@@ -33,6 +33,7 @@ impl Default for PtyState {
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn pty_open(
     state: tauri::State<PtyState>,
     cols: u16,
