@@ -65,9 +65,10 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Write Apple API key to disk
-        if: startsWith(matrix.platform, 'macos') && secrets.APPLE_API_KEY_PATH != ''
+        if: startsWith(matrix.platform, 'macos') && env.HAS_APPLE_KEY == 'true'
         shell: bash
         env:
+          HAS_APPLE_KEY: ${{ secrets.APPLE_API_KEY_PATH != '' }}
           KEY_CONTENT: ${{ secrets.APPLE_API_KEY_PATH }}
         run: |
           mkdir -p "$HOME/private_keys"
