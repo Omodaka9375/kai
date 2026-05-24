@@ -1,5 +1,5 @@
 ﻿import { Button } from "@/components/ui/button";
-import { GithubIcon } from "@hugeicons/core-free-icons";
+import { GithubIcon, Globe02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { getName, getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -7,8 +7,8 @@ import { arch, platform } from "@tauri-apps/plugin-os";
 import { useEffect, useState } from "react";
 import { SectionHeader } from "../components/SectionHeader";
 
-const REPO_URL = "https://github.com/Omodaka9375/kai";
-// const WEBSITE = "https://omodaka9375.github.io/kai";
+const REPO_URL = "https://github.com/Omodaka9375/Kai-ai";
+const WEBSITE = "https://omodaka9375.github.io/Kai-ai";
 
 const PLATFORM_LABEL: Record<string, string> = {
   macos: "macOS",
@@ -65,7 +65,7 @@ export function AboutSection() {
         <dt className="text-muted-foreground">License</dt>
         <dd>Apache 2.0</dd>
 
-        {/* <dt className="text-muted-foreground">Website</dt>
+        <dt className="text-muted-foreground">Website</dt>
         <dd>
           <button
             type="button"
@@ -75,7 +75,7 @@ export function AboutSection() {
             <HugeiconsIcon icon={Globe02Icon} size={12} strokeWidth={1.75} />
             kai.app
           </button>
-        </dd> */}
+        </dd>
       </dl>
 
       <div className="rounded-xl border border-border/60 bg-card/60 p-5">
