@@ -1,135 +1,66 @@
 <div align="center">
-  <img src="public/logo.png" width="128" height="128" alt="Kai" />
-
-  <p><em>The AI-native terminal emulator.</em></p>
+  <img src="public/logo.png" width="96" height="96" alt="Kai" />
+  <h1>Kai</h1>
+  <p>AI-native terminal emulator for developers.</p>
 
   <p>
-    <a href="#features"><img src="https://img.shields.io/badge/version-0.8.0-0d0d0d?style=flat-square" alt="version" /></a>
-    <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-0d0d0d?style=flat-square" alt="license" /></a>
-    <a href="#build-from-source"><img src="https://img.shields.io/badge/platform-macOS · Linux · Windows-0d0d0d?style=flat-square" alt="platform" /></a>
+    <a href="https://github.com/Omodaka9375/Kai-ai/releases/latest"><img src="https://img.shields.io/github/v/release/Omodaka9375/Kai-ai?style=flat-square&label=download" alt="download" /></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square" alt="license" /></a>
+    <a href="#build-from-source"><img src="https://img.shields.io/badge/platform-Windows%20·%20macOS%20·%20Linux-333?style=flat-square" alt="platform" /></a>
   </p>
 </div>
 
-<br />
-
-Kai is a fast, cross-platform terminal built on **Tauri 2 + Rust** and **React 19**. It combines a native PTY backend with a modern editor, file explorer, web preview, and a first-class AI assistant — all in under 10 MB, with zero telemetry and keys stored in the OS keychain.
-
-<br />
-
-<table>
-  <tr>
-    <td align="center"><img src="docs/terminal.png" alt="Terminal" /><br/><sub>Multi-tab terminal · WebGL rendering</sub></td>
-    <td align="center"><img src="docs/web-preview.png" alt="Web preview" /><br/><sub>Built-in web preview for local servers</sub></td>
-  </tr>
-  <tr>
-    <td colspan="2" align="center"><img src="docs/ai-workflow.png" alt="AI workflow" /><br/><sub>AI agent workflow with inline edit diffs</sub></td>
-  </tr>
-</table>
-
-<br />
-
 ---
+
+Kai is a fast, cross-platform terminal built on **Tauri 2 + Rust** and **React 19**. Terminal, code editor, file explorer, web preview, and AI agent — in one app, under 10 MB, zero telemetry.
+
+<p align="center">
+  <img src="docs/terminal.png" width="48%" alt="Terminal" />
+  <img src="docs/ai-workflow.png" width="48%" alt="AI agent" />
+</p>
 
 ## Features
 
-### Terminal
-- **xterm.js + WebGL** renderer with multi-tab, split panes, and background streaming
-- Native PTY via `portable-pty` — bash, zsh, PowerShell, cmd
-- Shell integration with cwd reporting and prompt markers
-- Inline search, link detection, true-color support
-- **Smart error detection** — auto-detects errors in terminal output and offers one-click "Ask Kai to fix"
-- Workspace directory persisted across restarts
+**Terminal** — xterm.js + WebGL, multi-tab, split panes, shell integration (bash/zsh/PowerShell/cmd), inline search, smart error detection with one-click AI fix.
 
-### Editor
-- **CodeMirror 6** — TypeScript, JavaScript, Rust, Python, Go, HTML/CSS, JSON, Markdown, and more
-- **Find & Replace** — with case-sensitive and regex toggles (`Ctrl+H`)
-- **Inline AI autocomplete** — ghost-text completions powered by any configured provider
-- AI-generated edit diffs with approval flow
-- Seven built-in themes (Tokyo Night, Nord, GitHub, Atom One, Aura, Copilot, Xcode)
-- Vim mode · Markdown preview
+**Editor** — CodeMirror 6 with 44 languages, find & replace, inline AI autocomplete, edit diffs with approval flow, 9 editor themes, Vim mode, image & PDF preview.
 
-### File Explorer
-- Catppuccin file icon theme
-- Fuzzy search, keyboard navigation, inline rename
-- "Open in Kai" shell context menu (Windows NSIS installer)
+**AI Agent** — bring your own key. Supports OpenAI, Anthropic, Google, Groq, xAI, Cerebras, DeepSeek, Mistral, OpenRouter, and any OpenAI-compatible endpoint. Local models via LM Studio or Ollama.
 
-### Web Preview
-- Auto-detects local dev servers and opens in-app
-- Configurable proxy URL for non-local domains
-- Links in agent output and terminal open in the built-in browser
+**MCP** — connect external tool servers via Model Context Protocol. Browse and install from the official registry.
 
-### AI — bring your own key
-- **Providers** — OpenAI, Anthropic, Google, Groq, xAI, Cerebras, DeepSeek, Mistral, OpenRouter, or any OpenAI-compatible endpoint
-- **Local models** — LM Studio, Ollama, or any local inference server
-- **MCP** — connect external tool servers via the Model Context Protocol (stdio, SSE, HTTP)
-- **MCP Registry** — browse, search, and one-click install from the official registry
-- **Skills** — reusable prompt + tool bundles invoked with `#handle`, optionally bound to MCP servers
-- **@ Mentions** — type `@` in the composer to attach files from the workspace as context
-- **Auto-approve** — three modes (off / edits / all) for uninterrupted agent runs
-- **Context summarization** — automatically compresses long conversations so you never hit a context limit
-- **Voice input** — dictate prompts via browser Speech API or OpenAI Whisper
-- **Document reading** — PDF and DOCX parsing built in
-- **Web browsing** — built-in `web_browse` and `web_search` tools
-- **YouTube summarization** — paste a YouTube link and the agent fetches captions and summarizes the video
-- Cancellable commands, edit diffs, multi-agent support, `KAI.md` project memory
+**More** — file explorer with Catppuccin icons, built-in web preview, REST API tester, 8 UI themes, voice input, PDF/DOCX reading, YouTube transcript summarization, `Kai.md` project memory, context summarization, auto-approve modes.
 
-### API Tester
-- Built-in REST client — test any HTTP endpoint without leaving Kai
-- Method selector, headers editor, body editor, response viewer with JSON pretty-print
-- Color-coded status, response time, raw/pretty toggle
+## Install
 
-### Quality
-- ~8 MB on disk
-- API keys stored in the OS keychain — never touch disk
-- No telemetry, no account required
-- Line-ending-resilient edit tool — works correctly on Windows (`\r\n`) without edit loops
+Grab the latest installer from [**Releases**](https://github.com/Omodaka9375/Kai-ai/releases/latest) — available for Windows (.exe), macOS (.dmg), and Linux (.deb / .rpm / .AppImage).
 
----
+Auto-update is built in.
 
-## Getting Started
+## Quick Start
 
-### Configure AI
+1. Open **Settings → Models**
+2. Add an API key for any provider — or point to a local model
+3. Press `Ctrl+I` to open the AI agent
 
-1. Open **Settings → AI**
-2. Pick a provider and paste your API key — or point Kai at a local inference endpoint
-3. Keys are written to the OS keychain via `keyring`
-
-### Platform Notes
-
-**Windows** — SmartScreen may warn on first launch (unsigned binary). Click *More info → Run anyway*.
-Default shell is `cmd.exe`; change in **Settings → General → Shell**.
-
-**Linux** — AppImage needs FUSE (`--appimage-extract-and-run` as fallback). On Wayland with rendering issues, try `WEBKIT_DISABLE_DMABUF_RENDERER=1` or use the `.deb` / `.rpm` packages.
-
----
+Keys are stored in the OS keychain. No account required.
 
 ## Build from Source
 
-**Prerequisites**
-- [Rust](https://rustup.rs) (stable)
-- [Node 20+](https://nodejs.org) and [pnpm](https://pnpm.io)
-- [Tauri prerequisites](https://tauri.app/start/prerequisites/) for your platform
-
 ```bash
+# Prerequisites: Rust (stable), Node 20+, pnpm, Tauri v2 deps
 pnpm install
 pnpm tauri dev          # development
-pnpm tauri build        # production bundle
+pnpm tauri build        # production
 ```
-
-```bash
-pnpm exec tsc --noEmit          # type-check
-cd src-tauri && cargo clippy    # lint
-```
-
----
 
 ## Tech Stack
 
-Tauri 2 · Rust · portable-pty · React 19 · TypeScript · xterm.js · CodeMirror 6 · Vercel AI SDK · Tailwind v4 · shadcn/ui · Zustand
+Tauri 2 · Rust · React 19 · TypeScript · xterm.js · CodeMirror 6 · Vercel AI SDK · Tailwind v4 · shadcn/ui
 
 ## Contributing
 
-Issues and PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Issues and PRs welcome.
 
 ## License
 
