@@ -1,0 +1,155 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
+use std::sync::Mutex;
+use std::thread;
+use std::time::Duration;
+
+use serde::Serialize;
+
+use crate::modules::workspace::{resolve_path, WorkspaceEnv};
+
+/// A persistent agent shell session. Each `run` call executes through the
+/// user's login shell with the session's tracked cwd. Cwd persists across
+/// calls; environment overrides via `export` do not (this is an agent shell,
+/// not an interactive REPL — interactive tools must NOT be invoked here, use
+/// the background process API for long-running work).
+pub struct ShellSession {
+    pub cwd: Mutex<String>,
+    pub workspace: WorkspaceEnv,
+    /// While pristine (no `run` yet), caller-provided cwd hints reseed `cwd`.
+    pub pristine: AtomicBool,
+    /// Set to true to abort the currently running command.
+    pub cancel: AtomicBool,
+    #[allow(dead_code)]
+    pub started_at_ms: u64,
+}
+
+#[derive(Serialize)]
+pub struct SessionRunOutput {
+    pub stdout: String,
+    pub stderr: String,
+    pub exit_code: Option<i32>,
+    pub timed_out: bool,
+    pub truncated: bool,
+    pub cwd_after: String,
+}
+
+/// Sentinel emitted on stdout immediately before the command exits, so we can
+/// recover the post-command cwd. Picks an unlikely literal — collisions with
+/// real command output would corrupt cwd tracking.
+const CWD_SENTINEL: &str = "__KAI_CWD__";
+
+impl ShellSession {
+    pub fn new(initial_cwd: String, workspace: WorkspaceEnv) -> Self {
+        let started_at_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        Self {
+            cwd: Mutex::new(initial_cwd),
+            workspace,
+            pristine: AtomicBool::new(true),
+            cancel: AtomicBool::new(false),
+            started_at_ms,
+        }
+    }
+
+    pub fn current_cwd(&self) -> String {
+        self.cwd.lock().unwrap().clone()
+    }
+
+    pub fn run(
+        &self,
+        command: String,
+        cwd_hint: Option<String>,
+        workspace_hint: Option<WorkspaceEnv>,
+        timeout: Duration,
+    ) -> Result<SessionRunOutput, String> {
+        let trimmed = command.trim().to_string();
+        if trimmed.is_empty() {
+            return Err("empty command".into());
+        }
+        if self.pristine.load(Ordering::Acquire) {
+            if let Some(hint) = cwd_hint.filter(|s| !s.is_empty()) {
+                let effective_workspace = workspace_hint.as_ref().unwrap_or(&self.workspace);
+                let p = resolve_path(&hint, effective_workspace);
+                if p.is_dir() {
+                    *self.cwd.lock().unwrap() = hint;
+                }
+            }
+        }
+        let cwd = self.current_cwd();
+        let effective_workspace = workspace_hint.unwrap_or_else(|| self.workspace.clone());
+        let wrapped = wrap_with_sentinel(&trimmed, &effective_workspace);
+
+        self.cancel.store(false, Ordering::Release);
+        let cancel_ptr = &self.cancel as *const AtomicBool;
+        // SAFETY: ShellSession is Arc-wrapped and outlives the thread. The
+        // cancel flag is only read (Relaxed load) by the poll loop.
+        let cancel_ref: &'static AtomicBool = unsafe { &*cancel_ptr };
+        let (tx, rx) = mpsc::channel::<Result<super::CommandOutput, String>>();
+        let cwd_for_thread = cwd.clone();
+        thread::spawn(move || {
+            let _ = tx.send(super::run_blocking_cancellable_pub(
+                wrapped,
+                Some(cwd_for_thread),
+                effective_workspace,
+                timeout,
+                Some(cancel_ref),
+            ));
+        });
+        let raw = rx.recv().map_err(|e| e.to_string())??;
+        self.pristine.store(false, Ordering::Release);
+
+        let (stdout_clean, cwd_after) = strip_cwd_sentinel(&raw.stdout, &cwd);
+        if let Some(ref new_cwd) = cwd_after {
+            let p = resolve_path(new_cwd, &self.workspace);
+            if p.is_dir() {
+                *self.cwd.lock().unwrap() = new_cwd.clone();
+            }
+        }
+        let resolved_cwd = self.current_cwd().replace('\\', "/");
+
+        Ok(SessionRunOutput {
+            stdout: stdout_clean,
+            stderr: raw.stderr,
+            exit_code: raw.exit_code,
+            timed_out: raw.timed_out,
+            truncated: raw.truncated,
+            cwd_after: resolved_cwd,
+        })
+    }
+}
+
+fn wrap_posix_with_sentinel(command: &str) -> String {
+    format!(
+        "{command}\n__KAI_rc=$?\nprintf '\\n%s%s\\n' '{CWD_SENTINEL}' \"$(pwd)\"\nexit $__KAI_rc\n",
+    )
+}
+
+fn wrap_with_sentinel(command: &str, workspace: &WorkspaceEnv) -> String {
+    if workspace.is_wsl() {
+        return wrap_posix_with_sentinel(command);
+    }
+    #[cfg(unix)]
+    {
+        wrap_posix_with_sentinel(command)
+    }
+    #[cfg(windows)]
+    {
+        format!(
+        "{command}\n$__KAI_rc = if ($null -ne $LASTEXITCODE) {{ $LASTEXITCODE }} elseif ($?) {{ 0 }} else {{ 1 }}\n\"`n{CWD_SENTINEL}$($PWD.Path)\"\nexit $__KAI_rc\n",
+    )
+    }
+}
+
+fn strip_cwd_sentinel(stdout: &str, _fallback: &str) -> (String, Option<String>) {
+    if let Some(idx) = stdout.rfind(CWD_SENTINEL) {
+        let before = &stdout[..idx];
+        let after = &stdout[idx + CWD_SENTINEL.len()..];
+        let cwd_line = after.lines().next().unwrap_or("").trim();
+        let cleaned = before.trim_end_matches('\n').to_string();
+        return (cleaned, Some(cwd_line.to_string()));
+    }
+    (stdout.to_string(), None)
+}
