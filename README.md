@@ -25,15 +25,13 @@ Kai is a fast, cross-platform terminal built on **Tauri 2 + Rust** and **React 1
 
 **Editor** — CodeMirror 6 with 44 languages, find & replace, inline AI autocomplete, edit diffs with approval flow, 9 editor themes, Vim mode, image & PDF preview.
 
-**AI AgentS** — bring your own key. Supports OpenAI, Anthropic, Google, Groq, xAI, Cerebras, DeepSeek, Mistral, OpenRouter, and any OpenAI-compatible endpoint. Local models via LM Studio or Ollama.
+**AI Agent** — bring your own key. Supports OpenAI, Anthropic, Google, Groq, xAI, Cerebras, DeepSeek, Mistral, OpenRouter, and any OpenAI-compatible endpoint. Local models via LM Studio or Ollama.
 
-**MCP Servers** — connect external tool servers via Model Context Protocol. Browse and install from the official registry.
+**Image & Video Generation** — generate images and videos directly from chat. Image: OpenAI GPT Image 2, Google Nano Banana 2, xAI Grok Imagine, ComfyUI (local). Video: Kling 3.0, Google Veo 3.1, ByteDance Seedance 2.0, ComfyUI. Inline rendering with lightbox and download.
 
-**Remote Control/SSH** — connect external tool servers via Model Context Protocol. Browse and install from the official registry.
+**MCP** — connect external tool servers via Model Context Protocol. Browse and install from the official registry.
 
-**Image and video generation** — built-in skills for generating images and videos in conversation.
-
-**More** — file explorer, built-in web preview, REST API tester, 8 UI themes, voice input, PDF/DOCX support, YouTube transcript summarization, `Kai.md` project memory, context summarization, auto-approve modes.
+**More** — file explorer with Catppuccin icons, built-in web preview, REST API tester, 8 UI themes, voice input, PDF/DOCX reading, YouTube transcript summarization, `Kai.md` project memory, context summarization, auto-approve modes.
 
 ## Install
 
