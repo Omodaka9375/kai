@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Welcome to Kai</title>
+  <title>Kai Terminal</title>
   <meta name="description" content="Fast, cross-platform terminal with built-in AI agent, code editor, and file explorer and much more. Open source, zero telemetry." />
   <meta property="og:title" content="Kai - Minimal, Private AI-Native Terminal Emulator" />
   <meta property="og:description" content="Terminal + AI agents + code editor in one app. Under 10 MB, zero telemetry." />
@@ -16,17 +16,19 @@
   <style>
     /* ── Config ── */
     :root {
-      --bg: #0a0a0f;
-      --bg-card: #12121a;
-      --bg-subtle: #1a1a26;
+      --bg: #09090b;
+      --bg-card: #111113;
+      --bg-subtle: #19191c;
       --border: rgba(255,255,255,0.06);
-      --text: #e4e4ed;
-      --text-muted: #8888a0;
-      --accent: #7aa2f7;
-      --accent-glow: rgba(122,162,247,0.15);
-      --green: #34d399;
-      --amber: #f59e0b;
-      --purple: #c4a7e7;
+      --text: #ececf0;
+      --text-muted: #8a8a98;
+      --accent: #d4a43c;
+      --accent-glow: rgba(212,164,60,0.12);
+      --green: #4ade80;
+      --amber: #facc15;
+      --purple: #c4b5fd;
+      --rose: #fb7185;
+      --cyan: #22d3ee;
       --font-sans: 'Instrument Sans', system-ui, sans-serif;
       --font-mono: 'JetBrains Mono', monospace;
       --max-w: 1080px;
@@ -64,7 +66,7 @@
     /* ── Nav ── */
     nav {
       position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-      background: rgba(10,10,15,0.8);
+      background: rgba(9,9,11,0.85);
       backdrop-filter: blur(16px);
       border-bottom: 1px solid var(--border);
     }
@@ -449,39 +451,49 @@
       <p class="section-desc">No browser tabs, no context switching. Terminal, editor, AI, and tools — unified.</p>
       <div class="features-grid">
         <div class="feature-card fade-in">
-          <div class="feature-icon" style="background:rgba(52,211,153,0.1);color:var(--green)">⌘</div>
+          <div class="feature-icon" style="background:rgba(74,222,128,0.1);color:var(--green)">⌘</div>
           <h3>Terminal</h3>
           <p>xterm.js with WebGL rendering. Multi-tab, split panes, shell integration for bash, zsh, PowerShell, and cmd.</p>
         </div>
         <div class="feature-card fade-in">
-          <div class="feature-icon" style="background:rgba(122,162,247,0.1);color:var(--accent)">✎</div>
+          <div class="feature-icon" style="background:rgba(212,164,60,0.1);color:var(--accent)">✎</div>
           <h3>Code Editor</h3>
           <p>CodeMirror 6 with 44 languages, find & replace, inline AI autocomplete, Vim mode, and 9 themes.</p>
         </div>
         <div class="feature-card fade-in">
-          <div class="feature-icon" style="background:rgba(196,167,231,0.1);color:var(--purple)">◆</div>
+          <div class="feature-icon" style="background:rgba(196,181,253,0.1);color:var(--purple)">◆</div>
           <h3>AI Agent</h3>
           <p>Reads, writes, and runs code. Edit diffs with approval flow, auto-approve modes, context summarization.</p>
         </div>
         <div class="feature-card fade-in">
-          <div class="feature-icon" style="background:rgba(245,158,11,0.1);color:var(--amber)">⚡</div>
+          <div class="feature-icon" style="background:rgba(250,204,21,0.1);color:var(--amber)">⚡</div>
           <h3>MCP Support</h3>
           <p>Connect external tool servers via Model Context Protocol. Browse and install from the official registry.</p>
         </div>
         <div class="feature-card fade-in">
-          <div class="feature-icon" style="background:rgba(245,158,11,0.1);color:var(--amber)">🎨</div>
+          <div class="feature-icon" style="background:rgba(251,113,133,0.1);color:var(--rose)">🎨</div>
           <h3>Image & Video Gen</h3>
           <p>Generate images (GPT Image 2, Nano Banana 2, Grok Imagine, ComfyUI) and videos (Kling 3.0, Veo 3.1, Seedance 2.0, ComfyUI) from chat. Inline preview with lightbox.</p>
         </div>
         <div class="feature-card fade-in">
-          <div class="feature-icon" style="background:rgba(52,211,153,0.1);color:var(--green)">◫</div>
+          <div class="feature-icon" style="background:rgba(74,222,128,0.1);color:var(--green)">◫</div>
           <h3>File Explorer</h3>
           <p>Catppuccin icon theme, fuzzy search, inline rename, image & PDF preview, drag to attach to AI.</p>
         </div>
         <div class="feature-card fade-in">
-          <div class="feature-icon" style="background:rgba(122,162,247,0.1);color:var(--accent)">⊞</div>
-          <h3>Web Preview & API Tester</h3>
-          <p>Built-in browser for local dev servers. REST API tester with headers, body editor, and JSON pretty-print.</p>
+          <div class="feature-icon" style="background:rgba(34,211,238,0.1);color:var(--cyan)">⊞</div>
+          <h3>Web Preview</h3>
+          <p>Built-in browser for local dev servers. Live-reload previews right next to your terminal — no alt-tabbing to a browser.</p>
+        </div>
+        <div class="feature-card fade-in">
+          <div class="feature-icon" style="background:rgba(212,164,60,0.1);color:var(--accent)">⇄</div>
+          <h3>API Tester</h3>
+          <p>REST client with method selector, headers, body editor, and JSON pretty-print. Test endpoints without leaving the terminal.</p>
+        </div>
+        <div class="feature-card fade-in">
+          <div class="feature-icon" style="background:rgba(196,181,253,0.1);color:var(--purple)">⎇</div>
+          <h3>Git CI Integrated</h3>
+          <p>Stage, commit, push, and view diffs from the sidebar. Built-in CI status indicators so you catch failures before context-switching.</p>
         </div>
       </div>
     </div>
