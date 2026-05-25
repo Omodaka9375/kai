@@ -155,7 +155,7 @@ export function buildFsTools(ctx: ToolContext) {
 
     write_file: tool({
       description:
-        "Create or overwrite a file with the given content. Always asks the user before running. Prefer `edit` / `multi_edit` for in-place changes — only use `write_file` for creating a brand-new file or fully replacing a tiny one.",
+        "Create or overwrite a file with the given content. Parent directories are created automatically. Always asks the user before running. Prefer `edit` / `multi_edit` for in-place changes — only use `write_file` for creating a brand-new file or fully replacing a tiny one.",
       inputSchema: z.object({
         path: z.string(),
         content: z.string(),
@@ -187,11 +187,23 @@ export function buildFsTools(ctx: ToolContext) {
           return {
             path: abs,
             queued_for_plan_review: true,
-            ok: true,
+            pending: true,
+            note: "File is queued for plan review — NOT yet written to disk. The user must approve the plan for the write to take effect.",
           };
         }
 
         try {
+          // Auto-create parent directories so the agent never needs a
+          // separate create_directory step (avoids approval-loop bugs).
+          const lastSep = Math.max(abs.lastIndexOf("/"), abs.lastIndexOf("\\"));
+          if (lastSep > 0) {
+            const parentDir = abs.slice(0, lastSep);
+            try {
+              await native.createDir(parentDir);
+            } catch {
+              // Parent already exists — ignore.
+            }
+          }
           await native.writeFile(abs, content);
           ctx.readCache.set(abs, { size: content.length, hash: djb2(content) });
           window.dispatchEvent(new CustomEvent("Kai:fs-changed", { detail: abs }));

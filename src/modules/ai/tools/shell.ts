@@ -34,8 +34,28 @@ function workspaceSessionKey(sessionId: string): string {
   return `${sessionId}:${workspaceScopeKey(currentWorkspaceEnv())}`;
 }
 
+/**
+ * Package-manager install/add commands — network-bound but NOT long-running
+ * servers. Must be checked BEFORE dev-server patterns to avoid false positives
+ * (e.g. `pnpm add @next/dev-utils` matching `\bdev\b`).
+ */
+function isPackageInstallCommand(cmd: string): boolean {
+  const lower = cmd.toLowerCase().trim();
+  return /^\s*(npm|pnpm|yarn|bun)\s+(add|install|i|ci|remove|uninstall|up|update|upgrade|link|dedupe)\b/.test(
+    lower,
+  );
+}
+
+/** Default timeout override for slow-but-foreground commands (seconds). */
+function slowCommandTimeout(cmd: string): number | undefined {
+  if (isPackageInstallCommand(cmd)) return 120;
+  return undefined;
+}
+
 /** Detect commands that are long-running dev servers / watchers. */
 function isDevServerCommand(cmd: string): boolean {
+  // Package install commands are network-slow, not servers — never block them.
+  if (isPackageInstallCommand(cmd)) return false;
   const lower = cmd.toLowerCase().trim();
   const DEV_PATTERNS = [
     /\bdev\b/,
@@ -105,11 +125,13 @@ export function buildShellTools(ctx: ToolContext) {
         try {
           const cwd = ctx.getCwd();
           const shellId = await getSessionShell(workspaceSessionKey(sid), cwd);
+          const effectiveTimeout =
+            timeout_secs ?? slowCommandTimeout(command);
           const r = await native.shellSessionRun(
             shellId,
             command,
             cwd,
-            timeout_secs,
+            effectiveTimeout,
           );
           return {
             command,
