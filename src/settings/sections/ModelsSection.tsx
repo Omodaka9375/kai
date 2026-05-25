@@ -125,6 +125,8 @@ export function ModelsSection() {
       />
 
       <AutocompleteBlock keys={keys} />
+
+      <MediaProvidersBlock />
     </div>
   );
 }
@@ -690,5 +692,171 @@ function Label({ children }: { children: React.ReactNode }) {
     <span className="text-[11px] font-medium tracking-tight text-muted-foreground">
       {children}
     </span>
+  );
+}
+
+const MEDIA_SERVICE = "kai-media";
+
+type MediaProvider = {
+  id: string;
+  label: string;
+  description: string;
+  consoleUrl: string;
+  placeholder: string;
+};
+
+const MEDIA_PROVIDERS: MediaProvider[] = [
+  {
+    id: "kling",
+    label: "Kling AI",
+    description: "Video generation (Kling 3.0)",
+    consoleUrl: "https://klingai.com/dev",
+    placeholder: "Paste Kling API key",
+  },
+  {
+    id: "seedance",
+    label: "Seedance (ByteDance)",
+    description: "Video generation (Seedance 2.0)",
+    consoleUrl: "https://seedance.ai",
+    placeholder: "Paste Seedance API key",
+  },
+];
+
+function MediaProvidersBlock() {
+  const [keys, setKeys] = useState<Record<string, string | null>>({});
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState<string | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      const loaded: Record<string, string | null> = {};
+      for (const p of MEDIA_PROVIDERS) {
+        try {
+          const v = await invoke<string | null>("secrets_get", {
+            service: MEDIA_SERVICE,
+            account: p.id,
+          });
+          loaded[p.id] = v && v.length > 0 ? v : null;
+        } catch {
+          loaded[p.id] = null;
+        }
+      }
+      setKeys(loaded);
+    })();
+  }, []);
+
+  const save = async (id: string) => {
+    const v = (drafts[id] ?? "").trim();
+    if (!v) return;
+    setSaving(id);
+    try {
+      await invoke("secrets_set", {
+        service: MEDIA_SERVICE,
+        account: id,
+        password: v,
+      });
+      setKeys((prev) => ({ ...prev, [id]: v }));
+      setDrafts((prev) => ({ ...prev, [id]: "" }));
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const clear = async (id: string) => {
+    try {
+      await invoke("secrets_delete", {
+        service: MEDIA_SERVICE,
+        account: id,
+      });
+    } catch {
+      // already absent
+    }
+    setKeys((prev) => ({ ...prev, [id]: null }));
+  };
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-0.5">
+        <Label>Media generation</Label>
+        <span className="text-[10.5px] leading-relaxed text-muted-foreground">
+          API keys for image and video generation providers. OpenAI, Google, and
+          xAI reuse your existing keys above.
+        </span>
+      </div>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        {MEDIA_PROVIDERS.map((p) => {
+          const currentKey = keys[p.id] ?? null;
+          return (
+            <div
+              key={p.id}
+              className="flex flex-col gap-2 rounded-lg border border-border/60 bg-card/60 px-3 py-2.5"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-[12.5px] font-medium">{p.label}</span>
+                {currentKey ? (
+                  <span className="ml-1 inline-flex items-center gap-1 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-px text-[10px] text-emerald-700 dark:text-emerald-300">
+                    <HugeiconsIcon icon={CheckmarkCircle02Icon} size={9} strokeWidth={2} />
+                    Configured
+                  </span>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => void window.open(p.consoleUrl, "_blank")}
+                  className="ml-auto text-[10.5px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                >
+                  Get key ↗
+                </button>
+              </div>
+              <span className="text-[10.5px] text-muted-foreground">
+                {p.description}
+              </span>
+              {currentKey ? (
+                <div className="flex items-center gap-1.5">
+                  <code className="flex-1 truncate rounded bg-muted/40 px-2 py-1 font-mono text-[11px] text-muted-foreground">
+                    {currentKey.length <= 8
+                      ? "•".repeat(currentKey.length)
+                      : `${currentKey.slice(0, 4)}${'•'.repeat(8)}${currentKey.slice(-4)}`}
+                  </code>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    onClick={() => void clear(p.id)}
+                    title="Remove"
+                    className="size-7 text-muted-foreground hover:text-destructive"
+                  >
+                    <HugeiconsIcon icon={Cancel01Icon} size={12} strokeWidth={1.75} />
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex gap-1.5">
+                  <Input
+                    type="password"
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder={p.placeholder}
+                    value={drafts[p.id] ?? ""}
+                    onChange={(e) =>
+                      setDrafts((prev) => ({ ...prev, [p.id]: e.target.value }))
+                    }
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") void save(p.id);
+                    }}
+                    className="h-8 flex-1 font-mono text-[11.5px] [&::-ms-reveal]:hidden"
+                  />
+                  <Button
+                    size="sm"
+                    onClick={() => void save(p.id)}
+                    disabled={saving === p.id || !(drafts[p.id] ?? "").trim()}
+                    className="h-8 px-3 text-[11px]"
+                  >
+                    Save
+                  </Button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
