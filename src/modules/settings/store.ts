@@ -74,6 +74,10 @@ export type Preferences = {
   openaiCompatibleContextSize: number;
   /** Active UI color theme. "default" uses the built-in Kai palette. */
   uiThemeId: string;
+  /** ComfyUI local server URL. */
+  comfyuiBaseURL: string;
+  /** ComfyUI workflow JSON (API format) uploaded by the user. */
+  comfyuiWorkflow: string;
 };
 
 const STORE_PATH = "Kai-settings.json";
@@ -107,6 +111,8 @@ const KEY_LAST_WORKSPACE_CWD = "lastWorkspaceCwd";
 const KEY_LMSTUDIO_CTX_SIZE = "lmstudioContextSize";
 const KEY_COMPAT_CTX_SIZE = "openaiCompatibleContextSize";
 const KEY_UI_THEME = "uiThemeId";
+const KEY_COMFYUI_BASE_URL = "comfyuiBaseURL";
+const KEY_COMFYUI_WORKFLOW = "comfyuiWorkflow";
 
 export const TERMINAL_FONT_SIZE_DEFAULT = 14;
 export const TERMINAL_FONT_SIZE_MIN = 8;
@@ -153,6 +159,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
   lmstudioContextSize: 0,
   openaiCompatibleContextSize: 0,
   uiThemeId: "default",
+  comfyuiBaseURL: "http://127.0.0.1:8188",
+  comfyuiWorkflow: "",
 };
 
 const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
@@ -251,6 +259,10 @@ export async function loadPreferences(): Promise<Preferences> {
       DEFAULT_PREFERENCES.openaiCompatibleContextSize,
     uiThemeId:
       get<string>(KEY_UI_THEME) ?? DEFAULT_PREFERENCES.uiThemeId,
+    comfyuiBaseURL:
+      get<string>(KEY_COMFYUI_BASE_URL) ?? DEFAULT_PREFERENCES.comfyuiBaseURL,
+    comfyuiWorkflow:
+      get<string>(KEY_COMFYUI_WORKFLOW) ?? DEFAULT_PREFERENCES.comfyuiWorkflow,
   };
 }
 
@@ -378,6 +390,14 @@ export async function setUiThemeId(value: string): Promise<void> {
   await writePref(KEY_UI_THEME, value);
 }
 
+export async function setComfyuiBaseURL(value: string): Promise<void> {
+  await writePref(KEY_COMFYUI_BASE_URL, value);
+}
+
+export async function setComfyuiWorkflow(value: string): Promise<void> {
+  await writePref(KEY_COMFYUI_WORKFLOW, value);
+}
+
 export async function setLastWorkspaceCwd(value: string): Promise<void> {
   await store.set(KEY_LAST_WORKSPACE_CWD, value);
   await store.save();
@@ -433,6 +453,8 @@ export async function onPreferencesChange(
     [KEY_LMSTUDIO_CTX_SIZE]: "lmstudioContextSize",
     [KEY_COMPAT_CTX_SIZE]: "openaiCompatibleContextSize",
     [KEY_UI_THEME]: "uiThemeId",
+    [KEY_COMFYUI_BASE_URL]: "comfyuiBaseURL",
+    [KEY_COMFYUI_WORKFLOW]: "comfyuiWorkflow",
   };
   // Same-process writes still fire onChange immediately; cross-window writes
   // arrive via the Tauri event emitted by writePref().

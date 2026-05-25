@@ -26,6 +26,8 @@ import {
   setAutocompleteEnabled,
   setAutocompleteModelId,
   setAutocompleteProvider,
+  setComfyuiBaseURL,
+  setComfyuiWorkflow,
   setDefaultModel,
   setLmstudioBaseURL,
   setLmstudioContextSize,
@@ -127,6 +129,8 @@ export function ModelsSection() {
       <AutocompleteBlock keys={keys} />
 
       <MediaProvidersBlock />
+
+      <ComfyUIBlock />
     </div>
   );
 }
@@ -692,6 +696,101 @@ function Label({ children }: { children: React.ReactNode }) {
     <span className="text-[11px] font-medium tracking-tight text-muted-foreground">
       {children}
     </span>
+  );
+}
+
+function ComfyUIBlock() {
+  const baseURL = usePreferencesStore((s) => s.comfyuiBaseURL);
+  const workflow = usePreferencesStore((s) => s.comfyuiWorkflow);
+  const [urlDraft, setUrlDraft] = useState(baseURL);
+
+  useEffect(() => setUrlDraft(baseURL), [baseURL]);
+
+  const hasWorkflow = workflow.length > 10;
+
+  const uploadWorkflow = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json";
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const text = await file.text();
+      try {
+        JSON.parse(text); // validate
+        await setComfyuiWorkflow(text);
+      } catch {
+        window.alert("Invalid JSON file. Export the workflow from ComfyUI using 'Save (API Format)'.");
+      }
+    };
+    input.click();
+  };
+
+  const clearWorkflow = () => void setComfyuiWorkflow("");
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-0.5">
+        <Label>ComfyUI (local)</Label>
+        <span className="text-[10.5px] leading-relaxed text-muted-foreground">
+          Connect to a local ComfyUI instance. Upload a workflow JSON exported
+          via "Save (API Format)" — the agent will inject your prompt
+          automatically.
+        </span>
+      </div>
+      <div className="flex flex-col gap-2.5 rounded-lg border border-border/60 bg-card/60 px-3 py-2.5">
+        <FieldRow label="Base URL">
+          <Input
+            value={urlDraft}
+            onChange={(e) => setUrlDraft(e.target.value)}
+            onBlur={() => {
+              const v = urlDraft.trim();
+              if (v !== baseURL) void setComfyuiBaseURL(v);
+            }}
+            placeholder="http://localhost:8188"
+            spellCheck={false}
+            className="h-8 font-mono text-[11.5px]"
+          />
+        </FieldRow>
+        <FieldRow label="Workflow">
+          <div className="flex flex-1 items-center gap-1.5">
+            {hasWorkflow ? (
+              <>
+                <span className="flex-1 truncate text-[11px] text-emerald-600 dark:text-emerald-400">
+                  <HugeiconsIcon icon={CheckmarkCircle02Icon} size={11} strokeWidth={2} className="inline mr-1" />
+                  Workflow loaded
+                </span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={uploadWorkflow}
+                  className="h-7 px-2 text-[10.5px]"
+                >
+                  Replace
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={clearWorkflow}
+                  className="h-7 px-2 text-[10.5px] text-muted-foreground hover:text-destructive"
+                >
+                  Clear
+                </Button>
+              </>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={uploadWorkflow}
+                className="h-7 px-3 text-[10.5px]"
+              >
+                Upload workflow JSON
+              </Button>
+            )}
+          </div>
+        </FieldRow>
+      </div>
+    </div>
   );
 }
 
