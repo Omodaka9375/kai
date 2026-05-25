@@ -4,10 +4,11 @@ import { useChatStore } from "../store/chatStore";
 import { generateOpenAIImage } from "../lib/media/openai-image";
 import { generateGoogleImage } from "../lib/media/google-image";
 import { generateXAIImage } from "../lib/media/xai-image";
+import { generateComfyImage } from "../lib/media/comfyui";
 import type { ImageResult } from "../lib/media/types";
 import type { ToolContext } from "./context";
 
-const PROVIDER_ENUM = ["auto", "openai", "google", "xai"] as const;
+const PROVIDER_ENUM = ["auto", "openai", "google", "xai", "comfyui"] as const;
 
 export function buildImageGenTools(_ctx: ToolContext) {
   return {
@@ -18,6 +19,7 @@ Providers:
 - openai: GPT Image 2 (best quality, supports editing)
 - google: Nano Banana 2 (Gemini, fast, good quality)
 - xai: Grok Imagine (good quality)
+- comfyui: local ComfyUI instance (upload workflow JSON in Settings)
 - auto: picks the first available provider (openai → google → xai)
 
 Auto-executes — no approval needed.`,
@@ -45,6 +47,33 @@ Auto-executes — no approval needed.`,
       }),
       execute: async ({ prompt, provider, size, quality }) => {
         const keys = useChatStore.getState().apiKeys;
+
+        // ComfyUI: no key needed, uses workflow from settings
+        if (provider === "comfyui") {
+          try {
+            const prefs = await import("@/modules/settings/preferences").then(
+              (m) => m.usePreferencesStore.getState(),
+            );
+            if (!prefs.comfyuiWorkflow) {
+              return { error: "No ComfyUI workflow uploaded. Go to Settings → Models → ComfyUI and upload a workflow JSON." };
+            }
+            const workflow = JSON.parse(prefs.comfyuiWorkflow) as Record<string, unknown>;
+            const result = await generateComfyImage(prefs.comfyuiBaseURL, workflow, prompt);
+            return {
+              type: "image" as const,
+              provider: result.provider,
+              mimeType: result.mimeType,
+              width: result.width,
+              height: result.height,
+              base64: result.base64,
+              url: result.url,
+              prompt,
+            };
+          } catch (e) {
+            return { error: String(e) };
+          }
+        }
+
         const resolved = resolveProvider(provider ?? "auto", keys);
         if (!resolved) {
           return {
