@@ -7,7 +7,33 @@ on:
   workflow_dispatch:
 
 jobs:
+  # ── 1. Create a single draft release so all matrix jobs upload to it ──
+  create-release:
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    outputs:
+      release-id: ${{ steps.create.outputs.result }}
+    steps:
+      - name: Create draft release
+        id: create
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data } = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: context.ref.replace('refs/tags/', ''),
+              name: `Kai ${context.ref.replace('refs/tags/', '')}`,
+              body: 'See the assets to download and install. Auto-update is built in.',
+              draft: true,
+              prerelease: false,
+            });
+            return data.id;
+
+  # ── 2. Build on each platform and attach assets to the single release ──
   publish-tauri:
+    needs: create-release
     permissions:
       contents: write
     strategy:
@@ -81,6 +107,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
+          releaseId: ${{ needs.create-release.outputs.release-id }}
           tagName: ${{ github.ref_name }}
           releaseName: "Kai ${{ github.ref_name }}"
           releaseBody: "See the assets to download and install. Auto-update is built in."
