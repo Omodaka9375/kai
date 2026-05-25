@@ -1,6 +1,7 @@
 import { createMCPClient, type MCPClient } from "@ai-sdk/mcp";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type { McpServerConfig } from "./mcp";
+import { createProxyFetch } from "./proxyFetch";
 
 // ── Tauri stdio transport ──────────────────────────────────────────────────
 
@@ -123,6 +124,10 @@ class McpClientManager {
     for (const cb of this.statusListeners) cb(id, status);
   }
 
+  /** Connection timeout (ms). MCP servers that don't respond within this
+   *  window are marked as errored instead of hanging indefinitely. */
+  static CONNECTION_TIMEOUT_MS = 30_000;
+
   /** Connect to a single MCP server. */
   async connect(config: McpServerConfig): Promise<void> {
     // Disconnect existing connection for this id first.
@@ -140,19 +145,34 @@ class McpClientManager {
 
       if (config.transport === "stdio") {
         const transport = new TauriStdioTransport(config);
-        client = await createMCPClient({ transport: transport as never });
+        client = await withTimeout(
+          createMCPClient({ transport: transport as never }),
+          McpClientManager.CONNECTION_TIMEOUT_MS,
+          `MCP server "${config.name}" did not respond within ${McpClientManager.CONNECTION_TIMEOUT_MS / 1000}s`,
+        );
       } else {
-        // SSE or HTTP — use built-in transport configs.
-        client = await createMCPClient({
-          transport: {
-            type: config.transport,
-            url: config.url ?? "",
-            headers: config.headers,
-          },
-        });
+        // SSE or HTTP — route through the Rust backend via proxyFetch to
+        // bypass WebView2 fetch quirks, CORS, and private-network blocks.
+        const mcpFetch = createProxyFetch({ allowPrivateNetwork: true });
+        client = await withTimeout(
+          createMCPClient({
+            transport: {
+              type: config.transport,
+              url: config.url ?? "",
+              headers: config.headers,
+              fetch: mcpFetch,
+            },
+          }),
+          McpClientManager.CONNECTION_TIMEOUT_MS,
+          `MCP server "${config.name}" did not respond within ${McpClientManager.CONNECTION_TIMEOUT_MS / 1000}s`,
+        );
       }
 
-      const tools = await client.tools();
+      const tools = await withTimeout(
+        client.tools(),
+        McpClientManager.CONNECTION_TIMEOUT_MS,
+        `MCP server "${config.name}" timed out listing tools`,
+      );
       const toolCount = Object.keys(tools).length;
 
       // Try to fetch server-provided instructions/prompts.
@@ -304,6 +324,17 @@ function sanitizeName(name: string): string {
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "")
     .slice(0, 30) || "mcp";
+}
+
+/** Race a promise against a timeout. */
+function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    p.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); },
+    );
+  });
 }
 
 /** Singleton manager instance. */
