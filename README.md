@@ -16,7 +16,7 @@ Kai is a fast, cross-platform terminal built on **Tauri 2 + Rust** and **React 1
 
 <p align="center">
   <img src="docs/terminal.png" width="48%" alt="Terminal" />
-  <img src="docs/ai-workflow.png" width="48%" alt="AI agent" />
+  <img src="docs/split-panes.png" width="48%" alt="AI agent" />
 </p>
 
 ## Features

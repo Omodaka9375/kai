@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kai Editor</title>
+  <meta name="description" content="Fast, cross-platform terminal with built-in AI agent, code editor, and file explorer. Open source, zero telemetry." />
+  <meta property="og:title" content="Kai - Minimal, Private AI-Native Terminal Emulator" />
+  <meta property="og:description" content="Terminal + AI agent + code editor in one app. Under 10 MB, zero telemetry." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://omodaka9375.github.io/Kai-ai/" />
+  <link rel="icon" href="../public/logo.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    /* ── Config ── */
+    :root {
+      --bg: #0a0a0f;
+      --bg-card: #12121a;
+      --bg-subtle: #1a1a26;
+      --border: rgba(255,255,255,0.06);
+      --text: #e4e4ed;
+      --text-muted: #8888a0;
+      --accent: #7aa2f7;
+      --accent-glow: rgba(122,162,247,0.15);
+      --green: #34d399;
+      --amber: #f59e0b;
+      --purple: #c4a7e7;
+      --font-sans: 'Instrument Sans', system-ui, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+      --max-w: 1080px;
+      --ease: cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    /* ── Reset ── */
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    html { scroll-behavior: smooth; -webkit-font-smoothing: antialiased; }
+    body {
+      font-family: var(--font-sans);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* ── Grain overlay ── */
+    body::after {
+      content: '';
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.025;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+      z-index: 9999;
+    }
+
+    /* ── Layout ── */
+    .container { max-width: var(--max-w); margin: 0 auto; padding: 0 24px; }
+    section { padding: 100px 0; }
+
+    /* ── Nav ── */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      background: rgba(10,10,15,0.8);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border);
+    }
+    nav .container {
+      display: flex; align-items: center; justify-content: space-between;
+      height: 56px;
+    }
+    .nav-brand {
+      display: flex; align-items: center; gap: 10px;
+      font-weight: 700; font-size: 18px; color: var(--text);
+    }
+    .nav-brand img { width: 38px; height: 38px; border-radius: 6px; }
+    .nav-links { display: flex; gap: 28px; align-items: center; }
+    .nav-links a {
+      font-size: 13px; font-weight: 500; color: var(--text-muted);
+      transition: color 0.2s;
+    }
+    .nav-links a:hover { color: var(--text); text-decoration: none; }
+    .btn-nav {
+      background: var(--accent);
+      color: var(--bg) !important;
+      padding: 7px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      transition: opacity 0.2s;
+    }
+    .btn-nav:hover { opacity: 0.85; text-decoration: none; }
+
+    /* ── Hero ── */
+    .hero {
+      padding-top: 160px;
+      padding-bottom: 80px;
+      text-align: center;
+      position: relative;
+    }
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: 60px; left: 50%; transform: translateX(-50%);
+      width: 600px; height: 600px;
+      background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .hero h1 {
+      font-size: clamp(40px, 6vw, 72px);
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      line-height: 1.1;
+      margin-bottom: 20px;
+      position: relative;
+    }
+    .hero h1 span { color: var(--accent); }
+    .hero p {
+      font-size: 18px;
+      color: var(--text-muted);
+      max-width: 540px;
+      margin: 0 auto 36px;
+      line-height: 1.7;
+    }
+    .hero-actions {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: var(--bg);
+      padding: 12px 28px;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 600;
+      transition: transform 0.2s var(--ease), box-shadow 0.2s;
+      display: inline-flex; align-items: center; gap: 8px;
+    }
+    .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 8px 24px var(--accent-glow);
+      text-decoration: none;
+    }
+    .btn-secondary {
+      background: var(--bg-subtle);
+      color: var(--text);
+      padding: 12px 28px;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 500;
+      border: 1px solid var(--border);
+      transition: border-color 0.2s;
+      display: inline-flex; align-items: center; gap: 8px;
+    }
+    .btn-secondary:hover { border-color: var(--accent); text-decoration: none; }
+
+    .hero-badges {
+      display: flex;
+      gap: 24px;
+      justify-content: center;
+      margin-top: 40px;
+      color: var(--text-muted);
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .hero-badges span { display: flex; align-items: center; gap: 6px; }
+    .dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+    .dot-green { background: var(--green); }
+    .dot-amber { background: var(--amber); }
+    .dot-purple { background: var(--purple); }
+
+    /* ── Screenshots ── */
+    .screenshots {
+      padding: 20px 0 50px 0;
+    }
+    .screenshots .container {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    .screenshots img {
+      width: 100%;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      box-shadow: 0 16px 48px rgba(0,0,0,0.4);
+    }
+
+    /* ── Features grid ── */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+    }
+    .feature-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 28px;
+      transition: border-color 0.25s, transform 0.25s var(--ease);
+    }
+    .feature-card:hover {
+      border-color: rgba(255,255,255,0.1);
+      transform: translateY(-2px);
+    }
+    .feature-icon {
+      width: 36px; height: 36px;
+      border-radius: 9px;
+      display: grid; place-items: center;
+      margin-bottom: 16px;
+      font-size: 18px;
+    }
+    .feature-card h3 {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .feature-card p {
+      font-size: 13.5px;
+      color: var(--text-muted);
+      line-height: 1.65;
+    }
+    .section-label {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--accent);
+      margin-bottom: 12px;
+    }
+    .section-title {
+      font-size: clamp(28px, 4vw, 40px);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 16px;
+    }
+    .section-desc {
+      font-size: 16px;
+      color: var(--text-muted);
+      max-width: 600px;
+      margin-bottom: 48px;
+    }
+
+    /* ── Providers ── */
+    .providers {
+      text-align: center;
+    }
+    .provider-logos {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      justify-content: center;
+      margin-top: 32px;
+      padding-left: 150px;
+      padding-right: 150px;
+    }
+    .provider-chip {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 18px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-muted);
+      transition: border-color 0.2s, color 0.2s;
+    }
+    .provider-chip:hover {
+      border-color: var(--accent);
+      color: var(--text);
+    }
+
+    /* ── Stats ── */
+    .stats {
+      display: flex;
+      gap: 48px;
+      justify-content: center;
+      padding: 60px 0;
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+    }
+    .stat { text-align: center; }
+    .stat-value {
+      font-family: var(--font-mono);
+      font-size: 32px;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .stat-label {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    /* ── CTA ── */
+    .cta {
+      text-align: center;
+      padding-top: 0px;
+    }
+    .cta h2 {
+      font-size: clamp(28px, 4vw, 40px);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 16px;
+    }
+    .cta p {
+      color: var(--text-muted);
+      font-size: 16px;
+      margin-bottom: 32px;
+    }
+
+    /* ── Footer ── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 32px 0;
+      text-align: center;
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+    footer a { color: var(--text-muted); }
+    footer a:hover { color: var(--text); }
+
+    /* ── Terminal mockup ── */
+    .terminal-mock {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      max-width: 640px;
+      margin: 48px auto 0;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.5);
+    }
+    .terminal-titlebar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 12px 16px;
+      background: var(--bg-subtle);
+      border-bottom: 1px solid var(--border);
+    }
+    .terminal-dot { width: 10px; height: 10px; border-radius: 50%; }
+    .terminal-body {
+      padding: 20px;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.8;
+      color: var(--text-muted);
+    }
+    .terminal-body .prompt { color: var(--green); }
+    .terminal-body .cmd { color: var(--text); }
+    .terminal-body .output { color: var(--text-muted); }
+    .terminal-body .accent { color: var(--accent); }
+
+    /* ── Responsive ── */
+    @media (max-width: 768px) {
+      .features-grid { grid-template-columns: 1fr; }
+      .screenshots .container { grid-template-columns: 1fr; }
+      .stats { flex-direction: column; gap: 24px; }
+      .nav-links a:not(.btn-nav) { display: none; }
+      .hero-badges { flex-direction: column; align-items: center; }
+    }
+    @media (max-width: 480px) {
+      section { padding: 60px 0; }
+      .hero { padding-top: 120px; }
+    }
+
+    /* ── Animations ── */
+    .fade-in {
+      opacity: 0;
+      transform: translateY(20px);
+      transition: opacity 0.6s var(--ease), transform 0.6s var(--ease);
+    }
+    .fade-in.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Nav -->
+  <nav>
+    <div class="container">
+      <a href="#" class="nav-brand">
+        <img src="../public/logo.png" alt="Kai" />
+      </a>
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#providers">Providers</a>
+        <a href="https://github.com/Omodaka9375/Kai-ai">GitHub</a>
+        <a href="https://github.com/Omodaka9375/Kai-ai/releases/latest" class="btn-nav">Download</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="container">
+      <h1>Minimal, private <br /><span>terminal IDE</span></h1>
+      <p>Fast, private, open-source</p>
+      <div class="hero-actions">
+        <a href="https://github.com/Omodaka9375/Kai-ai/releases/latest" class="btn-primary">
+          ↓ Download Kai
+        </a>
+        <a href="https://github.com/Omodaka9375/Kai-ai" class="btn-secondary">
+          View on GitHub
+        </a>
+      </div>
+      <div class="hero-badges">
+        <span><span class="dot dot-green"></span> Zero telemetry</span>
+        <span><span class="dot dot-amber"></span> Under 10 MB</span>
+        <span><span class="dot dot-purple"></span> Cross-platform</span>
+      </div>
+
+      <!-- Terminal mockup -->
+      <div class="terminal-mock fade-in">
+        <div class="terminal-titlebar">
+          <span class="terminal-dot" style="background:#ff5f57"></span>
+          <span class="terminal-dot" style="background:#febc2e"></span>
+          <span class="terminal-dot" style="background:#28c840"></span>
+        </div>
+        <div class="terminal-body">
+          <div><span class="prompt">~/project $</span> <span class="cmd">kai</span></div>
+          <div class="output">✓ Terminal ready</div>
+          <div class="output">✓ AI agent connected <span class="accent">(Claude 4.6 Sonnet)</span></div>
+          <div class="output">✓ MCP server: filesystem, git</div>
+          <div><span class="prompt">~/project $</span> <span class="cmd">_</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Screenshots -->
+  <section class="screenshots" id="screenshots">
+    <div class="container">
+      <img src="terminal.png" alt="Kai terminal with split panes" class="fade-in" />
+      <img src="split-panes.png" alt="Kai terminal with split panes" class="fade-in" />
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section id="features">
+    <div class="container">
+      <div class="section-label">Features</div>
+      <h2 class="section-title">Everything in one window.</h2>
+      <p class="section-desc">No browser tabs, no context switching. Terminal, editor, AI, and tools — unified.</p>
+      <div class="features-grid">
+        <div class="feature-card fade-in">
+          <div class="feature-icon" style="background:rgba(52,211,153,0.1);color:var(--green)">⌘</div>
+          <h3>Terminal</h3>
+          <p>xterm.js with WebGL rendering. Multi-tab, split panes, shell integration for bash, zsh, PowerShell, and cmd.</p>
+        </div>
+        <div class="feature-card fade-in">
+          <div class="feature-icon" style="background:rgba(122,162,247,0.1);color:var(--accent)">✎</div>
+          <h3>Code Editor</h3>
+          <p>CodeMirror 6 with 44 languages, find & replace, inline AI autocomplete, Vim mode, and 9 themes.</p>
+        </div>
+        <div class="feature-card fade-in">
+          <div class="feature-icon" style="background:rgba(196,167,231,0.1);color:var(--purple)">◆</div>
+          <h3>AI Agent</h3>
+          <p>Reads, writes, and runs code. Edit diffs with approval flow, auto-approve modes, context summarization.</p>
+        </div>
+        <div class="feature-card fade-in">
+          <div class="feature-icon" style="background:rgba(245,158,11,0.1);color:var(--amber)">⚡</div>
+          <h3>MCP Support</h3>
+          <p>Connect external tool servers via Model Context Protocol. Browse and install from the official registry.</p>
+        </div>
+        <div class="feature-card fade-in">
+          <div class="feature-icon" style="background:rgba(52,211,153,0.1);color:var(--green)">◫</div>
+          <h3>File Explorer</h3>
+          <p>Catppuccin icon theme, fuzzy search, inline rename, image & PDF preview, drag to attach to AI.</p>
+        </div>
+        <div class="feature-card fade-in">
+          <div class="feature-icon" style="background:rgba(122,162,247,0.1);color:var(--accent)">⊞</div>
+          <h3>Web Preview & API Tester</h3>
+          <p>Built-in browser for local dev servers. REST API tester with headers, body editor, and JSON pretty-print.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Screenshots -->
+  <section class="screenshots" id="screenshots">
+    <div class="container">
+      <img src="ai-workflow.png" alt="AI agent editing code" class="fade-in" />
+      <img src="web-preview.png" alt="Kai web preview" class="fade-in" />
+    </div>
+  </section>
+
+  <!-- Stats -->
+  <div class="container">
+    <div class="stats fade-in">
+      <div class="stat">
+        <div class="stat-value">&lt;10MB</div>
+        <div class="stat-label">App size</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">44</div>
+        <div class="stat-label">Languages</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">10+</div>
+        <div class="stat-label">AI providers</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">8</div>
+        <div class="stat-label">UI themes</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">0</div>
+        <div class="stat-label">Telemetry</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Providers -->
+  <section id="providers" class="providers">
+    <div class="container">
+      <div class="section-label">Bring Your Own Key</div>
+      <h2 class="section-title">Works with every provider.</h2>
+      <p class="section-desc" style="margin: 0 auto 0;">Cloud APIs, local models, or your own endpoint. No lock-in.</p>
+      <div class="provider-logos">
+        <span class="provider-chip">OpenAI</span>
+        <span class="provider-chip">Anthropic</span>
+        <span class="provider-chip">Google</span>
+        <span class="provider-chip">Groq</span>
+        <span class="provider-chip">xAI</span>
+        <span class="provider-chip">Cerebras</span>
+        <span class="provider-chip">DeepSeek</span>
+        <span class="provider-chip">Mistral</span>
+        <span class="provider-chip">OpenRouter</span>
+        <span class="provider-chip">LM Studio</span>
+        <span class="provider-chip">Ollama</span>
+        <span class="provider-chip">Any OpenAI-compatible</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="cta">
+    <div class="container">
+      <h2>Start building with Kai.</h2>
+      <p>Free, open source, no account required.</p>
+      <div class="hero-actions">
+        <a href="https://github.com/Omodaka9375/Kai-ai/releases/latest" class="btn-primary">
+          ↓ Download for free
+        </a>
+        <a href="https://github.com/Omodaka9375/Kai-ai" class="btn-secondary">
+          Star on GitHub
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container">
+      <p>Kai is open source under <a href="https://github.com/Omodaka9375/Kai-ai/blob/main/LICENSE">Apache-2.0</a></p>
+    </div>
+  </footer>
+
+  <script>
+    // Intersection Observer for fade-in animations
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('visible');
+            observer.unobserve(entry.target);
+          }
+        }
+      },
+      { threshold: 0.1, rootMargin: '0px 0px -40px 0px' }
+    );
+    document.querySelectorAll('.fade-in').forEach((el) => observer.observe(el));
+  </script>
+</body>
+</html>
