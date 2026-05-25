@@ -42,6 +42,7 @@ import type {
 } from "ai";
 import { memo, useCallback, useMemo } from "react";
 import { AiToolApproval } from "./AiToolApproval";
+import { MediaMessage, isMediaOutput } from "./MediaMessage";
 
 function CommandSnippet({ name }: { name: string }) {
   const meta = SLASH_COMMANDS[name];
@@ -729,6 +730,15 @@ const RenderedTool = memo(function RenderedTool({
         onRespond={(approved) => onApproval(part.approval.id, approved)}
       />
     );
+  }
+
+  // Render generated images/videos inline instead of as collapsed tool output.
+  if (
+    (toolName === "generate_image" || toolName === "generate_video") &&
+    "output" in part &&
+    isMediaOutput(part.output)
+  ) {
+    return <MediaMessage output={part.output} />;
   }
 
   return (
