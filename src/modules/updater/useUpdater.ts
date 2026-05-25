@@ -7,7 +7,7 @@ import { IS_LINUX } from "@/lib/platform";
 const LAST_CHECK_KEY = "Kai:updater:last-check";
 const CHECK_INTERVAL_MS = 30 * 60 * 1000;
 const GITHUB_LATEST_RELEASE =
-  "https://api.github.com/repos/Omodaka9375/Kai-ai/releases/latest";
+  "https://api.github.com/repos/Omodaka9375/kai/releases/latest";
 
 export interface ManualUpdateInfo {
   version: string;

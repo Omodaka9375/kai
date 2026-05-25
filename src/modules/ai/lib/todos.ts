@@ -9,7 +9,7 @@ export type Todo = {
   status: TodoStatus;
 };
 
-const STORE_PATH = "Kai-ai-todos.json";
+const STORE_PATH = "kai-todos.json";
 const todosKey = (sessionId: string) => `todos:${sessionId}`;
 
 const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });

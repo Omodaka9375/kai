@@ -13,7 +13,7 @@ export type Snippet = {
   builtin?: boolean;
 };
 
-const STORE_PATH = "Kai-ai-snippets.json";
+const STORE_PATH = "kai-snippets.json";
 const KEY_LIST = "snippets";
 
 const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });

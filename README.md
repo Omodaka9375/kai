@@ -4,7 +4,7 @@
   <p>Minimal, private AI-native terminal emulator</p>
 
   <p>
-    <a href="https://github.com/Omodaka9375/Kai-ai/releases/latest"><img src="https://img.shields.io/github/v/release/Omodaka9375/Kai-ai?style=flat-square&label=download" alt="download" /></a>
+    <a href="https://github.com/Omodaka9375/kai/releases/latest"><img src="https://img.shields.io/github/v/release/Omodaka9375/kai?style=flat-square&label=download" alt="download" /></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square" alt="license" /></a>
     <a href="#build-from-source"><img src="https://img.shields.io/badge/platform-Windows%20·%20macOS%20·%20Linux-333?style=flat-square" alt="platform" /></a>
   </p>
@@ -35,7 +35,7 @@ Kai is a fast, cross-platform terminal built on **Tauri 2 + Rust** and **React 1
 
 ## Install
 
-Grab the latest installer from [**Releases**](https://github.com/Omodaka9375/Kai-ai/releases/latest) — available for Windows (.exe), macOS (.dmg), and Linux (.deb / .rpm / .AppImage).
+Grab the latest installer from [**Releases**](https://github.com/Omodaka9375/kai/releases/latest) — available for Windows (.exe), macOS (.dmg), and Linux (.deb / .rpm / .AppImage).
 
 Auto-update is built in.
 

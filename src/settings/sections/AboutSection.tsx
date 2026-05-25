@@ -7,8 +7,8 @@ import { arch, platform } from "@tauri-apps/plugin-os";
 import { useEffect, useState } from "react";
 import { SectionHeader } from "../components/SectionHeader";
 
-const REPO_URL = "https://github.com/Omodaka9375/Kai-ai";
-const WEBSITE = "https://omodaka9375.github.io/Kai-ai";
+const REPO_URL = "https://github.com/Omodaka9375/kai";
+const WEBSITE = "https://omodaka9375.github.io/kai";
 
 const PLATFORM_LABEL: Record<string, string> = {
   macos: "macOS",

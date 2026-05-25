@@ -24,7 +24,7 @@ export type McpServerConfig = {
   enabled: boolean;
 };
 
-const STORE_PATH = "Kai-ai-mcp.json";
+const STORE_PATH = "kai-mcp.json";
 const KEY_SERVERS = "servers";
 
 const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
