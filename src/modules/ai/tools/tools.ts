@@ -1,6 +1,7 @@
 import { buildEditTools } from "./edit";
 import { buildFsTools } from "./fs";
 import { buildImageGenTools } from "./image-gen";
+import { buildVideoGenTools } from "./video-gen";
 import { buildSearchTools } from "./search";
 import { buildShellTools } from "./shell";
 import { buildSubagentTools } from "./subagent";
@@ -45,6 +46,7 @@ export function buildTools(
     ...buildWebTools(ctx),
     ...buildYouTubeTools(ctx),
     ...buildImageGenTools(ctx),
+    ...buildVideoGenTools(ctx),
     ...(mcpTools ?? {}),
   } as const;
 }
