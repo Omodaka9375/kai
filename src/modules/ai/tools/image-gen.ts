@@ -8,7 +8,7 @@ import { generateComfyImage } from "../lib/media/comfyui";
 import type { ImageResult } from "../lib/media/types";
 import type { ToolContext } from "./context";
 
-const PROVIDER_ENUM = ["auto", "openai", "google", "xai", "comfyui"] as const;
+const PROVIDER_ENUM = ["openai", "google", "xai", "comfyui"] as const;
 
 export function buildImageGenTools(_ctx: ToolContext) {
   return {
@@ -20,8 +20,8 @@ Providers:
 - google: Nano Banana 2 (Gemini, fast, good quality)
 - xai: Grok Imagine (good quality)
 - comfyui: local ComfyUI instance (upload workflow JSON in Settings)
-- auto: picks the first available provider (openai → google → xai)
 
+You MUST specify a provider. Ask the user which one to use if unclear.
 Auto-executes — no approval needed.`,
       inputSchema: z.object({
         prompt: z
@@ -31,9 +31,7 @@ Auto-executes — no approval needed.`,
           ),
         provider: z
           .enum(PROVIDER_ENUM)
-          .optional()
-          .default("auto")
-          .describe("Which image provider to use. Defaults to auto."),
+          .describe("Which image provider to use. Ask the user if not specified."),
         size: z
           .string()
           .optional()
@@ -74,16 +72,15 @@ Auto-executes — no approval needed.`,
           }
         }
 
-        const resolved = resolveProvider(provider ?? "auto", keys);
-        if (!resolved) {
+        const key = keys[provider as keyof typeof keys];
+        if (!key) {
           return {
-            error:
-              "No image generation provider available. Add an OpenAI, Google, or xAI API key in Settings → Models.",
+            error: `No API key configured for ${provider}. Add one in Settings → Models.`,
           };
         }
 
         try {
-          const result = await callProvider(resolved.provider, resolved.key, {
+          const result = await callProvider(provider as "openai" | "google" | "xai", key, {
             prompt,
             size,
             quality,
@@ -104,28 +101,6 @@ Auto-executes — no approval needed.`,
       },
     }),
   } as const;
-}
-
-type ResolvedProvider = {
-  provider: "openai" | "google" | "xai";
-  key: string;
-};
-
-function resolveProvider(
-  preference: string,
-  keys: Record<string, string | null>,
-): ResolvedProvider | null {
-  if (preference !== "auto") {
-    const key = keys[preference as keyof typeof keys];
-    if (key) return { provider: preference as ResolvedProvider["provider"], key };
-    return null;
-  }
-  // Auto: try openai → google → xai
-  for (const id of ["openai", "google", "xai"] as const) {
-    const key = keys[id];
-    if (key) return { provider: id, key };
-  }
-  return null;
 }
 
 async function callProvider(

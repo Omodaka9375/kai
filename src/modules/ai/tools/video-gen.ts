@@ -8,7 +8,7 @@ import { generateComfyVideo } from "../lib/media/comfyui";
 import type { VideoResult } from "../lib/media/types";
 import type { ToolContext } from "./context";
 
-const PROVIDER_ENUM = ["auto", "kling", "google", "seedance", "comfyui"] as const;
+const PROVIDER_ENUM = ["kling", "google", "seedance", "comfyui"] as const;
 
 export function buildVideoGenTools(_ctx: ToolContext) {
   return {
@@ -20,8 +20,8 @@ Providers:
 - google: Veo 3.1 (audio-native cinematic, uses existing Google key)
 - seedance: Seedance 2.0 (ByteDance, unified audio-video)
 - comfyui: local ComfyUI instance (upload workflow JSON in Settings)
-- auto: picks the first available provider (kling → google → seedance)
 
+You MUST specify a provider. Ask the user which one to use if unclear.
 Video generation takes 1-5 minutes. Auto-executes — no approval needed.`,
       inputSchema: z.object({
         prompt: z
@@ -31,9 +31,7 @@ Video generation takes 1-5 minutes. Auto-executes — no approval needed.`,
           ),
         provider: z
           .enum(PROVIDER_ENUM)
-          .optional()
-          .default("auto")
-          .describe("Which video provider to use. Defaults to auto."),
+          .describe("Which video provider to use. Ask the user if not specified."),
         duration: z
           .number()
           .optional()
@@ -75,16 +73,15 @@ Video generation takes 1-5 minutes. Auto-executes — no approval needed.`,
           seedance: await getMediaKey("seedance"),
         };
 
-        const resolved = resolveProvider(provider ?? "auto", allKeys);
-        if (!resolved) {
+        const key = allKeys[provider as keyof typeof allKeys];
+        if (!key) {
           return {
-            error:
-              "No video generation provider available. Add a Kling, Google, or Seedance API key in Settings → Models.",
+            error: `No API key configured for ${provider}. Add one in Settings → Models.`,
           };
         }
 
         try {
-          const result = await callProvider(resolved.provider, resolved.key, {
+          const result = await callProvider(provider as "kling" | "google" | "seedance", key, {
             prompt,
             duration,
             aspectRatio: aspect_ratio,
@@ -117,28 +114,6 @@ async function getMediaKey(provider: string): Promise<string | null> {
   } catch {
     return null;
   }
-}
-
-type ResolvedProvider = {
-  provider: "kling" | "google" | "seedance";
-  key: string;
-};
-
-function resolveProvider(
-  preference: string,
-  keys: Record<string, string | null>,
-): ResolvedProvider | null {
-  if (preference !== "auto") {
-    const key = keys[preference];
-    if (key) return { provider: preference as ResolvedProvider["provider"], key };
-    return null;
-  }
-  // Auto: kling → google → seedance
-  for (const id of ["kling", "google", "seedance"] as const) {
-    const key = keys[id];
-    if (key) return { provider: id, key };
-  }
-  return null;
 }
 
 async function callProvider(
