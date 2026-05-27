@@ -35,33 +35,44 @@ function workspaceSessionKey(sessionId: string): string {
 }
 
 /**
- * Package-manager install/add commands — network-bound but NOT long-running
- * servers. Must be checked BEFORE dev-server patterns to avoid false positives
+ * Package-manager commands that are NOT dev servers — install, build, test,
+ * lint, etc. Checked BEFORE dev-server patterns to avoid false positives
  * (e.g. `pnpm add @next/dev-utils` matching `\bdev\b`).
+ * Not anchored with ^ so chained commands like `cd project && pnpm install`
+ * are also recognized.
  */
-function isPackageInstallCommand(cmd: string): boolean {
-  const lower = cmd.toLowerCase().trim();
-  return /^\s*(npm|pnpm|yarn|bun)\s+(add|install|i|ci|remove|uninstall|up|update|upgrade|link|dedupe)\b/.test(
+function isPackageManagerForegroundCommand(cmd: string): boolean {
+  const lower = cmd.toLowerCase();
+  return /\b(npm|pnpm|yarn|bun)\s+(add|install|i|ci|remove|uninstall|up|update|upgrade|link|dedupe|build|run\s+build|test|run\s+test|lint|run\s+lint|typecheck|run\s+typecheck|format|run\s+format|check|run\s+check|run\s+preview|pack|publish|exec|dlx|why|ls|list|outdated|audit|prune|rebuild|clean)\b/.test(
     lower,
   );
 }
 
 /** Default timeout override for slow-but-foreground commands (seconds). */
 function slowCommandTimeout(cmd: string): number | undefined {
-  if (isPackageInstallCommand(cmd)) return 120;
+  const lower = cmd.toLowerCase();
+  // Package install commands — network I/O, can take 2+ minutes.
+  if (/\b(npm|pnpm|yarn|bun)\s+(add|install|i|ci|update|upgrade)\b/.test(lower)) return 120;
+  // Build commands — Rust/TS compilation can take 5+ minutes.
+  if (/\b(npm|pnpm|yarn|bun)\s+(run\s+)?build\b/.test(lower)) return 300;
+  if (/\b(cargo\s+build|cargo\s+test|tsc)\b/.test(lower)) return 300;
+  // Test/lint — usually under 2 minutes but give headroom.
+  if (/\b(npm|pnpm|yarn|bun)\s+(run\s+)?(test|lint|typecheck|check)\b/.test(lower)) return 120;
   return undefined;
 }
 
 /** Detect commands that are long-running dev servers / watchers. */
 function isDevServerCommand(cmd: string): boolean {
-  // Package install commands are network-slow, not servers — never block them.
-  if (isPackageInstallCommand(cmd)) return false;
+  // Package manager foreground commands are not servers — never block them.
+  if (isPackageManagerForegroundCommand(cmd)) return false;
   const lower = cmd.toLowerCase().trim();
+  // More specific patterns: require package-runner context or standalone
+  // server binaries. Bare `\bdev\b` and `\bstart\b` were too broad.
   const DEV_PATTERNS = [
-    /\bdev\b/,
-    /\bstart\b/,
-    /\bserve\b/,
-    /\bwatch\b/,
+    /\b(npm|pnpm|yarn|bun)\s+(run\s+)?dev\b/,
+    /\b(npm|pnpm|yarn|bun)\s+(run\s+)?start\b/,
+    /\b(npm|pnpm|yarn|bun)\s+(run\s+)?serve\b/,
+    /\b(npm|pnpm|yarn|bun)\s+(run\s+)?watch\b/,
     /\bnext\s+dev\b/,
     /\bvite\b(?!.*build)/,
     /\bgatsby\s+develop\b/,

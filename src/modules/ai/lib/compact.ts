@@ -141,7 +141,7 @@ export type CompactResult = {
   messages: ModelMessage[];
   compacted: boolean;
   droppedCount: number;
-  /** True when post-elision tokens still exceed 60% of the context limit. */
+  /** True when post-elision tokens still exceed 75% of the context limit. */
   needsSummarization: boolean;
 };
 
@@ -160,7 +160,8 @@ export function compactModelMessagesDetailed(
   let working = messages;
   let approxTokens = approxBytes(working) / 4;
 
-  if (approxTokens >= 0.45 * contextLimit) {
+  // ── Phase 1: drop superseded reads (stale file content) ──
+  if (approxTokens >= 0.6 * contextLimit) {
     const r = dropSupersededReads(working);
     if (r.touched) {
       working = r.out;
@@ -169,7 +170,8 @@ export function compactModelMessagesDetailed(
     }
   }
 
-  if (approxTokens < 0.55 * contextLimit) {
+  // Under 70% → no compaction needed.
+  if (approxTokens < 0.7 * contextLimit) {
     return {
       messages: working,
       compacted: dropped > 0,
@@ -178,6 +180,7 @@ export function compactModelMessagesDetailed(
     };
   }
 
+  // ── Phase 2: elide old tool results ──
   const out = working.slice();
   const stopIdx = Math.max(0, out.length - KEEP_TAIL);
   for (let i = 0; i < stopIdx; i++) {
@@ -192,7 +195,7 @@ export function compactModelMessagesDetailed(
     if (local) {
       out[i] = { ...out[i], content: next } as ModelMessage;
       dropped++;
-      if (approxBytes(out) / 4 < 0.6 * contextLimit) break;
+      if (approxBytes(out) / 4 < 0.65 * contextLimit) break;
     }
   }
 
@@ -201,6 +204,6 @@ export function compactModelMessagesDetailed(
     messages: out,
     compacted: dropped > 0,
     droppedCount: dropped,
-    needsSummarization: finalTokens >= 0.6 * contextLimit,
+    needsSummarization: finalTokens >= 0.75 * contextLimit,
   };
 }

@@ -69,6 +69,46 @@ function normEol(s: string): string {
 }
 
 /**
+ * Strict eol-normalized find (no fuzzy whitespace). Used for uniqueness
+ * checks so indentation variants aren't falsely flagged as duplicates.
+ */
+function eolAwareExactFind(
+  haystack: string,
+  needle: string,
+  startFrom = 0,
+): { start: number; length: number } | null {
+  const hNorm = normEol(haystack);
+  const nNorm = normEol(needle);
+  const normIdx = hNorm.indexOf(nNorm, startFrom);
+  if (normIdx === -1) return null;
+  let origPos = 0;
+  let normPos = 0;
+  while (normPos < normIdx && origPos < haystack.length) {
+    if (haystack[origPos] === "\r" && haystack[origPos + 1] === "\n") {
+      origPos += 2;
+      normPos += 1;
+    } else {
+      origPos++;
+      normPos++;
+    }
+  }
+  const origStart = origPos;
+  let matchNormLen = nNorm.length;
+  let origEnd = origStart;
+  let consumed = 0;
+  while (consumed < matchNormLen && origEnd < haystack.length) {
+    if (haystack[origEnd] === "\r" && haystack[origEnd + 1] === "\n") {
+      origEnd += 2;
+      consumed += 1;
+    } else {
+      origEnd++;
+      consumed++;
+    }
+  }
+  return { start: origStart, length: origEnd - origStart };
+}
+
+/**
  * Find `needle` in `haystack` with line-ending-insensitive matching.
  * Returns { start, length } in the ORIGINAL haystack, or null.
  */
@@ -184,9 +224,11 @@ async function applyEdits(
           path: abs,
         };
       }
-      // Check uniqueness: search for a second occurrence after this one.
-      const second = eolAwareFind(content, oldNorm, match.start + 1);
-      if (second) {
+      // Check uniqueness: search for a second occurrence AFTER the first
+      // match. Use exact eol-normalized matching only (not fuzzy whitespace)
+      // so indentation variants aren't falsely flagged as duplicates.
+      const exactSecond = eolAwareExactFind(content, oldNorm, match.start + match.length);
+      if (exactSecond) {
         return {
           error:
             "old_string is not unique. Provide more surrounding context, or set replace_all=true.",

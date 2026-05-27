@@ -36,6 +36,22 @@ function htmlToText(html: string): string {
   return text.trim();
 }
 
+/** Extract the real URL from DDG's redirect wrapper. */
+function extractDdgUrl(raw: string): string {
+  try {
+    // DDG wraps results as //duckduckgo.com/l/?uddg=<encoded>&rut=<hash>
+    if (raw.includes("uddg=")) {
+      const u = new URL(raw, "https://duckduckgo.com");
+      return decodeURIComponent(u.searchParams.get("uddg") ?? raw);
+    }
+    // Direct URL — just clean up protocol.
+    if (raw.startsWith("//")) return `https:${raw}`;
+    return raw;
+  } catch {
+    return raw;
+  }
+}
+
 export function buildWebTools(_ctx: ToolContext) {
   return {
     web_browse: tool({
@@ -68,17 +84,74 @@ export function buildWebTools(_ctx: ToolContext) {
       }),
       execute: async ({ query }) => {
         try {
-          const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-          const { body } = await httpFetch(searchUrl);
-          // Parse DuckDuckGo HTML results.
+          // Use DDG lite endpoint with POST. The Accept-Encoding is handled
+          // by Rust reqwest (gzip/deflate enabled in Cargo.toml).
+          const resp = await invoke<{ status: number; headers: Record<string, string>; body: number[] }>(
+            "ai_http_request",
+            {
+              url: "https://lite.duckduckgo.com/lite/",
+              method: "POST",
+              headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Content-Type": "application/x-www-form-urlencoded",
+              },
+              body: Array.from(new TextEncoder().encode(`q=${encodeURIComponent(query)}`)),
+              allowPrivateNetwork: false,
+            },
+          );
+          const body = new TextDecoder().decode(new Uint8Array(resp.body));
+
+          // DDG Lite uses a simple HTML table layout. Parse results from
+          // both the lite format and the standard html format for resilience.
           const results: { title: string; url: string; snippet?: string }[] = [];
-          const linkRe = /<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)<\/a>/gs;
-          for (const m of body.matchAll(linkRe)) {
-            const link = m[1];
+
+          // ── Strategy 1: DDG Lite table rows ──
+          // Lite wraps each result in <tr> with class "result-link" or
+          // a link inside a <td class="result-title">. The snippet is in
+          // the next <td class="result-snippet">.
+          // Links in lite are plain: <a href="https://example.com">Title</a>
+          const liteRowRe = /<a[^>]+href="(https?:\/\/[^"]*)"[^>]*class="[^"]*result-link[^"]*"[^>]*>(.*?)<\/a>/gs;
+          for (const m of body.matchAll(liteRowRe)) {
             const title = m[2].replace(/<[^>]+>/g, "").trim();
-            if (title && link) results.push({ title, url: link });
+            if (title) results.push({ title, url: extractDdgUrl(m[1]) });
           }
-          const snippetRe = /<a[^>]*class="result__snippet"[^>]*>(.*?)<\/a>/gs;
+          // Alt: href before class
+          if (results.length === 0) {
+            const liteRowRe2 = /<a[^>]+class="[^"]*result-link[^"]*"[^>]+href="(https?:\/\/[^"]*)"[^>]*>(.*?)<\/a>/gs;
+            for (const m of body.matchAll(liteRowRe2)) {
+              const title = m[2].replace(/<[^>]+>/g, "").trim();
+              if (title) results.push({ title, url: extractDdgUrl(m[1]) });
+            }
+          }
+
+          // ── Strategy 2: Standard DDG HTML (class="result__a") ──
+          if (results.length === 0) {
+            const aTagRe = /<a\s([^>]*class="result__a"[^>]*)>(.*?)<\/a>/gs;
+            for (const m of body.matchAll(aTagRe)) {
+              const attrs = m[1];
+              const inner = m[2];
+              const hrefMatch = /href="([^"]*)"/.exec(attrs);
+              if (!hrefMatch) continue;
+              const title = inner.replace(/<[^>]+>/g, "").trim();
+              const realUrl = extractDdgUrl(hrefMatch[1]);
+              if (title && realUrl) results.push({ title, url: realUrl });
+            }
+          }
+
+          // ── Strategy 3: Grab all external links from result-like containers ──
+          if (results.length === 0) {
+            const anyLink = /<a[^>]+href="(https?:\/\/(?!duckduckgo\.com)[^"]*)"[^>]*>(.*?)<\/a>/gi;
+            for (const m of body.matchAll(anyLink)) {
+              const title = m[2].replace(/<[^>]+>/g, "").trim();
+              if (title && title.length > 5 && !m[1].includes("duckduckgo.com")) {
+                results.push({ title, url: m[1] });
+              }
+              if (results.length >= 10) break;
+            }
+          }
+
+          // Extract snippets.
+          const snippetRe = /<(?:a|td)[^>]*class="[^"]*(?:result__snippet|result-snippet)[^"]*"[^>]*>(.*?)<\/(?:a|td)>/gs;
           let i = 0;
           for (const m of body.matchAll(snippetRe)) {
             if (i < results.length) {
