@@ -1,6 +1,5 @@
 import type { ModelMessage } from "ai";
 
-const KEEP_TAIL = 24;
 const ELISION_TEXT = "[elided to save context — see prior tool call in history]";
 
 type ToolPart = {
@@ -170,40 +169,12 @@ export function compactModelMessagesDetailed(
     }
   }
 
-  // Under 70% → no compaction needed.
-  if (approxTokens < 0.7 * contextLimit) {
-    return {
-      messages: working,
-      compacted: dropped > 0,
-      droppedCount: dropped,
-      needsSummarization: false,
-    };
-  }
-
-  // ── Phase 2: elide old tool results ──
-  const out = working.slice();
-  const stopIdx = Math.max(0, out.length - KEEP_TAIL);
-  for (let i = 0; i < stopIdx; i++) {
-    if (out[i].role === "system") continue;
-    if (!Array.isArray(out[i].content)) continue;
-    let local = false;
-    const next = (out[i].content as ToolPart[]).map((part) => {
-      const r = elideToolResult(part);
-      if (r.changed) local = true;
-      return r.part;
-    });
-    if (local) {
-      out[i] = { ...out[i], content: next } as ModelMessage;
-      dropped++;
-      if (approxBytes(out) / 4 < 0.65 * contextLimit) break;
-    }
-  }
-
-  const finalTokens = approxBytes(out) / 4;
+  // No tool-result elision — rely on summarization to manage context.
+  // Signal summarization when context exceeds 75%.
   return {
-    messages: out,
+    messages: working,
     compacted: dropped > 0,
     droppedCount: dropped,
-    needsSummarization: finalTokens >= 0.75 * contextLimit,
+    needsSummarization: approxTokens >= 0.75 * contextLimit,
   };
 }

@@ -895,6 +895,13 @@ export default function App() {
         e.preventDefault();
         e.stopPropagation();
         openPreviewTab(href);
+      } else {
+        // External URL — open in system browser via Tauri opener plugin.
+        e.preventDefault();
+        e.stopPropagation();
+        void import("@tauri-apps/plugin-opener").then(({ openUrl }) =>
+          openUrl(href),
+        );
       }
     };
     document.addEventListener("click", handler, true);

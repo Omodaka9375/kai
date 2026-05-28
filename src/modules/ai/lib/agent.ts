@@ -87,27 +87,27 @@ export async function buildLanguageModel(
   switch (provider) {
     case "openai": {
       const { createOpenAI } = await import("@ai-sdk/openai");
-      built = createOpenAI({ apiKey: key })(resolvedModelId);
+      built = createOpenAI({ apiKey: key, fetch: localProxyFetch })(resolvedModelId);
       break;
     }
     case "anthropic": {
       const { createAnthropic } = await import("@ai-sdk/anthropic");
-      built = createAnthropic({ apiKey: key })(resolvedModelId);
+      built = createAnthropic({ apiKey: key, fetch: localProxyFetch })(resolvedModelId);
       break;
     }
     case "google": {
       const { createGoogleGenerativeAI } = await import("@ai-sdk/google");
-      built = createGoogleGenerativeAI({ apiKey: key })(resolvedModelId);
+      built = createGoogleGenerativeAI({ apiKey: key, fetch: localProxyFetch })(resolvedModelId);
       break;
     }
     case "xai": {
       const { createXai } = await import("@ai-sdk/xai");
-      built = createXai({ apiKey: key })(resolvedModelId);
+      built = createXai({ apiKey: key, fetch: localProxyFetch })(resolvedModelId);
       break;
     }
     case "cerebras": {
       const { createCerebras } = await import("@ai-sdk/cerebras");
-      built = createCerebras({ apiKey: key })(resolvedModelId);
+      built = createCerebras({ apiKey: key, fetch: localProxyFetch })(resolvedModelId);
       break;
     }
     case "deepseek": {
@@ -117,6 +117,7 @@ export async function buildLanguageModel(
         name: "deepseek",
         baseURL: "https://api.deepseek.com",
         apiKey: key,
+        fetch: localProxyFetch,
       })(resolvedModelId);
       break;
     }
@@ -127,12 +128,13 @@ export async function buildLanguageModel(
         name: "mistral",
         baseURL: "https://api.mistral.ai/v1",
         apiKey: key,
+        fetch: localProxyFetch,
       })(resolvedModelId);
       break;
     }
     case "groq": {
       const { createGroq } = await import("@ai-sdk/groq");
-      built = createGroq({ apiKey: key })(resolvedModelId);
+      built = createGroq({ apiKey: key, fetch: localProxyFetch })(resolvedModelId);
       break;
     }
     case "openrouter": {
@@ -146,6 +148,7 @@ export async function buildLanguageModel(
           "HTTP-Referer": "https://Kai.ai",
           "X-Title": "Kai",
         },
+        fetch: localProxyFetch,
       })(resolvedModelId);
       break;
     }

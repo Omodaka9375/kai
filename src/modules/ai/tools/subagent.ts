@@ -28,7 +28,8 @@ Auto-executes (no approval) — subagents are read-only by design.`,
           .optional()
           .describe("Short label shown in the chat UI for the spawn card."),
       }),
-      execute: async ({ type, prompt, description }) => {
+      execute: async ({ type, prompt, description }, options) => {
+        const abortSignal = options?.abortSignal;
         const { apiKeys, selectedModelId, patchAgentMeta } =
           useChatStore.getState();
         const prefs = await import("@/modules/settings/preferences").then(
@@ -46,6 +47,7 @@ Auto-executes (no approval) — subagents are read-only by design.`,
             openaiCompatibleModelId: prefs.openaiCompatibleModelId || undefined,
             lmstudioModelId: prefs.lmstudioModelId || undefined,
             onStep: (label) => patchAgentMeta({ step: label }),
+            abortSignal,
           });
           return {
             type,
