@@ -197,6 +197,7 @@ export default function App() {
   const sidebarRef = useRef<PanelImperativeHandle | null>(null);
   const sidebarWidthRef = useRef(readSidebarWidth());
   const sidebarWidthWriteTimerRef = useRef(0);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarView, setSidebarViewState] = useState<SidebarViewId>(readSidebarView);
   const persistSidebarView = useCallback((view: SidebarViewId) => {
     setSidebarViewState(view);
@@ -1321,6 +1322,7 @@ export default function App() {
                 collapsedSize={0}
                 onResize={(size) => {
                   if (size.inPixels > 0) persistSidebarWidth(size.inPixels);
+                  setSidebarCollapsed(size.inPixels === 0);
                   // Track the workspace left edge (sidebar + handle) for the
                   // expanded agent window positioning.
                   const handleW = size.inPixels > 0 ? 12 : 0;
@@ -1363,7 +1365,7 @@ export default function App() {
               </ResizablePanel>
               <ResizableHandle withHandle />
               <ResizablePanel id="workspace" defaultSize="78%" minSize="30%">
-                <div className="flex h-full min-h-0 flex-col">
+                <div className={cn("flex h-full min-h-0 flex-col", sidebarCollapsed && "pl-1")}>
                   <div className="relative min-h-0 flex-1">
                     {splitTab ? (
                       <ResizablePanelGroup orientation="horizontal" className="h-full">
