@@ -383,6 +383,26 @@ export default function App() {
 
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [newEditorOpen, setNewEditorOpen] = useState(false);
+
+  // ── Workspace split ────────────────────────────────────────────────
+  // When non-null, the workspace splits into two side-by-side panels.
+  // The left panel shows the primary activeId tab; the right panel
+  // shows this tab.
+  const [splitTabId, setSplitTabId] = useState<number | null>(null);
+  const splitTab = splitTabId !== null ? tabs.find((t) => t.id === splitTabId) : null;
+  // Auto-clear if the split tab was closed.
+  useEffect(() => {
+    if (splitTabId !== null && !tabs.some((t) => t.id === splitTabId)) {
+      setSplitTabId(null);
+    }
+  }, [tabs, splitTabId]);
+  const toggleSplitTab = useCallback(
+    (tabId: number) => {
+      setSplitTabId((cur) => (cur === tabId ? null : tabId));
+    },
+    [],
+  );
+  const closeSplit = useCallback(() => setSplitTabId(null), []);
   const miniOpen = useChatStore((s) => s.mini.open);
   const openMini = useChatStore((s) => s.openMini);
   const focusInput = useChatStore((s) => s.focusInput);
@@ -944,7 +964,15 @@ export default function App() {
       "tab.next": () => cycleTab(1),
       "tab.prev": () => cycleTab(-1),
       "tab.selectByIndex": (e) => selectByIndex(parseInt(e.key, 10) - 1),
-      "pane.splitRight": () => splitActivePaneInActiveTab("row"),
+      "pane.splitRight": () => {
+        const t = tabsRef.current.find((x) => x.id === activeId);
+        if (t?.kind === "terminal") {
+          splitActivePaneInActiveTab("row");
+        } else if (t) {
+          // Non-terminal: open as workspace split
+          toggleSplitTab(t.id);
+        }
+      },
       "pane.splitDown": () => splitActivePaneInActiveTab("col"),
       "pane.focusNext": () => focusNextPaneInTab(activeId, 1),
       "pane.focusPrev": () => focusNextPaneInTab(activeId, -1),
@@ -1337,7 +1365,82 @@ export default function App() {
               <ResizablePanel id="workspace" defaultSize="78%" minSize="30%">
                 <div className="flex h-full min-h-0 flex-col">
                   <div className="relative min-h-0 flex-1">
-                    {workspaceSurface}
+                    {splitTab ? (
+                      <ResizablePanelGroup orientation="horizontal" className="h-full">
+                        <ResizablePanel id="ws-primary" defaultSize="50%" minSize="20%">
+                          {workspaceSurface}
+                        </ResizablePanel>
+                        <ResizableHandle withHandle />
+                        <ResizablePanel id="ws-split" defaultSize="50%" minSize="20%">
+                          <div className="relative h-full min-h-0">
+                            {/* Close split button */}
+                            <button
+                              type="button"
+                              onClick={closeSplit}
+                              className="absolute top-1 right-1 z-10 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                              title="Close split"
+                            >
+                              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M3 3l8 8M11 3l-8 8"/></svg>
+                            </button>
+                            {splitTab.kind === "editor" && (
+                              <div className="absolute inset-0 px-3 pt-2 pb-2">
+                                <EditorStack
+                                  tabs={tabs}
+                                  activeId={splitTab.id}
+                                  registerHandle={registerEditorHandle}
+                                  onDirtyChange={handleEditorDirty}
+                                  onCloseTab={disposeTab}
+                                />
+                              </div>
+                            )}
+                            {splitTab.kind === "md-preview" && (
+                              <div className="absolute inset-0 px-3 pt-2 pb-2">
+                                <MarkdownPreviewPane
+                                  path={(splitTab as { path: string }).path}
+                                  visible
+                                />
+                              </div>
+                            )}
+                            {splitTab.kind === "preview" && (
+                              <div className="absolute inset-0 px-3 pt-2 pb-2">
+                                <PreviewStack
+                                  tabs={tabs}
+                                  activeId={splitTab.id}
+                                  registerHandle={registerPreviewHandle}
+                                  onUrlChange={handlePreviewUrl}
+                                />
+                              </div>
+                            )}
+                            {splitTab.kind === "terminal" && (
+                              <div className="absolute inset-0 px-1 pt-1 pb-0.5">
+                                <TerminalStack
+                                  tabs={tabs}
+                                  activeId={splitTab.id}
+                                  registerHandle={registerTerminalHandle}
+                                  onSearchReady={handleSearchReady}
+                                  onCwd={handleTerminalCwd}
+                                  onExit={handleLeafExit}
+                                  onFocusLeaf={handleFocusLeaf}
+                                  onCloseLeaf={closePaneByLeaf}
+                                />
+                              </div>
+                            )}
+                            {splitTab.kind === "api-tester" && (
+                              <div className="absolute inset-0 px-3 pt-2 pb-2">
+                                <ApiTesterPane visible />
+                              </div>
+                            )}
+                            {(splitTab.kind === "git-diff" || splitTab.kind === "git-commit-file") && (
+                              <div className="absolute inset-0 px-3 pt-2 pb-2">
+                                <GitDiffStack tabs={tabs} activeId={splitTab.id} />
+                              </div>
+                            )}
+                          </div>
+                        </ResizablePanel>
+                      </ResizablePanelGroup>
+                    ) : (
+                      workspaceSurface
+                    )}
                   </div>
 
                   {keysLoaded ? (
