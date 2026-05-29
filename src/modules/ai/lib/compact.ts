@@ -151,6 +151,19 @@ export function compactModelMessages(
   return compactModelMessagesDetailed(messages, contextLimit).messages;
 }
 
+/**
+ * Estimated tokens consumed by the system prompt + tool definitions that
+ * are NOT included in the conversation messages but DO count against the
+ * model's context window. This overhead is subtracted from the context
+ * limit before computing thresholds.
+ *
+ * - System prompt: ~3–6k tokens (SYSTEM_PROMPT + persona + custom instructions)
+ * - Tool schemas (15+ tools): ~8–12k tokens
+ * - Cache/structural overhead: ~2k tokens
+ * Total: ~15–20k. We use 18k as a safe middle estimate.
+ */
+const SYSTEM_OVERHEAD_TOKENS = 18_000;
+
 export function compactModelMessagesDetailed(
   messages: ModelMessage[],
   contextLimit: number,
@@ -159,8 +172,12 @@ export function compactModelMessagesDetailed(
   let working = messages;
   let approxTokens = approxBytes(working) / 4;
 
+  // The effective budget for conversation is the context limit minus the
+  // system prompt + tool definitions that are added later by runAgentStream.
+  const effectiveLimit = Math.max(contextLimit - SYSTEM_OVERHEAD_TOKENS, 8_000);
+
   // ── Phase 1: drop superseded reads (stale file content) ──
-  if (approxTokens >= 0.6 * contextLimit) {
+  if (approxTokens >= 0.5 * effectiveLimit) {
     const r = dropSupersededReads(working);
     if (r.touched) {
       working = r.out;
@@ -170,11 +187,12 @@ export function compactModelMessagesDetailed(
   }
 
   // No tool-result elision — rely on summarization to manage context.
-  // Signal summarization when context exceeds 75%.
+  // Signal summarization when conversation exceeds 60% of the effective
+  // limit (i.e. ~60% of the space left after system prompt + tools).
   return {
     messages: working,
     compacted: dropped > 0,
     droppedCount: dropped,
-    needsSummarization: approxTokens >= 0.75 * contextLimit,
+    needsSummarization: approxTokens >= 0.6 * effectiveLimit,
   };
 }
