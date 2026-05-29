@@ -24,6 +24,25 @@ import { createProxyFetch } from "./proxyFetch";
 
 const localProxyFetch = createProxyFetch({ allowPrivateNetwork: true });
 
+/**
+ * Hybrid fetch for cloud providers: tries native fetch first (handles large
+ * bodies like image uploads efficiently), falls back to proxyFetch on CORS
+ * or network errors. This avoids the IPC bottleneck of serializing multi-MB
+ * request bodies as number arrays through Tauri.
+ */
+const cloudFetch: typeof fetch = async (input, init) => {
+  try {
+    return await globalThis.fetch(input, init);
+  } catch (e) {
+    // Native fetch failed (likely CORS) — retry through Rust proxy.
+    // Only retry on TypeError (network/CORS), not on AbortError or others.
+    if (e instanceof TypeError) {
+      return localProxyFetch(input, init);
+    }
+    throw e;
+  }
+};
+
 const TOOL_LABELS: Record<string, (input: Record<string, unknown>) => string> =
   {
     read_file: (i) => `Reading ${shortPath(i.path)}`,
@@ -87,27 +106,27 @@ export async function buildLanguageModel(
   switch (provider) {
     case "openai": {
       const { createOpenAI } = await import("@ai-sdk/openai");
-      built = createOpenAI({ apiKey: key, fetch: localProxyFetch })(resolvedModelId);
+      built = createOpenAI({ apiKey: key, fetch: cloudFetch })(resolvedModelId);
       break;
     }
     case "anthropic": {
       const { createAnthropic } = await import("@ai-sdk/anthropic");
-      built = createAnthropic({ apiKey: key, fetch: localProxyFetch })(resolvedModelId);
+      built = createAnthropic({ apiKey: key, fetch: cloudFetch })(resolvedModelId);
       break;
     }
     case "google": {
       const { createGoogleGenerativeAI } = await import("@ai-sdk/google");
-      built = createGoogleGenerativeAI({ apiKey: key, fetch: localProxyFetch })(resolvedModelId);
+      built = createGoogleGenerativeAI({ apiKey: key, fetch: cloudFetch })(resolvedModelId);
       break;
     }
     case "xai": {
       const { createXai } = await import("@ai-sdk/xai");
-      built = createXai({ apiKey: key, fetch: localProxyFetch })(resolvedModelId);
+      built = createXai({ apiKey: key, fetch: cloudFetch })(resolvedModelId);
       break;
     }
     case "cerebras": {
       const { createCerebras } = await import("@ai-sdk/cerebras");
-      built = createCerebras({ apiKey: key, fetch: localProxyFetch })(resolvedModelId);
+      built = createCerebras({ apiKey: key, fetch: cloudFetch })(resolvedModelId);
       break;
     }
     case "deepseek": {
@@ -117,7 +136,7 @@ export async function buildLanguageModel(
         name: "deepseek",
         baseURL: "https://api.deepseek.com",
         apiKey: key,
-        fetch: localProxyFetch,
+        fetch: cloudFetch,
       })(resolvedModelId);
       break;
     }
@@ -128,13 +147,13 @@ export async function buildLanguageModel(
         name: "mistral",
         baseURL: "https://api.mistral.ai/v1",
         apiKey: key,
-        fetch: localProxyFetch,
+        fetch: cloudFetch,
       })(resolvedModelId);
       break;
     }
     case "groq": {
       const { createGroq } = await import("@ai-sdk/groq");
-      built = createGroq({ apiKey: key, fetch: localProxyFetch })(resolvedModelId);
+      built = createGroq({ apiKey: key, fetch: cloudFetch })(resolvedModelId);
       break;
     }
     case "openrouter": {
@@ -148,7 +167,7 @@ export async function buildLanguageModel(
           "HTTP-Referer": "https://Kai.ai",
           "X-Title": "Kai",
         },
-        fetch: localProxyFetch,
+        fetch: cloudFetch,
       })(resolvedModelId);
       break;
     }
