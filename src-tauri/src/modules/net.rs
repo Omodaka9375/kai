@@ -204,7 +204,9 @@ pub async fn lm_ping(base_url: String) -> Result<u16, String> {
 
     let mut builder = reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
-        .redirect(reqwest::redirect::Policy::none());
+        .redirect(reqwest::redirect::Policy::none())
+        // Accept self-signed certs for local model servers (DGX, lab machines).
+        .danger_accept_invalid_certs(true);
     let addrs: Vec<SocketAddr> = safe_ips.iter().map(|ip| SocketAddr::new(*ip, 0)).collect();
     builder = builder.resolve_to_addrs(&host, &addrs);
     let client = builder.build().map_err(|e| e.to_string())?;
@@ -247,7 +249,16 @@ fn build_safe_client(
     pinned: &[(String, Vec<IpAddr>)],
 ) -> Result<reqwest::Client, String> {
     let mut builder = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(10));
+        .connect_timeout(Duration::from_secs(10))
+        // Disable automatic decompression — gzip-encoded SSE streams from
+        // local model servers (vLLM, Ollama) break incremental chunk parsing.
+        .no_gzip()
+        .no_deflate();
+    // Accept self-signed TLS certs for private-network servers (DGX, lab
+    // machines). Public endpoints always require valid certs.
+    if allow_private {
+        builder = builder.danger_accept_invalid_certs(true);
+    }
     // Pin reqwest's resolver to the IPs we just classified. Without this,
     // reqwest's own DNS lookup could return a different (private/metadata) IP
     // for the same hostname between classify and connect — classic DNS
