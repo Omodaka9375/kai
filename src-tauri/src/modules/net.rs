@@ -145,16 +145,12 @@ async fn classify_and_collect_safe_ips(
     host: &str,
     allow_private: bool,
 ) -> Result<Vec<IpAddr>, String> {
-    let (worst, ips) = resolve_and_classify(host).await?;
-    match worst {
-        IpKind::BlockedMetadata => return Err(format!("host not allowed: {host}")),
-        IpKind::Loopback | IpKind::Private if !allow_private => {
-            return Err(format!(
-                "host {host} resolves to a private/loopback address; this endpoint requires explicit opt-in",
-            ));
-        }
-        _ => {}
-    }
+    let (_worst, ips) = resolve_and_classify(host).await?;
+    // Filter IPs individually rather than rejecting on "worst" classification.
+    // A .local hostname commonly resolves to both a usable private IPv4 AND
+    // an IPv6 link-local (fe80::) address. The old logic treated the link-local
+    // as BlockedMetadata and rejected the entire host — even though the IPv4
+    // was perfectly fine with allow_private=true.
     let safe: Vec<IpAddr> = ips
         .into_iter()
         .filter(|ip| match ip_kind(*ip) {
@@ -164,7 +160,12 @@ async fn classify_and_collect_safe_ips(
         })
         .collect();
     if safe.is_empty() {
-        return Err(format!("host {host}: no safe IPs"));
+        if !allow_private {
+            return Err(format!(
+                "host {host} resolves to a private/loopback address; this endpoint requires explicit opt-in",
+            ));
+        }
+        return Err(format!("host {host}: no reachable IPs"));
     }
     Ok(safe)
 }
@@ -249,11 +250,7 @@ fn build_safe_client(
     pinned: &[(String, Vec<IpAddr>)],
 ) -> Result<reqwest::Client, String> {
     let mut builder = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(10))
-        // Disable automatic decompression — gzip-encoded SSE streams from
-        // local model servers (vLLM, Ollama) break incremental chunk parsing.
-        .no_gzip()
-        .no_deflate();
+        .connect_timeout(Duration::from_secs(10));
     // Accept self-signed TLS certs for private-network servers (DGX, lab
     // machines). Public endpoints always require valid certs.
     if allow_private {
