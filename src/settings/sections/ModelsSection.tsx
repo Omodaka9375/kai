@@ -250,18 +250,25 @@ function ModelIdWithFetch({
   const [models, setModels] = useState<string[]>([]);
   const [fetching, setFetching] = useState(false);
   const [open, setOpen] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   const fetchModels = async () => {
     if (!baseUrl.trim()) return;
     setFetching(true);
+    setFetchError(null);
     try {
       const list = await invoke<string[]>("lm_list_models", {
         baseUrl: baseUrl.trim(),
       });
       setModels(list);
-      if (list.length > 0) setOpen(true);
-    } catch {
+      if (list.length > 0) {
+        setOpen(true);
+      } else {
+        setFetchError("Server returned no models.");
+      }
+    } catch (e) {
       setModels([]);
+      setFetchError(String(e));
     }
     setFetching(false);
   };
@@ -317,6 +324,11 @@ function ModelIdWithFetch({
           )}
         </DropdownMenuContent>
       </DropdownMenu>
+      {fetchError && (
+        <p className="mt-1 text-[10.5px] text-red-500 dark:text-red-400">
+          {fetchError}
+        </p>
+      )}
     </div>
   );
 }
