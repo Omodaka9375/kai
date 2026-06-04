@@ -218,6 +218,44 @@ pub async fn lm_ping(base_url: String) -> Result<u16, String> {
         .map(|r| r.status().as_u16())
         .map_err(|e| e.to_string())
 }
+/// Fetch available model IDs from an OpenAI-compatible `/v1/models` endpoint.
+#[tauri::command]
+pub async fn lm_list_models(base_url: String) -> Result<Vec<String>, String> {
+    let trimmed = base_url.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return Err("empty base url".into());
+    }
+    let probe = format!("{trimmed}/models");
+    let parsed = validate_url(&probe, true)?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "missing host".to_string())?
+        .to_string();
+    let safe_ips = classify_and_collect_safe_ips(&host, true).await?;
+
+    let mut builder = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none())
+        .danger_accept_invalid_certs(true);
+    let addrs: Vec<SocketAddr> = safe_ips.iter().map(|ip| SocketAddr::new(*ip, 0)).collect();
+    builder = builder.resolve_to_addrs(&host, &addrs);
+    let client = builder.build().map_err(|e| e.to_string())?;
+    let resp = client.get(parsed).send().await.map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("server returned {}", resp.status()));
+    }
+    let body: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    let models = body["data"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| m["id"].as_str().map(|s| s.to_string()))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    Ok(models)
+}
+
 // AI HTTP proxy — bypasses webview CORS / Mixed-Content / PNA so local-network
 // model servers (LM Studio, Ollama, vLLM) work in the production bundle.
 

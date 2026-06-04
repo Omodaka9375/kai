@@ -233,6 +233,94 @@ function DefaultModelBlock({
   );
 }
 
+/** Model ID input with a "Fetch" button that queries /v1/models. */
+function ModelIdWithFetch({
+  value,
+  onChange,
+  onBlur,
+  baseUrl,
+  placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onBlur: (v: string) => void;
+  baseUrl: string;
+  placeholder: string;
+}) {
+  const [models, setModels] = useState<string[]>([]);
+  const [fetching, setFetching] = useState(false);
+  const [open, setOpen] = useState(false);
+
+  const fetchModels = async () => {
+    if (!baseUrl.trim()) return;
+    setFetching(true);
+    try {
+      const list = await invoke<string[]>("lm_list_models", {
+        baseUrl: baseUrl.trim(),
+      });
+      setModels(list);
+      if (list.length > 0) setOpen(true);
+    } catch {
+      setModels([]);
+    }
+    setFetching(false);
+  };
+
+  return (
+    <div className="flex flex-1 gap-1.5">
+      <DropdownMenu open={open} onOpenChange={setOpen}>
+        <div className="flex flex-1 gap-1.5">
+          <Input
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onBlur={() => onBlur(value.trim())}
+            placeholder={placeholder}
+            spellCheck={false}
+            className="h-8 flex-1 font-mono text-[11.5px]"
+          />
+          <DropdownMenuTrigger asChild>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void fetchModels()}
+              disabled={!baseUrl.trim() || fetching}
+              className="h-8 px-2.5 text-[11px]"
+            >
+              {fetching ? "…" : "Fetch"}
+            </Button>
+          </DropdownMenuTrigger>
+        </div>
+        <DropdownMenuContent
+          align="end"
+          side="bottom"
+          sideOffset={4}
+          className="max-h-[200px] min-w-[240px] overflow-y-auto p-1"
+        >
+          {models.length === 0 ? (
+            <div className="px-2 py-1.5 text-[11px] text-muted-foreground">
+              No models found
+            </div>
+          ) : (
+            models.map((m) => (
+              <DropdownMenuItem
+                key={m}
+                onClick={() => {
+                  onChange(m);
+                  onBlur(m);
+                  setOpen(false);
+                }}
+                className="font-mono text-[11px]"
+              >
+                {m}
+              </DropdownMenuItem>
+            ))
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}
+
 function LocalModelsBlock() {
   const baseURL = usePreferencesStore((s) => s.lmstudioBaseURL);
   const modelId = usePreferencesStore((s) => s.lmstudioModelId);
@@ -312,16 +400,12 @@ function LocalModelsBlock() {
         </FieldRow>
 
         <FieldRow label="Model ID">
-          <Input
+          <ModelIdWithFetch
             value={modelDraft}
-            onChange={(e) => setModelDraft(e.target.value)}
-            onBlur={() => {
-              const v = modelDraft.trim();
-              if (v !== modelId) void setLmstudioModelId(v);
-            }}
+            onChange={setModelDraft}
+            onBlur={(v) => { if (v !== modelId) void setLmstudioModelId(v); }}
+            baseUrl={urlDraft}
             placeholder="qwen2.5-coder-7b-instruct"
-            spellCheck={false}
-            className="h-8 font-mono text-[11.5px]"
           />
         </FieldRow>
 
@@ -439,16 +523,12 @@ function OpenAICompatibleBlock({
         </FieldRow>
 
         <FieldRow label="Model ID">
-          <Input
+          <ModelIdWithFetch
             value={modelDraft}
-            onChange={(e) => setModelDraft(e.target.value)}
-            onBlur={() => {
-              const v = modelDraft.trim();
-              if (v !== modelId) void setOpenaiCompatibleModelId(v);
-            }}
+            onChange={setModelDraft}
+            onBlur={(v) => { if (v !== modelId) void setOpenaiCompatibleModelId(v); }}
+            baseUrl={urlDraft}
             placeholder="gpt-4o, qwen3-max, glm-4.6, …"
-            spellCheck={false}
-            className="h-8 font-mono text-[11.5px]"
           />
         </FieldRow>
 
