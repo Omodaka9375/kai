@@ -6,6 +6,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { native } from "@/modules/ai/lib/native";
 import {
   ArrowReloadHorizontalIcon,
   Globe02Icon,
@@ -15,6 +16,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   forwardRef,
+  useCallback,
   useEffect,
   useImperativeHandle,
   useRef,
@@ -83,6 +85,40 @@ export const PreviewAddressBar = forwardRef<PreviewAddressBarHandle, Props>(
 
     const [notice, setNotice] = useState<string | null>(null);
     const [checkingPort, setCheckingPort] = useState<number | null>(null);
+
+    // ── Stop server button ──
+    // Finds and kills any bash_background process whose command matches
+    // the current preview URL's port.
+    const [serverHandle, setServerHandle] = useState<number | null>(null);
+
+    // Check for a running background process on the same port.
+    useEffect(() => {
+      if (!url) { setServerHandle(null); return; }
+      let port: string | null = null;
+      try { port = new URL(url).port || null; } catch { /* */ }
+      if (!port) { setServerHandle(null); return; }
+
+      let cancelled = false;
+      void native.shellBgList().then((list) => {
+        if (cancelled) return;
+        const match = list.find(
+          (p) => !p.exited && p.command.includes(`:${port}`) || p.command.includes(`--port ${port}`) || p.command.includes(`--port=${port}`),
+        );
+        setServerHandle(match?.handle ?? null);
+      });
+      return () => { cancelled = true; };
+    }, [url]);
+
+    const killServer = useCallback(async () => {
+      if (serverHandle === null) return;
+      try {
+        await native.shellBgKill(serverHandle);
+        setServerHandle(null);
+        setNotice("Server stopped.");
+      } catch (e) {
+        setNotice(`Failed to stop: ${e}`);
+      }
+    }, [serverHandle]);
 
     const submit = () => {
       const next = normalizeUrl(draft);
@@ -184,6 +220,20 @@ export const PreviewAddressBar = forwardRef<PreviewAddressBarHandle, Props>(
             }}
           />
         </div>
+        {serverHandle !== null && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={() => void killServer()}
+            title="Stop server"
+            className="size-7 shrink-0 rounded-md text-red-500 hover:bg-red-500/10 hover:text-red-600"
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
+              <rect x="2" y="2" width="10" height="10" rx="1.5" />
+            </svg>
+          </Button>
+        )}
         <Button
           type="button"
           variant="ghost"
