@@ -26,25 +26,37 @@ function headerInitToRecord(
   return out;
 }
 
-async function bodyToBytes(
+/**
+ * Convert a BodyInit to a base64 string for efficient IPC transfer.
+ * Base64 is ~1.33x the original size vs ~4-5x for a JSON number array,
+ * which makes image uploads (multi-MB base64 payloads) feasible.
+ */
+async function bodyToBase64(
   body: BodyInit | null | undefined,
-): Promise<number[] | undefined> {
+): Promise<string | undefined> {
   if (body == null) return undefined;
+  let bytes: Uint8Array;
   if (typeof body === "string") {
-    return Array.from(new TextEncoder().encode(body));
-  }
-  if (body instanceof ArrayBuffer) return Array.from(new Uint8Array(body));
-  if (ArrayBuffer.isView(body)) {
+    bytes = new TextEncoder().encode(body);
+  } else if (body instanceof ArrayBuffer) {
+    bytes = new Uint8Array(body);
+  } else if (ArrayBuffer.isView(body)) {
     const view = body as ArrayBufferView;
-    return Array.from(
-      new Uint8Array(view.buffer, view.byteOffset, view.byteLength),
-    );
+    bytes = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+  } else if (body instanceof Blob) {
+    bytes = new Uint8Array(await body.arrayBuffer());
+  } else {
+    // FormData / URLSearchParams / ReadableStream — uncommon for AI SDK calls.
+    const text = await new Response(body as BodyInit).text();
+    bytes = new TextEncoder().encode(text);
   }
-  if (body instanceof Blob)
-    return Array.from(new Uint8Array(await body.arrayBuffer()));
-  // FormData / URLSearchParams / ReadableStream — uncommon for AI SDK calls.
-  const text = await new Response(body as BodyInit).text();
-  return Array.from(new TextEncoder().encode(text));
+  // Use chunked btoa to avoid call-stack limits on large payloads.
+  let binary = "";
+  const CHUNK = 8192;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
 }
 
 export function createProxyFetch(
@@ -67,7 +79,7 @@ async function proxyFetchImpl(
   const url = input instanceof URL ? input.toString() : String(input);
   const method = (init?.method ?? "GET").toUpperCase();
   const headers = headerInitToRecord(init?.headers);
-  const body = await bodyToBytes(init?.body);
+  const bodyBase64 = await bodyToBase64(init?.body);
 
   const signal = init?.signal;
   if (signal?.aborted) {
@@ -139,7 +151,7 @@ async function proxyFetchImpl(
       url,
       method,
       headers,
-      body,
+      bodyBase64: bodyBase64 ?? null,
       allowPrivateNetwork,
       onEvent: channel,
     }).catch((e) => {

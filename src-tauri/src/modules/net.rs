@@ -361,6 +361,7 @@ pub async fn ai_http_request(
     method: String,
     headers: Option<HashMap<String, String>>,
     body: Option<Vec<u8>>,
+    body_base64: Option<String>,
     allow_private_network: Option<bool>,
 ) -> Result<HttpResponse, String> {
     let allow_private = allow_private_network.unwrap_or(false);
@@ -373,7 +374,13 @@ pub async fn ai_http_request(
 
     let client = build_safe_client(allow_private, &[(host, safe_ips)])?;
 
-    let req = build_request(&client, &method, parsed, headers, body)?;
+    // Accept body as either raw bytes or base64-encoded string.
+    let effective_body = if body.is_some() {
+        body
+    } else {
+        decode_body_base64(body_base64)?
+    };
+    let req = build_request(&client, &method, parsed, headers, effective_body)?;
     let resp = req.send().await.map_err(|e| e.to_string())?;
 
     let status = resp.status().as_u16();
@@ -402,16 +409,34 @@ pub enum AiStreamEvent {
     },
 }
 
+/// Decode a base64-encoded body from the frontend. Using base64 instead of
+/// a JSON number array (`Vec<u8>`) cuts IPC payload size by ~3-4x, making
+/// multi-MB image uploads feasible.
+fn decode_body_base64(b64: Option<String>) -> Result<Option<Vec<u8>>, String> {
+    match b64 {
+        None => Ok(None),
+        Some(s) if s.is_empty() => Ok(None),
+        Some(s) => {
+            use base64::Engine;
+            base64::engine::general_purpose::STANDARD
+                .decode(&s)
+                .map(Some)
+                .map_err(|e| format!("body base64 decode: {e}"))
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn ai_http_stream(
     url: String,
     method: String,
     headers: Option<HashMap<String, String>>,
-    body: Option<Vec<u8>>,
+    body_base64: Option<String>,
     allow_private_network: Option<bool>,
     on_event: Channel<AiStreamEvent>,
 ) -> Result<(), String> {
     let allow_private = allow_private_network.unwrap_or(false);
+    let body = decode_body_base64(body_base64)?;
     let parsed = match validate_url(&url, allow_private) {
         Ok(p) => p,
         Err(e) => {
