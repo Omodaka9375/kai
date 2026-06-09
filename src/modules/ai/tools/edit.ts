@@ -285,7 +285,7 @@ export function buildEditTools(ctx: ToolContext) {
       description:
         "Replace an exact string in a file. Requires read_file on this path first in the current session — this prevents blind edits. `old_string` must be unique in the file unless `replace_all: true`. Asks for user approval before writing.",
       inputSchema: z.object({
-        path: z.string(),
+        path: z.string().optional(),
         old_string: z
           .string()
           .describe("Exact substring to replace. Must be unique unless replace_all."),
@@ -293,7 +293,9 @@ export function buildEditTools(ctx: ToolContext) {
         replace_all: z.boolean().optional(),
       }),
       needsApproval: true,
-      execute: async ({ path, old_string, new_string, replace_all }) => {
+      execute: async ({ path: pathArg, old_string, new_string, replace_all }) => {
+        const path = pathArg ?? "";
+        if (!path) return { error: "path is required" };
         const reqPath = resolvePath(path, ctx.getCwd());
         const safety = await checkWritableCanonical(reqPath, native.canonicalize);
         if (!safety.ok) return { error: safety.reason, path: reqPath };
@@ -332,19 +334,23 @@ export function buildEditTools(ctx: ToolContext) {
       description:
         "Apply several exact-string replacements to a single file atomically. Each edit is applied in order to the running buffer; if any edit's old_string is missing or non-unique, the whole batch aborts before writing. Requires prior read_file on the path. Asks for user approval before writing.",
       inputSchema: z.object({
-        path: z.string(),
+        path: z.string().optional(),
         edits: z
           .array(
             z.object({
               old_string: z.string(),
               new_string: z.string(),
               replace_all: z.boolean().optional(),
+              path: z.string().optional(),
             }),
           )
           .min(1),
       }),
       needsApproval: true,
-      execute: async ({ path, edits }) => {
+      execute: async ({ path: pathArg, edits }) => {
+        // Some models put `path` inside each edit instead of at the top level.
+        const path = pathArg ?? edits[0]?.path ?? "";
+        if (!path) return { error: "path is required" };
         const reqPath = resolvePath(path, ctx.getCwd());
         const safety = await checkWritableCanonical(reqPath, native.canonicalize);
         if (!safety.ok) return { error: safety.reason, path: reqPath };
