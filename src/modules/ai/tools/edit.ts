@@ -69,6 +69,38 @@ function normEol(s: string): string {
 }
 
 /**
+ * Generate a "did you mean?" hint by scanning the file for lines that
+ * share similar content or keywords.
+ */
+function getDidYouMeanHint(haystack: string, needle: string): string {
+  const hLines = normEol(haystack).split("\n");
+  const nLines = needle.split("\n").map((l) => l.trim()).filter(Boolean);
+  if (nLines.length === 0) return "";
+
+  // Strategy 1: Find lines with similar content (Levenshtein/substring matching)
+  const matches: { lineNum: number; content: string; score: number }[] = [];
+  for (let i = 0; i < hLines.length; i++) {
+    const hl = hLines[i].trim();
+    if (!hl) continue;
+    
+    // Check if any line in the needle is a substring of this line, or vice versa
+    for (const nl of nLines) {
+      if (hl.includes(nl) || nl.includes(hl)) {
+        matches.push({ lineNum: i + 1, content: hLines[i], score: Math.min(hl.length, nl.length) });
+        break;
+      }
+    }
+  }
+
+  if (matches.length === 0) return " Read the file again to make sure you have the exact string and indentation.";
+
+  // Sort by match quality (longer matching substrings are better)
+  matches.sort((a, b) => b.score - a.score);
+  const best = matches.slice(0, 3);
+  return ` Did you mean one of these lines in the file?\n${best.map((m) => `Line ${m.lineNum}: "${m.content.trim()}"`).join("\n")}`;
+}
+
+/**
  * Strict eol-normalized find (no fuzzy whitespace). Used for uniqueness
  * checks so indentation variants aren't falsely flagged as duplicates.
  */
@@ -211,7 +243,7 @@ async function applyEdits(
       }
       if (n === 0) {
         return {
-          error: `old_string not found: ${JSON.stringify(oldNorm.slice(0, 80))}`,
+          error: `old_string not found: ${JSON.stringify(oldNorm.slice(0, 80))}.${getDidYouMeanHint(content, oldNorm)}`,
           path: abs,
         };
       }
@@ -220,7 +252,7 @@ async function applyEdits(
       const match = eolAwareFind(content, oldNorm);
       if (!match) {
         return {
-          error: `old_string not found: ${JSON.stringify(oldNorm.slice(0, 80))}`,
+          error: `old_string not found: ${JSON.stringify(oldNorm.slice(0, 80))}.${getDidYouMeanHint(content, oldNorm)}`,
           path: abs,
         };
       }
