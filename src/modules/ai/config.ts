@@ -171,15 +171,6 @@ export const MODELS = [
     capabilities: { intelligence: 4, speed: 4, cost: 3 },
     tags: ["tools", "coding"],
   },
-  {
-    id: "gpt-4.1-mini",
-    provider: "openai",
-    label: "GPT-4.1 mini",
-    hint: "Cheap",
-    description: "Ultra-cheap workhorse for bulk tasks.",
-    capabilities: { intelligence: 3, speed: 4, cost: 5 },
-    tags: ["vision", "tools"],
-  },
 
   // ── Anthropic ─────────────────────────────────────────────────────────────
   {
@@ -192,12 +183,21 @@ export const MODELS = [
     tags: ["vision", "reasoning", "tools", "coding"],
   },
   {
+    id: "claude-opus-4-8",
+    provider: "anthropic",
+    label: "Claude Opus 4.8",
+    hint: "Best",
+    description: "Anthropic's flagship for long reasoning.",
+    capabilities: { intelligence: 6, speed: 2, cost: 2 },
+    tags: ["vision", "reasoning", "tools", "coding"],
+  },
+  {
     id: "claude-sonnet-4-6",
     provider: "anthropic",
     label: "Claude Sonnet 4.6",
     hint: "Balanced",
     description: "Sweet spot of quality and speed.",
-    capabilities: { intelligence: 4, speed: 4, cost: 3 },
+    capabilities: { intelligence: 4, speed: 4, cost: 1 },
     tags: ["vision", "tools", "coding"],
   },
   {
