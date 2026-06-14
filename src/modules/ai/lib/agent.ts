@@ -323,6 +323,36 @@ export type RunAgentOptions = {
   mcpSummary?: { name: string; tools: string[]; instructions: string | null }[];
 };
 
+/**
+ * Strip `data:<mediaType>;base64,` prefixes from file parts in model messages.
+ *
+ * `convertToModelMessages` copies `FileUIPart.url` (a data-URL) into
+ * `FilePart.data` verbatim, but provider SDKs expect raw base64 or a URL
+ * object — not a data-URL string. Without this fixup, Anthropic receives
+ * invalid base64 and OpenAI double-wraps the prefix.
+ */
+function stripDataUrlPrefixes(messages: ModelMessage[]): ModelMessage[] {
+  const DATA_URL_RE = /^data:[^;]+;base64,/;
+  return messages.map((m) => {
+    if (!Array.isArray(m.content)) return m;
+    let touched = false;
+    const content = (
+      m.content as { type: string; data?: unknown; [k: string]: unknown }[]
+    ).map((part) => {
+      if (
+        part.type === "file" &&
+        typeof part.data === "string" &&
+        DATA_URL_RE.test(part.data)
+      ) {
+        touched = true;
+        return { ...part, data: part.data.replace(DATA_URL_RE, "") };
+      }
+      return part;
+    });
+    return touched ? ({ ...m, content } as ModelMessage) : m;
+  });
+}
+
 export async function runAgentStream(opts: RunAgentOptions) {
   const modelId = opts.modelId ?? DEFAULT_MODEL_ID;
   const model = await buildConfiguredLanguageModel(
@@ -352,7 +382,9 @@ export async function runAgentStream(opts: RunAgentOptions) {
     opts.projectMemory ?? null,
   ) + mcpBlock;
 
-  const history = await convertToModelMessages(opts.uiMessages);
+  const history = stripDataUrlPrefixes(
+    await convertToModelMessages(opts.uiMessages),
+  );
   const compact = compactModelMessagesDetailed(
     history,
     getModelContextLimit(getModel(modelId).id),
