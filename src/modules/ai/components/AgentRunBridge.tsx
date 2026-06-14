@@ -60,6 +60,10 @@ function Bridge({
   openAiDiffTab,
   closeAiDiffTab,
 }: BridgeProps) {
+  // getOrCreateChat returns a cached Chat instance per session id. On fast
+  // session switches the useMemo swaps the reference, but since Chat instances
+  // are long-lived and keyed by id, useChat simply reconnects to the existing
+  // subscription — no state is lost.
   const chat = useMemo(() => getOrCreateChat(sessionId), [sessionId]);
   const { status, messages, addToolApprovalResponse } = useChat<UIMessage>({
     chat,
@@ -106,7 +110,19 @@ function Bridge({
 
   const prevStatusRef = useRef(status);
   const nudgeCountRef = useRef(0);
+  const prevMessageCountRef = useRef(messages.length);
   const focusInput = useChatStore((s) => s.focusInput);
+
+  // Reset nudge counter when the user sends a new message (message count
+  // increases with a user-role message), not on every idle transition.
+  useEffect(() => {
+    if (messages.length > prevMessageCountRef.current) {
+      const newest = messages[messages.length - 1];
+      if (newest?.role === "user") nudgeCountRef.current = 0;
+    }
+    prevMessageCountRef.current = messages.length;
+  }, [messages.length, messages]);
+
   useEffect(() => {
     let runStatus: AgentRunStatus;
     if (approvalsPending > 0) runStatus = "awaiting-approval";
@@ -139,7 +155,6 @@ function Bridge({
           });
         }, 300);
       } else {
-        nudgeCountRef.current = 0;
         focusInput(null);
       }
     }

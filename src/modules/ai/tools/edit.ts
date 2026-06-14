@@ -307,9 +307,14 @@ async function applyEdits(
   }
 }
 
-/** Per-path edit failure counter. Resets on success. */
+/** Per-path edit failure counter. Resets on success or session switch. */
 const editFailures = new Map<string, number>();
 const MAX_EDIT_RETRIES = 3;
+
+/** Clear the edit failure counter — call on session switch/delete. */
+export function resetEditFailures(): void {
+  editFailures.clear();
+}
 
 export function buildEditTools(ctx: ToolContext) {
   return {

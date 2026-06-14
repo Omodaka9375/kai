@@ -32,6 +32,8 @@ import {
 import { pushRecentModel } from "../lib/modelPrefs";
 import { createContextAwareTransport } from "../lib/transport";
 import type { ToolContext } from "../tools/tools";
+import { closeShellSession } from "../tools/shell";
+import { resetEditFailures } from "../tools/edit";
 
 type Live = {
   getCwd: () => string | null;
@@ -471,6 +473,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
   switchSession: (id) => {
     if (get().activeSessionId === id) return;
     if (!get().sessions.some((s) => s.id === id)) return;
+    resetEditFailures();
 
     // Lazily seed the chat with persisted messages the first time we open
     // this session. Subsequent switches reuse the cached Chat instance.
@@ -493,6 +496,8 @@ export const useChatStore = create<StoreState>((set, get) => ({
     chats.get(id)?.stop();
     chats.delete(id);
     seedMessages.delete(id);
+    closeShellSession(id);
+    resetEditFailures();
     const pend = pendingPersist.get(id);
     if (pend) {
       clearTimeout(pend.timer);

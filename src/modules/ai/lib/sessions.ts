@@ -46,11 +46,43 @@ export async function saveActiveId(id: string | null): Promise<void> {
   await store.set(KEY_ACTIVE, id);
 }
 
+/**
+ * Strip large inline data (image data-URLs) from file parts before persisting.
+ * Replaces the data URL with a placeholder so the store file stays small.
+ */
+function stripInlineImages(messages: UIMessage[]): UIMessage[] {
+  const DATA_URL_RE = /^data:[^;]+;base64,/;
+  return messages.map((m) => {
+    if (m.role !== "user") return m;
+    const hasFile = m.parts.some(
+      (p) =>
+        (p as { type: string }).type === "file" &&
+        typeof (p as { url?: string }).url === "string" &&
+        DATA_URL_RE.test((p as { url: string }).url),
+    );
+    if (!hasFile) return m;
+    return {
+      ...m,
+      parts: m.parts.map((p) => {
+        const fp = p as { type: string; url?: string; mediaType?: string };
+        if (
+          fp.type === "file" &&
+          typeof fp.url === "string" &&
+          DATA_URL_RE.test(fp.url)
+        ) {
+          return { ...fp, url: `data:${fp.mediaType ?? "image/png"};base64,` };
+        }
+        return p;
+      }),
+    } as UIMessage;
+  });
+}
+
 export async function saveMessages(
   id: string,
   messages: UIMessage[],
 ): Promise<void> {
-  await store.set(messagesKey(id), messages);
+  await store.set(messagesKey(id), stripInlineImages(messages));
 }
 
 export async function deleteSessionData(id: string): Promise<void> {

@@ -157,14 +157,18 @@ pub fn fs_read_file_bytes(
 pub fn fs_stat(path: String, workspace: Option<WorkspaceEnv>) -> Result<FileStat, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     let p = resolve_path(&path, &workspace);
-    let meta = std::fs::metadata(&p).map_err(|e| e.to_string())?;
-    let kind = if meta.is_dir() {
-        StatKind::Dir
-    } else if meta.file_type().is_symlink() {
+    // Use symlink_metadata so we can detect symlinks. std::fs::metadata
+    // follows symlinks, making is_symlink() always return false.
+    let sym_meta = std::fs::symlink_metadata(&p).map_err(|e| e.to_string())?;
+    let kind = if sym_meta.is_symlink() {
         StatKind::Symlink
+    } else if sym_meta.is_dir() {
+        StatKind::Dir
     } else {
         StatKind::File
     };
+    // For size/mtime, follow the symlink to get the target's metadata.
+    let meta = std::fs::metadata(&p).unwrap_or(sym_meta);
     let mtime = meta
         .modified()
         .ok()

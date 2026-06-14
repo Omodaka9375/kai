@@ -1,15 +1,22 @@
 //! Secret storage with platform-appropriate backends.
 //!
-//! - macOS: macOS Keychain (via `keyring` crate)
-//! - Windows: Credential Manager (via `keyring` crate)
-//! - Linux: a file in the app's local data dir, mode 0600. The default
-//!   `keyring` backend on Linux is the Secret Service over D-Bus, which
-//!   silently fails on systems without gnome-keyring/kwallet (and on the
-//!   "login" collection not being created). For an open-source desktop
-//!   app shipped via AppImage/deb/rpm, we cannot assume a keyring daemon
-//!   exists. The file backend is the same approach Brave/Chromium fall
-//!   back to in that scenario; user-only file permissions provide the
-//!   isolation the secret-service collection would have otherwise.
+//! - **macOS**: macOS Keychain (via `keyring` crate) — encrypted at rest.
+//! - **Windows**: Credential Manager (via `keyring` crate) — encrypted per-user.
+//! - **Linux**: a plaintext JSON file at `~/.local/share/app.interlooper.KAI/
+//!   secrets.json`, mode 0600 (owner-only read/write). The default `keyring`
+//!   backend on Linux is the Secret Service over D-Bus, which silently fails
+//!   on systems without gnome-keyring/kwallet (and on the "login" collection
+//!   not being created). For an open-source desktop app shipped via
+//!   AppImage/deb/rpm, we cannot assume a keyring daemon exists. The file
+//!   backend is the same approach Brave/Chromium fall back to in that scenario;
+//!   user-only file permissions provide the isolation the secret-service
+//!   collection would have otherwise.
+//!
+//!   **SECURITY NOTE (Linux)**: API keys are stored as plaintext JSON on disk.
+//!   Any process running as the same user can read them. This is acceptable for
+//!   single-user desktop machines but users on shared systems should be aware.
+//!   A future improvement could detect `gnome-keyring` / `kwallet` at runtime
+//!   and use the native Secret Service when available.
 //!
 //! The frontend talks to `secrets_get`, `secrets_set`, `secrets_delete`,
 //! and `secrets_get_all` — no platform branching in JS.

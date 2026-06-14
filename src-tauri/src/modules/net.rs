@@ -206,7 +206,13 @@ pub async fn lm_ping(base_url: String) -> Result<u16, String> {
     let mut builder = reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
         .redirect(reqwest::redirect::Policy::none())
-        // Accept self-signed certs for local model servers (DGX, lab machines).
+    // SECURITY: accepts self-signed / invalid TLS certs for local model
+        // servers (DGX, lab machines, Ollama behind nginx, etc.). This is a
+        // deliberate trade-off — without it, BYOK users behind self-signed
+        // reverse proxies on private networks cannot connect. The risk is
+        // that a MITM on the same private network (corporate LAN, shared
+        // WiFi) can intercept model traffic. A per-server "trust self-signed"
+        // toggle in Settings would be the ideal long-term fix.
         .danger_accept_invalid_certs(true);
     let addrs: Vec<SocketAddr> = safe_ips.iter().map(|ip| SocketAddr::new(*ip, 0)).collect();
     builder = builder.resolve_to_addrs(&host, &addrs);
@@ -289,8 +295,9 @@ fn build_safe_client(
 ) -> Result<reqwest::Client, String> {
     let mut builder = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(10));
-    // Accept self-signed TLS certs for private-network servers (DGX, lab
-    // machines). Public endpoints always require valid certs.
+    // SECURITY: accept self-signed TLS certs for private-network servers
+    // (DGX, lab machines, Ollama, vLLM). Public endpoints always require
+    // valid certs. See lm_ping comment for the trade-off rationale.
     if allow_private {
         builder = builder.danger_accept_invalid_certs(true);
     }

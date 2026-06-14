@@ -23,6 +23,8 @@ function approxBytes(messages: ModelMessage[]): number {
           n += JSON.stringify(part.output ?? "").length;
         else if (part.type === "tool-call")
           n += JSON.stringify(part.input ?? "").length;
+        else if (part.type === "file" && typeof part.data === "string")
+          n += (part.data as string).length;
         else n += 64;
       }
     }

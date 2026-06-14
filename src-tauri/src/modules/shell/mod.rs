@@ -181,6 +181,19 @@ impl Default for ShellState {
     }
 }
 
+impl Drop for ShellState {
+    fn drop(&mut self) {
+        // Kill all background processes on app exit to prevent orphans.
+        // Sessions are one-shot subshells that exit when their child finishes,
+        // but bg processes (dev servers, watchers) run indefinitely.
+        if let Ok(map) = self.bg.read() {
+            for proc in map.values() {
+                proc.kill();
+            }
+        }
+    }
+}
+
 #[tauri::command]
 pub fn shell_session_open(
     state: tauri::State<ShellState>,
@@ -205,7 +218,12 @@ pub fn shell_session_open(
         }
     };
     let session = Arc::new(ShellSession::new(initial, workspace));
-    let id = state.next_session_id.fetch_add(1, Ordering::Relaxed);
+    let id = loop {
+        let candidate = state.next_session_id.fetch_add(1, Ordering::Relaxed);
+        if candidate != 0 && !state.sessions.read().unwrap().contains_key(&candidate) {
+            break candidate;
+        }
+    };
     state.sessions.write().unwrap().insert(id, session);
     Ok(id)
 }
@@ -263,7 +281,12 @@ pub fn shell_bg_spawn(
     workspace: Option<WorkspaceEnv>,
 ) -> Result<u32, String> {
     let proc = background::spawn(command, cwd, WorkspaceEnv::from_option(workspace))?;
-    let id = state.next_bg_id.fetch_add(1, Ordering::Relaxed);
+    let id = loop {
+        let candidate = state.next_bg_id.fetch_add(1, Ordering::Relaxed);
+        if candidate != 0 && !state.bg.read().unwrap().contains_key(&candidate) {
+            break candidate;
+        }
+    };
     state.bg.write().unwrap().insert(id, proc);
     Ok(id)
 }

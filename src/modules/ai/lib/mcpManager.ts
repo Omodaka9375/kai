@@ -176,23 +176,40 @@ class McpClientManager {
       const toolCount = Object.keys(tools).length;
 
       // Try to fetch server-provided instructions/prompts.
+      // Defense: validate returned data shape and cap total length to prevent
+      // a malicious MCP server from injecting unbounded text into the system prompt.
+      const MAX_INSTRUCTIONS_LEN = 8_000;
+      const MAX_PROMPTS = 5;
       let instructions: string | null = null;
       try {
         const prompts = await (client as any).experimental_listPrompts?.();
         if (prompts && Array.isArray(prompts) && prompts.length > 0) {
-          // Fetch the first prompt's content as instructions.
-          for (const p of prompts) {
+          const safePrompts = prompts.slice(0, MAX_PROMPTS);
+          for (const p of safePrompts) {
+            if (!p || typeof p.name !== "string") continue;
             try {
               const detail = await (client as any).experimental_getPrompt?.({
                 name: p.name,
               });
-              if (detail?.messages?.length) {
-                const text = detail.messages
-                  .map((m: any) => m.content?.text ?? "")
-                  .filter(Boolean)
-                  .join("\n");
-                if (text.trim()) {
-                  instructions = (instructions ? instructions + "\n\n" : "") + text.trim();
+              if (!detail || !Array.isArray(detail.messages)) continue;
+              const text = detail.messages
+                .filter((m: unknown): m is { content: { text: string } } => {
+                  if (!m || typeof m !== "object") return false;
+                  const msg = m as Record<string, unknown>;
+                  return (
+                    msg.content != null &&
+                    typeof msg.content === "object" &&
+                    typeof (msg.content as Record<string, unknown>).text === "string"
+                  );
+                })
+                .map((m) => m.content.text)
+                .join("\n");
+              if (text.trim()) {
+                const chunk = text.trim();
+                instructions = (instructions ? instructions + "\n\n" : "") + chunk;
+                if (instructions.length >= MAX_INSTRUCTIONS_LEN) {
+                  instructions = instructions.slice(0, MAX_INSTRUCTIONS_LEN);
+                  break;
                 }
               }
             } catch { /* prompt fetch failed, skip */ }

@@ -18,6 +18,18 @@ export function cancelAllShellSessions(): void {
   }
 }
 
+/** Close and remove the shell session for a deleted chat session. */
+export function closeShellSession(sessionId: string): void {
+  // Session keys are workspace-scoped; scan for any key starting with the
+  // session id since we don't know the workspace scope at deletion time.
+  for (const [key, p] of sessionShells) {
+    if (key === sessionId || key.startsWith(`${sessionId}:`)) {
+      void p.then((id) => native.shellSessionClose(id)).catch(() => {});
+      sessionShells.delete(key);
+    }
+  }
+}
+
 async function getSessionShell(
   sessionId: string,
   cwd: string | null,

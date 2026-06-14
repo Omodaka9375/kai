@@ -50,7 +50,14 @@ pub fn pty_open(
             log::error!("pty_open failed: {e}");
             e
         })?;
-    let id = state.next_id.fetch_add(1, Ordering::Relaxed);
+    // Wrapping add — after 4 billion opens, wraps to 0. Skip 0 (frontend
+    // treats it as "unset") and any id that collides with a live session.
+    let id = loop {
+        let candidate = state.next_id.fetch_add(1, Ordering::Relaxed);
+        if candidate != 0 && !state.sessions.read().unwrap().contains_key(&candidate) {
+            break candidate;
+        }
+    };
     state.sessions.write().unwrap().insert(id, session);
     log::info!("pty opened id={id} cols={cols} rows={rows}");
     Ok(id)

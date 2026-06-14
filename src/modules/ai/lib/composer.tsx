@@ -106,8 +106,9 @@ export function AiComposerProvider({ children }: ProviderProps) {
     };
     window.addEventListener("Kai:ai-attach-file", onAttach);
     return () => window.removeEventListener("Kai:ai-attach-file", onAttach);
-    // attachFileByPath is stable for our purposes (closes over setFiles only)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // attachFileByPath closes over setFiles (useState setter — identity-stable)
+  // and currentWorkspaceEnv (module-level). Safe to omit from deps.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -185,7 +186,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
         console.warn("attachFileByPath: skipped non-text file", path, result);
         return;
       }
-      const name = path.split("/").pop() || path;
+      const name = path.split(/[\\/]/).pop() || path;
       const id = `path-${path}`;
       setFiles((prev) => {
         if (prev.some((f) => f.id === id)) return prev;

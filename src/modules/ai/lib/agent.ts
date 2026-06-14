@@ -82,7 +82,18 @@ export type BuildModelOptions = {
   openaiCompatibleBaseURL?: string;
 };
 
+const MODEL_CACHE_CAP = 8;
 const modelCache = new Map<string, LanguageModel>();
+
+function touchModelCache(key: string, model: LanguageModel): void {
+  if (modelCache.has(key)) modelCache.delete(key);
+  modelCache.set(key, model);
+  while (modelCache.size > MODEL_CACHE_CAP) {
+    const oldest = modelCache.keys().next().value;
+    if (!oldest || oldest === key) break;
+    modelCache.delete(oldest);
+  }
+}
 
 export async function buildLanguageModel(
   provider: ProviderId,
@@ -202,7 +213,7 @@ export async function buildLanguageModel(
       throw new Error(`Unsupported provider: ${_exhaustive as ProviderId}`);
     }
   }
-  modelCache.set(cacheKey, built);
+  touchModelCache(cacheKey, built);
   return built;
 }
 
