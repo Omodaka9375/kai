@@ -40,9 +40,32 @@ import type {
   UIMessage,
   UIMessagePart,
 } from "ai";
-import { memo, useCallback, useMemo } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 import { AiToolApproval } from "./AiToolApproval";
 import { MediaMessage, isMediaOutput } from "./MediaMessage";
+
+function ForkButton({ messageIndex }: { messageIndex: number }) {
+  const forkSession = useChatStore((s) => s.forkSession);
+  const [forking, setForking] = useState(false);
+  const onClick = () => {
+    if (forking) return;
+    setForking(true);
+    void forkSession(messageIndex).finally(() => setForking(false));
+  };
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={forking}
+      title="Fork conversation from here"
+      className="ml-1 rounded p-0.5 text-muted-foreground/0 transition-colors group-hover/msg:text-muted-foreground/60 hover:!text-foreground"
+    >
+      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+        <path d="M5 3v4a2 2 0 002 2h2m0 0V5m0 4l-2-2m2 2l2-2" />
+      </svg>
+    </button>
+  );
+}
 
 function CommandSnippet({ name }: { name: string }) {
   const meta = SLASH_COMMANDS[name];
@@ -254,13 +277,19 @@ export function AiChatView({
   return (
     <Conversation>
       <ConversationContent className="gap-5 p-3">
-        {messages.map((m) => (
-          <RenderedMessage
-            key={m.id}
-            message={m}
-            onApproval={onApproval}
-            streaming={m.id === streamingMessageId}
-          />
+        {messages.map((m, idx) => (
+          <div key={m.id} className="group/msg relative">
+            <RenderedMessage
+              message={m}
+              onApproval={onApproval}
+              streaming={m.id === streamingMessageId}
+            />
+            {!isBusy && m.role === "user" && idx > 0 && (
+              <div className="absolute -top-1 right-0">
+                <ForkButton messageIndex={idx} />
+              </div>
+            )}
+          </div>
         ))}
         {compactionNotice && compactionNotice.droppedCount >= 3 && (
           <CompactionNotice

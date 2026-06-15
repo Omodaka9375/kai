@@ -287,9 +287,9 @@ export function AiInputBar() {
                     c.submit();
                   }
                 }}
-                placeholder="Ask anything # for snippets, @ for files"
+                placeholder={c.isBusy ? "Redirect agent…" : "Ask anything # for snippets, @ for files"}
                 rows={1}
-                disabled={c.isBusy}
+                disabled={false}
                 className={cn(
                   "max-h-40 flex-1 resize-none overflow-y-auto bg-transparent text-[13px] leading-relaxed outline-none",
                   "placeholder:text-muted-foreground/60",

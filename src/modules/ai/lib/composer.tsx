@@ -208,7 +208,16 @@ export function AiComposerProvider({ children }: ProviderProps) {
   };
 
   const submit = () => {
-    if (isBusy) return;
+    // When the agent is busy, redirect the message as a steering signal
+    // instead of queuing a normal send (which would be rejected).
+    if (isBusy) {
+      const trimmed = value.trim();
+      if (trimmed) {
+        useChatStore.getState().setSteeringMessage(trimmed);
+        setValue("");
+      }
+      return;
+    }
     const trimmed = value.trim();
     if (
       !trimmed &&
@@ -315,11 +324,11 @@ export function AiComposerProvider({ children }: ProviderProps) {
   };
 
   const canSend =
-    !isBusy &&
-    (value.trim().length > 0 ||
-      files.length > 0 ||
-      pickedSnippets.length > 0 ||
-      pickedCommands.length > 0);
+    value.trim().length > 0 ||
+    (!isBusy &&
+      (files.length > 0 ||
+        pickedSnippets.length > 0 ||
+        pickedCommands.length > 0));
 
   const ctx: ComposerCtx = {
     textareaRef,
