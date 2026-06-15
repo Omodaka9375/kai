@@ -15,6 +15,13 @@ function djb2(s: string): number {
   return h >>> 0;
 }
 
+/** Strip trailing whitespace from each line, preserving line endings.
+ *  Exempt .md/.mdx where trailing spaces are meaningful (hard line breaks). */
+function stripTrailingWs(s: string, filePath: string): string {
+  if (/\.(md|mdx)$/i.test(filePath)) return s;
+  return s.replace(/[^\S\n\r]+$/gm, "");
+}
+
 /**
  * Fuzzy-find `needle` in `haystack` by progressively relaxing whitespace
  * matching. Returns the start index in the original haystack, or -1.
@@ -69,21 +76,19 @@ function normEol(s: string): string {
 }
 
 /**
- * Generate a "did you mean?" hint by scanning the file for lines that
- * share similar content or keywords.
+ * Generate an actionable hint when old_string fails to match.
+ * Shows the closest matching region with a character-level mismatch diagnostic.
  */
 function getDidYouMeanHint(haystack: string, needle: string): string {
   const hLines = normEol(haystack).split("\n");
   const nLines = needle.split("\n").map((l) => l.trim()).filter(Boolean);
   if (nLines.length === 0) return "";
 
-  // Strategy 1: Find lines with similar content (Levenshtein/substring matching)
-  const matches: { lineNum: number; content: string; score: number }[] = [];
+  // Score every file line against every needle line
+  const matches: { lineNum: number; content: string; score: number; mismatch?: string }[] = [];
   for (let i = 0; i < hLines.length; i++) {
     const hl = hLines[i].trim();
     if (!hl) continue;
-    
-    // Check if any line in the needle is a substring of this line, or vice versa
     for (const nl of nLines) {
       if (hl.includes(nl) || nl.includes(hl)) {
         matches.push({ lineNum: i + 1, content: hLines[i], score: Math.min(hl.length, nl.length) });
@@ -92,12 +97,35 @@ function getDidYouMeanHint(haystack: string, needle: string): string {
     }
   }
 
-  if (matches.length === 0) return " Read the file again to make sure you have the exact string and indentation.";
+  // Diagnose whitespace mismatches: compare first needle line against best candidate
+  let wsDiag = "";
+  const firstNeedle = needle.split("\n")[0] ?? "";
+  if (firstNeedle.length > 0) {
+    // Find best candidate line by non-whitespace content
+    const stripped = firstNeedle.trim();
+    for (let i = 0; i < hLines.length; i++) {
+      if (hLines[i].trim() === stripped) {
+        const fileLead = hLines[i].match(/^(\s*)/)?.[1] ?? "";
+        const needleLead = firstNeedle.match(/^(\s*)/)?.[1] ?? "";
+        if (fileLead !== needleLead) {
+          const fileDesc = fileLead.includes("\t")
+            ? `${fileLead.length} chars (tabs)` : `${fileLead.length} spaces`;
+          const needleDesc = needleLead.includes("\t")
+            ? `${needleLead.length} chars (tabs)` : `${needleLead.length} spaces`;
+          wsDiag = ` Whitespace mismatch on line ${i + 1}: file has ${fileDesc} indent but old_string has ${needleDesc}.`;
+        }
+        break;
+      }
+    }
+  }
 
-  // Sort by match quality (longer matching substrings are better)
+  if (matches.length === 0) {
+    return `${wsDiag} Read the file again to get the exact content and indentation.`;
+  }
+
   matches.sort((a, b) => b.score - a.score);
   const best = matches.slice(0, 3);
-  return ` Did you mean one of these lines in the file?\n${best.map((m) => `Line ${m.lineNum}: "${m.content.trim()}"`).join("\n")}`;
+  return `${wsDiag} Similar lines in file:\n${best.map((m) => `  L${m.lineNum}: ${JSON.stringify(m.content.trimEnd())}`).join("\n")}`;
 }
 
 /**
@@ -195,7 +223,7 @@ function eolAwareFind(
 
 async function applyEdits(
   abs: string,
-  edits: { old_string: string; new_string: string; replace_all?: boolean }[],
+  edits: { old_string: string; new_string: string; replace_all?: boolean; line_hint?: number }[],
   kind: "edit" | "multi_edit",
   readCache: Map<string, { size: number; hash: number }>,
 ): Promise<EditResult> {
@@ -206,6 +234,19 @@ async function applyEdits(
     return { error: `file too large (${r.size} bytes)`, path: abs };
 
   const original = r.content;
+
+  // Stale-write guard: reject if file changed since last read_file.
+  const cached = readCache.get(abs);
+  if (cached) {
+    const freshHash = djb2(original);
+    if (cached.hash !== freshHash || cached.size !== original.length) {
+      return {
+        error: "File has been modified since you last read it. Call read_file again before editing.",
+        path: abs,
+      };
+    }
+  }
+
   // Detect line-ending style so new_string insertions match the file.
   const useCrlf = original.includes("\r\n");
   let content = original;
@@ -215,7 +256,9 @@ async function applyEdits(
     // Normalize the model's strings to \n, then re-apply the file's
     // line-ending style to new_string so we don't introduce mixed endings.
     const oldNorm = normEol(rawEdit.old_string);
-    const newNorm = normEol(rawEdit.new_string);
+    // Strip trailing whitespace from new_string to prevent model-generated
+    // trailing spaces from dirtying the file.
+    const newNorm = stripTrailingWs(normEol(rawEdit.new_string), abs);
     const newForFile = useCrlf ? newNorm.replace(/\n/g, "\r\n") : newNorm;
 
     if (oldNorm === newNorm) {
@@ -260,17 +303,38 @@ async function applyEdits(
       // match. Use exact eol-normalized matching only (not fuzzy whitespace)
       // so indentation variants aren't falsely flagged as duplicates.
       const exactSecond = eolAwareExactFind(content, oldNorm, match.start + match.length);
-      if (exactSecond) {
+      if (exactSecond && !rawEdit.line_hint) {
         return {
           error:
-            "old_string is not unique. Provide more surrounding context, or set replace_all=true.",
+            "old_string is not unique. Provide more surrounding context, set replace_all=true, or provide line_hint to disambiguate.",
           path: abs,
         };
       }
+      // When line_hint is provided and there are multiple matches, pick
+      // the occurrence closest to the hinted line number.
+      let chosen = match;
+      if (exactSecond && rawEdit.line_hint) {
+        const candidates = [match, exactSecond];
+        // Collect remaining occurrences (cap at 50 to avoid runaway)
+        let more = exactSecond;
+        for (let i = 0; i < 50; i++) {
+          const next = eolAwareExactFind(content, oldNorm, more.start + more.length);
+          if (!next) break;
+          candidates.push(next);
+          more = next;
+        }
+        // Pick the candidate whose start line is closest to line_hint
+        chosen = candidates.reduce((best, c) => {
+          const cLine = content.slice(0, c.start).split("\n").length;
+          const bLine = content.slice(0, best.start).split("\n").length;
+          return Math.abs(cLine - rawEdit.line_hint!) < Math.abs(bLine - rawEdit.line_hint!)
+            ? c : best;
+        });
+      }
       content =
-        content.slice(0, match.start) +
+        content.slice(0, chosen.start) +
         newForFile +
-        content.slice(match.start + match.length);
+        content.slice(chosen.start + chosen.length);
       totalReplacements += 1;
     }
   }
@@ -320,18 +384,22 @@ export function buildEditTools(ctx: ToolContext) {
   return {
     edit: tool({
       description:
-        "Replace an exact string in a file with a new string. BOTH old_string AND new_string are required — old_string is the text to find, new_string is what replaces it. To insert text, set old_string to an adjacent line and new_string to that line plus your insertion. Requires read_file on this path first. Asks for user approval.",
+        "Replace an exact string in a file with a new string. BOTH old_string AND new_string are required — old_string is the text to find, new_string is what replaces it. To insert text, set old_string to an adjacent line and new_string to that line plus your insertion. Requires read_file on this path first. Asks for user approval. If old_string matches multiple locations, provide line_hint to disambiguate.",
       inputSchema: z.object({
         path: z.string().optional(),
         old_string: z
           .string()
-          .default("")
-          .describe("REQUIRED. Exact substring to find and replace. Must be unique unless replace_all."),
-        new_string: z.string().default("").describe("REQUIRED. The replacement text."),
+          .describe("The exact text to find and replace. Must match the file content exactly. Must be unique unless replace_all or line_hint."),
+        new_string: z.string().describe("The replacement text."),
         replace_all: z.boolean().optional(),
+        line_hint: z
+          .number()
+          .int()
+          .optional()
+          .describe("Approximate 1-based line number where the edit should apply. Used to disambiguate when old_string appears more than once."),
       }),
       needsApproval: true,
-      execute: async ({ path: pathArg, old_string, new_string, replace_all }) => {
+      execute: async ({ path: pathArg, old_string, new_string, replace_all, line_hint }) => {
         const path = pathArg ?? "";
         if (!path) return { error: "path is required" };
         const reqPath = resolvePath(path, ctx.getCwd());
@@ -355,7 +423,7 @@ export function buildEditTools(ctx: ToolContext) {
         }
         const result = await applyEdits(
           abs,
-          [{ old_string, new_string, replace_all }],
+          [{ old_string, new_string, replace_all, line_hint }],
           "edit",
           ctx.readCache,
         );
