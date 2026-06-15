@@ -343,24 +343,29 @@ export type RunAgentOptions = {
  */
 function stripIncompleteToolCalls(messages: UIMessage[]): UIMessage[] {
   if (messages.length === 0) return messages;
-  const last = messages[messages.length - 1];
-  if (last.role !== "assistant") return messages;
 
   const COMPLETE_STATES = new Set([
     "output-available",
     "output-error",
+    "approval-responded",
   ]);
-  const cleaned = last.parts.filter((p) => {
-    const type = (p as { type?: string }).type ?? "";
-    if (!type.startsWith("tool-") && type !== "dynamic-tool") return true;
-    const state = (p as { state?: string }).state;
-    return state != null && COMPLETE_STATES.has(state);
-  });
 
-  if (cleaned.length === last.parts.length) return messages;
-  const out = messages.slice();
-  out[out.length - 1] = { ...last, parts: cleaned } as UIMessage;
-  return out;
+  // Scan ALL assistant messages, not just the last — failed edit retries
+  // and dismissed approvals can leave orphaned tool calls anywhere.
+  let touched = false;
+  const out = messages.map((m) => {
+    if (m.role !== "assistant") return m;
+    const cleaned = m.parts.filter((p) => {
+      const type = (p as { type?: string }).type ?? "";
+      if (!type.startsWith("tool-") && type !== "dynamic-tool") return true;
+      const state = (p as { state?: string }).state;
+      return state != null && COMPLETE_STATES.has(state);
+    });
+    if (cleaned.length === m.parts.length) return m;
+    touched = true;
+    return { ...m, parts: cleaned } as UIMessage;
+  });
+  return touched ? out : messages;
 }
 
 /**
