@@ -188,7 +188,7 @@ export const MODELS = [
     label: "Claude Opus 4.8",
     hint: "Best",
     description: "Anthropic's flagship for long reasoning.",
-    capabilities: { intelligence: 6, speed: 2, cost: 2 },
+    capabilities: { intelligence: 5, speed: 2, cost: 2 },
     tags: ["vision", "reasoning", "tools", "coding"],
   },
   {

@@ -202,7 +202,7 @@ class McpClientManager {
                     typeof (msg.content as Record<string, unknown>).text === "string"
                   );
                 })
-                .map((m) => m.content.text)
+                .map((m: { content: { text: string } }) => m.content.text)
                 .join("\n");
               if (text.trim()) {
                 const chunk = text.trim();
