@@ -335,6 +335,34 @@ export type RunAgentOptions = {
 };
 
 /**
+ * Remove tool-call parts from the last assistant message that never received
+ * a result. This happens when the user stops the agent mid-tool-call — the
+ * conversation retains an unanswered tool call that the provider API rejects
+ * on the next send ("Tool result is missing for tool call ...").
+ */
+function stripIncompleteToolCalls(messages: UIMessage[]): UIMessage[] {
+  if (messages.length === 0) return messages;
+  const last = messages[messages.length - 1];
+  if (last.role !== "assistant") return messages;
+
+  const COMPLETE_STATES = new Set([
+    "output-available",
+    "output-error",
+  ]);
+  const cleaned = last.parts.filter((p) => {
+    const type = (p as { type?: string }).type ?? "";
+    if (!type.startsWith("tool-") && type !== "dynamic-tool") return true;
+    const state = (p as { state?: string }).state;
+    return state != null && COMPLETE_STATES.has(state);
+  });
+
+  if (cleaned.length === last.parts.length) return messages;
+  const out = messages.slice();
+  out[out.length - 1] = { ...last, parts: cleaned } as UIMessage;
+  return out;
+}
+
+/**
  * Strip `data:<mediaType>;base64,` prefixes from file parts in model messages.
  *
  * `convertToModelMessages` copies `FileUIPart.url` (a data-URL) into
@@ -394,7 +422,9 @@ export async function runAgentStream(opts: RunAgentOptions) {
   ) + mcpBlock;
 
   const history = stripDataUrlPrefixes(
-    await convertToModelMessages(opts.uiMessages),
+    await convertToModelMessages(stripIncompleteToolCalls(opts.uiMessages), {
+      ignoreIncompleteToolCalls: true,
+    }),
   );
   const compact = compactModelMessagesDetailed(
     history,
