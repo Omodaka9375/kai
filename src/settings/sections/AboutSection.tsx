@@ -1,6 +1,7 @@
-﻿import { Button } from "@/components/ui/button";
-import { GithubIcon, Globe02Icon } from "@hugeicons/core-free-icons";
+import { Button } from "@/components/ui/button";
+import { GithubIcon, Globe02Icon, RefreshIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useUpdater } from "@/modules/updater/useUpdater";
 import { getName, getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { arch, platform } from "@tauri-apps/plugin-os";
@@ -23,6 +24,7 @@ export function AboutSection() {
   const [version, setVersion] = useState("");
   const [name, setName] = useState("Kai");
   const [build, setBuild] = useState("");
+  const updater = useUpdater({ autoCheck: false });
 
   useEffect(() => {
     void getVersion().then(setVersion);
@@ -111,6 +113,20 @@ export function AboutSection() {
 
       <div className="flex flex-col gap-1.5">
         <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void updater.check({ manual: true })}
+            disabled={updater.status.kind === "checking"}
+            className="gap-1.5"
+          >
+            <HugeiconsIcon icon={RefreshIcon} size={12} strokeWidth={1.75} className={updater.status.kind === "checking" ? "animate-spin" : ""} />
+            {updater.status.kind === "checking"
+              ? "Checking…"
+              : updater.status.kind === "uptodate"
+                ? "Up to date"
+                : "Check for updates"}
+          </Button>
           <Button
             variant="outline"
             size="sm"
