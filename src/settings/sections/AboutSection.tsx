@@ -112,21 +112,59 @@ export function AboutSection() {
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void updater.check({ manual: true })}
-            disabled={updater.status.kind === "checking"}
-            className="gap-1.5"
-          >
-            <HugeiconsIcon icon={RefreshIcon} size={12} strokeWidth={1.75} className={updater.status.kind === "checking" ? "animate-spin" : ""} />
-            {updater.status.kind === "checking"
-              ? "Checking…"
-              : updater.status.kind === "uptodate"
-                ? "Up to date"
-                : "Check for updates"}
-          </Button>
+        <div className="flex flex-wrap gap-2">
+          {updater.status.kind === "available" ? (
+            <Button
+              variant="default"
+              size="sm"
+              onClick={() => void updater.install()}
+              className="gap-1.5"
+            >
+              Install update ({updater.status.update.version})
+            </Button>
+          ) : updater.status.kind === "manual-available" ? (
+            <Button
+              variant="default"
+              size="sm"
+              onClick={() => void openUrl(updater.status.kind === "manual-available" ? updater.status.info.releaseUrl : REPO_URL)}
+              className="gap-1.5"
+            >
+              Download v{updater.status.info.version}
+            </Button>
+          ) : updater.status.kind === "downloading" ? (
+            <Button variant="outline" size="sm" disabled className="gap-1.5">
+              <HugeiconsIcon icon={RefreshIcon} size={12} strokeWidth={1.75} className="animate-spin" />
+              Downloading{updater.status.contentLength
+                ? ` ${Math.round((updater.status.downloaded / updater.status.contentLength) * 100)}%`
+                : "…"}
+            </Button>
+          ) : updater.status.kind === "ready" ? (
+            <Button variant="outline" size="sm" disabled className="gap-1.5">
+              Restarting…
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void updater.check({ manual: true })}
+              disabled={updater.status.kind === "checking"}
+              className="gap-1.5"
+            >
+              <HugeiconsIcon icon={RefreshIcon} size={12} strokeWidth={1.75} className={updater.status.kind === "checking" ? "animate-spin" : ""} />
+              {updater.status.kind === "checking"
+                ? "Checking…"
+                : updater.status.kind === "uptodate"
+                  ? "Up to date"
+                  : updater.status.kind === "error"
+                    ? "Retry check"
+                    : "Check for updates"}
+            </Button>
+          )}
+          {(updater.status.kind === "available" || updater.status.kind === "manual-available") && (
+            <Button variant="ghost" size="sm" onClick={updater.dismiss}>
+              Dismiss
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -144,6 +182,9 @@ export function AboutSection() {
             Report an issue
           </Button>
         </div>
+        {updater.status.kind === "error" && (
+          <p className="text-[11px] text-destructive">{updater.status.message}</p>
+        )}
       </div>
     </div>
   );
