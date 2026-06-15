@@ -113,6 +113,24 @@ function Bridge({
   const prevMessageCountRef = useRef(messages.length);
   const focusInput = useChatStore((s) => s.focusInput);
 
+  // ---- Steering message injection -------------------------------------------
+  // When the agent goes idle and a steering message was queued, send it as a
+  // real user message so it appears in the chat and the model sees it.
+  const steeringMessage = useChatStore((s) => s.steeringMessage);
+  const setSteeringMessage = useChatStore((s) => s.setSteeringMessage);
+  useEffect(() => {
+    if (!steeringMessage) return;
+    // Only inject when the agent is idle — if it's still running, wait for
+    // the next idle transition.
+    if (status === "submitted" || status === "streaming") return;
+    const msg = steeringMessage;
+    setSteeringMessage(null);
+    void chat.sendMessage({
+      role: "user",
+      parts: [{ type: "text", text: msg }],
+    });
+  }, [steeringMessage, status, chat, setSteeringMessage]);
+
   // Reset nudge counter when the user sends a new message (message count
   // increases with a user-role message), not on every idle transition.
   useEffect(() => {
