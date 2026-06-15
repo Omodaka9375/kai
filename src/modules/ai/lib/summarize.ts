@@ -1,4 +1,5 @@
 import { generateText, type LanguageModel, type ModelMessage } from "ai";
+import type { FileSnapshot } from "./fileTracker";
 
 const SUMMARIZE_PROMPT = `You are a conversation summarizer for an AI coding assistant. Your job is to compress a conversation into a structured summary that preserves all information the assistant needs to continue working effectively.
 
@@ -39,6 +40,7 @@ export async function summarizeConversation(
   messages: ModelMessage[],
   model: LanguageModel,
   abortSignal?: AbortSignal,
+  fileTrackerSnapshot?: FileSnapshot[],
 ): Promise<string> {
   // Build a condensed transcript for the summarizer. Skip the system
   // message (index 0) — the summarizer doesn't need the full system prompt.
@@ -68,10 +70,18 @@ export async function summarizeConversation(
     .filter(Boolean)
     .join("\n\n");
 
+  let prompt = SUMMARIZE_PROMPT;
+  if (fileTrackerSnapshot && fileTrackerSnapshot.length > 0) {
+    const fileList = fileTrackerSnapshot
+      .map((f) => `- \`${f.path}\` — ${f.state}`)
+      .join("\n");
+    prompt += `\n\n## Files touched in this session\n${fileList}`;
+  }
+
   const { text } = await generateText({
     model,
     messages: [
-      { role: "system", content: SUMMARIZE_PROMPT },
+      { role: "system", content: prompt },
       {
         role: "user",
         content: `Summarize this conversation:\n\n${transcript}`,

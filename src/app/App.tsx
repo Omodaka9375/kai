@@ -80,6 +80,7 @@ import {
   type TerminalPaneHandle,
 } from "@/modules/terminal";
 import { ThemeProvider } from "@/modules/theme";
+import { initBusHandlers } from "@/modules/ai/lib/busHandlers";
 import { UpdaterDialog } from "@/modules/updater";
 import {
   getWslHome,
@@ -140,6 +141,9 @@ function readSidebarView(): SidebarViewId {
   }
   return "explorer";
 }
+
+// Initialize agent bus event handlers once.
+initBusHandlers();
 
 export default function App() {
   const {

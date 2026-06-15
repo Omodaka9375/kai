@@ -82,6 +82,7 @@ export function buildFsTools(ctx: ToolContext) {
             return { path: abs, unchanged: true, size: r.size };
           }
           ctx.readCache.set(abs, { size: r.size, hash });
+          ctx.fileTracker.markRead(abs);
 
           if (isFullRead) {
             const lines = r.content.split("\n");
@@ -206,6 +207,7 @@ export function buildFsTools(ctx: ToolContext) {
           }
           await native.writeFile(abs, content);
           ctx.readCache.set(abs, { size: content.length, hash: djb2(content) });
+          ctx.fileTracker.markModified(abs);
           window.dispatchEvent(new CustomEvent("Kai:fs-changed", { detail: abs }));
           return { path: abs, bytesWritten: content.length, ok: true };
         } catch (e) {

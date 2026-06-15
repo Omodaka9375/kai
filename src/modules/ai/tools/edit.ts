@@ -362,6 +362,7 @@ export function buildEditTools(ctx: ToolContext) {
           editFailures.set(abs, failures + 1);
         } else {
           editFailures.delete(abs);
+          ctx.fileTracker.markModified(abs);
         }
         return result;
       },
@@ -412,6 +413,7 @@ export function buildEditTools(ctx: ToolContext) {
           editFailures.set(abs, failures + 1);
         } else {
           editFailures.delete(abs);
+          ctx.fileTracker.markModified(abs);
         }
         return result;
       },

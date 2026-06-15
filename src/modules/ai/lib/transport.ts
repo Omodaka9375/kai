@@ -17,6 +17,8 @@ import {
 import type { ToolContext } from "../tools/tools";
 import { useChatStore } from "../store/chatStore";
 import { saveMessages } from "./sessions";
+import { extensionRegistry } from "./extensions";
+import { agentBus } from "./eventBus";
 
 const Kai_MD_MAX_BYTES = 32 * 1024;
 type MemoryCacheEntry = { content: string | null; mtime: number };
@@ -79,6 +81,16 @@ type SendOptions = {
 
 export function createContextAwareTransport(deps: Deps) {
   const run = async (options: SendOptions) => {
+    const sessionId = deps.getSessionId?.() ?? "unknown";
+    const modelId = deps.getModelId() ?? "unknown";
+    agentBus.emit("agent:start", { sessionId });
+    // Fire extension hooks (fire-and-forget, errors logged internally).
+    for (const ext of extensionRegistry.getAll()) {
+      if (ext.onAgentStart) void ext.onAgentStart({ sessionId, modelId });
+    }
+
+    let extensionStepCount = 0;
+
     const live = deps.getLive();
     const projectMemory = await readKaiMd(live.workspaceRoot);
     const envBlock = formatEnvBlock(live);
@@ -115,10 +127,20 @@ export function createContextAwareTransport(deps: Deps) {
       customInstructions: effectiveCustomInstructions,
       agentPersona: deps.getAgentPersona(),
       toolContext: deps.toolContext,
-      onStep: deps.onStep,
+      onStep: (step) => {
+        if (step !== null) extensionStepCount++;
+        deps.onStep?.(step);
+      },
       onUsage: deps.onUsage,
       onCompact: deps.onCompact,
-      onFinishMeta: deps.onFinishMeta,
+      onFinishMeta: (info) => {
+        deps.onFinishMeta?.(info);
+        const finishReason = info.finishReason;
+        agentBus.emit("agent:end", { sessionId, stepCount: extensionStepCount, finishReason });
+        for (const ext of extensionRegistry.getAll()) {
+          if (ext.onAgentEnd) void ext.onAgentEnd({ sessionId, modelId, stepCount: extensionStepCount, finishReason });
+        }
+      },
       lmstudioBaseURL: deps.getLmstudioBaseURL?.(),
       lmstudioModelId: deps.getLmstudioModelId?.(),
       openaiCompatibleBaseURL: deps.getOpenaiCompatibleBaseURL?.(),
@@ -218,10 +240,12 @@ async function maybeSummarize(
       deps.getOpenaiCompatibleModelId?.(),
     );
 
+    const fileSnapshot = deps.toolContext.fileTracker.getSnapshot();
     const summary = await summarizeConversation(
       modelMsgs,
       model,
       abortSignal,
+      fileSnapshot.length > 0 ? fileSnapshot : undefined,
     );
 
     // Find the tail cutoff in the UIMessage array.
