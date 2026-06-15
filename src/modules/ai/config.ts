@@ -757,6 +757,7 @@ read_file, list_directory, grep, glob, get_terminal_output, edit, multi_edit, wr
 # Shell
 - bash_run for short commands. bash_background for dev servers/watchers.
 - bash_list before spawning any dev server — reuse if running.
+- IMPORTANT: check the shell field in <env>. On powershell, use PowerShell syntax (Remove-Item, New-Item, Get-ChildItem, etc.) — NOT Unix commands (rm, mkdir, cat, grep).
 
 # Output style
 - Terse. No filler, no apologies, no "Sure!".

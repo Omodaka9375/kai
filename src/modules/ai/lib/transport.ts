@@ -16,6 +16,7 @@ import {
 } from "./summarize";
 import type { ToolContext } from "../tools/tools";
 import { useChatStore } from "../store/chatStore";
+import { IS_WINDOWS, IS_MAC, IS_LINUX } from "@/lib/platform";
 import { saveMessages } from "./sessions";
 import { extensionRegistry } from "./extensions";
 import { agentBus } from "./eventBus";
@@ -197,11 +198,14 @@ function injectEnvIntoLastUser(
 
 function formatEnvBlock(live: LiveSnapshot): string | null {
   const lines: string[] = [];
+  const os = IS_WINDOWS ? "windows" : IS_MAC ? "macos" : IS_LINUX ? "linux" : "unknown";
+  const shell = IS_WINDOWS ? "powershell" : "bash";
+  lines.push(`os: ${os}`);
+  lines.push(`shell: ${shell}`);
   if (live.workspaceRoot) lines.push(`workspace_root: ${live.workspaceRoot}`);
   if (live.cwd) lines.push(`active_terminal_cwd: ${live.cwd}`);
   if (live.activeFile) lines.push(`active_file: ${live.activeFile}`);
   if (live.terminalPrivate) lines.push("active_terminal_mode: private");
-  if (lines.length === 0) return null;
   return `<env>\n${lines.join("\n")}\n</env>`;
 }
 
