@@ -21,6 +21,7 @@ import { EMPTY_PROVIDER_KEYS, type ProviderKeys } from "../lib/keyring";
 import {
   deleteSessionData,
   deriveTitle,
+  forkSession as forkSessionFromStore,
   loadAll,
   loadMessages,
   newSessionId,
@@ -32,8 +33,9 @@ import {
 import { pushRecentModel } from "../lib/modelPrefs";
 import { createContextAwareTransport } from "../lib/transport";
 import type { ToolContext } from "../tools/tools";
-import { closeShellSession } from "../tools/shell";
 import { resetEditFailures } from "../tools/edit";
+import { FileTracker } from "../lib/fileTracker";
+import { agentBus } from "../lib/eventBus";
 
 type Live = {
   getCwd: () => string | null;
@@ -183,6 +185,11 @@ type StoreState = {
   renameSession: (id: string, title: string) => void;
   /** Persist messages of a session and bump its updatedAt + auto-title. */
   persistMessages: (id: string, messages: UIMessage[]) => void;
+  /** Fork the current session at a message index, creating a new branch. */
+  forkSession: (atMessageIndex: number) => Promise<string | null>;
+  /** Steering message queued while agent is busy. */
+  steeringMessage: string | null;
+  setSteeringMessage: (msg: string | null) => void;
 };
 
 const NOOP_LIVE: Live = {
@@ -255,6 +262,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     openPreview: (url) => useChatStore.getState().live.openPreview(url),
     readCache,
     getSessionId: () => sessionId,
+    fileTracker: new FileTracker(),
   };
 
   const transport = createContextAwareTransport({
@@ -349,6 +357,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
   setSelectedModelId: (id) => {
     set({ selectedModelId: id });
     void pushRecentModel(id);
+    agentBus.emit("model:change", { modelId: id });
   },
 
   mini: { open: false },
@@ -473,7 +482,9 @@ export const useChatStore = create<StoreState>((set, get) => ({
   switchSession: (id) => {
     if (get().activeSessionId === id) return;
     if (!get().sessions.some((s) => s.id === id)) return;
+    const fromId = get().activeSessionId;
     resetEditFailures();
+    agentBus.emit("session:switch", { fromId, toId: id });
 
     // Lazily seed the chat with persisted messages the first time we open
     // this session. Subsequent switches reuse the cached Chat instance.
@@ -496,8 +507,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
     chats.get(id)?.stop();
     chats.delete(id);
     seedMessages.delete(id);
-    closeShellSession(id);
-    resetEditFailures();
+    agentBus.emit("session:delete", { sessionId: id });
     const pend = pendingPersist.get(id);
     if (pend) {
       clearTimeout(pend.timer);
@@ -562,6 +572,33 @@ export const useChatStore = create<StoreState>((set, get) => ({
     set({ sessions: next });
     void saveSessionsList(next);
   },
+  forkSession: async (atMessageIndex) => {
+    const activeId = get().activeSessionId;
+    if (!activeId) return null;
+    try {
+      const { newId, messages } = await forkSessionFromStore(activeId, atMessageIndex);
+      const meta: SessionMeta = {
+        id: newId,
+        title: "Fork",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        parentId: activeId,
+        forkMessageIndex: atMessageIndex,
+      };
+      const next = [meta, ...get().sessions];
+      set({ sessions: next, activeSessionId: newId, agentMeta: IDLE_META });
+      seedMessages.set(newId, messages);
+      void saveSessionsList(next);
+      void saveActiveId(newId);
+      return newId;
+    } catch (err) {
+      console.error("[forkSession] failed:", err);
+      return null;
+    }
+  },
+
+  steeringMessage: null,
+  setSteeringMessage: (msg) => set({ steeringMessage: msg }),
 }));
 
 export function getAgentMeta(): AgentMeta {

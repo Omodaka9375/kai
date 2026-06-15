@@ -13,7 +13,7 @@ import {
   LMSTUDIO_DEFAULT_BASE_URL,
   MAX_AGENT_STEPS,
   providerNeedsKey,
-  selectSystemPrompt,
+  SYSTEM_PROMPT,
   type ModelId,
   type ProviderId,
 } from "../config";
@@ -21,6 +21,7 @@ import { buildTools, type ToolContext } from "../tools/tools";
 import { compactModelMessagesDetailed } from "./compact";
 import type { ProviderKeys } from "./keyring";
 import { createProxyFetch } from "./proxyFetch";
+import { normalizeForProvider } from "./providerNormalize";
 
 const localProxyFetch = createProxyFetch({ allowPrivateNetwork: true });
 
@@ -252,12 +253,12 @@ const PLAN_MODE_PROMPT = `## PLAN MODE — ACTIVE
 Mutating tools (write_file, edit, multi_edit, create_directory) will queue their changes for the user to review as a single diff. Do NOT execute bash_run or bash_background while plan mode is active — restrict yourself to reads (read_file, grep, glob, list_directory) and the queued mutations. After queueing the full set of edits, stop and return a brief summary; do not continue acting until the user has accepted/rejected.`;
 
 export function buildStableSystem(
-  modelId: ModelId,
+  _modelId: ModelId,
   persona: { name: string; instructions: string } | null,
   customInstructions: string | undefined,
   projectMemory: string | null,
 ): string {
-  const base = selectSystemPrompt(getModel(modelId).id);
+  const base = SYSTEM_PROMPT;
   const personaBlock = persona?.instructions.trim()
     ? `\n\n## ACTIVE AGENT — ${persona.name}\n${persona.instructions.trim()}`
     : "";
@@ -421,11 +422,12 @@ export async function runAgentStream(opts: RunAgentOptions) {
     opts.projectMemory ?? null,
   ) + mcpBlock;
 
-  const history = stripDataUrlPrefixes(
+  const rawHistory = stripDataUrlPrefixes(
     await convertToModelMessages(stripIncompleteToolCalls(opts.uiMessages), {
       ignoreIncompleteToolCalls: true,
     }),
   );
+  const history = normalizeForProvider(rawHistory, provider);
   const compact = compactModelMessagesDetailed(
     history,
     getModelContextLimit(getModel(modelId).id),

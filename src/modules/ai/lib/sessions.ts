@@ -6,6 +6,8 @@ export type SessionMeta = {
   title: string;
   createdAt: number;
   updatedAt: number;
+  parentId?: string;
+  forkMessageIndex?: number;
 };
 
 const STORE_PATH = "kai-sessions.json";
@@ -91,6 +93,25 @@ export async function deleteSessionData(id: string): Promise<void> {
 
 export function newSessionId(): string {
   return `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * Fork a session at a specific message index.
+ * Creates a new session with messages from the source up to (and including) atMessageIndex.
+ */
+export async function forkSession(
+  sourceId: string,
+  atMessageIndex: number,
+): Promise<{ newId: string; messages: UIMessage[] }> {
+  const source = await loadMessages(sourceId);
+  if (!source) throw new Error("source session not found");
+  if (atMessageIndex < 0 || atMessageIndex >= source.length) {
+    throw new Error(`invalid message index: ${atMessageIndex}`);
+  }
+  const forkedMessages = source.slice(0, atMessageIndex + 1);
+  const newId = newSessionId();
+  await saveMessages(newId, forkedMessages);
+  return { newId, messages: forkedMessages };
 }
 
 export function deriveTitle(messages: UIMessage[]): string {
