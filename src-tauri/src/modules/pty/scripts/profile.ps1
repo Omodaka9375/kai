@@ -1,5 +1,10 @@
 # KAI-shell-integration (PowerShell)
 # Emits OSC 7 (cwd) + OSC 133 A/B/D so the host tracks cwd and prompt boundaries.
+#
+# Launched via `pwsh -NoExit -File <this>`. -File skips $PROFILE, so we source
+# it ourselves below. This gives the user their full environment (Oh-My-Posh,
+# Starship, posh-git, custom modules, aliases, PATH) while still injecting our
+# OSC hooks afterward.
 
 if ($global:__KAI_HOOKS_LOADED) { return }
 $global:__KAI_HOOKS_LOADED = $true
@@ -10,6 +15,17 @@ try {
     $global:OutputEncoding    = [System.Text.UTF8Encoding]::new($false)
 } catch {}
 
+# Source the user's profile. -File suppresses automatic $PROFILE loading, so
+# without this the user gets a bare shell with no customizations. Errors in the
+# user's profile are caught so KAI still starts even if the profile is broken.
+if ($PROFILE -and (Test-Path $PROFILE -ErrorAction SilentlyContinue)) {
+    try { . $PROFILE } catch {
+        Write-Warning "KAI: error sourcing `$PROFILE: $_"
+    }
+}
+
+# Capture whatever prompt the user's profile defined (Oh-My-Posh, Starship,
+# posh-git, or the default) so we can wrap it with OSC markers.
 if (Test-Path Function:prompt) {
     Copy-Item Function:prompt Function:__KAI_user_prompt -Force -ErrorAction SilentlyContinue
 }
