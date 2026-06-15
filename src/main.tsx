@@ -15,6 +15,11 @@ if (USE_CUSTOM_WINDOW_CONTROLS) {
   document.documentElement.dataset.chrome = "borderless";
 }
 
+// Block the WebView's native context menu (Refresh, Back, Inspect, etc.)
+// which can nuke the entire app state. Custom context menus implemented in
+// React should call e.stopPropagation() so they still work.
+document.addEventListener("contextmenu", (e) => e.preventDefault());
+
 // Seed before first paint so default tab mounts at target cwd (no flicker).
 await initLaunchDir();
 
