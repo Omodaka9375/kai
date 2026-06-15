@@ -320,13 +320,14 @@ export function buildEditTools(ctx: ToolContext) {
   return {
     edit: tool({
       description:
-        "Replace an exact string in a file. Requires read_file on this path first in the current session — this prevents blind edits. `old_string` must be unique in the file unless `replace_all: true`. Asks for user approval before writing.",
+        "Replace an exact string in a file with a new string. BOTH old_string AND new_string are required — old_string is the text to find, new_string is what replaces it. To insert text, set old_string to an adjacent line and new_string to that line plus your insertion. Requires read_file on this path first. Asks for user approval.",
       inputSchema: z.object({
         path: z.string().optional(),
         old_string: z
           .string()
-          .describe("Exact substring to replace. Must be unique unless replace_all."),
-        new_string: z.string().describe("Replacement substring."),
+          .default("")
+          .describe("REQUIRED. Exact substring to find and replace. Must be unique unless replace_all."),
+        new_string: z.string().default("").describe("REQUIRED. The replacement text."),
         replace_all: z.boolean().optional(),
       }),
       needsApproval: true,
