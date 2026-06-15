@@ -394,7 +394,6 @@ export function buildEditTools(ctx: ToolContext) {
         replace_all: z.boolean().optional(),
         line_hint: z
           .number()
-          .int()
           .optional()
           .describe("Approximate 1-based line number where the edit should apply. Used to disambiguate when old_string appears more than once."),
       }),

@@ -126,7 +126,7 @@ export function buildShellTools(ctx: ToolContext) {
         "Run a foreground shell command in this session's persistent agent shell. cwd persists across calls (so `cd foo` then `bash_run pwd` works). Use for short-lived commands (lint, test, search, build). For long-running or daemon processes (dev servers, watch tasks), use `bash_background`. NEVER invoke interactive tools (vim, less, top) — they will hang. Asks for user approval.",
       inputSchema: z.object({
         command: z.string(),
-        timeout_secs: z.number().int().min(1).max(300).optional(),
+        timeout_secs: z.number().min(1).max(300).optional(),
       }),
       needsApproval: true,
       execute: async ({ command, timeout_secs }) => {
@@ -196,8 +196,8 @@ export function buildShellTools(ctx: ToolContext) {
       description:
         "Read accumulated logs from a `bash_background` process. Pass `since_offset` from the previous response's `next_offset` to tail incrementally. `dropped` reports bytes evicted by the ring buffer.",
       inputSchema: z.object({
-        handle: z.number().int(),
-        since_offset: z.number().int().optional(),
+        handle: z.number(),
+        since_offset: z.number().optional(),
       }),
       execute: async ({ handle, since_offset }) => {
         try {
@@ -226,7 +226,7 @@ export function buildShellTools(ctx: ToolContext) {
     bash_kill: tool({
       description:
         "Terminate a `bash_background` process by handle. Idempotent — kills nothing if the handle is unknown or already exited.",
-      inputSchema: z.object({ handle: z.number().int() }),
+      inputSchema: z.object({ handle: z.number() }),
       execute: async ({ handle }) => {
         try {
           await native.shellBgKill(handle);

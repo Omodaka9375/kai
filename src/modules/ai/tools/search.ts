@@ -56,7 +56,7 @@ export function buildSearchTools(ctx: ToolContext) {
             "Optional include-globs over relative paths, e.g. ['**/*.ts', 'src/**/*.tsx'].",
           ),
         case_insensitive: z.boolean().optional(),
-        max_results: z.number().int().min(1).max(500).optional(),
+        max_results: z.number().min(1).max(500).optional(),
       }),
       execute: async ({
         pattern,
@@ -102,7 +102,7 @@ export function buildSearchTools(ctx: ToolContext) {
       inputSchema: z.object({
         pattern: z.string().describe("Glob pattern over relative paths."),
         root: z.string().optional(),
-        max_results: z.number().int().min(1).max(2000).optional(),
+        max_results: z.number().min(1).max(2000).optional(),
       }),
       execute: async ({ pattern, root, max_results }) => {
         const r = resolveRoot(root, ctx);

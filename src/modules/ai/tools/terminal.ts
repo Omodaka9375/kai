@@ -35,7 +35,7 @@ export function buildTerminalTools(ctx: ToolContext) {
       inputSchema: z.object({
         lines: z
           .number()
-          .int()
+          
           .min(1)
           .max(2000)
           .optional()

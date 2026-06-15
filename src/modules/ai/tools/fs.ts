@@ -29,13 +29,11 @@ export function buildFsTools(ctx: ToolContext) {
           .describe("Absolute path, or relative to the active terminal cwd."),
         offset: z
           .number()
-          .int()
           .min(0)
           .optional()
           .describe("0-based start line. Default 0."),
         limit: z
           .number()
-          .int()
           .min(1)
           .max(10000)
           .optional()
