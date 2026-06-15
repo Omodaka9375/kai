@@ -12,6 +12,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { createContext, memo, useContext, useEffect, useRef, useState } from "react";
 
+import { MermaidBlock } from "./chat-mermaid";
 import { Shimmer } from "./shimmer";
 import { highlight, isHighlightable, type HighlightedNode } from "./chat-code-lezer";
 
@@ -64,6 +65,10 @@ export function ChatCodeBlock({ code, lang }: ChatCodeBlockProps) {
 
   if (streaming) {
     return <GeneratingPlaceholder label={label} />;
+  }
+
+  if (label === "mermaid") {
+    return <MermaidBlock code={code} />;
   }
 
   if (SHELL_LANGS.has(label)) {

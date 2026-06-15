@@ -54,6 +54,8 @@ export default defineConfig(async ({ mode }) => ({
             return "codemirror";
           if (id.includes("/streamdown/") || id.includes("@streamdown/"))
             return "streamdown";
+          if (id.includes("/mermaid/") || id.includes("mermaid"))
+            return "mermaid";
           if (id.includes("/motion/") || id.includes("framer-motion"))
             return "motion";
           if (
