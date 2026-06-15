@@ -81,20 +81,29 @@ export function buildFsTools(ctx: ToolContext) {
           const isFullRead = offset === undefined && limit === undefined;
           const prior = ctx.readCache.get(abs);
           if (isFullRead && !force && prior && prior.size === r.size && prior.hash === hash) {
-            // Return a short preview so the model has enough context to
-            // construct valid old_string values without needing the full read.
+            // Return head + tail preview so the model can construct valid
+            // old_string values for edits at the beginning OR end of file.
             const lines = r.content.split("\n");
-            const previewLines = lines.slice(0, 30).join("\n");
-            const preview = previewLines.length > 1500
-              ? previewLines.slice(0, 1500) + "\n…"
-              : previewLines + (lines.length > 30 ? "\n…" : "");
+            const HEAD = 20;
+            const TAIL = 15;
+            let preview: string;
+            if (lines.length <= HEAD + TAIL + 5) {
+              // Small file — just show everything.
+              preview = r.content.length > 2000
+                ? r.content.slice(0, 2000) + "\n…"
+                : r.content;
+            } else {
+              const head = lines.slice(0, HEAD).join("\n");
+              const tail = lines.slice(-TAIL).join("\n");
+              preview = `${head}\n\n… (${lines.length - HEAD - TAIL} lines omitted) …\n\n${tail}`;
+            }
             return {
               path: abs,
               unchanged: true,
               size: r.size,
               total_lines: lines.length,
               preview,
-              hint: "File content unchanged since last read. A short preview is included above. If you need the full content (e.g. earlier read scrolled out of context), call read_file with force: true.",
+              hint: "File unchanged since last read. Head and tail preview included. If you need the full content, call read_file with force: true.",
             };
           }
           ctx.readCache.set(abs, { size: r.size, hash });
