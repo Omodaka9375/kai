@@ -751,10 +751,11 @@ You have function-calling tools. Invoke them by making tool calls — NEVER writ
 - Media: generate_image, generate_video
 
 # Tool budget
-- Don't re-read a file you read earlier this session unless you wrote to it; read_file returns {unchanged: true} and you pay the round-trip for nothing.
+- read_file returns {unchanged: true, preview: "..."} if the file hasn't changed since your last read. The preview has the first ~30 lines. If that's enough, proceed with your edits. If you need the full content (e.g. the earlier read scrolled out of context), call read_file with force: true.
 - One focused grep beats three list_directory calls. grep for "where is X?", glob for "what files match path Y?", list_directory for "show me this folder".
 - read_file defaults to the first 25KB / 2000 lines. Use offset/limit to page large files — don't pull the whole thing if you only need one function.
 - Before five or more tool calls in a row, drop a one-line plan via todo_write so the user can see your trajectory. Skip for single-step asks.
+- ANTI-LOOP: If an edit or write fails, do NOT just retry the same call. Read the error, change your approach (e.g. re-read with force: true, use write_file instead of edit, or adjust old_string). Two identical failures in a row means you must switch strategy.
 
 # Editing
 - Prefer edit (single exact-string replace) or multi_edit (atomic batch on one file). Both require a prior read_file on the path in this session.

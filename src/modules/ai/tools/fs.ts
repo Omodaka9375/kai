@@ -22,7 +22,7 @@ export function buildFsTools(ctx: ToolContext) {
   return {
     read_file: tool({
       description:
-        "Read a file's text content. Supports UTF-8 text files, PDF, and DOCX. Defaults to the first 2000 lines (capped at 25KB). Pass `offset`/`limit` for line-based windowing of large text files. Refuses binary (except PDF/DOCX), oversized, or sensitive files (.env, keys, credentials). If you call this on the same path twice in a session without edits in between, the second call returns `unchanged: true` instead of re-emitting the content — re-read the prior tool result.",
+        "Read a file's text content. Supports UTF-8 text files, PDF, and DOCX. Defaults to the first 2000 lines (capped at 25KB). Pass `offset`/`limit` for line-based windowing of large text files. Refuses binary (except PDF/DOCX), oversized, or sensitive files (.env, keys, credentials). If the file hasn't changed since your last read in this session, returns `unchanged: true` with a short preview. Pass `force: true` if you need the full content again (e.g. the earlier read has scrolled out of context).",
       inputSchema: z.object({
         path: z
           .string()
@@ -40,8 +40,12 @@ export function buildFsTools(ctx: ToolContext) {
           .max(10000)
           .optional()
           .describe("Max lines to return. Default 2000."),
+        force: z
+          .boolean()
+          .optional()
+          .describe("Bypass the unchanged-dedup cache and return the full content even if the file hasn't changed since the last read."),
       }),
-      execute: async ({ path, offset, limit }) => {
+      execute: async ({ path, offset, limit, force }) => {
         const reqPath = resolvePath(path, ctx.getCwd());
         const safety = await checkReadableCanonical(reqPath, native.canonicalize);
         if (!safety.ok) return { error: safety.reason, path: reqPath };
@@ -78,8 +82,22 @@ export function buildFsTools(ctx: ToolContext) {
           const hash = djb2(r.content);
           const isFullRead = offset === undefined && limit === undefined;
           const prior = ctx.readCache.get(abs);
-          if (isFullRead && prior && prior.size === r.size && prior.hash === hash) {
-            return { path: abs, unchanged: true, size: r.size };
+          if (isFullRead && !force && prior && prior.size === r.size && prior.hash === hash) {
+            // Return a short preview so the model has enough context to
+            // construct valid old_string values without needing the full read.
+            const lines = r.content.split("\n");
+            const previewLines = lines.slice(0, 30).join("\n");
+            const preview = previewLines.length > 1500
+              ? previewLines.slice(0, 1500) + "\n…"
+              : previewLines + (lines.length > 30 ? "\n…" : "");
+            return {
+              path: abs,
+              unchanged: true,
+              size: r.size,
+              total_lines: lines.length,
+              preview,
+              hint: "File content unchanged since last read. A short preview is included above. If you need the full content (e.g. earlier read scrolled out of context), call read_file with force: true.",
+            };
           }
           ctx.readCache.set(abs, { size: r.size, hash });
           ctx.fileTracker.markRead(abs);
