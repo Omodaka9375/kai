@@ -629,8 +629,9 @@ export const MODEL_CONTEXT_LIMITS: Record<string, number> = {
   "meta-llama/llama-4-scout-17b-16e-instruct": 128_000,
   "meta-llama/llama-4-maverick": 128_000,
   "moonshotai/kimi-k2.5": 256_000,
-  "qwen/qwen3-max": 256_000,
-  "qwen/qwen3-coder": 256_000,
+  "qwen/qwen3.7-max": 1_000_000,
+  "qwen/qwen3.7-plus": 1_000_000,
+  "qwen/qwen3.6-27b": 262_144,
   "mistralai/mistral-large-latest": 128_000,
   "z-ai/glm-5.2": 200_000,
   "z-ai/glm-5.2[1m]": 1_000_000,
@@ -686,6 +687,9 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
   "deepseek-reasoner": { input: 0.55, output: 2.19, cacheRead: 0.14 },
   "z-ai/glm-5.2": { input: 1.0, output: 3.2, cacheRead: 0.1 },
   "z-ai/glm-5.2[1m]": { input: 1.0, output: 3.2, cacheRead: 0.1 },
+  "qwen/qwen3.7-max": { input: 2.5, output: 7.5 },
+  "qwen/qwen3.7-plus": { input: 2.5, output: 7.5 },
+  "qwen/qwen3.6-27b": { input: 0.4, output: 1.6 },
 };
 
 export function estimateCost(
