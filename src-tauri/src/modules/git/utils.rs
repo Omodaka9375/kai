@@ -31,10 +31,10 @@ pub fn canonical_dir(path: &str, workspace: &WorkspaceEnv) -> Result<ResolvedGit
         normalize_git_path(path)
     } else {
         let path_str = local_path.to_string_lossy();
-        let cleaned = if path_str.starts_with(r"\\?\UNC\") {
-            format!(r"\\{}", &path_str[8..])
-        } else if path_str.starts_with(r"\\?\") {
-            path_str[4..].to_string()
+        let cleaned = if let Some(stripped) = path_str.strip_prefix(r"\\?\UNC\") {
+            format!(r"\\{}", stripped)
+        } else if let Some(stripped) = path_str.strip_prefix(r"\\?\") {
+            stripped.to_string()
         } else {
             path_str.into_owned()
         };
