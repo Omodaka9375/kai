@@ -539,13 +539,22 @@ export const MODELS = [
     tags: ["tools", "coding"],
   },
   {
-    id: "z-ai/glm-4.6",
+    id: "z-ai/glm-5.2",
     provider: "openrouter",
-    label: "GLM 4.6",
+    label: "GLM 5.2",
     hint: "OpenRouter",
-    description: "Zhipu's long-context agentic model.",
-    capabilities: { intelligence: 4, speed: 4, cost: 4 },
-    tags: ["tools", "coding"],
+    description: "Zhipu's 744B MoE flagship coding model. MIT-licensed.",
+    capabilities: { intelligence: 5, speed: 4, cost: 5 },
+    tags: ["reasoning", "tools", "coding"],
+  },
+  {
+    id: "z-ai/glm-5.2[1m]",
+    provider: "openrouter",
+    label: "GLM 5.2 (1M)",
+    hint: "OpenRouter",
+    description: "Zhipu's flagship with usable 1-million-token context.",
+    capabilities: { intelligence: 5, speed: 3, cost: 4 },
+    tags: ["reasoning", "tools", "coding"],
   },
 
   // ── Generic OpenAI-compatible (user-defined endpoint) ─────────────────────
@@ -623,7 +632,8 @@ export const MODEL_CONTEXT_LIMITS: Record<string, number> = {
   "qwen/qwen3-max": 256_000,
   "qwen/qwen3-coder": 256_000,
   "mistralai/mistral-large-latest": 128_000,
-  "z-ai/glm-4.6": 128_000,
+  "z-ai/glm-5.2": 200_000,
+  "z-ai/glm-5.2[1m]": 1_000_000,
   "openai-compatible-custom": 128_000,
   "lmstudio-local": 32_000,
   "mistral-large-latest": 131_072,
@@ -674,6 +684,8 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
   "deepseek-v4-pro": { input: 0.28, output: 1.1, cacheRead: 0.028 },
   "deepseek-v4-flash": { input: 0.07, output: 0.27, cacheRead: 0.007 },
   "deepseek-reasoner": { input: 0.55, output: 2.19, cacheRead: 0.14 },
+  "z-ai/glm-5.2": { input: 1.0, output: 3.2, cacheRead: 0.1 },
+  "z-ai/glm-5.2[1m]": { input: 1.0, output: 3.2, cacheRead: 0.1 },
 };
 
 export function estimateCost(
