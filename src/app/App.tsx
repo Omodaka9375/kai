@@ -826,13 +826,19 @@ export default function App() {
     ? (launchCwd ?? home ?? null)
     : null;
   const sourceControlContextPath = (() => {
-    if (activeTab?.kind === "terminal") {
-      return activeTerminalLeafCwd ?? explorerRoot ?? workspaceFallbackPath;
-    }
-    if (activeTab?.kind === "editor") return dirname(activeTab.path);
+    // For git-related tabs, always use the repo root directly.
     if (activeTab?.kind === "git-diff") return activeTab.repoRoot;
     if (activeTab?.kind === "git-commit-file") return activeTab.repoRoot;
     if (activeTab?.kind === "git-history") return activeTab.repoRoot;
+    // For editor tabs, use the file's directory.
+    if (activeTab?.kind === "editor") return dirname(activeTab.path);
+    // For terminal tabs, prefer the leaf's tracked cwd, then the tab's
+    // initial cwd, then the explorer root (workspace). workspaceFallbackPath
+    // (home dir) is last resort — it's usually not inside a repo.
+    if (activeTab?.kind === "terminal") {
+      return activeTerminalLeafCwd ?? activeTab.cwd ?? explorerRoot ?? workspaceFallbackPath;
+    }
+    // No active tab: use explorer root (which tracks the workspace).
     return explorerRoot ?? workspaceFallbackPath;
   })();
   const hasOpenGitTab = useMemo(
@@ -854,6 +860,17 @@ export default function App() {
   const sourceControlPath = sourceControlActive
     ? sourceControlContextPath
     : badgeContextPath;
+
+  // Automatically authorize standard workspaces/folders in the Rust registry
+  // when the user explicitly navigates to them (via terminal cd, active file tab, etc.)
+  useEffect(() => {
+    if (sourceControlPath) {
+      void native.workspaceAuthorize(sourceControlPath).catch((err) => {
+        console.error("Auto-authorizing source control path failed:", err);
+      });
+    }
+  }, [sourceControlPath]);
+
   const sourceControl = useSourceControl(sourceControlPath, true);
 
   const toggleSourceControl = useCallback(() => {

@@ -166,6 +166,18 @@ where
         return Err(GitError::TimedOut("git command"));
     }
     if output.exit_code != Some(0) {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_ascii_lowercase();
+        // If it's just not a git repository, return None cleanly.
+        if stderr.contains("not a git repository") {
+            return Ok(None);
+        }
+        // If it's any other error (like dubious ownership), return the error so the UI displays it.
+        if !stderr.is_empty() {
+            return Err(GitError::CommandFailed {
+                context: "git command failed",
+                detail: stderr.trim().to_string(),
+            });
+        }
         return Ok(None);
     }
     let stdout = std::str::from_utf8(&output.stdout).unwrap_or("");

@@ -17,10 +17,6 @@ pub fn split_upstream(upstream: &str) -> (Option<String>, Option<String>) {
     }
 }
 
-pub fn display_path(path: &Path) -> String {
-    path.to_string_lossy().replace('\\', "/")
-}
-
 fn normalize_git_path(path: &str) -> String {
     path.replace('\\', "/")
 }
@@ -34,7 +30,22 @@ pub fn canonical_dir(path: &str, workspace: &WorkspaceEnv) -> Result<ResolvedGit
     let git_path = if workspace.is_wsl() {
         normalize_git_path(path)
     } else {
-        display_path(&local_path)
+        let path_str = local_path.to_string_lossy();
+        let cleaned = if path_str.starts_with(r"\\?\UNC\") {
+            format!(r"\\{}", &path_str[8..])
+        } else if path_str.starts_with(r"\\?\") {
+            path_str[4..].to_string()
+        } else {
+            path_str.into_owned()
+        };
+        #[cfg(windows)]
+        {
+            cleaned
+        }
+        #[cfg(not(windows))]
+        {
+            cleaned.replace('\\', "/")
+        }
     };
     Ok(ResolvedGitDirectory {
         workspace: workspace.clone(),

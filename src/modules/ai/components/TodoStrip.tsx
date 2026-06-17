@@ -7,9 +7,9 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { CheckmarkSquare02Icon, SquareIcon } from "@hugeicons/core-free-icons";
+import { ArrowDown01Icon, ArrowRight01Icon, CheckmarkSquare02Icon, SquareIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { Todo } from "../lib/todos";
 import { useTodosStore } from "../store/todoStore";
 
@@ -22,6 +22,12 @@ export function TodoStrip({ sessionId }: Props) {
   const todos =
     useTodosStore((s) => (sessionId ? s.bySession[sessionId] : undefined)) ??
     EMPTY_TODOS;
+  const [expanded, setExpanded] = useState(true);
+
+  // Auto-collapse when list grows past 5 items
+  useEffect(() => {
+    if (todos.length > 5) setExpanded(false);
+  }, [todos.length > 5]);
 
   useEffect(() => {
     if (sessionId) void hydrate(sessionId);
@@ -34,18 +40,30 @@ export function TodoStrip({ sessionId }: Props) {
 
   return (
     <div className="shrink-0 border-t border-border/80 bg-muted/20 px-3 py-1.5">
-      <div className="my-1.5 flex items-center gap-2">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="my-1 flex w-full cursor-pointer items-center gap-2"
+      >
+        <HugeiconsIcon
+          icon={expanded ? ArrowDown01Icon : ArrowRight01Icon}
+          size={10}
+          strokeWidth={2}
+          className="shrink-0 text-muted-foreground"
+        />
         <span className="text-[11px] font-medium text-foreground">Todos</span>
         <Progress value={pct} className="h-1 flex-1" />
         <span className="text-[11px] tabular-nums font-mono text-muted-foreground">
           {completed}/{todos.length}
         </span>
-      </div>
-      <ul className="flex flex-col gap-0.5">
-        {todos.map((t) => (
-          <TodoRow key={t.id} todo={t} />
-        ))}
-      </ul>
+      </button>
+      {expanded && (
+        <ul className="flex flex-col gap-0.5">
+          {todos.map((t) => (
+            <TodoRow key={t.id} todo={t} />
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

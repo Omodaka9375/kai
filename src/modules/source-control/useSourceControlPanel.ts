@@ -498,19 +498,19 @@ export function useSourceControlPanel(
       setPanelState("loading");
       return;
     }
-    if (!summary.hasRepo) {
-      setRepo(null);
-      setStatus(null);
-      setSelected(null);
-      setPanelState("no-repo");
-      setSelectionTransition("none");
-      return;
-    }
     if (summary.localError && !summary.status) {
       setRepo(summary.repo);
       setStatus(null);
       setSelected(null);
       setPanelState("error");
+      setSelectionTransition("none");
+      return;
+    }
+    if (!summary.hasRepo) {
+      setRepo(null);
+      setStatus(null);
+      setSelected(null);
+      setPanelState("no-repo");
       setSelectionTransition("none");
       return;
     }
