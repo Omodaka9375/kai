@@ -22,7 +22,6 @@ import {
   AiMiniWindow,
   getAllKeys,
   hasAnyKey,
-  SelectionAskAi,
   useChatStore,
 } from "@/modules/ai";
 import { CustomContextMenu } from "@/modules/ai/components/CustomContextMenu";
@@ -658,9 +657,6 @@ export default function App() {
     activeTab,
   ]);
 
-  const [askPopup, setAskPopup] = useState<{ x: number; y: number } | null>(
-    null,
-  );
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
@@ -668,12 +664,6 @@ export default function App() {
     isTerminal: boolean;
   } | null>(null);
 
-  // Helper to ensure selections and right-clicks only trigger in standard workspace components
-  const isInsideSelectableArea = useCallback((t: EventTarget | null) => {
-    const el = t as HTMLElement | null;
-    if (!el) return false;
-    return !!(el.closest(".cm-editor") || el.closest(".xterm-screen"));
-  }, []);
 
   const handleCopy = useCallback(() => {
     const text = contextMenu?.selectionText ?? captureActiveSelection();
@@ -726,16 +716,6 @@ export default function App() {
   }, [activeId]);
 
   useEffect(() => {
-    const isInsideAi = (t: EventTarget | null) => {
-      const el = t as HTMLElement | null;
-      if (!el) return false;
-      return !!(
-        el.closest("[data-selection-ask-ai]") ||
-        el.closest("[data-ai-input-bar]") ||
-        el.closest("[data-ai-mini-window]")
-      );
-    };
-
     const handleContextMenu = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
       // Allow native context menu in input fields, textareas, and general contenteditables,
@@ -767,51 +747,13 @@ export default function App() {
         selectionText,
         isTerminal,
       });
-
-      // Dismiss the hover selection "Ask Kai" pill immediately on right-click contextmenu
-      // to prevent redundant overlapping menus
-      setAskPopup(null);
-    };
-
-    const onDown = (e: MouseEvent) => {
-      if (e.button !== 0) return; // Only handle left clicks for hover pill dismissals
-      if (isInsideAi(e.target)) return;
-      setAskPopup(null);
-    };
-    const onUp = (e: MouseEvent) => {
-      if (e.button !== 0) return; // Only trigger the hover pill on left-click text selections
-      if (isInsideAi(e.target)) return;
-      // Enforce editor/terminal selection boundary: never trigger the hover pill
-      // on standard layout text labels
-      if (!isInsideSelectableArea(e.target)) {
-        setAskPopup(null);
-        return;
-      }
-      // Defer one tick so xterm/CodeMirror finalize the selection.
-      setTimeout(() => {
-        const text = captureActiveSelection();
-        if (text && text.trim().length > 0) {
-          setAskPopup({ x: e.clientX, y: e.clientY });
-        } else {
-          setAskPopup(null);
-        }
-      }, 0);
     };
 
     document.addEventListener("contextmenu", handleContextMenu);
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("mouseup", onUp);
     return () => {
       document.removeEventListener("contextmenu", handleContextMenu);
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("mouseup", onUp);
     };
-  }, [captureActiveSelection, isInsideSelectableArea]);
-
-  const onAskFromSelection = useCallback(() => {
-    askFromSelection();
-    setAskPopup(null);
-  }, [askFromSelection]);
+  }, [captureActiveSelection]);
 
   const openNewTab = useCallback(() => {
     newTab(inheritedCwdForNewTab());
@@ -1643,15 +1585,6 @@ export default function App() {
 
           <AnimatePresence>
             {miniOpen && hasComposer ? <AiMiniWindow key="ai-mini" /> : null}
-            {askPopup ? (
-              <SelectionAskAi
-                key="ask-ai-popup"
-                x={askPopup.x}
-                y={askPopup.y}
-                onAsk={onAskFromSelection}
-                onDismiss={() => setAskPopup(null)}
-              />
-            ) : null}
             {contextMenu ? (
               <CustomContextMenu
                 key="custom-context-menu"
@@ -1665,7 +1598,7 @@ export default function App() {
                 onClearTerminal={handleClearTerminal}
                 onSplitRight={handleSplitRight}
                 onSplitDown={handleSplitDown}
-                onAskKai={onAskFromSelection}
+                onAskKai={askFromSelection}
                 onDismiss={() => setContextMenu(null)}
               />
             ) : null}
