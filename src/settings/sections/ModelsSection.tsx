@@ -540,7 +540,7 @@ function OpenAICompatibleBlock({
             onChange={setModelDraft}
             onBlur={(v) => { if (v !== modelId) void setOpenaiCompatibleModelId(v); }}
             baseUrl={urlDraft}
-            placeholder="gpt-5.5, qwen3-max, glm-5.2, …"
+            placeholder="gpt-5.5, qwen3.7-max, glm-5.2, …"
           />
         </FieldRow>
 
