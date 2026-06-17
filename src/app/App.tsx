@@ -25,6 +25,7 @@ import {
   SelectionAskAi,
   useChatStore,
 } from "@/modules/ai";
+import { CustomContextMenu } from "@/modules/ai/components/CustomContextMenu";
 import { ErrorPrompt } from "@/modules/ai/components/ErrorPrompt";
 import { ApiTesterPane } from "@/modules/api-tester/ApiTesterPane";
 import { AiComposerProvider } from "@/modules/ai/lib/composer";
@@ -660,6 +661,69 @@ export default function App() {
   const [askPopup, setAskPopup] = useState<{ x: number; y: number } | null>(
     null,
   );
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    selectionText: string | null;
+    isTerminal: boolean;
+  } | null>(null);
+
+  // Helper to ensure selections and right-clicks only trigger in standard workspace components
+  const isInsideSelectableArea = useCallback((t: EventTarget | null) => {
+    const el = t as HTMLElement | null;
+    if (!el) return false;
+    return !!(el.closest(".cm-editor") || el.closest(".xterm-screen"));
+  }, []);
+
+  const handleCopy = useCallback(() => {
+    const text = contextMenu?.selectionText ?? captureActiveSelection();
+    if (text) void navigator.clipboard.writeText(text);
+  }, [contextMenu, captureActiveSelection]);
+
+  const handlePaste = useCallback(async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!text) return;
+      const t = tabsRef.current.find((x) => x.id === activeId);
+      if (t?.kind === "terminal") {
+        // Inject cleanly into the active shell PTY session
+        const term = terminalRefs.current.get(t.activeLeafId);
+        if (term) term.write(text);
+      } else if (t?.kind === "editor") {
+        const editor = editorRefs.current.get(activeId);
+        if (editor) {
+          editor.focus();
+          document.execCommand("insertText", false, text);
+        }
+      }
+    } catch (e) {
+      console.error("Custom paste failed:", e);
+    }
+  }, [activeId]);
+
+  const handleSelectAll = useCallback(() => {
+    const t = tabsRef.current.find((x) => x.id === activeId);
+    if (t?.kind === "editor") {
+      const editor = editorRefs.current.get(activeId);
+      if (editor) {
+        editor.focus();
+        document.execCommand("selectAll");
+      }
+    } else if (t?.kind === "terminal") {
+      const term = terminalRefs.current.get(t.activeLeafId);
+      if (term && "selectAll" in term) {
+        (term as { selectAll?: () => void }).selectAll?.();
+      }
+    }
+  }, [activeId]);
+
+  const handleClearTerminal = useCallback(() => {
+    const t = tabsRef.current.find((x) => x.id === activeId);
+    if (t?.kind === "terminal") {
+      const term = terminalRefs.current.get(t.activeLeafId);
+      if (term) term.write("clear\r");
+    }
+  }, [activeId]);
 
   useEffect(() => {
     const isInsideAi = (t: EventTarget | null) => {
@@ -672,12 +736,51 @@ export default function App() {
       );
     };
 
+    const handleContextMenu = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      // Allow native context menu in input fields, textareas, and general contenteditables,
+      // EXCEPT inside CodeMirror's editable area (where we want our custom selection actions).
+      if (
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable) &&
+        !target.closest(".cm-content")
+      ) {
+        return;
+      }
+
+      e.preventDefault();
+
+      const isTerminal = !!target.closest(".xterm-screen");
+      const isEditor = !!target.closest(".cm-editor");
+      
+      // Do not open our custom context menu outside editor/terminal panes (e.g., standard UI borders)
+      if (!isTerminal && !isEditor) {
+        setContextMenu(null);
+        return;
+      }
+
+      const selectionText = captureActiveSelection();
+      setContextMenu({
+        x: e.clientX,
+        y: e.clientY,
+        selectionText,
+        isTerminal,
+      });
+    };
+
     const onDown = (e: MouseEvent) => {
       if (isInsideAi(e.target)) return;
       setAskPopup(null);
     };
     const onUp = (e: MouseEvent) => {
       if (isInsideAi(e.target)) return;
+      // Enforce editor/terminal selection boundary: never trigger the hover pill
+      // on standard layout text labels
+      if (!isInsideSelectableArea(e.target)) {
+        setAskPopup(null);
+        return;
+      }
       // Defer one tick so xterm/CodeMirror finalize the selection.
       setTimeout(() => {
         const text = captureActiveSelection();
@@ -689,13 +792,15 @@ export default function App() {
       }, 0);
     };
 
+    document.addEventListener("contextmenu", handleContextMenu);
     document.addEventListener("mousedown", onDown);
     document.addEventListener("mouseup", onUp);
     return () => {
+      document.removeEventListener("contextmenu", handleContextMenu);
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("mouseup", onUp);
     };
-  }, [captureActiveSelection]);
+  }, [captureActiveSelection, isInsideSelectableArea]);
 
   const onAskFromSelection = useCallback(() => {
     askFromSelection();
@@ -966,6 +1071,14 @@ export default function App() {
     },
     [activeId, splitActivePane],
   );
+
+  const handleSplitRight = useCallback(() => {
+    splitActivePaneInActiveTab("row");
+  }, [splitActivePaneInActiveTab]);
+
+  const handleSplitDown = useCallback(() => {
+    splitActivePaneInActiveTab("col");
+  }, [splitActivePaneInActiveTab]);
 
   const handleCloseTabOrPane = useCallback(() => {
     const t = tabsRef.current.find((x) => x.id === activeId);
@@ -1531,6 +1644,23 @@ export default function App() {
                 y={askPopup.y}
                 onAsk={onAskFromSelection}
                 onDismiss={() => setAskPopup(null)}
+              />
+            ) : null}
+            {contextMenu ? (
+              <CustomContextMenu
+                key="custom-context-menu"
+                x={contextMenu.x}
+                y={contextMenu.y}
+                selectionText={contextMenu.selectionText}
+                isTerminal={contextMenu.isTerminal}
+                onCopy={handleCopy}
+                onPaste={handlePaste}
+                onSelectAll={handleSelectAll}
+                onClearTerminal={handleClearTerminal}
+                onSplitRight={handleSplitRight}
+                onSplitDown={handleSplitDown}
+                onAskKai={onAskFromSelection}
+                onDismiss={() => setContextMenu(null)}
               />
             ) : null}
           </AnimatePresence>
