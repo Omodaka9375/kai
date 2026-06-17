@@ -183,6 +183,17 @@ export async function buildLanguageModel(
       })(resolvedModelId);
       break;
     }
+    case "zai": {
+      const { createOpenAICompatible } =
+        await import("@ai-sdk/openai-compatible");
+      built = createOpenAICompatible({
+        name: "zai",
+        baseURL: "https://api.z.ai/api/paas/v4",
+        apiKey: key,
+        fetch: cloudFetch,
+      })(resolvedModelId);
+      break;
+    }
     case "openai-compatible": {
       if (!compatURL) {
         throw new Error(

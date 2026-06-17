@@ -11,7 +11,8 @@ export type ProviderId =
   | "mistral"
   | "openrouter"
   | "openai-compatible"
-  | "lmstudio";
+  | "lmstudio"
+  | "zai";
 
 export type ProviderInfo = {
   id: ProviderId;
@@ -101,6 +102,13 @@ export const PROVIDERS: readonly ProviderInfo[] = [
     keyringAccount: "",
     keyPrefix: null,
     consoleUrl: "https://lmstudio.ai/docs/basics/server",
+  },
+  {
+    id: "zai",
+    label: "Z.ai (GLM)",
+    keyringAccount: "zai-api-key",
+    keyPrefix: null,
+    consoleUrl: "https://z.ai/model-api",
   },
 ] as const;
 
@@ -576,6 +584,44 @@ export const MODELS = [
     description: "Local GGUF models via LM Studio.",
     capabilities: { intelligence: 3, speed: 3, cost: 5 },
   },
+
+  // ── Z.ai (GLM) ─────────────────────────────────────────────────────────────
+  {
+    id: "glm-5.2",
+    provider: "zai",
+    label: "GLM 5.2",
+    hint: "Flagship",
+    description: "Latest 744B MoE flagship coding and reasoning model.",
+    capabilities: { intelligence: 5, speed: 4, cost: 5 },
+    tags: ["reasoning", "tools", "coding"],
+  },
+  {
+    id: "glm-5.2[1m]",
+    provider: "zai",
+    label: "GLM 5.2 (1M)",
+    hint: "Flagship",
+    description: "Zhipu's flagship with usable 1-million-token context.",
+    capabilities: { intelligence: 5, speed: 3, cost: 4 },
+    tags: ["reasoning", "tools", "coding"],
+  },
+  {
+    id: "glm-5.1",
+    provider: "zai",
+    label: "GLM 5.1",
+    hint: "Fast",
+    description: "Advanced reasoning with ultra-fast inference.",
+    capabilities: { intelligence: 4, speed: 5, cost: 5 },
+    tags: ["reasoning", "tools", "coding"],
+  },
+  {
+    id: "glm-4.7",
+    provider: "zai",
+    label: "GLM 4.7",
+    hint: "Stable",
+    description: "Production-stable GLM model.",
+    capabilities: { intelligence: 4, speed: 4, cost: 5 },
+    tags: ["tools", "coding"],
+  },
 ] as const satisfies readonly ModelInfo[];
 
 export type ModelId = (typeof MODELS)[number]["id"];
@@ -635,6 +681,10 @@ export const MODEL_CONTEXT_LIMITS: Record<string, number> = {
   "mistralai/mistral-large-latest": 128_000,
   "z-ai/glm-5.2": 200_000,
   "z-ai/glm-5.2[1m]": 1_000_000,
+  "glm-5.2": 200_000,
+  "glm-5.2[1m]": 1_000_000,
+  "glm-5.1": 200_000,
+  "glm-4.7": 128_000,
   "openai-compatible-custom": 128_000,
   "lmstudio-local": 32_000,
   "mistral-large-latest": 131_072,
@@ -687,6 +737,10 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
   "deepseek-reasoner": { input: 0.55, output: 2.19, cacheRead: 0.14 },
   "z-ai/glm-5.2": { input: 1.0, output: 3.2, cacheRead: 0.1 },
   "z-ai/glm-5.2[1m]": { input: 1.0, output: 3.2, cacheRead: 0.1 },
+  "glm-5.2": { input: 1.0, output: 3.2, cacheRead: 0.1 },
+  "glm-5.2[1m]": { input: 1.0, output: 3.2, cacheRead: 0.1 },
+  "glm-5.1": { input: 1.0, output: 3.2, cacheRead: 0.1 },
+  "glm-4.7": { input: 0.1, output: 0.1 },
   "qwen/qwen3.7-max": { input: 2.5, output: 7.5 },
   "qwen/qwen3.7-plus": { input: 2.5, output: 7.5 },
   "qwen/qwen3.6-27b": { input: 0.4, output: 1.6 },
@@ -741,6 +795,7 @@ export const DEFAULT_AUTOCOMPLETE_MODEL: Partial<Record<ProviderId, string>> = {
   deepseek: "deepseek-v4-flash",
   openrouter: "openai/gpt-5.4-mini",
   "openai-compatible": "",
+  zai: "glm-5.1",
 };
 
 /** Curated list of fast models suitable for inline completion (speed ≥ 4). */

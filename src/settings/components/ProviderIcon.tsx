@@ -26,6 +26,7 @@ const ICON_BY_PROVIDER = {
   openrouter: GlobeIcon,
   "openai-compatible": PlugIcon,
   lmstudio: ComputerIcon,
+  zai: CpuIcon,
 } as const satisfies Record<ProviderId, typeof ChatGptIcon>;
 
 type Props = {
