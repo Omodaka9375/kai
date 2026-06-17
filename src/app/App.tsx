@@ -767,13 +767,19 @@ export default function App() {
         selectionText,
         isTerminal,
       });
+
+      // Dismiss the hover selection "Ask Kai" pill immediately on right-click contextmenu
+      // to prevent redundant overlapping menus
+      setAskPopup(null);
     };
 
     const onDown = (e: MouseEvent) => {
+      if (e.button !== 0) return; // Only handle left clicks for hover pill dismissals
       if (isInsideAi(e.target)) return;
       setAskPopup(null);
     };
     const onUp = (e: MouseEvent) => {
+      if (e.button !== 0) return; // Only trigger the hover pill on left-click text selections
       if (isInsideAi(e.target)) return;
       // Enforce editor/terminal selection boundary: never trigger the hover pill
       // on standard layout text labels
