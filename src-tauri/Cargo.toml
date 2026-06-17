@@ -1,6 +1,6 @@
 [package]
 name = "KAI"
-version = "0.9.12"
+version = "0.9.13"
 description = "KAI — an open-source AI-native terminal emulator"
 authors = ["Omodaka9375"]
 edition = "2021"
