@@ -75,10 +75,15 @@ export function ExtensionsView() {
     if (cursor && !loading) void doFetch(search, cursor);
   };
 
-  const isInstalled = (name: string) =>
-    installedServers.some(
-      (s) => s.name === name || s.name === displayName(name),
+  const isInstalled = (s: McpRegistryEntry["server"]) => {
+    const targetName = s.title || displayName(s.name);
+    return installedServers.some(
+      (installed) =>
+        installed.name === s.name ||
+        installed.name === targetName ||
+        installed.name === displayName(s.name),
     );
+  };
 
   const install = (entry: McpRegistryEntry) => {
     const config = registryEntryToConfig(entry.server);
@@ -133,7 +138,7 @@ export function ExtensionsView() {
         <ul className="flex flex-col">
           {entries.map((entry) => {
             const s = entry.server;
-            const installed = isInstalled(s.name);
+            const installed = isInstalled(s);
             const hasStdio = s.packages?.some(
               (p) => p.transport.type === "stdio",
             );
@@ -261,7 +266,9 @@ function registryEntryToConfig(
   const remote = s.remotes?.[0];
   if (remote) {
     const transport =
-      remote.type === "sse" ? ("sse" as const) : ("http" as const);
+      (remote.type === "sse" || remote.type === "streamable-http")
+        ? ("sse" as const)
+        : ("http" as const);
     return {
       id: newMcpServerId(),
       name: s.title || displayName(s.name),

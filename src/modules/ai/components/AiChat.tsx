@@ -204,6 +204,9 @@ function stripLeakedTokens(text: string): string {
     // Strip raw leaked JSON tool-call payloads containing <|"|> delimiters
     .replace(/(?:^|,)?\s*\{[\s\S]*?(?:new_string|old_string|path|proposedContent|proposed_content)\s*:\s*<\|"\|>[\s\S]*?\}(?:\s*,?)?/gi, "")
     .replace(/<\|"\|>/g, "")
+    // Strip any trailing partial or incomplete tags/tokens at the very end of the text stream
+    .replace(/(?:<\|?|\|)[a-z_0-9\-]*$/i, "")
+    .replace(/<[a-z_0-9\-]*$/i, "")
     .trim();
 }
 

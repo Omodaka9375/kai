@@ -164,12 +164,27 @@ function Bridge({
     if (wasActive && runStatus === "idle" && messages.length > 0) {
       const last = messages[messages.length - 1];
       if (last?.role === "assistant" && shouldAutoNudge(last, nudgeCountRef.current)) {
+        const text = last.parts
+          .filter((p) => (p as { type?: string }).type === "text")
+          .map((p) => (p as { text?: string }).text ?? "")
+          .join(" ");
+        const isLeak = 
+          text.includes("<|tool_call") || 
+          text.includes("<|tool_call:") || 
+          text.includes("new_string:<|") || 
+          text.includes("proposedContent:") ||
+          (text.includes("<|\"|>") && text.includes("path:"));
+
+        const nudgeText = isLeak
+          ? "System correction: You generated raw JSON/text tool call parameters inside your response instead of executing the tool. Please execute the tool call using the proper native function-calling format."
+          : "Continue";
+
         nudgeCountRef.current++;
         // Small delay so the UI settles before the next request.
         setTimeout(() => {
           void chat.sendMessage({
             role: "user",
-            parts: [{ type: "text", text: "Continue" }],
+            parts: [{ type: "text", text: nudgeText }],
           });
         }, 300);
       } else {
@@ -462,14 +477,25 @@ function shouldAutoNudge(msg: UIMessage, nudgesSoFar: number): boolean {
   const text = parts
     .filter((p) => (p as { type?: string }).type === "text")
     .map((p) => (p as { text?: string }).text ?? "")
-    .join(" ")
-    .toLowerCase();
+    .join(" ");
+
+  // Check if the text contains raw leaked JSON tool-call tokens/delimiters
+  const hasLeakedToolCall = 
+    text.includes("<|tool_call") || 
+    text.includes("<|tool_call:") || 
+    text.includes("new_string:<|") || 
+    text.includes("proposedContent:") ||
+    (text.includes("<|\"|>") && text.includes("path:"));
+
+  if (hasLeakedToolCall) return true;
+
+  const lowerText = text.toLowerCase();
   const intentPatterns = [
     /\b(?:let me|i(?:'ll| will| need to| should| can))\s+(?:read|check|look|examine|open|search|scan|grep|find|review|analyze|inspect|explore)/,
     /\b(?:first|now),?\s+(?:i(?:'ll| will| need to))\b/,
     /\b(?:let's|i'm going to)\s+(?:start|begin|take a look)/,
   ];
-  return intentPatterns.some((re) => re.test(text));
+  return intentPatterns.some((re) => re.test(lowerText));
 }
 
 async function readOriginal(
