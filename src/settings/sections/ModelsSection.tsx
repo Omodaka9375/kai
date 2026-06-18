@@ -118,7 +118,11 @@ export function ModelsSection() {
         </div>
       </div>
 
+      <MediaProvidersBlock />
+
       <LocalModelsBlock />
+
+      <ComfyUIBlock />
 
       <OpenAICompatibleBlock
         compatKey={keys["openai-compatible"]}
@@ -127,10 +131,6 @@ export function ModelsSection() {
       />
 
       <AutocompleteBlock keys={keys} />
-
-      <MediaProvidersBlock />
-
-      <ComfyUIBlock />
     </div>
   );
 }

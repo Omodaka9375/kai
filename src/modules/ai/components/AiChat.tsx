@@ -323,7 +323,7 @@ export function AiChatView({
         {showDone && (
           <div className="flex items-center gap-1.5 px-1 text-[11px] text-emerald-600 dark:text-emerald-400">
             <span className="size-1.5 rounded-full bg-emerald-500" />
-            Done
+            Stopped
           </div>
         )}
         {showContinue && (

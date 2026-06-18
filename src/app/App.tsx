@@ -102,8 +102,8 @@ function dirname(path: string | null): string | null {
   return normalized.slice(0, idx);
 }
 
-const SIDEBAR_DEFAULT_WIDTH = 200;
-const SIDEBAR_MIN_WIDTH = 200;
+const SIDEBAR_DEFAULT_WIDTH = 150;
+const SIDEBAR_MIN_WIDTH = 150;
 const SIDEBAR_MAX_WIDTH = 480;
 const SIDEBAR_WIDTH_STORAGE_KEY = "Kai.sidebar.width";
 const SIDEBAR_VIEW_STORAGE_KEY = "Kai.sidebar.view";
