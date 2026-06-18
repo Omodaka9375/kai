@@ -2,7 +2,7 @@ import { cn } from "@/lib/utils";
 import { useChatStore, type AutoApproveMode } from "../store/chatStore";
 
 const LABELS: Record<AutoApproveMode, string> = {
-  off: "Manual",
+  off: "Ask",
   edits: "Auto: edits",
   all: "Auto: all",
 };

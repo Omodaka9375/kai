@@ -33,9 +33,20 @@ export function TodoStrip({ sessionId, isBusy, onStop }: Props) {
     if (todos.length > 5) setExpanded(false);
   }, [todos.length > 5]);
 
+  const clearSession = useTodosStore((s) => s.clearSession);
+
   useEffect(() => {
     if (sessionId) void hydrate(sessionId);
   }, [sessionId, hydrate]);
+
+  // Auto-close and remove todo list when all items are completed
+  useEffect(() => {
+    if (!sessionId || todos.length === 0) return;
+    const allCompleted = todos.every((t) => t.status === "completed");
+    if (allCompleted) {
+      void clearSession(sessionId);
+    }
+  }, [todos, sessionId, clearSession]);
 
   if (!sessionId || (todos.length === 0 && !isBusy)) return null;
 
@@ -60,6 +71,19 @@ export function TodoStrip({ sessionId, isBusy, onStop }: Props) {
 
   const completed = todos.filter((t) => t.status === "completed").length;
   const pct = Math.round((completed / todos.length) * 100);
+
+  const toggleTodo = (todoId: string) => {
+    if (!sessionId) return;
+    const nextTodos = todos.map((t) =>
+      t.id === todoId
+        ? {
+            ...t,
+            status: t.status === "completed" ? "pending" as const : "completed" as const,
+          }
+        : t,
+    );
+    useTodosStore.getState().setTodos(sessionId, nextTodos);
+  };
 
   return (
     <div className="shrink-0 border-t border-border/80 bg-muted/20 px-3 py-1.5">
@@ -96,7 +120,7 @@ export function TodoStrip({ sessionId, isBusy, onStop }: Props) {
       {expanded && (
         <ul className="flex flex-col gap-0.5">
           {todos.map((t) => (
-            <TodoRow key={t.id} todo={t} />
+            <TodoRow key={t.id} todo={t} onToggle={() => toggleTodo(t.id)} />
           ))}
         </ul>
       )}
@@ -104,12 +128,13 @@ export function TodoStrip({ sessionId, isBusy, onStop }: Props) {
   );
 }
 
-function TodoRow({ todo }: { todo: Todo }) {
+function TodoRow({ todo, onToggle }: { todo: Todo; onToggle: () => void }) {
   const isInProgress = todo.status === "in_progress";
   const row = (
     <li
+      onClick={onToggle}
       className={cn(
-        "flex items-start gap-2 rounded px-1.5 py-1 text-[11px] leading-snug",
+        "flex items-start gap-2 rounded px-1.5 py-1 text-[11px] leading-snug cursor-pointer hover:bg-muted/40 transition-colors",
         isInProgress && "border-l-2 border-foreground/50 bg-muted/40",
       )}
     >

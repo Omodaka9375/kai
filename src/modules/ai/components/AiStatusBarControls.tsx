@@ -145,6 +145,12 @@ export function AiStatusBarControls() {
       <ModelDropdown />
 
       <span className="mx-1 h-8 w-px bg-border" aria-hidden />
+      <IconBtn
+        title={miniOpen ? "Close conversation" : "Open conversation"}
+        onClick={toggleMini}
+      >
+        <HugeiconsIcon icon={Message01Icon} size={13} strokeWidth={1.75} />
+      </IconBtn>
       <Button
         onClick={closePanel}
         title="Close AI panel"
@@ -157,12 +163,7 @@ export function AiStatusBarControls() {
           {fmtShortcut(MOD_KEY, "I")}
         </Kbd>
       </Button>
-      <IconBtn
-        title={miniOpen ? "Close conversation" : "Open conversation"}
-        onClick={toggleMini}
-      >
-        <HugeiconsIcon icon={Message01Icon} size={13} strokeWidth={1.75} />
-      </IconBtn>
+
 
     </div>
   );
