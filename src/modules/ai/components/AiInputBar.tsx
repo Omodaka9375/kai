@@ -245,7 +245,7 @@ export function AiInputBar() {
 
         <Popover open={pickerOpen}>
           <PopoverAnchor asChild>
-            <div className="flex items-start gap-2">
+            <div className="flex items-center gap-2">
               <textarea
                 ref={c.textareaRef}
                 value={c.value}

@@ -251,14 +251,40 @@ pub async fn lm_list_models(base_url: String) -> Result<Vec<String>, String> {
         return Err(format!("server returned {}", resp.status()));
     }
     let body: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-    let models = body["data"]
-        .as_array()
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|m| m["id"].as_str().map(|s| s.to_string()))
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
+    let mut models = Vec::new();
+
+    if let Some(arr) = body.as_array() {
+        for m in arr {
+            if let Some(s) = m.as_str() {
+                models.push(s.to_string());
+            } else if let Some(id) = m["id"].as_str() {
+                models.push(id.to_string());
+            } else if let Some(name) = m["name"].as_str() {
+                models.push(name.to_string());
+            }
+        }
+    } else if let Some(arr) = body["data"].as_array() {
+        for m in arr {
+            if let Some(s) = m.as_str() {
+                models.push(s.to_string());
+            } else if let Some(id) = m["id"].as_str() {
+                models.push(id.to_string());
+            } else if let Some(name) = m["name"].as_str() {
+                models.push(name.to_string());
+            }
+        }
+    } else if let Some(arr) = body["models"].as_array() {
+        for m in arr {
+            if let Some(s) = m.as_str() {
+                models.push(s.to_string());
+            } else if let Some(id) = m["id"].as_str() {
+                models.push(id.to_string());
+            } else if let Some(name) = m["name"].as_str() {
+                models.push(name.to_string());
+            }
+        }
+    }
+
     Ok(models)
 }
 

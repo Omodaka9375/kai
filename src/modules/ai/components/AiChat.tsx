@@ -194,13 +194,16 @@ function stripLeakedTokens(text: string): string {
     .replace(/<\|(?:start|end)_of_thought\|>/gi, "")
     .replace(/<\|thinking\|>[\s\S]*?<\| \/thinking\|>/gi, "")
     .replace(/<\|thinking\|>[\s\S]*?<\|?\/thinking\|>/gi, "")
-    .replace(/<\|im_(?:start|end)\|>[^\n]*/g, "")
+    .replace(/<\|im_(?:start|end)\\|>[^\n]*/g, "")
     // Raw tool call syntax leaked by Gemma 4 and similar models.
     .replace(/<\|?tool_call_?[a-z_]*\|?>/gi, "")
     .replace(/<\|?\/tool_call_?[a-z_]*\|?>/gi, "")
     .replace(/call:[a-z_]+\{[^}]*\}(?:<[^>]*>)*/gi, "")
     .replace(/<tool_call>/gi, "")
     .replace(/<\/tool_call>/gi, "")
+    // Strip raw leaked JSON tool-call payloads containing <|"|> delimiters
+    .replace(/(?:^|,)?\s*\{[\s\S]*?(?:new_string|old_string|path|proposedContent|proposed_content)\s*:\s*<\|"\|>[\s\S]*?\}(?:\s*,?)?/gi, "")
+    .replace(/<\|"\|>/g, "")
     .trim();
 }
 

@@ -413,7 +413,7 @@ function SessionPicker() {
         <button
           type="button"
           className={cn(
-            "flex min-w-0 max-w-48 items-center gap-1 rounded-md px-1.5 py-1",
+            "flex min-w-0 max-w-32 items-center gap-1 rounded-md px-1.5 py-1",
             "text-[11px] text-muted-foreground transition-colors",
             "hover:bg-accent hover:text-foreground",
           )}
@@ -428,7 +428,7 @@ function SessionPicker() {
           />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-56">
+      <DropdownMenuContent align="start" className="min-w-56 max-w-64">
         <DropdownMenuItem
           onSelect={() => newSession()}
           className="gap-2 text-xs"
