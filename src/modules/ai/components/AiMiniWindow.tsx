@@ -38,6 +38,8 @@ import { AgentSwitcher } from "./AgentSwitcher";
 import { AiChatView } from "./AiChat";
 import { PlanDiffReview } from "./PlanDiffReview";
 import { TodoStrip } from "./TodoStrip";
+import { useComposer } from "../lib/composer";
+import { cancelAllShellSessions } from "../tools/shell";
 
 const SUGGESTIONS = [
   {
@@ -124,6 +126,7 @@ function Body({
   onExpand: () => void;
 }) {
   const focusInput = useChatStore((s) => s.focusInput);
+  const c = useComposer();
 
   const chat = useMemo(() => getOrCreateChat(sessionId), [sessionId]);
   const helpers = useChat<UIMessage>({ chat });
@@ -155,7 +158,14 @@ function Body({
         )}
       </div>
 
-      <TodoStrip sessionId={sessionId} />
+      <TodoStrip
+        sessionId={sessionId}
+        isBusy={c.isBusy}
+        onStop={() => {
+          cancelAllShellSessions();
+          c.stop();
+        }}
+      />
     </>
   );
 }

@@ -34,7 +34,6 @@ import {
   Search01Icon,
   Settings01Icon,
   StarIcon,
-  StopCircleIcon,
   Tick01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -51,7 +50,6 @@ import {
 } from "../config";
 import { ACCEPTED_FILES, useComposer } from "../lib/composer";
 import { toggleFavoriteModel } from "../lib/modelPrefs";
-import { cancelAllShellSessions } from "../tools/shell";
 import { useChatStore } from "../store/chatStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 
@@ -166,22 +164,6 @@ export function AiStatusBarControls() {
         <HugeiconsIcon icon={Message01Icon} size={13} strokeWidth={1.75} />
       </IconBtn>
 
-      {c.isBusy && (
-        <Button
-          type="button"
-          size="icon"
-          variant="ghost"
-          onClick={() => {
-            cancelAllShellSessions();
-            c.stop();
-          }}
-          className="size-6"
-          aria-label="Stop"
-          title="Stop"
-        >
-          <HugeiconsIcon icon={StopCircleIcon} size={13} strokeWidth={1.75} />
-        </Button>
-      )}
     </div>
   );
 }

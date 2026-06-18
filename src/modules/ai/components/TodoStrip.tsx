@@ -7,17 +7,21 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { ArrowDown01Icon, ArrowRight01Icon, CheckmarkSquare02Icon, SquareIcon } from "@hugeicons/core-free-icons";
+import { ArrowDown01Icon, ArrowRight01Icon, CheckmarkSquare02Icon, SquareIcon, StopCircleIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useState } from "react";
 import type { Todo } from "../lib/todos";
 import { useTodosStore } from "../store/todoStore";
 
-type Props = { sessionId: string | null };
+type Props = {
+  sessionId: string | null;
+  isBusy?: boolean;
+  onStop?: () => void;
+};
 
 const EMPTY_TODOS: Todo[] = [];
 
-export function TodoStrip({ sessionId }: Props) {
+export function TodoStrip({ sessionId, isBusy, onStop }: Props) {
   const hydrate = useTodosStore((s) => s.hydrate);
   const todos =
     useTodosStore((s) => (sessionId ? s.bySession[sessionId] : undefined)) ??
@@ -33,7 +37,26 @@ export function TodoStrip({ sessionId }: Props) {
     if (sessionId) void hydrate(sessionId);
   }, [sessionId, hydrate]);
 
-  if (!sessionId || todos.length === 0) return null;
+  if (!sessionId || (todos.length === 0 && !isBusy)) return null;
+
+  if (todos.length === 0) {
+    return (
+      <div className="flex shrink-0 items-center justify-between border-t border-border/80 bg-muted/20 px-3 py-1.5 h-8">
+        <span className="text-[11px] text-muted-foreground flex items-center gap-1.5">
+          <Spinner className="size-3" />
+          <span>Agent running…</span>
+        </span>
+        <button
+          type="button"
+          onClick={onStop}
+          className="flex size-4 items-center justify-center rounded bg-muted hover:bg-muted-foreground/20 text-muted-foreground transition-colors hover:text-foreground cursor-pointer"
+          title="Stop agent"
+        >
+          <HugeiconsIcon icon={StopCircleIcon} size={9} strokeWidth={2} />
+        </button>
+      </div>
+    );
+  }
 
   const completed = todos.filter((t) => t.status === "completed").length;
   const pct = Math.round((completed / todos.length) * 100);
@@ -56,6 +79,19 @@ export function TodoStrip({ sessionId }: Props) {
         <span className="text-[11px] tabular-nums font-mono text-muted-foreground">
           {completed}/{todos.length}
         </span>
+        {isBusy && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onStop?.();
+            }}
+            className="ml-1.5 flex size-4 shrink-0 items-center justify-center rounded bg-muted hover:bg-muted-foreground/20 text-muted-foreground transition-colors hover:text-foreground cursor-pointer"
+            title="Stop agent"
+          >
+            <HugeiconsIcon icon={StopCircleIcon} size={10} strokeWidth={1} />
+          </button>
+        )}
       </button>
       {expanded && (
         <ul className="flex flex-col gap-0.5">

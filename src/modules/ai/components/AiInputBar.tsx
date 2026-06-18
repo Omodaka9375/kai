@@ -18,7 +18,6 @@ import { SLASH_COMMANDS } from "../lib/slashCommands";
 import type { Snippet } from "../lib/snippets";
 import { useChatStore } from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
-import { AgentSwitcher } from "./AgentSwitcher";
 import { AutoApproveToggle } from "./AutoApproveToggle";
 import { FilePickerContent } from "./FilePicker";
 import { SnippetPickerContent, type PickerItem } from "./SnippetPicker";
@@ -296,7 +295,6 @@ export function AiInputBar() {
                 )}
               />
               <AutoApproveToggle />
-              <AgentSwitcher />
             </div>
           </PopoverAnchor>
           {fileTrigger ? (
