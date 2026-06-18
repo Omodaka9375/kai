@@ -213,8 +213,15 @@ export function AiInputBar() {
       ? "Transcribing…"
       : null;
 
+  const hasChips = c.files.length > 0 || c.pickedSnippets.length > 0 || c.pickedCommands.length > 0;
+
   return (
-    <div className="shrink-0 border-t border-border/60 bg-card/40 px-3 py-2">
+    <div
+      className={cn(
+        "shrink-0 border-t border-border/60 bg-card/40 px-3 flex flex-col justify-center",
+        hasChips ? "py-2 min-h-[42px]" : "h-[42px] py-0"
+      )}
+    >
       <div
         className={cn(
           "flex flex-col gap-1.5 rounded-lg px-1 py-1",
