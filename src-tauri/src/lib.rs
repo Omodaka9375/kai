@@ -51,10 +51,7 @@ async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Res
         .inner_size(860.0, 640.0)
         .min_inner_size(720.0, 520.0)
         .resizable(true)
-        .visible(false)
-        // Keep settings above the main app window so it doesn't get hidden
-        // when the user clicks back into the editor or terminal (#33).
-        .always_on_top(true);
+        .visible(false);
 
     // Tie lifecycle to the main window so settings minimizes/closes with it.
     if let Some(main) = app.get_webview_window("main") {
