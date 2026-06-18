@@ -141,6 +141,12 @@ export const native = {
       content,
       workspace: currentWorkspaceEnv(),
     }),
+  writeFileBytes: (path: string, bytes: number[]) =>
+    invoke<void>("fs_write_file_bytes", {
+      path,
+      bytes,
+      workspace: currentWorkspaceEnv(),
+    }),
   canonicalize: (path: string) =>
     invoke<string>("fs_canonicalize", {
       path,

@@ -181,3 +181,47 @@ pub fn fs_stat(path: String, workspace: Option<WorkspaceEnv>) -> Result<FileStat
         kind,
     })
 }
+
+/// Write raw binary bytes — used by the document generator in the frontend.
+#[tauri::command]
+pub fn fs_write_file_bytes(
+    path: String,
+    bytes: Vec<u8>,
+    workspace: Option<WorkspaceEnv>,
+) -> Result<(), String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    let target = resolve_path(&path, &workspace);
+    let parent = target
+        .parent()
+        .ok_or_else(|| "path has no parent".to_string())?;
+    let file_name = target
+        .file_name()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| "path has no file name".to_string())?;
+
+    let tmp = parent.join(format!(".{file_name}.KAI.tmp"));
+
+    {
+        let mut f = std::fs::File::create(&tmp).map_err(|e| {
+            log::debug!("fs_write_file_bytes create({}) failed: {e}", tmp.display());
+            e.to_string()
+        })?;
+        f.write_all(&bytes).map_err(|e| {
+            log::debug!("fs_write_file_bytes write({}) failed: {e}", tmp.display());
+            e.to_string()
+        })?;
+        f.sync_all().map_err(|e| e.to_string())?;
+    }
+
+    std::fs::rename(&tmp, &target).map_err(|e| {
+        log::warn!(
+            "fs_write_file_bytes rename({} -> {}) failed: {e}",
+            tmp.display(),
+            target.display()
+        );
+        let _ = std::fs::remove_file(&tmp);
+        e.to_string()
+    })?;
+
+    Ok(())
+}

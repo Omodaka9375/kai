@@ -1,6 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { isDocumentFile, parseDocument } from "../lib/documentParser";
+import { isDocumentFile, parseDocument, parseDocx } from "../lib/documentParser";
 import { native } from "../lib/native";
 import {
   checkReadableCanonical,
@@ -271,6 +271,208 @@ export function buildFsTools(ctx: ToolContext) {
           return { path: abs, ok: true };
         } catch (e) {
           return { error: String(e), path: abs };
+        }
+      },
+    }),
+
+    convert_to_pdf: tool({
+      description:
+        "Convert an existing .md, .txt, or .docx file into a professionally formatted PDF. Parent directories for target path are created automatically. Always asks the user before running.",
+      inputSchema: z.object({
+        sourcePath: z
+          .string()
+          .describe("Absolute path to the source file (.md, .txt, .docx), or relative to the active terminal cwd."),
+        targetPath: z
+          .string()
+          .optional()
+          .describe("Optional target PDF path. Defaults to the same directory and base name with a .pdf extension."),
+      }),
+      needsApproval: true,
+      execute: async ({ sourcePath, targetPath }) => {
+        const absSource = resolvePath(sourcePath, ctx.getCwd());
+        const safetySource = await checkReadableCanonical(absSource, native.canonicalize);
+        if (!safetySource.ok) return { error: safetySource.reason, path: absSource };
+        const resolvedSource = safetySource.canonical;
+
+        // Auto-determine target path if not provided
+        let resolvedTarget = "";
+        if (targetPath) {
+          const absTarget = resolvePath(targetPath, ctx.getCwd());
+          const safetyTarget = await checkWritableCanonical(absTarget, native.canonicalize);
+          if (!safetyTarget.ok) return { error: safetyTarget.reason, path: absTarget };
+          resolvedTarget = safetyTarget.canonical;
+        } else {
+          // Replace extension of source file with .pdf
+          const lastDot = resolvedSource.lastIndexOf(".");
+          const base = lastDot !== -1 ? resolvedSource.slice(0, lastDot) : resolvedSource;
+          resolvedTarget = `${base}.pdf`;
+          const safetyTarget = await checkWritableCanonical(resolvedTarget, native.canonicalize);
+          if (!safetyTarget.ok) return { error: safetyTarget.reason, path: resolvedTarget };
+          resolvedTarget = safetyTarget.canonical;
+        }
+
+        try {
+          // Read source file text
+          let text = "";
+          const isDocx = resolvedSource.toLowerCase().endsWith(".docx");
+          
+          if (isDocx) {
+            text = await parseDocx(resolvedSource);
+          } else {
+            const r = await native.readFile(resolvedSource);
+            if (r.kind === "binary") {
+              return { error: "Cannot convert binary source file to PDF", path: resolvedSource };
+            }
+            if (r.kind === "toolarge") {
+              return { error: "Source file is too large for conversion", path: resolvedSource };
+            }
+            text = r.content;
+          }
+
+          // Generate PDF
+          const { jsPDF } = await import("jspdf");
+          const doc = new jsPDF();
+          const pageWidth = doc.internal.pageSize.getWidth();
+          const pageHeight = doc.internal.pageSize.getHeight();
+          const margin = 20;
+          const contentWidth = pageWidth - margin * 2;
+
+          const lines = text.split("\n");
+          let y = margin;
+
+          function checkNewPage(neededHeight: number) {
+            if (y + neededHeight > pageHeight - margin) {
+              doc.addPage();
+              y = margin;
+            }
+          }
+
+          let inCodeBlock = false;
+
+          for (let i = 0; i < lines.length; i++) {
+            const rawLine = lines[i].trim();
+            
+            // Code block toggle
+            if (rawLine.startsWith("```")) {
+              inCodeBlock = !inCodeBlock;
+              continue;
+            }
+
+            if (inCodeBlock) {
+              doc.setFont("courier", "normal");
+              doc.setFontSize(9);
+              doc.setTextColor(80, 80, 80);
+              const codeLines = doc.splitTextToSize(lines[i], contentWidth - 10);
+              for (const codeLine of codeLines) {
+                checkNewPage(5);
+                doc.text(codeLine, margin + 5, y);
+                y += 5;
+              }
+              continue;
+            }
+
+            if (rawLine.startsWith("# ")) {
+              const headingText = rawLine.slice(2);
+              doc.setFont("helvetica", "bold");
+              doc.setFontSize(18);
+              doc.setTextColor(33, 37, 41);
+              const headingLines = doc.splitTextToSize(headingText, contentWidth);
+              y += 4;
+              for (const line of headingLines) {
+                checkNewPage(8);
+                doc.text(line, margin, y);
+                y += 8;
+              }
+              y += 4;
+            } else if (rawLine.startsWith("## ")) {
+              const headingText = rawLine.slice(3);
+              doc.setFont("helvetica", "bold");
+              doc.setFontSize(14);
+              doc.setTextColor(33, 37, 41);
+              const headingLines = doc.splitTextToSize(headingText, contentWidth);
+              y += 3;
+              for (const line of headingLines) {
+                checkNewPage(7);
+                doc.text(line, margin, y);
+                y += 7;
+              }
+              y += 3;
+            } else if (rawLine.startsWith("### ")) {
+              const headingText = rawLine.slice(4);
+              doc.setFont("helvetica", "bold");
+              doc.setFontSize(12);
+              doc.setTextColor(33, 37, 41);
+              const headingLines = doc.splitTextToSize(headingText, contentWidth);
+              y += 2;
+              for (const line of headingLines) {
+                checkNewPage(6);
+                doc.text(line, margin, y);
+                y += 6;
+              }
+              y += 2;
+            } else if (rawLine.startsWith("- ") || rawLine.startsWith("* ")) {
+              const itemText = rawLine.slice(2);
+              doc.setFont("helvetica", "normal");
+              doc.setFontSize(10.5);
+              doc.setTextColor(50, 50, 50);
+              const itemLines = doc.splitTextToSize(itemText, contentWidth - 8);
+              let isFirstLine = true;
+              for (const line of itemLines) {
+                checkNewPage(6);
+                if (isFirstLine) {
+                  doc.text("•", margin + 2, y);
+                  doc.text(line, margin + 8, y);
+                  isFirstLine = false;
+                } else {
+                  doc.text(line, margin + 8, y);
+                }
+                y += 6;
+              }
+              y += 1.5;
+            } else if (rawLine === "") {
+              y += 4;
+            } else {
+              doc.setFont("helvetica", "normal");
+              doc.setFontSize(10.5);
+              doc.setTextColor(50, 50, 50);
+              const pLines = doc.splitTextToSize(lines[i], contentWidth);
+              for (const line of pLines) {
+                checkNewPage(6);
+                doc.text(line, margin, y);
+                y += 6;
+              }
+            }
+          }
+
+          // Auto-create parent directories for target file
+          const lastSep = Math.max(resolvedTarget.lastIndexOf("/"), resolvedTarget.lastIndexOf("\\"));
+          if (lastSep > 0) {
+            const parentDir = resolvedTarget.slice(0, lastSep);
+            try {
+              await native.createDir(parentDir);
+            } catch {
+              // already exists
+            }
+          }
+
+          // Output binary bytes
+          const arrayBuffer = doc.output("arraybuffer");
+          const uint8Array = new Uint8Array(arrayBuffer);
+          const bytes = Array.from(uint8Array);
+
+          // Write bytes to disk
+          await native.writeFileBytes(resolvedTarget, bytes);
+          window.dispatchEvent(new CustomEvent("Kai:fs-changed", { detail: resolvedTarget }));
+
+          return {
+            sourcePath: resolvedSource,
+            targetPath: resolvedTarget,
+            bytesWritten: bytes.length,
+            ok: true,
+            message: `Successfully converted and saved PDF to ${resolvedTarget}`,
+          };
+        } catch (e) {
+          return { error: String(e), sourcePath: resolvedSource, targetPath: resolvedTarget };
         }
       },
     }),

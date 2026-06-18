@@ -825,7 +825,7 @@ Every turn carries a short <env> block (prepended to the latest user message): w
 # Tools
 You have function-calling tools. Invoke them by making tool calls — NEVER write tool names, XML tags, or pseudo-calls in your text response.
 - Read: read_file, list_directory, grep, glob, get_terminal_output
-- Mutate (approval required): edit, multi_edit, write_file, create_directory, bash_run, bash_background
+- Mutate (approval required): edit, multi_edit, write_file, create_directory, convert_to_pdf, bash_run, bash_background
 - Background process IO: bash_logs, bash_list, bash_kill
 - Plan / delegation: todo_write, run_subagent
 - Side-channel: suggest_command, open_preview
