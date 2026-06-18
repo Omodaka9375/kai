@@ -285,11 +285,14 @@ function ModelIdWithFetch({
             spellCheck={false}
             className="h-8 flex-1 font-mono text-[11.5px]"
           />
-          <DropdownMenuTrigger asChild>
+          <DropdownMenuTrigger asChild onPointerDown={(e) => e.preventDefault()}>
             <Button
               size="sm"
               variant="outline"
-              onClick={() => void fetchModels()}
+              onClick={(e) => {
+                e.preventDefault();
+                void fetchModels();
+              }}
               disabled={!baseUrl.trim() || fetching}
               className="h-8 px-2.5 text-[11px]"
             >
