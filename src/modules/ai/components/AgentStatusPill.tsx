@@ -75,6 +75,6 @@ function describe(meta: AgentMeta): {
     tone:
       "border-border/60 bg-card text-muted-foreground hover:text-foreground",
     icon: <Spinner className="size-3" />,
-    label: meta.step ?? "Thinking…",
+    label: meta.step ?? "Thinking",
   };
 }

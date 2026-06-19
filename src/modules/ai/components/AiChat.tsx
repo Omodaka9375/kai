@@ -40,7 +40,7 @@ import type {
   UIMessage,
   UIMessagePart,
 } from "ai";
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { AiToolApproval } from "./AiToolApproval";
 import { MediaMessage, isMediaOutput } from "./MediaMessage";
 
@@ -315,8 +315,8 @@ export function AiChatView({
           </div>
         )}
         {showSpinner && (
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Spinner />
+          <div className="flex items-center gap-2.5 text-xs text-muted-foreground">
+            <GameOfLifeSpinner />
             <span className="truncate">{step ?? "Thinking…"}</span>
           </div>
         )}
@@ -566,6 +566,73 @@ function buildPartGroups(parts: AnyPart[]): Group[] {
   });
   flushRun();
   return out;
+}
+
+const GOL_WIDTH = 24;
+const GLIDER_PATTERN = [[0, 0], [1, 1], [2, 1], [0, 2], [1, 0]];
+
+export function GameOfLifeSpinner() {
+  const [row, setRow] = useState<number[]>(() => {
+    const arr = Array(GOL_WIDTH).fill(0);
+    const startX = Math.floor(Math.random() * (GOL_WIDTH - 4));
+    for (const [dx] of GLIDER_PATTERN) {
+      arr[(startX + dx) % GOL_WIDTH] = 1;
+    }
+    for (let i = 0; i < GOL_WIDTH / 6; i++) {
+      arr[Math.floor(Math.random() * GOL_WIDTH)] = 1;
+    }
+    return arr;
+  });
+
+  useEffect(() => {
+    const step = () => {
+      setRow((prev) => {
+        const next = Array(GOL_WIDTH).fill(0);
+        const w = GOL_WIDTH;
+        for (let x = 0; x < w; x++) {
+          const n =
+            prev[(x - 1 + w) % w] + prev[x] + prev[(x + 1) % w] +
+            prev[(x - 1 + w) % w]           + prev[(x + 1) % w] +
+            prev[(x - 1 + w) % w] + prev[x] + prev[(x + 1) % w];
+          const cur = prev[x];
+          next[x] = (cur && (n === 2 || n === 3)) || (!cur && n === 3) ? 1 : 0;
+        }
+
+        const sum = next.reduce((a, b) => a + b, 0);
+        if (sum === 0 || next.every((v, i) => v === prev[i])) {
+          const arr = Array(GOL_WIDTH).fill(0);
+          const startX = Math.floor(Math.random() * (GOL_WIDTH - 4));
+          for (const [dx] of GLIDER_PATTERN) {
+            arr[(startX + dx) % GOL_WIDTH] = 1;
+          }
+          for (let i = 0; i < GOL_WIDTH / 6; i++) {
+            arr[Math.floor(Math.random() * GOL_WIDTH)] = 1;
+          }
+          return arr;
+        }
+        return next;
+      });
+    };
+
+    const interval = setInterval(step, 100);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <span className="inline-flex items-center gap-[1px] font-mono text-[10px] text-muted-foreground/60 select-none tracking-normal">
+      {row.map((val, idx) => (
+        <span
+          key={idx}
+          className={cn(
+            "transition-colors duration-100",
+            val === 1 ? "text-primary" : "text-muted-foreground/35"
+          )}
+        >
+          {val === 1 ? "█" : "·"}
+        </span>
+      ))}
+    </span>
+  );
 }
 
 function readPathFromPart(p: AnyPart): string | null {

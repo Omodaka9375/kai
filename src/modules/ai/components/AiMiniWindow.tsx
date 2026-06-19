@@ -66,6 +66,7 @@ export function AiMiniWindow() {
   const closeMini = useChatStore((s) => s.closeMini);
   const sessionId = useChatStore((s) => s.activeSessionId);
   const [expanded, setExpanded] = useState(false);
+  const c = useComposer();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -73,12 +74,18 @@ export function AiMiniWindow() {
         const target = e.target as HTMLElement | null;
         const tag = target?.tagName;
         if (tag === "INPUT" || tag === "TEXTAREA") return;
-        closeMini();
+        if (c.isBusy) {
+          e.preventDefault();
+          cancelAllShellSessions();
+          c.stop();
+        } else {
+          closeMini();
+        }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [closeMini]);
+  }, [closeMini, c.isBusy, c.stop]);
 
   return (
     <motion.div
