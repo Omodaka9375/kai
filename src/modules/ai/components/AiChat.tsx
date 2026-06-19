@@ -239,7 +239,6 @@ export function AiChatView({
     status === "streaming" && lastMessage?.role === "assistant"
       ? lastMessage.id
       : null;
-  const step = useChatStore((s) => s.agentMeta.step);
   const hitStepCap = useChatStore((s) => s.agentMeta.hitStepCap);
   const compactionNotice = useChatStore((s) => s.agentMeta.compactionNotice);
   const summarizing = useChatStore((s) => s.agentMeta.summarizing);
@@ -315,9 +314,8 @@ export function AiChatView({
           </div>
         )}
         {showSpinner && (
-          <div className="flex items-center gap-2.5 text-xs text-muted-foreground">
+          <div className="flex text-xs text-muted-foreground">
             <GameOfLifeSpinner />
-            <span className="truncate">{step ?? "Thinking…"}</span>
           </div>
         )}
         {showDone && (
