@@ -626,7 +626,7 @@ export function GameOfLifeSpinner() {
             val === 1 ? "text-primary" : "text-muted-foreground/35"
           )}
         >
-          {val === 1 ? "█" : "·"}
+          {val === 1 ? "█" : "\u00A0"}
         </span>
       ))}
     </span>
