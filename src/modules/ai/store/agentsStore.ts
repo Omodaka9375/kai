@@ -33,13 +33,7 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
   hydrated: false,
   customAgents: [],
   activeId: BUILTIN_AGENTS[0].id,
-  all: () => {
-    const custom = get().customAgents;
-    return BUILTIN_AGENTS.map((b) => {
-      const overridden = custom.find((c) => c.id === b.id);
-      return overridden ? { ...overridden, builtIn: true } : b;
-    }).concat(custom.filter((c) => !BUILTIN_AGENTS.some((b) => b.id === c.id)));
-  },
+  all: () => [...BUILTIN_AGENTS, ...get().customAgents],
   hydrate: async () => {
     if (initialized) return;
     initialized = true;

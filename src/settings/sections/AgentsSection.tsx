@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { AGENT_ICONS } from "@/modules/ai/components/AgentSwitcher";
 import {
+  BUILTIN_AGENTS,
   type Agent,
   type AgentIconId,
 } from "@/modules/ai/lib/agents";
@@ -37,7 +38,7 @@ import {
   WifiConnected01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { SectionHeader } from "../components/SectionHeader";
 
 const ICON_OPTIONS: AgentIconId[] = [
@@ -52,12 +53,18 @@ const ICON_OPTIONS: AgentIconId[] = [
 export function AgentsSection() {
   const customInstructions = usePreferencesStore((s) => s.customInstructions);
   const customAgents = useAgentsStore((s) => s.customAgents);
-  const allAgents = useAgentsStore((s) => s.all());
   const activeAgentId = useAgentsStore((s) => s.activeId);
   const setActiveAgentId = useAgentsStore((s) => s.setActiveId);
   const upsertAgent = useAgentsStore((s) => s.upsert);
   const removeAgent = useAgentsStore((s) => s.remove);
   const hydrateAgents = useAgentsStore((s) => s.hydrate);
+
+  const allAgents = useMemo(() => {
+    return BUILTIN_AGENTS.map((b) => {
+      const overridden = customAgents.find((c) => c.id === b.id);
+      return overridden ? { ...overridden, builtIn: true } : b;
+    }).concat(customAgents.filter((c) => !BUILTIN_AGENTS.some((b) => b.id === c.id)));
+  }, [customAgents]);
 
   const snippets = useSnippetsStore((s) => s.snippets);
   const upsertSnippet = useSnippetsStore((s) => s.upsert);
