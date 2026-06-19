@@ -55,6 +55,7 @@ export function MarkdownPreviewPane({ path, visible }: Props) {
       <div className="mx-auto max-w-3xl px-8 py-6">
         <Streamdown
           className="prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+          linkSafety={{ enabled: false }}
         >
           {content}
         </Streamdown>
