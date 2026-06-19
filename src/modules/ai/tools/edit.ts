@@ -235,15 +235,12 @@ async function applyEdits(
 
   const original = r.content;
 
-  // Stale-write guard: reject if file changed since last read_file.
+  // Stale-write guard: update cache if file changed, but allow editing if old_string matches.
   const cached = readCache.get(abs);
   if (cached) {
     const freshHash = djb2(original);
     if (cached.hash !== freshHash || cached.size !== original.length) {
-      return {
-        error: "File has been modified since you last read it. Call read_file again before editing.",
-        path: abs,
-      };
+      readCache.set(abs, { size: original.length, hash: freshHash });
     }
   }
 
