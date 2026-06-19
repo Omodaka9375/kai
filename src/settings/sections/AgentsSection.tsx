@@ -11,7 +11,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { AGENT_ICONS } from "@/modules/ai/components/AgentSwitcher";
 import {
-  BUILTIN_AGENTS,
   type Agent,
   type AgentIconId,
 } from "@/modules/ai/lib/agents";
@@ -53,6 +52,7 @@ const ICON_OPTIONS: AgentIconId[] = [
 export function AgentsSection() {
   const customInstructions = usePreferencesStore((s) => s.customInstructions);
   const customAgents = useAgentsStore((s) => s.customAgents);
+  const allAgents = useAgentsStore((s) => s.all());
   const activeAgentId = useAgentsStore((s) => s.activeId);
   const setActiveAgentId = useAgentsStore((s) => s.setActiveId);
   const upsertAgent = useAgentsStore((s) => s.upsert);
@@ -114,16 +114,20 @@ export function AgentsSection() {
           </Button>
         </div>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {[...BUILTIN_AGENTS, ...customAgents].map((a) => (
-            <AgentCard
-              key={a.id}
-              agent={a}
-              active={a.id === activeAgentId}
-              onActivate={() => setActiveAgentId(a.id)}
-              onEdit={a.builtIn ? null : () => setEditingAgent(a)}
-              onDelete={a.builtIn ? null : () => removeAgent(a.id)}
-            />
-          ))}
+          {allAgents.map((a) => {
+            const isOverridden = a.builtIn && customAgents.some((c) => c.id === a.id);
+            return (
+              <AgentCard
+                key={a.id}
+                agent={a}
+                active={a.id === activeAgentId}
+                onActivate={() => setActiveAgentId(a.id)}
+                onEdit={() => setEditingAgent(a)}
+                onDelete={a.builtIn ? (isOverridden ? () => removeAgent(a.id) : null) : () => removeAgent(a.id)}
+                isReset={a.builtIn && isOverridden}
+              />
+            );
+          })}
         </div>
       </section>
 
@@ -360,12 +364,14 @@ function AgentCard({
   onActivate,
   onEdit,
   onDelete,
+  isReset,
 }: {
   agent: Agent;
   active: boolean;
   onActivate: () => void;
   onEdit: (() => void) | null;
   onDelete: (() => void) | null;
+  isReset?: boolean;
 }) {
   const Icon = AGENT_ICONS[agent.icon] ?? SparklesIcon;
   return (
@@ -386,7 +392,7 @@ function AgentCard({
             {agent.name}
             {agent.builtIn ? (
               <span className="rounded bg-muted/50 px-1 py-0.5 text-[9px] tracking-wide text-muted-foreground uppercase">
-                Built-in
+                {isReset ? "Customized" : "Built-in"}
               </span>
             ) : null}
           </span>
@@ -433,7 +439,7 @@ function AgentCard({
               variant="ghost"
               className="size-6 text-muted-foreground hover:text-destructive"
               onClick={onDelete}
-              title="Delete"
+              title={isReset ? "Reset to default" : "Delete"}
             >
               <HugeiconsIcon icon={Delete02Icon} size={11} strokeWidth={1.75} />
             </Button>
@@ -471,7 +477,7 @@ function AgentEditorDialog({
             {isNew ? "New agent" : "Edit agent"}
           </DialogTitle>
         </DialogHeader>
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3 max-h-[60vh] overflow-y-auto pr-1 scrollbar-thin">
           <div className="flex gap-2">
             <div className="flex flex-col gap-1">
               <Label>Icon</Label>
@@ -586,7 +592,7 @@ function SnippetEditorDialog({
               : "New snippet"}
           </DialogTitle>
         </DialogHeader>
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3 max-h-[60vh] overflow-y-auto pr-1 scrollbar-thin">
           <div className="flex gap-2">
             <div className="flex w-32 flex-col gap-1">
               <Label>Handle</Label>
@@ -720,7 +726,7 @@ function McpEditorDialog({
             {isNew ? "Add MCP server" : "Edit MCP server"}
           </DialogTitle>
         </DialogHeader>
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3 max-h-[60vh] overflow-y-auto pr-1 scrollbar-thin">
           <div className="flex gap-2">
             <div className="flex flex-1 flex-col gap-1">
               <Label>Name</Label>

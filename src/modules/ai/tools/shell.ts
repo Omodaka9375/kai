@@ -119,6 +119,11 @@ function getInteractiveCommandHint(cmd: string): string | null {
   return null;
 }
 
+const ANSI_RE = /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g;
+function stripAnsi(s: string): string {
+  return s.replace(ANSI_RE, "");
+}
+
 export function buildShellTools(ctx: ToolContext) {
   return {
     bash_run: tool({
@@ -158,8 +163,8 @@ export function buildShellTools(ctx: ToolContext) {
           );
           return {
             command,
-            stdout: r.stdout,
-            stderr: r.stderr,
+            stdout: stripAnsi(r.stdout),
+            stderr: stripAnsi(r.stderr),
             exit_code: r.exit_code,
             timed_out: r.timed_out,
             truncated: r.truncated,
@@ -202,7 +207,10 @@ export function buildShellTools(ctx: ToolContext) {
       execute: async ({ handle, since_offset }) => {
         try {
           const r = await native.shellBgLogs(handle, since_offset);
-          return r;
+          return {
+            ...r,
+            bytes: stripAnsi(r.bytes),
+          };
         } catch (e) {
           return { error: String(e) };
         }
