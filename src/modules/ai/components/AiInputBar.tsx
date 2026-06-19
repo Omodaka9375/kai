@@ -253,6 +253,22 @@ export function AiInputBar() {
                 onKeyUp={updateTrigger}
                 onClick={updateTrigger}
                 onSelect={updateTrigger}
+                onPaste={(e) => {
+                  const items = e.clipboardData?.items;
+                  if (!items) return;
+                  const pastedFiles: File[] = [];
+                  for (let i = 0; i < items.length; i++) {
+                    const item = items[i];
+                    if (item.type.startsWith("image/")) {
+                      const file = item.getAsFile();
+                      if (file) pastedFiles.push(file);
+                    }
+                  }
+                  if (pastedFiles.length > 0) {
+                    e.preventDefault();
+                    void c.addFiles(pastedFiles as any);
+                  }
+                }}
                 onKeyDown={(e) => {
                   if (pickerOpen) {
                     const items = fileTrigger ? filteredFiles : filteredItems;

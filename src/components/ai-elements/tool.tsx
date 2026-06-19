@@ -281,7 +281,7 @@ function renderInputPreview(
             {cwd}
           </div>
         ) : null}
-        <pre className="overflow-auto rounded bg-muted/40 p-2 font-mono text-[11px] leading-relaxed">
+        <pre className="overflow-auto rounded bg-muted/40 p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap">
           {cmd}
         </pre>
       </div>
@@ -721,7 +721,7 @@ function SuggestCommandCard({
         <div className="text-[11px] text-muted-foreground">{explanation}</div>
       ) : null}
       <div className="flex items-stretch gap-1.5 rounded bg-muted/40 overflow-hidden">
-        <pre className="flex-1 overflow-auto p-2 font-mono text-[11px] leading-relaxed">
+        <pre className="flex-1 overflow-auto p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap">
           {command}
         </pre>
         <button

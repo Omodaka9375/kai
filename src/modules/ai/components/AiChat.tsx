@@ -452,6 +452,13 @@ const RenderedMessage = memo(function RenderedMessage({
     const withoutCmd = cmdMatch ? rawText.slice(cmdMatch[0].length) : rawText;
     const stripped = stripUserContextBlocks(withoutCmd);
 
+    const imageParts = message.parts.filter(
+      (p): p is { type: "file"; url: string; mediaType: string; [k: string]: any } =>
+        p.type === "file" &&
+        typeof p.url === "string" &&
+        p.mediaType.startsWith("image/"),
+    );
+
     return (
       <Message from="user">
         <MessageContent>
@@ -459,6 +466,19 @@ const RenderedMessage = memo(function RenderedMessage({
           {stripped.chips.length > 0 ? (
             <ContextChips chips={stripped.chips} />
           ) : null}
+          {imageParts.length > 0 && (
+            <div className="flex flex-col gap-1.5 mb-2 max-w-sm">
+              {imageParts.map((p, idx) => (
+                <img
+                  key={idx}
+                  src={p.url}
+                  alt="User upload"
+                  className="rounded-lg max-h-48 object-contain"
+                  draggable={false}
+                />
+              ))}
+            </div>
+          )}
           {stripped.text ? (
             <p className="whitespace-pre-wrap wrap-break-word">
               {stripped.text}

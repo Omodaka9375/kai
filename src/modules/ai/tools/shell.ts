@@ -155,14 +155,21 @@ export function buildShellTools(ctx: ToolContext) {
           const shellId = await getSessionShell(workspaceSessionKey(sid), cwd);
           const effectiveTimeout =
             timeout_secs ?? slowCommandTimeout(command);
+
+          // Auto-append --yes to npx commands to prevent interactive installation prompts from hanging the shell
+          let sanitizedCommand = command;
+          if (/\bnpx\b/.test(sanitizedCommand) && !/\b(npx\s+(?:-y|--yes))\b/.test(sanitizedCommand)) {
+            sanitizedCommand = sanitizedCommand.replace(/\bnpx\b/g, "npx --yes");
+          }
+
           const r = await native.shellSessionRun(
             shellId,
-            command,
+            sanitizedCommand,
             cwd,
             effectiveTimeout,
           );
           return {
-            command,
+            command: sanitizedCommand,
             stdout: stripAnsi(r.stdout),
             stderr: stripAnsi(r.stderr),
             exit_code: r.exit_code,
