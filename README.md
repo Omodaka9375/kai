@@ -74,7 +74,14 @@ KAI has full support for local, offline-only development. To use a local GGUF mo
 Extend your AI agent's capabilities with custom tools via the Model Context Protocol:
 1.  Open KAI's left sidebar and switch to the **Extensions** (puzzle icon) tab.
 2.  Browse or search for official MCP servers (such as `Filesystem`, `PostgreSQL`, or `GitHub`).
-3.  Click **Install**. KAI will automatically download and connect the server in the background, making its tools immediately available to your active agent.
+3. Click **Install**. KAI will automatically download and connect the server in the background, making its tools immediately available to your active agent.
+
+### 3. Project Memory with Kai.md
+KAI allows you to define custom guidelines, development standards, architectural context, and preferred workflows for your AI agent on a per-project basis.
+To activate this, manually create a file named `Kai.md` at your project's root directory. KAI will automatically read and inject its contents (up to 32KB) directly into the agent's core instruction prompt on every message.
+*   **Case Sensitivity**: The filename must be exactly `Kai.md` on case-sensitive filesystems like Linux. On Windows/macOS, variations like `KAI.md` or `kai.md` are also recognized.
+*   **Zero-Write Safe**: KAI only reads from this file; it will never modify or write to your `Kai.md` file during a session, keeping you in full control of your guidelines.
+*   **What to Include**: Define your tech stack, formatting guidelines, database schemas, directory mappings, or preferred test commands.
 
 ## Build from Source
 
