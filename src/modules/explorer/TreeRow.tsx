@@ -18,6 +18,7 @@ import {
 import { fileIconUrl, folderIconUrl } from "./lib/iconResolver";
 import { COMPACT_CONTENT, COMPACT_ITEM } from "./lib/menuItemClass";
 import type { useFileTree } from "./lib/useFileTree";
+import { native } from "@/modules/ai/lib/native";
 
 type Tree = ReturnType<typeof useFileTree>;
 
@@ -36,6 +37,7 @@ export type EntryRowProps = {
   onRevealInTerminal?: (path: string) => void;
   onAttachToAgent?: (path: string) => void;
   onPreviewMarkdown?: (path: string) => void;
+  onOpenPreview?: (url: string) => void;
 };
 
 function EntryRowImpl(props: EntryRowProps) {
@@ -54,6 +56,7 @@ function EntryRowImpl(props: EntryRowProps) {
     onRevealInTerminal,
     onAttachToAgent,
     onPreviewMarkdown,
+    onOpenPreview,
   } = props;
 
   const [isConfirming, setIsConfirming] = useState(false);
@@ -134,6 +137,26 @@ function EntryRowImpl(props: EntryRowProps) {
             onSelect={() => onOpenFile(path, true)}
           >
             Open
+          </ContextMenuItem>
+        )}
+        {!isDir && /\.(html|htm)$/i.test(name) && onOpenPreview && (
+          <ContextMenuItem
+            className={COMPACT_ITEM}
+            onSelect={async () => {
+              const lastSep = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+              const parentDir = lastSep > 0 ? path.slice(0, lastSep) : path;
+              const command = `npx --yes http-server "${parentDir}" --port 5500`;
+              try {
+                // Spawn the background server
+                await native.shellBgSpawn(command, parentDir);
+                // Open the preview tab pointing to the file on port 5500
+                onOpenPreview(`http://localhost:5500/${name}`);
+              } catch (e) {
+                console.error("Live preview launch failed:", e);
+              }
+            }}
+          >
+            Open in Live Preview
           </ContextMenuItem>
         )}
         {!isDir && /\.md$/i.test(name) && onPreviewMarkdown && (

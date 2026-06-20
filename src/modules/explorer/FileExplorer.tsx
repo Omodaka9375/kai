@@ -46,6 +46,7 @@ type Props = {
   onRevealInTerminal?: (path: string) => void;
   onAttachToAgent?: (path: string) => void;
   onPreviewMarkdown?: (path: string) => void;
+  onOpenPreview?: (url: string) => void;
 };
 
 type Row =
@@ -153,6 +154,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(
       onRevealInTerminal,
       onAttachToAgent,
       onPreviewMarkdown,
+      onOpenPreview,
     },
     ref,
   ) {
@@ -357,6 +359,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(
               onRevealInTerminal={onRevealInTerminal}
               onAttachToAgent={onAttachToAgent}
               onPreviewMarkdown={onPreviewMarkdown}
+              onOpenPreview={onOpenPreview}
             />
           );
         }

@@ -57,10 +57,11 @@ type Props = {
   url: string;
   onSubmit: (url: string) => void;
   onReload: () => void;
+  onClose?: () => void;
 };
 
 export const PreviewAddressBar = forwardRef<PreviewAddressBarHandle, Props>(
-  function PreviewAddressBar({ url, onSubmit, onReload }, ref) {
+  function PreviewAddressBar({ url, onSubmit, onReload, onClose }, ref) {
     const [draft, setDraft] = useState(url);
     const inputRef = useRef<HTMLInputElement>(null);
 
@@ -115,10 +116,11 @@ export const PreviewAddressBar = forwardRef<PreviewAddressBarHandle, Props>(
         await native.shellBgKill(serverHandle);
         setServerHandle(null);
         setNotice("Server stopped.");
+        onClose?.();
       } catch (e) {
         setNotice(`Failed to stop: ${e}`);
       }
-    }, [serverHandle]);
+    }, [serverHandle, onClose]);
 
     const submit = () => {
       const next = normalizeUrl(draft);

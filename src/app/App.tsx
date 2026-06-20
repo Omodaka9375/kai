@@ -1290,6 +1290,7 @@ export default function App() {
           activeId={activeId}
           registerHandle={registerPreviewHandle}
           onUrlChange={handlePreviewUrl}
+          onCloseTab={disposeTab}
         />
       </div>
       <div
@@ -1425,6 +1426,7 @@ export default function App() {
                         onRevealInTerminal={cdInNewTab}
                         onAttachToAgent={handleAttachFileToAgent}
                         onPreviewMarkdown={openMarkdownPreview}
+                        onOpenPreview={openPreviewTab}
                       />
                     ) : sidebarView === "source-control" ? (
                       <SourceControlPanel
@@ -1491,6 +1493,7 @@ export default function App() {
                                   activeId={splitTab.id}
                                   registerHandle={registerPreviewHandle}
                                   onUrlChange={handlePreviewUrl}
+                                  onCloseTab={disposeTab}
                                 />
                               </div>
                             )}

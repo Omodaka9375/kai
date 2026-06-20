@@ -8,6 +8,7 @@ type Props = {
   activeId: number;
   onUrlChange: (id: number, url: string) => void;
   registerHandle: (id: number, handle: PreviewPaneHandle | null) => void;
+  onCloseTab?: (id: number) => void;
 };
 
 export function PreviewStack({
@@ -15,6 +16,7 @@ export function PreviewStack({
   activeId,
   onUrlChange,
   registerHandle,
+  onCloseTab,
 }: Props) {
   const previews = tabs.filter((t): t is PreviewTab => t.kind === "preview");
 
@@ -78,6 +80,7 @@ export function PreviewStack({
               url={t.url}
               visible={visible}
               onUrlChange={getUrlCallback(t.id)}
+              onClose={() => onCloseTab?.(t.id)}
             />
           </div>
         );

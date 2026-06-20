@@ -24,6 +24,7 @@ type Props = {
   url: string;
   visible: boolean;
   onUrlChange: (url: string) => void;
+  onClose?: () => void;
 };
 
 // Tear the iframe down after this much invisibility — a background dev
@@ -31,7 +32,7 @@ type Props = {
 const SUSPEND_AFTER_MS = 30_000;
 
 export const PreviewPane = forwardRef<PreviewPaneHandle, Props>(
-  function PreviewPane({ url, visible, onUrlChange }, ref) {
+  function PreviewPane({ url, visible, onUrlChange, onClose }, ref) {
     // `nonce` is part of the iframe `key`. Bumping it remounts the iframe,
     // which is the only reliable cross-origin reload (calling
     // contentWindow.location.reload() throws on cross-origin frames).
@@ -82,6 +83,7 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, Props>(
           url={url}
           onSubmit={onUrlChange}
           onReload={() => setNonce((n) => n + 1)}
+          onClose={onClose}
         />
         {showXfoHint ? (
           <div className="flex h-7 shrink-0 items-center gap-1.5 border-b border-border/60 bg-amber-500/8 px-3 text-[11px] text-amber-600 dark:text-amber-400">
