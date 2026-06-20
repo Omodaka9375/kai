@@ -102,7 +102,7 @@ export function AiMiniWindow() {
         "transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
         expanded
           ? "top-[2.85rem] right-2 bottom-[calc(var(--kai-input-bar-h,0px)+44px)] left-[calc(var(--kai-workspace-left,0px)+8px)] rounded-xl"
-          : "right-3 bottom-[calc(var(--kai-input-bar-h,0px)+44px)] h-[min(42rem,calc(100vh-var(--kai-input-bar-h,0px)-92px))] w-[min(34rem,calc(100vw-2rem))]",
+          : "right-2 bottom-[calc(var(--kai-input-bar-h,0px)+44px)] h-[min(42rem,calc(100vh-var(--kai-input-bar-h,0px)-92px))] w-[min(34rem,calc(100vw-2rem))]",
       )}
     >
       <div

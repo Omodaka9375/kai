@@ -1415,7 +1415,7 @@ export default function App() {
                   setSidebarCollapsed(size.inPixels === 0);
                   // Track the workspace left edge (sidebar + handle) for the
                   // expanded agent window positioning.
-                  const handleW = size.inPixels > 0 ? 12 : 0;
+                  const handleW = size.inPixels > 0 ? 1 : 0;
                   document.documentElement.style.setProperty(
                     "--kai-workspace-left",
                     `${size.inPixels + handleW}px`,
