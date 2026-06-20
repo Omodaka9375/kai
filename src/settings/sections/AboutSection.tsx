@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { GithubIcon, Globe02Icon, RefreshIcon } from "@hugeicons/core-free-icons";
+import { Clock01Icon, GithubIcon, Globe02Icon, RefreshIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useUpdater } from "@/modules/updater/useUpdater";
 import { getName, getVersion } from "@tauri-apps/api/app";
@@ -165,6 +165,15 @@ export function AboutSection() {
               Dismiss
             </Button>
           )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void openUrl(`${REPO_URL}/blob/main/CHANGELOG.md`)}
+            className="gap-1.5"
+          >
+            <HugeiconsIcon icon={Clock01Icon} size={12} strokeWidth={1.75} />
+            Changelog
+          </Button>
           <Button
             variant="outline"
             size="sm"
