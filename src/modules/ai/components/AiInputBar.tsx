@@ -3,16 +3,18 @@ import { Popover, PopoverAnchor } from "@/components/ui/popover";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import {
+  Add01Icon,
   Cancel01Icon,
   CodeIcon,
   HashtagIcon,
   Key01Icon,
+  Mic01Icon,
   TerminalIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useMemo, useState } from "react";
-import { useComposer, type FileAttachment } from "../lib/composer";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ACCEPTED_FILES, useComposer, type FileAttachment } from "../lib/composer";
 import { useWorkspaceFiles } from "../hooks/useWorkspaceFiles";
 import { SLASH_COMMANDS } from "../lib/slashCommands";
 import type { Snippet } from "../lib/snippets";
@@ -72,6 +74,7 @@ function detectFileTrigger(
 
 export function AiInputBar() {
   const c = useComposer();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const snippets = useSnippetsStore((s) => s.snippets);
   const workspaceRoot = useChatStore((s) => s.live.getWorkspaceRoot());
 
@@ -246,6 +249,57 @@ export function AiInputBar() {
         <Popover open={pickerOpen}>
           <PopoverAnchor asChild>
             <div className="flex items-center gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept={ACCEPTED_FILES}
+                className="hidden"
+                onChange={(e) => {
+                  void c.addFiles(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+
+              {c.voice.supported && (
+                <button
+                  type="button"
+                  title={
+                    c.voice.recording
+                      ? "Stop & transcribe"
+                      : c.voice.transcribing
+                        ? "Transcribing…"
+                        : "Voice input"
+                  }
+                  onClick={() =>
+                    c.voice.recording ? c.voice.stop() : void c.voice.start()
+                  }
+                  disabled={c.isBusy || c.voice.transcribing}
+                  className={cn(
+                    "shrink-0 size-6 flex items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50",
+                    c.voice.recording && "bg-destructive/15 text-destructive hover:bg-destructive/20 hover:text-destructive animate-pulse"
+                  )}
+                >
+                  {c.voice.recording ? (
+                    <span className="size-1.5 rounded-full bg-destructive" />
+                  ) : c.voice.transcribing ? (
+                    <Spinner className="size-3" />
+                  ) : (
+                    <HugeiconsIcon icon={Mic01Icon} size={14} strokeWidth={1.75} />
+                  )}
+                </button>
+              )}
+
+              <button
+                type="button"
+                title="Attach file or image"
+                disabled={c.isBusy}
+                onClick={() => fileInputRef.current?.click()}
+                className="shrink-0 size-6 flex items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50"
+              >
+                <HugeiconsIcon icon={Add01Icon} size={14} strokeWidth={2} />
+              </button>
+
               <textarea
                 ref={c.textareaRef}
                 value={c.value}

@@ -6,12 +6,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Kbd } from "@/components/ui/kbd";
-import { Spinner } from "@/components/ui/spinner";
 import { fmtShortcut, MOD_KEY } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import {
-  Add01Icon,
   AiBookIcon,
   ArrowDown01Icon,
   BrainIcon,
@@ -29,7 +27,6 @@ import {
   Grok02Icon,
   Hexagon01Icon,
   Message01Icon,
-  Mic01Icon,
   PlugIcon,
   Search01Icon,
   Settings01Icon,
@@ -48,7 +45,6 @@ import {
   type ModelInfo,
   type ProviderId,
 } from "../config";
-import { ACCEPTED_FILES, useComposer } from "../lib/composer";
 import { toggleFavoriteModel } from "../lib/modelPrefs";
 import { useChatStore } from "../store/chatStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
@@ -86,62 +82,12 @@ export function AiOpenButton({ onOpen }: { onOpen: () => void }) {
 }
 
 export function AiStatusBarControls() {
-  const c = useComposer();
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const toggleMini = useChatStore((s) => s.toggleMini);
   const miniOpen = useChatStore((s) => s.mini.open);
   const closePanel = useChatStore((s) => s.closePanel);
 
   return (
     <div className="flex items-center gap-0.5">
-      <input
-        ref={fileInputRef}
-        type="file"
-        multiple
-        accept={ACCEPTED_FILES}
-        className="hidden"
-        onChange={(e) => {
-          void c.addFiles(e.target.files);
-          e.target.value = "";
-        }}
-      />
-
-      <IconBtn
-        title="Attach file or image"
-        onClick={() => fileInputRef.current?.click()}
-        disabled={c.isBusy}
-      >
-        <HugeiconsIcon icon={Add01Icon} size={13} strokeWidth={2} />
-      </IconBtn>
-
-      {c.voice.supported && (
-        <IconBtn
-          title={
-            c.voice.recording
-              ? "Stop & transcribe"
-              : c.voice.transcribing
-                ? "Transcribing…"
-                : "Voice input"
-          }
-          onClick={() =>
-            c.voice.recording ? c.voice.stop() : void c.voice.start()
-          }
-          disabled={c.isBusy || c.voice.transcribing}
-          className={cn(
-            c.voice.recording &&
-            "bg-destructive/10 text-destructive hover:bg-destructive/15",
-          )}
-        >
-          {c.voice.recording ? (
-            <span className="size-2 animate-pulse rounded-full bg-destructive" />
-          ) : c.voice.transcribing ? (
-            <Spinner className="size-3" />
-          ) : (
-            <HugeiconsIcon icon={Mic01Icon} size={13} strokeWidth={1.75} />
-          )}
-        </IconBtn>
-      )}
-
       <ModelDropdown />
 
       <span className="mx-1 h-8 w-px bg-border" aria-hidden />
