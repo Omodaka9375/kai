@@ -1448,8 +1448,8 @@ export default function App() {
               </ResizablePanel>
               <ResizableHandle withHandle />
               <ResizablePanel id="workspace" defaultSize="78%" minSize="30%">
-                <div className={cn("flex h-full min-h-0 flex-col", sidebarCollapsed && "pl-1")}>
-                  <div className="relative min-h-0 flex-1">
+                <div className="flex h-full min-h-0 flex-col">
+                  <div className={cn("relative min-h-0 flex-1", sidebarCollapsed && "pl-1")}>
                     {splitTab ? (
                       <ResizablePanelGroup orientation="horizontal" className="h-full">
                         <ResizablePanel id="ws-primary" defaultSize="50%" minSize="20%">

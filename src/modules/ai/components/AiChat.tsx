@@ -58,11 +58,41 @@ function ForkButton({ messageIndex }: { messageIndex: number }) {
       onClick={onClick}
       disabled={forking}
       title="Fork conversation from here"
-      className="ml-1 rounded p-0.5 text-muted-foreground/0 transition-colors group-hover/msg:text-muted-foreground/60 hover:!text-foreground"
+      className="shrink-0 size-6 flex items-center justify-center rounded-md border border-border/40 bg-background/50 text-muted-foreground opacity-0 group-hover/msg:opacity-100 transition-all hover:bg-accent hover:text-foreground shadow-sm"
     >
-      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round">
         <path d="M5 3v4a2 2 0 002 2h2m0 0V5m0 4l-2-2m2 2l2-2" />
       </svg>
+    </button>
+  );
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const onClick = () => {
+    if (!text) return;
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title="Copy message content"
+      className="shrink-0 size-6 flex items-center justify-center rounded-md border border-border/40 bg-background/50 text-muted-foreground opacity-0 group-hover/msg:opacity-100 transition-all hover:bg-accent hover:text-foreground shadow-sm"
+    >
+      {copied ? (
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3.5 8.5l3 3 6-7" />
+        </svg>
+      ) : (
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="5.5" y="5.5" width="7.5" height="7.5" rx="1.5" />
+          <path d="M3.5 10.5h-.75a1.5 1.5 0 01-1.5-1.5v-5.5a1.5 1.5 0 011.5-1.5h5.5a1.5 1.5 0 011.5 1.5v.75" />
+        </svg>
+      )}
     </button>
   );
 }
@@ -288,12 +318,9 @@ export function AiChatView({
               message={m}
               onApproval={onApproval}
               streaming={m.id === streamingMessageId}
+              forkable={!isBusy && m.role === "user" && idx > 0}
+              messageIndex={idx}
             />
-            {!isBusy && m.role === "user" && idx > 0 && (
-              <div className="absolute -top-1 right-0">
-                <ForkButton messageIndex={idx} />
-              </div>
-            )}
           </div>
         ))}
         {compactionNotice && compactionNotice.droppedCount >= 3 && (
@@ -427,12 +454,16 @@ const RenderedMessage = memo(function RenderedMessage({
   message,
   onApproval,
   streaming,
+  forkable,
+  messageIndex,
 }: {
   message: UIMessage;
   onApproval: (id: string, approved: boolean) => void;
   streaming: boolean;
+  forkable?: boolean;
+  messageIndex?: number;
 }) {
-  // Index of the trailing text part — only that one is "live" mid-stream.
+  // Index of the trailing text part — only that one is \"live\" mid-stream.
   // Earlier text parts (separated by tool calls) are already finalized.
   let lastTextIdx = -1;
   for (let i = message.parts.length - 1; i >= 0; i -= 1) {
@@ -461,30 +492,35 @@ const RenderedMessage = memo(function RenderedMessage({
 
     return (
       <Message from="user">
-        <MessageContent>
-          {commandName ? <CommandSnippet name={commandName} /> : null}
-          {stripped.chips.length > 0 ? (
-            <ContextChips chips={stripped.chips} />
-          ) : null}
-          {imageParts.length > 0 && (
-            <div className="flex flex-col gap-1.5 mb-2 max-w-sm">
-              {imageParts.map((p, idx) => (
-                <img
-                  key={idx}
-                  src={p.url}
-                  alt="User upload"
-                  className="rounded-lg max-h-48 object-contain"
-                  draggable={false}
-                />
-              ))}
-            </div>
+        <div className="flex items-center gap-1.5">
+          {forkable && messageIndex !== undefined && (
+            <ForkButton messageIndex={messageIndex} />
           )}
-          {stripped.text ? (
-            <p className="whitespace-pre-wrap wrap-break-word">
-              {stripped.text}
-            </p>
-          ) : null}
-        </MessageContent>
+          <MessageContent>
+            {commandName ? <CommandSnippet name={commandName} /> : null}
+            {stripped.chips.length > 0 ? (
+              <ContextChips chips={stripped.chips} />
+            ) : null}
+            {imageParts.length > 0 && (
+              <div className="flex flex-col gap-1.5 mb-2 max-w-sm">
+                {imageParts.map((p, idx) => (
+                  <img
+                    key={idx}
+                    src={p.url}
+                    alt="User upload"
+                    className="rounded-lg max-h-48 object-contain"
+                    draggable={false}
+                  />
+                ))}
+              </div>
+            )}
+            {stripped.text ? (
+              <p className="whitespace-pre-wrap wrap-break-word">
+                {stripped.text}
+              </p>
+            ) : null}
+          </MessageContent>
+        </div>
       </Message>
     );
   }
@@ -493,41 +529,57 @@ const RenderedMessage = memo(function RenderedMessage({
     message.parts,
   ]);
 
+  const assistantText = useMemo(() => {
+    return message.parts
+      .filter((p): p is { type: "text"; text: string } => p.type === "text")
+      .map((p) => stripLeakedTokens(p.text))
+      .join("\n");
+  }, [message.parts]);
+
   return (
     <Message from={message.role}>
-      <MessageContent>
-        <div className="flex flex-col gap-3">
-          {groups.map((g) => {
-            if (g.kind === "reads") {
-              return (
-                <PartAppear key={`${message.id}-${g.key}`}>
-                  <ReadGroup parts={g.parts} />
-                </PartAppear>
-              );
-            }
-            const isReadSingle =
-              partType(g.part) === "tool-read_file" &&
-              ((g.part as { state?: string }).state ?? "") !==
-                "approval-requested";
-            if (isReadSingle) {
-              return (
-                <PartAppear key={`${message.id}-${g.key}`}>
-                  <ReadRow part={g.part} />
-                </PartAppear>
-              );
-            }
-            return (
-              <PartAppear key={`${message.id}-${g.key}`}>
-                <RenderedPart
-                  part={g.part}
-                  onApproval={onApproval}
-                  streaming={streaming && g.idx === lastTextIdx}
-                />
-              </PartAppear>
-            );
-          })}
+      <div className="flex items-start gap-3 w-full">
+        <div className="flex-1 min-w-0">
+          <MessageContent>
+            <div className="flex flex-col gap-3">
+              {groups.map((g) => {
+                if (g.kind === "reads") {
+                  return (
+                    <PartAppear key={`${message.id}-${g.key}`}>
+                      <ReadGroup parts={g.parts} />
+                    </PartAppear>
+                  );
+                }
+                const isReadSingle =
+                  partType(g.part) === "tool-read_file" &&
+                  ((g.part as { state?: string }).state ?? "") !==
+                    "approval-requested";
+                if (isReadSingle) {
+                  return (
+                    <PartAppear key={`${message.id}-${g.key}`}>
+                      <ReadRow part={g.part} />
+                    </PartAppear>
+                  );
+                }
+                return (
+                  <PartAppear key={`${message.id}-${g.key}`}>
+                    <RenderedPart
+                      part={g.part}
+                      onApproval={onApproval}
+                      streaming={streaming && g.idx === lastTextIdx}
+                    />
+                  </PartAppear>
+                );
+              })}
+            </div>
+          </MessageContent>
         </div>
-      </MessageContent>
+        {assistantText.trim() ? (
+          <div className="pt-0.5">
+            <CopyButton text={assistantText} />
+          </div>
+        ) : null}
+      </div>
     </Message>
   );
 });
