@@ -980,7 +980,15 @@ export default function App() {
       const isLocal = (() => {
         try {
           const u = new URL(href);
-          return u.hostname === "localhost" || u.hostname === "*********" || u.hostname === "[::1]";
+          const h = u.hostname;
+          return (
+            h === "localhost" ||
+            h === "*********" ||
+            h === "*******" ||
+            h === "*********" ||
+            h === "******" ||
+            h === "[::1]"
+          );
         } catch { return false; }
       })();
       const hasProxy = !!usePreferencesStore.getState().previewProxyUrl;

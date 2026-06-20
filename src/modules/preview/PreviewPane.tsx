@@ -193,11 +193,10 @@ function applyProxy(template: string, targetUrl: string): string {
   if (template.includes("{url}")) {
     return template.replace("{url}", encodeURIComponent(targetUrl));
   }
-  // If no placeholder, append the target URL directly.
-  // When the template ends with = (query param style), don't encode —
-  // most proxies expect the raw URL after ?url=
+  // If no placeholder, append the target URL. We always URL-encode the target
+  // URL to prevent query parameter collision with the proxy's own URL structure.
   const sep = template.endsWith("/") || template.endsWith("=") ? "" : "/";
-  const encoded = template.endsWith("=") ? targetUrl : encodeURIComponent(targetUrl);
+  const encoded = encodeURIComponent(targetUrl);
   return `${template}${sep}${encoded}`;
 }
 
@@ -209,6 +208,8 @@ function isLocalUrl(url: string): boolean {
       h === "localhost" ||
       h === "127.0.0.1" ||
       h === "0.0.0.0" ||
+      h === "*********" ||
+      h === "******" ||
       h === "[::1]" ||
       h.endsWith(".localhost")
     );
