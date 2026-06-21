@@ -1399,7 +1399,6 @@ export default function App() {
               leafIds(activeTerminalTab.paneTree).length < MAX_PANES_PER_TAB
             }
             onOpenShortcuts={() => setShortcutsOpen(true)}
-            onOpenSettings={() => void openSettingsWindow()}
             searchTarget={searchTarget}
             searchRef={searchInlineRef}
             onOpenProject={onOpenProject}
