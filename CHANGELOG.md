@@ -5,7 +5,10 @@ All notable changes to the KAI terminal emulator project are documented in this 
 ---
 ## [0.9.31]
 ### Added
-*   **Small UI cleanup**
+*   **Top Bar Button Swapping**: Swapped the Keyboard Shortcuts help button directly into KAI's top-right header action row, replacing the redundant Settings button there.
+*   **DWM Shadow Clashes Resolved**: Disabled standard Windows Desktop Window Manager (DWM) shadows on the settings tauri window builder to resolve the thin square border clashing with custom HTML rounded corners.
+### Fixed
+*   **Needless Borrows Warnings**: Resolved modern Clippy compiler warning failures (`needless_borrows_for_generic_args`) on platform-specific string array slice inputs inside Tauri's Rust lib builder.
 
 ## [0.9.30]
 ### Added
