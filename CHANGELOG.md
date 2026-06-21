@@ -4,6 +4,13 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [0.9.29]
+### Added
+*   **Workspace-Scoped AI Sessions**: Partitioned and scoped chat sessions on the active project directory (`workspaceRoot`). Session switches and list dropdowns in `AiMiniWindow` automatically filter based on the current workspace context.
+*   **Late Workspace Hydration**: Resolved boot-time session initialization race conditions by deferring chat state hydration until the local workspace root is fully resolved, and passing it dynamically on boot.
+*   **Auto-Claiming Legacy Chats**: Implemented a background project-claiming system. Any workspace-less or legacy sessions opened in a project are automatically converted and associated with that specific workspace path.
+*   **LaTeX Math Arrow Parsing**: Enhanced token sanitization (`stripLeakedTokens`) in `AiChat.tsx` to automatically parse and translate LaTeX arrow strings (e.g., `\rightarrow`, `\to`, etc.) into clean Unicode equivalents (`→`, `←`, etc.).
+
 ## [0.9.28]
 ### Added
 *   **Unified Input Bar Controls**: Moved the voice microphone (`Mic01Icon`) and file attachment (`Add01Icon`) buttons from the bottom status bar directly to the left of the user query input text area inside the `AiInputBar`.
