@@ -3,6 +3,9 @@
 All notable changes to the KAI terminal emulator project are documented in this file. KAI adheres to Semantic Versioning.
 
 ---
+## [0.9.31]
+### Added
+*   **Small UI cleanup**
 
 ## [0.9.30]
 ### Added

@@ -26,7 +26,6 @@ import {
   KeyboardIcon,
   LayoutTwoColumnIcon,
   LayoutTwoRowIcon,
-  Settings01Icon,
   SidebarLeftIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -54,7 +53,6 @@ type Props = {
   /** Active tab is a terminal and below the per-tab pane cap. */
   canSplit: boolean;
   onOpenShortcuts: () => void;
-  onOpenSettings: () => void;
   searchTarget: SearchTarget;
   searchRef: RefObject<SearchInlineHandle | null>;
   onOpenProject: (path: string) => void;
@@ -77,7 +75,6 @@ export function Header({
   onSplit,
   canSplit,
   onOpenShortcuts,
-  onOpenSettings,
   searchTarget,
   searchRef,
   onOpenProject,
@@ -169,17 +166,6 @@ export function Header({
     </Button>
   );
 
-  const settingsButton = (
-    <Button
-      variant="ghost"
-      size="icon"
-      className="size-7 shrink-0 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-      onClick={onOpenSettings}
-      title="Settings"
-    >
-      <HugeiconsIcon icon={Settings01Icon} size={15} strokeWidth={1.75} />
-    </Button>
-  );
 
   return (
     <div
@@ -338,7 +324,6 @@ export function Header({
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {!IS_MAC && shortcutsButton}
       </div>
 
       {!IS_MAC && <span className="mx-1 h-5 w-px shrink-0 bg-border" />}
@@ -367,14 +352,7 @@ export function Header({
 
       <SearchInline ref={searchRef} target={searchTarget} compact={compact} />
 
-      {IS_MAC && (
-        <>
-          {shortcutsButton}
-          {settingsButton}
-        </>
-      )}
-
-      {!IS_MAC && settingsButton}
+      {shortcutsButton}
 
       {USE_CUSTOM_WINDOW_CONTROLS && (
         <>
