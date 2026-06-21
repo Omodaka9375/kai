@@ -87,7 +87,7 @@ async fn pick_project_folder() -> Result<Option<String>, String> {
     {
         let script = "[System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms') | Out-Null; $dialog = New-Object System.Windows.Forms.FolderBrowserDialog; $dialog.Description = 'Select KAI Project Folder'; if ($dialog.ShowDialog() -eq 'OK') { $dialog.SelectedPath } else { '' }";
         let output = std::process::Command::new("powershell")
-            .args(&["-NoProfile", "-Command", script])
+            .args(["-NoProfile", "-Command", script])
             .output();
         match output {
             Ok(out) => {
@@ -105,7 +105,7 @@ async fn pick_project_folder() -> Result<Option<String>, String> {
     {
         let script_posix = "POSIX path of (choose folder with prompt \"Select KAI Project Folder\")";
         let output_posix = std::process::Command::new("osascript")
-            .args(&["-e", script_posix])
+            .args(["-e", script_posix])
             .output();
         match output_posix {
             Ok(out_p) => {
@@ -122,14 +122,14 @@ async fn pick_project_folder() -> Result<Option<String>, String> {
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         let output = std::process::Command::new("zenity")
-            .args(&["--file-selection", "--directory", "--title=Select KAI Project Folder"])
+            .args(["--file-selection", "--directory", "--title=Select KAI Project Folder"])
             .output();
         match output {
             Ok(out) => {
                 let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
                 if s.is_empty() {
                     let output_kd = std::process::Command::new("kdialog")
-                        .args(&["--getexistingdirectory", ".", "--title", "Select KAI Project Folder"])
+                        .args(["--getexistingdirectory", ".", "--title", "Select KAI Project Folder"])
                         .output();
                     match output_kd {
                         Ok(out_kd) => {
@@ -148,7 +148,7 @@ async fn pick_project_folder() -> Result<Option<String>, String> {
             }
             Err(_) => {
                 let output_kd = std::process::Command::new("kdialog")
-                    .args(&["--getexistingdirectory", ".", "--title", "Select KAI Project Folder"])
+                    .args(["--getexistingdirectory", ".", "--title", "Select KAI Project Folder"])
                     .output();
                 match output_kd {
                     Ok(out_kd) => {
