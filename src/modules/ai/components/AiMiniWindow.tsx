@@ -87,6 +87,37 @@ export function AiMiniWindow() {
     return () => window.removeEventListener("keydown", onKey);
   }, [closeMini, c.isBusy, c.stop]);
 
+  const sessions = useChatStore((s) => s.sessions);
+  const switchSession = useChatStore((s) => s.switchSession);
+  const newSession = useChatStore((s) => s.newSession);
+  const workspaceRoot = useChatStore((s) => s.live.getWorkspaceRoot());
+
+  useEffect(() => {
+    if (!workspaceRoot || !sessionId || sessions.length === 0) return;
+    const activeSession = sessions.find((s) => s.id === sessionId);
+    if (!activeSession) return;
+
+    // Normalize paths
+    const normalized = workspaceRoot.replace(/\\/g, "/").replace(/\/$/, "");
+    const activeRoot = activeSession.workspaceRoot?.replace(/\\/g, "/").replace(/\/$/, "");
+
+    // If the active session is from a different project, auto-switch or create
+    if (activeRoot && activeRoot !== normalized) {
+      const projectSessions = sessions.filter((s) => {
+        if (!s.workspaceRoot) return false; // Don't auto-switch back to legacy empty ones
+        const sRoot = s.workspaceRoot.replace(/\\/g, "/").replace(/\/$/, "");
+        return sRoot === normalized;
+      });
+
+      if (projectSessions.length > 0) {
+        const sortedProject = [...projectSessions].sort((a, b) => b.updatedAt - a.updatedAt);
+        switchSession(sortedProject[0].id);
+      } else {
+        newSession();
+      }
+    }
+  }, [workspaceRoot, sessionId, sessions, switchSession, newSession]);
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 12, scale: 0.98 }}
@@ -408,11 +439,21 @@ function SessionPicker() {
   const switchSession = useChatStore((s) => s.switchSession);
   const newSession = useChatStore((s) => s.newSession);
   const deleteSession = useChatStore((s) => s.deleteSession);
+  const workspaceRoot = useChatStore((s) => s.live.getWorkspaceRoot());
 
   const active = sessions.find((s) => s.id === activeId) ?? null;
   if (!active) return null;
 
-  const sorted = [...sessions].sort((a, b) => b.updatedAt - a.updatedAt);
+  const filteredSessions = useMemo(() => {
+    if (!workspaceRoot) return sessions;
+    const normalized = workspaceRoot.replace(/[\\/]+$/, "");
+    return sessions.filter((s) => {
+      if (!s.workspaceRoot) return true; // Keep legacy or non-project sessions
+      return s.workspaceRoot.replace(/[\\/]+$/, "") === normalized;
+    });
+  }, [sessions, workspaceRoot]);
+
+  const sorted = [...filteredSessions].sort((a, b) => b.updatedAt - a.updatedAt);
 
   return (
     <DropdownMenu>

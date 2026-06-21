@@ -445,6 +445,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
         title: "New chat",
         createdAt: Date.now(),
         updatedAt: Date.now(),
+        workspaceRoot: get().live?.getWorkspaceRoot?.(),
       };
       nextSessions = [fresh, ...sessions];
       void saveSessionsList(nextSessions);
@@ -465,6 +466,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
       title: "New chat",
       createdAt: Date.now(),
       updatedAt: Date.now(),
+      workspaceRoot: get().live?.getWorkspaceRoot?.(),
     };
     const next = [meta, ...get().sessions];
     set({
@@ -522,6 +524,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
         title: "New chat",
         createdAt: Date.now(),
         updatedAt: Date.now(),
+        workspaceRoot: get().live?.getWorkspaceRoot?.(),
       };
       set({ sessions: [fresh], activeSessionId: fresh.id });
       void saveSessionsList([fresh]);
@@ -584,6 +587,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
         updatedAt: Date.now(),
         parentId: activeId,
         forkMessageIndex: atMessageIndex,
+        workspaceRoot: get().live?.getWorkspaceRoot?.(),
       };
       const next = [meta, ...get().sessions];
       set({ sessions: next, activeSessionId: newId, agentMeta: IDLE_META });

@@ -8,6 +8,7 @@ export type SessionMeta = {
   updatedAt: number;
   parentId?: string;
   forkMessageIndex?: number;
+  workspaceRoot?: string | null;
 };
 
 const STORE_PATH = "kai-sessions.json";
