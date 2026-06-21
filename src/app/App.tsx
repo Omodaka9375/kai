@@ -797,6 +797,10 @@ export default function App() {
     [newTab],
   );
 
+  const onOpenProject = useCallback((path: string) => {
+    resetWorkspace(path);
+  }, [resetWorkspace]);
+
   const handleOpenFile = useCallback(
     (path: string, pin?: boolean) => {
       // Explorer defaults to preview (pin=false); explicit actions like
@@ -1398,6 +1402,7 @@ export default function App() {
             onOpenSettings={() => void openSettingsWindow()}
             searchTarget={searchTarget}
             searchRef={searchInlineRef}
+            onOpenProject={onOpenProject}
           />
 
           <main className="zoom-content flex min-h-0 flex-1 flex-col">

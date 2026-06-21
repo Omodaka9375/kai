@@ -3,10 +3,16 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
 } from "@/components/ui/dropdown-menu";
+import { invoke } from "@tauri-apps/api/core";
 import { WindowControls } from "@/components/WindowControls";
 import { IS_MAC, KEY_SEP, USE_CUSTOM_WINDOW_CONTROLS } from "@/lib/platform";
+import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   getBindingTokens,
@@ -51,6 +57,7 @@ type Props = {
   onOpenSettings: () => void;
   searchTarget: SearchTarget;
   searchRef: RefObject<SearchInlineHandle | null>;
+  onOpenProject: (path: string) => void;
 };
 
 const COMPACT_WIDTH = 720;
@@ -73,10 +80,54 @@ export function Header({
   onOpenSettings,
   searchTarget,
   searchRef,
+  onOpenProject,
 }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [compact, setCompact] = useState(false);
   const userShortcuts = usePreferencesStore((s) => s.shortcuts);
+  const [recentProjects, setRecentProjects] = useState<string[]>([]);
+
+  const loadRecentProjects = () => {
+    try {
+      const saved = localStorage.getItem("Kai.recentProjects");
+      if (saved) {
+        setRecentProjects(JSON.parse(saved));
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleOpenProject = async () => {
+    try {
+      const selected = await invoke<string | null>("pick_project_folder");
+      if (selected) {
+        onOpenProject(selected);
+      }
+    } catch (e) {
+      console.error("Open project failed:", e);
+    }
+  };
+
+  const handleNewProject = async () => {
+    try {
+      const parentDir = await invoke<string | null>("pick_project_folder");
+      if (!parentDir) return;
+
+      const name = window.prompt("Enter new Project / Folder Name:");
+      if (!name || !name.trim()) return;
+
+      const cleanName = name.trim();
+      const nextPath = parentDir.endsWith("/")
+        ? `${parentDir}${cleanName}`
+        : `${parentDir}/${cleanName}`;
+
+      await invoke("fs_create_dir", { path: nextPath });
+      onOpenProject(nextPath);
+    } catch (e) {
+      window.alert(`Failed to create project: ${String(e)}`);
+    }
+  };
 
   const tokensFor = (id: ShortcutId): string => {
     const s = SHORTCUTS.find((s) => s.id === id);
@@ -139,6 +190,102 @@ export function Header({
       }`}
     >
       <div className="flex shrink-0 items-center gap-0.5">
+        <DropdownMenu onOpenChange={(open) => { if (open) loadRecentProjects(); }}>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="shrink-0 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+              title="File"
+            >
+              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M2.5 4h11M2.5 8h11M2.5 12h11" />
+              </svg>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="min-w-52">
+            <DropdownMenuItem onSelect={handleNewProject} className="gap-2 text-xs">
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground/80">
+                <path d="M1.5 3.5a1.5 1.5 0 011.5-1.5h3.5l2 2h6a1.5 1.5 0 011.5 1.5v7a1.5 1.5 0 01-1.5 1.5h-11a1.5 1.5 0 01-1.5-1.5v-9z" />
+                <path d="M8 7v4M6 9h4" />
+              </svg>
+              <span className="flex-1 font-medium">New Project</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={handleOpenProject} className="gap-2 text-xs">
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground/80">
+                <path d="M1.5 3.5a1.5 1.5 0 011.5-1.5h3.5l2 2h6a1.5 1.5 0 011.5 1.5v7a1.5 1.5 0 01-1.5 1.5h-11a1.5 1.5 0 01-1.5-1.5v-9z" />
+              </svg>
+              <span className="flex-1 font-medium">Open Project</span>
+            </DropdownMenuItem>
+
+            {recentProjects.length > 0 ? (
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger className="gap-2 text-xs">
+                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground/80">
+                    <circle cx="8" cy="8" r="6.5" />
+                    <path d="M8 4.5V8l2.5 2" />
+                  </svg>
+                  <span className="flex-1 font-medium">Recent</span>
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="min-w-64 max-w-sm">
+                  {recentProjects.map((path) => (
+                    <DropdownMenuItem
+                      key={path}
+                      onSelect={() => onOpenProject(path)}
+                      className="text-xs truncate font-mono"
+                      title={path}
+                    >
+                      {path.split("/").pop() || path}
+                      <span className="ml-2 text-[10px] text-muted-foreground/50 truncate">
+                        {path}
+                      </span>
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+            ) : null}
+
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => void openSettingsWindow("models")} className="gap-2 text-xs">
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground/80">
+                <path d="M8 1.5c-3 0-5.5 2-5.5 5s2 4.5 2 4.5l.5.5h6l.5-.5s2-1.5 2-4.5-2.5-5-5.5-5z" />
+                <path d="M5.5 14h5M6.5 11.5v2.5M9.5 11.5v2.5" />
+              </svg>
+              <span className="flex-1">Models</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void openSettingsWindow("agents")} className="gap-2 text-xs">
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground/80">
+                <rect x="3.5" y="3.5" width="9" height="9" rx="2" />
+                <path d="M1.5 6h2M1.5 10h2M12.5 6h2M12.5 10h2M6 1.5v2M10 1.5v2M6 12.5v2M10 12.5v2" />
+              </svg>
+              <span className="flex-1">Agents</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void openSettingsWindow("shortcuts")} className="gap-2 text-xs">
+              <HugeiconsIcon icon={KeyboardIcon} size={13} strokeWidth={1.75} className="text-muted-foreground/80" />
+              <span className="flex-1">Shortcuts</span>
+              <span className="text-[10px] text-muted-foreground/60 font-mono">
+                {IS_MAC ? "⌘/" : "Ctrl+/"}
+              </span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void openSettingsWindow("general")} className="gap-2 text-xs">
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground/80">
+                <circle cx="8" cy="8" r="3.5" />
+                <path d="M8 1.5v1M8 13.5v1M1.5 8h1M13.5 8h1M3.4 3.4l.7.7M12.6 12.6l.7.7M3.4 12.6l.7-.7M12.6 3.4l.7-.7" />
+              </svg>
+              <span className="flex-1">Appearance</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void openSettingsWindow("about")} className="gap-2 text-xs">
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground/80">
+                <circle cx="8" cy="8" r="6.5" />
+                <path d="M8 11V8M8 5h.01" />
+              </svg>
+              <span className="flex-1">About</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <span className="h-4 w-px shrink-0 bg-border/60 mx-0.5" />
+
         <Button
           onClick={onToggleSidebar}
           title="Toggle sidebar"

@@ -80,6 +80,91 @@ async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Res
     Ok(())
 }
 
+#[tauri::command]
+async fn pick_project_folder() -> Result<Option<String>, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let script = "[System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms') | Out-Null; $dialog = New-Object System.Windows.Forms.FolderBrowserDialog; $dialog.Description = 'Select KAI Project Folder'; if ($dialog.ShowDialog() -eq 'OK') { $dialog.SelectedPath } else { '' }";
+        let output = std::process::Command::new("powershell")
+            .args(&["-NoProfile", "-Command", script])
+            .output();
+        match output {
+            Ok(out) => {
+                let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if s.is_empty() {
+                    Ok(None)
+                } else {
+                    Ok(Some(s.replace("\\", "/")))
+                }
+            }
+            Err(e) => Err(e.to_string()),
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let script_posix = "POSIX path of (choose folder with prompt \"Select KAI Project Folder\")";
+        let output_posix = std::process::Command::new("osascript")
+            .args(&["-e", script_posix])
+            .output();
+        match output_posix {
+            Ok(out_p) => {
+                let path = String::from_utf8_lossy(&out_p.stdout).trim().to_string();
+                if path.is_empty() {
+                    Ok(None)
+                } else {
+                    Ok(Some(path))
+                }
+            }
+            Err(e) => Err(e.to_string()),
+        }
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        let output = std::process::Command::new("zenity")
+            .args(&["--file-selection", "--directory", "--title=Select KAI Project Folder"])
+            .output();
+        match output {
+            Ok(out) => {
+                let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if s.is_empty() {
+                    let output_kd = std::process::Command::new("kdialog")
+                        .args(&["--getexistingdirectory", ".", "--title", "Select KAI Project Folder"])
+                        .output();
+                    match output_kd {
+                        Ok(out_kd) => {
+                            let s_kd = String::from_utf8_lossy(&out_kd.stdout).trim().to_string();
+                            if s_kd.is_empty() {
+                                Ok(None)
+                            } else {
+                                Ok(Some(s_kd))
+                            }
+                        }
+                        Err(_) => Ok(None),
+                    }
+                } else {
+                    Ok(Some(s))
+                }
+            }
+            Err(_) => {
+                let output_kd = std::process::Command::new("kdialog")
+                    .args(&["--getexistingdirectory", ".", "--title", "Select KAI Project Folder"])
+                    .output();
+                match output_kd {
+                    Ok(out_kd) => {
+                        let s_kd = String::from_utf8_lossy(&out_kd.stdout).trim().to_string();
+                        if s_kd.is_empty() {
+                            Ok(None)
+                        } else {
+                            Ok(Some(s_kd))
+                        }
+                    }
+                    Err(_) => Ok(None),
+                }
+            }
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -166,6 +251,7 @@ pub fn run() {
             workspace::workspace_current_dir,
             get_launch_dir,
             open_settings_window,
+            pick_project_folder,
             secrets::secrets_get,
             secrets::secrets_set,
             secrets::secrets_delete,
