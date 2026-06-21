@@ -51,7 +51,8 @@ async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Res
         .inner_size(860.0, 640.0)
         .min_inner_size(720.0, 520.0)
         .resizable(true)
-        .visible(false);
+        .visible(false)
+        .shadow(false);
 
     // Tie lifecycle to the main window so settings minimizes/closes with it.
     if let Some(main) = app.get_webview_window("main") {
