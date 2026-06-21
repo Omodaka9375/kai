@@ -178,7 +178,7 @@ type StoreState = {
   sessionsHydrated: boolean;
   sessions: SessionMeta[];
   activeSessionId: string | null;
-  hydrateSessions: () => Promise<void>;
+  hydrateSessions: (workspaceRoot?: string | null) => Promise<void>;
   newSession: () => string;
   switchSession: (id: string) => void;
   deleteSession: (id: string) => void;
@@ -425,9 +425,11 @@ export const useChatStore = create<StoreState>((set, get) => ({
   sessions: [],
   activeSessionId: null,
 
-  hydrateSessions: async () => {
+  hydrateSessions: async (workspaceRoot?: string | null) => {
     if (get().sessionsHydrated) return;
     const { sessions } = await loadAll();
+
+    const root = workspaceRoot ?? get().live?.getWorkspaceRoot?.() ?? null;
 
     // Reuse the most recent untitled "New chat" session if one exists from
     // the previous run — no point stacking empty placeholder sessions every
@@ -445,7 +447,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
         title: "New chat",
         createdAt: Date.now(),
         updatedAt: Date.now(),
-        workspaceRoot: get().live?.getWorkspaceRoot?.(),
+        workspaceRoot: root,
       };
       nextSessions = [fresh, ...sessions];
       void saveSessionsList(nextSessions);

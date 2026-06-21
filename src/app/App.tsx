@@ -463,12 +463,6 @@ export default function App() {
   }, [prefsHydrated, prefDefaultModel, setSelectedModelId]);
 
   const hydrateSessions = useChatStore((s) => s.hydrateSessions);
-  useEffect(() => {
-    void hydrateSessions();
-    void useAgentsStore.getState().hydrate();
-    void useSnippetsStore.getState().hydrate();
-    void useMcpStore.getState().hydrate();
-  }, [hydrateSessions]);
 
   const activeTab = tabs.find((t) => t.id === activeId);
   const isTerminalTab = activeTab?.kind === "terminal";
@@ -509,6 +503,15 @@ export default function App() {
   useEffect(() => {
     if (explorerRoot) void setLastWorkspaceCwd(explorerRoot);
   }, [explorerRoot]);
+
+  useEffect(() => {
+    if (!launchCwdResolved) return;
+    const root = explorerRoot ?? launchCwd ?? home ?? null;
+    void hydrateSessions(root);
+    void useAgentsStore.getState().hydrate();
+    void useSnippetsStore.getState().hydrate();
+    void useMcpStore.getState().hydrate();
+  }, [hydrateSessions, launchCwdResolved, explorerRoot, launchCwd, home]);
 
   useEffect(() => {
     setActiveSearchAddon(

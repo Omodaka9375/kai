@@ -31,7 +31,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { motion } from "motion/react";
 import { useEffect, useMemo, useState } from "react";
 import { estimateCost, getModel, getModelContextLimit } from "../config";
-import type { SessionMeta } from "../lib/sessions";
+import { saveSessionsList, type SessionMeta } from "../lib/sessions";
 import { getOrCreateChat, useChatStore } from "../store/chatStore";
 import { usePlanStore } from "../store/planStore";
 import { AgentSwitcher } from "./AgentSwitcher";
@@ -100,6 +100,16 @@ export function AiMiniWindow() {
     // Normalize paths
     const normalized = workspaceRoot.replace(/\\/g, "/").replace(/\/$/, "");
     const activeRoot = activeSession.workspaceRoot?.replace(/\\/g, "/").replace(/\/$/, "");
+
+    // If the active session doesn't have a workspaceRoot associated yet, associate it with the current project!
+    if (!activeSession.workspaceRoot) {
+      const next = sessions.map((s) =>
+        s.id === sessionId ? { ...s, workspaceRoot } : s,
+      );
+      useChatStore.setState({ sessions: next });
+      void saveSessionsList(next);
+      return;
+    }
 
     // If the active session is from a different project, auto-switch or create
     if (activeRoot && activeRoot !== normalized) {
