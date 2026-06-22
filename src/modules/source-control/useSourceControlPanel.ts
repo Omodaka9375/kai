@@ -15,6 +15,8 @@ import {
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SourceControlSummary } from "./useSourceControl";
+import { generateText } from "ai";
+import { buildConfiguredLanguageModel } from "@/modules/ai/lib/agent";
 
 type PanelState = "closed" | "loading" | "no-repo" | "ready" | "error";
 type DiffMode = "+" | "-";
@@ -715,12 +717,7 @@ export function useSourceControlPanel(
     setActionMessage(null);
     setActionError(null);
     try {
-      const [{ buildConfiguredLanguageModel }, { generateText }, diff] =
-        await Promise.all([
-          import("@/modules/ai/lib/agent"),
-          import("ai"),
-          native.gitDiff(repo.repoRoot, null, true),
-        ]);
+      const diff = await native.gitDiff(repo.repoRoot, null, true);
       const { text: diffText, truncated } = truncateDiff(diff.diffText);
       const chatState = useChatStore.getState();
       const prefs = usePreferencesStore.getState();
