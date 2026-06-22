@@ -204,17 +204,17 @@ export function Header({
               <span className="flex-1 font-medium">Open Project</span>
             </DropdownMenuItem>
 
-            {recentProjects.length > 0 ? (
-              <DropdownMenuSub>
-                <DropdownMenuSubTrigger className="gap-2 text-xs">
-                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground/80">
-                    <circle cx="8" cy="8" r="6.5" />
-                    <path d="M8 4.5V8l2.5 2" />
-                  </svg>
-                  <span className="flex-1 font-medium">Recent</span>
-                </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent className="min-w-64 max-w-sm">
-                  {recentProjects.map((path) => (
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger className="gap-2 text-xs">
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground/80">
+                  <circle cx="8" cy="8" r="6.5" />
+                  <path d="M8 4.5V8l2.5 2" />
+                </svg>
+                <span className="flex-1 font-medium">Recent</span>
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="min-w-64 max-w-sm">
+                {recentProjects.length > 0 ? (
+                  recentProjects.map((path) => (
                     <DropdownMenuItem
                       key={path}
                       onSelect={() => onOpenProject(path)}
@@ -226,10 +226,14 @@ export function Header({
                         {path}
                       </span>
                     </DropdownMenuItem>
-                  ))}
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>
-            ) : null}
+                  ))
+                ) : (
+                  <DropdownMenuItem disabled className="text-xs text-muted-foreground/70">
+                    No Recent Projects
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
 
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={() => void openSettingsWindow("models")} className="gap-2 text-xs">
