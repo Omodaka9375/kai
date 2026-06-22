@@ -29,9 +29,10 @@ export function TodoStrip({ sessionId, isBusy, onStop }: Props) {
   const [expanded, setExpanded] = useState(true);
 
   // Auto-collapse when list grows past 5 items
+  const count = todos.length;
   useEffect(() => {
-    if (todos.length > 5) setExpanded(false);
-  }, [todos.length > 5]);
+    if (count > 5) setExpanded(false);
+  }, [count]);
 
   const clearSession = useTodosStore((s) => s.clearSession);
 

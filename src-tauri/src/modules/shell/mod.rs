@@ -163,6 +163,9 @@ fn run_blocking_cancellable(
 // Persistent agent shell state + background process state.
 // ──────────────────────────────────────────────────────────────────────────
 
+const MAX_SESSIONS: usize = 32;
+const MAX_BG_PROCS: usize = 16;
+
 pub struct ShellState {
     sessions: RwLock<HashMap<u32, Arc<ShellSession>>>,
     bg: RwLock<HashMap<u32, Arc<BackgroundProc>>>,
@@ -218,13 +221,17 @@ pub fn shell_session_open(
         }
     };
     let session = Arc::new(ShellSession::new(initial, workspace));
+    let mut map = state.sessions.write().unwrap();
+    if map.len() >= MAX_SESSIONS {
+        return Err(format!("too many shell sessions (limit {MAX_SESSIONS}); close unused sessions first"));
+    }
     let id = loop {
         let candidate = state.next_session_id.fetch_add(1, Ordering::Relaxed);
-        if candidate != 0 && !state.sessions.read().unwrap().contains_key(&candidate) {
+        if candidate != 0 && !map.contains_key(&candidate) {
             break candidate;
         }
     };
-    state.sessions.write().unwrap().insert(id, session);
+    map.insert(id, session);
     Ok(id)
 }
 
@@ -280,14 +287,25 @@ pub fn shell_bg_spawn(
     cwd: Option<String>,
     workspace: Option<WorkspaceEnv>,
 ) -> Result<u32, String> {
+    // Reap exited processes before checking the cap so short-lived commands
+    // don't permanently consume a slot.
+    {
+        let mut map = state.bg.write().unwrap();
+        map.retain(|_, p| !p.has_exited());
+    }
     let proc = background::spawn(command, cwd, WorkspaceEnv::from_option(workspace))?;
+    let mut map = state.bg.write().unwrap();
+    if map.len() >= MAX_BG_PROCS {
+        proc.kill();
+        return Err(format!("too many background processes (limit {MAX_BG_PROCS}); kill unused ones first"));
+    }
     let id = loop {
         let candidate = state.next_bg_id.fetch_add(1, Ordering::Relaxed);
-        if candidate != 0 && !state.bg.read().unwrap().contains_key(&candidate) {
+        if candidate != 0 && !map.contains_key(&candidate) {
             break candidate;
         }
     };
-    state.bg.write().unwrap().insert(id, proc);
+    map.insert(id, proc);
     Ok(id)
 }
 

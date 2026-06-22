@@ -277,12 +277,12 @@ function bindSlot(slot: Slot, p: AcquireParams): void {
   p.drainRing((bytes) => slot.term.write(bytes));
   try {
     slot.term.write("\x1b[?25h");
-  } catch {}
+  } catch (e) { console.debug("[Kai-pool] cursor-show write failed:", e); }
 
   for (const d of slot.oscDisposers) {
     try {
       d();
-    } catch {}
+    } catch (e) { console.debug("[Kai-pool] osc disposer failed:", e); }
   }
   slot.oscDisposers = p.registerOsc(slot.term);
 
@@ -299,7 +299,7 @@ function bindSlot(slot: Slot, p: AcquireParams): void {
   if (p.searchQuery) {
     try {
       slot.searchAddon.findNext(p.searchQuery);
-    } catch {}
+    } catch (e) { console.debug("[Kai-pool] search replay failed:", e); }
   }
 
   applyCursorBlinkOnSlot(slot, adapter?.isLeafFocused(p.leafId) ?? false);
@@ -414,7 +414,7 @@ function detachSlotFromLeaf(slot: Slot): void {
   for (const d of slot.oscDisposers) {
     try {
       d();
-    } catch {}
+    } catch (e) { console.debug("[Kai-pool] osc disposer failed:", e); }
   }
   slot.oscDisposers = [];
 
@@ -455,7 +455,7 @@ function attachWebgl(slot: Slot): void {
       }
       try {
         webgl.dispose();
-      } catch {}
+      } catch (e) { console.debug("[Kai-webgl] context-loss dispose failed:", e); }
       // Recovery: WebKit may transiently lose contexts on sleep/wake or GPU
       // reset; without re-attach the slot would silently fall back to DOM
       // forever. Defer past WebKit's reset window before retrying.
@@ -502,7 +502,7 @@ function disposeSlotWebgl(slot: Slot): void {
     (
       addon as unknown as { _renderer?: unknown; _renderService?: unknown }
     )._renderService = null;
-  } catch {}
+  } catch (e) { console.debug("[Kai-webgl] renderer cleanup failed:", e); }
   slot.webglAddon = null;
 }
 
@@ -510,22 +510,22 @@ function releaseCanvasContext(canvas: HTMLCanvasElement): void {
   let gl: WebGL2RenderingContext | WebGLRenderingContext | null = null;
   try {
     gl = canvas.getContext("webgl2") as WebGL2RenderingContext | null;
-  } catch {}
+  } catch (e) { console.debug("[Kai-webgl] getContext(webgl2) failed:", e); }
   if (!gl) {
     try {
       gl = canvas.getContext("webgl") as WebGLRenderingContext | null;
-    } catch {}
+    } catch (e) { console.debug("[Kai-webgl] getContext(webgl) failed:", e); }
   }
   if (gl) {
     try {
       const ext = gl.getExtension("WEBGL_lose_context");
       if (ext && !gl.isContextLost()) ext.loseContext();
-    } catch {}
+    } catch (e) { console.debug("[Kai-webgl] loseContext failed:", e); }
   }
   try {
     canvas.width = 0;
     canvas.height = 0;
-  } catch {}
+  } catch (e) { console.debug("[Kai-webgl] canvas reset failed:", e); }
 }
 
 export function applyWebglPreference(enabled: boolean): void {

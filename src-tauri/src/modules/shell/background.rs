@@ -61,6 +61,10 @@ impl BackgroundProc {
         }
     }
 
+    pub fn has_exited(&self) -> bool {
+        self.exited.load(Ordering::Acquire)
+    }
+
     pub fn kill(&self) {
         let _ = self.child.kill();
     }

@@ -201,9 +201,21 @@ pub fn spawn(
             // `pending`, so the last line of output never races the Exit event.
             #[cfg(windows)]
             {
-                let deadline = Instant::now() + Duration::from_millis(50);
+                // On Windows, ConPTY's ClosePseudoConsole (inside the reader's
+                // EOF path) can occasionally block for hundreds of ms. We spin
+                // with a generous deadline first, then fall back to a full join
+                // so we never silently drop the reader thread or final output.
+                let deadline = Instant::now() + Duration::from_millis(500);
                 while Instant::now() < deadline && !reader_thread.is_finished() {
                     thread::sleep(Duration::from_millis(5));
+                }
+                if reader_thread.is_finished() {
+                    let _ = reader_thread.join();
+                } else {
+                    log::warn!("pty reader thread still alive after 500ms; joining (may block)");
+                    if let Err(e) = reader_thread.join() {
+                        log::error!("pty reader thread panicked: {e:?}");
+                    }
                 }
             }
             #[cfg(not(windows))]

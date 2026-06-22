@@ -1,6 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { isDocumentFile, parseDocument, parseDocx } from "../lib/documentParser";
+import { djb2 } from "../lib/hash";
 import { native } from "../lib/native";
 import {
   checkReadableCanonical,
@@ -11,12 +12,6 @@ import { resolvePath, type ToolContext } from "./context";
 
 const READ_BYTE_CAP = 25 * 1024;
 const READ_LINE_CAP = 2000;
-
-function djb2(s: string): number {
-  let h = 5381;
-  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
-  return h >>> 0;
-}
 
 export function buildFsTools(ctx: ToolContext) {
   return {

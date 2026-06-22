@@ -437,7 +437,7 @@ pub fn push(
     )?;
     ensure_success(&output, "git push failed")?;
 
-    let upstream = upstream.unwrap();
+    let upstream = upstream.expect("None case returned Err(NoUpstream) above");
     let (remote, branch) = split_upstream(&upstream);
     Ok(GitPushResult {
         remote,

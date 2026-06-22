@@ -1,5 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
+import { djb2 } from "../lib/hash";
 import { native } from "../lib/native";
 import { checkWritableCanonical } from "../lib/security";
 import { newQueuedEditId, usePlanStore } from "../store/planStore";
@@ -8,12 +9,6 @@ import { resolvePath, type ToolContext } from "./context";
 type EditResult =
   | { ok: true; replacements: number; bytesWritten: number; path: string }
   | { error: string; path: string };
-
-function djb2(s: string): number {
-  let h = 5381;
-  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
-  return h >>> 0;
-}
 
 /** Strip trailing whitespace from each line, preserving line endings.
  *  Exempt .md/.mdx where trailing spaces are meaningful (hard line breaks). */
