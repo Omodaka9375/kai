@@ -4,6 +4,19 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [0.9.33]
+### Fixed
+*   **Unsafe Lifetime in Shell Sessions**: Eliminated an unsound `unsafe` block that transmuted a raw pointer to `'static` for the cancel flag in agent shell sessions. Now uses a safe `Arc<AtomicBool>` clone moved into the worker thread.
+*   **CWD Sentinel Collision**: Replaced the static `__KAI_CWD__` sentinel with a per-session random token (timestamp + pid + counter) so command output can never accidentally or maliciously corrupt the agent shell's working directory tracking.
+*   **PTY Final Output Loss (Windows)**: Increased the reader-thread join deadline from 50ms to 500ms with an unconditional `join()` fallback, preventing the last chunk of terminal output from being silently dropped on ConPTY child exit.
+*   **TodoStrip useEffect Dependency**: Changed the auto-collapse effect dependency from a boolean expression (`todos.length > 5`) to the numeric length value, fixing a subtle React hook correctness issue.
+### Added
+*   **Shell Resource Caps**: Added limits of 32 concurrent agent shell sessions and 16 background processes. Exited background processes are auto-reaped before the cap is checked, and clear error messages are returned when limits are hit.
+### Improved
+*   **Git Push Safety**: Replaced a bare `unwrap()` in the git push path with an annotated `expect()` for clearer panic context if the upstream invariant is ever violated.
+*   **WebGL Error Traceability**: Added `console.debug` logging to 7 previously silent `catch {}` blocks in the terminal renderer pool, covering WebGL context loss, addon disposal, and OSC handler teardown.
+*   **DRY Hash Utility**: Extracted the duplicated `djb2` hash function from `tools/fs.ts` and `tools/edit.ts` into a shared `ai/lib/hash.ts` module.
+
 ## [0.9.32]
 ### Added
 *   **Global Text Search in File Tree**: Integrated a fully functional, regex-powered text search inside your workspace files (`fs_grep`) inside the File Explorer search panel.

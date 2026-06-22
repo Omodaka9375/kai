@@ -1,13 +1,14 @@
 {
   "name": "KAI",
   "private": false,
-  "version": "0.9.32",
+  "version": "0.9.33",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
+    "cargo_check": "cargo check --manifest-path src-tauri\Cargo.toml",
     "test": "vitest run",
     "test:watch": "vitest"
   },
