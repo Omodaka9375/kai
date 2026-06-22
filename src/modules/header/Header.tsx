@@ -170,7 +170,7 @@ export function Header({
             <Button
               variant="ghost"
               size="icon-sm"
-              className="shrink-0 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+              className="shrink-0 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-0 focus-visible:border-transparent focus:outline-none"
               title="File"
             >
               <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
@@ -280,7 +280,7 @@ export function Header({
             <Button
               variant="ghost"
               size="icon-sm"
-              className="shrink-0 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+              className="shrink-0 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50 focus-visible:ring-0 focus-visible:border-transparent focus:outline-none"
               title="Split terminal"
               disabled={!canSplit}
             >
