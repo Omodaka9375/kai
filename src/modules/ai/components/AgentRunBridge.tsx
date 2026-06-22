@@ -156,6 +156,10 @@ function Bridge({
         : {}),
       ...(runStatus === "idle" ? { error: null } : {}),
     });
+    // Auto-open the mini chat window when the agent is thinking or streaming!
+    if (runStatus === "thinking" || runStatus === "streaming") {
+      openMini();
+    }
     // When the agent goes idle, check if it stopped prematurely (narrated
     // instead of acting). If so, auto-nudge it to continue.
     const wasActive =

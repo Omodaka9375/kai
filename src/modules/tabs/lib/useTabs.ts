@@ -790,7 +790,10 @@ export function useTabs(initial?: Partial<TerminalTab> & { defer?: boolean }) {
       ];
     });
     setActiveId(tabId);
-    for (const lid of toDispose) disposeSession(lid);
+    // Defer disposing previous sessions so React unmounting/slot-release finishes first!
+    setTimeout(() => {
+      for (const lid of toDispose) disposeSession(lid);
+    }, 120);
   }, []);
 
   return {
