@@ -78,6 +78,8 @@ export type Preferences = {
   comfyuiBaseURL: string;
   /** ComfyUI workflow JSON (API format) uploaded by the user. */
   comfyuiWorkflow: string;
+  /** List of recently opened projects/folders. */
+  recentProjects: string[];
 };
 
 const STORE_PATH = "Kai-settings.json";
@@ -159,8 +161,9 @@ export const DEFAULT_PREFERENCES: Preferences = {
   lmstudioContextSize: 0,
   openaiCompatibleContextSize: 0,
   uiThemeId: "default",
-  comfyuiBaseURL: "http://127.0.0.1:8188",
+  comfyuiBaseURL: "http://*********:8188",
   comfyuiWorkflow: "",
+  recentProjects: [],
 };
 
 const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
@@ -263,11 +266,17 @@ export async function loadPreferences(): Promise<Preferences> {
       get<string>(KEY_COMFYUI_BASE_URL) ?? DEFAULT_PREFERENCES.comfyuiBaseURL,
     comfyuiWorkflow:
       get<string>(KEY_COMFYUI_WORKFLOW) ?? DEFAULT_PREFERENCES.comfyuiWorkflow,
+    recentProjects:
+      get<string[]>("recentProjects") ?? DEFAULT_PREFERENCES.recentProjects,
   };
 }
 
 export async function setTheme(value: ThemePref): Promise<void> {
   await writePref(KEY_THEME, value);
+}
+
+export async function setRecentProjects(value: string[]): Promise<void> {
+  await writePref("recentProjects", value);
 }
 
 export async function setDefaultModel(value: ModelId): Promise<void> {

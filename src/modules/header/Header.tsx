@@ -82,18 +82,7 @@ export function Header({
   const rootRef = useRef<HTMLDivElement>(null);
   const [compact, setCompact] = useState(false);
   const userShortcuts = usePreferencesStore((s) => s.shortcuts);
-  const [recentProjects, setRecentProjects] = useState<string[]>([]);
-
-  const loadRecentProjects = () => {
-    try {
-      const saved = localStorage.getItem("Kai.recentProjects");
-      if (saved) {
-        setRecentProjects(JSON.parse(saved));
-      }
-    } catch {
-      // ignore
-    }
-  };
+  const recentProjects = usePreferencesStore((s) => s.recentProjects) || [];
 
   const handleOpenProject = async () => {
     try {
@@ -176,7 +165,7 @@ export function Header({
       }`}
     >
       <div className="flex shrink-0 items-center gap-0.5">
-        <DropdownMenu onOpenChange={(open) => { if (open) loadRecentProjects(); }}>
+        <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
               variant="ghost"

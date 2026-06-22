@@ -53,7 +53,7 @@ import {
 import { PreviewStack, type PreviewPaneHandle } from "@/modules/preview";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import { onKeysChanged, setLastWorkspaceCwd } from "@/modules/settings/store";
+import { onKeysChanged, setLastWorkspaceCwd, setRecentProjects } from "@/modules/settings/store";
 import {
   ShortcutsDialog,
   useGlobalShortcuts,
@@ -501,7 +501,17 @@ export default function App() {
 
   // Persist the workspace root so it's restored on next launch.
   useEffect(() => {
-    if (explorerRoot) void setLastWorkspaceCwd(explorerRoot);
+    if (explorerRoot) {
+      void setLastWorkspaceCwd(explorerRoot);
+      try {
+        const normalized = explorerRoot.replace(/\\/g, "/").replace(/\/$/, "");
+        const list = usePreferencesStore.getState().recentProjects || [];
+        const next = [normalized, ...list.filter((p) => p !== normalized)].slice(0, 10);
+        void setRecentProjects(next);
+      } catch {
+        // ignore
+      }
+    }
   }, [explorerRoot]);
 
   useEffect(() => {
