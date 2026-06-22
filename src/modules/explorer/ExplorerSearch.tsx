@@ -34,6 +34,8 @@ type SearchHit = {
   rel: string;
   name: string;
   is_dir: boolean;
+  line?: number;
+  text?: string;
 };
 
 type SearchResult = {
@@ -46,7 +48,7 @@ const DEBOUNCE_MS = 300;
 
 type Props = {
   rootPath: string;
-  onOpenFile: (path: string) => void;
+  onOpenFile: (path: string, pin?: boolean, line?: number) => void;
   open: boolean;
   onRequestClose: () => void;
   onActiveChange?: (active: boolean) => void;
@@ -76,6 +78,8 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(function E
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [searching, setSearching] = useState(false);
   const [truncated, setTruncated] = useState(false);
+  const [searchMode, setSearchMode] = useState<"files" | "content">("files");
+  const [matchCase, setMatchCase] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastKeyboardNavAt = useRef(0);
@@ -111,21 +115,44 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(function E
     let alive = true;
     const handle = setTimeout(async () => {
       try {
-        const res = await invoke<SearchResult>("fs_search", {
-          root: rootPath,
-          query: q,
-          limit: 200,
-          showHidden,
-          workspace: currentWorkspaceEnv(),
-        });
-        if (alive) {
-          setResults(res.hits);
-          setTruncated(res.truncated);
-          setSelectedIndex(0);
+        if (searchMode === "content") {
+          const res = await invoke<{ hits: { path: string; rel: string; line: number; text: string }[]; truncated: boolean }>("fs_grep", {
+            pattern: q,
+            root: rootPath,
+            case_insensitive: !matchCase,
+            limit: 200,
+            workspace: currentWorkspaceEnv(),
+          });
+          if (alive) {
+            const mapped: SearchHit[] = res.hits.map((h) => ({
+              path: h.path,
+              rel: h.rel,
+              name: `${h.rel.split(/[\\/]/).pop() ?? h.rel}:${h.line}`,
+              is_dir: false,
+              line: h.line,
+              text: h.text,
+            }));
+            setResults(mapped);
+            setTruncated(res.truncated);
+            setSelectedIndex(0);
+          }
+        } else {
+          const res = await invoke<SearchResult>("fs_search", {
+            root: rootPath,
+            query: q,
+            limit: 200,
+            showHidden,
+            workspace: currentWorkspaceEnv(),
+          });
+          if (alive) {
+            setResults(res.hits);
+            setTruncated(res.truncated);
+            setSelectedIndex(0);
+          }
         }
       } catch (e) {
         if (alive) {
-          console.error("fs_search failed:", e);
+          console.error("search failed:", e);
           setResults([]);
           setTruncated(false);
           setSelectedIndex(0);
@@ -139,7 +166,7 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(function E
       alive = false;
       clearTimeout(handle);
     };
-  }, [query, rootPath, showHidden]);
+  }, [query, rootPath, showHidden, searchMode, matchCase]);
 
   useImperativeHandle(
     ref,
@@ -163,7 +190,7 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(function E
 
   const handleSelect = (hit: SearchHit) => {
     if (!hit.is_dir) {
-      onOpenFile(hit.path);
+      onOpenFile(hit.path, false, hit.line);
     }
   };
 
@@ -175,53 +202,98 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(function E
           initial={{ opacity: 0, transform: "translateY(-15px)" }}
           animate={{ opacity: 1, transform: "translateY(0px)" }}
         >
-          <HugeiconsIcon
-            icon={Search01Icon}
-            size={13}
-            strokeWidth={2}
-            className="absolute top-1/2 left-4 -translate-y-1/2 text-muted-foreground"
-          />
-          <Input
-            ref={inputRef}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") {
-                e.preventDefault();
-                e.stopPropagation();
-                onRequestClose();
-                return;
-              }
-              if (results.length > 0) {
-                if (e.key === "ArrowDown") {
-                  e.preventDefault();
-                  lastKeyboardNavAt.current = Date.now();
-                  setSelectedIndex((prev) => (prev + 1) % results.length);
-                } else if (e.key === "ArrowUp") {
-                  e.preventDefault();
-                  lastKeyboardNavAt.current = Date.now();
-                  setSelectedIndex(
-                    (prev) => (prev - 1 + results.length) % results.length,
-                  );
-                } else if (e.key === "Enter") {
-                  e.preventDefault();
-                  handleSelect(results[selectedIndex]);
-                }
-              }
-            }}
-            placeholder="Search files…"
-            className="h-7 pr-7 pl-6.5 text-xs"
-          />
-          {query ? (
+          {/* Search Mode Toggles */}
+          <div className="flex items-center gap-1.5 mb-1.5 px-0.5">
             <button
               type="button"
-              onClick={() => setQuery("")}
-              className="absolute top-1/2 right-3.5 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-              aria-label="Clear search"
+              onClick={() => setSearchMode("files")}
+              className={cn(
+                "rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors select-none",
+                searchMode === "files"
+                  ? "bg-primary text-primary-foreground font-semibold shadow-xs"
+                  : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+              )}
             >
-              <HugeiconsIcon icon={Cancel01Icon} size={11} strokeWidth={2} />
+              Files
             </button>
-          ) : null}
+            <button
+              type="button"
+              onClick={() => setSearchMode("content")}
+              className={cn(
+                "rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors select-none",
+                searchMode === "content"
+                  ? "bg-primary text-primary-foreground font-semibold shadow-xs"
+                  : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+              )}
+            >
+              Content
+            </button>
+            {searchMode === "content" && (
+              <button
+                type="button"
+                onClick={() => setMatchCase(!matchCase)}
+                title="Match Case"
+                className={cn(
+                  "ml-auto rounded px-1.5 py-0.5 text-[10px] font-mono border transition-colors select-none leading-none",
+                  matchCase
+                    ? "bg-primary/10 text-primary border-primary/30"
+                    : "text-muted-foreground border-border/40 hover:bg-accent hover:text-foreground"
+                )}
+              >
+                Aa
+              </button>
+            )}
+          </div>
+
+          <div className="relative">
+            <HugeiconsIcon
+              icon={Search01Icon}
+              size={13}
+              strokeWidth={2}
+              className="absolute top-1/2 left-2 -translate-y-1/2 text-muted-foreground"
+            />
+            <Input
+              ref={inputRef}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onRequestClose();
+                  return;
+                }
+                if (results.length > 0) {
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    lastKeyboardNavAt.current = Date.now();
+                    setSelectedIndex((prev) => (prev + 1) % results.length);
+                  } else if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    lastKeyboardNavAt.current = Date.now();
+                    setSelectedIndex(
+                      (prev) => (prev - 1 + results.length) % results.length,
+                    );
+                  } else if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleSelect(results[selectedIndex]);
+                  }
+                }
+              }}
+              placeholder={searchMode === "content" ? "Search text in files…" : "Search files…"}
+              className="h-7 pr-7 pl-6 text-xs"
+            />
+            {query ? (
+              <button
+                type="button"
+                onClick={() => setQuery("")}
+                className="absolute top-1/2 right-2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                aria-label="Clear search"
+              >
+                <HugeiconsIcon icon={Cancel01Icon} size={11} strokeWidth={2} />
+              </button>
+            ) : null}
+          </div>
         </motion.div>
       ) : null}
 
@@ -238,10 +310,11 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(function E
               </div>
             ) : (
               results.map((hit, index) => {
-                const url = hit.is_dir ? null : fileIconUrl(hit.name);
+                const filename = hit.rel.split(/[\\/]/).pop() ?? hit.name;
+                const url = hit.is_dir ? null : fileIconUrl(filename);
                 const isSelected = index === selectedIndex;
                 return (
-                  <ContextMenu key={hit.path}>
+                  <ContextMenu key={`${hit.path}:${hit.line ?? 0}`}>
                     <ContextMenuTrigger asChild>
                       <button
                         type="button"
@@ -253,32 +326,43 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(function E
                           }
                         }}
                         className={cn(
-                          "flex w-full items-center gap-1.5 px-2 py-1 text-left text-xs transition-colors",
+                          "flex w-full items-start gap-2 px-2 py-1.5 text-left text-xs transition-colors",
                           isSelected ? "bg-accent text-foreground" : "hover:bg-accent/50 text-foreground/80"
                         )}
                         title={hit.path}
                       >
                         {url ? (
-                          <img src={url} alt="" className="size-3.5 shrink-0" />
+                          <img src={url} alt="" className="size-3.5 shrink-0 mt-0.5" />
                         ) : (
                           <HugeiconsIcon
                             icon={Folder01Icon}
                             size={13}
                             strokeWidth={1.75}
-                            className="shrink-0 text-muted-foreground"
+                            className="shrink-0 text-muted-foreground mt-0.5"
                           />
                         )}
-                        <span className="truncate">{hit.name}</span>
-                        <span className="ml-auto truncate text-[10px] text-muted-foreground">
-                          {hit.rel}
-                        </span>
+                        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                          <div className="flex items-center justify-between gap-1.5 w-full">
+                            <span className="truncate font-medium text-foreground">{hit.name}</span>
+                            {!hit.text && (
+                              <span className="shrink-0 truncate text-[10px] text-muted-foreground">
+                                {hit.rel}
+                              </span>
+                            )}
+                          </div>
+                          {hit.text !== undefined && (
+                            <div className="truncate font-mono text-[10px] text-muted-foreground/80 bg-muted/30 px-1.5 py-0.5 rounded border border-border/30 w-full">
+                              {hit.text.trim()}
+                            </div>
+                          )}
+                        </div>
                       </button>
                     </ContextMenuTrigger>
                     <ContextMenuContent className={COMPACT_CONTENT}>
                       {!hit.is_dir && (
                         <ContextMenuItem
                           className={COMPACT_ITEM}
-                          onSelect={() => onOpenFile(hit.path)}
+                          onSelect={() => onOpenFile(hit.path, true, hit.line)}
                         >
                           Open
                         </ContextMenuItem>

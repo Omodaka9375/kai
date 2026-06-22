@@ -40,7 +40,7 @@ export type FileExplorerHandle = {
 
 type Props = {
   rootPath: string | null;
-  onOpenFile: (path: string, pin?: boolean) => void;
+  onOpenFile: (path: string, pin?: boolean, line?: number) => void;
   onPathRenamed?: (from: string, to: string) => void;
   onPathDeleted?: (path: string) => void;
   onRevealInTerminal?: (path: string) => void;

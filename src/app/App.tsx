@@ -802,12 +802,20 @@ export default function App() {
   }, [resetWorkspace]);
 
   const handleOpenFile = useCallback(
-    (path: string, pin?: boolean) => {
+    (path: string, pin?: boolean, lineNum?: number) => {
       // Explorer defaults to preview (pin=false); explicit actions like
       // context-menu "Open" pass pin=true for a persistent tab.
-      openFileTab(path, pin ?? false);
+      const tabId = openFileTab(path, pin ?? false);
+      if (typeof lineNum === "number" && lineNum > 0) {
+        setTimeout(() => {
+          const handle = editorRefs.current.get(tabId ?? activeId);
+          if (handle && "scrollToLine" in handle) {
+            handle.scrollToLine(lineNum);
+          }
+        }, 120);
+      }
     },
-    [openFileTab],
+    [openFileTab, activeId],
   );
 
   const handlePathRenamed = useCallback(
