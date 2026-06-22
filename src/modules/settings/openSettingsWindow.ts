@@ -7,6 +7,6 @@ export type SettingsTab =
   | "agents"
   | "about";
 
-export async function openSettingsWindow(tab?: SettingsTab): Promise<void> {
+export async function openSettingsWindow(tab?: string): Promise<void> {
   await invoke("open_settings_window", { tab: tab ?? null });
 }

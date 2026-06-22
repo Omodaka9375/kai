@@ -225,35 +225,35 @@ export function Header({
             </DropdownMenuSub>
 
             <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={() => void openSettingsWindow("models")} className="gap-2 text-xs">
+            <DropdownMenuItem onSelect={() => void openSettingsWindow("models&isolate=true")} className="gap-2 text-xs">
               <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground/80">
                 <path d="M8 1.5c-3 0-5.5 2-5.5 5s2 4.5 2 4.5l.5.5h6l.5-.5s2-1.5 2-4.5-2.5-5-5.5-5z" />
                 <path d="M5.5 14h5M6.5 11.5v2.5M9.5 11.5v2.5" />
               </svg>
               <span className="flex-1">Models</span>
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => void openSettingsWindow("agents")} className="gap-2 text-xs">
+            <DropdownMenuItem onSelect={() => void openSettingsWindow("agents&isolate=true")} className="gap-2 text-xs">
               <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground/80">
                 <rect x="3.5" y="3.5" width="9" height="9" rx="2" />
                 <path d="M1.5 6h2M1.5 10h2M12.5 6h2M12.5 10h2M6 1.5v2M10 1.5v2M6 12.5v2M10 12.5v2" />
               </svg>
               <span className="flex-1">Agents</span>
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => void openSettingsWindow("shortcuts")} className="gap-2 text-xs">
+            <DropdownMenuItem onSelect={() => void openSettingsWindow("shortcuts&isolate=true")} className="gap-2 text-xs">
               <HugeiconsIcon icon={KeyboardIcon} size={13} strokeWidth={1.75} className="text-muted-foreground/80" />
               <span className="flex-1">Shortcuts</span>
               <span className="text-[10px] text-muted-foreground/60 font-mono">
                 {IS_MAC ? "⌘/" : "Ctrl+/"}
               </span>
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => void openSettingsWindow("general")} className="gap-2 text-xs">
+            <DropdownMenuItem onSelect={() => void openSettingsWindow("general&isolate=true")} className="gap-2 text-xs">
               <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground/80">
                 <circle cx="8" cy="8" r="3.5" />
                 <path d="M8 1.5v1M8 13.5v1M1.5 8h1M13.5 8h1M3.4 3.4l.7.7M12.6 12.6l.7.7M3.4 12.6l.7-.7M12.6 3.4l.7-.7" />
               </svg>
               <span className="flex-1">Appearance</span>
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => void openSettingsWindow("about")} className="gap-2 text-xs">
+            <DropdownMenuItem onSelect={() => void openSettingsWindow("about&isolate=true")} className="gap-2 text-xs">
               <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground/80">
                 <circle cx="8" cy="8" r="6.5" />
                 <path d="M8 11V8M8 5h.01" />

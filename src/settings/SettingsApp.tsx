@@ -40,14 +40,24 @@ function readInitialTab(): SettingsTab {
   if (typeof window === "undefined") return "general";
   const url = new URL(window.location.href);
   const t = url.searchParams.get("tab");
+  if (!t) return "general";
+  const cleanTab = t.split("&")[0];
   // Back-compat: legacy "ai" / "connections" → "models".
-  if (t === "ai" || t === "connections") return "models";
-  if (t && (VALID_TABS as string[]).includes(t)) return t as SettingsTab;
+  if (cleanTab === "ai" || cleanTab === "connections") return "models";
+  if ((VALID_TABS as string[]).includes(cleanTab)) return cleanTab as SettingsTab;
   return "general";
+}
+
+function isInitialIsolated(): boolean {
+  if (typeof window === "undefined") return false;
+  const url = new URL(window.location.href);
+  const t = url.searchParams.get("tab") || "";
+  return url.searchParams.get("isolate") === "true" || t.includes("isolate=true");
 }
 
 export function SettingsApp() {
   const [active, setActive] = useState<SettingsTab>(readInitialTab);
+  const [isolated, setIsolated] = useState(isInitialIsolated);
   const init = usePreferencesStore((s) => s.init);
   const ActiveSection = TABS.find(t => t.id === active)?.component;
 
@@ -57,12 +67,15 @@ export function SettingsApp() {
 
   useEffect(() => {
     const apply = (detail: string) => {
-      if (detail === "ai" || detail === "connections") {
+      const isIso = detail.includes("isolate=true");
+      setIsolated(isIso);
+      const cleanTab = detail.split("&")[0];
+      if (cleanTab === "ai" || cleanTab === "connections") {
         setActive("models");
         return;
       }
-      if ((VALID_TABS as string[]).includes(detail)) {
-        setActive(detail as SettingsTab);
+      if ((VALID_TABS as string[]).includes(cleanTab)) {
+        setActive(cleanTab as SettingsTab);
       }
     };
     const unlistenPromise = getCurrentWebviewWindow().listen<string>(
@@ -81,26 +94,32 @@ export function SettingsApp() {
         className={`flex h-11 shrink-0 items-center border-b border-border/60 bg-card/60 ${IS_MAC ? "pr-3 pl-22" : "pr-0 pl-3"
           }`}
       >
-        <Tabs
-          value={active}
-          onValueChange={(v) => setActive(v as SettingsTab)}
-          orientation="horizontal"
-          className="flex-1 items-center"
-          data-tauri-drag-region
-        >
-          <TabsList className="mx-auto h-7 bg-muted/40 px-2">
-            {TABS.map((t) => (
-              <TabsTrigger
-                key={t.id}
-                value={t.id}
-                className="h-6 gap-1.5 px-2.5 text-[11.5px]"
-              >
-                <HugeiconsIcon icon={t.icon} size={12} strokeWidth={1.75} />
-                <span>{t.label}</span>
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
+        {isolated ? (
+          <div className="flex-1 px-3 text-[12.5px] font-semibold text-foreground tracking-tight" data-tauri-drag-region>
+            {TABS.find((t) => t.id === active)?.label ?? "Settings"}
+          </div>
+        ) : (
+          <Tabs
+            value={active}
+            onValueChange={(v) => setActive(v as SettingsTab)}
+            orientation="horizontal"
+            className="flex-1 items-center"
+            data-tauri-drag-region
+          >
+            <TabsList className="mx-auto h-7 bg-muted/40 px-2">
+              {TABS.map((t) => (
+                <TabsTrigger
+                  key={t.id}
+                  value={t.id}
+                  className="h-6 gap-1.5 px-2.5 text-[11.5px]"
+                >
+                  <HugeiconsIcon icon={t.icon} size={12} strokeWidth={1.75} />
+                  <span>{t.label}</span>
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+        )}
         {USE_CUSTOM_WINDOW_CONTROLS && <WindowControls closeOnly />}
       </header>
 
