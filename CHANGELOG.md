@@ -3,8 +3,22 @@
 All notable changes to the KAI terminal emulator project are documented in this file. KAI adheres to Semantic Versioning.
 
 ---
-## [0.9.31]
+
+## [0.9.32]
 ### Added
+*   **Global Text Search in File Tree**: Integrated a fully functional, regex-powered text search inside your workspace files (`fs_grep`) inside the File Explorer search panel.
+    *   **Files vs Content Toggles**: Easily switch between searching for matching file names and searching for matching lines of text inside files.
+    *   **Case Sensitivity**: Toggles exact casing matches using the native `"Aa"` button (mimicking VS Code).
+    *   **Inline Context Previews**: Displays file hits as `filename.ext:line` with matching line snippets rendered inside a beautifully styled inline code block below the filename.
+    *   **Smooth Navigation**: Clicking any text match opens the file and instantly scrolls the editor centered directly to that specific line number.
+*   **Source Control Merge Conflict Safety**: Automatically detects unresolved merge conflicts inside the active working tree.
+    *   **Conflicts Alert Banner**: Displays a prominent red warning banner at the top of the SCM list notifying you of active conflicts.
+    *   **Committed Safeguards**: Disables both the **Commit** button and the **Generate Commit Message** buttons whenever unresolved conflicts are present on disk.
+*   **Isolated Settings Modals**: The File menu setting shortcuts now launch a focused settings window that hides the main TabsList navigation bar entirely, acting as a clean, consistent, dedicated modal.
+### Fixed
+*   **SCM Message Generation Crashes**: Restructured the `generateCommitMessage` handler to statically import dependencies, resolving runtime webview dynamic import failures.
+
+## [0.9.31]
 *   **Top Bar Button Swapping**: Swapped the Keyboard Shortcuts help button directly into KAI's top-right header action row, replacing the redundant Settings button there.
 *   **DWM Shadow Clashes Resolved**: Disabled standard Windows Desktop Window Manager (DWM) shadows on the settings tauri window builder to resolve the thin square border clashing with custom HTML rounded corners.
 ### Fixed
