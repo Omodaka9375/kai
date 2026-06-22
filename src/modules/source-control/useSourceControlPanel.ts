@@ -729,22 +729,38 @@ export function useSourceControlPanel(
         openaiCompatibleBaseURL,
         openaiCompatibleModelId,
       );
-      const result = await generateText({
-        model,
-        system: COMMIT_MESSAGE_SYSTEM_PROMPT,
-        prompt: buildCommitMessagePrompt(stagedEntries, diffText, truncated),
-        maxOutputTokens: COMMIT_MESSAGE_MAX_OUTPUT_TOKENS,
-        temperature: 0.2,
-      });
-      let message = cleanCommitMessage(result.text);
-      if (!isValidCommitMessage(message)) {
-        const repair = await generateText({
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      let result;
+      try {
+        result = await generateText({
           model,
           system: COMMIT_MESSAGE_SYSTEM_PROMPT,
-          prompt: buildRepairCommitMessagePrompt(message, stagedEntries),
+          prompt: buildCommitMessagePrompt(stagedEntries, diffText, truncated),
           maxOutputTokens: COMMIT_MESSAGE_MAX_OUTPUT_TOKENS,
-          temperature: 0,
+          temperature: 0.2,
+          abortSignal: controller.signal,
         });
+      } finally {
+        clearTimeout(timeoutId);
+      }
+      let message = cleanCommitMessage(result.text);
+      if (!isValidCommitMessage(message)) {
+        const repairController = new AbortController();
+        const repairTimeoutId = setTimeout(() => repairController.abort(), 10000);
+        let repair;
+        try {
+          repair = await generateText({
+            model,
+            system: COMMIT_MESSAGE_SYSTEM_PROMPT,
+            prompt: buildRepairCommitMessagePrompt(message, stagedEntries),
+            maxOutputTokens: COMMIT_MESSAGE_MAX_OUTPUT_TOKENS,
+            temperature: 0,
+            abortSignal: repairController.signal,
+          });
+        } finally {
+          clearTimeout(repairTimeoutId);
+        }
         message = cleanCommitMessage(repair.text);
       }
       if (!isValidCommitMessage(message)) {
