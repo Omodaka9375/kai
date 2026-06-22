@@ -79,6 +79,7 @@ type GroupId = "staged" | "unstaged";
 
 type RowDescriptor =
   | { kind: "banner-diverged"; key: string }
+  | { kind: "banner-conflicts"; key: string }
   | { kind: "group-header"; key: string; group: GroupId; count: number }
   | { kind: "entry"; key: string; group: GroupId; entry: SourceControlEntry }
   | { kind: "empty"; key: string; group: GroupId; text: string };
@@ -172,14 +173,17 @@ export const SourceControlPanel = memo(function SourceControlPanel({
   const canCommit =
     scm.stagedEntries.length > 0 &&
     scm.commitMessage.trim().length > 0 &&
-    !scm.actionBusy;
+    !scm.actionBusy &&
+    !scm.hasConflicts;
   const commitDisabledReason = scm.actionBusy
     ? "Wait for the current Git action to finish."
-    : scm.stagedEntries.length === 0
-      ? "Stage changes to enable commit."
-      : scm.commitMessage.trim().length === 0
-        ? "Enter a commit message to enable commit."
-        : null;
+    : scm.hasConflicts
+      ? "Resolve merge conflicts before committing."
+      : scm.stagedEntries.length === 0
+        ? "Stage changes to enable commit."
+        : scm.commitMessage.trim().length === 0
+          ? "Enter a commit message to enable commit."
+          : null;
   const commitHint = canCommit
     ? `Commit with ${commitShortcut}.`
     : (commitDisabledReason ?? `Commit with ${commitShortcut}.`);
@@ -259,6 +263,9 @@ export const SourceControlPanel = memo(function SourceControlPanel({
     if (isDiverged) {
       result.push({ kind: "banner-diverged", key: "banner-diverged" });
     }
+    if (scm.hasConflicts) {
+      result.push({ kind: "banner-conflicts", key: "banner-conflicts" });
+    }
 
     if (stagedCount > 0) {
       result.push({
@@ -336,6 +343,7 @@ export const SourceControlPanel = memo(function SourceControlPanel({
       if (!row) return ROW_HEIGHTS.entry;
       switch (row.kind) {
         case "banner-diverged":
+        case "banner-conflicts":
           return ROW_HEIGHTS.banner;
         case "group-header":
           return ROW_HEIGHTS.groupHeader;
@@ -896,6 +904,8 @@ const RowRenderer = memo(function RowRenderer(props: RowRendererProps) {
   switch (row.kind) {
     case "banner-diverged":
       return <DivergedBanner />;
+    case "banner-conflicts":
+      return <ConflictsBanner />;
     case "group-header":
       return <GroupHeader {...props} row={row} />;
     case "entry":
@@ -922,6 +932,15 @@ function DivergedBanner() {
         <span className="font-medium">Diverged from upstream</span>
         <span className="ml-1 opacity-75">— resolve in terminal</span>
       </span>
+    </div>
+  );
+}
+
+function ConflictsBanner() {
+  return (
+    <div className="mx-2 mt-1 flex h-7 items-center gap-1.5 rounded-md border border-destructive/25 bg-destructive/[0.07] px-2 text-[10.5px] leading-none text-destructive dark:text-red-300">
+      <span className="size-1.5 shrink-0 rounded-full bg-destructive animate-pulse" />
+      <span className="font-medium">Unresolved Merge Conflicts — Resolve them before committing.</span>
     </div>
   );
 }

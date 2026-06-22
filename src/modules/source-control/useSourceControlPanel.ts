@@ -69,6 +69,7 @@ type SourceControlPanelState = {
   allClean: boolean;
   canPush: boolean;
   pushHint: string | null;
+  hasConflicts: boolean;
   canGenerateCommitMessage: boolean;
   generateCommitMessageHint: string;
   selectionTransition: SelectionTransition;
@@ -403,7 +404,20 @@ export function useSourceControlPanel(
   const selectedModel = getModel(selectedModelId);
   const aiBusy = agentStatus !== "idle" && agentStatus !== "error";
   const anyActionBusy = localActionBusy !== null || summary.busyAction !== null;
+
+  const hasConflicts = useMemo(() => {
+    return (status?.changedFiles ?? []).some(
+      (file) =>
+        file.indexStatus === "U" ||
+        file.worktreeStatus === "U" ||
+        file.statusLabel === "Unmerged",
+    );
+  }, [status]);
+
   const aiUnavailableReason = useMemo(() => {
+    if (hasConflicts) {
+      return "Resolve merge conflicts before generating a commit message.";
+    }
     if (stagedEntries.length === 0) {
       return "Stage changes to generate a commit message";
     }
@@ -429,7 +443,7 @@ export function useSourceControlPanel(
     stagedEntries.length,
   ]);
   const canGenerateCommitMessage =
-    stagedEntries.length > 0 && !anyActionBusy && !aiBusy && !!repo;
+    stagedEntries.length > 0 && !anyActionBusy && !aiBusy && !!repo && !hasConflicts;
   const generateCommitMessageHint = aiUnavailableReason
     ? aiUnavailableReason
     : aiBusy
@@ -856,6 +870,7 @@ export function useSourceControlPanel(
     allClean,
     canPush,
     pushHint,
+    hasConflicts,
     canGenerateCommitMessage,
     generateCommitMessageHint,
     selectionTransition,
