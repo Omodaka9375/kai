@@ -159,25 +159,20 @@ export function AiInputBar() {
     if (!trigger) return;
     const before = c.value.slice(0, trigger.start);
     const afterRaw = c.value.slice(trigger.end);
-    let insert = "";
     if (item.kind === "snippet") {
-      const needsSpace = afterRaw.length === 0 || !/^\s/.test(afterRaw);
-      insert = `#${item.snippet.handle}${needsSpace ? " " : ""}`;
       c.addSnippet(item.snippet);
     } else {
       c.addCommand(item.command);
     }
-    const after =
-      item.kind === "command" ? afterRaw.replace(/^\s+/, "") : afterRaw;
-    c.setValue(`${before}${insert}${after}`);
+    const after = afterRaw.replace(/^\s+/, "");
+    c.setValue(`${before}${after}`);
     setTrigger(null);
     setActiveIndex(0);
     requestAnimationFrame(() => {
       const el = c.textareaRef.current;
       if (!el) return;
-      const caret = before.length + insert.length;
       el.focus();
-      el.setSelectionRange(caret, caret);
+      el.setSelectionRange(before.length, before.length);
     });
   };
 
