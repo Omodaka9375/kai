@@ -4,6 +4,21 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [0.9.36]
+### Added
+*   **Dedicated MCP Settings Panel**: The "MCP Servers" entry in the File menu now opens its own isolated Settings window showing only the MCP server management section — add, edit, toggle, and remove servers without navigating through the full settings UI.
+*   **Dedicated Snippets Settings Panel**: Added a new "Snippets" entry to the File menu that opens a focused Settings window for creating and managing reusable prompt snippets (`#handle` tokens).
+*   **Lazy-Loaded Settings Sections**: All settings sections are now loaded on demand via `React.lazy`, so opening any isolated settings panel only fetches the code for that specific section — dramatically faster window open times, especially in dev mode.
+### Fixed
+*   **MCP Store Hydration Staleness**: Fixed MCP server configs not reflecting the latest saved state when the settings window reopened, ensuring fresh data is always loaded from disk.
+### Docs
+*   **Claude Code CLI Guide**: Added a README section explaining how to use a Claude subscription via the Claude Code CLI directly inside KAI's terminal.
+
+## [0.9.35]
+### Fixed
+*   **Git Credential Helpers Restored**: Stopped blanking `GIT_ASKPASS` and `SSH_ASKPASS` environment variables in git subprocess calls. Non-interactive credential helpers (Git Credential Manager, ssh-agent) now work correctly for push, pull, and fetch operations.
+*   **Terminal CR Fallback**: Improved carriage return handling in terminal session initialization to prevent edge-case prompt rendering issues.
+
 ## [0.9.34]
 ### Added
 *   **Per-Project Model Memory**: KAI now remembers the last AI model selected in each project. When you reopen a workspace, it automatically restores the model you were using — no more reselecting every time you switch projects.
