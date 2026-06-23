@@ -27,6 +27,7 @@ export type ShortcutId =
   | "view.zoomReset"
   | "ai.toggle"
   | "ai.askSelection"
+  | "editor.saveAll"
   | "shortcuts.open"
   | "settings.open"
   | "sidebar.toggle";
@@ -56,6 +57,12 @@ export type Shortcut = {
 };
 
 export const SHORTCUTS: Shortcut[] = [
+  {
+    id: "editor.saveAll",
+    label: "Save all open files",
+    group: "General",
+    defaultBindings: [{ [MOD_PROP]: true, shift: true, key: "s" }],
+  },
   {
     id: "settings.open",
     label: "Open settings",

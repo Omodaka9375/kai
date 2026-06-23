@@ -22,6 +22,7 @@ import {
 import type { Tab } from "@/modules/tabs";
 import { TabBar } from "@/modules/tabs";
 import {
+  FloppyDiskIcon,
   GridViewIcon,
   KeyboardIcon,
   LayoutTwoColumnIcon,
@@ -56,6 +57,10 @@ type Props = {
   searchTarget: SearchTarget;
   searchRef: RefObject<SearchInlineHandle | null>;
   onOpenProject: (path: string) => void;
+  onSave: () => void;
+  onSaveAll: () => void;
+  /** Number of editor tabs with unsaved changes. */
+  dirtyCount: number;
 };
 
 const COMPACT_WIDTH = 720;
@@ -78,11 +83,15 @@ export function Header({
   searchTarget,
   searchRef,
   onOpenProject,
+  onSave,
+  onSaveAll,
+  dirtyCount,
 }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [compact, setCompact] = useState(false);
   const userShortcuts = usePreferencesStore((s) => s.shortcuts);
   const recentProjects = usePreferencesStore((s) => s.recentProjects) || [];
+  const activeTab = tabs.find((t) => t.id === activeId);
 
   const handleOpenProject = async () => {
     try {
@@ -223,6 +232,30 @@ export function Header({
                 )}
               </DropdownMenuSubContent>
             </DropdownMenuSub>
+
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              disabled={!activeTab || activeTab.kind !== "editor" || !activeTab.dirty}
+              onSelect={onSave}
+              className="gap-2 text-xs"
+            >
+              <HugeiconsIcon icon={FloppyDiskIcon} size={13} strokeWidth={1.75} className="text-muted-foreground/80" />
+              <span className="flex-1">Save</span>
+              <span className="text-[10px] text-muted-foreground/60 font-mono">
+                {IS_MAC ? "⌘S" : "Ctrl+S"}
+              </span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={dirtyCount < 2}
+              onSelect={onSaveAll}
+              className="gap-2 text-xs"
+            >
+              <HugeiconsIcon icon={FloppyDiskIcon} size={13} strokeWidth={1.75} className="text-muted-foreground/80" />
+              <span className="flex-1">Save All</span>
+              <span className="text-[10px] text-muted-foreground/60 font-mono">
+                {IS_MAC ? "⌘⇧S" : "Ctrl+Shift+S"}
+              </span>
+            </DropdownMenuItem>
 
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={() => void openSettingsWindow("models&isolate=true")} className="gap-2 text-xs">

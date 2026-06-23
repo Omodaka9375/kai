@@ -69,7 +69,7 @@ import {
   useSourceControl,
 } from "@/modules/source-control";
 import { StatusBar } from "@/modules/statusbar";
-import { MAX_PANES_PER_TAB, useTabs, useWorkspaceCwd } from "@/modules/tabs";
+import { MAX_PANES_PER_TAB, useTabs, useWorkspaceCwd, type EditorTab } from "@/modules/tabs";
 import {
   disposeSession,
   findLeafCwd,
@@ -811,6 +811,24 @@ export default function App() {
     resetWorkspace(path);
   }, [resetWorkspace]);
 
+  const dirtyEditorTabs = useMemo(
+    () => tabs.filter((t): t is EditorTab => t.kind === "editor" && t.dirty),
+    [tabs],
+  );
+
+  const handleSave = useCallback(() => {
+    const active = tabs.find((t) => t.id === activeId);
+    if (active?.kind === "editor" && active.dirty) {
+      editorRefs.current.get(activeId)?.save();
+    }
+  }, [tabs, activeId]);
+
+  const handleSaveAll = useCallback(() => {
+    for (const t of dirtyEditorTabs) {
+      editorRefs.current.get(t.id)?.save();
+    }
+  }, [dirtyEditorTabs]);
+
   const handleOpenFile = useCallback(
     (path: string, pin?: boolean, lineNum?: number) => {
       // Explorer defaults to preview (pin=false); explicit actions like
@@ -1096,6 +1114,7 @@ export default function App() {
       "search.replace": () => searchInlineRef.current?.focusReplace(),
       "ai.toggle": togglePanelAndFocus,
       "ai.askSelection": askFromSelection,
+      "editor.saveAll": handleSaveAll,
       "shortcuts.open": () => setShortcutsOpen((v) => !v),
       "settings.open": () => void openSettingsWindow(),
       "sidebar.toggle": toggleSidebar,
@@ -1119,6 +1138,7 @@ export default function App() {
       askFromSelection,
       toggleSidebar,
       toggleExplorerFocus,
+      handleSaveAll,
       zoomIn,
       zoomOut,
       zoomReset,
@@ -1420,6 +1440,9 @@ export default function App() {
             searchTarget={searchTarget}
             searchRef={searchInlineRef}
             onOpenProject={onOpenProject}
+            onSave={handleSave}
+            onSaveAll={handleSaveAll}
+            dirtyCount={dirtyEditorTabs.length}
           />
 
           <main className="zoom-content flex min-h-0 flex-1 flex-col">

@@ -92,6 +92,8 @@ export type EditorPaneHandle = {
   /** Re-read the file from disk. Skips silently if the buffer is dirty. */
   reload: () => boolean;
   scrollToLine: (lineNum: number) => void;
+  /** Save the buffer to disk. No-op if not dirty. */
+  save: () => Promise<void>;
 };
 
 type Props = {
@@ -294,6 +296,10 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
         },
         getPath: () => path,
         reload: () => reloadRef.current(),
+        save: async () => {
+          await saveRef.current();
+          onSavedRef.current?.();
+        },
         scrollToLine: (lineNum: number) => {
           const view = cmRef.current?.view;
           if (!view) return;
