@@ -32,6 +32,7 @@ import {
   FolderCloudIcon,
   FolderGitTwoIcon,
   MinusSignIcon,
+  MinusSignSquareIcon,
   Refresh01Icon,
   RemoveSquareIcon,
 } from "@hugeicons/core-free-icons";
@@ -1156,7 +1157,11 @@ const EntryRow = memo(function EntryRow({
           {isBusy ? (
             <Spinner className="size-3" />
           ) : (
-            <HugeiconsIcon icon={AddSquareIcon} size={12} strokeWidth={2} />
+            <HugeiconsIcon
+              icon={actionType === "unstage" ? MinusSignSquareIcon : AddSquareIcon}
+              size={12}
+              strokeWidth={2}
+            />
           )}
         </IconActionButton>
       </div>

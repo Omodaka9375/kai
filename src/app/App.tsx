@@ -500,19 +500,20 @@ export default function App() {
   );
 
   // Persist the workspace root so it's restored on next launch.
+  // Guard behind prefsHydrated so we don't overwrite the persisted recent
+  // projects list with [current] before the store has loaded from disk.
   useEffect(() => {
-    if (explorerRoot) {
-      void setLastWorkspaceCwd(explorerRoot);
-      try {
-        const normalized = explorerRoot.replace(/\\/g, "/").replace(/\/$/, "");
-        const list = usePreferencesStore.getState().recentProjects || [];
-        const next = [normalized, ...list.filter((p) => p !== normalized)].slice(0, 10);
-        void setRecentProjects(next);
-      } catch {
-        // ignore
-      }
+    if (!explorerRoot || !prefsHydrated) return;
+    void setLastWorkspaceCwd(explorerRoot);
+    try {
+      const normalized = explorerRoot.replace(/\\/g, "/").replace(/\/$/, "");
+      const list = usePreferencesStore.getState().recentProjects || [];
+      const next = [normalized, ...list.filter((p) => p !== normalized)].slice(0, 10);
+      void setRecentProjects(next);
+    } catch {
+      // ignore
     }
-  }, [explorerRoot]);
+  }, [explorerRoot, prefsHydrated]);
 
   useEffect(() => {
     if (!launchCwdResolved) return;
