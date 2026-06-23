@@ -62,10 +62,13 @@ export async function fetchRegistryServers(opts?: {
   const params = new URLSearchParams();
   params.set("version", "latest");
   params.set("limit", String(opts?.limit ?? PAGE_SIZE));
+  params.set("_t", String(Date.now()));
   if (opts?.search) params.set("search", opts.search);
   if (opts?.cursor) params.set("cursor", opts.cursor);
 
-  const resp = await fetch(`${BASE_URL}/servers?${params}`);
+  const resp = await fetch(`${BASE_URL}/servers?${params}`, {
+    cache: "no-store",
+  });
   if (!resp.ok) throw new Error(`Registry API error: ${resp.status}`);
   return resp.json();
 }
