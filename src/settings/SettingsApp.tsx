@@ -6,25 +6,34 @@ import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   AiScanIcon,
   InformationCircleIcon,
+  PuzzleIcon,
   Settings01Icon,
+  SparklesIcon,
   UserMultiple02Icon,
   KeyboardIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { JSX, useEffect, useState } from "react";
-import { AboutSection } from "./sections/AboutSection";
-import { AgentsSection } from "./sections/AgentsSection";
-import { GeneralSection } from "./sections/GeneralSection";
-import { ModelsSection } from "./sections/ModelsSection";
-import { ShortcutsSection } from "./sections/ShortcutsSection";
+import { lazy, Suspense, useEffect, useState } from "react";
 
-const TABS: { id: SettingsTab; label: string; icon: typeof Settings01Icon, component: () => JSX.Element }[] =
+const GeneralSection = lazy(() => import("./sections/GeneralSection").then((m) => ({ default: m.GeneralSection })));
+const ShortcutsSection = lazy(() => import("./sections/ShortcutsSection").then((m) => ({ default: m.ShortcutsSection })));
+const ModelsSection = lazy(() => import("./sections/ModelsSection").then((m) => ({ default: m.ModelsSection })));
+const AgentsSection = lazy(() => import("./sections/AgentsSection").then((m) => ({ default: m.AgentsSection })));
+const SnippetsSection = lazy(() => import("./sections/SnippetsSection").then((m) => ({ default: m.SnippetsSection })));
+const McpSection = lazy(() => import("./sections/McpSection").then((m) => ({ default: m.McpSection })));
+const AboutSection = lazy(() => import("./sections/AboutSection").then((m) => ({ default: m.AboutSection })));
+
+type TabDef = { id: SettingsTab; label: string; icon: typeof Settings01Icon; component: React.LazyExoticComponent<() => React.JSX.Element> };
+
+const TABS: TabDef[] =
   [
     { id: "general", label: "General", icon: Settings01Icon, component: GeneralSection },
     { id: "shortcuts", label: "Shortcuts", icon: KeyboardIcon, component: ShortcutsSection },
     { id: "models", label: "Models", icon: AiScanIcon, component: ModelsSection },
     { id: "agents", label: "Agents", icon: UserMultiple02Icon, component: AgentsSection },
+    { id: "snippets", label: "Snippets", icon: SparklesIcon, component: SnippetsSection },
+    { id: "mcp", label: "MCP Servers", icon: PuzzleIcon, component: McpSection },
     { id: "about", label: "About", icon: InformationCircleIcon, component: AboutSection },
   ];
 
@@ -33,6 +42,8 @@ const VALID_TABS: SettingsTab[] = [
   "shortcuts",
   "models",
   "agents",
+  "snippets",
+  "mcp",
   "about",
 ];
 
@@ -125,7 +136,9 @@ export function SettingsApp() {
 
       <main className="min-h-0 flex-1 overflow-y-auto px-8 pt-6 pb-7 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <div className="mx-auto w-full max-w-160">
-          {ActiveSection && <ActiveSection />}
+          <Suspense fallback={<div className="py-12 text-center text-[11px] text-muted-foreground">Loading…</div>}>
+            {ActiveSection && <ActiveSection />}
+          </Suspense>
         </div>
       </main>
     </div>

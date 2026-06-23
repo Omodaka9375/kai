@@ -260,10 +260,13 @@ class McpClientManager {
     });
   }
 
-  /** Connect all enabled servers from a config list. */
+  /** Connect all enabled servers from a config list sequentially with stagger. */
   async connectAll(configs: McpServerConfig[]): Promise<void> {
     const enabled = configs.filter((c) => c.enabled);
-    await Promise.allSettled(enabled.map((c) => this.connect(c)));
+    for (const c of enabled) {
+      void this.connect(c);
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
   }
 
   /** Disconnect all active servers. */

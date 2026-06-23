@@ -272,6 +272,18 @@ export function Header({
               </svg>
               <span className="flex-1">Agents</span>
             </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void openSettingsWindow("snippets&isolate=true")} className="gap-2 text-xs">
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground/80">
+                <path d="M4 2.5l8 5.5-8 5.5z" />
+              </svg>
+              <span className="flex-1">Snippets</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void openSettingsWindow("mcp&isolate=true")} className="gap-2 text-xs">
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground/80">
+                <path d="M10 1a2 2 0 00-2 2v1h-.5a1.5 1.5 0 00-1.5 1.5V6H4v-.5a1.5 1.5 0 00-3 0V7a1.5 1.5 0 001.5 1.5H4v1.5a1.5 1.5 0 001.5 1.5h1.5l2 2h3a2 2 0 002-2v-1.5h1.5a1.5 1.5 0 000-3H14V5.5A1.5 1.5 0 0012.5 4H12V3a2 2 0 00-2-2z" />
+              </svg>
+              <span className="flex-1">MCP Servers</span>
+            </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => void openSettingsWindow("shortcuts&isolate=true")} className="gap-2 text-xs">
               <HugeiconsIcon icon={KeyboardIcon} size={13} strokeWidth={1.75} className="text-muted-foreground/80" />
               <span className="flex-1">Shortcuts</span>
