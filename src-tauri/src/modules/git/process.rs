@@ -262,9 +262,12 @@ where
         .map(|arg| arg.as_ref().to_os_string())
         .collect();
     let mut cmd = build_git_command(workspace, cwd, &args)?;
+    // GIT_TERMINAL_PROMPT=0 prevents git from blocking on interactive
+    // credential prompts in the terminal. We intentionally do NOT blank
+    // GIT_ASKPASS / SSH_ASKPASS — those are non-interactive credential
+    // helpers (Git Credential Manager, ssh-agent) that work without a TTY
+    // and should be allowed to provide credentials for push/pull/fetch.
     cmd.env("GIT_TERMINAL_PROMPT", "0")
-        .env("GIT_ASKPASS", "")
-        .env("SSH_ASKPASS", "")
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("LC_ALL", "C")
         .stdin(Stdio::null())
