@@ -394,7 +394,15 @@ function stripDataUrlPrefixes(messages: ModelMessage[]): ModelMessage[] {
     let touched = false;
     const content = (
       m.content as { type: string; data?: unknown; [k: string]: unknown }[]
-    ).map((part) => {
+    ).filter((part) => {
+      // Drop file parts with empty data (e.g. images stripped during session
+      // persistence) — providers reject empty base64 payloads.
+      if (part.type === "file" && typeof part.data === "string") {
+        const raw = part.data.replace(DATA_URL_RE, "");
+        if (!raw) { touched = true; return false; }
+      }
+      return true;
+    }).map((part) => {
       if (
         part.type === "file" &&
         typeof part.data === "string" &&

@@ -5,13 +5,21 @@ import { cn } from "@/lib/utils";
 import {
   Add01Icon,
   Cancel01Icon,
+  ClipboardIcon,
   CodeIcon,
+  Copy01Icon,
   HashtagIcon,
   Key01Icon,
   Mic01Icon,
+  RedoIcon,
+  Scissor01Icon,
   TerminalIcon,
+  TextSelectIcon,
+  UndoIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { Kbd, KbdGroup } from "@/components/ui/kbd";
+import { IS_MAC } from "@/lib/platform";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ACCEPTED_FILES, useComposer, type FileAttachment } from "../lib/composer";
@@ -81,6 +89,7 @@ export function AiInputBar() {
   const [trigger, setTrigger] = useState<SnippetTrigger | null>(null);
   const [fileTrigger, setFileTrigger] = useState<FileTrigger | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   const workspaceFiles = useWorkspaceFiles(workspaceRoot, fileTrigger !== null);
 
   const [fileQuery, setFileQuery] = useState("");
@@ -217,7 +226,7 @@ export function AiInputBar() {
     <div
       className={cn(
         "shrink-0 border-t border-border/60 bg-card/40 px-3 flex flex-col justify-center",
-        hasChips ? "py-2 min-h-[42px]" : "h-[42px] py-0"
+        hasChips ? "py-2 min-h-[42px]" : "min-h-[42px] py-0"
       )}
     >
       <div
@@ -302,6 +311,10 @@ export function AiInputBar() {
                 onKeyUp={updateTrigger}
                 onClick={updateTrigger}
                 onSelect={updateTrigger}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setCtxMenu({ x: e.clientX, y: e.clientY });
+                }}
                 onPaste={(e) => {
                   const items = e.clipboardData?.items;
                   if (!items) return;
@@ -362,7 +375,7 @@ export function AiInputBar() {
                 rows={1}
                 disabled={false}
                 className={cn(
-                  "max-h-40 flex-1 resize-none overflow-y-auto bg-transparent text-[13px] leading-relaxed outline-none",
+                  "flex-1 resize-none bg-transparent text-[13px] leading-relaxed outline-none",
                   "placeholder:text-muted-foreground/60",
                 )}
               />
@@ -409,7 +422,183 @@ export function AiInputBar() {
           )}
         </AnimatePresence>
       </div>
+
+      {ctxMenu && (
+        <InputContextMenu
+          x={ctxMenu.x}
+          y={ctxMenu.y}
+          textareaRef={c.textareaRef}
+          hasSelection={
+            c.textareaRef.current
+              ? c.textareaRef.current.selectionStart !== c.textareaRef.current.selectionEnd
+              : false
+          }
+          onDismiss={() => setCtxMenu(null)}
+        />
+      )}
     </div>
+  );
+}
+
+// ── Themed right-click menu for the AI input textarea ─────────────────
+
+const MOD = IS_MAC ? "⌘" : "Ctrl+";
+
+type CtxItem = {
+  label: string;
+  icon: typeof Copy01Icon;
+  kbd: string;
+  action: (el: HTMLTextAreaElement) => void;
+  enabled?: (el: HTMLTextAreaElement) => boolean;
+};
+
+const CTX_ITEMS: CtxItem[] = [
+  {
+    label: "Undo",
+    icon: UndoIcon,
+    kbd: `${MOD}Z`,
+    action: () => document.execCommand("undo"),
+  },
+  {
+    label: "Redo",
+    icon: RedoIcon,
+    kbd: IS_MAC ? "⇧⌘Z" : "Ctrl+Y",
+    action: () => document.execCommand("redo"),
+  },
+  {
+    label: "Cut",
+    icon: Scissor01Icon,
+    kbd: `${MOD}X`,
+    action: () => document.execCommand("cut"),
+    enabled: (el) => el.selectionStart !== el.selectionEnd,
+  },
+  {
+    label: "Copy",
+    icon: Copy01Icon,
+    kbd: `${MOD}C`,
+    action: () => document.execCommand("copy"),
+    enabled: (el) => el.selectionStart !== el.selectionEnd,
+  },
+  {
+    label: "Paste",
+    icon: ClipboardIcon,
+    kbd: `${MOD}V`,
+    action: (el) => {
+      void navigator.clipboard.readText().then((text) => {
+        if (!text) return;
+        const start = el.selectionStart;
+        const end = el.selectionEnd;
+        // Use execCommand so undo history is preserved.
+        el.focus();
+        document.execCommand("insertText", false, text);
+        // If execCommand didn't work (some browsers), fall back.
+        if (el.selectionStart === start && el.selectionEnd === end) {
+          const before = el.value.slice(0, start);
+          const after = el.value.slice(end);
+          const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+            window.HTMLTextAreaElement.prototype,
+            "value",
+          )?.set;
+          nativeInputValueSetter?.call(el, before + text + after);
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          el.setSelectionRange(start + text.length, start + text.length);
+        }
+      });
+    },
+  },
+  {
+    label: "Select All",
+    icon: TextSelectIcon,
+    kbd: `${MOD}A`,
+    action: (el) => el.setSelectionRange(0, el.value.length),
+    enabled: (el) => el.value.length > 0,
+  },
+];
+
+function InputContextMenu({
+  x,
+  y,
+  textareaRef,
+  hasSelection: _hasSelection,
+  onDismiss,
+}: {
+  x: number;
+  y: number;
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+  hasSelection: boolean;
+  onDismiss: () => void;
+}) {
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node))
+        onDismiss();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onDismiss();
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [onDismiss]);
+
+  const w = 170;
+  const h = CTX_ITEMS.length * 28 + 12; // rough estimate for clamping
+  const left = Math.max(4, Math.min(x, window.innerWidth - w - 4));
+  const top = Math.max(4, Math.min(y, window.innerHeight - h - 4));
+
+  const el = textareaRef.current;
+
+  return (
+    <motion.div
+      ref={menuRef}
+      initial={{ opacity: 0, scale: 0.96 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.96 }}
+      transition={{ duration: 0.1, ease: "easeOut" }}
+      style={{ top, left, width: w }}
+      className="fixed z-50 flex flex-col gap-0.5 rounded-lg border border-border/70 bg-card/95 p-1 shadow-xl backdrop-blur-md"
+    >
+      {CTX_ITEMS.map((item) => {
+        const disabled = el ? item.enabled?.(el) === false : true;
+        return (
+          <button
+            key={item.label}
+            type="button"
+            disabled={disabled}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (el) {
+                el.focus();
+                item.action(el);
+              }
+              onDismiss();
+            }}
+            className={cn(
+              "flex h-7 w-full cursor-pointer items-center justify-between rounded-md px-2 text-[11.5px] text-foreground hover:bg-accent",
+              disabled && "pointer-events-none opacity-40",
+            )}
+          >
+            <span className="flex items-center gap-2">
+              <HugeiconsIcon
+                icon={item.icon}
+                size={12}
+                strokeWidth={1.8}
+                className="text-muted-foreground"
+              />
+              <span>{item.label}</span>
+            </span>
+            <KbdGroup>
+              <Kbd className="h-4 min-w-4 px-1 text-[9px]">{item.kbd}</Kbd>
+            </KbdGroup>
+          </button>
+        );
+      })}
+    </motion.div>
   );
 }
 
@@ -551,7 +740,8 @@ function extOf(name: string): string {
 function autoresize(el: HTMLTextAreaElement | null) {
   if (!el) return;
   el.style.height = "auto";
-  const maxH = 160;
+  // ~2 visible lines (2 × line-height 1.625 × 13px ≈ 42px), scroll beyond
+  const maxH = 42;
   const next = Math.min(el.scrollHeight, maxH);
   el.style.height = `${next}px`;
   el.style.overflowY = el.scrollHeight > maxH ? "auto" : "hidden";

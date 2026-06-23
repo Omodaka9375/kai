@@ -95,18 +95,20 @@ export function createContextAwareTransport(deps: Deps) {
     const live = deps.getLive();
     const projectMemory = await readKaiMd(live.workspaceRoot);
     const envBlock = formatEnvBlock(live);
-    let messagesForRun = envBlock
-      ? injectEnvIntoLastUser(options.messages, envBlock)
-      : options.messages;
-
     // ── Context summarization ───────────────────────────────────────
     // Check if the conversation is approaching the context limit. If so,
     // summarize older messages and replace the history before running.
-    messagesForRun = await maybeSummarize(
-      messagesForRun,
+    // Run summarization on the clean messages (before env injection) so
+    // the trimmed set can be fed back to the Chat as originalMessages.
+    const summarized = await maybeSummarize(
+      options.messages,
       deps,
       options.abortSignal,
     );
+    const didSummarize = summarized !== options.messages;
+    const messagesForRun = envBlock
+      ? injectEnvIntoLastUser(summarized, envBlock)
+      : summarized;
     // Gather MCP tools from all connected servers.
     const mcpTools = mcpManager.getActiveTools();
     const mcpSummary = mcpManager.getConnectedServerSummaries();
@@ -153,8 +155,12 @@ export function createContextAwareTransport(deps: Deps) {
       mcpTools: Object.keys(mcpTools).length > 0 ? mcpTools : undefined,
       mcpSummary: mcpSummary.length > 0 ? mcpSummary : undefined,
     });
+    // When summarization trimmed the history, pass the trimmed set as
+    // originalMessages so the Chat instance adopts it. Otherwise the Chat
+    // keeps the full pre-summary history, and every subsequent step
+    // re-triggers summarization.
     return result.toUIMessageStream({
-      originalMessages: options.messages,
+      originalMessages: didSummarize ? summarized : options.messages,
     });
   };
 

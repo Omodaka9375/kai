@@ -1,6 +1,7 @@
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   setFavoriteModelIds,
+  setProjectModelId,
   setRecentModelIds,
 } from "@/modules/settings/store";
 
@@ -24,4 +25,11 @@ export async function pushRecentModel(id: string): Promise<void> {
     return;
   }
   await setRecentModelIds(next);
+}
+
+/** Save the model choice for the current project so it's restored on next open. */
+export async function persistProjectModel(id: string, workspaceRoot: string | null): Promise<void> {
+  if (!workspaceRoot) return;
+  const key = workspaceRoot.replace(/\\/g, "/").replace(/\/$/, "");
+  await setProjectModelId(key, id);
 }

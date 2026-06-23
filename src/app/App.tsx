@@ -24,6 +24,7 @@ import {
   hasAnyKey,
   useChatStore,
 } from "@/modules/ai";
+import type { ModelId } from "@/modules/ai/config";
 import { CustomContextMenu } from "@/modules/ai/components/CustomContextMenu";
 import { ErrorPrompt } from "@/modules/ai/components/ErrorPrompt";
 import { ApiTesterPane } from "@/modules/api-tester/ApiTesterPane";
@@ -457,10 +458,7 @@ export default function App() {
   useEffect(() => {
     void initPrefs();
   }, [initPrefs]);
-  useEffect(() => {
-    if (!prefsHydrated) return;
-    setSelectedModelId(prefDefaultModel);
-  }, [prefsHydrated, prefDefaultModel, setSelectedModelId]);
+  const projectModelIds = usePreferencesStore((s) => s.projectModelIds);
 
   const hydrateSessions = useChatStore((s) => s.hydrateSessions);
 
@@ -514,6 +512,17 @@ export default function App() {
       // ignore
     }
   }, [explorerRoot, prefsHydrated]);
+
+  // Restore per-project model when workspace changes, fall back to global default.
+  const projectModelRoot = useRef<string | null>(null);
+  useEffect(() => {
+    if (!prefsHydrated) return;
+    const root = explorerRoot?.replace(/\\/g, "/").replace(/\/$/, "") ?? null;
+    if (root === projectModelRoot.current) return;
+    projectModelRoot.current = root;
+    const saved = root ? projectModelIds[root] : undefined;
+    setSelectedModelId((saved ?? prefDefaultModel) as ModelId);
+  }, [prefsHydrated, explorerRoot, projectModelIds, prefDefaultModel, setSelectedModelId]);
 
   useEffect(() => {
     if (!launchCwdResolved) return;
@@ -1301,7 +1310,7 @@ export default function App() {
     <div className="relative h-full min-h-0">
       <div
         className={cn(
-          "absolute inset-0 px-1 pt-1 pb-0.5",
+          "absolute inset-0 px-1 pt-1",
           !isTerminalTab && "invisible pointer-events-none",
         )}
         aria-hidden={!isTerminalTab}

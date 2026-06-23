@@ -80,6 +80,8 @@ export type Preferences = {
   comfyuiWorkflow: string;
   /** List of recently opened projects/folders. */
   recentProjects: string[];
+  /** Per-project last-used model ID. Keys are normalized workspace roots. */
+  projectModelIds: Record<string, string>;
 };
 
 const STORE_PATH = "Kai-settings.json";
@@ -164,6 +166,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   comfyuiBaseURL: "http://*********:8188",
   comfyuiWorkflow: "",
   recentProjects: [],
+  projectModelIds: {},
 };
 
 const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
@@ -268,6 +271,8 @@ export async function loadPreferences(): Promise<Preferences> {
       get<string>(KEY_COMFYUI_WORKFLOW) ?? DEFAULT_PREFERENCES.comfyuiWorkflow,
     recentProjects:
       get<string[]>("recentProjects") ?? DEFAULT_PREFERENCES.recentProjects,
+    projectModelIds:
+      get<Record<string, string>>("projectModelIds") ?? DEFAULT_PREFERENCES.projectModelIds,
   };
 }
 
@@ -277,6 +282,12 @@ export async function setTheme(value: ThemePref): Promise<void> {
 
 export async function setRecentProjects(value: string[]): Promise<void> {
   await writePref("recentProjects", value);
+}
+
+export async function setProjectModelId(workspaceRoot: string, modelId: string): Promise<void> {
+  const current = await store.get<Record<string, string>>("projectModelIds") ?? {};
+  current[workspaceRoot] = modelId;
+  await writePref("projectModelIds", current);
 }
 
 export async function setDefaultModel(value: ModelId): Promise<void> {
@@ -464,6 +475,7 @@ export async function onPreferencesChange(
     [KEY_UI_THEME]: "uiThemeId",
     [KEY_COMFYUI_BASE_URL]: "comfyuiBaseURL",
     [KEY_COMFYUI_WORKFLOW]: "comfyuiWorkflow",
+    projectModelIds: "projectModelIds",
   };
   // Same-process writes still fire onChange immediately; cross-window writes
   // arrive via the Tauri event emitted by writePref().

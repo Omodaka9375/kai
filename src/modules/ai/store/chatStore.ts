@@ -30,7 +30,7 @@ import {
   saveSessionsList,
   type SessionMeta,
 } from "../lib/sessions";
-import { pushRecentModel } from "../lib/modelPrefs";
+import { pushRecentModel, persistProjectModel } from "../lib/modelPrefs";
 import { createContextAwareTransport } from "../lib/transport";
 import type { ToolContext } from "../tools/tools";
 import { resetEditFailures } from "../tools/edit";
@@ -357,6 +357,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
   setSelectedModelId: (id) => {
     set({ selectedModelId: id });
     void pushRecentModel(id);
+    void persistProjectModel(id, get().live.getWorkspaceRoot());
     agentBus.emit("model:change", { modelId: id });
   },
 
