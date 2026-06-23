@@ -83,6 +83,17 @@ To activate this, manually create a file named `Kai.md` at your project's root d
 *   **Zero-Write Safe**: KAI only reads from this file; it will never modify or write to your `Kai.md` file during a session, keeping you in full control of your guidelines.
 *   **What to Include**: Define your tech stack, formatting guidelines, database schemas, directory mappings, or preferred test commands.
 
+### 4. Anthropic models on a Claude subscription (in the terminal)
+
+KAI's built-in AI agent is BYOK — Anthropic models selected in **Settings → Models** use your Anthropic **API key** and bill at standard API rates. If you have a **Claude Pro/Max subscription** and want to use it instead, run Anthropic's official **Claude Code** CLI in a KAI terminal pane. KAI is a full terminal, so the CLI behaves exactly as it would anywhere else and authenticates against your subscription.
+
+1.  Install Claude Code: `npm install -g @anthropic-ai/claude-code` (or use the native installer), then verify in a KAI pane with `claude --version`.
+2.  `cd` into your project, run `claude`, and at the prompt choose to log in with your **Claude account (Pro/Max)** — not an API key. To switch later, run `/login` inside Claude Code and pick the subscription. Confirm with `/status`, which should show your plan.
+3.  Make sure `ANTHROPIC_API_KEY` is **not** set in your shell environment — if it is, Claude Code may use the key and bill the API instead of your subscription. Check with `echo $ANTHROPIC_API_KEY`.
+4.  Give Claude Code its own terminal tab. KAI keeps background PTYs alive across tab switches, so the session keeps running while you work in the editor, and edited files refresh on disk.
+
+*   **Why the terminal**: Per Anthropic's terms, Claude subscription auth is only for its official clients (Claude Code, claude.ai). Running the official CLI in a terminal is the supported way to use your subscription here; KAI's own AI agent remains API-key based and is unaffected.
+
 ## Build from Source
 
 ```bash
