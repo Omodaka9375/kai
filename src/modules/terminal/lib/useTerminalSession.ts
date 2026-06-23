@@ -241,23 +241,25 @@ function attachSession(
         s.receivedOutput = false;
         if (s.cols > 0 && s.rows > 0) pty.resize(s.cols, s.rows);
 
-        // ponytail: prompt nudge — on Windows (ConPTY), the shell sometimes
-        // renders its initial prompt before the reader thread or frontend slot
-        // is wired, so it vanishes. If no output arrives within 3s, tickle a
-        // resize to make the shell redraw its prompt without injecting input.
-        // Ceiling: doesn't help if the shell itself is broken; upgrade to a
-        // proper readiness handshake via OSC 133 if this proves insufficient.
-        setTimeout(() => {
-          if (!s.receivedOutput && !s.disposed && s.pty === pty) {
-            const c = s.cols || 80;
-            const r = s.rows || 24;
-            // Shrink by one column then restore — triggers SIGWINCH / ConPTY
-            // resize notification which makes the shell redraw its prompt.
-            void pty.resize(Math.max(c - 1, 1), r).then(() => {
-              if (!s.disposed && s.pty === pty) void pty.resize(c, r);
-            });
-          }
-        }, 3000);
+        // ponytail: prompt nudge — on ConPTY the shell can render its
+        // initial prompt into a size/pipe state that the frontend hasn't
+        // wired yet, so the prompt vanishes. Schedule escalating nudges:
+        //   500ms  — resize to current dims (makes shell redraw)
+        //   1500ms — send CR if still silent (forces prompt at empty input)
+        // Ceiling: doesn't help if the shell itself is broken; upgrade to
+        // an OSC 133 readiness handshake if this proves insufficient.
+        const nudge = (ms: number, action: () => void) =>
+          setTimeout(() => {
+            if (!s.receivedOutput && !s.disposed && s.pty === pty) action();
+          }, ms);
+        nudge(500, () => {
+          const c = s.cols || 80;
+          const r = s.rows || 24;
+          void pty.resize(c, r);
+        });
+        nudge(1500, () => {
+          void pty.write("\r");
+        });
       })
       .catch((e) => {
         s.ptyOpening = false;
