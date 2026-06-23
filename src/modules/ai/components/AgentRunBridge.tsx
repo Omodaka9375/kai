@@ -114,21 +114,31 @@ function Bridge({
   const focusInput = useChatStore((s) => s.focusInput);
 
   // ---- Steering message injection -------------------------------------------
-  // When the agent goes idle and a steering message was queued, send it as a
-  // real user message so it appears in the chat and the model sees it.
+  // When the user sends a message while the agent is busy, stop the current
+  // run first (so incomplete tool_use parts get cleaned up by
+  // stripIncompleteToolCalls in the transport), then inject the steering
+  // message once the status settles to idle.
   const steeringMessage = useChatStore((s) => s.steeringMessage);
   const setSteeringMessage = useChatStore((s) => s.setSteeringMessage);
   useEffect(() => {
     if (!steeringMessage) return;
-    // Only inject when the agent is idle — if it's still running, wait for
-    // the next idle transition.
-    if (status === "submitted" || status === "streaming") return;
+    if (status === "submitted" || status === "streaming") {
+      // Agent is still running — stop it so the next idle transition picks
+      // up the queued steering message.
+      void chat.stop();
+      return;
+    }
     const msg = steeringMessage;
     setSteeringMessage(null);
-    void chat.sendMessage({
-      role: "user",
-      parts: [{ type: "text", text: msg }],
-    });
+    // Small delay lets the Chat internals settle after stop() before we
+    // send the new message.
+    const t = setTimeout(() => {
+      void chat.sendMessage({
+        role: "user",
+        parts: [{ type: "text", text: msg }],
+      });
+    }, 150);
+    return () => clearTimeout(t);
   }, [steeringMessage, status, chat, setSteeringMessage]);
 
   // Reset nudge counter when the user sends a new message (message count
