@@ -49,6 +49,8 @@ type Session = {
   searchQuery: string | null;
   dormantRing: DormantRing;
   hasSlot: boolean;
+  /** Set to true once the PTY has delivered at least one byte of output. */
+  receivedOutput: boolean;
 };
 
 const sessions = new Map<number, Session>();
@@ -102,6 +104,7 @@ function ensureSession(leafId: number, initialCwd?: string): Session {
     searchQuery: null,
     dormantRing: new DormantRing(),
     hasSlot: false,
+    receivedOutput: false,
   };
   sessions.set(leafId, session);
 
@@ -118,6 +121,7 @@ const textDecoder = new TextDecoder("utf-8", { fatal: false });
 function deliverPtyBytes(leafId: number, bytes: Uint8Array): void {
   const s = sessions.get(leafId);
   if (!s) return;
+  s.receivedOutput = true;
   const slot = getSlotForLeaf(leafId);
   if (slot) slot.term.write(bytes);
   else s.dormantRing.push(bytes);
@@ -234,7 +238,26 @@ function attachSession(
           return;
         }
         s.pty = pty;
+        s.receivedOutput = false;
         if (s.cols > 0 && s.rows > 0) pty.resize(s.cols, s.rows);
+
+        // ponytail: prompt nudge — on Windows (ConPTY), the shell sometimes
+        // renders its initial prompt before the reader thread or frontend slot
+        // is wired, so it vanishes. If no output arrives within 3s, tickle a
+        // resize to make the shell redraw its prompt without injecting input.
+        // Ceiling: doesn't help if the shell itself is broken; upgrade to a
+        // proper readiness handshake via OSC 133 if this proves insufficient.
+        setTimeout(() => {
+          if (!s.receivedOutput && !s.disposed && s.pty === pty) {
+            const c = s.cols || 80;
+            const r = s.rows || 24;
+            // Shrink by one column then restore — triggers SIGWINCH / ConPTY
+            // resize notification which makes the shell redraw its prompt.
+            void pty.resize(Math.max(c - 1, 1), r).then(() => {
+              if (!s.disposed && s.pty === pty) void pty.resize(c, r);
+            });
+          }
+        }, 3000);
       })
       .catch((e) => {
         s.ptyOpening = false;

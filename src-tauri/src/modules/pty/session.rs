@@ -79,6 +79,15 @@ pub fn spawn(
     let mut child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
     drop(pair.slave);
 
+    // ponytail: ConPTY settle — rapid sequential ConPTY spawns can leave the
+    // second PTY's output pipe stalled (conhost hasn't finished wiring the
+    // first session's pipes). A short yield inside the SPAWN_LOCK prevents
+    // the next openpty from racing the kernel. 50ms is enough for conhost;
+    // upgrade to an event-based readiness signal if this causes visible
+    // latency on bulk tab-opens.
+    #[cfg(windows)]
+    std::thread::sleep(Duration::from_millis(50));
+
     let killer = child.clone_killer();
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
     let writer: Arc<Mutex<Box<dyn Write + Send>>> = Arc::new(Mutex::new(
