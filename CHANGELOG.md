@@ -4,6 +4,19 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [0.9.34]
+### Added
+*   **Per-Project Model Memory**: KAI now remembers the last AI model selected in each project. When you reopen a workspace, it automatically restores the model you were using — no more reselecting every time you switch projects.
+*   **Save & Save All in File Menu**: Added Save (active dirty editor) and Save All (all unsaved editors, `Ctrl+Shift+S` / `⌘⇧S`) actions to the File dropdown menu.
+*   **Themed AI Input Context Menu**: Right-clicking the AI input textarea now shows a custom themed context menu (Undo, Redo, Cut, Copy, Paste, Select All) matching the app's visual style, replacing the unstyled native browser menu.
+### Fixed
+*   **Shell Prompt Not Appearing on Startup (Windows)**: Fixed an intermittent issue where PowerShell (and other shells) would show only a blinking cursor on launch with no prompt. Added a ConPTY settle delay between sequential PTY spawns to prevent output pipe stalls, and a fallback resize nudge that triggers a prompt redraw if no output is received within 3 seconds.
+*   **AI Summarization Loop**: Fixed a bug where the "Context summarized" notice would trigger on every subsequent agent step instead of just once. The Chat instance now adopts the trimmed message history after summarization, preventing redundant re-summarization.
+*   **Image Paste Crash on Anthropic**: Fixed `image.source.base64: image cannot be empty` errors when sending messages with images to Claude. Stripped image placeholders from persisted sessions are now silently dropped instead of being sent as broken empty payloads.
+*   **Claude Opus Context Limits**: Corrected the context window for Claude Opus 4.6, 4.7, and 4.8 from 200K to the actual 1 million token limit.
+*   **AI Input Bar Overflow**: The AI input textarea now properly expands up to 2 lines and scrolls beyond, instead of pushing the entire workspace layout upward.
+*   **Source Control Unstage Icon**: Fixed the unstage button icon and guarded recent projects persistence behind preferences hydration.
+
 ## [0.9.33]
 ### Fixed
 *   **Unsafe Lifetime in Shell Sessions**: Eliminated an unsound `unsafe` block that transmuted a raw pointer to `'static` for the cancel flag in agent shell sessions. Now uses a safe `Arc<AtomicBool>` clone moved into the worker thread.
