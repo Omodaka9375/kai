@@ -3,7 +3,10 @@
 All notable changes to the KAI terminal emulator project are documented in this file. KAI adheres to Semantic Versioning.
 
 ---
-
+## [0.9.37]
+### Fixed
+*   **Stop agent before injecting steering message**: Prevents orphaned tool_use blocks from reaching the API
+when the user redirects the agent mid-run.
 ## [0.9.36]
 ### Added
 *   **Dedicated MCP Settings Panel**: The "MCP Servers" entry in the File menu now opens its own isolated Settings window showing only the MCP server management section — add, edit, toggle, and remove servers without navigating through the full settings UI.
