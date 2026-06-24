@@ -40,7 +40,8 @@ import type {
   UIMessage,
   UIMessagePart,
 } from "ai";
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { StickToBottomContext } from "use-stick-to-bottom";
 import { AiToolApproval } from "./AiToolApproval";
 import { MediaMessage, isMediaOutput } from "./MediaMessage";
 
@@ -272,6 +273,7 @@ export function AiChatView({
   clearError,
   addToolApprovalResponse,
 }: Props) {
+  const scrollCtx = useRef<StickToBottomContext | null>(null);
   const isBusy = status === "submitted" || status === "streaming";
   const lastMessage = messages[messages.length - 1];
   const showSpinner = isBusy && lastMessage?.role === "user";
@@ -319,8 +321,20 @@ export function AiChatView({
     );
   }
 
+  // Auto-scroll to bottom when the user sends a new message.
+  const prevMsgCount = useRef(messages.length);
+  useEffect(() => {
+    if (messages.length > prevMsgCount.current) {
+      const newest = messages[messages.length - 1];
+      if (newest?.role === "user") {
+        scrollCtx.current?.scrollToBottom();
+      }
+    }
+    prevMsgCount.current = messages.length;
+  }, [messages.length, messages]);
+
   return (
-    <Conversation>
+    <Conversation contextRef={scrollCtx}>
         <ConversationContent className="gap-5 p-3 pb-6">
         {messages.map((m, idx) => (
           <div key={m.id} className="group/msg relative">

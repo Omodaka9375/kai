@@ -29,7 +29,7 @@ export function joinPath(parent: string, name: string): string {
 }
 
 export function dirname(path: string): string {
-  const i = path.lastIndexOf("/");
+  const i = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
   if (i <= 0) return "/";
   return path.slice(0, i);
 }

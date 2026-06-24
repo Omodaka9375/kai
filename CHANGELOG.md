@@ -3,6 +3,16 @@
 All notable changes to the KAI terminal emulator project are documented in this file. KAI adheres to Semantic Versioning.
 
 ---
+
+## [0.9.38]
+### Fixed
+*   **Approval Cards Unresponsive During Fast Edits**: When multiple edit approvals spawned in quick succession, only the last card was clickable. Removed `onRespond` from the `AiToolApproval` memo comparator — the inline closure caused rapid function-identity churn during streaming that prevented earlier cards from responding to clicks.
+*   **Folder Delete & Rename Broken on Windows**: The `dirname()` helper in the file explorer only searched for `/` separators, causing folder delete and rename operations to fail on Windows backslash paths. Now splits on both `/` and `\`.
+*   **Table Download Button Non-Functional**: The download button on markdown tables (from Streamdown) used blob-URL anchor clicks, which don't trigger real downloads inside Tauri's webview. Disabled the table download control; copy and fullscreen still work.
+*   **Agent Chat Not Auto-Scrolling on User Message**: When the user sent a new message while scrolled up, the AI mini window didn't scroll to show the new message or the agent's response. Added a `contextRef`-based scroll-to-bottom trigger on new user messages.
+### Changed
+*   **Agent Identity Decoupled from Persona**: Changed the system prompt from "You are Kai" to "You are an AI agent embedded in a developer terminal emulator called Kai", so custom agent personas aren't overridden by a hardcoded identity.
+
 ## [0.9.37]
 ### Fixed
 *   **Stop agent before injecting steering message**: Prevents orphaned tool_use blocks from reaching the API

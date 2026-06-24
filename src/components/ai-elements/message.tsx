@@ -323,6 +323,14 @@ export type MessageResponseProps = ComponentProps<typeof Streamdown> & {
 
 const streamdownComponents = { code: MarkdownCode };
 
+/**
+ * Disable table download — blob-URL anchor clicks don't trigger downloads
+ * in Tauri's webview. Copy and fullscreen still work.
+ */
+const streamdownControls = {
+  table: { download: false },
+};
+
 export const MessageResponse = memo(
   ({ className, streaming = false, ...props }: MessageResponseProps) => (
     <ChatStreamingProvider value={streaming}>
@@ -333,6 +341,7 @@ export const MessageResponse = memo(
         )}
         linkSafety={{ enabled: false }}
         components={streamdownComponents}
+        controls={streamdownControls}
         {...props}
       />
     </ChatStreamingProvider>

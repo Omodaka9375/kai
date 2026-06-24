@@ -116,11 +116,13 @@ function AiToolApprovalImpl({ part, toolName, onRespond }: Props) {
 export const AiToolApproval = memo(AiToolApprovalImpl, (a, b) => {
   // The approval card never changes content for a given approvalId — once
   // the model has emitted the approval-requested part with its input, we
-  // don't want to re-render on every downstream token.
+  // don't want to re-render on every downstream token. Deliberately omit
+  // onRespond: the closure captures the stable approval.id and streaming
+  // re-renders cause rapid function-identity churn that makes earlier
+  // approval cards unresponsive to clicks.
   return (
     a.toolName === b.toolName &&
-    a.part.approval.id === b.part.approval.id &&
-    a.onRespond === b.onRespond
+    a.part.approval.id === b.part.approval.id
   );
 });
 
