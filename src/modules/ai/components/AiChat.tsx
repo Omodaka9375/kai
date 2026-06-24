@@ -321,7 +321,7 @@ export function AiChatView({
 
   return (
     <Conversation>
-      <ConversationContent className="gap-5 p-3">
+        <ConversationContent className="gap-5 p-3 pb-6">
         {messages.map((m, idx) => (
           <div key={m.id} className="group/msg relative">
             <RenderedMessage
