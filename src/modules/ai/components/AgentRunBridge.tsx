@@ -75,10 +75,18 @@ function Bridge({
 
   // Expose the approval responder so the diff tab can resolve approvals.
   // We keep it in a ref-stable closure so identity is stable per render.
+  // Wrapped in try-catch: if the agent was stopped/restarted between the
+  // approval card opening and the user clicking Accept/Reject, the Chat
+  // may no longer have the tool call (stripped by stripIncompleteToolCalls)
+  // and addToolApprovalResponse throws "Tool call not found". Swallow it.
   useEffect(() => {
-    setApprovalResponder((id, approved) =>
-      addToolApprovalResponse({ id, approved }),
-    );
+    setApprovalResponder((id, approved) => {
+      try {
+        addToolApprovalResponse({ id, approved });
+      } catch (e) {
+        console.debug("[kai] stale approval ignored:", id, e);
+      }
+    });
     return () => setApprovalResponder(null);
   }, [setApprovalResponder, addToolApprovalResponse]);
 
@@ -238,7 +246,11 @@ function Bridge({
         if (!shouldApprove) continue;
         autoApprovedRef.current.add(id);
         markAutoApproved(id);
-        addToolApprovalResponse({ id, approved: true });
+        try {
+          addToolApprovalResponse({ id, approved: true });
+        } catch {
+          // Tool call may have been cleaned up already.
+        }
       }
     }
   }, [messages, autoApprove, addToolApprovalResponse, markAutoApproved]);
