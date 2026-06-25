@@ -14,8 +14,19 @@ const sessionShells = new Map<string, Promise<number>>();
 /** Cancel all running shell session commands. Called on agent stop. */
 export function cancelAllShellSessions(): void {
   for (const p of sessionShells.values()) {
-    void p.then((id) => native.shellSessionCancel(id)).catch(() => {});
+    void p.then((id) => {
+      native.shellSessionCancel(id);
+      // If the cancel flag didn't take effect (e.g. the child process is
+      // unkillable or stuck in a blocking syscall), close the entire session
+      // after a grace period so the next run gets a fresh shell.
+      setTimeout(() => {
+        native.shellSessionClose(id);
+      }, 3000);
+    }).catch(() => {});
   }
+  // Also clear the session map so the next agent run creates a fresh shell
+  // instead of reusing the stuck one.
+  sessionShells.clear();
 }
 
 /** Close and remove the shell session for a deleted chat session. */

@@ -4,6 +4,14 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [0.9.39]
+### Fixed
+*   **"Input should be an object" API Error**: Added a post-conversion `sanitizeModelMessages` pass that coerces `null`/`undefined`/non-object `tool-call` inputs to `{}` before sending to the provider, preventing Anthropic's `tool_use.input: Input should be an object` rejection.
+*   **Orphaned tool_use Without tool_result**: The same sanitizer now strips any `tool-call` parts that have no matching `tool-result` anywhere in the conversation, catching edge cases that `stripIncompleteToolCalls` and `ignoreIncompleteToolCalls` miss after session restore or mid-stream stops.
+*   **Stuck Shell Commands Unrecoverable**: When `cancelAllShellSessions` fires (Esc / Stop), it now force-closes the shell session after a 3-second grace period and clears the session cache, so a stuck command doesn't permanently block the agent — the next run gets a fresh shell.
+*   **Denied Edit Causes Retry Loop**: Added a `DENIED TOOL CALLS` rule to the system prompt instructing the model to never retry a denied/rejected tool call and to ask the user what to do instead.
+*   **Pasted Text Not Wrapping in Chat**: Added `overflow-wrap-anywhere` to both the user message `<p>` and the `MessageContent` container so long formatted text, URLs, and code snippets wrap correctly inside the AI mini window.
+
 ## [0.9.38]
 ### Fixed
 *   **Approval Cards Unresponsive During Fast Edits**: When multiple edit approvals spawned in quick succession, only the last card was clickable. Removed `onRespond` from the `AiToolApproval` memo comparator — the inline closure caused rapid function-identity churn during streaming that prevented earlier cards from responding to clicks.

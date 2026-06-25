@@ -539,7 +539,7 @@ const RenderedMessage = memo(function RenderedMessage({
               </div>
             )}
             {stripped.text ? (
-              <p className="whitespace-pre-wrap wrap-break-word">
+              <p className="whitespace-pre-wrap break-words overflow-wrap-anywhere">
                 {stripped.text}
               </p>
             ) : null}

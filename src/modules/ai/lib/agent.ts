@@ -417,6 +417,61 @@ function stripDataUrlPrefixes(messages: ModelMessage[]): ModelMessage[] {
   });
 }
 
+/**
+ * Post-conversion belt-and-suspenders sanitizer on the ModelMessage[] level.
+ * Catches edge cases that stripIncompleteToolCalls + ignoreIncompleteToolCalls
+ * miss:
+ *  1. tool-call parts with non-object `input` (null/undefined/string) —
+ *     Anthropic rejects "Input should be an object".
+ *  2. Orphaned tool-call parts that have no matching tool-result in the
+ *     next message — Anthropic rejects "tool_use ids found without
+ *     tool_result blocks".
+ */
+function sanitizeModelMessages(messages: ModelMessage[]): ModelMessage[] {
+  type AnyPart = { type: string; toolCallId?: string; input?: unknown; [k: string]: unknown };
+
+  // Pass 1: fix non-object tool-call inputs.
+  let out = messages.map((m): ModelMessage => {
+    if (!Array.isArray(m.content)) return m;
+    let touched = false;
+    const content = (m.content as AnyPart[]).map((part) => {
+      if (part.type === "tool-call" && (part.input == null || typeof part.input !== "object")) {
+        touched = true;
+        return { ...part, input: {} };
+      }
+      return part;
+    });
+    return touched ? { ...m, content } as ModelMessage : m;
+  });
+
+  // Pass 2: remove orphaned tool-call parts (no matching tool-result).
+  // Build a set of tool-call IDs that DO have a result in the next message.
+  const answeredIds = new Set<string>();
+  for (let i = 0; i < out.length; i++) {
+    const m = out[i];
+    if (!Array.isArray(m.content)) continue;
+    for (const part of m.content as AnyPart[]) {
+      if (part.type === "tool-result" && part.toolCallId) {
+        answeredIds.add(part.toolCallId);
+      }
+    }
+  }
+  out = out.map((m): ModelMessage => {
+    if (m.role !== "assistant" || !Array.isArray(m.content)) return m;
+    let touched = false;
+    const content = (m.content as AnyPart[]).filter((part) => {
+      if (part.type === "tool-call" && part.toolCallId && !answeredIds.has(part.toolCallId)) {
+        touched = true;
+        return false;
+      }
+      return true;
+    });
+    return touched ? { ...m, content } as ModelMessage : m;
+  });
+
+  return out;
+}
+
 export async function runAgentStream(opts: RunAgentOptions) {
   const modelId = opts.modelId ?? DEFAULT_MODEL_ID;
   const model = await buildConfiguredLanguageModel(
@@ -446,10 +501,12 @@ export async function runAgentStream(opts: RunAgentOptions) {
     opts.projectMemory ?? null,
   ) + mcpBlock;
 
-  const rawHistory = stripDataUrlPrefixes(
-    await convertToModelMessages(stripIncompleteToolCalls(opts.uiMessages), {
-      ignoreIncompleteToolCalls: true,
-    }),
+  const rawHistory = sanitizeModelMessages(
+    stripDataUrlPrefixes(
+      await convertToModelMessages(stripIncompleteToolCalls(opts.uiMessages), {
+        ignoreIncompleteToolCalls: true,
+      }),
+    ),
   );
   const history = normalizeForProvider(rawHistory, provider);
   const compact = compactModelMessagesDetailed(
