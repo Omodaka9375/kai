@@ -201,8 +201,6 @@ export const SourceControlPanel = memo(function SourceControlPanel({
 
   const canPull =
     hasUpstream &&
-    !!scm.status &&
-    scm.status.behind > 0 &&
     !isDiverged &&
     !scm.actionBusy &&
     !sourceControl.busyAction;
@@ -538,14 +536,14 @@ export const SourceControlPanel = memo(function SourceControlPanel({
             <IconActionButton
               label={
                 pullBusy
-                  ? "Pulling…"
+                  ? "Pulling\u2026"
                   : isDiverged
-                    ? "Branch diverged — resolve in terminal"
+                    ? "Branch diverged \u2014 resolve in terminal"
                     : !hasUpstream
                       ? "No upstream configured"
-                      : (scm.status?.behind ?? 0) === 0
-                        ? "Already up to date"
-                        : `Pull ${scm.status?.behind ?? 0} commits (fast-forward)`
+                      : (scm.status?.behind ?? 0) > 0
+                        ? `Pull ${scm.status?.behind ?? 0} commits (fast-forward)`
+                        : "Pull from remote"
               }
               disabled={!canPull}
               onClick={handlePull}
