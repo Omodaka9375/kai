@@ -361,13 +361,41 @@ function stripIncompleteToolCalls(messages: UIMessage[]): UIMessage[] {
     "approval-responded",
   ]);
 
-  // Scan ALL assistant messages, not just the last — failed edit retries
-  // and dismissed approvals can leave orphaned tool calls anywhere.
+  // Pass 1: find tool-call IDs that will be stripped (incomplete state).
+  // We need these to also strip their matching `tool-approval-request` parts
+  // which the AI SDK injects as separate parts in the same message.
+  const strippedToolCallIds = new Set<string>();
+  for (const m of messages) {
+    if (m.role !== "assistant") continue;
+    for (const p of m.parts) {
+      const type = (p as { type?: string }).type ?? "";
+      if (!type.startsWith("tool-") && type !== "dynamic-tool") continue;
+      // Skip approval-request parts — handled in pass 2.
+      if (type === "tool-approval-request") continue;
+      const state = (p as { state?: string }).state;
+      if (state != null && COMPLETE_STATES.has(state)) continue;
+      // This tool part will be stripped — collect its toolCallId.
+      const tcId = (p as { toolCallId?: string }).toolCallId;
+      if (tcId) strippedToolCallIds.add(tcId);
+    }
+  }
+
+  if (strippedToolCallIds.size === 0) return messages;
+
+  // Pass 2: strip incomplete tool parts AND any approval-request parts
+  // whose toolCallId was collected above.
   let touched = false;
   const out = messages.map((m) => {
     if (m.role !== "assistant") return m;
     const cleaned = m.parts.filter((p) => {
       const type = (p as { type?: string }).type ?? "";
+      // Strip orphaned tool-approval-request parts whose tool call is gone.
+      if (type === "tool-approval-request") {
+        const tcId = (p as { toolCallId?: string }).toolCallId
+          ?? (p as { toolCall?: { toolCallId?: string } }).toolCall?.toolCallId;
+        if (tcId && strippedToolCallIds.has(tcId)) return false;
+        return true;
+      }
       if (!type.startsWith("tool-") && type !== "dynamic-tool") return true;
       const state = (p as { state?: string }).state;
       return state != null && COMPLETE_STATES.has(state);
@@ -444,23 +472,33 @@ function sanitizeModelMessages(messages: ModelMessage[]): ModelMessage[] {
     return touched ? { ...m, content } as ModelMessage : m;
   });
 
-  // Pass 2: remove orphaned tool-call parts (no matching tool-result).
-  // Build a set of tool-call IDs that DO have a result in the next message.
+  // Pass 2: collect tool-call IDs that have a matching tool-result.
   const answeredIds = new Set<string>();
-  for (let i = 0; i < out.length; i++) {
-    const m = out[i];
+  // Also collect all tool-call IDs that exist in assistant messages.
+  const existingToolCallIds = new Set<string>();
+  for (const m of out) {
     if (!Array.isArray(m.content)) continue;
     for (const part of m.content as AnyPart[]) {
       if (part.type === "tool-result" && part.toolCallId) {
         answeredIds.add(part.toolCallId);
       }
+      if (part.type === "tool-call" && part.toolCallId) {
+        existingToolCallIds.add(part.toolCallId);
+      }
     }
   }
+
+  // Pass 3: remove orphaned tool-call parts (no result) AND orphaned
+  // tool-approval-request parts (referencing a stripped/missing tool call).
   out = out.map((m): ModelMessage => {
     if (m.role !== "assistant" || !Array.isArray(m.content)) return m;
     let touched = false;
     const content = (m.content as AnyPart[]).filter((part) => {
       if (part.type === "tool-call" && part.toolCallId && !answeredIds.has(part.toolCallId)) {
+        touched = true;
+        return false;
+      }
+      if (part.type === "tool-approval-request" && part.toolCallId && !existingToolCallIds.has(part.toolCallId)) {
         touched = true;
         return false;
       }

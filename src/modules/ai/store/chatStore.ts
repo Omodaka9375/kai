@@ -328,9 +328,17 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     messages: initialMessages,
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
     onError: (e) => {
+      const msg = e instanceof Error ? e.message : String(e);
+      // Suppress stale approval errors — these fire when a tool call was
+      // cleaned up (stop/restart/steering) but the AI SDK's internal
+      // approval matching still references the old ID. Not actionable.
+      if (msg.includes("not found for approval request")) {
+        console.debug("[kai] suppressed stale approval error:", msg);
+        return;
+      }
       useChatStore.getState().patchAgentMeta({
         status: "error",
-        error: e instanceof Error ? e.message : String(e),
+        error: msg,
       });
     },
   });
