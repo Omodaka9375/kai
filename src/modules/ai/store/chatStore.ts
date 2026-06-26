@@ -332,7 +332,14 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       // Suppress stale approval errors — these fire when a tool call was
       // cleaned up (stop/restart/steering) but the AI SDK's internal
       // approval matching still references the old ID. Not actionable.
-      if (msg.includes("not found for approval request")) {
+      // Two variants:
+      //  - "Tool call X not found for approval request Y"
+      //  - "Tool approval response references unknown approvalId: Y"
+      if (
+        msg.includes("not found for approval request") ||
+        msg.includes("unknown approvalId") ||
+        msg.includes("No matching tool-approval-request")
+      ) {
         console.debug("[kai] suppressed stale approval error:", msg);
         return;
       }
