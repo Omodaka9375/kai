@@ -195,7 +195,7 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(function E
   };
 
   return (
-    <div className="flex flex-col">
+    <div className="flex h-full flex-col">
       {open ? (
         <motion.div
           className="relative shrink-0 px-2 py-1.5"

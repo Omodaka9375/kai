@@ -188,13 +188,17 @@ export function compactModelMessagesDetailed(
     }
   }
 
-  // No tool-result elision — rely on summarization to manage context.
-  // Signal summarization when conversation exceeds 60% of the effective
-  // limit (i.e. ~60% of the space left after system prompt + tools).
+  // Signal summarization when conversation tokens exceed 90% of the full
+  // context limit (not the effective limit). Using the full limit means the
+  // threshold matches the percentage shown in the context indicator and only
+  // fires near the actual context ceiling, not at ~50% real usage.
+  // ponytail: approxBytes / 4 is a rough token estimate; real tokenizers vary
+  // by ±15%. The 90% ceiling gives enough headroom that summarization itself
+  // (which calls the model) doesn't push us over the limit.
   return {
     messages: working,
     compacted: dropped > 0,
     droppedCount: dropped,
-    needsSummarization: approxTokens >= 0.6 * effectiveLimit,
+    needsSummarization: approxTokens >= 0.9 * contextLimit,
   };
 }

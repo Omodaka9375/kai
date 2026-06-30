@@ -32,6 +32,7 @@ import { fileIconUrl, folderIconUrl } from "./lib/iconResolver";
 import { COMPACT_CONTENT, COMPACT_ITEM } from "./lib/menuItemClass";
 import { useFileTree } from "./lib/useFileTree";
 import { useGlobalShortcuts } from "@/modules/shortcuts";
+import { cn } from "@/lib/utils";
 
 export type FileExplorerHandle = {
   focus: () => void;
@@ -441,16 +442,18 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(
           </Button>
         </div>
 
-        <ExplorerSearch
-          ref={searchRef}
-          rootPath={rootPath}
-          onOpenFile={onOpenFile}
-          open={isSearchOpen}
-          onRequestClose={() => setIsSearchOpen(false)}
-          onActiveChange={setIsSearchActive}
-          onRevealInTerminal={onRevealInTerminal}
-          onAttachToAgent={onAttachToAgent}
-        />
+        <div className={cn("flex flex-col", isSearchActive ? "min-h-0 flex-1 overflow-hidden" : "shrink-0")}>
+          <ExplorerSearch
+            ref={searchRef}
+            rootPath={rootPath}
+            onOpenFile={onOpenFile}
+            open={isSearchOpen}
+            onRequestClose={() => setIsSearchOpen(false)}
+            onActiveChange={setIsSearchActive}
+            onRevealInTerminal={onRevealInTerminal}
+            onAttachToAgent={onAttachToAgent}
+          />
+        </div>
 
         {!isSearchActive ? (
           <ContextMenu>

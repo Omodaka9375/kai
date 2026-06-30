@@ -62,8 +62,35 @@ pub fn fs_read_file(path: String, workspace: Option<WorkspaceEnv>) -> Result<Rea
         e.to_string()
     })?;
 
-    // Null-byte sniff on the first chunk. Not perfect (misses UTF-16 BOM
-    // cases) but catches the common "this is a PNG" mistake cheaply.
+    // UTF-16 BOM detection: transcode to UTF-8 before the null-byte check.
+    // Windows tools (PowerShell ISE, Notepad) default to UTF-16 LE for .ps1
+    // and .txt files, which would otherwise be rejected as binary.
+    if bytes.len() >= 2 {
+        if bytes[0] == 0xFF && bytes[1] == 0xFE {
+            // UTF-16 LE
+            let words: Vec<u16> = bytes[2..]
+                .chunks_exact(2)
+                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                .collect();
+            return match String::from_utf16(&words) {
+                Ok(content) => Ok(ReadResult::Text { content, size }),
+                Err(_) => Ok(ReadResult::Binary { size }),
+            };
+        }
+        if bytes[0] == 0xFE && bytes[1] == 0xFF {
+            // UTF-16 BE
+            let words: Vec<u16> = bytes[2..]
+                .chunks_exact(2)
+                .map(|c| u16::from_be_bytes([c[0], c[1]]))
+                .collect();
+            return match String::from_utf16(&words) {
+                Ok(content) => Ok(ReadResult::Text { content, size }),
+                Err(_) => Ok(ReadResult::Binary { size }),
+            };
+        }
+    }
+
+    // Null-byte sniff on the first chunk — catches binary files cheaply.
     let sniff_len = bytes.len().min(BINARY_SNIFF_BYTES);
     if bytes[..sniff_len].contains(&0) {
         return Ok(ReadResult::Binary { size });

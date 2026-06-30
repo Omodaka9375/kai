@@ -185,7 +185,7 @@ export const ReasoningTrigger = memo(
               strokeWidth={1.75}
               className={cn(
                 "transition-transform",
-                isOpen ? "rotate-180" : "rotate-0",
+                isOpen ? "rotate-0" : "rotate-180",
               )}
             />
           </>

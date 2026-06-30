@@ -128,25 +128,28 @@ function Bridge({
   // message once the status settles to idle.
   const steeringMessage = useChatStore((s) => s.steeringMessage);
   const setSteeringMessage = useChatStore((s) => s.setSteeringMessage);
+  // Keep a ref so the send callback always sees the latest value without
+  // being a reactive dep (avoids the cleanup-cancels-timeout race).
+  const steeringRef = useRef<string | null>(null);
+  steeringRef.current = steeringMessage;
+
   useEffect(() => {
     if (!steeringMessage) return;
     if (status === "submitted" || status === "streaming") {
-      // Agent is still running — stop it so the next idle transition picks
-      // up the queued steering message.
-      void chat.stop();
+      // Agent is still running — stop it; the effect will re-fire once
+      // status settles to "ready" and send the queued message then.
+      chat.stop();
       return;
     }
-    const msg = steeringMessage;
+    // Consume the message immediately so the state update doesn't cause the
+    // effect cleanup to cancel our send (setSteeringMessage triggers a
+    // re-render which would clearTimeout a delayed send).
     setSteeringMessage(null);
-    // Small delay lets the Chat internals settle after stop() before we
-    // send the new message.
-    const t = setTimeout(() => {
-      void chat.sendMessage({
-        role: "user",
-        parts: [{ type: "text", text: msg }],
-      });
-    }, 150);
-    return () => clearTimeout(t);
+    const msg = steeringRef.current ?? steeringMessage;
+    void chat.sendMessage({
+      role: "user",
+      parts: [{ type: "text", text: msg }],
+    });
   }, [steeringMessage, status, chat, setSteeringMessage]);
 
   // Reset nudge counter when the user sends a new message (message count

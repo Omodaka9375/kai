@@ -81,7 +81,7 @@ export function buildSharedExtensions(): Extension[] {
         outline:
           "1px solid color-mix(in srgb, var(--foreground) 35%, transparent) !important",
       },
-      ".cm-selectionBackground, &.cm-focused .cm-selectionBackground, ::selection":
+      ".cm-selectionBackground, &.cm-focused .cm-selectionBackground, & .cm-selectionBackground, ::selection":
         {
           backgroundColor:
             "color-mix(in srgb, var(--foreground) 18%, transparent) !important",
