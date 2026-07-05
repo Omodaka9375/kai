@@ -48,6 +48,7 @@ Auto-executes (no approval) — subagents are read-only by design.`,
             lmstudioModelId: prefs.lmstudioModelId || undefined,
             onStep: (label) => patchAgentMeta({ step: label }),
             abortSignal,
+            maxSteps: prefs.subagentMaxSteps,
           });
           return {
             type,

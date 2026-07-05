@@ -49,6 +49,9 @@ type Props = {
   onClose: (id: number) => void;
   /** Promote a preview (transient) tab to persistent. */
   onPin: (id: number) => void;
+  onMove: (dragId: number, hoverId: number) => void;
+  onSplitTab: (id: number) => void;
+  splitTabId: number | null;
   onToggleSidebar: () => void;
   onSplit: (dir: "row" | "col") => void;
   /** Active tab is a terminal and below the per-tab pane cap. */
@@ -76,6 +79,9 @@ export function Header({
   onNewApiTester,
   onClose,
   onPin,
+  onMove,
+  onSplitTab,
+  splitTabId,
   onToggleSidebar,
   onSplit,
   canSplit,
@@ -383,6 +389,10 @@ export function Header({
           onNewApiTester={onNewApiTester}
           onClose={onClose}
           onPin={onPin}
+          onMove={onMove}
+          onSplitTab={onSplitTab}
+          splitTabId={splitTabId}
+          onSplitPane={onSplit}
           compact={compact}
         />
         <div data-tauri-drag-region className="h-full min-w-2 flex-1" />

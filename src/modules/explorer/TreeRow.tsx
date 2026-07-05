@@ -8,7 +8,7 @@ import {
 import { cn } from "@/lib/utils";
 import { ArrowRight01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { memo, useState } from "react";
+import { memo, useRef, useState } from "react";
 import { InlineInput } from "./InlineInput";
 import {
   copyToClipboard,
@@ -60,6 +60,7 @@ function EntryRowImpl(props: EntryRowProps) {
   } = props;
 
   const [isConfirming, setIsConfirming] = useState(false);
+  const isConfirmingRef = useRef(false);
   const iconUrl = isDir ? folderIconUrl(name, isExpanded) : fileIconUrl(name);
   const createTarget = isDir ? path : path.slice(0, path.lastIndexOf("/")) || rootPath;
   const paddingLeft = 6 + depth * 12;
@@ -72,7 +73,7 @@ function EntryRowImpl(props: EntryRowProps) {
   };
 
   return (
-    <ContextMenu>
+    <ContextMenu onOpenChange={(open) => { if (!open) { isConfirmingRef.current = false; setIsConfirming(false); } }}>
       <ContextMenuTrigger asChild>
         {isRenaming ? (
           <div
@@ -219,14 +220,14 @@ function EntryRowImpl(props: EntryRowProps) {
           className={COMPACT_ITEM}
           variant="destructive"
           onSelect={(e) => {
-            e.preventDefault();
-            if (isConfirming) {
+            if (isConfirmingRef.current) {
               void tree.deletePath(path);
             } else {
+              e.preventDefault();
+              isConfirmingRef.current = true;
               setIsConfirming(true);
             }
           }}
-          onMouseLeave={() => setTimeout(() => setIsConfirming(false), 1500)}
         >
           {isConfirming ? "Click again to confirm" : "Delete"}
         </ContextMenuItem>

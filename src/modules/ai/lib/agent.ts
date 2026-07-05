@@ -483,10 +483,10 @@ export async function runAgentStream(opts: RunAgentOptions) {
     opts.onCompact?.({ droppedCount: compact.droppedCount });
   }
 
-  const messages: ModelMessage[] = [{ role: "system", content: stableSystem }];
-  if (opts.planMode) {
-    messages.push({ role: "system", content: PLAN_MODE_PROMPT });
-  }
+  const systemContent = opts.planMode
+    ? `${stableSystem}\n\n${PLAN_MODE_PROMPT}`
+    : stableSystem;
+  const messages: ModelMessage[] = [{ role: "system", content: systemContent }];
   messages.push(...compactedHistory);
 
   const finalMessages = applyCacheBreakpoints(messages, provider);

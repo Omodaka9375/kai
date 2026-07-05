@@ -82,6 +82,8 @@ export type Preferences = {
   recentProjects: string[];
   /** Per-project last-used model ID. Keys are normalized workspace roots. */
   projectModelIds: Record<string, string>;
+  /** Max steps a subagent may take before it is stopped. Default 24. */
+  subagentMaxSteps: number;
 };
 
 const STORE_PATH = "Kai-settings.json";
@@ -117,6 +119,7 @@ const KEY_COMPAT_CTX_SIZE = "openaiCompatibleContextSize";
 const KEY_UI_THEME = "uiThemeId";
 const KEY_COMFYUI_BASE_URL = "comfyuiBaseURL";
 const KEY_COMFYUI_WORKFLOW = "comfyuiWorkflow";
+const KEY_SUBAGENT_MAX_STEPS = "subagentMaxSteps";
 
 export const TERMINAL_FONT_SIZE_DEFAULT = 14;
 export const TERMINAL_FONT_SIZE_MIN = 8;
@@ -167,6 +170,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   comfyuiWorkflow: "",
   recentProjects: [],
   projectModelIds: {},
+  subagentMaxSteps: 24,
 };
 
 const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
@@ -273,6 +277,8 @@ export async function loadPreferences(): Promise<Preferences> {
       get<string[]>("recentProjects") ?? DEFAULT_PREFERENCES.recentProjects,
     projectModelIds:
       get<Record<string, string>>("projectModelIds") ?? DEFAULT_PREFERENCES.projectModelIds,
+    subagentMaxSteps:
+      get<number>(KEY_SUBAGENT_MAX_STEPS) ?? DEFAULT_PREFERENCES.subagentMaxSteps,
   };
 }
 
@@ -418,6 +424,11 @@ export async function setComfyuiWorkflow(value: string): Promise<void> {
   await writePref(KEY_COMFYUI_WORKFLOW, value);
 }
 
+export async function setSubagentMaxSteps(value: number): Promise<void> {
+  const clamped = Math.max(1, Math.min(200, Math.round(value)));
+  await writePref(KEY_SUBAGENT_MAX_STEPS, clamped);
+}
+
 export async function setLastWorkspaceCwd(value: string): Promise<void> {
   await store.set(KEY_LAST_WORKSPACE_CWD, value);
   await store.save();
@@ -476,6 +487,7 @@ export async function onPreferencesChange(
     [KEY_COMFYUI_BASE_URL]: "comfyuiBaseURL",
     [KEY_COMFYUI_WORKFLOW]: "comfyuiWorkflow",
     projectModelIds: "projectModelIds",
+    [KEY_SUBAGENT_MAX_STEPS]: "subagentMaxSteps",
   };
   // Same-process writes still fire onChange immediately; cross-window writes
   // arrive via the Tauri event emitted by writePref().

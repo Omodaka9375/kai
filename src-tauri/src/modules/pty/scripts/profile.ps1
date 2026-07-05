@@ -53,6 +53,22 @@ function global:prompt {
     if ($null -eq $lec) { $lec = if ($?) { 0 } else { 1 } }
     $esc = [char]27
 
+    # If the cursor is not at column 0 (e.g. a server process exited without a
+    # trailing newline), print a newline so the prompt doesn't overwrite the
+    # last line of output. The dim "%" marker matches the convention used by
+    # zsh's PROMPT_CR / PROMPT_SP — it signals the partial line visually.
+    try {
+        if ([Console]::CursorLeft -ne 0) {
+            $cols = [Console]::WindowWidth
+            if ($cols -le 0) { $cols = 80 }
+            $marker = "$esc[7m%$esc[0m"
+            $pad = $cols - [Console]::CursorLeft - 1
+            if ($pad -gt 0) { Write-Host (' ' * $pad) -NoNewline }
+            Write-Host $marker -NoNewline
+            Write-Host "`r`n" -NoNewline
+        }
+    } catch {}
+
     $oscD = "$esc]133;D;$lec$esc\"
     $oscA = "$esc]133;A$esc\"
     $oscB = "$esc]133;B$esc\"

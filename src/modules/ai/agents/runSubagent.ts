@@ -7,7 +7,7 @@ import { buildFsTools } from "../tools/fs";
 import { buildSearchTools } from "../tools/search";
 import { SUBAGENTS, type SubagentType } from "./registry";
 
-const SUBAGENT_MAX_STEPS = 12;
+const SUBAGENT_MAX_STEPS_DEFAULT = 24;
 
 type Args = {
   type: SubagentType;
@@ -21,6 +21,7 @@ type Args = {
   openaiCompatibleModelId?: string;
   onStep?: (label: string) => void;
   abortSignal?: AbortSignal;
+  maxSteps?: number;
 };
 
 type RunResult = {
@@ -41,6 +42,7 @@ export async function runSubagent({
   openaiCompatibleModelId,
   onStep,
   abortSignal,
+  maxSteps,
 }: Args): Promise<RunResult> {
   const def = SUBAGENTS[type];
   if (!def) throw new Error(`unknown subagent type: ${type}`);
@@ -76,7 +78,7 @@ export async function runSubagent({
     system: def.systemPrompt,
     prompt,
     tools: tools as Parameters<typeof generateText>[0]["tools"],
-    stopWhen: stepCountIs(SUBAGENT_MAX_STEPS),
+    stopWhen: stepCountIs(maxSteps ?? SUBAGENT_MAX_STEPS_DEFAULT),
     abortSignal,
     onStepFinish: (step) => {
       if (!onStep) return;

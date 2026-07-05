@@ -218,6 +218,32 @@ function chipLabel(c: ContextChip): string {
 }
 type AnyPart = UIMessagePart<Record<string, never>, Record<string, never>>;
 
+/**
+ * Split text into alternating non-thinking / thinking segments.
+ * Returns an array of { thinking: boolean; text: string } objects.
+ * Complete <thinking>…</thinking> blocks become thinking=true segments;
+ * everything else (including unclosed trailing <thinking> blocks that are
+ * still streaming) becomes thinking=false.
+ */
+function splitThinkingBlocks(
+  text: string,
+): { thinking: boolean; text: string }[] {
+  const out: { thinking: boolean; text: string }[] = [];
+  // Match complete blocks only — unclosed ones stay in text so the
+  // streaming text part keeps rendering while the model is still thinking.
+  const re = /<thinking>([\s\S]*?)<\/thinking>/gi;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) out.push({ thinking: false, text: text.slice(last, m.index) });
+    const inner = m[1].trim();
+    if (inner) out.push({ thinking: true, text: inner });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push({ thinking: false, text: text.slice(last) });
+  return out;
+}
+
 /** Strip leaked model thinking/channel tokens and raw tool call syntax. */
 function stripLeakedTokens(text: string): string {
   let cleaned = text
@@ -225,6 +251,9 @@ function stripLeakedTokens(text: string): string {
     .replace(/<\|(?:start|end)_of_thought\|>/gi, "")
     .replace(/<\|thinking\|>[\\s\\S]*?<\| \/thinking\|>/gi, "")
     .replace(/<\|thinking\|>[\\s\\S]*?<\|?\/thinking\|>/gi, "")
+    // Strip XML-style <thinking>…</thinking> blocks (complete or dangling open tag)
+    .replace(/<thinking>[\s\S]*?<\/thinking>/gi, "")
+    .replace(/<thinking>[\s\S]*$/gi, "")
     .replace(/<\|im_(?:start|end)\\\\|>[^\n]*/g, "")
     // Raw tool call syntax leaked by Gemma 4 and similar models.
     .replace(/<\|?tool_call_?[a-z_]*(?::|\|?>)?/gi, "")
@@ -871,6 +900,38 @@ const RenderedPart = memo(function RenderedPart({
 }) {
   if (part.type === "text") {
     const raw = (part as unknown as { text: string }).text;
+    // If the text contains <thinking>…</thinking> blocks (models that don't
+    // emit a separate reasoning part), split and render them as pills.
+    if (/<thinking>/i.test(raw)) {
+      const segments = splitThinkingBlocks(raw);
+      // Check if there's any non-thinking visible text after stripping tokens
+      const hasVisibleText = segments.some(
+        (s) => !s.thinking && stripLeakedTokens(s.text).trim(),
+      );
+      const hasThinking = segments.some((s) => s.thinking);
+      if (!hasVisibleText && !hasThinking) return null;
+      return (
+        <>
+          {segments.map((seg, i) => {
+            if (seg.thinking) {
+              return (
+                <Reasoning key={i}>
+                  <ReasoningTrigger />
+                  <ReasoningContent>{seg.text}</ReasoningContent>
+                </Reasoning>
+              );
+            }
+            const cleaned = stripLeakedTokens(seg.text);
+            if (!cleaned.trim()) return null;
+            return (
+              <MessageResponse key={i} streaming={streaming && i === segments.length - 1}>
+                {cleaned}
+              </MessageResponse>
+            );
+          })}
+        </>
+      );
+    }
     const cleaned = stripLeakedTokens(raw);
     if (!cleaned) return null;
     return (

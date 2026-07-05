@@ -111,12 +111,19 @@ export function AiMiniWindow() {
       return;
     }
 
-    // If the active session is from a different project, auto-switch or create
-    if (activeRoot && activeRoot !== normalized) {
+    // If the active session is from a different project, auto-switch or create.
+    // "Different project" means normalized is neither equal to activeRoot nor a
+    // subdirectory of it — cd-ing into a subfolder must not trigger a reset.
+    const isSubfolderOrSame =
+      activeRoot &&
+      (normalized === activeRoot || normalized.startsWith(activeRoot + "/"));
+
+    if (activeRoot && !isSubfolderOrSame) {
       const projectSessions = sessions.filter((s) => {
         if (!s.workspaceRoot) return false; // Don't auto-switch back to legacy empty ones
         const sRoot = s.workspaceRoot.replace(/\\/g, "/").replace(/\/$/, "");
-        return sRoot === normalized;
+        // Match sessions whose root is a parent of (or equal to) normalized
+        return normalized === sRoot || normalized.startsWith(sRoot + "/");
       });
 
       if (projectSessions.length > 0) {

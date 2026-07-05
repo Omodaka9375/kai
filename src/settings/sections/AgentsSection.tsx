@@ -17,7 +17,7 @@ import {
 } from "@/modules/ai/lib/agents";
 import { newAgentId, useAgentsStore } from "@/modules/ai/store/agentsStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import { setCustomInstructions } from "@/modules/settings/store";
+import { setCustomInstructions, setSubagentMaxSteps } from "@/modules/settings/store";
 import {
   Add01Icon,
   CheckmarkCircle02Icon,
@@ -40,6 +40,7 @@ const ICON_OPTIONS: AgentIconId[] = [
 
 export function AgentsSection() {
   const customInstructions = usePreferencesStore((s) => s.customInstructions);
+  const subagentMaxSteps = usePreferencesStore((s) => s.subagentMaxSteps);
   const customAgents = useAgentsStore((s) => s.customAgents);
   const activeAgentId = useAgentsStore((s) => s.activeId);
   const setActiveAgentId = useAgentsStore((s) => s.setActiveId);
@@ -68,6 +69,8 @@ export function AgentsSection() {
       />
 
       <CustomInstructionsBlock value={customInstructions} />
+
+      <SubagentStepsBlock value={subagentMaxSteps} />
 
       <section className="flex flex-col gap-2">
         <div className="flex items-center justify-between">
@@ -347,6 +350,44 @@ function CustomInstructionsBlock({ value }: { value: string }) {
         placeholder="e.g. Always reply in concise bullet points. Prefer pnpm over npm. My machine is an M-series Mac."
         className="min-h-[100px] resize-y bg-card/60 font-sans text-[12px] leading-relaxed border border-border"
       />
+    </div>
+  );
+}
+
+function SubagentStepsBlock({ value }: { value: number }) {
+  const [draft, setDraft] = useState(String(value));
+
+  useEffect(() => {
+    setDraft(String(value));
+  }, [value]);
+
+  const commit = () => {
+    const n = parseInt(draft, 10);
+    if (Number.isFinite(n) && n >= 1) void setSubagentMaxSteps(n);
+    else setDraft(String(value));
+  };
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-0.5">
+          <Label>Subagent step limit</Label>
+          <span className="text-[10.5px] text-muted-foreground/70">
+            Max tool calls a subagent may make per run. Increase if subagents
+            hit the step cap on large codebases.
+          </span>
+        </div>
+        <input
+          type="number"
+          min={1}
+          max={200}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => e.key === "Enter" && commit()}
+          className="h-7 w-16 rounded-md border border-border bg-card/60 px-2 text-center text-[12px] tabular-nums focus:outline-none focus:ring-1 focus:ring-ring"
+        />
+      </div>
     </div>
   );
 }

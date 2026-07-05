@@ -770,6 +770,19 @@ export function useTabs(initial?: Partial<TerminalTab> & { defer?: boolean }) {
     return closedTab;
   }, []);
 
+  const moveTab = useCallback((dragId: number, hoverId: number) => {
+    if (dragId === hoverId) return;
+    setTabs((curr) => {
+      const from = curr.findIndex((t) => t.id === dragId);
+      const to = curr.findIndex((t) => t.id === hoverId);
+      if (from === -1 || to === -1) return curr;
+      const next = curr.slice();
+      const [item] = next.splice(from, 1);
+      next.splice(to, 0, item);
+      return next;
+    });
+  }, []);
+
   const resetWorkspace = useCallback((cwd?: string) => {
     const tabId = nextIdRef.current++;
     const leafId = nextIdRef.current++;
@@ -823,5 +836,6 @@ export function useTabs(initial?: Partial<TerminalTab> & { defer?: boolean }) {
     closeActivePane,
     closePaneByLeaf,
     resetWorkspace,
+    moveTab,
   };
 }

@@ -173,6 +173,7 @@ export default function App() {
     closeActivePane,
     closePaneByLeaf,
     resetWorkspace,
+    moveTab,
   } = useTabs({ defer: true });
 
   // Mirror `tabs` into a ref so callbacks scheduled with `setTimeout`
@@ -1440,6 +1441,9 @@ export default function App() {
             onNewApiTester={newApiTesterTab}
             onClose={handleClose}
             onPin={pinTab}
+            onMove={moveTab}
+            onSplitTab={toggleSplitTab}
+            splitTabId={splitTabId}
             onToggleSidebar={toggleSidebar}
             onSplit={splitActivePaneInActiveTab}
             canSplit={

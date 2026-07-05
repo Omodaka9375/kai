@@ -4,6 +4,20 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [0.9.5]
+### Added
+- **Tab split view**: Right-click any tab to open it as a side-by-side split panel. All tab kinds supported (terminal, editor, preview, git diff, API tester, markdown preview). Terminal tabs additionally offer "Split pane right / down" to split within the tab itself.
+- **Draggable tabs**: Tab bar tabs can now be dragged left and right to reorder them.
+- **Subagent step limit setting**: Subagent max steps doubled from 12 → 24 and exposed as a configurable field in Agent Settings (range 1–200).
+
+### Fixed
+- **Chat session reset on `cd`**: Navigating into a subdirectory of the current project no longer triggers a new chat session. The session switcher now treats any path that starts with the session's project root as the same project.
+- **Plan Mode "System message must be at the beginning" error**: The plan mode prompt was appended as a second `system` role message, which most non-Anthropic providers reject. It is now concatenated into the single system message.
+- **`<thinking>` tags leaking into chat**: Models that emit raw `<thinking>…</thinking>` in their text stream (DeepSeek, Qwen, etc.) now have those blocks extracted and rendered as collapsible reasoning pills, matching the behaviour of native `reasoning` parts. Dangling open tags and pipe-delimited variants are also stripped.
+- **Editor text selection invisible**: Selection highlight in the CodeMirror editor was using `var(--foreground)` at 18% opacity, which blended into the background on dark themes. Raised to 28% (focused) / 14% (unfocused) and split into separate selectors so the two states are visually distinct.
+- **Folder delete via right-click did nothing**: The two-click confirmation used `useState`, which caused a React re-render that replaced the menu item's DOM node and fired a synthetic `mouseleave`, resetting the confirmation state before the second click could land. Confirmation state is now tracked in a `useRef` so no re-render occurs on first click; `e.preventDefault()` is only called on the first click, allowing the second click to close the menu naturally after deleting.
+- **Terminal prompt overwrites last line after stopping a server**: When a process exits without a trailing newline (e.g. Ctrl+C on a dev server), PowerShell's prompt function now checks `[Console]::CursorLeft` and emits a newline + inverted-video `%` marker before drawing the prompt, matching the zsh `PROMPT_CR` convention.
+
 ## [0.9.39]
 ### Fixed
 *   **"Input should be an object" API Error**: Added a post-conversion `sanitizeModelMessages` pass that coerces `null`/`undefined`/non-object `tool-call` inputs to `{}` before sending to the provider, preventing Anthropic's `tool_use.input: Input should be an object` rejection.

@@ -81,11 +81,15 @@ export function buildSharedExtensions(): Extension[] {
         outline:
           "1px solid color-mix(in srgb, var(--foreground) 35%, transparent) !important",
       },
-      ".cm-selectionBackground, &.cm-focused .cm-selectionBackground, & .cm-selectionBackground, ::selection":
-        {
-          backgroundColor:
-            "color-mix(in srgb, var(--foreground) 18%, transparent) !important",
-        },
+      "&.cm-focused .cm-selectionBackground, &.cm-focused ::selection": {
+        backgroundColor:
+          "color-mix(in srgb, var(--foreground) 28%, transparent) !important",
+      },
+      // Unfocused selection stays visible but dimmer.
+      ".cm-selectionBackground, ::selection": {
+        backgroundColor:
+          "color-mix(in srgb, var(--foreground) 14%, transparent) !important",
+      },
       ".cm-panels": {
         backgroundColor: "var(--popover)",
         color: "var(--popover-foreground)",
