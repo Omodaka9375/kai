@@ -81,14 +81,14 @@ export function buildSharedExtensions(): Extension[] {
         outline:
           "1px solid color-mix(in srgb, var(--foreground) 35%, transparent) !important",
       },
+      // Focused selection — use accent color for maximum visibility.
       "&.cm-focused .cm-selectionBackground, &.cm-focused ::selection": {
-        backgroundColor:
-          "color-mix(in srgb, var(--foreground) 28%, transparent) !important",
+        backgroundColor: "var(--accent) !important",
       },
       // Unfocused selection stays visible but dimmer.
       ".cm-selectionBackground, ::selection": {
         backgroundColor:
-          "color-mix(in srgb, var(--foreground) 14%, transparent) !important",
+          "color-mix(in srgb, var(--accent) 50%, transparent) !important",
       },
       ".cm-panels": {
         backgroundColor: "var(--popover)",

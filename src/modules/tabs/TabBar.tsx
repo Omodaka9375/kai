@@ -104,6 +104,8 @@ export function TabBar({
   // use useState for the draggingId so we can apply visual feedback.
 
   const dragIdRef = useRef<number | null>(null);
+  const didDragRef = useRef(false);
+  const lastHoveredTabIdRef = useRef<number | null>(null);
 
   const tabIdFromPoint = useCallback((x: number, y: number): number | null => {
     const el = document.elementFromPoint(x, y);
@@ -114,15 +116,15 @@ export function TabBar({
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent<HTMLElement>, tabId: number) => {
-      // Only primary button; let close-button clicks pass through.
       if (e.button !== 0) return;
       const closeBtn = (e.target as Element).closest("[aria-label='Close tab']");
       if (closeBtn) return;
 
       dragIdRef.current = tabId;
+      didDragRef.current = false;
+      lastHoveredTabIdRef.current = tabId;
       setDraggingId(tabId);
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-      e.preventDefault(); // prevent text selection during drag
     },
     [],
   );
@@ -130,10 +132,13 @@ export function TabBar({
   const onPointerMove = useCallback(
     (e: React.PointerEvent<HTMLElement>) => {
       if (dragIdRef.current === null) return;
+      didDragRef.current = true;
       const hoverId = tabIdFromPoint(e.clientX, e.clientY);
-      if (hoverId !== null && hoverId !== dragIdRef.current) {
+      // Only reorder when we cross into a NEW tab's area, not on every pixel move
+      if (hoverId !== null && hoverId !== dragIdRef.current && hoverId !== lastHoveredTabIdRef.current) {
         onMove(dragIdRef.current, hoverId);
-        dragIdRef.current = hoverId; // track new position
+        dragIdRef.current = hoverId;
+        lastHoveredTabIdRef.current = hoverId;
       }
     },
     [onMove, tabIdFromPoint],
@@ -143,6 +148,7 @@ export function TabBar({
     (e: React.PointerEvent<HTMLElement>) => {
       if (dragIdRef.current === null) return;
       dragIdRef.current = null;
+      didDragRef.current = false; // Reset the drag flag so clicks work again
       setDraggingId(null);
       (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
     },
@@ -161,10 +167,12 @@ export function TabBar({
           onValueChange={(v) => onSelect(Number(v))}
         >
           <TabsList className="h-7 w-max gap-0.5 bg-transparent p-0">
-            {tabs.map((t) => {
+            {tabs.map((t, idx) => {
               const isPreview = t.kind === "editor" && (t as EditorTab).preview;
               const isDragging = t.id === draggingId;
               const isSplit = t.id === splitTabId;
+              // Show drop indicator between tabs when dragging
+              const showDropIndicator = draggingId !== null && !isDragging && idx > 0;
               return (
                 <ContextMenu key={t.id}>
                   <ContextMenuTrigger asChild>
@@ -183,8 +191,8 @@ export function TabBar({
                             ? "px-2!"
                             : "ps-2! pe-1!",
                         isSplit && "ring-1 ring-inset ring-foreground/20",
-                        isDragging && "cursor-grabbing opacity-50",
-                        !isDragging && draggingId !== null && "cursor-grabbing",
+                        isDragging && "cursor-grabbing opacity-90 shadow-lg scale-105 z-10",
+                        !isDragging && draggingId !== null && "cursor-grabbing opacity-70",
                         draggingId === null && "cursor-grab active:cursor-grabbing",
                       )}
                     >
@@ -226,6 +234,10 @@ export function TabBar({
                       )}
                     </TabsTrigger>
                   </ContextMenuTrigger>
+                  {/* Drop indicator between tabs when dragging */}
+                  {showDropIndicator && (
+                    <div className="w-0.5 shrink-0 self-stretch bg-primary/60 rounded-full mx-0.5" />
+                  )}
                   <ContextMenuContent className="min-w-40 text-[12px]">
                     <ContextMenuItem
                       className="gap-2 text-[12px]"

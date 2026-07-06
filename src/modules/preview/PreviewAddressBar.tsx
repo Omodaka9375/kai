@@ -102,9 +102,25 @@ export const PreviewAddressBar = forwardRef<PreviewAddressBarHandle, Props>(
       let cancelled = false;
       void native.shellBgList().then((list) => {
         if (cancelled) return;
-        const match = list.find(
-          (p) => !p.exited && p.command.includes(`:${port}`) || p.command.includes(`--port ${port}`) || p.command.includes(`--port=${port}`),
-        );
+        const match = list.find((p) => {
+          if (p.exited) return false;
+          const cmd = p.command.toLowerCase();
+          // Match various server command patterns
+          const portPatterns = [
+            `:${port}`,           // :3000, :5173
+            `--port ${port}`,     // --port 3000
+            `--port=${port}`,     // --port=3000
+            `-p ${port}`,         // -p 3000
+            `-p=${port}`,         // -p=3000
+            `port:${port}`,       // port:3000 (JSON config)
+            `port=${port}`,       // port=3000 (env var style)
+            `localhost:${port}`,  // localhost:3000
+            `127.0.0.1:${port}`,  // 127.0.0.1:3000
+            `0.0.0.0:${port}`,    // 0.0.0.0:3000
+            `:::${port}`,         // :::3000 (IPv6)
+          ];
+          return portPatterns.some(pattern => cmd.includes(pattern));
+        });
         setServerHandle(match?.handle ?? null);
       });
       return () => { cancelled = true; };
