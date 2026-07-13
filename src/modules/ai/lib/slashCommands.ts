@@ -1,5 +1,6 @@
 import { CheckListIcon, SparklesIcon } from "@hugeicons/core-free-icons";
 import { usePlanStore } from "../store/planStore";
+import { handleGoalCommand } from "./goalHandler";
 
 /**
  * Outcome of intercepting a slash command from the composer.
@@ -9,7 +10,7 @@ import { usePlanStore } from "../store/planStore";
  * - `"none"`: not a slash command; let the composer behave as usual.
  */
 export type SlashOutcome =
-  | { kind: "handled"; toast?: string }
+  | { kind: "handled"; toast?: string; goalId?: string }
   | { kind: "send-prompt"; prompt: string; commandName?: string }
   | { kind: "none" };
 
@@ -52,7 +53,7 @@ export function wrapWithCommandMarker(prompt: string, name: string): string {
   return `<Kai-command name="${name}" />\n\n${prompt}`;
 }
 
-export function tryRunSlashCommand(input: string): SlashOutcome {
+export async function tryRunSlashCommand(input: string): Promise<SlashOutcome> {
   const trimmed = input.trim();
   const lead = trimmed[0];
   if (lead !== "/" && lead !== "#") return { kind: "none" };
@@ -80,6 +81,17 @@ export function tryRunSlashCommand(input: string): SlashOutcome {
         prompt: INIT_PROMPT,
         commandName: "init",
       };
+    }
+    case "goal": {
+      // Delegate to goal handler
+      const result = await handleGoalCommand(trimmed);
+      if (result.handled) {
+        if (result.error) {
+          return { kind: "handled", toast: result.error };
+        }
+        return { kind: "handled", goalId: result.goalId };
+      }
+      return { kind: "none" };
     }
     default:
       return { kind: "none" };

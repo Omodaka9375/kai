@@ -1,4 +1,5 @@
 import { useChatStore } from "@/modules/ai";
+import { GoalStatusPill } from "@/modules/ai/components/GoalStatusPill";
 import {
   AiOpenButton,
   AiStatusBarControls,
@@ -42,6 +43,7 @@ export function StatusBar({
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <WorkspaceEnvSelector onSelect={onWorkspaceChange} />
         <CwdBreadcrumb cwd={cwd} filePath={filePath} home={home} onCd={onCd} />
+        <GoalStatusPill />
         {privateActive ? (
           <Tooltip>
             <TooltipTrigger asChild>

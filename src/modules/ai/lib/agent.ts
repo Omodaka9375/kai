@@ -22,6 +22,13 @@ import { compactModelMessagesDetailed } from "./compact";
 import type { ProviderKeys } from "./keyring";
 import { createProxyFetch } from "./proxyFetch";
 import { normalizeForProvider } from "./providerNormalize";
+import {
+  getRulePacksForStack,
+  formatRulePacksForPrompt,
+  type StackInfo,
+} from "./stackDetector";
+export type { StackInfo };
+import { getGlobalStreamGuard, type LoopDetectionResult } from "./streamGuard";
 
 const localProxyFetch = createProxyFetch({ allowPrivateNetwork: true });
 
@@ -268,6 +275,8 @@ export function buildStableSystem(
   persona: { name: string; instructions: string } | null,
   customInstructions: string | undefined,
   projectMemory: string | null,
+  goalContext?: string | null,
+  stackInfo?: StackInfo | null,
 ): string {
   const base = SYSTEM_PROMPT;
   const personaBlock = persona?.instructions.trim()
@@ -280,7 +289,21 @@ export function buildStableSystem(
     projectMemory && projectMemory.trim().length > 0
       ? `\n\n## PROJECT — Kai.md\n${projectMemory.trim()}`
       : "";
-  return `${base}${memoryBlock}${personaBlock}${customBlock}`;
+  const goalBlock = goalContext?.trim()
+    ? `\n${goalContext.trim()}`
+    : "";
+
+  // Add stack detection and rule packs if available
+  let stackBlock = "";
+  if (stackInfo) {
+    const rulePacks = getRulePacksForStack(stackInfo);
+    const formattedPacks = formatRulePacksForPrompt(rulePacks);
+    if (formattedPacks) {
+      stackBlock = `\n\n${formattedPacks}`;
+    }
+  }
+
+  return `${base}${memoryBlock}${personaBlock}${customBlock}${stackBlock}${goalBlock}`;
 }
 
 // OpenAI / Gemini / DeepSeek apply prefix caching automatically; only
@@ -332,12 +355,15 @@ export type RunAgentOptions = {
   onUsage?: (delta: AgentUsageDelta) => void;
   onCompact?: (info: { droppedCount: number }) => void;
   onFinishMeta?: (info: { hitStepCap: boolean; finishReason: string }) => void;
+  onLoopDetected?: (info: LoopDetectionResult) => void;
   lmstudioBaseURL?: string;
   lmstudioModelId?: string;
   openaiCompatibleBaseURL?: string;
   openaiCompatibleModelId?: string;
   planMode?: boolean;
   projectMemory?: string | null;
+  goalContext?: string | null;
+  stackInfo?: StackInfo | null;
   uiMessages: UIMessage[];
   abortSignal?: AbortSignal;
   /** Extra tools from MCP servers, already namespaced. */
@@ -464,6 +490,8 @@ export async function runAgentStream(opts: RunAgentOptions) {
     opts.agentPersona ?? null,
     opts.customInstructions,
     opts.projectMemory ?? null,
+    opts.goalContext ?? null,
+    opts.stackInfo ?? null,
   ) + mcpBlock;
 
   const rawHistory = sanitizeModelMessages(
@@ -491,6 +519,8 @@ export async function runAgentStream(opts: RunAgentOptions) {
 
   const finalMessages = applyCacheBreakpoints(messages, provider);
 
+  // Initialize stream guard for loop detection
+  const streamGuard = getGlobalStreamGuard();
   let stepsSeen = 0;
   return streamText({
     model,
@@ -500,6 +530,15 @@ export async function runAgentStream(opts: RunAgentOptions) {
     abortSignal: opts.abortSignal,
     onStepFinish: (step) => {
       stepsSeen++;
+
+      // Check for loop detection on text output
+      if (step.text && opts.onLoopDetected) {
+        const loopResult = streamGuard.check(step.text);
+        if (loopResult.isLooping) {
+          opts.onLoopDetected(loopResult);
+        }
+      }
+
       if (opts.onStep) {
         const last = step.toolCalls?.[step.toolCalls.length - 1];
         if (last) {
@@ -528,6 +567,8 @@ export async function runAgentStream(opts: RunAgentOptions) {
     },
     onFinish: (result) => {
       opts.onStep?.(null);
+      // Reset stream guard on finish
+      streamGuard.reset();
       const finishReason =
         (result as { finishReason?: string } | undefined)?.finishReason ?? "";
       opts.onFinishMeta?.({

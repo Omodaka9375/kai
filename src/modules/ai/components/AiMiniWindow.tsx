@@ -30,12 +30,15 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { motion } from "motion/react";
 import { useEffect, useMemo, useState } from "react";
+import { CogIcon } from "@hugeicons/core-free-icons";
 import { estimateCost, getModel, getModelContextLimit } from "../config";
 import { saveSessionsList, type SessionMeta } from "../lib/sessions";
 import { getOrCreateChat, useChatStore } from "../store/chatStore";
 import { usePlanStore } from "../store/planStore";
 import { AgentSwitcher } from "./AgentSwitcher";
 import { AiChatView } from "./AiChat";
+import { GoalPanel } from "./GoalPanel";
+import { AgentOrchestratorPanel } from "./AgentOrchestratorPanel";
 import { PlanDiffReview } from "./PlanDiffReview";
 import { TodoStrip } from "./TodoStrip";
 import { useComposer } from "../lib/composer";
@@ -66,6 +69,7 @@ export function AiMiniWindow() {
   const closeMini = useChatStore((s) => s.closeMini);
   const sessionId = useChatStore((s) => s.activeSessionId);
   const [expanded, setExpanded] = useState(false);
+  const [showOrchestrator, setShowOrchestrator] = useState(false);
   const c = useComposer();
 
   useEffect(() => {
@@ -162,6 +166,8 @@ export function AiMiniWindow() {
           sessionId={sessionId}
           onClose={closeMini}
           onExpand={() => setExpanded((v) => !v)}
+          showOrchestrator={showOrchestrator}
+          onToggleOrchestrator={() => setShowOrchestrator((prev) => !prev)}
         />
       ) : (
         <EmptyShell onClose={closeMini} onExpand={() => setExpanded((v) => !v)} />
@@ -175,10 +181,14 @@ function Body({
   sessionId,
   onClose,
   onExpand,
+  showOrchestrator,
+  onToggleOrchestrator,
 }: {
   sessionId: string;
   onClose: () => void;
   onExpand: () => void;
+  showOrchestrator: boolean;
+  onToggleOrchestrator: () => void;
 }) {
   const focusInput = useChatStore((s) => s.focusInput);
   const c = useComposer();
@@ -192,6 +202,7 @@ function Body({
         onClose={onClose}
         onExpand={onExpand}
         messages={helpers.messages}
+        onToggleOrchestrator={onToggleOrchestrator}
       />
 
       <PlanModeStrip />
@@ -221,6 +232,8 @@ function Body({
           c.stop();
         }}
       />
+      <GoalPanel />
+      {showOrchestrator && <AgentOrchestratorPanel onClose={() => onToggleOrchestrator()} />}
     </>
   );
 }
@@ -275,12 +288,14 @@ function Header({
   onClose,
   onExpand,
   messages,
+  onToggleOrchestrator,
 }: {
   onClose: () => void;
   onExpand: () => void;
   messages?: UIMessage[];
   step?: string | null;
   isBusy?: boolean;
+  onToggleOrchestrator?: () => void;
 }) {
 
   return (
@@ -292,6 +307,19 @@ function Header({
         ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-1">
+        {onToggleOrchestrator && (
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            onClick={onToggleOrchestrator}
+            className="size-5"
+            aria-label="Toggle Agent Orchestrator"
+            title="Toggle Agent Orchestrator"
+          >
+            <HugeiconsIcon icon={CogIcon} size={14} strokeWidth={2} />
+          </Button>
+        )}
         <SessionPicker />
         <Button
           type="button"

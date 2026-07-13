@@ -36,6 +36,7 @@ import type { ToolContext } from "../tools/tools";
 import { resetEditFailures } from "../tools/edit";
 import { FileTracker } from "../lib/fileTracker";
 import { agentBus } from "../lib/eventBus";
+import { detectStack, type StackInfo } from "../lib/stackDetector";
 
 type Live = {
   getCwd: () => string | null;
@@ -247,8 +248,26 @@ export function flushPersist(id?: string): void {
   for (const key of Array.from(pendingPersist.keys())) flushPersistEntry(key);
 }
 
-function makeChat(sessionId: string): Chat<UIMessage> {
+/**
+ * Create a Chat instance synchronously. Stack detection happens in the
+ * background and stackInfo will be updated via the getStackInfo callback.
+ */
+function makeChatSync(sessionId: string): Chat<UIMessage> {
   const readCache = new Map<string, { size: number; hash: number }>();
+
+  // Start stack detection in the background - don't block chat creation
+  const workspaceRoot = useChatStore.getState().live.getWorkspaceRoot();
+  let stackInfo: StackInfo | null = null;
+  if (workspaceRoot) {
+    detectStack(workspaceRoot)
+      .then((detected) => {
+        stackInfo = detected;
+      })
+      .catch(() => {
+        // Stack detection failed silently - continue without it
+      });
+  }
+
   const toolContext: ToolContext = {
     getCwd: () => useChatStore.getState().live.getCwd(),
     getWorkspaceRoot: () =>
@@ -294,6 +313,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     getOpenaiCompatibleModelId: () =>
       usePreferencesStore.getState().openaiCompatibleModelId,
     getSessionId: () => sessionId,
+    getStackInfo: () => stackInfo,
     onStep: (step) => {
       useChatStore.getState().patchAgentMeta({ step });
     },
@@ -644,7 +664,9 @@ export function getOrCreateChat(sessionId: string): Chat<UIMessage> {
     touchChat(sessionId, existing);
     return existing;
   }
-  const c = makeChat(sessionId);
+  // Create chat synchronously - stack detection happens asynchronously
+  // in the background and will be passed to the agent when available
+  const c = makeChatSync(sessionId);
   touchChat(sessionId, c);
   return c;
 }

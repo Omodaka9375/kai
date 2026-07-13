@@ -5,6 +5,7 @@ import {
   buildConfiguredLanguageModel,
   runAgentStream,
   type AgentUsageDelta,
+  type StackInfo,
 } from "./agent";
 import { compactModelMessagesDetailed } from "./compact";
 import type { ProviderKeys } from "./keyring";
@@ -16,6 +17,7 @@ import {
 } from "./summarize";
 import type { ToolContext } from "../tools/tools";
 import { useChatStore } from "../store/chatStore";
+import { useGoalsStore } from "../store/goalsStore";
 import { IS_WINDOWS, IS_MAC, IS_LINUX } from "@/lib/platform";
 import { saveMessages } from "./sessions";
 import { extensionRegistry } from "./extensions";
@@ -72,6 +74,7 @@ type Deps = {
   onFinishMeta?: (info: { hitStepCap: boolean; finishReason: string }) => void;
   getPlanMode?: () => boolean;
   getSessionId?: () => string | null;
+  getStackInfo?: () => StackInfo | null;
 };
 
 type SendOptions = {
@@ -150,6 +153,8 @@ export function createContextAwareTransport(deps: Deps) {
       openaiCompatibleModelId: deps.getOpenaiCompatibleModelId?.(),
       planMode: deps.getPlanMode?.(),
       projectMemory,
+      goalContext: useGoalsStore.getState().activeGoalId ?? undefined,
+      stackInfo: deps.getStackInfo?.(),
       uiMessages: messagesForRun,
       abortSignal: options.abortSignal,
       mcpTools: Object.keys(mcpTools).length > 0 ? mcpTools : undefined,

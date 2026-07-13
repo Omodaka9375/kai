@@ -4,11 +4,20 @@ import { djb2 } from "../lib/hash";
 import { native } from "../lib/native";
 import { checkWritableCanonical } from "../lib/security";
 import { newQueuedEditId, usePlanStore } from "../store/planStore";
+import { createSnapshot, restoreFromSnapshot, type FileSnapshot } from "../lib/snapshot";
+import { runGate } from "./gate";
 import { resolvePath, type ToolContext } from "./context";
 
 type EditResult =
   | { ok: true; replacements: number; bytesWritten: number; path: string }
-  | { error: string; path: string };
+  | { ok: false; error: string; path: string };
+
+type EditResultWithRollback = EditResult & {
+  rolledBack?: boolean;
+  gateErrors?: any[];
+  gateOutput?: string;
+  rollbackResult?: any;
+};
 
 /** Strip trailing whitespace from each line, preserving line endings.
  *  Exempt .md/.mdx where trailing spaces are meaningful (hard line breaks). */
@@ -221,14 +230,22 @@ async function applyEdits(
   edits: { old_string: string; new_string: string; replace_all?: boolean; line_hint?: number }[],
   kind: "edit" | "multi_edit",
   readCache: Map<string, { size: number; hash: number }>,
-): Promise<EditResult> {
+  enableGateRollback?: boolean,
+  cwd?: string,
+): Promise<EditResultWithRollback> {
   const r = await native.readFile(abs);
   if (r.kind === "binary")
-    return { error: "binary file refused", path: abs };
+    return { ok: false, error: "binary file refused", path: abs };
   if (r.kind === "toolarge")
-    return { error: `file too large (${r.size} bytes)`, path: abs };
+    return { ok: false, error: `file too large (${r.size} bytes)`, path: abs };
 
   const original = r.content;
+
+  // Create snapshot before edit if gate rollback is enabled
+  let snapshot: FileSnapshot | null = null;
+  if (enableGateRollback && cwd) {
+    snapshot = await createSnapshot(abs);
+  }
 
   // Stale-write guard: update cache if file changed, but allow editing if old_string matches.
   const cached = readCache.get(abs);
@@ -255,12 +272,13 @@ async function applyEdits(
 
     if (oldNorm === newNorm) {
       return {
+        ok: false,
         error: "old_string and new_string are identical",
         path: abs,
       };
     }
     if (oldNorm.length === 0) {
-      return { error: "old_string cannot be empty", path: abs };
+      return { ok: false, error: "old_string cannot be empty", path: abs };
     }
     if (rawEdit.replace_all) {
       let n = 0;
@@ -278,6 +296,7 @@ async function applyEdits(
       }
       if (n === 0) {
         return {
+          ok: false,
           error: `old_string not found: ${JSON.stringify(oldNorm.slice(0, 80))}.${getDidYouMeanHint(content, oldNorm)}`,
           path: abs,
         };
@@ -287,6 +306,7 @@ async function applyEdits(
       const match = eolAwareFind(content, oldNorm);
       if (!match) {
         return {
+          ok: false,
           error: `old_string not found: ${JSON.stringify(oldNorm.slice(0, 80))}.${getDidYouMeanHint(content, oldNorm)}`,
           path: abs,
         };
@@ -297,6 +317,7 @@ async function applyEdits(
       const exactSecond = eolAwareExactFind(content, oldNorm, match.start + match.length);
       if (exactSecond && !rawEdit.line_hint) {
         return {
+          ok: false,
           error:
             "old_string is not unique. Provide more surrounding context, set replace_all=true, or provide line_hint to disambiguate.",
           path: abs,
@@ -352,6 +373,25 @@ async function applyEdits(
     await native.writeFile(abs, content);
     readCache.set(abs, { size: content.length, hash: djb2(content) });
     window.dispatchEvent(new CustomEvent("Kai:fs-changed", { detail: abs }));
+
+    // Run gate check if enabled
+    if (enableGateRollback && snapshot !== null && cwd) {
+      const gateResult = await runGate(cwd);
+      if (!gateResult.success) {
+        // Gate failed - rollback
+        const rollbackResult = await restoreFromSnapshot(snapshot);
+        return {
+          ok: false,
+          error: "Gate validation failed",
+          path: abs,
+          rolledBack: true,
+          gateErrors: gateResult.errors,
+          gateOutput: gateResult.output,
+          rollbackResult,
+        };
+      }
+    }
+
     return {
       ok: true,
       replacements: totalReplacements,
@@ -359,7 +399,11 @@ async function applyEdits(
       path: abs,
     };
   } catch (err) {
-    return { error: String(err), path: abs };
+    // Try to rollback if we have a snapshot
+    if (enableGateRollback && snapshot) {
+      await restoreFromSnapshot(snapshot);
+    }
+    return { ok: false, error: String(err), path: abs };
   }
 }
 
@@ -388,9 +432,13 @@ export function buildEditTools(ctx: ToolContext) {
           .number()
           .optional()
           .describe("Approximate 1-based line number where the edit should apply. Used to disambiguate when old_string appears more than once."),
+        enableGateRollback: z
+          .boolean()
+          .optional()
+          .describe("If true, run gate after edit and rollback on failure. Default: false."),
       }),
       needsApproval: true,
-      execute: async ({ path: pathArg, old_string, new_string, replace_all, line_hint }) => {
+      execute: async ({ path: pathArg, old_string, new_string, replace_all, line_hint, enableGateRollback }) => {
         const path = pathArg ?? "";
         if (!path) return { error: "path is required" };
         const reqPath = resolvePath(path, ctx.getCwd());
@@ -417,6 +465,8 @@ export function buildEditTools(ctx: ToolContext) {
           [{ old_string, new_string, replace_all, line_hint }],
           "edit",
           ctx.readCache,
+          enableGateRollback,
+          ctx.getCwd() ?? undefined,
         );
         if ("error" in result) {
           editFailures.set(abs, failures + 1);
@@ -443,9 +493,13 @@ export function buildEditTools(ctx: ToolContext) {
             }),
           )
           .min(1),
+        enableGateRollback: z
+          .boolean()
+          .optional()
+          .describe("If true, run gate after edits and rollback on failure. Default: false."),
       }),
       needsApproval: true,
-      execute: async ({ path: pathArg, edits }) => {
+      execute: async ({ path: pathArg, edits, enableGateRollback }) => {
         // Some models put `path` inside each edit instead of at the top level.
         const path = pathArg ?? edits[0]?.path ?? "";
         if (!path) return { error: "path is required" };
@@ -468,7 +522,14 @@ export function buildEditTools(ctx: ToolContext) {
             path: abs,
           };
         }
-        const result = await applyEdits(abs, edits, "multi_edit", ctx.readCache);
+        const result = await applyEdits(
+          abs,
+          edits,
+          "multi_edit",
+          ctx.readCache,
+          enableGateRollback,
+          ctx.getCwd() ?? undefined,
+        );
         if ("error" in result) {
           editFailures.set(abs, failures + 1);
         } else {

@@ -207,7 +207,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
     }
   };
 
-  const submit = () => {
+  const submit = async () => {
     // When the agent is busy, redirect the message as a steering signal
     // instead of queuing a normal send (which would be rejected).
     if (isBusy) {
@@ -236,7 +236,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
       commandSource = `#${pickedCommands[0].name} ${trimmed}`.trim();
     }
     if (commandSource.startsWith("/") || commandSource.startsWith("#")) {
-      const outcome = tryRunSlashCommand(commandSource);
+      const outcome = await tryRunSlashCommand(commandSource);
       if (outcome.kind === "handled") {
         setValue("");
         if (outcome.toast) console.info(outcome.toast);

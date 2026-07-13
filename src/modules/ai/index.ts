@@ -6,6 +6,8 @@ export {
   SelectionAskAi,
 } from "./components/lazy";
 export { AgentStatusPill } from "./components/AgentStatusPill";
+export { GoalStatusPill } from "./components/GoalStatusPill";
+export { GoalPanel } from "./components/GoalPanel";
 export {
   EMPTY_PROVIDER_KEYS,
   getAllKeys,

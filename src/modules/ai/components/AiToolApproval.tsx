@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import {
   Cancel01Icon,
@@ -10,11 +11,13 @@ import {
   TerminalIcon,
   Tick02Icon,
   ToolsIcon,
+  UserWarning01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ToolUIPart } from "ai";
 import { memo } from "react";
 import { useChatStore } from "../store/chatStore";
+import { getToolActionInfo, analyzeShellCommand } from "../lib/policy";
 
 type Props = {
   part: Extract<ToolUIPart, { state: "approval-requested" }>;
@@ -39,6 +42,14 @@ function AiToolApprovalImpl({ part, toolName, onRespond }: Props) {
   const input = part.input as Record<string, unknown>;
   const autoApprovedIds = useChatStore((s) => s.autoApprovedIds);
   const wasAutoApproved = autoApprovedIds.has(part.approval.id);
+
+  // Get policy info for this tool
+  const policyInfo = getToolActionInfo(toolName);
+
+  // Analyze shell commands for additional warnings
+  const shellAnalysis = toolName === "bash_run" && typeof input.command === "string"
+    ? analyzeShellCommand(input.command)
+    : null;
 
   if (wasAutoApproved) {
     return (
@@ -87,6 +98,62 @@ function AiToolApprovalImpl({ part, toolName, onRespond }: Props) {
 
       <div className="px-3 py-2.5">
         <PreviewBlock toolName={toolName} input={input} />
+
+        {/* Policy risk level and warnings */}
+        {(policyInfo.riskLevel !== "low" || shellAnalysis?.warnings.length) && (
+          <div className="mt-3 space-y-2">
+            {/* Risk level badge */}
+            <div className="flex items-center gap-2">
+              <Badge
+                variant="secondary"
+                className={cn(
+                  "text-[10px] font-medium",
+                  policyInfo.riskLevel === "critical" && "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
+                  policyInfo.riskLevel === "high" && "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
+                  policyInfo.riskLevel === "medium" && "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400",
+                )}
+              >
+                {policyInfo.riskLevel === "critical" && "⚠️ Critical Risk"}
+                {policyInfo.riskLevel === "high" && "⚠️ High Risk"}
+                {policyInfo.riskLevel === "medium" && "Medium Risk"}
+              </Badge>
+              <span className="text-[11px] text-muted-foreground">
+                {policyInfo.description}
+              </span>
+            </div>
+
+            {/* Shell command warnings */}
+            {shellAnalysis?.warnings.length ? (
+              <div className="rounded-md bg-amber-50 dark:bg-amber-950/20 p-2">
+                <div className="flex items-start gap-1.5">
+                  <HugeiconsIcon
+                    icon={UserWarning01Icon}
+                    size={14}
+                    strokeWidth={2}
+                    className="text-amber-600 dark:text-amber-400 mt-0.5"
+                  />
+                  <div className="flex-1">
+                    <p className="text-[11px] font-medium text-amber-800 dark:text-amber-300">
+                      Warnings:
+                    </p>
+                    <ul className="mt-1 space-y-0.5">
+                      {shellAnalysis.warnings.map((warning, i) => (
+                        <li key={i} className="text-[10px] text-amber-700 dark:text-amber-400">
+                          • {warning}
+                        </li>
+                      ))}
+                    </ul>
+                    {shellAnalysis.suggestions.length > 0 && (
+                      <p className="mt-2 text-[10px] text-amber-700 dark:text-amber-400">
+                        <strong>Suggestion:</strong> {shellAnalysis.suggestions[0]}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        )}
       </div>
 
       <div className="flex items-center justify-end gap-1.5 border-t border-border/60 px-3 py-2">
