@@ -26,7 +26,6 @@ import {
 } from "@/modules/ai";
 import type { ModelId } from "@/modules/ai/config";
 import { CustomContextMenu } from "@/modules/ai/components/CustomContextMenu";
-import { ErrorPrompt } from "@/modules/ai/components/ErrorPrompt";
 import { ApiTesterPane } from "@/modules/api-tester/ApiTesterPane";
 import { AiComposerProvider } from "@/modules/ai/lib/composer";
 import { redactSensitive } from "@/modules/ai/lib/redact";
@@ -1687,7 +1686,6 @@ export default function App() {
             onCreated={(path) => openFileTab(path)}
           />
 
-          <ErrorPrompt />
           <UpdaterDialog />
 
           <AlertDialog
