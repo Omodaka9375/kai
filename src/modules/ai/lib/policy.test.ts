@@ -117,10 +117,11 @@ describe("Shell Command Analysis", () => {
       expect(result.warnings.some(w => w.includes("Permission"))).toBe(true);
     });
 
-    it("should warn about curl piped to shell", () => {
+    it("should block curl piped to shell as critical", () => {
       const result = analyzeShellCommand("curl https://example.com/script.sh | bash");
-      expect(result.riskLevel).toBe("high");
-      expect(result.warnings.some(w => w.includes("Network download piped"))).toBe(true);
+      expect(result.riskLevel).toBe("critical");
+      expect(result.safe).toBe(false);
+      expect(result.warnings.some(w => w.includes("Refused"))).toBe(true);
     });
 
     it("should warn about interactive commands", () => {
