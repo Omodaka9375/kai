@@ -253,20 +253,22 @@ function stripLeakedTokens(text: string): string {
     .replace(/<\|thinking\|>[\\s\\S]*?<\|?\/thinking\|>/gi, "")
     // Strip XML-style <thinking>…</thinking> blocks (complete or dangling open tag)
     .replace(/<thinking>[\s\S]*?<\/thinking>/gi, "")
-    .replace(/<thinking>[\s\S]*$/gi, "")
+    // Only strip a dangling <thinking> if NO closing </thinking> follows
+    .replace(/<thinking>(?![\s\S]*<\/thinking>)[\s\S]*$/gi, "")
     .replace(/<\|im_(?:start|end)\\\\|>[^\n]*/g, "")
     // Raw tool call syntax leaked by Gemma 4 and similar models.
     .replace(/<\|?tool_call_?[a-z_]*(?::|\|?>)?/gi, "")
     .replace(/<\|?\/tool_call_?[a-z_]*(?:\|?>)?/gi, "")
-    .replace(/call:[a-z_]+\{[^}]*\}?(?:<[^>]*>)?/gi, "")
+    .replace(/call:[a-z_]+\{[^}]*\}(?:<[^>]*>)?/gi, "")
     .replace(/<tool_call>?/gi, "")
     .replace(/<\/tool_call>?/gi, "")
     // Strip raw leaked JSON tool-call payloads containing <|"|> delimiters
     .replace(/(?:^|,)?\s*\{[\s\S]*?(?:new_string|old_string|path|proposedContent|proposed_content)\s*:\s*<\|"\|>[\s\S]*?\}(?:\s*,?)?/gi, "")
     .replace(/<\|"\|>/g, "")
-    // Strip any trailing partial or incomplete tags/tokens at the very end of the text stream
-    .replace(/(?:<\|?|\|)[a-z_0-9\-]*$/i, "")
-    .replace(/<[a-z_0-9\-]*$/i, "");
+    // Strip any trailing partial or incomplete tags/tokens at the very end of the text stream.
+    // Require at least one alphanumeric so we don't eat legitimate symbols like <- or |->
+    .replace(/(?:<\|?|\|)[a-z_0-9][a-z_0-9\-]*$/i, "")
+    .replace(/<[a-z_0-9][a-z_0-9\-]*$/i, "");
 
   // Convert LaTeX math arrow symbols to standard Unicode arrows
   cleaned = cleaned
