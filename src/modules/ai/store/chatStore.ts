@@ -31,6 +31,7 @@ import {
   type SessionMeta,
 } from "../lib/sessions";
 import { pushRecentModel, persistProjectModel } from "../lib/modelPrefs";
+import { cancelAllShellSessions } from "../tools/shell";
 import { createContextAwareTransport } from "../lib/transport";
 import type { ToolContext } from "../tools/tools";
 import { resetEditFailures } from "../tools/edit";
@@ -690,5 +691,6 @@ export async function sendMessage(text: string): Promise<boolean> {
 export function stop(): void {
   const id = useChatStore.getState().activeSessionId;
   if (!id) return;
+  cancelAllShellSessions();
   void chats.get(id)?.stop();
 }

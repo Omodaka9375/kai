@@ -145,9 +145,13 @@ export function buildShellTools(ctx: ToolContext) {
         timeout_secs: z.number().min(1).max(300).optional(),
       }),
       needsApproval: true,
-      execute: async ({ command, timeout_secs }) => {
+      execute: async ({ command, timeout_secs }, options) => {
         const safety = checkShellCommand(command);
         if (!safety.ok) return { error: safety.reason };
+        // Check abort before any work — agent was stopped before we started.
+        if (options?.abortSignal?.aborted) {
+          return { error: "Command cancelled — agent stopped." };
+        }
         // Block long-running dev server commands — they hang bash_run.
         if (isDevServerCommand(command)) {
           return {
@@ -167,6 +171,14 @@ export function buildShellTools(ctx: ToolContext) {
           const effectiveTimeout =
             timeout_secs ?? slowCommandTimeout(command);
 
+          // Wire abort signal — cancels the Rust child process immediately.
+          let aborted = false;
+          const onAbort = () => {
+            aborted = true;
+            void native.shellSessionCancel(shellId).catch(() => {});
+          };
+          options?.abortSignal?.addEventListener("abort", onAbort, { once: true });
+
           // Auto-append --yes to npx commands to prevent interactive installation prompts from hanging the shell
           let sanitizedCommand = command;
           if (/\bnpx\b/.test(sanitizedCommand) && !/\b(npx\s+(?:-y|--yes))\b/.test(sanitizedCommand)) {
@@ -179,6 +191,14 @@ export function buildShellTools(ctx: ToolContext) {
             cwd,
             effectiveTimeout,
           );
+
+          // Clean up abort listener to avoid leaks.
+          options?.abortSignal?.removeEventListener("abort", onAbort);
+
+          if (aborted) {
+            return { error: "Command cancelled by stop.", timed_out: true };
+          }
+
           return {
             command: sanitizedCommand,
             stdout: stripAnsi(r.stdout),
