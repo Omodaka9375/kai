@@ -340,6 +340,7 @@ export const MessageResponse = memo(
           className,
         )}
         linkSafety={{ enabled: false }}
+        skipHtml
         components={streamdownComponents}
         controls={streamdownControls}
         {...props}
