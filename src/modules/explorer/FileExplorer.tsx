@@ -189,10 +189,22 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(
       const handler = (e: Event) => {
         const path = (e as CustomEvent<string>).detail;
         if (!path || !rootPath) return;
-        // Refresh the parent directory of the changed path.
-        const sep = path.lastIndexOf("/");
-        const parent = sep > 0 ? path.slice(0, sep) : rootPath;
-        tree.refresh(parent);
+        // Refresh every ancestor that's already loaded in the tree so
+        // newly-created intermediate directories appear in their parent's
+        // entry list. Walk up from the immediate parent to rootPath.
+        let cursor = path;
+        while (cursor.length > (rootPath?.length ?? 1)) {
+          const sep = cursor.lastIndexOf("/");
+          if (sep <= 0) break;
+          cursor = cursor.slice(0, sep);
+          // Only refresh if this ancestor is already loaded — don't
+          // fetch paths the tree hasn't expanded yet.
+          if (tree.nodes[cursor]?.status === "loaded") {
+            tree.refresh(cursor);
+          }
+        }
+        // Always refresh rootPath so a top-level create shows up.
+        tree.refresh(rootPath);
       };
       window.addEventListener("Kai:fs-changed", handler);
       return () => window.removeEventListener("Kai:fs-changed", handler);
