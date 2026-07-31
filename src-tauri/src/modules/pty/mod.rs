@@ -52,12 +52,20 @@ pub fn pty_open(
         })?;
     // Wrapping add — after 4 billion opens, wraps to 0. Skip 0 (frontend
     // treats it as "unset") and any id that collides with a live session.
-    let id = loop {
+    // Bound at 1024 attempts so a pathological collision storm returns an
+    // error instead of spinning forever.
+    const ID_ALLOC_BOUND: u32 = 1024;
+    let mut id = None;
+    for _ in 0..ID_ALLOC_BOUND {
         let candidate = state.next_id.fetch_add(1, Ordering::Relaxed);
         if candidate != 0 && !state.sessions.read().unwrap().contains_key(&candidate) {
-            break candidate;
+            id = Some(candidate);
+            break;
         }
-    };
+    }
+    let id = id.ok_or_else(|| {
+        format!("failed to allocate pty id after {ID_ALLOC_BOUND} attempts — too many live sessions?")
+    })?;
     state.sessions.write().unwrap().insert(id, session);
     log::info!("pty opened id={id} cols={cols} rows={rows}");
     Ok(id)

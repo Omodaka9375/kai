@@ -8,19 +8,30 @@ import { currentWorkspaceEnv, workspaceScopeKey } from "@/modules/workspace";
 /**
  * Per-session lazy shell-session id. The agent gets one persistent shell per
  * chat session, so cwd survives across tool calls (cd, mkdir+cd, etc).
+ *
+ * Each entry carries a generation counter so delayed-close timeouts from
+ * `cancelAllShellSessions` can never close a replacement session that got
+ * the same numeric Rust id.
  */
-const sessionShells = new Map<string, Promise<number>>();
+const sessionShells = new Map<string, { promise: Promise<number>; generation: number }>();
+let shellGeneration = 0;
 
 /** Cancel all running shell session commands. Called on agent stop. */
 export function cancelAllShellSessions(): void {
-  for (const p of sessionShells.values()) {
-    void p.then((id) => {
+  for (const [key, entry] of sessionShells) {
+    const gen = entry.generation;
+    void entry.promise.then((id) => {
       native.shellSessionCancel(id);
       // If the cancel flag didn't take effect (e.g. the child process is
       // unkillable or stuck in a blocking syscall), close the entire session
       // after a grace period so the next run gets a fresh shell.
       setTimeout(() => {
-        native.shellSessionClose(id);
+        // Only close if this generation is still current — a new
+        // getSessionShell call may have replaced the entry by now.
+        const cur = sessionShells.get(key);
+        if (cur && cur.generation === gen) {
+          native.shellSessionClose(id);
+        }
       }, 3000);
     }).catch(() => {});
   }
@@ -33,9 +44,9 @@ export function cancelAllShellSessions(): void {
 export function closeShellSession(sessionId: string): void {
   // Session keys are workspace-scoped; scan for any key starting with the
   // session id since we don't know the workspace scope at deletion time.
-  for (const [key, p] of sessionShells) {
+  for (const [key, entry] of sessionShells) {
     if (key === sessionId || key.startsWith(`${sessionId}:`)) {
-      void p.then((id) => native.shellSessionClose(id)).catch(() => {});
+      void entry.promise.then((id) => native.shellSessionClose(id)).catch(() => {});
       sessionShells.delete(key);
     }
   }
@@ -45,12 +56,13 @@ async function getSessionShell(
   sessionId: string,
   cwd: string | null,
 ): Promise<number> {
-  let p = sessionShells.get(sessionId);
-  if (!p) {
-    p = native.shellSessionOpen(cwd);
-    sessionShells.set(sessionId, p);
-  }
-  return p;
+  const existing = sessionShells.get(sessionId);
+  if (existing) return existing.promise;
+  const promise = native.shellSessionOpen(cwd);
+  // `existing` is falsy here (we returned above if truthy), so create new.
+    const generation = ++shellGeneration;
+  sessionShells.set(sessionId, { promise, generation });
+  return promise;
 }
 
 function workspaceSessionKey(sessionId: string): string {
@@ -179,10 +191,11 @@ export function buildShellTools(ctx: ToolContext) {
           };
           options?.abortSignal?.addEventListener("abort", onAbort, { once: true });
 
-          // Auto-append --yes to npx commands to prevent interactive installation prompts from hanging the shell
+          // Auto-append --yes to npx commands to prevent interactive installation prompts from hanging the shell.
+          // Only match npx when it appears as the command (start of string, or after ; && || | & or whitespace), never inside strings.
           let sanitizedCommand = command;
-          if (/\bnpx\b/.test(sanitizedCommand) && !/\b(npx\s+(?:-y|--yes))\b/.test(sanitizedCommand)) {
-            sanitizedCommand = sanitizedCommand.replace(/\bnpx\b/g, "npx --yes");
+          if (/(?:^|[;|&]\s*)\bnpx\b/.test(sanitizedCommand) && !/(?:^|[;|&]\s*)\bnpx\s+(?:-y|--yes)\b/.test(sanitizedCommand)) {
+            sanitizedCommand = sanitizedCommand.replace(/((?:^|[;|&])\s*)\bnpx\b/g, "$1npx --yes");
           }
 
           const r = await native.shellSessionRun(

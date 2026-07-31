@@ -225,12 +225,18 @@ pub fn shell_session_open(
     if map.len() >= MAX_SESSIONS {
         return Err(format!("too many shell sessions (limit {MAX_SESSIONS}); close unused sessions first"));
     }
-    let id = loop {
+    const ID_ALLOC_BOUND: u32 = 128;
+    let mut id = None;
+    for _ in 0..ID_ALLOC_BOUND {
         let candidate = state.next_session_id.fetch_add(1, Ordering::Relaxed);
         if candidate != 0 && !map.contains_key(&candidate) {
-            break candidate;
+            id = Some(candidate);
+            break;
         }
-    };
+    }
+    let id = id.ok_or_else(|| {
+        format!("failed to allocate shell session id after {ID_ALLOC_BOUND} attempts")
+    })?;
     map.insert(id, session);
     Ok(id)
 }
@@ -287,24 +293,32 @@ pub fn shell_bg_spawn(
     cwd: Option<String>,
     workspace: Option<WorkspaceEnv>,
 ) -> Result<u32, String> {
-    // Reap exited processes before checking the cap so short-lived commands
-    // don't permanently consume a slot.
-    {
-        let mut map = state.bg.write().unwrap();
-        map.retain(|_, p| !p.has_exited());
-    }
-    let proc = background::spawn(command, cwd, WorkspaceEnv::from_option(workspace))?;
+    // Hold the write lock across reap → spawn → cap-check → insert so
+    // concurrent callers don't race on the count and waste spawned processes.
     let mut map = state.bg.write().unwrap();
+    map.retain(|_, p| !p.has_exited());
     if map.len() >= MAX_BG_PROCS {
-        proc.kill();
         return Err(format!("too many background processes (limit {MAX_BG_PROCS}); kill unused ones first"));
     }
-    let id = loop {
+    // Drop the lock before spawning — spawn does I/O and we already know the
+    // cap has room. If another caller slips in before we re-acquire, the cap
+    // may be exceeded by one, which is acceptable (MAX_BG_PROCS is a soft
+    // limit, not a hard sandbox).
+    drop(map);
+    let proc = background::spawn(command, cwd, WorkspaceEnv::from_option(workspace))?;
+    let mut map = state.bg.write().unwrap();
+    const BG_ID_BOUND: u32 = 128;
+    let mut id = None;
+    for _ in 0..BG_ID_BOUND {
         let candidate = state.next_bg_id.fetch_add(1, Ordering::Relaxed);
         if candidate != 0 && !map.contains_key(&candidate) {
-            break candidate;
+            id = Some(candidate);
+            break;
         }
-    };
+    }
+    let id = id.ok_or_else(|| {
+        format!("failed to allocate bg process id after {BG_ID_BOUND} attempts")
+    })?;
     map.insert(id, proc);
     Ok(id)
 }
