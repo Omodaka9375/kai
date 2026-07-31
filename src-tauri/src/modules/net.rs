@@ -538,6 +538,27 @@ pub async fn ai_http_stream(
     Ok(())
 }
 
+/// Fetch the full list of available models from OpenRouter's public API.
+/// No API key is required — the endpoint is open. Callers should cache the
+/// result (e.g. 24h) and merge with the hardcoded model list.
+#[tauri::command]
+pub async fn openrouter_list_models() -> Result<String, String> {
+    let url = "https://openrouter.ai/api/v1/models";
+    let parsed = validate_url(url, false)?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "missing host".to_string())?
+        .to_string();
+    let safe_ips = classify_and_collect_safe_ips(&host, false).await?;
+
+    let client = build_safe_client(false, &[(host, safe_ips)])?;
+    let resp = client.get(parsed).send().await.map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("OpenRouter returned {}", resp.status()));
+    }
+    resp.text().await.map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

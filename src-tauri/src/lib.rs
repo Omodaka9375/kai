@@ -262,6 +262,7 @@ pub fn run() {
             mcp::mcp_stdio_close,
             net::lm_ping,
             net::lm_list_models,
+            net::openrouter_list_models,
             net::ai_http_request,
             net::ai_http_stream,
         ])

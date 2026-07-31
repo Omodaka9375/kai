@@ -736,8 +736,18 @@ export const MODELS = [
 
 export type ModelId = (typeof MODELS)[number]["id"];
 
+/** Resolver populated by the OpenRouter models store so getModel() can find
+ *  models that were fetched dynamically and aren't in the hardcoded MODELS array. */
+let externalModelLookup: ((id: string) => ModelInfo | undefined) | null = null;
+export function registerExternalModelLookup(fn: (id: string) => ModelInfo | undefined): void {
+  externalModelLookup = fn;
+}
+
 export function getModel(id: ModelId): ModelInfo {
-  const m = MODELS.find((x) => x.id === id);
+  // Check hardcoded models first.
+  const m =
+    (MODELS as readonly ModelInfo[]).find((x) => x.id === id) ??
+    externalModelLookup?.(id);
   if (!m) throw new Error(`Unknown model: ${id}`);
   return m;
 }

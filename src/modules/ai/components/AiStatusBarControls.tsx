@@ -34,10 +34,9 @@ import {
   Tick01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useEffect } from "react";
 import {
   getModel,
-  MODELS,
   providerNeedsKey,
   PROVIDERS,
   type ModelCapabilities,
@@ -45,6 +44,7 @@ import {
   type ModelInfo,
   type ProviderId,
 } from "../config";
+import { useOpenRouterModelsStore } from "../store/openrouterModelsStore";
 import { toggleFavoriteModel } from "../lib/modelPrefs";
 import { useChatStore } from "../store/chatStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
@@ -125,6 +125,14 @@ function ModelDropdown() {
   // For custom endpoints, show the actual model ID instead of generic label.
   const lmModelId = usePreferencesStore((s) => s.lmstudioModelId);
   const compatModelId = usePreferencesStore((s) => s.openaiCompatibleModelId);
+
+  // Auto-sync OpenRouter models so the dropdown stays current.
+  const orModels = useOpenRouterModelsStore((s) => s.models);
+  const orFetch = useOpenRouterModelsStore((s) => s.fetch);
+  const hasOpenRouterKey = !!apiKeys.openrouter;
+  useEffect(() => {
+    if (hasOpenRouterKey) void orFetch();
+  }, [hasOpenRouterKey, orFetch]);
   const displayLabel =
     current.id === "lmstudio-local" && lmModelId.trim()
       ? lmModelId.trim()
@@ -154,7 +162,7 @@ function ModelDropdown() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    let pool: readonly ModelInfo[] = MODELS;
+    let pool: readonly ModelInfo[] = orModels;
     if (tab === "favorites") {
       pool = pool.filter((m) => favoriteIds.includes(m.id));
     } else if (tab === "recent") {
