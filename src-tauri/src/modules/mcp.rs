@@ -6,6 +6,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::RwLock;
 use tauri::ipc::Channel;
 
+use crate::modules::lock::rwlock_write;
+
 /// Events streamed back to the frontend for a stdio MCP session.
 #[derive(Clone, Serialize)]
 #[serde(tag = "kind")]
@@ -118,11 +120,7 @@ pub fn mcp_stdio_open(
     });
 
     let session = McpSession { child, _id: id };
-    state
-        .sessions
-        .write()
-        .expect("McpState lock poisoned")
-        .insert(id, session);
+    rwlock_write(&state.sessions).insert(id, session);
 
     Ok(id)
 }
@@ -130,7 +128,7 @@ pub fn mcp_stdio_open(
 /// Send a JSON-RPC message to a stdio MCP session's stdin.
 #[tauri::command]
 pub fn mcp_stdio_send(state: tauri::State<'_, McpState>, id: u32, message: String) -> Result<(), String> {
-    let mut sessions = state.sessions.write().expect("McpState lock poisoned");
+    let mut sessions = rwlock_write(&state.sessions);
     let session = sessions
         .get_mut(&id)
         .ok_or_else(|| format!("no mcp session {id}"))?;
@@ -148,7 +146,7 @@ pub fn mcp_stdio_send(state: tauri::State<'_, McpState>, id: u32, message: Strin
 /// Close a stdio MCP session, killing the child process.
 #[tauri::command]
 pub fn mcp_stdio_close(state: tauri::State<'_, McpState>, id: u32) -> Result<(), String> {
-    let mut sessions = state.sessions.write().expect("McpState lock poisoned");
+    let mut sessions = rwlock_write(&state.sessions);
     if let Some(mut session) = sessions.remove(&id) {
         let _ = session.child.kill();
         let _ = session.child.wait();

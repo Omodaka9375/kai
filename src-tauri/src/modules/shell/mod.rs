@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
+use crate::modules::lock::{rwlock_read, rwlock_write};
 use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 #[cfg(windows)]
 use crate::modules::workspace::validate_wsl_distro_name;
@@ -221,7 +222,7 @@ pub fn shell_session_open(
         }
     };
     let session = Arc::new(ShellSession::new(initial, workspace));
-    let mut map = state.sessions.write().unwrap();
+    let mut map = rwlock_write(&state.sessions);
     if map.len() >= MAX_SESSIONS {
         return Err(format!("too many shell sessions (limit {MAX_SESSIONS}); close unused sessions first"));
     }
@@ -250,10 +251,7 @@ pub async fn shell_session_run(
     timeout_secs: Option<u64>,
     workspace: Option<WorkspaceEnv>,
 ) -> Result<SessionRunOutput, String> {
-    let session = state
-        .sessions
-        .read()
-        .unwrap()
+    let session = rwlock_read(&state.sessions)
         .get(&id)
         .cloned()
         .ok_or_else(|| "no shell session".to_string())?;
@@ -271,7 +269,7 @@ pub async fn shell_session_run(
 
 #[tauri::command]
 pub fn shell_session_close(state: tauri::State<ShellState>, id: u32) -> Result<(), String> {
-    state.sessions.write().unwrap().remove(&id);
+    rwlock_write(&state.sessions).remove(&id);
     Ok(())
 }
 
@@ -279,7 +277,7 @@ pub fn shell_session_close(state: tauri::State<ShellState>, id: u32) -> Result<(
 /// flag every 50ms and kills the child process when set.
 #[tauri::command]
 pub fn shell_session_cancel(state: tauri::State<ShellState>, id: u32) -> Result<(), String> {
-    let sessions = state.sessions.read().unwrap();
+    let sessions = rwlock_read(&state.sessions);
     if let Some(session) = sessions.get(&id) {
         session.cancel.store(true, std::sync::atomic::Ordering::Release);
     }
@@ -295,7 +293,7 @@ pub fn shell_bg_spawn(
 ) -> Result<u32, String> {
     // Hold the write lock across reap → spawn → cap-check → insert so
     // concurrent callers don't race on the count and waste spawned processes.
-    let mut map = state.bg.write().unwrap();
+    let mut map = rwlock_write(&state.bg);
     map.retain(|_, p| !p.has_exited());
     if map.len() >= MAX_BG_PROCS {
         return Err(format!("too many background processes (limit {MAX_BG_PROCS}); kill unused ones first"));
@@ -306,7 +304,7 @@ pub fn shell_bg_spawn(
     // limit, not a hard sandbox).
     drop(map);
     let proc = background::spawn(command, cwd, WorkspaceEnv::from_option(workspace))?;
-    let mut map = state.bg.write().unwrap();
+    let mut map = rwlock_write(&state.bg);
     const BG_ID_BOUND: u32 = 128;
     let mut id = None;
     for _ in 0..BG_ID_BOUND {
@@ -329,10 +327,7 @@ pub fn shell_bg_logs(
     handle: u32,
     since_offset: Option<u64>,
 ) -> Result<BackgroundLogResponse, String> {
-    let proc = state
-        .bg
-        .read()
-        .unwrap()
+    let proc = rwlock_read(&state.bg)
         .get(&handle)
         .cloned()
         .ok_or_else(|| "no background handle".to_string())?;
@@ -341,7 +336,7 @@ pub fn shell_bg_logs(
 
 #[tauri::command]
 pub fn shell_bg_kill(state: tauri::State<ShellState>, handle: u32) -> Result<(), String> {
-    if let Some(proc) = state.bg.read().unwrap().get(&handle).cloned() {
+    if let Some(proc) = rwlock_read(&state.bg).get(&handle).cloned() {
         proc.kill();
     }
     Ok(())
@@ -349,7 +344,7 @@ pub fn shell_bg_kill(state: tauri::State<ShellState>, handle: u32) -> Result<(),
 
 #[tauri::command]
 pub fn shell_bg_list(state: tauri::State<ShellState>) -> Result<Vec<BackgroundProcInfo>, String> {
-    let map = state.bg.read().unwrap();
+    let map = rwlock_read(&state.bg);
     let mut out = Vec::with_capacity(map.len());
     for (id, p) in map.iter() {
         out.push(p.info(*id));

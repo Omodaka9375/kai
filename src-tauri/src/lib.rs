@@ -1,5 +1,6 @@
 mod modules;
 
+use modules::lock::mutex_lock;
 use modules::{fs, git, mcp, net, pty, secrets, shell, workspace};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
@@ -11,7 +12,7 @@ struct LaunchDir(Mutex<Option<String>>);
 
 #[tauri::command]
 fn get_launch_dir(state: State<'_, LaunchDir>) -> Option<String> {
-    state.0.lock().expect("LaunchDir mutex poisoned").take()
+    mutex_lock(&state.0).take()
 }
 
 fn parse_launch_dir() -> Option<String> {

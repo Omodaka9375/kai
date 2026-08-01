@@ -1,4 +1,5 @@
 pub mod fs;
+pub mod lock;
 pub mod git;
 pub mod mcp;
 pub mod net;

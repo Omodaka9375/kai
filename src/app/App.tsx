@@ -54,11 +54,8 @@ import { PreviewStack, type PreviewPaneHandle } from "@/modules/preview";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { onKeysChanged, setLastWorkspaceCwd, setRecentProjects } from "@/modules/settings/store";
-import {
-  ShortcutsDialog,
-  useGlobalShortcuts,
-  type ShortcutHandlers,
-} from "@/modules/shortcuts";
+import { ShortcutsDialog } from "@/modules/shortcuts";
+import { useAppShortcuts } from "./useAppShortcuts";
 import {
   ExtensionsView,
   SidebarRail,
@@ -386,9 +383,6 @@ export default function App() {
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  const [newEditorOpen, setNewEditorOpen] = useState(false);
 
   // ── Workspace split ────────────────────────────────────────────────
   // When non-null, the workspace splits into two side-by-side panels.
@@ -1071,22 +1065,21 @@ export default function App() {
     };
   }, [openPreviewTab]);
 
-  const splitActivePaneInActiveTab = useCallback(
+  const handleSplitPane = useCallback(
     (dir: "row" | "col") => {
       const t = tabsRef.current.find((x) => x.id === activeId);
-      if (!t || t.kind !== "terminal") return;
-      splitActivePane(activeId, dir);
+      if (t?.kind === "terminal") splitActivePane(activeId, dir);
     },
     [activeId, splitActivePane],
   );
-
-  const handleSplitRight = useCallback(() => {
-    splitActivePaneInActiveTab("row");
-  }, [splitActivePaneInActiveTab]);
-
-  const handleSplitDown = useCallback(() => {
-    splitActivePaneInActiveTab("col");
-  }, [splitActivePaneInActiveTab]);
+  const handleSplitRight = useCallback(
+    () => handleSplitPane("row"),
+    [handleSplitPane],
+  );
+  const handleSplitDown = useCallback(
+    () => handleSplitPane("col"),
+    [handleSplitPane],
+  );
 
   const handleCloseTabOrPane = useCallback(() => {
     const t = tabsRef.current.find((x) => x.id === activeId);
@@ -1097,65 +1090,32 @@ export default function App() {
     handleClose(activeId);
   }, [activeId, closeActivePane, handleClose]);
 
-  const shortcutHandlers = useMemo<ShortcutHandlers>(
-    () => ({
-      "tab.new": openNewTab,
-      "tab.newPrivate": openNewPrivateTab,
-      "tab.newPreview": () => openPreviewTab(""),
-      "tab.newEditor": () => setNewEditorOpen(true),
-      "tab.close": handleCloseTabOrPane,
-      "tab.next": () => cycleTab(1),
-      "tab.prev": () => cycleTab(-1),
-      "tab.selectByIndex": (e) => selectByIndex(parseInt(e.key, 10) - 1),
-      "pane.splitRight": () => {
-        const t = tabsRef.current.find((x) => x.id === activeId);
-        if (t?.kind === "terminal") {
-          splitActivePaneInActiveTab("row");
-        } else if (t) {
-          // Non-terminal: open as workspace split
-          toggleSplitTab(t.id);
-        }
-      },
-      "pane.splitDown": () => splitActivePaneInActiveTab("col"),
-      "pane.focusNext": () => focusNextPaneInTab(activeId, 1),
-      "pane.focusPrev": () => focusNextPaneInTab(activeId, -1),
-      "pane.source": toggleSourceControl,
-      "search.focus": () => searchInlineRef.current?.focus(),
-      "search.replace": () => searchInlineRef.current?.focusReplace(),
-      "ai.toggle": togglePanelAndFocus,
-      "ai.askSelection": askFromSelection,
-      "editor.saveAll": handleSaveAll,
-      "shortcuts.open": () => setShortcutsOpen((v) => !v),
-      "settings.open": () => void openSettingsWindow(),
-      "sidebar.toggle": toggleSidebar,
-      "explorer.focus": toggleExplorerFocus,
-      "view.zoomIn": zoomIn,
-      "view.zoomOut": zoomOut,
-      "view.zoomReset": zoomReset,
-    }),
-    [
+  const { shortcutsOpen, setShortcutsOpen, newEditorOpen, setNewEditorOpen } =
+    useAppShortcuts({
+      tabsRef,
       activeId,
-      cycleTab,
-      handleCloseTabOrPane,
       openNewTab,
       openNewPrivateTab,
       openPreviewTab,
+      closeTabOrPane: handleCloseTabOrPane,
+      cycleTab,
       selectByIndex,
-      splitActivePaneInActiveTab,
+      toggleSplitTab,
+      splitActivePane,
       focusNextPaneInTab,
+      closeActivePane,
+      handleClose,
       toggleSourceControl,
       togglePanelAndFocus,
       askFromSelection,
+      handleSaveAll,
       toggleSidebar,
       toggleExplorerFocus,
-      handleSaveAll,
+      searchInlineRef,
       zoomIn,
       zoomOut,
       zoomReset,
-    ],
-  );
-
-  useGlobalShortcuts(shortcutHandlers);
+    });
 
   const registerTerminalHandle = useCallback(
     (leafId: number, h: TerminalPaneHandle | null) => {
@@ -1444,7 +1404,7 @@ export default function App() {
             onSplitTab={toggleSplitTab}
             splitTabId={splitTabId}
             onToggleSidebar={toggleSidebar}
-            onSplit={splitActivePaneInActiveTab}
+            onSplit={handleSplitPane}
             canSplit={
               activeTerminalTab !== null &&
               leafIds(activeTerminalTab.paneTree).length < MAX_PANES_PER_TAB

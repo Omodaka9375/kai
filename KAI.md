@@ -25,6 +25,10 @@ KAI loads `KAI.md` from the workspace root as agent memory (similar to AGENTS.md
 - `shell::shell_session_*` — persistent agent shell with state across calls.
 - `shell::shell_bg_*` — long-running background processes (dev servers etc.) with bounded ring-buffer log capture.
 - `secrets::secrets_*` — OS keychain via the `keyring` crate. Service constant `kai`. Linux uses a file-based fallback gated behind `#[cfg(target_os = "linux")]`.
+- `git::*` — git operations for the source-control panel and git-history views (own process runner with availability caching, WSL-aware).
+- `net::ai_http_request` / `net::ai_http_stream` — SSRF-hardened HTTP proxy for AI tools and cloud provider calls. Blocks loopback/private/metadata IPs (DNS-pinned via `resolve_to_addrs`, redirect policy re-checks every hop) unless the caller passes `allowPrivateNetwork: true` (reserved for user-configured local endpoints like LM Studio / ComfyUI — never for model-callable browse tools).
+- `mcp::*` — MCP server sessions (stdio/SSE) bridging external tool servers into the agent.
+- `workspace::*` — workspace environments: local vs WSL roots, `resolve_path` funnels every fs/git command through env-aware path resolution.
 - `open_settings_window` — separate webview window for Settings.
 
 ### PTY shell integration
@@ -40,44 +44,47 @@ ConPTY on Windows requires `SPAWN_LOCK` (Mutex) around `openpty + spawn_command`
 
 Each ConPTY child is also assigned to a per-session **Job Object** with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` (`pty/job.rs`). When the Job HANDLE drops — clean shutdown, panic, or even SIGKILL'd KAI process — the kernel kills every descendant of the shell (e.g. `npm run dev` spawned from inside pwsh). Without this Windows orphans the entire process subtree because `TerminateProcess` only kills the immediate child. macOS/Linux rely on `Drop for Session → killer.kill()`; on dev-`Ctrl-C` of `cargo run` destructors don't fire and orphans are possible there too — acceptable for now since dev only.
 
-`AiComposerProvider` is mounted unconditionally at the App.tsx root: a conditional wrapper would change the parent element type when keys load, remounting the entire tree (and re-spawning every PTY) the moment `getAllKeys()` resolves. Production happened to dodge this because keychain reads can land in the same paint frame; dev didn't. Keep the unconditional wrap.
+`AiComposerProvider` is mounted unconditionally at the `src/app/App.tsx` root: a conditional wrapper would change the parent element type when keys load, remounting the entire tree (and re-spawning every PTY) the moment `getAllKeys()` resolves. Production happened to dodge this because keychain reads can land in the same paint frame; dev didn't. Keep the unconditional wrap.
 
 ### Frontend (`src/`)
 
-Single-window React app. Path alias `@/*` → `src/*`. Tabs are tagged-union (`{ kind: "terminal" | "editor" | "preview" | "ai-diff", … }`) and **not** unmounted on switch — they're hidden via `invisible pointer-events-none` so PTYs and dev servers keep streaming in the background.
+Single-window React app; entry `src/main.tsx` → `src/app/App.tsx`. Path alias `@/*` → `src/*`. Tabs are tagged-union (`{ kind: "terminal" | "editor" | "preview" | "ai-diff", … }`) and **not** unmounted on switch — they're hidden via `invisible pointer-events-none` so PTYs and dev servers keep streaming in the background.
 
-`App.tsx` wires modules together — keep it a coordinator. New features go inside the appropriate `modules/<area>/`.
+`src/app/App.tsx` wires modules together — keep it a coordinator. New features go inside the appropriate `modules/<area>/`.
 
 ### Module layout (`src/modules/`)
 
 Each module is self-contained, exports a thin barrel via `index.ts`, and owns its hooks under `lib/`.
 
 - **terminal/** — `TerminalStack` keeps one mounted xterm per tab via `useTerminalSession` + `pty-bridge`. `osc-handlers.ts` parses OSC 7 (with Windows drive-letter normalization: `/C:/Users/foo` → `C:/Users/foo`) and OSC 133 markers. Themes in `themes.ts`.
-- **editor/** — CodeMirror 6 stack (`EditorStack` mirrors `TerminalStack`). `extensions.ts` configures language modes; supports vim mode and prebuilt themes (Tokyo Night, Nord, GitHub, Atom One, Aura, Copilot, Xcode).
+- **editor/** — CodeMirror 6 stack (`EditorStack` mirrors `TerminalStack`). `extensions.ts` configures language modes; supports vim mode and prebuilt themes (Tokyo Night, Nord, GitHub, Atom One, Aura, Copilot, Xcode). `lib/languageResolver.ts` lazy-loads language packs per extension and **caches the built Extension per extension key** — CM6 language extensions are stateless config, safe to share across EditorStates; do not "fix" the cache by rebuilding per editor (it is what keeps editor-open fast and the resolver tests cheap).
 - **explorer/** — file tree with Material/Catppuccin icons (`iconResolver.ts`), fuzzy search, keyboard nav, inline rename, context actions. Backslash-aware `basename`.
 - **preview/** — auto-detected dev-server preview tab (status-bar pill suggests opening when a localhost URL is detected).
+- **sidebar/** — activity rail + `ExtensionsView` (skills/snippets/agents management).
+- **source-control/** — git panel (stage/commit/branch) backed by the Rust `git` module; **git-history/** — commit history and per-file history diff stacks.
+- **api-tester/** — REST client pane (requests proxied through `net.rs`; may reach private networks since the user types the URL).
+- **workspace/** — local vs WSL workspace environments (`LOCAL_WORKSPACE`, `useWorkspaceEnvStore`, `getWslHome`).
 - **tabs/** — `useTabs` is the source of truth for tab list + active id. `useWorkspaceCwd` derives explorer root + inherited cwd for new tabs from active tab. `basename` splits on both `/` and `\`.
 - **header/** — top bar + inline search (`SearchInline` adapts to terminal vs editor via `SearchTarget`). `WindowControls` rendered when `USE_CUSTOM_WINDOW_CONTROLS` is true (Linux + Windows; macOS uses native traffic lights).
 - **statusbar/** — bottom bar, `CwdBreadcrumb` (handles Unix paths, Windows drive letters, and home `~` segments via `pathUtils.segmentsFromCwd`), AI tools indicator.
-- **shortcuts/** — keymap registry (`shortcuts.ts`) + `useGlobalShortcuts`. Handlers live in `App.tsx` and are passed in by id (`tab.new`, `ai.toggle`, …). `metaKey || ctrlKey` for cross-platform Cmd/Ctrl.
+- **shortcuts/** — keymap registry (`shortcuts.ts`) + `useGlobalShortcuts`. Handlers live in `src/app/App.tsx` and are passed in by id (`tab.new`, `ai.toggle`, …). `metaKey || ctrlKey` for cross-platform Cmd/Ctrl.
 - **settings/** — settings store (`store.ts` via `tauri-plugin-store`), preferences hook, settings window opener.
-- **shell-integration/** — frontend bridge for OSC events and shell session lifecycle.
 - **theme/** — `next-themes` provider.
 - **updater/** — auto-updater UI built on `tauri-plugin-updater`.
 - **ai/** — see below.
 
 ### AI subsystem (`src/modules/ai/`)
 
-BYOK. Multi-provider via `@ai-sdk/*`: **OpenAI, Anthropic, Google, Groq, xAI, Cerebras, OpenAI-compatible** (LM Studio for local/offline). Provider list in `config.ts` (`PROVIDERS`); model registry includes `DEFAULT_MODEL_ID` + `DEFAULT_AUTOCOMPLETE_MODEL`.
+BYOK. Multi-provider via `@ai-sdk/*`: **OpenAI, Anthropic, Google, Groq, xAI, Cerebras, DeepSeek, Mistral, OpenRouter, z.ai, OpenAI-compatible, LM Studio** (last two for local/offline; DeepSeek/Mistral/OpenRouter/z.ai ride the openai-compatible client with fixed base URLs). Provider list in `config.ts` (`PROVIDERS`, 12 entries); model registry includes `DEFAULT_MODEL_ID` + `DEFAULT_AUTOCOMPLETE_MODEL`. The OpenRouter model list auto-syncs at runtime.
 
 - **Key storage**: OS keychain via `keyring` (Rust). Frontend reads/writes through `secrets_*` commands. Service `KEYRING_SERVICE = "kai"`. Never persist keys to disk, settings store, or `localStorage`.
 - **Agent** (`lib/agent.ts`): `Experimental_Agent` with `stopWhen: stepCountIs(MAX_AGENT_STEPS)` and the system prompt from `config.ts`. Provider branching happens here — keep the `Agent` / `DirectChatTransport` shape; the rest of the system depends on AI SDK v6 chat semantics.
 - **Sub-agents** (`agents/registry.ts`, `agents/runSubagent.ts`): named sub-agents with their own system prompts and tool subsets, invoked by the main agent via `run_subagent` tool.
-- **Sessions** (`lib/sessions.ts` + `store/chatStore.ts`): conversations are organized into named sessions, persisted via `tauri-plugin-store` at `kai-sessions.json` (list + `activeId` + per-session `messages:<id>` keys). `chatStore.ts` keeps a module-scoped `Map<sessionId, Chat<UIMessage>>`; `getOrCreateChat(apiKey, sessionId)` lazily constructs a `Chat`, seeded with messages from a hydration map populated by `hydrateSessions()` (called once from `App.tsx`). `AgentRunBridge` mirrors active-session messages to disk on every change and auto-derives titles from the first user message. Switching the API key wipes the chat map; sessions persist.
+- **Sessions** (`lib/sessions.ts` + `store/chatStore.ts`): conversations are organized into named sessions, persisted via `tauri-plugin-store` at `kai-sessions.json` (list + `activeId` + per-session `messages:<id>` keys). `chatStore.ts` keeps a module-scoped `Map<sessionId, Chat<UIMessage>>` bounded by `CHATS_LRU_CAP` (8; evicted chats are stopped); `getOrCreateChat(sessionId)` lazily constructs a `Chat`, seeded with messages from a hydration map populated by `hydrateSessions()` (called once from `src/app/App.tsx`). `AgentRunBridge` mirrors active-session messages to disk on every change and auto-derives titles from the first user message. API keys live in the store and are read lazily per request (`getKeys`), so key rotation needs no chat rebuild.
 - **Composer** (`lib/composer.tsx`): React context providing shared input state (text, attachments, voice) for both the docked `AiInputBar` and any other surface. Attachments include image, text-file, and `selection` kinds — selections come from `useChatStore.attachSelection(text, source)` (drained into chips, not pasted into the textarea) and are wrapped as `<selection source="terminal|editor">…</selection>` blocks at submit. Composer derives `isBusy` from `agentMeta.status` so it can mount safely before sessions hydrate.
 - **Voice input**: streamed transcription pipeline. Toggled from the composer.
 - **Live context bridge**: `App.tsx` calls `setLive({ getCwd, getTerminalContext, … })` so tools can read the *currently active* terminal's cwd + last 300 lines of buffer. Lazy by design — don't pre-snapshot.
-- **Tools** (`tools/tools.ts`): `read_file`, `list_directory`, `fs_search`, `fs_grep` auto-execute. `write_file`, `create_directory`, `rename`, `delete`, `run_command`, `shell_session_run`, `shell_bg_spawn` set `needsApproval: true` and the AI SDK pauses for an in-UI confirmation card. Auto-send after approval uses `lastAssistantMessageIsCompleteWithApprovalResponses`. `lib/security.ts` is a deny-list refusing obvious secret paths (`.env*`, `.ssh/`, credentials, keychain dirs) — apply on **both** read and write paths and don't bypass it.
+- **Tools** (`tools/tools.ts`): `read_file`, `list_directory`, `fs_search`, `fs_grep` auto-execute. `write_file`, `create_directory`, `rename`, `delete`, `run_command`, `shell_session_run`, `shell_bg_spawn` set `needsApproval: true` and the AI SDK pauses for an in-UI confirmation card. Auto-send after approval uses `lastAssistantMessageIsCompleteWithApprovalResponses`. `lib/security.ts` is a deny-list refusing obvious secret paths (`.env*`, `.ssh/`, credentials, keychain dirs) — apply on **both** read and write paths and don't bypass it. `checkReadableCanonical` / `checkWritableCanonical` also re-check the canonicalized path to catch symlink traversal. Network tools (`web.ts`, `youtube.ts`) go through the SSRF-hardened Rust proxy: model-callable URL fetchers **must** pass `allowPrivateNetwork: false`; `true` is reserved for user-configured endpoints (LM Studio, ComfyUI, api-tester, MCP).
 - **Edit diffs**: AI-proposed edits open in a side-by-side diff tab (`ai-diff` tab kind); user accepts/rejects per hunk before the write tool actually runs.
 - **Skills / snippets**: reusable prompt fragments + tool-bundles surfaced in the composer.
 
@@ -106,6 +113,7 @@ BYOK. Multi-provider via `@ai-sdk/*`: **OpenAI, Anthropic, Google, Groq, xAI, Ce
 
 ### Cross-platform conventions
 
+- State locks: never `.unwrap()` / `.expect("poisoned")` on a shared `Mutex`/`RwLock` — use `modules::lock::{mutex_lock, rwlock_read, rwlock_write}`. They recover from poisoning and log a warning; one panicking thread must not take down every PTY/shell/git command.
 - HOME / cache dirs: use the `dirs` crate (`dirs::home_dir()`, `dirs::cache_dir()`), never raw `$HOME` / `%USERPROFILE%`.
 - Shell init scripts: gate Unix-only logic behind `#[cfg(unix)]`; Windows arm in `pty::shell_init::windows`.
 - Terminal input: send `\r` (CR) for Enter, not `\n` (LF) — PowerShell on Windows requires CR.

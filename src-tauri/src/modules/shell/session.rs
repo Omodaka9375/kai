@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use serde::Serialize;
 
+use crate::modules::lock::mutex_lock;
 use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 
 /// A persistent agent shell session. Each `run` call executes through the
@@ -71,7 +72,7 @@ impl ShellSession {
     }
 
     pub fn current_cwd(&self) -> String {
-        self.cwd.lock().unwrap().clone()
+        mutex_lock(&self.cwd).clone()
     }
 
     pub fn run(
@@ -90,7 +91,7 @@ impl ShellSession {
                 let effective_workspace = workspace_hint.as_ref().unwrap_or(&self.workspace);
                 let p = resolve_path(&hint, effective_workspace);
                 if p.is_dir() {
-                    *self.cwd.lock().unwrap() = hint;
+                    *mutex_lock(&self.cwd) = hint;
                 }
             }
         }
@@ -118,7 +119,7 @@ impl ShellSession {
         if let Some(ref new_cwd) = cwd_after {
             let p = resolve_path(new_cwd, &self.workspace);
             if p.is_dir() {
-                *self.cwd.lock().unwrap() = new_cwd.clone();
+                *mutex_lock(&self.cwd) = new_cwd.clone();
             }
         }
         let resolved_cwd = self.current_cwd().replace('\\', "/");

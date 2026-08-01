@@ -9,6 +9,7 @@ use tauri::ipc::{Channel, Response};
 
 use super::da_filter::DaFilter;
 use super::shell_init;
+use crate::modules::lock::mutex_lock;
 use crate::modules::workspace::WorkspaceEnv;
 
 const FLUSH_INTERVAL: Duration = Duration::from_millis(4);
@@ -64,7 +65,7 @@ pub fn spawn(
     on_data: Channel<Response>,
     on_exit: Channel<i32>,
 ) -> Result<(Arc<Session>, PtySize), String> {
-    let _spawn_guard = SPAWN_LOCK.lock().unwrap();
+    let _spawn_guard = mutex_lock(&SPAWN_LOCK);
 
     let pty_system = native_pty_system();
     let size = PtySize {
@@ -145,7 +146,7 @@ pub fn spawn(
                         if filtered.is_empty() {
                             continue;
                         }
-                        let mut g = pending_r.lock().unwrap();
+                        let mut g = mutex_lock(&pending_r);
                         if g.len() + filtered.len() > MAX_PENDING {
                             dropped_bytes += g.len() as u64;
                             g.clear();
@@ -173,7 +174,7 @@ pub fn spawn(
         .spawn(move || loop {
             thread::sleep(FLUSH_INTERVAL);
             let chunk = {
-                let mut g = pending_f.lock().unwrap();
+                let mut g = mutex_lock(&pending_f);
                 if g.is_empty() {
                     if done_f.load(Ordering::Acquire) {
                         break;
@@ -231,7 +232,7 @@ pub fn spawn(
             if let Err(e) = reader_thread.join() {
                 log::error!("pty reader thread panicked: {e:?}");
             }
-            let tail = std::mem::take(&mut *pending_e.lock().unwrap());
+            let tail = std::mem::take(&mut *mutex_lock(&pending_e));
             if !tail.is_empty() {
                 if let Err(e) = on_data_exit.send(Response::new(tail)) {
                     log::debug!("pty final-data send failed (channel closed): {e}");

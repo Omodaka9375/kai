@@ -13,6 +13,7 @@ use std::thread;
 use portable_pty::PtySize;
 use tauri::ipc::{Channel, Response};
 
+use crate::modules::lock::{mutex_lock, rwlock_read, rwlock_write};
 use crate::modules::workspace::WorkspaceEnv;
 use session::Session;
 
@@ -58,7 +59,7 @@ pub fn pty_open(
     let mut id = None;
     for _ in 0..ID_ALLOC_BOUND {
         let candidate = state.next_id.fetch_add(1, Ordering::Relaxed);
-        if candidate != 0 && !state.sessions.read().unwrap().contains_key(&candidate) {
+        if candidate != 0 && !rwlock_read(&state.sessions).contains_key(&candidate) {
             id = Some(candidate);
             break;
         }
@@ -66,17 +67,14 @@ pub fn pty_open(
     let id = id.ok_or_else(|| {
         format!("failed to allocate pty id after {ID_ALLOC_BOUND} attempts — too many live sessions?")
     })?;
-    state.sessions.write().unwrap().insert(id, session);
+    rwlock_write(&state.sessions).insert(id, session);
     log::info!("pty opened id={id} cols={cols} rows={rows}");
     Ok(id)
 }
 
 #[tauri::command]
 pub fn pty_write(state: tauri::State<PtyState>, id: u32, data: String) -> Result<(), String> {
-    let session = state
-        .sessions
-        .read()
-        .unwrap()
+    let session = rwlock_read(&state.sessions)
         .get(&id)
         .cloned()
         .ok_or_else(|| {
@@ -85,10 +83,7 @@ pub fn pty_write(state: tauri::State<PtyState>, id: u32, data: String) -> Result
         })?;
     // Bind to a local so the MutexGuard temporary drops before `session` —
     // see rustc note on tail-expression temporary drop order.
-    let result = session
-        .writer
-        .lock()
-        .unwrap()
+    let result = mutex_lock(&session.writer)
         .write_all(data.as_bytes())
         .map_err(|e| {
             // EPIPE is expected if the child already exited.
@@ -105,20 +100,14 @@ pub fn pty_resize(
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
-    let session = state
-        .sessions
-        .read()
-        .unwrap()
+    let session = rwlock_read(&state.sessions)
         .get(&id)
         .cloned()
         .ok_or_else(|| {
             log::warn!("pty_resize: unknown id={id}");
             "no session".to_string()
         })?;
-    let result = session
-        .master
-        .lock()
-        .unwrap()
+    let result = mutex_lock(&session.master)
         .resize(PtySize {
             rows,
             cols,
@@ -134,9 +123,9 @@ pub fn pty_resize(
 
 #[tauri::command]
 pub fn pty_close(state: tauri::State<PtyState>, id: u32) -> Result<(), String> {
-    let session = state.sessions.write().unwrap().remove(&id);
+    let session = rwlock_write(&state.sessions).remove(&id);
     if let Some(s) = session {
-        if let Err(e) = s.killer.lock().unwrap().kill() {
+        if let Err(e) = mutex_lock(&s.killer).kill() {
             // Non-fatal: the child may already have exited on its own (e.g. the
             // user ran `exit`). Log so this isn't invisible during debugging.
             log::debug!("pty_close: kill id={id} returned {e}");
