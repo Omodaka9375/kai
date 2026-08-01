@@ -13,7 +13,9 @@ async function httpFetch(url: string): Promise<{ status: number; body: string }>
       url,
       method: "GET",
       headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
-      allowPrivateNetwork: true,
+      // The agent calls this tool unsupervised — never let it reach LAN /
+      // loopback / cloud-metadata addresses (SSRF guard lives in net.rs).
+      allowPrivateNetwork: false,
     },
   );
   const body = new TextDecoder().decode(new Uint8Array(resp.body));

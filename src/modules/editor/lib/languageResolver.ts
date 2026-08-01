@@ -230,6 +230,9 @@ export async function resolveLanguage(
   } else {
     ext = result as Extension;
   }
+  // Safe to store: CM6 language extensions (LanguageSupport + the language
+  // itself) are stateless configuration — the same extension value can be
+  // installed in any number of EditorStates.
   cache.set(key, ext);
   return ext;
 }
