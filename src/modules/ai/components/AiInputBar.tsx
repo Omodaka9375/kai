@@ -329,6 +329,14 @@ export function AiInputBar() {
                   if (pastedFiles.length > 0) {
                     e.preventDefault();
                     void c.addFiles(pastedFiles as any);
+                    return;
+                  }
+                  // Large or markdown-structured pastes become an attachment
+                  // chip instead of flooding the (narrow) input.
+                  const text = e.clipboardData?.getData("text/plain") ?? "";
+                  if (shouldAttachPaste(text)) {
+                    e.preventDefault();
+                    c.attachPastedText(text);
                   }
                 }}
                 onKeyDown={(e) => {
@@ -374,8 +382,10 @@ export function AiInputBar() {
                 placeholder={c.isBusy ? "Redirect agent…" : "Ask anything # for snippets, @ for files"}
                 rows={1}
                 disabled={false}
+                wrap="soft"
                 className={cn(
-                  "flex-1 resize-none bg-transparent text-[13px] leading-relaxed outline-none",
+                  "flex-1 resize-none bg-transparent text-[13px] leading-relaxed outline-none overflow-x-hidden",
+                  "whitespace-pre-wrap break-words [overflow-wrap:anywhere]",
                   "placeholder:text-muted-foreground/60",
                 )}
               />
@@ -745,6 +755,28 @@ function autoresize(el: HTMLTextAreaElement | null) {
   const next = Math.min(el.scrollHeight, maxH);
   el.style.height = `${next}px`;
   el.style.overflowY = el.scrollHeight > maxH ? "auto" : "hidden";
+}
+
+/**
+ * Decide whether pasted text should become an attachment chip instead of
+ * landing inline in the input. Thresholds tuned so ordinary one-liners and
+ * short snippets stay editable, but walls of markdown / tables / code get
+ * the chip treatment (readable, removable, doesn't wreck the layout).
+ */
+export function shouldAttachPaste(text: string): boolean {
+  if (!text) return false;
+  const len = text.length;
+  if (len >= 800) return true;
+  const lines = text.split("\n");
+  if (lines.length >= 6) return true;
+  // Long unbroken lines are what actually breaks the narrow input layout.
+  if (lines.some((l) => l.length >= 400)) return true;
+  // Markdown structure: tables, fenced code, headings, task lists.
+  if (/^\s*\|.*\|\s*$/m.test(text)) return true; // table rows
+  if (/```/.test(text)) return true; // fenced code
+  if (/^#{1,6}\s+\S/m.test(text)) return true; // headings
+  if (/^\s*[-*]\s+\[[ xX]\]\s/m.test(text)) return true; // task lists
+  return false;
 }
 
 export type AiInputBarProps = { tabId: number };

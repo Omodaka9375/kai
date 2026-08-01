@@ -42,6 +42,8 @@ type ComposerCtx = {
   setValue: React.Dispatch<React.SetStateAction<string>>;
   files: FileAttachment[];
   addFiles: (list: FileList | null) => Promise<void>;
+  /** Attach pasted text as a chip — used for large/formatted pastes that would swamp the input. */
+  attachPastedText: (text: string) => void;
   /** Attach a file by absolute path — used by the file explorer's "Attach to Agent". */
   attachFileByPath: (path: string) => Promise<void>;
   removeFile: (id: string) => void;
@@ -157,6 +159,27 @@ export function AiComposerProvider({ children }: ProviderProps) {
 
   const removeFile = (id: string) =>
     setFiles((prev) => prev.filter((f) => f.id !== id));
+
+  const attachPastedText = (text: string) => {
+    const trimmed = text;
+    if (!trimmed) return;
+    const firstLine =
+      trimmed.split("\n").find((l) => l.trim().length > 0)?.trim() ?? "text";
+    const name =
+      firstLine.length > 24 ? `${firstLine.slice(0, 24)}…` : firstLine;
+    const id = `paste-${Date.now()}-${Math.round(Math.random() * 1e6)}`;
+    setFiles((prev) => [
+      ...prev,
+      {
+        id,
+        name: `Pasted: ${name}`,
+        kind: "text",
+        mediaType: "text/plain",
+        text: trimmed,
+        size: trimmed.length,
+      },
+    ]);
+  };
 
   const addSnippet = (s: Snippet) =>
     setPickedSnippets((prev) =>
@@ -338,6 +361,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
     setValue,
     files,
     addFiles,
+    attachPastedText,
     attachFileByPath,
     removeFile,
     pickedSnippets,
