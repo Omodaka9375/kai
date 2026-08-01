@@ -2,7 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { djb2 } from "../lib/hash";
 import { native } from "../lib/native";
-import { checkWritableCanonical } from "../lib/security";
+import { checkReadableCanonical, checkWritableCanonical } from "../lib/security";
 import { newQueuedEditId, usePlanStore } from "../store/planStore";
 import { resolvePath, type ToolContext } from "./context";
 
@@ -368,6 +368,35 @@ async function applyEdits(
   }
 }
 
+/**
+ * Read-before-edit guard, self-healing: if the file isn't in the read cache
+ * (model skipped read_file, session was compacted, or cache was reset),
+ * read it once here instead of hard-failing. Returns null on success
+ * (cache now warm) or an error result to return to the model.
+ */
+async function ensureReadCache(
+  abs: string,
+  ctx: ToolContext,
+): Promise<{ error: string; path: string } | null> {
+  if (ctx.readCache.has(abs)) return null;
+  const safety = await checkReadableCanonical(abs, native.canonicalize);
+  if (!safety.ok) return { error: safety.reason, path: abs };
+  try {
+    const r = await native.readFile(safety.canonical);
+    if (r.kind === "binary") return { error: "binary file refused", path: abs };
+    if (r.kind === "toolarge")
+      return { error: `file too large (${r.size} bytes)`, path: abs };
+    ctx.readCache.set(abs, { size: r.size, hash: djb2(r.content) });
+    ctx.fileTracker.markRead(abs);
+    return null;
+  } catch (e) {
+    return {
+      error: `cannot edit "${abs}": read failed (${String(e)}). If the file does not exist yet, use write_file to create it.`,
+      path: abs,
+    };
+  }
+}
+
 /** Per-path edit failure counter. Resets on success or session switch. */
 const editFailures = new Map<string, number>();
 const MAX_EDIT_RETRIES = 3;
@@ -381,7 +410,7 @@ export function buildEditTools(ctx: ToolContext) {
   return {
     edit: tool({
       description:
-        "Replace an exact string in a file with a new string. BOTH old_string AND new_string are required — old_string is the text to find, new_string is what replaces it. To insert text, set old_string to an adjacent line and new_string to that line plus your insertion. Requires read_file on this path first. Asks for user approval. If old_string matches multiple locations, provide line_hint to disambiguate.",
+        "Replace text in an existing file. HOW IT WORKS: the tool searches the file for old_string and swaps it for new_string. RULES: (1) old_string must be copied EXACTLY from the file — every character, space, and indent; never invent or paraphrase it. (2) To INSERT without deleting, set old_string to the line before/after the spot and repeat that line inside new_string with your addition. (3) If old_string appears more than once, either widen it with surrounding lines to make it unique, or pass line_hint. (4) To create a NEW file use write_file instead. Asks for user approval.",
       inputSchema: z.object({
         path: z.string().optional(),
         old_string: z
@@ -402,13 +431,8 @@ export function buildEditTools(ctx: ToolContext) {
         const safety = await checkWritableCanonical(reqPath, native.canonicalize);
         if (!safety.ok) return { error: safety.reason, path: reqPath };
         const abs = safety.canonical;
-        if (!ctx.readCache.has(abs)) {
-          return {
-            error:
-              "must call read_file on this path first (read-before-edit invariant).",
-            path: abs,
-          };
-        }
+        const guard = await ensureReadCache(abs, ctx);
+        if (guard) return guard;
         const failures = editFailures.get(abs) ?? 0;
         if (failures >= MAX_EDIT_RETRIES) {
           editFailures.delete(abs);
@@ -435,7 +459,7 @@ export function buildEditTools(ctx: ToolContext) {
 
     multi_edit: tool({
       description:
-        "Apply several exact-string replacements to a single file atomically. Each edit is applied in order to the running buffer; if any edit's old_string is missing or non-unique, the whole batch aborts before writing. Requires prior read_file on the path. Asks for user approval before writing.",
+        "Apply several replacements to ONE file in a single call. Same exact-match rules as edit: every old_string must be copied verbatim from the file. Edits apply in order to the running buffer; if any old_string is missing or non-unique, NOTHING is written (all-or-nothing). Prefer this over repeated edit calls when changing several spots in the same file. Asks for user approval.",
       inputSchema: z.object({
         path: z.string().optional(),
         edits: z
@@ -458,13 +482,8 @@ export function buildEditTools(ctx: ToolContext) {
         const safety = await checkWritableCanonical(reqPath, native.canonicalize);
         if (!safety.ok) return { error: safety.reason, path: reqPath };
         const abs = safety.canonical;
-        if (!ctx.readCache.has(abs)) {
-          return {
-            error:
-              "must call read_file on this path first (read-before-edit invariant).",
-            path: abs,
-          };
-        }
+        const guard = await ensureReadCache(abs, ctx);
+        if (guard) return guard;
         const failures = editFailures.get(abs) ?? 0;
         if (failures >= MAX_EDIT_RETRIES) {
           editFailures.delete(abs);

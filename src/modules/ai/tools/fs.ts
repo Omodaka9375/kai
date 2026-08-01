@@ -176,7 +176,7 @@ export function buildFsTools(ctx: ToolContext) {
 
     write_file: tool({
       description:
-        "Create or overwrite a file with the given content. Parent directories are created automatically. Always asks the user before running. Prefer `edit` / `multi_edit` for in-place changes — only use `write_file` for creating a brand-new file or fully replacing a tiny one.",
+        "Write the ENTIRE content of a file. Use ONLY when: (a) creating a brand-new file, or (b) deliberately replacing the whole file. Parent directories are created automatically. Do NOT use it to change part of an existing file — use edit or multi_edit for that (write_file overwrites everything). Always asks the user before running.",
       inputSchema: z.object({
         path: z.string(),
         content: z.string(),

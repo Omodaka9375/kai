@@ -2,6 +2,7 @@ import { useChat, type UIMessage } from "@ai-sdk/react";
 import type { ToolUIPart, UIMessagePart } from "ai";
 import { useEffect, useMemo, useRef } from "react";
 import { native } from "../lib/native";
+import { hasLeakedToolCall } from "../lib/leakedToolCall";
 import { checkReadable } from "../lib/security";
 import { resolvePath } from "../tools/tools";
 import {
@@ -193,15 +194,10 @@ function Bridge({
           .filter((p) => (p as { type?: string }).type === "text")
           .map((p) => (p as { text?: string }).text ?? "")
           .join(" ");
-        const isLeak = 
-          text.includes("<|tool_call") || 
-          text.includes("<|tool_call:") || 
-          text.includes("new_string:<|") || 
-          text.includes("proposedContent:") ||
-          (text.includes("<|\"|>") && text.includes("path:"));
+        const isLeak = hasLeakedToolCall(text);
 
         const nudgeText = isLeak
-          ? "System correction: You generated raw JSON/text tool call parameters inside your response instead of executing the tool. Please execute the tool call using the proper native function-calling format."
+          ? "System correction: your previous reply contained raw tool-call markup as plain text, so nothing was executed. Emit tool calls ONLY via the native function-calling mechanism — never write <tool_call>, <|tool_call|>, or JSON call blobs in your text. Re-issue the intended tool call now."
           : "Continue";
 
         nudgeCountRef.current++;
@@ -493,7 +489,7 @@ function applyEditsLocally(
  * Limits to 2 auto-nudges per agent run to prevent infinite loops.
  */
 function shouldAutoNudge(msg: UIMessage, nudgesSoFar: number): boolean {
-  if (nudgesSoFar >= 2) return false;
+  if (nudgesSoFar >= 3) return false;
   const parts = msg.parts;
   if (parts.length === 0) return false;
   // Only nudge if the response is text-only (no tool calls at all).
@@ -508,15 +504,8 @@ function shouldAutoNudge(msg: UIMessage, nudgesSoFar: number): boolean {
     .map((p) => (p as { text?: string }).text ?? "")
     .join(" ");
 
-  // Check if the text contains raw leaked JSON tool-call tokens/delimiters
-  const hasLeakedToolCall = 
-    text.includes("<|tool_call") || 
-    text.includes("<|tool_call:") || 
-    text.includes("new_string:<|") || 
-    text.includes("proposedContent:") ||
-    (text.includes("<|\"|>") && text.includes("path:"));
-
-  if (hasLeakedToolCall) return true;
+  // Check if the text contains raw leaked tool-call markup
+  if (hasLeakedToolCall(text)) return true;
 
   const lowerText = text.toLowerCase();
   const intentPatterns = [

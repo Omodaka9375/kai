@@ -584,6 +584,27 @@ const RenderedMessage = memo(function RenderedMessage({
     message.parts,
   ]);
 
+  // Sequential approval queue: when a step emits several approval-requested
+  // tool calls, only the first is interactive — the rest render as compact
+  // queued chips and unlock one at a time as the user responds. Order is
+  // part order, which matches the model's intended sequence.
+  const pendingApprovals = useMemo(() => {
+    const out: { id: string; toolName: string }[] = [];
+    for (const p of message.parts as AnyPart[]) {
+      const state = (p as { state?: string }).state ?? "";
+      if (state !== "approval-requested") continue;
+      const id = (p as { approval?: { id?: string } }).approval?.id;
+      if (!id) continue;
+      const type = (p as { type?: string }).type ?? "";
+      const toolName =
+        type === "dynamic-tool"
+          ? ((p as { toolName?: string }).toolName ?? "tool")
+          : type.replace(/^tool-/, "");
+      out.push({ id, toolName });
+    }
+    return out;
+  }, [message.parts]);
+
   const assistantText = useMemo(() => {
     return message.parts
       .filter((p): p is { type: "text"; text: string } => p.type === "text")
@@ -616,12 +637,36 @@ const RenderedMessage = memo(function RenderedMessage({
                     </PartAppear>
                   );
                 }
+                const gState = (g.part as { state?: string }).state ?? "";
+                const gApprovalId =
+                  gState === "approval-requested"
+                    ? ((g.part as { approval?: { id?: string } }).approval?.id ??
+                      null)
+                    : null;
+                const queueIndex = gApprovalId
+                  ? pendingApprovals.findIndex((a) => a.id === gApprovalId)
+                  : -1;
                 return (
                   <PartAppear key={`${message.id}-${g.key}`}>
                     <RenderedPart
                       part={g.part}
                       onApproval={onApproval}
                       streaming={streaming && g.idx === lastTextIdx}
+                      approvalQueue={
+                        gApprovalId && queueIndex > 0
+                          ? {
+                              queued: true,
+                              position: queueIndex + 1,
+                              total: pendingApprovals.length,
+                            }
+                          : gApprovalId && queueIndex === 0
+                            ? {
+                                queued: false,
+                                position: 1,
+                                total: pendingApprovals.length,
+                              }
+                            : null
+                      }
                     />
                   </PartAppear>
                 );
@@ -891,14 +936,18 @@ const ReadRow = memo(function ReadRow({ part }: { part: AnyPart }) {
   );
 });
 
+type ApprovalQueueInfo = { queued: boolean; position: number; total: number };
+
 const RenderedPart = memo(function RenderedPart({
   part,
   onApproval,
   streaming,
+  approvalQueue,
 }: {
   part: AnyPart;
   onApproval: (id: string, approved: boolean) => void;
   streaming: boolean;
+  approvalQueue?: ApprovalQueueInfo | null;
 }) {
   if (part.type === "text") {
     const raw = (part as unknown as { text: string }).text;
@@ -964,6 +1013,7 @@ const RenderedPart = memo(function RenderedPart({
       <RenderedTool
         part={part as unknown as AnyToolPart}
         onApproval={onApproval}
+        approvalQueue={approvalQueue}
       />
     );
   }
@@ -974,9 +1024,11 @@ const RenderedPart = memo(function RenderedPart({
 const RenderedTool = memo(function RenderedTool({
   part,
   onApproval,
+  approvalQueue,
 }: {
   part: AnyToolPart;
   onApproval: (id: string, approved: boolean) => void;
+  approvalQueue?: ApprovalQueueInfo | null;
 }) {
   const toolName =
     part.type === "dynamic-tool"
@@ -989,6 +1041,7 @@ const RenderedTool = memo(function RenderedTool({
         part={part as Extract<ToolUIPart, { state: "approval-requested" }>}
         toolName={toolName}
         onRespond={(approved) => onApproval(part.approval.id, approved)}
+        queue={approvalQueue}
       />
     );
   }

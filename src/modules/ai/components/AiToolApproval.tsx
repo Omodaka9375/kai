@@ -23,6 +23,8 @@ type Props = {
   part: Extract<ToolUIPart, { state: "approval-requested" }>;
   toolName: string;
   onRespond: (approved: boolean) => void;
+  /** Sequential approval queue: queued = render as a compact chip, not a card. */
+  queue?: { queued: boolean; position: number; total: number } | null;
 };
 
 const TOOL_META: Record<string, { label: string; icon: typeof FilePlusIcon }> =
@@ -35,13 +37,33 @@ const TOOL_META: Record<string, { label: string; icon: typeof FilePlusIcon }> =
     bash_background: { label: "Spawn background process", icon: TerminalIcon },
   };
 
-function AiToolApprovalImpl({ part, toolName, onRespond }: Props) {
+function AiToolApprovalImpl({ part, toolName, onRespond, queue }: Props) {
   const meta = TOOL_META[toolName];
   const label = meta?.label ?? toolName;
   const Icon = meta?.icon ?? ToolsIcon;
   const input = part.input as Record<string, unknown>;
   const autoApprovedIds = useChatStore((s) => s.autoApprovedIds);
   const wasAutoApproved = autoApprovedIds.has(part.approval.id);
+
+  // Queued behind an earlier approval — compact placeholder, no actions.
+  if (queue?.queued) {
+    return (
+      <div className="flex items-center gap-2 rounded-lg border border-dashed border-border/60 bg-muted/30 px-3 py-1.5 opacity-70">
+        <HugeiconsIcon
+          icon={Icon}
+          size={12}
+          strokeWidth={1.75}
+          className="shrink-0 text-muted-foreground"
+        />
+        <span className="text-[11px] text-muted-foreground">
+          {label}
+        </span>
+        <span className="ml-auto text-[10px] text-muted-foreground/80">
+          queued {queue.position} of {queue.total}
+        </span>
+      </div>
+    );
+  }
 
   // Get policy info for this tool
   const policyInfo = getToolActionInfo(toolName);
@@ -92,7 +114,9 @@ function AiToolApprovalImpl({ part, toolName, onRespond }: Props) {
           {label}
         </span>
         <span className="ml-auto text-[10px] text-muted-foreground">
-          needs approval
+          {queue && queue.total > 1
+            ? `needs approval · ${queue.position} of ${queue.total}`
+            : "needs approval"}
         </span>
       </div>
 
@@ -189,7 +213,10 @@ export const AiToolApproval = memo(AiToolApprovalImpl, (a, b) => {
   // approval cards unresponsive to clicks.
   return (
     a.toolName === b.toolName &&
-    a.part.approval.id === b.part.approval.id
+    a.part.approval.id === b.part.approval.id &&
+    a.queue?.queued === b.queue?.queued &&
+    a.queue?.position === b.queue?.position &&
+    a.queue?.total === b.queue?.total
   );
 });
 
