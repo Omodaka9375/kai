@@ -8,8 +8,6 @@ import {
   checkWritableCanonical,
 } from "../lib/security";
 import { newQueuedEditId, usePlanStore } from "../store/planStore";
-import { createSnapshot, restoreFromSnapshot, type FileSnapshot } from "../lib/snapshot";
-import { runGate } from "./gate";
 import { resolvePath, type ToolContext } from "./context";
 
 const READ_BYTE_CAP = 25 * 1024;
@@ -182,13 +180,9 @@ export function buildFsTools(ctx: ToolContext) {
       inputSchema: z.object({
         path: z.string(),
         content: z.string(),
-        enableGateRollback: z
-          .boolean()
-          .optional()
-          .describe("If true, run gate after write and rollback on failure. Default: false."),
       }),
       needsApproval: true,
-      execute: async ({ path, content, enableGateRollback }) => {
+      execute: async ({ path, content }) => {
         const reqPath = resolvePath(path, ctx.getCwd());
         const safety = await checkWritableCanonical(reqPath, native.canonicalize);
         if (!safety.ok) return { error: safety.reason, path: reqPath };
@@ -219,12 +213,6 @@ export function buildFsTools(ctx: ToolContext) {
           };
         }
 
-        // Create snapshot before write if gate rollback is enabled
-        let snapshot: FileSnapshot | null = null;
-        if (enableGateRollback) {
-          snapshot = await createSnapshot(abs);
-        }
-
         try {
           // Auto-create parent directories so the agent never needs a
           // separate create_directory step (avoids approval-loop bugs).
@@ -242,33 +230,8 @@ export function buildFsTools(ctx: ToolContext) {
           ctx.fileTracker.markModified(abs);
           window.dispatchEvent(new CustomEvent("Kai:fs-changed", { detail: abs }));
 
-          // Run gate check if enabled
-          if (enableGateRollback && snapshot !== null) {
-            const cwd = ctx.getCwd();
-            if (cwd) {
-              const gateResult = await runGate(cwd);
-              if (!gateResult.success) {
-                // Gate failed - rollback
-                const rollbackResult = await restoreFromSnapshot(snapshot);
-                return {
-                  path: abs,
-                  ok: false,
-                  rolledBack: true,
-                  reason: "Gate validation failed",
-                  gateErrors: gateResult.errors,
-                  gateOutput: gateResult.output,
-                  rollbackResult,
-                };
-              }
-            }
-          }
-
           return { path: abs, bytesWritten: content.length, ok: true };
         } catch (e) {
-          // Try to rollback if we have a snapshot
-          if (enableGateRollback && snapshot !== null) {
-            await restoreFromSnapshot(snapshot);
-          }
           return { error: String(e), path: abs };
         }
       },

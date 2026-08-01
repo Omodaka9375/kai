@@ -1,6 +1,5 @@
 import { buildEditTools } from "./edit";
 import { buildFsTools } from "./fs";
-import { buildGateTools } from "./gate";
 import { buildImageGenTools } from "./image-gen";
 import { buildVideoGenTools } from "./video-gen";
 import { buildSearchTools } from "./search";
@@ -13,12 +12,11 @@ import { buildYouTubeTools } from "./youtube";
 
 export { resolvePath, type ToolContext } from "./context";
 
-/** Core tools: filesystem, editing, shell, terminal, gate — always available. */
+/** Core tools: filesystem, editing, shell, terminal — always available. */
 export function buildCoreTools(ctx: import("./context").ToolContext) {
   return {
     ...buildFsTools(ctx),
     ...buildEditTools(ctx),
-    ...buildGateTools(ctx),
     ...buildShellTools(ctx),
     ...buildTerminalTools(ctx),
   } as const;
@@ -52,4 +50,3 @@ export function buildTools(
 export type ChatTools = ReturnType<typeof buildTools>;
 export type CoreTools = ReturnType<typeof buildCoreTools>;
 export type ExtendedTools = ReturnType<typeof buildExtendedTools>;
-export type GateTools = import("./gate").GateTools;
