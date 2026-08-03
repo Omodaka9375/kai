@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -79,6 +80,12 @@ export function ThemeProvider({
       : window.matchMedia("(prefers-color-scheme: dark)").matches,
   );
 
+  // Track the last-applied (uiThemeId, mode) pair so we can skip
+  // redundant applyUiTheme calls when only one of the two changes in a
+  // way that doesn't affect the output (e.g. system dark-mode toggle
+  // while on a palette that only has dark vars).
+  const lastAppliedRef = useRef<{ id: string; mode: "light" | "dark" } | null>(null);
+
   // Hydrate from the persistent store (cross-window source of truth).
   useEffect(() => {
     let alive = true;
@@ -90,12 +97,14 @@ export function ThemeProvider({
       writeFastUiTheme(p.uiThemeId);
     });
     const unlistenP = onPreferencesChange((key, value) => {
+      // Guard: skip if the value matches current state — prevents the
+      // window that originated the change from re-applying its own write.
       if (key === "theme" && (value === "system" || value === "light" || value === "dark")) {
-        setThemeState(value);
+        setThemeState((prev) => (prev === value ? prev : value));
         writeFastTheme(value);
       }
       if (key === "uiThemeId" && typeof value === "string") {
-        setUiThemeIdState(value);
+        setUiThemeIdState((prev) => (prev === value ? prev : value));
         writeFastUiTheme(value);
       }
     });
@@ -116,6 +125,13 @@ export function ThemeProvider({
     theme === "system" ? (systemDark ? "dark" : "light") : theme;
 
   useEffect(() => {
+    // Skip if the (id, mode) pair hasn't changed — avoids wasted
+    // teardown/rebuild cycles on system dark-mode toggles, hydration
+    // re-renders, or cross-window event echoes.
+    const prev = lastAppliedRef.current;
+    if (prev && prev.id === uiThemeId && prev.mode === resolvedTheme) return;
+    lastAppliedRef.current = { id: uiThemeId, mode: resolvedTheme };
+
     const root = document.documentElement;
     root.classList.remove("light", "dark");
     root.classList.add(resolvedTheme);

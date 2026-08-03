@@ -340,25 +340,101 @@ export const UI_THEMES: readonly UiThemePalette[] = [
 
 export const UI_THEME_MAP = new Map(UI_THEMES.map((t) => [t.id, t]));
 
-/** Apply a theme's CSS variables to the document root. Pass "default" to clear overrides. */
+// ── applyUiTheme ─────────────────────────────────────────────────────
+
+/** Track the last-applied palette and keys so we only clear what we set. */
+let _lastAppliedKeys: string[] = [];
+
+/**
+ * Apply a theme's CSS variables to the document root.
+ * Pass "default" to clear all overrides and fall back to globals.css.
+ */
 export function applyUiTheme(themeId: string, mode: "light" | "dark"): void {
   const root = document.documentElement;
-  const palette = UI_THEME_MAP.get(themeId);
 
-  // Clear any previously applied theme variables.
-  for (const t of UI_THEMES) {
-    const vars = { ...t.light, ...t.dark };
-    for (const key of Object.keys(vars)) {
-      root.style.removeProperty(key);
-    }
+  // Clear only the keys we set last time — not every key from every theme.
+  for (const key of _lastAppliedKeys) {
+    root.style.removeProperty(key);
   }
+  _lastAppliedKeys = [];
 
-  if (!palette || themeId === "default") return;
+  if (!themeId || themeId === "default") return;
+
+  const palette = UI_THEME_MAP.get(themeId);
+  if (!palette) return;
 
   const vars = mode === "dark" ? palette.dark : palette.light;
   if (!vars) return;
 
-  for (const [key, value] of Object.entries(vars)) {
+  // Derive sidebar, chart, and radius values from the palette so every
+  // UI surface matches — not just the main card/background area.
+  const derived = deriveAuxiliaryVars(vars, mode);
+  const allVars = { ...vars, ...derived };
+
+  for (const [key, value] of Object.entries(allVars)) {
     root.style.setProperty(key, value);
+    _lastAppliedKeys.push(key);
   }
+}
+
+// ── Auxiliary variable derivation ─────────────────────────────────────
+
+/**
+ * Derive --sidebar-*, --chart-*, and --radius values from the palette's
+ * main variables. This keeps sidebars, charts, and border radius
+ * consistent with the selected theme without requiring every palette
+ * to define them explicitly.
+ */
+function deriveAuxiliaryVars(
+  vars: Record<string, string>,
+  mode: "light" | "dark",
+): Record<string, string> {
+  const bg = vars["--background"] ?? (mode === "dark" ? "oklch(0.16 0.02 260)" : "oklch(0.97 0.005 260)");
+  const fg = vars["--foreground"] ?? (mode === "dark" ? "oklch(0.92 0.01 260)" : "oklch(0.20 0.02 260)");
+  const primary = vars["--primary"] ?? (mode === "dark" ? "oklch(0.72 0.12 260)" : "oklch(0.55 0.15 260)");
+  const muted = vars["--muted"] ?? (mode === "dark" ? "oklch(0.26 0.02 260)" : "oklch(0.94 0.01 260)");
+  const border = vars["--border"] ?? (mode === "dark" ? "oklch(1 0 0 / 10%)" : "oklch(0.90 0.01 260)");
+  const ring = vars["--ring"] ?? primary;
+
+  // Sidebar: slightly offset from background for visual separation.
+  const sidebarBg = shiftOklch(bg, "l", mode === "dark" ? 0.04 : -0.03);
+  const sidebarAccent = shiftOklch(muted, "l", mode === "dark" ? 0.04 : -0.02);
+
+  return {
+    "--sidebar": sidebarBg,
+    "--sidebar-foreground": fg,
+    "--sidebar-primary": primary,
+    "--sidebar-primary-foreground": bg,
+    "--sidebar-accent": sidebarAccent,
+    "--sidebar-accent-foreground": fg,
+    "--sidebar-border": border,
+    "--sidebar-ring": ring,
+    // Chart: 5-step sequence derived from the primary hue.
+    "--chart-1": primary,
+    "--chart-2": shiftOklch(primary, "c", -0.1),
+    "--chart-3": shiftOklch(primary, "l", 0.08),
+    "--chart-4": shiftOklch(shiftOklch(primary, "l", -0.06), "c", -0.15),
+    "--chart-5": shiftOklch(primary, "l", 0.14),
+    "--radius": "0.625rem",
+  };
+}
+
+/** Shift the lightness (l) or chroma (c) component of an oklch() color
+ *  string by the given delta. Returns the original string if it doesn't
+ *  match the expected format (e.g. hex, or oklch with alpha). */
+function shiftOklch(
+  oklch: string,
+  component: "l" | "c",
+  delta: number,
+): string {
+  const m = oklch.match(
+    /^oklch\(([\d.]+)\s+([\d.]+)\s+([\d.]+)\)$/,
+  );
+  if (!m) return oklch;
+  let l = parseFloat(m[1]);
+  let c = parseFloat(m[2]);
+  const h = m[3];
+  if (component === "l") l = Math.max(0, Math.min(1, l + delta));
+  else c = Math.max(0, c + delta);
+  return `oklch(${l.toFixed(3)} ${c.toFixed(3)} ${h})`;
 }
