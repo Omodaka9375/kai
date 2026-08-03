@@ -82,30 +82,17 @@ export function AiOpenButton({ onOpen }: { onOpen: () => void }) {
 }
 
 export function AiStatusBarControls() {
-  const toggleMini = useChatStore((s) => s.toggleMini);
-  const miniOpen = useChatStore((s) => s.mini.open);
-  const closePanel = useChatStore((s) => s.closePanel);
+  const togglePanel = useChatStore((s) => s.togglePanel);
+  const panelOpen = useChatStore((s) => s.panelOpen);
 
   return (
     <div className="flex items-center gap-0.5">
       <ModelDropdown />
 
       <span className="mx-1 h-8 w-px bg-border" aria-hidden />
-      <Button
-        onClick={closePanel}
-        title="Close AI panel"
-        size="xs"
-        variant="ghost"
-        aria-label="Close AI panel"
-        className="text-[11px] text-foreground/85 px-1"
-      >
-        <Kbd className="h-4 gap-px px-2 font-mono text-[11px]">
-          {fmtShortcut(MOD_KEY, "I")}
-        </Kbd>
-      </Button>
       <IconBtn
-        title={miniOpen ? "Close conversation" : "Open conversation"}
-        onClick={toggleMini}
+        title={panelOpen ? "Close AI panel" : "Open AI panel"}
+        onClick={togglePanel}
       >
         <HugeiconsIcon icon={Message01Icon} size={13} strokeWidth={1.75} />
       </IconBtn>
