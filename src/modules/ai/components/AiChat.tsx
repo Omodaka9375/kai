@@ -255,7 +255,7 @@ function stripLeakedTokens(text: string): string {
     .replace(/<thinking>[\s\S]*?<\/thinking>/gi, "")
     // Only strip a dangling <thinking> if NO closing </thinking> follows
     .replace(/<thinking>(?![\s\S]*<\/thinking>)[\s\S]*$/gi, "")
-    .replace(/<\|im_(?:start|end)\\\\|>[^\n]*/g, "")
+    .replace(/<\|im_(?:start|end)\|>[^\n]*/g, "")
     // Raw tool call syntax leaked by Gemma 4 and similar models.
     .replace(/<\|?tool_call_?[a-z_]*(?::|\|?>)?/gi, "")
     .replace(/<\|?\/tool_call_?[a-z_]*(?:\|?>)?/gi, "")
