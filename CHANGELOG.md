@@ -4,6 +4,68 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.0.1]
+
+### Fixed
+- **Text truncated after `>` in agent responses**: A broken regex in `stripLeakedTokens` for stripping `<|im_start|>/<|im_end|>` tokens had an unintended regex alternation that matched _any_ `>` character and stripped everything after it. Fixed the escape sequence so only actual LLM tokens are removed.
+- **Dynamic OpenRouter models defaulted to 128K context**: Any model fetched from OpenRouter that wasn't in the hardcoded `MODEL_CONTEXT_LIMITS` fell through to the 128K default — including `deepseek-v4-flash-0731` (which has 1M context). Added a `registerDynamicContextLimits` system that populates context limits from the API response's `context_length` field.
+- **Incorrect model context limits**: Verified every API model against official docs and OpenRouter model pages. Corrected 6 models: GPT-4.1-mini 128K→1M, Llama 4 Scout/Maverick 128K→1M, Inkling 524K→1M, GLM 5.1 200K→205K, Kimi K2.5 256K→262K.
+- **Bogus GLM 5.2 (1M) model entries**: Z.ai and OpenRouter both use `glm-5.2` as the model ID — the `glm-5.2[1m]` suffix was invalid and caused "model not found" errors. Removed the duplicate entries; 1M context is built into GLM 5.2.
+- **Custom Instructions textarea breaks with large text**: The `field-sizing-content` CSS on the Textarea component caused the field to grow unbounded when pasting large prompts, pushing content off-screen. Replaced with fixed height + `overflow-y-auto` scrolling. Added dirty detection (Save only appears on changes), animated "Saved" feedback, and a character counter.
+- **ASCII/Unicode diagrams render as single line**: Streamdown/markdown collapses single newlines into paragraphs, turning multi-line box-drawing diagrams into illegible one-liners. Added `wrapAsciiArt()` — detects contiguous blocks of box-drawing characters (U+2500–U+25FF) or ASCII-art line patterns and wraps them in code fences before rendering.
+- **Theme sidebar/chart surfaces don't match selected palette**: Palette themes (Emerald, Amber, etc.) only defined main surface variables — sidebar, chart, and border-radius stuck to the Kai default gray. Added `deriveAuxiliaryVars()` that auto-generates `--sidebar-*`, `--chart-*`, and `--radius` from each palette's existing colors.
+- **Theme clearing looped over all 8 palettes**: `applyUiTheme` destructively cleared every CSS variable from every theme on each application. Now tracks the last-applied keys and only removes exactly what was set.
+- **Theme useEffect ran redundant applies**: System dark-mode toggle or cross-window event echoes triggered `applyUiTheme` even when the (id, mode) pair hadn't changed. Added a `lastAppliedRef` guard to skip no-op cycles.
+- **Settings window re-applied its own theme change**: The cross-window `PREFS_CHANGED_EVENT` listener in `ThemeProvider` applied changes even when the current window was the originator. Added a value comparison guard in `onPreferencesChange`.
+
+### Changed
+- **Deterministic session state replaces model-based summarization**: Context summarization (`summarize.ts`) called `generateText` with the user's model, which could fail if the model had a small context window (recursive problem). Replaced with `buildSessionState` — a zero-cost `<session_state>` block built from `fileTracker`, `todoStore`, and lightweight regex error extraction. No API call, no model dependency, no failure modes.
+- **Removed unreliable auto-nudge logic**: The `shouldAutoNudge` heuristic often fired on legitimate model completions, injecting unwanted "Continue" messages. Removed entirely along with `hasLeakedToolCall` usage and the nudge counter.
+- **Removed summarization spinner and notice**: Since `buildSessionState` is synchronous, the "Compressing context…" spinner and "Context summarized" notice are no longer needed. Removed along with `summarize.ts` file.
+- **Progressive context compaction thresholds**: Lowered stall-read dropping from 50% to 40%, added tool-result truncation at 60%, and lowered summarization trigger from 90% to 75% of effective context limit. All phases now use the unified `contextLimit - 18K` effective limit.
+- **Token-based gate replaces message-count gate**: The old `MIN_MESSAGES_FOR_SUMMARY = 12` guard prevented summarization on short conversations with huge tool results (e.g. reading a 200KB file in 3 messages). Now uses a 16K token-estimate floor.
+
+### Added
+- **Free model detection & tag**: OpenRouter models with zero pricing or `:free` suffix are now tagged with a green `FREE` badge in the model picker dropdown. Detection runs during the dynamic model fetch.
+- **Live output tokens/sec in status bar**: The model name in the bottom bar now shows a live `123 tok/s` counter during streaming, computed from cumulative output tokens ÷ elapsed time since first token.
+- **Context pressure API for tools**: Added `getRemainingContextTokens()` to `ToolContext`, allowing tools to auto-truncate responses when context is tight.
+- **"None" agent persona option**: Added a `__none__` sentinel to the agent picker. When selected, `getAgentPersona` returns `null` and the `## ACTIVE AGENT` block is omitted from the system prompt — the model sees only the base system prompt + custom instructions.
+
+### Removed
+- **Close AI panel keyboard shortcut pill**: The `Ctrl+I` shortcut pill in the status bar is gone. The conversation icon now toggles the AI panel open/closed.
+
+---
+
+## [1.0.0]
+
+### Added
+- **Auto-sync OpenRouter model list**: KAI now periodically fetches the full OpenRouter model catalog and merges it with the hardcoded model list, so models like `deepseek-v4-flash-0731` and other newly released variants never need a manual update.
+- **Latest model additions**: Added GPT-5.6 family (Sol, Terra, Luna), Claude Opus 5 / Sonnet 5 / Fable 5, Gemini 3.6 Flash, Kimi K3, MiniMax M3, Qwen 3.7 Flash/Max/Plus, Gemini 3.5 Flash Lite, Laguna S 2.1, Inkling, LongCat 2.0, Grok Build 0.1.
+- **Sequential approval queue**: When an agent step emits multiple approval-required tool calls, only the first is interactive — the rest render as compact "queued" chips and unlock one at a time as the user responds.
+- **Leaked tool-call detection**: Small/local models that emit raw tool-call markup as plain text are now detected and the model is automatically corrected with a nudge to use native function calling.
+- **Comprehensive AI safety layer**: Added a deny-list refusing obvious secret paths (`.env`, `.ssh/`, credentials) on both read and write paths, with canonical-path re-check to catch symlink traversal.
+- **Poison-tolerant state locks**: Replaced all bare `.unwrap()`/`.expect("poisoned")` calls on shared `Mutex`/`RwLock` with poison-recovering wrappers so one panicking thread doesn't take down every PTY/shell/git command.
+
+### Fixed
+- **STOP button now cancels running shell commands**: `bash_run` and `bash_background` respect `abortSignal` — pressing Stop or Esc kills in-flight shell processes.
+- **Over-aggressive thinking-tag regex truncated responses**: The `<thinking>` dangling-tag regex consumed everything from the tag to end-of-string in legitimate responses. Fixed with a negative lookahead for a closing `</thinking>` before stripping.
+- **Code block content truncated around `->` operators**: Fixed regex patterns that incorrectly matched `->`/`->>` as partial tool-call tokens and stripped them from code blocks.
+- **New folders not appearing in file tree**: Agent-created directories now trigger a file tree refresh so they appear immediately without manual reload.
+- **Wide pastes breaking AI input layout**: The AI input textarea now properly constrains its width, preventing horizontal overflow when pasting long lines.
+- **Race conditions and unbounded loops in AI pipeline**: Fixed several edge cases that could cause infinite loops or stale state in the agent's message processing.
+- **Agent SSRF hole in HTTP proxy**: Closed a DNS-rebinding vector by pinning reqwest's resolver to the IPs classified during host validation, and added per-hop redirect re-checking.
+- **Removed annoying error toast popup**: The "Ask Kai to fix" toast that appeared on every error is gone — errors are now shown inline in the chat.
+
+### Removed
+- **Non-functional Agent Orchestrator prototype**: The Agent Orchestrator panel and its backend were removed — they were unreachable and contained dead code paths.
+- **`tsforge` gate tool and `enableGateRollback`**: Removed an unused LLM security analysis tool and its rollback mechanism.
+
+### Changed
+- **Shortcut wiring extracted from App.tsx**: Keyboard shortcut definitions and registration moved to dedicated modules, keeping `App.tsx` as a thin coordinator.
+- **Simplified edit tools**: The edit tool implementations were streamlined for better reliability and fewer edge cases.
+
+---
+
 ## [0.9.5]
 ### Added
 - **Tab split view**: Right-click any tab to open it as a side-by-side split panel. All tab kinds supported (terminal, editor, preview, git diff, API tester, markdown preview). Terminal tabs additionally offer "Split pane right / down" to split within the tab itself.
