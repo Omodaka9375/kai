@@ -817,6 +817,13 @@ export const MODEL_CONTEXT_LIMITS: Record<string, number> = {
 const customContextOverrides: Record<string, number> = {};
 
 /** Called by the preferences layer to push custom context sizes into the config module. */
+/** Dynamic limit registry — populated by the OpenRouter models store at fetch time. */
+const dynamicContextLimits: Record<string, number> = {};
+
+export function registerDynamicContextLimits(limits: Record<string, number>): void {
+  Object.assign(dynamicContextLimits, limits);
+}
+
 export function setCustomContextLimit(modelId: string, size: number): void {
   if (size > 0) customContextOverrides[modelId] = size;
   else delete customContextOverrides[modelId];
@@ -826,7 +833,9 @@ export function getModelContextLimit(modelId: string | undefined): number {
   if (!modelId) return 128_000;
   const override = customContextOverrides[modelId];
   if (override && override > 0) return override;
-  return MODEL_CONTEXT_LIMITS[modelId] ?? 128_000;
+  if (MODEL_CONTEXT_LIMITS[modelId] != null) return MODEL_CONTEXT_LIMITS[modelId];
+  if (dynamicContextLimits[modelId] != null) return dynamicContextLimits[modelId];
+  return 128_000;
 }
 
 export type ModelPricing = {

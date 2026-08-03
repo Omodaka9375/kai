@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import type { ModelInfo, ModelTag } from "../config";
-import { MODELS, registerExternalModelLookup } from "../config";
+import { MODELS, registerDynamicContextLimits, registerExternalModelLookup } from "../config";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -55,10 +55,13 @@ export const useOpenRouterModelsStore = create<State>((set, get) => ({
     set({ loading: true, error: null });
     try {
       const raw = await invoke<string>("openrouter_list_models");
-      const parsed = parseOpenRouterModels(raw);
+      const { models: parsed, contextLimits } = parseOpenRouterModels(raw);
       const merged = mergeModels(parsed);
       // Register a lookup so getModel() can resolve dynamically-fetched models.
       registerExternalModelLookup((id) => merged.find((m) => m.id === id));
+      // Register context limits from fetched data so dynamic models
+      // don't fall back to the 128K default.
+      registerDynamicContextLimits(contextLimits);
       set({ models: merged, lastFetched: Date.now(), loading: false });
     } catch (e) {
       set({ error: String(e), loading: false });
@@ -201,16 +204,17 @@ function shouldSkip(id: string): boolean {
   return false;
 }
 
-function parseOpenRouterModels(rawJson: string): ModelInfo[] {
+function parseOpenRouterModels(rawJson: string): { models: ModelInfo[]; contextLimits: Record<string, number> } {
   let data: OpenRouterModelRaw[];
   try {
     const parsed: OpenRouterResponse = JSON.parse(rawJson);
     data = parsed.data ?? [];
   } catch {
-    return [];
+    return { models: [], contextLimits: {} };
   }
 
   const out: ModelInfo[] = [];
+  const contextLimits: Record<string, number> = {};
   for (const m of data) {
     if (!m.id) continue;
     if (shouldSkip(m.id)) continue;
@@ -237,6 +241,12 @@ function parseOpenRouterModels(rawJson: string): ModelInfo[] {
       capabilities,
       tags: tags.length > 0 ? tags : undefined,
     });
+
+    // Collect context limits from the API response so dynamic models
+    // don't fall back to the 128K default.
+    if (m.context_length && m.context_length > 0) {
+      contextLimits[m.id] = m.context_length;
+    }
   }
 
   // Sort: high-intelligence first, then alphabetically.
@@ -247,7 +257,7 @@ function parseOpenRouterModels(rawJson: string): ModelInfo[] {
     return a.label.localeCompare(b.label);
   });
 
-  return out;
+  return { models: out, contextLimits };
 }
 
 // ── Merge ───────────────────────────────────────────────────────────────────
