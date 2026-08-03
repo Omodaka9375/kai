@@ -1,3 +1,4 @@
+import { useCallback } from "react";
 import { useChatStore } from "@/modules/ai";
 import { GoalStatusPill } from "@/modules/ai/components/GoalStatusPill";
 import {
@@ -37,6 +38,18 @@ export function StatusBar({
 }: Props) {
   const panelOpen = useChatStore((s) => s.panelOpen);
   const togglePanel = useChatStore((s) => s.togglePanel);
+  const openMini = useChatStore((s) => s.openMini);
+  const closeMini = useChatStore((s) => s.closeMini);
+
+  const handleOpenAgent = useCallback(() => {
+    if (panelOpen) {
+      togglePanel();
+      closeMini();
+    } else {
+      togglePanel();
+      openMini();
+    }
+  }, [panelOpen, togglePanel, openMini, closeMini]);
 
   return (
     <footer className="flex h-9 shrink-0 items-center justify-between gap-3 overflow-hidden border-t border-border/60 bg-card/60 px-3 pb-0.5 text-[11px]">
@@ -63,7 +76,7 @@ export function StatusBar({
         {panelOpen && hasComposer ? (
           <AiStatusBarControls />
         ) : (
-          <AiOpenButton onOpen={togglePanel} />
+          <AiOpenButton onOpen={handleOpenAgent} />
         )}
       </div>
     </footer>
