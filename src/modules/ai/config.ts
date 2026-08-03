@@ -127,7 +127,7 @@ export type ModelCapabilities = {
   cost: CapabilityScore;
 };
 
-export type ModelTag = "vision" | "reasoning" | "tools" | "coding";
+export type ModelTag = "vision" | "reasoning" | "tools" | "coding" | "free";
 
 export type ModelInfo = {
   id: string;

@@ -503,6 +503,11 @@ function ModelRow({
         <span className="shrink-0 text-[12px] font-medium leading-none">
           {model.label}
         </span>
+        {model.tags?.includes("free") ? (
+          <span className="shrink-0 rounded-sm border border-emerald-500/30 bg-emerald-500/10 px-1 text-[9px] font-semibold uppercase leading-none text-emerald-600 dark:text-emerald-400">
+            Free
+          </span>
+        ) : null}
         <span className="truncate text-[10.5px] leading-none text-muted-foreground">
           {model.description}
         </span>

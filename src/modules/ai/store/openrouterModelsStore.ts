@@ -218,10 +218,14 @@ function parseOpenRouterModels(rawJson: string): ModelInfo[] {
     if (m.top_provider?.is_moderated) continue;
 
     const label = deriveLabel(m.id, m.name);
+    const isFree =
+      (m.pricing?.prompt === "0" && m.pricing?.completion === "0") ||
+      m.id.endsWith(":free");
     const modalityTags = tagsFromModality(m.architecture?.modality);
     const heuristicTags = tagsFromHeuristics(m.id, m.name ?? "", m.description ?? "");
+    const freeTag: ModelTag[] = isFree ? ["free"] : [];
     // Deduplicate tags.
-    const tags = [...new Set([...modalityTags, ...heuristicTags])];
+    const tags = [...new Set([...modalityTags, ...heuristicTags, ...freeTag])];
     const capabilities = deriveCapabilities(m.context_length, m.description ?? "");
 
     out.push({
