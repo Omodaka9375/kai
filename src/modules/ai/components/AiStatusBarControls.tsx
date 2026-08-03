@@ -84,9 +84,16 @@ export function AiOpenButton({ onOpen }: { onOpen: () => void }) {
 export function AiStatusBarControls() {
   const togglePanel = useChatStore((s) => s.togglePanel);
   const panelOpen = useChatStore((s) => s.panelOpen);
+  const outputTps = useChatStore((s) => s.agentMeta.outputTps);
+  const isStreaming = useChatStore((s) => s.agentMeta.status === "streaming");
 
   return (
     <div className="flex items-center gap-0.5">
+      {isStreaming && outputTps > 0 ? (
+        <span className="flex h-5.5 items-center rounded-md border border-emerald-500/30 bg-emerald-500/10 px-1.5 tabular-nums text-[10px] text-emerald-600 dark:text-emerald-400 my-1">
+          {outputTps} tok/s
+        </span>
+      ) : null}
       <ModelDropdown />
 
       <span className="mx-1 h-8 w-px bg-border" aria-hidden />
@@ -108,8 +115,6 @@ function ModelDropdown() {
   const setSelected = useChatStore((s) => s.setSelectedModelId);
   const favoriteIds = usePreferencesStore((s) => s.favoriteModelIds);
   const recentIds = usePreferencesStore((s) => s.recentModelIds);
-  const outputTps = useChatStore((s) => s.agentMeta.outputTps);
-  const isStreaming = useChatStore((s) => s.agentMeta.status === "streaming");
   const current = getModel(selected);
   // For custom endpoints, show the actual model ID instead of generic label.
   const lmModelId = usePreferencesStore((s) => s.lmstudioModelId);
@@ -197,11 +202,6 @@ function ModelDropdown() {
           }
         >
           {displayLabel}
-          {isStreaming && outputTps > 0 ? (
-            <span className="tabular-nums text-[10px] text-muted-foreground/70">
-              {outputTps} tok/s
-            </span>
-          ) : null}
           <HugeiconsIcon
             icon={ArrowDown01Icon}
             size={11}
