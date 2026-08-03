@@ -244,6 +244,75 @@ function splitThinkingBlocks(
   return out;
 }
 
+/**
+ * Detect blocks of ASCII / Unicode box-drawing art and wrap them in
+ * markdown code fences so Streamdown preserves the line breaks.
+ * Without this, markdown collapses single-newline lines into one paragraph.
+ */
+function wrapAsciiArt(text: string): string {
+  // Must have at least 3 lines to be a diagram.
+  const lines = text.split("\n");
+  if (lines.length < 3) return text;
+
+  // Unicode box-drawing + block elements.
+  const BOX_RE = /[\u2500-\u257F\u2580-\u259F\u25A0-\u25FF]/;
+  // ASCII art indicators: │ ├ ─ ╭ etc (these are in the box-drawing range above).
+  // Also detect ASCII-only art: lines dominated by | - + / \ = characters
+  // with consistent indentation patterns.
+  const ASCII_LINE_RE = /^\s*[|\-+\/=<>^v.#*~:]{3,}/;
+
+  // Find contiguous runs of lines that look like art.
+  const out: string[] = [];
+  let artRun: string[] = [];
+  let inArt = false;
+
+  const flushArt = () => {
+    if (artRun.length >= 3) {
+      out.push("```text");
+      out.push(...artRun);
+      out.push("```");
+    } else {
+      out.push(...artRun);
+    }
+    artRun = [];
+    inArt = false;
+  };
+
+  const isArtLine = (line: string): boolean =>
+    BOX_RE.test(line) || ASCII_LINE_RE.test(line);
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const art = isArtLine(line);
+    // A blank line next to an art line stays in the art block
+    // (diagrams often have blank lines between sections).
+    const blankNearArt =
+      line.trim() === "" &&
+      artRun.length > 0 &&
+      i + 1 < lines.length &&
+      isArtLine(lines[i + 1]);
+
+    if (art || blankNearArt) {
+      if (!inArt) {
+        // Flush any preceding non-art lines as-is.
+        if (artRun.length > 0) {
+          out.push(...artRun);
+          artRun = [];
+        }
+      }
+      inArt = true;
+      artRun.push(line);
+    } else {
+      if (inArt) flushArt();
+      artRun.push(line);
+    }
+  }
+  if (inArt) flushArt();
+  else if (artRun.length > 0) out.push(...artRun);
+
+  return out.join("\n");
+}
+
 /** Strip leaked model thinking/channel tokens and raw tool call syntax. */
 function stripLeakedTokens(text: string): string {
   let cleaned = text
@@ -278,6 +347,10 @@ function stripLeakedTokens(text: string): string {
     .replace(/\$?\\(Leftarrow)\$?/gi, "⇐")
     .replace(/\$?\\(leftrightarrow)\$?/gi, "↔")
     .replace(/\$?\\(Leftrightarrow)\$?/gi, "⇔");
+
+  // Wrap ASCII / box-drawing diagrams in code fences so markdown
+  // renderers preserve the line breaks.
+  cleaned = wrapAsciiArt(cleaned);
 
   return cleaned.trim();
 }
