@@ -353,10 +353,11 @@ function makeChatSync(sessionId: string): Chat<UIMessage> {
         streamStartedAt = now;
         streamStartedAtRef.current = streamStartedAt;
       }
+      const elapsedMs = streamStartedAt !== null ? now - streamStartedAt : 0;
       const outputTps =
-        streamStartedAt !== null && newOutputTokens > 0
+        streamStartedAt !== null && newOutputTokens > 0 && elapsedMs > 0
           ? Math.round(
-              (newOutputTokens / ((now - streamStartedAt) / 1000)),
+              (newOutputTokens / (elapsedMs / 1000)),
             )
           : 0;
       useChatStore.getState().patchAgentMeta({
