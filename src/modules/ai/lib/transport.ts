@@ -11,7 +11,6 @@ import type { ProviderKeys } from "./keyring";
 import { mcpManager } from "./mcpManager";
 import { native } from "./native";
 import { buildSessionState } from "./sessionState";
-import { SUMMARY_KEEP_TAIL_PAIRS } from "./summarize";
 import type { ToolContext } from "../tools/tools";
 import { useChatStore } from "../store/chatStore";
 import { useGoalsStore } from "../store/goalsStore";
@@ -219,6 +218,10 @@ function formatEnvBlock(live: LiveSnapshot): string | null {
 
 // ── Context summarization ─────────────────────────────────────────────
 
+/** Number of trailing user/assistant message pairs to keep verbatim
+ *  when compacting the conversation history. */
+const SUMMARY_KEEP_TAIL_PAIRS = 6;
+
 /** Minimum estimated tokens before summarization is worth considering.
  *  Below this, even a 32K-context model has enough room — summarization
  *  overhead would be larger than the savings. */
@@ -243,53 +246,30 @@ async function maybeSummarize(
   const tokenEstimate = JSON.stringify(modelMsgs).length / 4;
   if (tokenEstimate < MIN_TOKEN_ESTIMATE_FOR_SUMMARY) return messages;
 
-  // Signal the UI.
-  useChatStore.getState().patchAgentMeta({ summarizing: true });
+  const fileSnapshot = deps.toolContext.fileTracker.getSnapshot();
+  const stateBlock = buildSessionState({
+    messages,
+    fileSnapshot,
+    sessionId: deps.getSessionId?.() ?? null,
+  });
 
-  try {
-    const fileSnapshot = deps.toolContext.fileTracker.getSnapshot();
-    const stateBlock = buildSessionState({
-      messages,
-      fileSnapshot,
-      sessionId: deps.getSessionId?.() ?? null,
-    });
+  // Trim to the last N message pairs, prepend the session state snapshot.
+  const cutoff = findUIMessageTailCutoff(messages, SUMMARY_KEEP_TAIL_PAIRS);
+  const tail = messages.slice(cutoff);
 
-    // Find the tail cutoff in the UIMessage array.
-    const cutoff = findUIMessageTailCutoff(messages, SUMMARY_KEEP_TAIL_PAIRS);
-    const tail = messages.slice(cutoff);
+  const summaryMessage: UIMessage = {
+    id: `summary-${Date.now()}`,
+    role: "assistant",
+    parts: [{ type: "text", text: stateBlock }],
+  };
 
-    // Build a synthetic "assistant" message that carries the session state
-    // so it appears in the conversation history naturally.
-    const summaryMessage: UIMessage = {
-      id: `summary-${Date.now()}`,
-      role: "assistant",
-      parts: [
-        {
-          type: "text",
-          text: `> **Context compacted** — earlier messages compressed.\n\n${stateBlock}`,
-        },
-      ],
-    };
+  const trimmed = [summaryMessage, ...tail];
 
-    const trimmed = [summaryMessage, ...tail];
+  // Persist the trimmed history so the session stays bounded.
+  const sessionId = deps.getSessionId?.();
+  if (sessionId) void saveMessages(sessionId, trimmed);
 
-    // Persist the trimmed history so the session stays bounded.
-    const sessionId = deps.getSessionId?.();
-    if (sessionId) void saveMessages(sessionId, trimmed);
-
-    useChatStore.getState().patchAgentMeta({
-      summarizing: false,
-      summaryNotice: { at: Date.now() },
-    });
-
-    return trimmed;
-  } catch (e) {
-    // Summarization failed — fall back to the original messages. The
-    // existing elision in agent.ts will still help.
-    console.warn("[kai] context summarization failed:", e);
-    useChatStore.getState().patchAgentMeta({ summarizing: false });
-    return messages;
-  }
+  return trimmed;
 }
 
 /** Find tail cutoff index in UIMessage[] (counts user messages as pairs). */
