@@ -4,6 +4,37 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.0.4]
+
+### Fixed
+- **Open agent button didn't open the mini-window**: The "Open agent" button in the status bar only toggled `panelOpen`, but `AiMiniWindow` is controlled by a separate `mini.open` state. The button now opens/closes both the input panel and the chat window together.
+- **TPS pill showed "Infinity"**: When the first output token arrived in the same millisecond tick as the stream start timestamp, division by zero produced `Infinity`. Added an `elapsedMs > 0` guard.
+- **Session tracker missing cost estimates for dynamic models**: OpenRouter models fetched at runtime had no `MODEL_PRICING` entries, so `estimateCost` returned `null`. Added `registerDynamicPricing` — pricing data is now collected from the API response alongside context limits.
+- **X close button on AiMiniWindow redundant**: The close button competed with the status bar toggle. Removed — the mini-window is now controlled exclusively via the "Open agent" / conversation toggle button.
+
+### Changed
+- **Tokens/sec moved to separate pill**: The live TPS counter is now a standalone neutral-colored pill to the left of the model name rather than tucked inside the model dropdown trigger.
+- **Privacy and Browse removed from new tab menu**: Both options were non-functional or internal-use only. Removed from the `+` dropdown and cleaned up the prop chain.
+
+---
+
+## [1.0.3]
+
+### Fixed
+- **Open agent button only opened — never closed**: `AiOpenButton` called `openPanel()` which only sets `panelOpen: true`. Changed to `togglePanel` so it functions as a proper open/close toggle.
+
+---
+
+## [1.0.2]
+
+### Fixed
+- **Theme sidebar/chart surfaces didn't match selected palette**: Palette themes only defined main surface variables. Added `deriveAuxiliaryVars()` to auto-generate `--sidebar-*`, `--chart-*`, and `--radius` from each palette's existing colors.
+- **Theme clearing looped over all 8 palettes**: `applyUiTheme` now tracks the last-applied keys and only removes exactly what was set.
+- **Theme useEffect ran redundant applies**: Added a `lastAppliedRef` guard to skip no-op (id, mode) cycles.
+- **Settings window re-applied its own theme change**: `onPreferencesChange` callbacks now compare incoming values with current state to skip self-originated events.
+
+---
+
 ## [1.0.1]
 
 ### Fixed
