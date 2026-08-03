@@ -2,7 +2,6 @@ import type { UIMessage } from "@ai-sdk/react";
 import { convertToModelMessages } from "ai";
 import { getModel, getModelContextLimit, type ModelId } from "../config";
 import {
-  buildConfiguredLanguageModel,
   runAgentStream,
   type AgentUsageDelta,
   type StackInfo,
@@ -11,10 +10,8 @@ import { compactModelMessagesDetailed } from "./compact";
 import type { ProviderKeys } from "./keyring";
 import { mcpManager } from "./mcpManager";
 import { native } from "./native";
-import {
-  summarizeConversation,
-  SUMMARY_KEEP_TAIL_PAIRS,
-} from "./summarize";
+import { buildSessionState } from "./sessionState";
+import { SUMMARY_KEEP_TAIL_PAIRS } from "./summarize";
 import type { ToolContext } from "../tools/tools";
 import { useChatStore } from "../store/chatStore";
 import { useGoalsStore } from "../store/goalsStore";
@@ -23,7 +20,7 @@ import { saveMessages } from "./sessions";
 import { extensionRegistry } from "./extensions";
 import { agentBus } from "./eventBus";
 
-const Kai_MD_MAX_BYTES = 32 * 1024;
+const KAI_MD_MAX_BYTES = 32 * 1024;
 type MemoryCacheEntry = { content: string | null; mtime: number };
 const projectMemoryCache = new Map<string, MemoryCacheEntry>();
 
@@ -39,8 +36,8 @@ async function readKaiMd(workspaceRoot: string | null): Promise<string | null> {
       return null;
     }
     const content =
-      r.content.length > Kai_MD_MAX_BYTES
-        ? r.content.slice(0, Kai_MD_MAX_BYTES)
+      r.content.length > KAI_MD_MAX_BYTES
+        ? r.content.slice(0, KAI_MD_MAX_BYTES)
         : r.content;
     projectMemoryCache.set(workspaceRoot, { content, mtime: Date.now() });
     return content;
@@ -230,7 +227,7 @@ const MIN_TOKEN_ESTIMATE_FOR_SUMMARY = 16_000;
 async function maybeSummarize(
   messages: UIMessage[],
   deps: Deps,
-  abortSignal?: AbortSignal,
+  _abortSignal?: AbortSignal,
 ): Promise<UIMessage[]> {
   const modelId = deps.getModelId();
   const contextLimit = getModelContextLimit(getModel(modelId).id);
@@ -250,36 +247,26 @@ async function maybeSummarize(
   useChatStore.getState().patchAgentMeta({ summarizing: true });
 
   try {
-    const model = await buildConfiguredLanguageModel(
-      modelId,
-      deps.getKeys(),
-      deps.getLmstudioBaseURL?.(),
-      deps.getLmstudioModelId?.(),
-      deps.getOpenaiCompatibleBaseURL?.(),
-      deps.getOpenaiCompatibleModelId?.(),
-    );
-
     const fileSnapshot = deps.toolContext.fileTracker.getSnapshot();
-    const summary = await summarizeConversation(
-      modelMsgs,
-      model,
-      abortSignal,
-      fileSnapshot.length > 0 ? fileSnapshot : undefined,
-    );
+    const stateBlock = buildSessionState({
+      messages,
+      fileSnapshot,
+      sessionId: deps.getSessionId?.() ?? null,
+    });
 
     // Find the tail cutoff in the UIMessage array.
     const cutoff = findUIMessageTailCutoff(messages, SUMMARY_KEEP_TAIL_PAIRS);
     const tail = messages.slice(cutoff);
 
-    // Build a synthetic "assistant" message that carries the summary so it
-    // appears in the conversation history naturally.
+    // Build a synthetic "assistant" message that carries the session state
+    // so it appears in the conversation history naturally.
     const summaryMessage: UIMessage = {
       id: `summary-${Date.now()}`,
       role: "assistant",
       parts: [
         {
           type: "text",
-          text: `> **Context summarized** — earlier messages were compressed.\n\n${summary}`,
+          text: `> **Context compacted** — earlier messages compressed.\n\n${stateBlock}`,
         },
       ],
     };
