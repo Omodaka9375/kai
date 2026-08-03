@@ -41,10 +41,11 @@ export function AgentSwitcher({ isMiniWindow }: { isMiniWindow?: boolean }) {
   const list = useAgentsStore.getState().all();
   void customAgents; // keeps the store subscription alive
 
-  const active = list.find((a) => a.id === activeId) ?? list[0];
+  const noneSelected = activeId === "__none__";
+  const active = noneSelected ? null : (list.find((a) => a.id === activeId) ?? list[0]);
   const builtIn = list.filter((a) => a.builtIn);
   const custom = list.filter((a) => !a.builtIn);
-  const ActiveIcon = ICONS[active.icon] ?? SparklesIcon;
+  const ActiveIcon = active ? (ICONS[active.icon] ?? SparklesIcon) : SparklesIcon;
 
   return (
     <DropdownMenu>
@@ -57,10 +58,18 @@ export function AgentSwitcher({ isMiniWindow }: { isMiniWindow?: boolean }) {
               ? "flex h-6 items-center gap-1 rounded-md border border-border/60 bg-card px-1.5 text-[10.5px] text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-foreground"
               : "text-xs mr-1",
           )}
-          title={`Agent: ${active.name}`}
+          title={noneSelected ? "No agent persona" : `Agent: ${active?.name ?? ""}`}
         >
-          <HugeiconsIcon icon={ActiveIcon} size={11} strokeWidth={1.75} />
-          <span className="max-w-[7rem] truncate">{active.name}</span>
+          {noneSelected ? (
+            <span className="max-w-[7rem] truncate text-muted-foreground/70">
+              No persona
+            </span>
+          ) : (
+            <>
+              <HugeiconsIcon icon={ActiveIcon} size={11} strokeWidth={1.75} />
+              <span className="max-w-[7rem] truncate">{active?.name}</span>
+            </>
+          )}
           <HugeiconsIcon
             icon={ArrowDown01Icon}
             size={10}
@@ -70,6 +79,32 @@ export function AgentSwitcher({ isMiniWindow }: { isMiniWindow?: boolean }) {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="min-w-60">
+        <DropdownMenuItem
+          onSelect={() => setActiveId("__none__")}
+          className={cn(
+            "flex items-start gap-2 text-[12px]",
+            noneSelected && "bg-accent/40",
+          )}
+        >
+          <span className="text-muted-foreground/70 text-[11px] mt-0.5 w-[13px] text-center">
+            —
+          </span>
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span>None</span>
+            <span className="line-clamp-1 text-[10.5px] text-muted-foreground">
+              No persona — use the base system prompt only
+            </span>
+          </span>
+          {noneSelected ? (
+            <HugeiconsIcon
+              icon={Tick02Icon}
+              size={12}
+              strokeWidth={2}
+              className="mt-0.5 shrink-0 text-foreground"
+            />
+          ) : null}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
         <div className="px-2 pt-1.5 pb-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
           Built-in
         </div>

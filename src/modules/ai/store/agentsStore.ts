@@ -4,6 +4,7 @@ import {
   BUILTIN_AGENTS,
   loadAgents,
   newAgentId,
+  NONE_AGENT_ID,
   saveActiveAgentId,
   saveCustomAgents,
   type Agent,
@@ -32,7 +33,7 @@ function broadcast(): void {
 export const useAgentsStore = create<AgentsState>((set, get) => ({
   hydrated: false,
   customAgents: [],
-  activeId: BUILTIN_AGENTS[0].id,
+  activeId: NONE_AGENT_ID,
   all: () => [...BUILTIN_AGENTS, ...get().customAgents],
   hydrate: async () => {
     if (initialized) return;
@@ -63,7 +64,7 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
     set({ customAgents: list });
     let active = get().activeId;
     if (active === id) {
-      active = BUILTIN_AGENTS[0].id;
+      active = NONE_AGENT_ID;
       set({ activeId: active });
       void saveActiveAgentId(active);
     }

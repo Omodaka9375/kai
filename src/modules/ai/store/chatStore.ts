@@ -306,6 +306,7 @@ function makeChatSync(sessionId: string): Chat<UIMessage> {
       usePreferencesStore.getState().customInstructions,
     getAgentPersona: () => {
       const { activeId, customAgents } = useAgentsStore.getState();
+      if (activeId === "__none__") return null;
       const all = [...BUILTIN_AGENTS, ...customAgents];
       const a = all.find((x) => x.id === activeId) ?? BUILTIN_AGENTS[0];
       return { name: a.name, instructions: a.instructions };

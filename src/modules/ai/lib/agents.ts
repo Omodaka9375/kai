@@ -105,6 +105,9 @@ export const BUILTIN_AGENTS: readonly Agent[] = [
   },
 ] as const;
 
+/** Sentinel activeId — selecting this means no agent persona is applied. */
+export const NONE_AGENT_ID = "__none__";
+
 const STORE_PATH = "kai-agents.json";
 const KEY_CUSTOM = "customAgents";
 const KEY_ACTIVE = "activeAgentId";
@@ -125,7 +128,7 @@ export async function loadAgents(): Promise<LoadedAgents> {
     if (k === KEY_CUSTOM) custom = v as Agent[];
     else if (k === KEY_ACTIVE) activeId = v as string;
   }
-  return { custom: custom ?? [], activeId: activeId ?? BUILTIN_AGENTS[0].id };
+  return { custom: custom ?? [], activeId: activeId ?? NONE_AGENT_ID };
 }
 
 export async function saveCustomAgents(custom: Agent[]): Promise<void> {
@@ -145,7 +148,7 @@ export function newAgentId(): string {
 export function findAgent(
   agents: readonly Agent[],
   id: string | null | undefined,
-): Agent {
-  if (!id) return BUILTIN_AGENTS[0];
-  return agents.find((a) => a.id === id) ?? BUILTIN_AGENTS[0];
+): Agent | null {
+  if (!id || id === NONE_AGENT_ID) return null;
+  return agents.find((a) => a.id === id) ?? null;
 }
