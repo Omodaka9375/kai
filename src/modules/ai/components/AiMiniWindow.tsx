@@ -23,7 +23,6 @@ import {
   ArrowExpand01Icon,
   Delete02Icon,
   FilterIcon,
-  MinimizeScreenIcon,
   TerminalIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -160,11 +159,10 @@ export function AiMiniWindow() {
       {sessionId ? (
         <Body
           sessionId={sessionId}
-          onClose={closeMini}
           onExpand={() => setExpanded((v) => !v)}
         />
       ) : (
-        <EmptyShell onClose={closeMini} onExpand={() => setExpanded((v) => !v)} />
+        <EmptyShell onExpand={() => setExpanded((v) => !v)} />
       )}
       <PlanDiffReview />
     </motion.div>
@@ -173,11 +171,9 @@ export function AiMiniWindow() {
 
 function Body({
   sessionId,
-  onClose,
   onExpand,
 }: {
   sessionId: string;
-  onClose: () => void;
   onExpand: () => void;
 }) {
   const focusInput = useChatStore((s) => s.focusInput);
@@ -189,7 +185,6 @@ function Body({
   return (
     <>
       <Header
-        onClose={onClose}
         onExpand={onExpand}
         messages={helpers.messages}
       />
@@ -251,10 +246,8 @@ function PlanModeStrip() {
 }
 
 function EmptyShell({
-  onClose,
   onExpand,
 }: {
-  onClose: () => void;
   onExpand: () => void;
 }) {
   return (
@@ -262,7 +255,6 @@ function EmptyShell({
       <Header
         step={null}
         isBusy={false}
-        onClose={onClose}
         onExpand={onExpand}
       />
       <div className="flex flex-1 items-center justify-center text-[11px] text-muted-foreground">
@@ -273,11 +265,9 @@ function EmptyShell({
 }
 
 function Header({
-  onClose,
   onExpand,
   messages,
 }: {
-  onClose: () => void;
   onExpand: () => void;
   messages?: UIMessage[];
   step?: string | null;
@@ -294,17 +284,6 @@ function Header({
       </div>
       <div className="flex shrink-0 items-center gap-1">
         <SessionPicker />
-        <Button
-          type="button"
-          size="icon"
-          variant="ghost"
-          onClick={onClose}
-          className="size-5"
-          aria-label="Minimize"
-          title="Minimize"
-        >
-          <HugeiconsIcon icon={MinimizeScreenIcon} size={11} strokeWidth={1.75} />
-        </Button>
         <Button
           type="button"
           size="icon"

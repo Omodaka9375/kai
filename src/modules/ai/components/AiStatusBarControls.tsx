@@ -34,7 +34,7 @@ import {
   Tick01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useMemo, useRef, useState, useEffect } from "react";
+import { useCallback, useMemo, useRef, useState, useEffect } from "react";
 import {
   getModel,
   providerNeedsKey,
@@ -84,8 +84,18 @@ export function AiOpenButton({ onOpen }: { onOpen: () => void }) {
 export function AiStatusBarControls() {
   const togglePanel = useChatStore((s) => s.togglePanel);
   const panelOpen = useChatStore((s) => s.panelOpen);
+  const closeMini = useChatStore((s) => s.closeMini);
   const outputTps = useChatStore((s) => s.agentMeta.outputTps);
   const isStreaming = useChatStore((s) => s.agentMeta.status === "streaming");
+
+  const handleToggle = useCallback(() => {
+    if (panelOpen) {
+      togglePanel();
+      closeMini();
+    } else {
+      togglePanel();
+    }
+  }, [panelOpen, togglePanel, closeMini]);
 
   return (
     <div className="flex items-center gap-0.5">
@@ -99,7 +109,7 @@ export function AiStatusBarControls() {
       <span className="mx-1 h-8 w-px bg-border" aria-hidden />
       <IconBtn
         title={panelOpen ? "Close AI panel" : "Open AI panel"}
-        onClick={togglePanel}
+        onClick={handleToggle}
       >
         <HugeiconsIcon icon={Message01Icon} size={13} strokeWidth={1.75} />
       </IconBtn>
