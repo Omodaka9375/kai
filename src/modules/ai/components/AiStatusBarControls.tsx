@@ -90,7 +90,7 @@ export function AiStatusBarControls() {
   return (
     <div className="flex items-center gap-0.5">
       {isStreaming && outputTps > 0 ? (
-        <span className="flex h-5.5 items-center rounded-md border border-emerald-500/30 bg-emerald-500/10 px-1.5 tabular-nums text-[10px] text-emerald-600 dark:text-emerald-400 my-1">
+        <span className="flex h-5.5 items-center rounded-md border border-border/60 bg-card px-1.5 tabular-nums text-[10px] text-muted-foreground my-1">
           {outputTps} tok/s
         </span>
       ) : null}

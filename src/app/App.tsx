@@ -1394,8 +1394,6 @@ export default function App() {
             activeId={activeId}
             onSelect={setActiveId}
             onNew={openNewTab}
-            onNewPrivate={openNewPrivateTab}
-            onNewPreview={() => openPreviewTab("")}
             onNewEditor={() => setNewEditorOpen(true)}
             onNewApiTester={newApiTesterTab}
             onClose={handleClose}

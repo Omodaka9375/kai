@@ -891,12 +891,19 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
   "qwen/qwen3.6-27b": { input: 0.4, output: 1.6 },
 };
 
+/** Dynamic pricing registry — populated by the OpenRouter models store at fetch time. */
+const dynamicPricing: Record<string, ModelPricing> = {};
+
+export function registerDynamicPricing(pricing: Record<string, ModelPricing>): void {
+  Object.assign(dynamicPricing, pricing);
+}
+
 export function estimateCost(
   modelId: string | undefined,
   usage: { inputTokens: number; outputTokens: number; cachedInputTokens: number },
 ): number | null {
   if (!modelId) return null;
-  const p = MODEL_PRICING[modelId];
+  const p = MODEL_PRICING[modelId] ?? dynamicPricing[modelId];
   if (!p) return null;
   const fresh = Math.max(0, usage.inputTokens - usage.cachedInputTokens);
   const cached = usage.cachedInputTokens;

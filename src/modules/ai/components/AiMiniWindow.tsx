@@ -21,7 +21,6 @@ import {
   AlertCircleIcon,
   ArrowDown01Icon,
   ArrowExpand01Icon,
-  Cancel01Icon,
   Delete02Icon,
   FilterIcon,
   MinimizeScreenIcon,
@@ -316,17 +315,6 @@ function Header({
           title="Expand to panel"
         >
           <HugeiconsIcon icon={ArrowExpand01Icon} size={11} strokeWidth={1.75} />
-        </Button>
-        <Button
-          type="button"
-          size="icon"
-          variant="ghost"
-          onClick={onClose}
-          className="size-5"
-          aria-label="Close"
-          title="Close (Esc)"
-        >
-          <HugeiconsIcon icon={Cancel01Icon} size={11} strokeWidth={1.75} />
         </Button>
       </div>
     </div>

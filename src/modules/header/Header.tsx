@@ -42,8 +42,6 @@ type Props = {
   activeId: number;
   onSelect: (id: number) => void;
   onNew: () => void;
-  onNewPrivate: () => void;
-  onNewPreview: () => void;
   onNewEditor: () => void;
   onNewApiTester: () => void;
   onClose: (id: number) => void;
@@ -73,8 +71,6 @@ export function Header({
   activeId,
   onSelect,
   onNew,
-  onNewPrivate,
-  onNewPreview,
   onNewEditor,
   onNewApiTester,
   onClose,
@@ -383,8 +379,6 @@ export function Header({
           activeId={activeId}
           onSelect={onSelect}
           onNew={onNew}
-          onNewPrivate={onNewPrivate}
-          onNewPreview={onNewPreview}
           onNewEditor={onNewEditor}
           onNewApiTester={onNewApiTester}
           onClose={onClose}

@@ -39,8 +39,6 @@ type Props = {
   activeId: number;
   onSelect: (id: number) => void;
   onNew: () => void;
-  onNewPrivate: () => void;
-  onNewPreview: () => void;
   onNewEditor: () => void;
   onNewApiTester: () => void;
   onClose: (id: number) => void;
@@ -62,8 +60,6 @@ export function TabBar({
   activeId,
   onSelect,
   onNew,
-  onNewPrivate,
-  onNewPreview,
   onNewEditor,
   onNewApiTester,
   onClose,
@@ -306,17 +302,6 @@ export function TabBar({
                 {fmtShortcut(MOD_KEY, "T")}
               </span>
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => onNewPrivate()}>
-              <HugeiconsIcon
-                icon={IncognitoIcon}
-                size={14}
-                strokeWidth={1.75}
-              />
-              <span className="flex-1">Privacy</span>
-              <span className="text-xs text-muted-foreground">
-                {fmtShortcut(MOD_KEY, "R")}
-              </span>
-            </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => onNewEditor()}>
               <HugeiconsIcon
                 icon={PencilEdit02Icon}
@@ -326,13 +311,6 @@ export function TabBar({
               <span className="flex-1">Editor</span>
               <span className="text-xs text-muted-foreground">
                 {fmtShortcut(MOD_KEY, "E")}
-              </span>
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => onNewPreview()}>
-              <HugeiconsIcon icon={Globe02Icon} size={14} strokeWidth={1.75} />
-              <span className="flex-1">Browse</span>
-              <span className="text-xs text-muted-foreground">
-                {fmtShortcut(MOD_KEY, "P")}
               </span>
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => onNewApiTester()}>

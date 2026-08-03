@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
-import type { ModelInfo, ModelTag } from "../config";
-import { MODELS, registerDynamicContextLimits, registerExternalModelLookup } from "../config";
+import type { ModelInfo, ModelPricing, ModelTag } from "../config";
+import { MODELS, registerDynamicContextLimits, registerDynamicPricing, registerExternalModelLookup } from "../config";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -55,13 +55,14 @@ export const useOpenRouterModelsStore = create<State>((set, get) => ({
     set({ loading: true, error: null });
     try {
       const raw = await invoke<string>("openrouter_list_models");
-      const { models: parsed, contextLimits } = parseOpenRouterModels(raw);
+      const { models: parsed, contextLimits, pricing } = parseOpenRouterModels(raw);
       const merged = mergeModels(parsed);
       // Register a lookup so getModel() can resolve dynamically-fetched models.
       registerExternalModelLookup((id) => merged.find((m) => m.id === id));
-      // Register context limits from fetched data so dynamic models
-      // don't fall back to the 128K default.
+      // Register context limits and pricing from fetched data so dynamic
+      // models get accurate context windows and cost estimates.
       registerDynamicContextLimits(contextLimits);
+      registerDynamicPricing(pricing);
       set({ models: merged, lastFetched: Date.now(), loading: false });
     } catch (e) {
       set({ error: String(e), loading: false });
@@ -204,17 +205,18 @@ function shouldSkip(id: string): boolean {
   return false;
 }
 
-function parseOpenRouterModels(rawJson: string): { models: ModelInfo[]; contextLimits: Record<string, number> } {
+function parseOpenRouterModels(rawJson: string): { models: ModelInfo[]; contextLimits: Record<string, number>; pricing: Record<string, ModelPricing> } {
   let data: OpenRouterModelRaw[];
   try {
     const parsed: OpenRouterResponse = JSON.parse(rawJson);
     data = parsed.data ?? [];
   } catch {
-    return { models: [], contextLimits: {} };
+    return { models: [], contextLimits: {}, pricing: {} };
   }
 
   const out: ModelInfo[] = [];
   const contextLimits: Record<string, number> = {};
+  const pricing: Record<string, ModelPricing> = {};
   for (const m of data) {
     if (!m.id) continue;
     if (shouldSkip(m.id)) continue;
@@ -247,6 +249,16 @@ function parseOpenRouterModels(rawJson: string): { models: ModelInfo[]; contextL
     if (m.context_length && m.context_length > 0) {
       contextLimits[m.id] = m.context_length;
     }
+    // Collect pricing from the API response so dynamic models show
+    // cost estimates in the session tracker.
+    if (m.pricing?.prompt != null && m.pricing?.completion != null) {
+      const input = parseFloat(m.pricing.prompt);
+      const output = parseFloat(m.pricing.completion);
+      if (input > 0 || output > 0) {
+        // OpenRouter prices are per-token; convert to $/1M tokens.
+        pricing[m.id] = { input: input * 1_000_000, output: output * 1_000_000 };
+      }
+    }
   }
 
   // Sort: high-intelligence first, then alphabetically.
@@ -257,7 +269,7 @@ function parseOpenRouterModels(rawJson: string): { models: ModelInfo[]; contextL
     return a.label.localeCompare(b.label);
   });
 
-  return { models: out, contextLimits };
+  return { models: out, contextLimits, pricing };
 }
 
 // ── Merge ───────────────────────────────────────────────────────────────────
