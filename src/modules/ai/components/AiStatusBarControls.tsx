@@ -121,6 +121,8 @@ function ModelDropdown() {
   const setSelected = useChatStore((s) => s.setSelectedModelId);
   const favoriteIds = usePreferencesStore((s) => s.favoriteModelIds);
   const recentIds = usePreferencesStore((s) => s.recentModelIds);
+  const outputTps = useChatStore((s) => s.agentMeta.outputTps);
+  const isStreaming = useChatStore((s) => s.agentMeta.status === "streaming");
   const current = getModel(selected);
   // For custom endpoints, show the actual model ID instead of generic label.
   const lmModelId = usePreferencesStore((s) => s.lmstudioModelId);
@@ -208,6 +210,11 @@ function ModelDropdown() {
           }
         >
           {displayLabel}
+          {isStreaming && outputTps > 0 ? (
+            <span className="tabular-nums text-[10px] text-muted-foreground/70">
+              {outputTps} tok/s
+            </span>
+          ) : null}
           <HugeiconsIcon
             icon={ArrowDown01Icon}
             size={11}

@@ -70,6 +70,8 @@ export type AgentMeta = {
   summarizing: boolean;
   /** Shown after summarization completes. */
   summaryNotice: { at: number } | null;
+  /** Rolling output tokens per second, updated during streaming. */
+  outputTps: number;
 };
 
 const ZERO_USAGE: AgentUsage = {
@@ -90,6 +92,7 @@ const IDLE_META: AgentMeta = {
   compactionNotice: null,
   summarizing: false,
   summaryNotice: null,
+  outputTps: 0,
 };
 
 export type MiniState = {
@@ -269,6 +272,8 @@ function makeChatSync(sessionId: string): Chat<UIMessage> {
       });
   }
 
+  const streamStartedAtRef = { current: null as number | null };
+
   const toolContext: ToolContext = {
     getCwd: () => useChatStore.getState().live.getCwd(),
     getWorkspaceRoot: () =>
@@ -316,6 +321,9 @@ function makeChatSync(sessionId: string): Chat<UIMessage> {
     getSessionId: () => sessionId,
     getStackInfo: () => stackInfo,
     onStep: (step) => {
+      if (step === null) {
+        streamStartedAtRef.current = null;
+      }
       useChatStore.getState().patchAgentMeta({ step });
     },
     onCompact: (info) => {
@@ -328,14 +336,29 @@ function makeChatSync(sessionId: string): Chat<UIMessage> {
     },
     onUsage: (delta) => {
       const cur = useChatStore.getState().agentMeta.tokens;
+      const newOutputTokens = cur.outputTokens + delta.outputTokens;
+      const now = Date.now();
+      // Track stream start on first output tokens.
+      let streamStartedAt = streamStartedAtRef.current;
+      if (streamStartedAt === null && delta.outputTokens > 0) {
+        streamStartedAt = now;
+        streamStartedAtRef.current = streamStartedAt;
+      }
+      const outputTps =
+        streamStartedAt !== null && newOutputTokens > 0
+          ? Math.round(
+              (newOutputTokens / ((now - streamStartedAt) / 1000)),
+            )
+          : 0;
       useChatStore.getState().patchAgentMeta({
         tokens: {
           inputTokens: cur.inputTokens + delta.inputTokens,
-          outputTokens: cur.outputTokens + delta.outputTokens,
+          outputTokens: newOutputTokens,
           cachedInputTokens: cur.cachedInputTokens + delta.cachedInputTokens,
         },
         lastInputTokens: delta.lastInputTokens,
         lastCachedTokens: delta.lastCachedTokens,
+        outputTps,
       });
     },
   }) as unknown as ChatTransport<UIMessage>;
