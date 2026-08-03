@@ -4,6 +4,14 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.0.5]
+
+### Fixed
+- **Close AI panel left AiMiniWindow open**: The conversation toggle icon in the status bar closed the input panel but the chat window stayed visible. Now both close together — `handleToggle` calls `closeMini()` alongside `togglePanel()`.
+- **Minimize button on AiMiniWindow competed with status bar toggle**: Removed the minimize-screen button from the mini-window header. The single conversation toggle in the status bar is now the only way to open/close both the panel and mini-window.
+
+---
+
 ## [1.0.4]
 
 ### Fixed
