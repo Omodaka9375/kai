@@ -2,7 +2,6 @@ import { useChat, type UIMessage } from "@ai-sdk/react";
 import type { ToolUIPart, UIMessagePart } from "ai";
 import { useEffect, useMemo, useRef } from "react";
 import { native } from "../lib/native";
-import { hasLeakedToolCall } from "../lib/leakedToolCall";
 import { checkReadable } from "../lib/security";
 import { resolvePath } from "../tools/tools";
 import {
@@ -117,10 +116,7 @@ function Bridge({
     return n;
   }, [messages]);
 
-  const prevStatusRef = useRef(status);
-  const nudgeCountRef = useRef(0);
-  const prevMessageCountRef = useRef(messages.length);
-  const focusInput = useChatStore((s) => s.focusInput);
+
 
   // ---- Steering message injection -------------------------------------------
   // When the user sends a message while the agent is busy, stop the current
@@ -153,16 +149,6 @@ function Bridge({
     });
   }, [steeringMessage, status, chat, setSteeringMessage]);
 
-  // Reset nudge counter when the user sends a new message (message count
-  // increases with a user-role message), not on every idle transition.
-  useEffect(() => {
-    if (messages.length > prevMessageCountRef.current) {
-      const newest = messages[messages.length - 1];
-      if (newest?.role === "user") nudgeCountRef.current = 0;
-    }
-    prevMessageCountRef.current = messages.length;
-  }, [messages.length, messages]);
-
   useEffect(() => {
     let runStatus: AgentRunStatus;
     if (approvalsPending > 0) runStatus = "awaiting-approval";
@@ -182,38 +168,7 @@ function Bridge({
     if (runStatus === "thinking" || runStatus === "streaming") {
       openMini();
     }
-    // When the agent goes idle, check if it stopped prematurely (narrated
-    // instead of acting). If so, auto-nudge it to continue.
-    const wasActive =
-      prevStatusRef.current === "submitted" ||
-      prevStatusRef.current === "streaming";
-    if (wasActive && runStatus === "idle" && messages.length > 0) {
-      const last = messages[messages.length - 1];
-      if (last?.role === "assistant" && shouldAutoNudge(last, nudgeCountRef.current)) {
-        const text = last.parts
-          .filter((p) => (p as { type?: string }).type === "text")
-          .map((p) => (p as { text?: string }).text ?? "")
-          .join(" ");
-        const isLeak = hasLeakedToolCall(text);
-
-        const nudgeText = isLeak
-          ? "System correction: your previous reply contained raw tool-call markup as plain text, so nothing was executed. Emit tool calls ONLY via the native function-calling mechanism — never write <tool_call>, <|tool_call|>, or JSON call blobs in your text. Re-issue the intended tool call now."
-          : "Continue";
-
-        nudgeCountRef.current++;
-        // Small delay so the UI settles before the next request.
-        setTimeout(() => {
-          void chat.sendMessage({
-            role: "user",
-            parts: [{ type: "text", text: nudgeText }],
-          });
-        }, 300);
-      } else {
-        focusInput(null);
-      }
-    }
-    prevStatusRef.current = status;
-  }, [status, approvalsPending, patch, focusInput, messages.length, chat]);
+  }, [status, approvalsPending, patch, openMini]);
 
   useEffect(() => {
     if (approvalsPending > 0) openMini();
@@ -480,40 +435,6 @@ function applyEditsLocally(
     }
   }
   return { ok: true, content };
-}
-
-/**
- * Detect when the agent stopped with narration instead of acting.
- * Returns true if the last message looks like the model announced a tool
- * call but never made one — e.g. "Let me read the file" then stopped.
- * Limits to 2 auto-nudges per agent run to prevent infinite loops.
- */
-function shouldAutoNudge(msg: UIMessage, nudgesSoFar: number): boolean {
-  if (nudgesSoFar >= 3) return false;
-  const parts = msg.parts;
-  if (parts.length === 0) return false;
-  // Only nudge if the response is text-only (no tool calls at all).
-  const hasToolCall = parts.some((p) => {
-    const t = (p as { type?: string }).type ?? "";
-    return t.startsWith("tool-") || t === "dynamic-tool";
-  });
-  if (hasToolCall) return false;
-  // Check if the text mentions intent to act without having acted.
-  const text = parts
-    .filter((p) => (p as { type?: string }).type === "text")
-    .map((p) => (p as { text?: string }).text ?? "")
-    .join(" ");
-
-  // Check if the text contains raw leaked tool-call markup
-  if (hasLeakedToolCall(text)) return true;
-
-  const lowerText = text.toLowerCase();
-  const intentPatterns = [
-    /\b(?:let me|i(?:'ll| will| need to| should| can))\s+(?:read|check|look|examine|open|search|scan|grep|find|review|analyze|inspect|explore)/,
-    /\b(?:first|now),?\s+(?:i(?:'ll| will| need to))\b/,
-    /\b(?:let's|i'm going to)\s+(?:start|begin|take a look)/,
-  ];
-  return intentPatterns.some((re) => re.test(lowerText));
 }
 
 async function readOriginal(
