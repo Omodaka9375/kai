@@ -36,7 +36,7 @@ export function StatusBar({
   privateActive,
 }: Props) {
   const panelOpen = useChatStore((s) => s.panelOpen);
-  const openPanel = useChatStore((s) => s.openPanel);
+  const togglePanel = useChatStore((s) => s.togglePanel);
 
   return (
     <footer className="flex h-9 shrink-0 items-center justify-between gap-3 overflow-hidden border-t border-border/60 bg-card/60 px-3 pb-0.5 text-[11px]">
@@ -63,7 +63,7 @@ export function StatusBar({
         {panelOpen && hasComposer ? (
           <AiStatusBarControls />
         ) : (
-          <AiOpenButton onOpen={openPanel} />
+          <AiOpenButton onOpen={togglePanel} />
         )}
       </div>
     </footer>
