@@ -322,6 +322,7 @@ function AgentEditorDialog({
 
 function CustomInstructionsBlock({ value }: { value: string }) {
   const [draft, setDraft] = useState(value);
+  const [savedTick, setSavedTick] = useState(0);
   const hadFirstSync = useRef(false);
 
   useEffect(() => {
@@ -331,25 +332,43 @@ function CustomInstructionsBlock({ value }: { value: string }) {
     }
   }, [value]);
 
+  const handleSave = async () => {
+    await setCustomInstructions(draft);
+    setSavedTick((n) => n + 1);
+  };
+
+  const isDirty = draft !== value;
+  const chars = draft.length;
+
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
         <Label>Custom instructions</Label>
-        {/* {savedTick > 0 ? (
-          <span className="text-[10px] text-muted-foreground">Saved</span>
-        ) : null} */}
-        {draft && (
-          <Button size="xs" onClick={() => void setCustomInstructions(draft)}>
-            Save
-          </Button>
-        )}
+        <div className="flex items-center gap-1.5">
+          {savedTick > 0 ? (
+            <span
+              key={savedTick}
+              className="animate-in fade-in text-[10px] text-emerald-600 dark:text-emerald-400"
+            >
+              Saved
+            </span>
+          ) : null}
+          {isDirty && draft ? (
+            <Button size="xs" onClick={handleSave}>
+              Save
+            </Button>
+          ) : null}
+        </div>
       </div>
       <Textarea
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         placeholder="e.g. Always reply in concise bullet points. Prefer pnpm over npm. My machine is an M-series Mac."
-        className="min-h-[100px] resize-y bg-card/60 font-sans text-[12px] leading-relaxed border border-border"
+        className="min-h-[120px] h-[200px] max-h-[400px] resize-y overflow-y-auto bg-card/60 font-sans text-[12px] leading-relaxed border border-border [field-sizing:content]"
       />
+      <span className="self-end text-[10px] tabular-nums text-muted-foreground/60">
+        {chars.toLocaleString()} characters
+      </span>
     </div>
   );
 }
