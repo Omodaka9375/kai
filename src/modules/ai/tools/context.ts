@@ -20,6 +20,11 @@ export type ToolContext = {
   getSessionId: () => string | null;
   /** Tracks files read/modified during this session for smarter compaction. */
   fileTracker: FileTracker;
+  /**
+   * Approximate remaining token budget for this chat session.
+   * Tools can use this to auto-truncate responses when context is tight.
+   * Returns 0 if unknown (never used as a negative). */
+  getRemainingContextTokens?: () => number;
 };
 
 export function resolvePath(rawPath: string, cwd: string | null): string {

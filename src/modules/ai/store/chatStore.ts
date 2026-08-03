@@ -7,6 +7,7 @@ import { create } from "zustand";
 import {
   DEFAULT_MODEL_ID,
   getModel,
+  getModelContextLimit,
   providerNeedsKey,
   type ModelId,
   type ProviderId,
@@ -288,6 +289,13 @@ function makeChatSync(sessionId: string): Chat<UIMessage> {
     readCache,
     getSessionId: () => sessionId,
     fileTracker: new FileTracker(),
+    getRemainingContextTokens: () => {
+      const tokens = useChatStore.getState().agentMeta.tokens;
+      const modelId = useChatStore.getState().selectedModelId;
+      const limit = getModelContextLimit(getModel(modelId).id);
+      const used = tokens.inputTokens + tokens.outputTokens;
+      return Math.max(0, limit - used);
+    },
   };
 
   const transport = createContextAwareTransport({

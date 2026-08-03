@@ -142,7 +142,7 @@ export type CompactResult = {
   messages: ModelMessage[];
   compacted: boolean;
   droppedCount: number;
-  /** True when post-elision tokens still exceed 75% of the context limit. */
+  /** True when post-elision tokens still exceed the summarization threshold. */
   needsSummarization: boolean;
 };
 
@@ -166,6 +166,29 @@ export function compactModelMessages(
  */
 const SYSTEM_OVERHEAD_TOKENS = 18_000;
 
+/** Max characters to keep from a truncated tool result body. */
+const TOOL_RESULT_TRUNCATE_CHARS = 3_000;
+
+function truncateLargeToolResult(part: ToolPart): { changed: boolean; part: ToolPart } {
+  if (part.type !== "tool-result") return { changed: false, part };
+  const output = part.output;
+  if (output == null) return { changed: false, part };
+  const str = typeof output === "string" ? output : JSON.stringify(output);
+  if (str.length <= TOOL_RESULT_TRUNCATE_CHARS) return { changed: false, part };
+  return {
+    changed: true,
+    part: {
+      ...part,
+      output: {
+        type: "text",
+        value: str.slice(0, TOOL_RESULT_TRUNCATE_CHARS) +
+          `\n[...truncated ${str.length - TOOL_RESULT_TRUNCATE_CHARS} chars to save context]`,
+        __truncated: true,
+      },
+    },
+  };
+}
+
 export function compactModelMessagesDetailed(
   messages: ModelMessage[],
   contextLimit: number,
@@ -179,7 +202,8 @@ export function compactModelMessagesDetailed(
   const effectiveLimit = Math.max(contextLimit - SYSTEM_OVERHEAD_TOKENS, 8_000);
 
   // ── Phase 1: drop superseded reads (stale file content) ──
-  if (approxTokens >= 0.5 * effectiveLimit) {
+  // Trigger earlier — at 40% of effective limit, not 50%.
+  if (approxTokens >= 0.4 * effectiveLimit) {
     const r = dropSupersededReads(working);
     if (r.touched) {
       working = r.out;
@@ -188,17 +212,34 @@ export function compactModelMessagesDetailed(
     }
   }
 
-  // Signal summarization when conversation tokens exceed 90% of the full
-  // context limit (not the effective limit). Using the full limit means the
-  // threshold matches the percentage shown in the context indicator and only
-  // fires near the actual context ceiling, not at ~50% real usage.
-  // ponytail: approxBytes / 4 is a rough token estimate; real tokenizers vary
-  // by ±15%. The 90% ceiling gives enough headroom that summarization itself
-  // (which calls the model) doesn't push us over the limit.
+  // ── Phase 2: truncate large tool results ──
+  if (approxTokens >= 0.6 * effectiveLimit) {
+    let localDropped = 0;
+    working = working.map((m): ModelMessage => {
+      if (!Array.isArray(m.content)) return m;
+      let touched = false;
+      const nextContent = (m.content as ToolPart[]).map((part) => {
+        const r = truncateLargeToolResult(part);
+        if (r.changed) touched = true;
+        return r.part;
+      });
+      if (!touched) return m;
+      localDropped++;
+      return { ...m, content: nextContent } as ModelMessage;
+    });
+    if (localDropped > 0) {
+      dropped += localDropped;
+      approxTokens = approxBytes(working) / 4;
+    }
+  }
+
+  // ── Phase 3: signal summarization ──
+  // Summarize at 75% of effective limit (unified with phases 1 & 2).
+  // Leaves 25% headroom for the summarization call itself.
   return {
     messages: working,
     compacted: dropped > 0,
     droppedCount: dropped,
-    needsSummarization: approxTokens >= 0.9 * contextLimit,
+    needsSummarization: approxTokens >= 0.75 * effectiveLimit,
   };
 }

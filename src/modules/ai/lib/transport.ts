@@ -222,17 +222,16 @@ function formatEnvBlock(live: LiveSnapshot): string | null {
 
 // ── Context summarization ─────────────────────────────────────────────
 
-/** Minimum messages before summarization can trigger. */
-const MIN_MESSAGES_FOR_SUMMARY = 12;
+/** Minimum estimated tokens before summarization is worth considering.
+ *  Below this, even a 32K-context model has enough room — summarization
+ *  overhead would be larger than the savings. */
+const MIN_TOKEN_ESTIMATE_FOR_SUMMARY = 16_000;
 
 async function maybeSummarize(
   messages: UIMessage[],
   deps: Deps,
   abortSignal?: AbortSignal,
 ): Promise<UIMessage[]> {
-  // Don't summarize tiny conversations.
-  if (messages.length < MIN_MESSAGES_FOR_SUMMARY) return messages;
-
   const modelId = deps.getModelId();
   const contextLimit = getModelContextLimit(getModel(modelId).id);
 
@@ -241,6 +240,11 @@ async function maybeSummarize(
   const modelMsgs = await convertToModelMessages(messages);
   const compact = compactModelMessagesDetailed(modelMsgs, contextLimit);
   if (!compact.needsSummarization) return messages;
+
+  // Gate on actual token volume — skip summarization if the conversation
+  // is too small for it to be worth the overhead.
+  const tokenEstimate = JSON.stringify(modelMsgs).length / 4;
+  if (tokenEstimate < MIN_TOKEN_ESTIMATE_FOR_SUMMARY) return messages;
 
   // Signal the UI.
   useChatStore.getState().patchAgentMeta({ summarizing: true });
