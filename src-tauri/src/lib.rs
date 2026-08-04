@@ -83,88 +83,15 @@ async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Res
 }
 
 #[tauri::command]
-async fn pick_project_folder() -> Result<Option<String>, String> {
-    #[cfg(target_os = "windows")]
-    {
-        let script = "[System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms') | Out-Null; $dialog = New-Object System.Windows.Forms.FolderBrowserDialog; $dialog.Description = 'Select KAI Project Folder'; if ($dialog.ShowDialog() -eq 'OK') { $dialog.SelectedPath } else { '' }";
-        let output = std::process::Command::new("powershell")
-            .args(["-NoProfile", "-Command", script])
-            .output();
-        match output {
-            Ok(out) => {
-                let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                if s.is_empty() {
-                    Ok(None)
-                } else {
-                    Ok(Some(s.replace("\\", "/")))
-                }
-            }
-            Err(e) => Err(e.to_string()),
-        }
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let script_posix = "POSIX path of (choose folder with prompt \"Select KAI Project Folder\")";
-        let output_posix = std::process::Command::new("osascript")
-            .args(["-e", script_posix])
-            .output();
-        match output_posix {
-            Ok(out_p) => {
-                let path = String::from_utf8_lossy(&out_p.stdout).trim().to_string();
-                if path.is_empty() {
-                    Ok(None)
-                } else {
-                    Ok(Some(path))
-                }
-            }
-            Err(e) => Err(e.to_string()),
-        }
-    }
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    {
-        let output = std::process::Command::new("zenity")
-            .args(["--file-selection", "--directory", "--title=Select KAI Project Folder"])
-            .output();
-        match output {
-            Ok(out) => {
-                let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                if s.is_empty() {
-                    let output_kd = std::process::Command::new("kdialog")
-                        .args(["--getexistingdirectory", ".", "--title", "Select KAI Project Folder"])
-                        .output();
-                    match output_kd {
-                        Ok(out_kd) => {
-                            let s_kd = String::from_utf8_lossy(&out_kd.stdout).trim().to_string();
-                            if s_kd.is_empty() {
-                                Ok(None)
-                            } else {
-                                Ok(Some(s_kd))
-                            }
-                        }
-                        Err(_) => Ok(None),
-                    }
-                } else {
-                    Ok(Some(s))
-                }
-            }
-            Err(_) => {
-                let output_kd = std::process::Command::new("kdialog")
-                    .args(["--getexistingdirectory", ".", "--title", "Select KAI Project Folder"])
-                    .output();
-                match output_kd {
-                    Ok(out_kd) => {
-                        let s_kd = String::from_utf8_lossy(&out_kd.stdout).trim().to_string();
-                        if s_kd.is_empty() {
-                            Ok(None)
-                        } else {
-                            Ok(Some(s_kd))
-                        }
-                    }
-                    Err(_) => Ok(None),
-                }
-            }
-        }
-    }
+async fn pick_project_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .pick_folder(move |p| {
+            let _ = tx.send(p.map(|pb| pb.to_string().replace("\\", "/")));
+        });
+    rx.await.map_err(|e| e.to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -189,6 +116,7 @@ pub fn run() {
         )
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(pty::PtyState::default())
         .manage(shell::ShellState::default())
         .manage(secrets::SecretsState::default())
