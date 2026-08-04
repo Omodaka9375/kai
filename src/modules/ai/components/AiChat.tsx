@@ -265,6 +265,10 @@ function wrapAsciiArt(text: string): string {
   const out: string[] = [];
   let artRun: string[] = [];
   let inArt = false;
+  // Track fenced code blocks: their lines must pass through untouched,
+  // otherwise a model-fenced diagram gets a second nested ```text fence
+  // injected, which then renders as literal text inside the block.
+  let inFence = false;
 
   const flushArt = () => {
     if (artRun.length >= 3) {
@@ -283,6 +287,22 @@ function wrapAsciiArt(text: string): string {
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    // Fence delimiter (up to 3 leading spaces per CommonMark): toggle and
+    // flush any pending run so it never merges across the boundary.
+    if (/^\s{0,3}```/.test(line)) {
+      if (inArt) flushArt();
+      else if (artRun.length > 0) {
+        out.push(...artRun);
+        artRun = [];
+      }
+      inFence = !inFence;
+      out.push(line);
+      continue;
+    }
+    if (inFence) {
+      out.push(line);
+      continue;
+    }
     const art = isArtLine(line);
     // A blank line next to an art line stays in the art block
     // (diagrams often have blank lines between sections).
