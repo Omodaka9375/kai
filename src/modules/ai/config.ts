@@ -574,6 +574,15 @@ export const MODELS = [
     tags: ["vision", "tools", "coding"],
   },
   {
+    id: "moonshotai/kimi-k3",
+    provider: "openrouter",
+    label: "Kimi K3",
+    hint: "OpenRouter",
+    description: "Moonshot's latest flagship with 1M context and enhanced reasoning.",
+    capabilities: { intelligence: 5, speed: 3, cost: 3 },
+    tags: ["vision", "tools", "coding"],
+  },
+  {
     id: "qwen/qwen3.7-max",
     provider: "openrouter",
     label: "Qwen 3.7 Max",
@@ -589,6 +598,24 @@ export const MODELS = [
     hint: "OpenRouter",
     description: "High-speed balanced model from Alibaba.",
     capabilities: { intelligence: 4, speed: 4, cost: 4 },
+    tags: ["tools", "coding"],
+  },
+  {
+    id: "qwen/qwen3.7-flash",
+    provider: "openrouter",
+    label: "Qwen 3.7 Flash",
+    hint: "OpenRouter",
+    description: "Fast, cheap Qwen tier for high-throughput tasks.",
+    capabilities: { intelligence: 3, speed: 5, cost: 5 },
+    tags: ["tools"],
+  },
+  {
+    id: "qwen/qwen3.6-27b",
+    provider: "openrouter",
+    label: "Qwen 3.6 27B",
+    hint: "OpenRouter",
+    description: "Compact Qwen for lightweight coding and chat.",
+    capabilities: { intelligence: 3, speed: 5, cost: 5 },
     tags: ["tools", "coding"],
   },
   {
@@ -730,7 +757,20 @@ export function getModel(id: ModelId): ModelInfo {
   const m =
     (MODELS as readonly ModelInfo[]).find((x) => x.id === id) ??
     externalModelLookup?.(id);
-  if (!m) throw new Error(`Unknown model: ${id}`);
+  if (!m) {
+    // Fall back to a synthetic entry instead of crashing. A saved session
+    // may reference a model that was removed from MODELS or hasn't loaded
+    // yet via the OpenRouter dynamic fetch. The user can switch models.
+    console.warn(`Unknown model "${id}" — using synthetic fallback.`);
+    return {
+      id,
+      provider: "openrouter" as ProviderId,
+      label: id.split("/").pop() ?? id,
+      hint: "Unknown",
+      description: `Model "${id}" not found in the registry. You may need to switch to a known model.`,
+      capabilities: { intelligence: 3, speed: 3, cost: 3 },
+    };
+  }
   return m;
 }
 
@@ -747,7 +787,6 @@ export const MODEL_CONTEXT_LIMITS: Record<string, number> = {
   "gpt-5.4-mini": 400_000,
   "gpt-5.4-nano": 400_000,
   "gpt-5.3-codex": 400_000,
-  "gpt-4.1-mini": 1_047_576,
   "claude-fable-5": 1_000_000,
   "claude-opus-5": 1_000_000,
   "claude-sonnet-5": 1_000_000,
@@ -852,7 +891,6 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
   "gpt-5.4-mini": { input: 0.4, output: 1.6, cacheRead: 0.04 },
   "gpt-5.4-nano": { input: 0.1, output: 0.4, cacheRead: 0.01 },
   "gpt-5.3-codex": { input: 1.5, output: 6, cacheRead: 0.15 },
-  "gpt-4.1-mini": { input: 0.4, output: 1.6, cacheRead: 0.1 },
   "claude-fable-5": { input: 10, output: 50, cacheRead: 1.0 },
   "claude-opus-5": { input: 5, output: 25, cacheRead: 0.5 },
   "claude-sonnet-5": { input: 3, output: 15, cacheRead: 0.3 },
