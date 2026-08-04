@@ -70,6 +70,9 @@ export function AiMiniWindow() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        // If any child already handled this Escape (dropdown, autocomplete,
+        // file-trigger dismiss, etc.), don't steal it.
+        if (e.defaultPrevented) return;
         const target = e.target as HTMLElement | null;
         const tag = target?.tagName;
         if (tag === "INPUT" || tag === "TEXTAREA") return;
