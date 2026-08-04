@@ -29,15 +29,53 @@ export async function loadAll(): Promise<LoadedSessions> {
   // Two targeted get()s instead of entries() — entries() deserializes the
   // entire store including every messages:<id> blob, which grows to
   // multiple MB across projects and freezes the webview.
-  const [sessions, activeId] = await Promise.all([
-    store.get<SessionMeta[]>(KEY_SESSIONS),
-    store.get<string | null>(KEY_ACTIVE),
-  ]);
-  return { sessions: sessions ?? [], activeId: activeId ?? null };
+  let sessions: SessionMeta[] = [];
+  let activeId: string | null = null;
+  try {
+    const [raw, rawActive] = await Promise.all([
+      store.get<SessionMeta[]>(KEY_SESSIONS),
+      store.get<string | null>(KEY_ACTIVE),
+    ]);
+    sessions = raw ?? [];
+    activeId = rawActive ?? null;
+  } catch (err) {
+    console.error(
+      "[loadAll] Corrupted store data — resetting sessions:",
+      err,
+    );
+    // Corrupted JSON or mismatched schema. Return empty state so the app
+    // can boot cleanly instead of crashing the React tree.
+  }
+  // Validate that activeId exists in the session list. If the store was
+  // partially written, activeId may reference a deleted session.
+  if (activeId && !sessions.some((s) => s.id === activeId)) {
+    console.warn(
+      "[loadAll] activeId references unknown session — clearing:",
+      activeId,
+    );
+    activeId = null;
+  }
+  return { sessions, activeId };
 }
 
 export async function loadMessages(id: string): Promise<UIMessage[] | null> {
-  return (await store.get<UIMessage[]>(messagesKey(id))) ?? null;
+  try {
+    const raw = await store.get<unknown>(messagesKey(id));
+    if (!raw) return null;
+    // Basic shape validation: must be an array of objects with a `role` field.
+    if (!Array.isArray(raw)) {
+      console.warn("[loadMessages] Corrupted — not an array:", id);
+      return null;
+    }
+    if (raw.length > 0 && typeof raw[0] !== "object") {
+      console.warn("[loadMessages] Corrupted — items are not objects:", id);
+      return null;
+    }
+    return raw as UIMessage[];
+  } catch (err) {
+    console.error("[loadMessages] Failed to load — resetting:", id, err);
+    return null;
+  }
 }
 
 export async function saveSessionsList(sessions: SessionMeta[]): Promise<void> {
@@ -50,46 +88,50 @@ export async function saveActiveId(id: string | null): Promise<void> {
 
 /**
  * Strip large inline data (image data-URLs) from file parts before persisting.
- * Replaces the data URL with a placeholder so the store file stays small.
+ * Operates on plain JSON objects (after JSON round-trip), not UIMessage types.
  */
-function stripInlineImages(messages: UIMessage[]): UIMessage[] {
+function stripInlineImagesInPlace(items: unknown[]): void {
   const DATA_URL_RE = /^data:[^;]+;base64,/;
-  return messages.map((m) => {
-    if (m.role !== "user") return m;
-    const hasFile = m.parts.some(
-      (p) =>
-        (p as { type: string }).type === "file" &&
-        typeof (p as { url?: string }).url === "string" &&
-        DATA_URL_RE.test((p as { url: string }).url),
-    );
-    if (!hasFile) return m;
-    return {
-      ...m,
-      parts: m.parts.map((p) => {
-        const fp = p as { type: string; url?: string; mediaType?: string };
-        if (
-          fp.type === "file" &&
-          typeof fp.url === "string" &&
-          DATA_URL_RE.test(fp.url)
-        ) {
-          return { ...fp, url: `data:${fp.mediaType ?? "image/png"};base64,` };
-        }
-        return p;
-      }),
-    } as UIMessage;
-  });
+  for (const m of items) {
+    if (m == null || typeof m !== "object") continue;
+    const msg = m as Record<string, unknown>;
+    if (msg.role !== "user") continue;
+    if (!Array.isArray(msg.parts)) continue;
+    for (const p of msg.parts) {
+      if (p == null || typeof p !== "object") continue;
+      const part = p as Record<string, unknown>;
+      if (part.type === "file" && typeof part.url === "string" && DATA_URL_RE.test(part.url)) {
+        part.url = `data:${part.mediaType ?? "image/png"};base64,`;
+      }
+    }
+  }
 }
 
 export async function saveMessages(
   id: string,
   messages: UIMessage[],
 ): Promise<void> {
-  const stripped = stripInlineImages(messages);
+  // Deep-clone via JSON round-trip to strip any non-serializable values
+  // (undefined, BigInt, Symbol, functions, circular refs) that would
+  // produce corrupted or unreadable store data.
+  let toStore: unknown[];
+  try {
+    toStore = JSON.parse(JSON.stringify(messages));
+  } catch (err) {
+    console.error(
+      "[saveMessages] Messages contain non-serializable data — skipping persist:",
+      err,
+    );
+    return;
+  }
+
+  // Strip image data-URLs to keep the store file compact.
+  stripInlineImagesInPlace(toStore);
+
   // Guard against unbounded growth — if the serialized JSON exceeds
   // MAX_MESSAGES_JSON_BYTES, trim to the most recent messages. Without
   // this, a single session can balloon the store file to multiple MB
   // and cause the same freeze on the next launch.
-  let toStore: UIMessage[] = stripped;
   let json = JSON.stringify(toStore);
   if (json.length > MAX_MESSAGES_JSON_BYTES) {
     // Keep the most recent messages that fit under the cap.
@@ -107,7 +149,20 @@ export async function saveMessages(
     toStore = toStore.slice(-lo || -1);
     json = JSON.stringify(toStore);
   }
-  await store.set(messagesKey(id), toStore);
+
+  // Verify the JSON round-trips before persisting. If it fails, the data
+  // is fundamentally unserializable — don't write it.
+  try {
+    JSON.parse(json);
+  } catch (err) {
+    console.error(
+      "[saveMessages] Produced invalid JSON — skipping persist:",
+      err,
+    );
+    return;
+  }
+
+  await store.set(messagesKey(id), toStore as UIMessage[]);
 }
 
 export async function deleteSessionData(id: string): Promise<void> {

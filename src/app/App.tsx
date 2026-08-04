@@ -28,6 +28,7 @@ import type { ModelId } from "@/modules/ai/config";
 import { CustomContextMenu } from "@/modules/ai/components/CustomContextMenu";
 import { ApiTesterPane } from "@/modules/api-tester/ApiTesterPane";
 import { AiComposerProvider } from "@/modules/ai/lib/composer";
+import { AiErrorBoundary } from "@/modules/ai/components/AiErrorBoundary";
 import { redactSensitive } from "@/modules/ai/lib/redact";
 import { native } from "@/modules/ai/lib/native";
 import { useAgentsStore } from "@/modules/ai/store/agentsStore";
@@ -1579,11 +1580,15 @@ export default function App() {
                       }}
                     >
                       {hasComposer ? (
-                        <AiInputBar />
+                        <AiErrorBoundary label="input-bar">
+                          <AiInputBar />
+                        </AiErrorBoundary>
                       ) : (
-                        <AiInputBarConnect
-                          onAdd={() => void openSettingsWindow("models")}
-                        />
+                        <AiErrorBoundary label="input-bar-connect">
+                          <AiInputBarConnect
+                            onAdd={() => void openSettingsWindow("models")}
+                          />
+                        </AiErrorBoundary>
                       )}
                     </motion.div>
                   ) : null}
@@ -1612,7 +1617,11 @@ export default function App() {
           ) : null}
 
           <AnimatePresence>
-            {miniOpen && hasComposer ? <AiMiniWindow key="ai-mini" /> : null}
+            {miniOpen && hasComposer ? (
+              <AiErrorBoundary label="mini-window">
+                <AiMiniWindow key="ai-mini" />
+              </AiErrorBoundary>
+            ) : null}
             {contextMenu ? (
               <CustomContextMenu
                 key="custom-context-menu"

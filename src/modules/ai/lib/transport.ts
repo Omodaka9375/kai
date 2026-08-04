@@ -15,7 +15,7 @@ import type { ToolContext } from "../tools/tools";
 import { useChatStore } from "../store/chatStore";
 import { useGoalsStore } from "../store/goalsStore";
 import { IS_WINDOWS, IS_MAC, IS_LINUX } from "@/lib/platform";
-import { saveMessages } from "./sessions";
+
 import { extensionRegistry } from "./extensions";
 import { agentBus } from "./eventBus";
 
@@ -265,10 +265,8 @@ async function maybeSummarize(
 
   const trimmed = [summaryMessage, ...tail];
 
-  // Persist the trimmed history so the session stays bounded.
-  const sessionId = deps.getSessionId?.();
-  if (sessionId) void saveMessages(sessionId, trimmed);
-
+  // Persistence is handled by AgentRunBridge which fires on every
+  // messages change, including after summarization replaces history.
   return trimmed;
 }
 

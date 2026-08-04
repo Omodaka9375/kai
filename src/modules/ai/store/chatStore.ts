@@ -497,9 +497,21 @@ export const useChatStore = create<StoreState>((set, get) => ({
 
   hydrateSessions: async (workspaceRoot?: string | null) => {
     if (get().sessionsHydrated) return;
-    const { sessions } = await loadAll();
 
     const root = workspaceRoot ?? get().live?.getWorkspaceRoot?.() ?? null;
+
+    let sessions: SessionMeta[] = [];
+    try {
+      const loaded = await loadAll();
+      sessions = loaded.sessions;
+    } catch (err) {
+      console.error(
+        "[hydrateSessions] Failed to load sessions — resetting store:",
+        err,
+      );
+      // Corrupted store file. Continue with a fresh in-memory state;
+      // the store will be overwritten when sessions are next persisted.
+    }
 
     // Reuse the most recent untitled "New chat" session if one exists from
     // the previous run — no point stacking empty placeholder sessions every
@@ -520,9 +532,13 @@ export const useChatStore = create<StoreState>((set, get) => ({
         workspaceRoot: root,
       };
       nextSessions = [fresh, ...sessions];
-      void saveSessionsList(nextSessions);
+      void saveSessionsList(nextSessions).catch((err) =>
+        console.error("[hydrateSessions] Failed to persist sessions:", err),
+      );
     }
-    void saveActiveId(freshId);
+    void saveActiveId(freshId).catch((err) =>
+      console.error("[hydrateSessions] Failed to persist activeId:", err),
+    );
 
     set({
       sessions: nextSessions,
