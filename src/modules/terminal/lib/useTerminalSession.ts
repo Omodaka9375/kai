@@ -4,7 +4,7 @@ import { usePreferencesStore } from "@/modules/settings/preferences";
 import type { SearchAddon } from "@xterm/addon-search";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { DormantRing } from "./dormantRing";
-import { feedText as feedErrorDetector } from "./errorDetector";
+import { feedText as feedErrorDetector, resetDetector } from "./errorDetector";
 import {
   createShellIntegrationState,
   registerCwdHandler,
@@ -51,6 +51,8 @@ type Session = {
   hasSlot: boolean;
   /** Set to true once the PTY has delivered at least one byte of output. */
   receivedOutput: boolean;
+  /** Pending nudge setTimeout handles — cleared on dispose. */
+  nudgeTimers: ReturnType<typeof setTimeout>[];
 };
 
 const sessions = new Map<number, Session>();
@@ -105,6 +107,7 @@ function ensureSession(leafId: number, initialCwd?: string): Session {
     dormantRing: new DormantRing(),
     hasSlot: false,
     receivedOutput: false,
+    nudgeTimers: [],
   };
   sessions.set(leafId, session);
 
@@ -248,10 +251,13 @@ function attachSession(
         //   1500ms — send CR if still silent (forces prompt at empty input)
         // Ceiling: doesn't help if the shell itself is broken; upgrade to
         // an OSC 133 readiness handshake if this proves insufficient.
-        const nudge = (ms: number, action: () => void) =>
-          setTimeout(() => {
+        const nudge = (ms: number, action: () => void) => {
+          const id = setTimeout(() => {
+            s.nudgeTimers = s.nudgeTimers.filter((t) => t !== id);
             if (!s.receivedOutput && !s.disposed && s.pty === pty) action();
           }, ms);
+          s.nudgeTimers.push(id);
+        };
         nudge(500, () => {
           const c = s.cols || 80;
           const r = s.rows || 24;
@@ -318,6 +324,9 @@ export function disposeSession(leafId: number): void {
   const s = sessions.get(leafId);
   if (!s) return;
   s.disposed = true;
+  for (const t of s.nudgeTimers) clearTimeout(t);
+  s.nudgeTimers = [];
+  resetDetector();
   unbindLeafFromSlot(leafId, s);
   s.snapshot = null;
   s.pty?.close();

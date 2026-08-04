@@ -17,6 +17,7 @@ type McpStdioEvent =
  */
 class TauriStdioTransport {
   private sessionId: number | null = null;
+  private channel: Channel<McpStdioEvent> | null = null;
   private config: McpServerConfig;
 
   onclose?: () => void;
@@ -29,6 +30,7 @@ class TauriStdioTransport {
 
   async start(): Promise<void> {
     const channel = new Channel<McpStdioEvent>();
+    this.channel = channel;
     channel.onmessage = (event) => {
       switch (event.kind) {
         case "message":
@@ -73,6 +75,10 @@ class TauriStdioTransport {
         () => {},
       );
       this.sessionId = null;
+    }
+    if (this.channel !== null) {
+      this.channel.onmessage = undefined as unknown as (e: McpStdioEvent) => void;
+      this.channel = null;
     }
   }
 }

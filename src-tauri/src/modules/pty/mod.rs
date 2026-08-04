@@ -33,6 +33,38 @@ impl Default for PtyState {
     }
 }
 
+impl Drop for PtyState {
+    fn drop(&mut self) {
+        // On Windows, ClosePseudoConsole (inside Session::drop) can block for
+        // hundreds of ms. When the app shuts down and Tauri drops PtyState,
+        // we'd otherwise block the main thread for every active PTY. Spawn each
+        // session's drop on a background thread, matching what pty_close does.
+        let sessions =
+            std::mem::take(&mut *rwlock_write(&self.sessions));
+        if sessions.is_empty() {
+            return;
+        }
+        let count = sessions.len();
+        for (id, session) in sessions {
+            let name = format!("KAI-pty-drop-{id}");
+            thread::Builder::new()
+                .name(name)
+                .spawn(move || {
+                    let t0 = std::time::Instant::now();
+                    drop(session);
+                    log::info!(
+                        "pty session id={id} dropped in {}ms (shutdown)",
+                        t0.elapsed().as_millis()
+                    );
+                })
+                .ok(); // Best-effort: if we can't spawn, fall back to inline drop.
+        }
+        if count > 0 {
+            log::info!("pty shutdown: dispatched {count} session(s) to background drop threads");
+        }
+    }
+}
+
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub fn pty_open(

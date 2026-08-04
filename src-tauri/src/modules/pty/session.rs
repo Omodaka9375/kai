@@ -169,7 +169,7 @@ pub fn spawn(
     let on_data_flush = on_data.clone();
     let pending_f = pending.clone();
     let done_f = done.clone();
-    thread::Builder::new()
+    let flusher_thread = thread::Builder::new()
         .name("KAI-pty-flusher".into())
         .spawn(move || loop {
             thread::sleep(FLUSH_INTERVAL);
@@ -231,6 +231,11 @@ pub fn spawn(
             #[cfg(not(windows))]
             if let Err(e) = reader_thread.join() {
                 log::error!("pty reader thread panicked: {e:?}");
+            }
+            // Join the flusher so panics are observed (the flusher exits
+            // when `done` is set to true after the reader finishes).
+            if let Err(e) = flusher_thread.join() {
+                log::error!("pty flusher thread panicked: {e:?}");
             }
             let tail = std::mem::take(&mut *mutex_lock(&pending_e));
             if !tail.is_empty() {

@@ -57,6 +57,7 @@ export type Slot = {
   fitTimer: ReturnType<typeof setTimeout> | null;
   ptyTimer: ReturnType<typeof setTimeout> | null;
   unhideRaf: number | null;
+  webglRecoveryTimer: ReturnType<typeof setTimeout> | null;
   lastCols: number;
   lastRows: number;
   lastW: number;
@@ -138,6 +139,7 @@ function createSlot(): Slot {
     fitTimer: null,
     ptyTimer: null,
     unhideRaf: null,
+    webglRecoveryTimer: null,
     lastCols: term.cols,
     lastRows: term.rows,
     lastW: 0,
@@ -206,7 +208,14 @@ function pickSlotFor(leafId: number): PickResult {
     }
   }
   const chosen = best!;
-  return { slot: chosen, previousLeafId: chosen.currentLeafId };
+  // Notify the adapter so it can snapshot/unbind the evicted leaf,
+  // then destroy the slot to release GPU/DOM/event resources.
+  if (chosen.currentLeafId !== null) {
+    adapter?.evictLeaf(chosen.currentLeafId);
+  }
+  destroySlot(chosen);
+  // Create a fresh terminal — recycling a disposed Terminal is not safe.
+  return { slot: createSlot(), previousLeafId: null };
 }
 
 export type AcquireParams = {
@@ -231,9 +240,6 @@ export function acquireSlot(params: AcquireParams): Slot {
   }
 
   const pick = pickSlotFor(params.leafId);
-  if (pick.previousLeafId !== null) {
-    adapter?.evictLeaf(pick.previousLeafId);
-  }
   if (
     pick.slot.currentLeafId !== null &&
     pick.slot.currentLeafId !== params.leafId
@@ -432,8 +438,30 @@ function detachSlotFromLeaf(slot: Slot): void {
     getRecycler().appendChild(slot.host);
   }
 
+  if (slot.webglRecoveryTimer) {
+    clearTimeout(slot.webglRecoveryTimer);
+    slot.webglRecoveryTimer = null;
+  }
+
   slot.currentLeafId = null;
   slot.lastUsedAt = performance.now();
+}
+
+/** Fully destroy a slot, releasing all GPU, DOM, and event-listener resources. */
+function destroySlot(slot: Slot): void {
+  detachSlotFromLeaf(slot);
+  disposeSlotWebgl(slot);
+  try {
+    slot.term.dispose();
+  } catch (e) {
+    console.warn("[Kai-pool] terminal dispose failed:", e);
+  }
+  // Remove host from wherever it's attached, then drop it.
+  if (slot.host.parentNode) {
+    slot.host.parentNode.removeChild(slot.host);
+  }
+  const idx = slots.indexOf(slot);
+  if (idx !== -1) slots.splice(idx, 1);
 }
 
 const WEBGL_RECOVERY_DELAY_MS = 250;
@@ -459,7 +487,9 @@ function attachWebgl(slot: Slot): void {
       // Recovery: WebKit may transiently lose contexts on sleep/wake or GPU
       // reset; without re-attach the slot would silently fall back to DOM
       // forever. Defer past WebKit's reset window before retrying.
-      setTimeout(() => {
+      if (slot.webglRecoveryTimer) clearTimeout(slot.webglRecoveryTimer);
+      slot.webglRecoveryTimer = setTimeout(() => {
+        slot.webglRecoveryTimer = null;
         if (slot.webglAddon) return;
         if (!usePreferencesStore.getState().terminalWebglEnabled) return;
         attachWebgl(slot);
