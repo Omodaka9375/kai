@@ -23,17 +23,16 @@ export type LoadedSessions = {
   activeId: string | null;
 };
 
+const MAX_MESSAGES_JSON_BYTES = 512 * 1024;
+
 export async function loadAll(): Promise<LoadedSessions> {
-  // One IPC roundtrip via entries() rather than two parallel get()s. Per-
-  // session messages are loaded lazily via `loadMessages` only when a
-  // session is opened, so cold boot stays at a single store call.
-  const entries = await store.entries();
-  let sessions: SessionMeta[] | undefined;
-  let activeId: string | null | undefined;
-  for (const [k, v] of entries) {
-    if (k === KEY_SESSIONS) sessions = v as SessionMeta[];
-    else if (k === KEY_ACTIVE) activeId = v as string | null;
-  }
+  // Two targeted get()s instead of entries() — entries() deserializes the
+  // entire store including every messages:<id> blob, which grows to
+  // multiple MB across projects and freezes the webview.
+  const [sessions, activeId] = await Promise.all([
+    store.get<SessionMeta[]>(KEY_SESSIONS),
+    store.get<string | null>(KEY_ACTIVE),
+  ]);
   return { sessions: sessions ?? [], activeId: activeId ?? null };
 }
 
@@ -85,7 +84,30 @@ export async function saveMessages(
   id: string,
   messages: UIMessage[],
 ): Promise<void> {
-  await store.set(messagesKey(id), stripInlineImages(messages));
+  const stripped = stripInlineImages(messages);
+  // Guard against unbounded growth — if the serialized JSON exceeds
+  // MAX_MESSAGES_JSON_BYTES, trim to the most recent messages. Without
+  // this, a single session can balloon the store file to multiple MB
+  // and cause the same freeze on the next launch.
+  let toStore: UIMessage[] = stripped;
+  let json = JSON.stringify(toStore);
+  if (json.length > MAX_MESSAGES_JSON_BYTES) {
+    // Keep the most recent messages that fit under the cap.
+    let lo = 0;
+    let hi = toStore.length;
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2);
+      const slice = toStore.slice(-mid);
+      if (JSON.stringify(slice).length <= MAX_MESSAGES_JSON_BYTES) {
+        lo = mid;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    toStore = toStore.slice(-lo || -1);
+    json = JSON.stringify(toStore);
+  }
+  await store.set(messagesKey(id), toStore);
 }
 
 export async function deleteSessionData(id: string): Promise<void> {
