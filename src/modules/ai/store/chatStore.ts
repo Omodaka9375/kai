@@ -415,6 +415,9 @@ export const useChatStore = create<StoreState>((set, get) => ({
   respondToApproval: (approvalId, approved) => {
     const fn = get().approvalResponder;
     if (fn) fn(approvalId, approved);
+    // When the user explicitly denies a tool call, stop the agent so it
+    // doesn't keep making more calls. The user wants to intervene.
+    if (!approved) stop();
   },
 
   apiKeys: { ...EMPTY_PROVIDER_KEYS },
