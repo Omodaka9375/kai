@@ -434,7 +434,7 @@ function SessionPicker() {
     if (!workspaceRoot) return sessions;
     const normalized = workspaceRoot.replace(/[\\/]+$/, "");
     return sessions.filter((s) => {
-      if (!s.workspaceRoot) return true; // Keep legacy or non-project sessions
+      if (!s.workspaceRoot) return false; // Untagged sessions are filtered at the store level — don't leak cross-workspace
       return s.workspaceRoot.replace(/[\\/]+$/, "") === normalized;
     });
   }, [sessions, workspaceRoot]);

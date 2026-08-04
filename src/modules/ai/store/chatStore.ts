@@ -182,6 +182,7 @@ type StoreState = {
 
   // Sessions
   sessionsHydrated: boolean;
+  lastHydratedWorkspace: string | null;
   sessions: SessionMeta[];
   activeSessionId: string | null;
   hydrateSessions: (workspaceRoot?: string | null) => Promise<void>;
@@ -492,13 +493,22 @@ export const useChatStore = create<StoreState>((set, get) => ({
   },
 
   sessionsHydrated: false,
+  lastHydratedWorkspace: null,
   sessions: [],
   activeSessionId: null,
 
   hydrateSessions: async (workspaceRoot?: string | null) => {
-    if (get().sessionsHydrated) return;
-
     const root = workspaceRoot ?? get().live?.getWorkspaceRoot?.() ?? null;
+    const norm = (p: string | null | undefined) =>
+      p?.replace(/\\/g, "/").replace(/\/+$/, "") ?? null;
+    const normalizedRoot = norm(root);
+
+    // Skip only if we've already hydrated for this exact workspace.
+    if (
+      get().sessionsHydrated &&
+      norm(get().lastHydratedWorkspace) === normalizedRoot
+    )
+      return;
 
     let sessions: SessionMeta[] = [];
     try {
@@ -509,18 +519,29 @@ export const useChatStore = create<StoreState>((set, get) => ({
         "[hydrateSessions] Failed to load sessions — resetting store:",
         err,
       );
-      // Corrupted store file. Continue with a fresh in-memory state;
-      // the store will be overwritten when sessions are next persisted.
     }
+
+    // Filter sessions to the current workspace root. Sessions without a
+    // workspaceRoot (from before this feature was added) are kept — they'll
+    // be auto-tagged with the current root the first time the user opens them.
+    const workspaceSessions = normalizedRoot
+      ? sessions.filter((s) => {
+          const sRoot = norm(s.workspaceRoot);
+          return sRoot === normalizedRoot || !sRoot;
+        })
+      : sessions;
 
     // Reuse the most recent untitled "New chat" session if one exists from
     // the previous run — no point stacking empty placeholder sessions every
     // launch. Otherwise prepend a fresh one.
-    const reusable = sessions[0]?.title === "New chat" ? sessions[0] : null;
+    const reusable =
+      workspaceSessions[0]?.title === "New chat"
+        ? workspaceSessions[0]
+        : null;
     let nextSessions: SessionMeta[];
     let freshId: string;
     if (reusable) {
-      nextSessions = sessions;
+      nextSessions = workspaceSessions;
       freshId = reusable.id;
     } else {
       freshId = newSessionId();
@@ -531,7 +552,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
         updatedAt: Date.now(),
         workspaceRoot: root,
       };
-      nextSessions = [fresh, ...sessions];
+      nextSessions = [fresh, ...workspaceSessions];
       void saveSessionsList(nextSessions).catch((err) =>
         console.error("[hydrateSessions] Failed to persist sessions:", err),
       );
@@ -544,6 +565,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
       sessions: nextSessions,
       activeSessionId: freshId,
       sessionsHydrated: true,
+      lastHydratedWorkspace: root,
     });
   },
 
