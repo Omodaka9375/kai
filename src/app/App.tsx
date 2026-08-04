@@ -492,6 +492,15 @@ export default function App() {
     launchCwd ?? home,
   );
 
+  // Reflect the current project folder in the window title so the user can
+  // distinguish multiple KAI instances in the taskbar / Alt+Tab.
+  useEffect(() => {
+    if (!explorerRoot) return;
+    const name =
+      explorerRoot.split(/[\\/]/).filter(Boolean).pop() ?? explorerRoot;
+    document.title = name === "KAI" ? name : `${name} — KAI`;
+  }, [explorerRoot]);
+
   // Persist the workspace root so it's restored on next launch.
   // Guard behind prefsHydrated so we don't overwrite the persisted recent
   // projects list with [current] before the store has loaded from disk.
