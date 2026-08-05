@@ -4,6 +4,52 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.1.0]
+
+### Fixed
+- **Model persistence across workspace switches**: `persistProjectModel` now falls back to `lastWorkspaceCwd` when the live context bridge is not yet set, so model selection is preserved across workspace reloads and tab switches.
+- **Window title always shows project name**: Removed the special-case that hid the project name when opened in a folder called "KAI". The title bar now consistently displays `ProjectName — KAI` regardless of the workspace folder name.
+- **Image/file attachments counted in context tokens**: `estimateTokens` now includes file and image parts in its token count, preventing context overflow when sending attachments alongside long conversations.
+- **ESC key no longer closes AiMiniWindow when idle**: The Escape key now only closes the mini-window when the agent is actively running or awaiting approval. An idle chat window remains open.
+- **Double-escaped regex in `stripLeakedTokens` fixed**: The markdown cleanup regex had `[\\\\s\\\\S]` (double-escaped), causing it to match literal backslash characters. Corrected to `[\\s\\S]`.
+- **Tab drag reorder jitter fixed**: `dragIdRef` is no longer reassigned after `moveTab`, eliminating visual jitter when reordering tabs.
+- **Nested code fence rendering in ASCII art blocks**: `wrapAsciiArt` now skips content already inside fenced code blocks, preventing double-fencing that broke markdown rendering.
+
+---
+
+## [1.0.9]
+
+### Fixed
+- **Agent retried denied tool calls**: When a user denied an approval-required tool call, the agent would retry the same call (or a variant), causing an infinite loop. The denial prompt has been strengthened and the agent is now forcibly stopped on denial — the user must re-prompt to continue.
+- **AiMiniWindow Escape key swallowed by child components**: The Escape handler now checks `e.defaultPrevented` so dismissing a dropdown or autocomplete inside the mini-window doesn't collapse the entire panel.
+- **Memory leaks across PTY lifecycle, renderer pool, and MCP channels**:
+  - **Renderer pool**: WebGL contexts are now properly destroyed via `Terminal.dispose()` when a slot is evicted from the pool; the WebGL recovery timer is now cancellable.
+  - **PTY sessions**: Nudge timeout IDs are cleared on session disposal; the detector is reset to prevent stale callbacks.
+  - **MCP manager**: `TauriStdioTransport.close()` now releases its Channel `onmessage` handler to break the reference cycle.
+  - **Rust PTY drop**: `PtyState` now spawns background drop threads per session via `Drop` impl, preventing main-thread blockage from `ClosePseudoConsole` on Windows shutdown.
+
+---
+
+## [1.0.8]
+
+### Added
+- **Project folder name in window title bar**: The active workspace folder name is now shown in the title bar as `ProjectName — KAI`, making it easy to identify which project window is which.
+
+### Fixed
+- **Blank page crash from unknown model IDs in saved sessions**: If a saved session referenced a model ID not in the registry (e.g. after removing a provider), `getModel()` would throw, crashing the entire app. It now returns a synthetic fallback model instead. Missing models `moonshotai/kimi-k3`, `qwen/qwen3.7-flash`, and `qwen/qwen3.6-27b` were also added to the registry.
+- **Session leakage across workspaces**: `hydrateSessions` now filters sessions to the current workspace root and re-hydrates on workspace switch. The session picker no longer leaks untagged legacy sessions from other projects.
+- **Stop button unresponsive during approval**: `isBusy` now includes the `awaiting-approval` status, so the stop button, input bar disabled state, and mini-window escape handler all treat a pending approval as agent-busy rather than idle.
+- **Native folder picker replaces shell-out on Windows**: The "Open Project" dialog now uses `tauri-plugin-dialog`'s native folder picker instead of shelling out to PowerShell, providing a faster and more reliable directory selection experience.
+
+---
+
+## [1.0.6]
+
+### Fixed
+- **Store-file bloat freezing the webview on session hydration**: `loadAll()` was deserializing every `messages:<id>` key in `kai-sessions.json` at once — on projects with many large conversations this could reach 3.5 MB and freeze the webview JS thread, rendering a blank page when opening the AI panel. Now only the lightweight session list and active ID are loaded; messages are fetched lazily per session. A 512 KB guard also truncates oversized message histories on save.
+
+---
+
 ## [1.0.5]
 
 ### Fixed
