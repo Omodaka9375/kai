@@ -498,7 +498,7 @@ export default function App() {
     if (!explorerRoot) return;
     const name =
       explorerRoot.split(/[\\/]/).filter(Boolean).pop() ?? explorerRoot;
-    document.title = name === "KAI" ? name : `${name} — KAI`;
+    document.title = name ? `${name} — KAI` : "KAI";
   }, [explorerRoot]);
 
   // Persist the workspace root so it's restored on next launch.

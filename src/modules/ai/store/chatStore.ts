@@ -430,7 +430,13 @@ export const useChatStore = create<StoreState>((set, get) => ({
   setSelectedModelId: (id) => {
     set({ selectedModelId: id });
     void pushRecentModel(id);
-    void persistProjectModel(id, get().live.getWorkspaceRoot());
+    // live.getWorkspaceRoot() may be null during startup before setLive()
+    // runs — fall back to lastWorkspaceCwd so the model is always persisted.
+    const root =
+      get().live.getWorkspaceRoot() ??
+      usePreferencesStore.getState().lastWorkspaceCwd ??
+      null;
+    void persistProjectModel(id, root);
     agentBus.emit("model:change", { modelId: id });
   },
 

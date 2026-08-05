@@ -133,7 +133,6 @@ export function TabBar({
       // Only reorder when we cross into a NEW tab's area, not on every pixel move
       if (hoverId !== null && hoverId !== dragIdRef.current && hoverId !== lastHoveredTabIdRef.current) {
         onMove(dragIdRef.current, hoverId);
-        dragIdRef.current = hoverId;
         lastHoveredTabIdRef.current = hoverId;
       }
     },

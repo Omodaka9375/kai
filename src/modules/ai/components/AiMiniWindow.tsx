@@ -62,7 +62,6 @@ const SUGGESTIONS = [
 ];
 
 export function AiMiniWindow() {
-  const closeMini = useChatStore((s) => s.closeMini);
   const sessionId = useChatStore((s) => s.activeSessionId);
   const [expanded, setExpanded] = useState(false);
   const c = useComposer();
@@ -80,14 +79,14 @@ export function AiMiniWindow() {
           e.preventDefault();
           cancelAllShellSessions();
           c.stop();
-        } else {
-          closeMini();
         }
+        // Intentionally do NOT close the mini-window on Escape —
+        // the open/close button controls window visibility.
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [closeMini, c.isBusy, c.stop]);
+  }, [c.isBusy, c.stop]);
 
   const sessions = useChatStore((s) => s.sessions);
   const switchSession = useChatStore((s) => s.switchSession);
@@ -315,6 +314,13 @@ function estimateTokens(messages: UIMessage[]): number {
         const tp = p as unknown as { input?: unknown; output?: unknown };
         if (tp.input) chars += JSON.stringify(tp.input).length;
         if (tp.output) chars += JSON.stringify(tp.output).length;
+      } else if (p.type === "file") {
+        // Count file/image parts — data URLs can be multi-MB.
+        // Image tokens vary by provider (e.g. OpenAI: ~85 tokens per 512×512 tile),
+        // but a rough estimate of data length / 4 gives a conservative lower bound.
+        const fp = p as { url?: string; data?: string };
+        const data = fp.url ?? fp.data ?? "";
+        chars += data.length;
       }
     }
   }

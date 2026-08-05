@@ -338,8 +338,8 @@ function stripLeakedTokens(text: string): string {
   let cleaned = text
     .replace(/<\|channel\|?>[\s\S]*?<\|?channel\|>/gi, "")
     .replace(/<\|(?:start|end)_of_thought\|>/gi, "")
-    .replace(/<\|thinking\|>[\\s\\S]*?<\| \/thinking\|>/gi, "")
-    .replace(/<\|thinking\|>[\\s\\S]*?<\|?\/thinking\|>/gi, "")
+    .replace(/<\|thinking\|>[\s\S]*?<\| \/thinking\|>/gi, "")
+    .replace(/<\|thinking\|>[\s\S]*?<\|?\/thinking\|>/gi, "")
     // Strip XML-style <thinking>…</thinking> blocks (complete or dangling open tag)
     .replace(/<thinking>[\s\S]*?<\/thinking>/gi, "")
     // Only strip a dangling <thinking> if NO closing </thinking> follows
