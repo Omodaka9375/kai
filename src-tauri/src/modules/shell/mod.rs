@@ -11,6 +11,7 @@ use std::sync::{mpsc, Arc, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
+#[cfg(windows)]
 use base64::Engine;
 use serde::Serialize;
 
