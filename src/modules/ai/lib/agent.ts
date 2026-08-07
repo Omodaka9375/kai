@@ -373,10 +373,16 @@ export type RunAgentOptions = {
 };
 
 /**
- * Remove tool-call parts from the last assistant message that never received
- * a result. This happens when the user stops the agent mid-tool-call — the
- * conversation retains an unanswered tool call that the provider API rejects
- * on the next send ("Tool result is missing for tool call ...").
+ * Remove assistant messages that contain incomplete tool-call parts — parts
+ * that never received a tool result (output-available/output-error) or had
+ * their approval resolved (approval-responded). The entire message is dropped,
+ * not just the tool part, because retaining orphaned text from a message
+ * whose tool call was stripped would corrupt the conversation: the model
+ * appears to have said something but no action followed, which causes models
+ * to leak raw tool-call XML syntax as text and spiral into loops.
+ *
+ * This happens when the user stops the agent mid-tool-call, toggles
+ * auto-approve off while a tool is pending, or when edit retries fail.
  */
 function stripIncompleteToolCalls(messages: UIMessage[]): UIMessage[] {
   if (messages.length === 0) return messages;
@@ -389,20 +395,17 @@ function stripIncompleteToolCalls(messages: UIMessage[]): UIMessage[] {
 
   // Scan ALL assistant messages, not just the last — failed edit retries
   // and dismissed approvals can leave orphaned tool calls anywhere.
-  let touched = false;
-  const out = messages.map((m) => {
-    if (m.role !== "assistant") return m;
-    const cleaned = m.parts.filter((p) => {
-      const type = (p as { type?: string }).type ?? "";
-      if (!type.startsWith("tool-") && type !== "dynamic-tool") return true;
+  const out = messages.filter((m) => {
+    if (m.role !== "assistant") return true;
+    for (const p of m.parts) {
+      const ptype = (p as { type?: string }).type ?? "";
+      if (!ptype.startsWith("tool-") && ptype !== "dynamic-tool") continue;
       const state = (p as { state?: string }).state;
-      return state != null && COMPLETE_STATES.has(state);
-    });
-    if (cleaned.length === m.parts.length) return m;
-    touched = true;
-    return { ...m, parts: cleaned } as UIMessage;
+      if (state == null || !COMPLETE_STATES.has(state)) return false;
+    }
+    return true;
   });
-  return touched ? out : messages;
+  return out;
 }
 
 /**

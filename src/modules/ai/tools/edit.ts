@@ -123,99 +123,6 @@ function getDidYouMeanHint(haystack: string, needle: string): string {
   return `${wsDiag} Similar lines in file:\n${best.map((m) => `  L${m.lineNum}: ${JSON.stringify(m.content.trimEnd())}`).join("\n")}`;
 }
 
-/**
- * Strict eol-normalized find (no fuzzy whitespace). Used for uniqueness
- * checks so indentation variants aren't falsely flagged as duplicates.
- */
-function eolAwareExactFind(
-  haystack: string,
-  needle: string,
-  startFrom = 0,
-): { start: number; length: number } | null {
-  const hNorm = normEol(haystack);
-  const nNorm = normEol(needle);
-  const normIdx = hNorm.indexOf(nNorm, startFrom);
-  if (normIdx === -1) return null;
-  let origPos = 0;
-  let normPos = 0;
-  while (normPos < normIdx && origPos < haystack.length) {
-    if (haystack[origPos] === "\r" && haystack[origPos + 1] === "\n") {
-      origPos += 2;
-      normPos += 1;
-    } else {
-      origPos++;
-      normPos++;
-    }
-  }
-  const origStart = origPos;
-  let matchNormLen = nNorm.length;
-  let origEnd = origStart;
-  let consumed = 0;
-  while (consumed < matchNormLen && origEnd < haystack.length) {
-    if (haystack[origEnd] === "\r" && haystack[origEnd + 1] === "\n") {
-      origEnd += 2;
-      consumed += 1;
-    } else {
-      origEnd++;
-      consumed++;
-    }
-  }
-  return { start: origStart, length: origEnd - origStart };
-}
-
-/**
- * Find `needle` in `haystack` with line-ending-insensitive matching.
- * Returns { start, length } in the ORIGINAL haystack, or null.
- */
-function eolAwareFind(
-  haystack: string,
-  needle: string,
-  startFrom = 0,
-): { start: number; length: number } | null {
-  const hNorm = normEol(haystack);
-  const nNorm = normEol(needle);
-
-  // Try exact match on normalized form.
-  let normIdx = hNorm.indexOf(nNorm, startFrom);
-  if (normIdx === -1) {
-    // Fuzzy fallback (whitespace normalization).
-    normIdx = fuzzyFind(hNorm, nNorm);
-  }
-  if (normIdx === -1) return null;
-
-  // Map the normalized index back to the original haystack.
-  // Walk the original and normalized strings together to find the
-  // corresponding position and length.
-  let origPos = 0;
-  let normPos = 0;
-  while (normPos < normIdx && origPos < haystack.length) {
-    if (haystack[origPos] === "\r" && haystack[origPos + 1] === "\n") {
-      origPos += 2;
-      normPos += 1;
-    } else {
-      origPos++;
-      normPos++;
-    }
-  }
-  const origStart = origPos;
-
-  // Find end position for the match length.
-  let matchNormLen = nNorm.length;
-  let origEnd = origStart;
-  let consumed = 0;
-  while (consumed < matchNormLen && origEnd < haystack.length) {
-    if (haystack[origEnd] === "\r" && haystack[origEnd + 1] === "\n") {
-      origEnd += 2;
-      consumed += 1;
-    } else {
-      origEnd++;
-      consumed++;
-    }
-  }
-
-  return { start: origStart, length: origEnd - origStart };
-}
-
 async function applyEdits(
   abs: string,
   edits: { old_string: string; new_string: string; replace_all?: boolean; line_hint?: number }[],
@@ -239,19 +146,19 @@ async function applyEdits(
     }
   }
 
-  // Detect line-ending style so new_string insertions match the file.
+  // Normalize the entire file content to \n before applying edits, then
+  // restore the original line-ending style at the end. This avoids
+  // positional drift that occurs when mapping CRLF↔LF per edit in
+  // sequential multi_edit calls — each edit's position shift compounds.
   const useCrlf = original.includes("\r\n");
-  let content = original;
+  let content = normEol(original);
   let totalReplacements = 0;
 
   for (const rawEdit of edits) {
-    // Normalize the model's strings to \n, then re-apply the file's
-    // line-ending style to new_string so we don't introduce mixed endings.
     const oldNorm = normEol(rawEdit.old_string);
     // Strip trailing whitespace from new_string to prevent model-generated
     // trailing spaces from dirtying the file.
     const newNorm = stripTrailingWs(normEol(rawEdit.new_string), abs);
-    const newForFile = useCrlf ? newNorm.replace(/\n/g, "\r\n") : newNorm;
 
     if (oldNorm === newNorm) {
       return {
@@ -267,13 +174,13 @@ async function applyEdits(
       let n = 0;
       let searchFrom = 0;
       while (searchFrom < content.length) {
-        const match = eolAwareFind(content, oldNorm, searchFrom);
-        if (!match) break;
+        const idx = content.indexOf(oldNorm, searchFrom);
+        if (idx === -1) break;
         content =
-          content.slice(0, match.start) +
-          newForFile +
-          content.slice(match.start + match.length);
-        searchFrom = match.start + newForFile.length;
+          content.slice(0, idx) +
+          newNorm +
+          content.slice(idx + oldNorm.length);
+        searchFrom = idx + newNorm.length;
         n++;
         if (n > 1000) break;
       }
@@ -286,8 +193,11 @@ async function applyEdits(
       }
       totalReplacements += n;
     } else {
-      const match = eolAwareFind(content, oldNorm);
-      if (!match) {
+      let idx = content.indexOf(oldNorm);
+      if (idx === -1) {
+        idx = fuzzyFind(content, oldNorm);
+      }
+      if (idx === -1) {
         return {
           ok: false,
           error: `old_string not found: ${JSON.stringify(oldNorm.slice(0, 80))}.${getDidYouMeanHint(content, oldNorm)}`,
@@ -295,10 +205,10 @@ async function applyEdits(
         };
       }
       // Check uniqueness: search for a second occurrence AFTER the first
-      // match. Use exact eol-normalized matching only (not fuzzy whitespace)
-      // so indentation variants aren't falsely flagged as duplicates.
-      const exactSecond = eolAwareExactFind(content, oldNorm, match.start + match.length);
-      if (exactSecond && !rawEdit.line_hint) {
+      // match. Use exact matching only (not fuzzy whitespace) so indentation
+      // variants aren't falsely flagged as duplicates.
+      const secondIdx = content.indexOf(oldNorm, idx + oldNorm.length);
+      if (secondIdx !== -1 && !rawEdit.line_hint) {
         return {
           ok: false,
           error:
@@ -308,31 +218,34 @@ async function applyEdits(
       }
       // When line_hint is provided and there are multiple matches, pick
       // the occurrence closest to the hinted line number.
-      let chosen = match;
-      if (exactSecond && rawEdit.line_hint) {
-        const candidates = [match, exactSecond];
-        // Collect remaining occurrences (cap at 50 to avoid runaway)
-        let more = exactSecond;
+      let chosenIdx = idx;
+      if (secondIdx !== -1 && rawEdit.line_hint) {
+        const occurrences: number[] = [idx, secondIdx];
+        let next = secondIdx;
         for (let i = 0; i < 50; i++) {
-          const next = eolAwareExactFind(content, oldNorm, more.start + more.length);
-          if (!next) break;
-          candidates.push(next);
-          more = next;
+          const nidx = content.indexOf(oldNorm, next + oldNorm.length);
+          if (nidx === -1) break;
+          occurrences.push(nidx);
+          next = nidx;
         }
-        // Pick the candidate whose start line is closest to line_hint
-        chosen = candidates.reduce((best, c) => {
-          const cLine = content.slice(0, c.start).split("\n").length;
-          const bLine = content.slice(0, best.start).split("\n").length;
+        chosenIdx = occurrences.reduce((best, cur) => {
+          const cLine = content.slice(0, cur).split("\n").length;
+          const bLine = content.slice(0, best).split("\n").length;
           return Math.abs(cLine - rawEdit.line_hint!) < Math.abs(bLine - rawEdit.line_hint!)
-            ? c : best;
+            ? cur : best;
         });
       }
       content =
-        content.slice(0, chosen.start) +
-        newForFile +
-        content.slice(chosen.start + chosen.length);
+        content.slice(0, chosenIdx) +
+        newNorm +
+        content.slice(chosenIdx + oldNorm.length);
       totalReplacements += 1;
     }
+  }
+
+  // Restore original line-ending style after all edits are applied.
+  if (useCrlf) {
+    content = content.replace(/\n/g, "\r\n");
   }
 
   if (usePlanStore.getState().active) {

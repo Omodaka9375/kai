@@ -11,6 +11,7 @@ use std::sync::{mpsc, Arc, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use base64::Engine;
 use serde::Serialize;
 
 use crate::modules::lock::{rwlock_read, rwlock_write};
@@ -353,6 +354,19 @@ pub fn shell_bg_list(state: tauri::State<ShellState>) -> Result<Vec<BackgroundPr
     Ok(out)
 }
 
+/// Encode a UTF-8 string as UTF-16LE base64 for PowerShell's -EncodedCommand.
+#[cfg(windows)]
+fn encode_utf16le_base64(s: &str) -> String {
+    use base64::engine::general_purpose::STANDARD;
+    let utf16: Vec<u16> = s.encode_utf16().collect();
+    let mut bytes = Vec::with_capacity(utf16.len() * 2);
+    for unit in utf16 {
+        bytes.push(unit as u8);
+        bytes.push((unit >> 8) as u8);
+    }
+    STANDARD.encode(&bytes)
+}
+
 pub(crate) fn build_oneshot_command(
     command: &str,
     #[cfg_attr(not(windows), allow(unused_variables))] workspace: &WorkspaceEnv,
@@ -396,7 +410,13 @@ pub(crate) fn build_oneshot_command(
         if is_cmd {
             cmd.arg("/C").arg(command);
         } else {
-            cmd.arg("-NoProfile").arg("-Command").arg(command);
+            // Use -EncodedCommand with base64-encoded UTF-16LE to prevent
+            // PowerShell from interpreting special characters in the command
+            // string (& | < > \" $ @() etc.). Without this, inline node
+            // commands and chained shell expressions get mangled.
+            cmd.arg("-NoProfile")
+                .arg("-EncodedCommand")
+                .arg(encode_utf16le_base64(command));
         }
         Ok(cmd)
     }
