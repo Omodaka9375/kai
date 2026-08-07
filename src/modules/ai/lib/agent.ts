@@ -72,6 +72,12 @@ const TOOL_LABELS: Record<string, (input: Record<string, unknown>) => string> =
     todo_write: (i) =>
       `Updating plan (${Array.isArray(i.todos) ? i.todos.length : 0} items)`,
     run_subagent: (i) => `Spawning ${String(i.type ?? "subagent")} subagent`,
+    checkpoint_undo: () => `Undoing last AI edits`,
+    save_memory: (i) =>
+      `Saving to memory: ${ellipsize(String(i.entry ?? ""), 40)}`,
+    batch_edit: (i) =>
+      `Batch editing ${Array.isArray(i.edits) ? i.edits.length : 0} files`,
+    display_image: () => `Displaying image in terminal`,
   };
 
 function shortPath(p: unknown): string {

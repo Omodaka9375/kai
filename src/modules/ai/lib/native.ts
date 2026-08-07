@@ -156,6 +156,8 @@ export const native = {
     invoke<void>("fs_create_file", { path, workspace: currentWorkspaceEnv() }),
   createDir: (path: string) =>
     invoke<void>("fs_create_dir", { path, workspace: currentWorkspaceEnv() }),
+  deleteFile: (path: string) =>
+    invoke<void>("fs_delete", { path, workspace: currentWorkspaceEnv() }),
   // AI tooling never sees dot-prefixed entries regardless of the user's
   // explorer preference — keeps .git / .env / .ssh out of agent context.
   readDir: (path: string) =>

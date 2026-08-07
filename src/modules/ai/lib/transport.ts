@@ -9,7 +9,6 @@ import {
 import { compactModelMessagesDetailed } from "./compact";
 import type { ProviderKeys } from "./keyring";
 import { mcpManager } from "./mcpManager";
-import { native } from "./native";
 import { buildSessionState } from "./sessionState";
 import type { ToolContext } from "../tools/tools";
 import { useChatStore } from "../store/chatStore";
@@ -18,30 +17,24 @@ import { IS_WINDOWS, IS_MAC, IS_LINUX } from "@/lib/platform";
 
 import { extensionRegistry } from "./extensions";
 import { agentBus } from "./eventBus";
+import { loadProjectRules, formatRulesForPrompt, type ProjectRules } from "./projectRules";
+import { cleanOldCheckpoints } from "./checkpoints";
+import { getRelevantFiles, formatRelevantFiles } from "./relevance";
+import { loadProjectMemoryCached } from "./memory";
 
-const KAI_MD_MAX_BYTES = 32 * 1024;
-type MemoryCacheEntry = { content: string | null; mtime: number };
-const projectMemoryCache = new Map<string, MemoryCacheEntry>();
+type RulesCacheEntry = { rules: ProjectRules | null; mtime: number };
+const projectRulesCache = new Map<string, RulesCacheEntry>();
 
-async function readKaiMd(workspaceRoot: string | null): Promise<string | null> {
+async function readProjectRules(workspaceRoot: string | null): Promise<ProjectRules | null> {
   if (!workspaceRoot) return null;
-  const path = `${workspaceRoot.replace(/\/$/, "")}/Kai.md`;
-  const cached = projectMemoryCache.get(workspaceRoot);
-  if (cached && Date.now() - cached.mtime < 30_000) return cached.content;
+  const cached = projectRulesCache.get(workspaceRoot);
+  if (cached && Date.now() - cached.mtime < 30_000) return cached.rules;
   try {
-    const r = await native.readFile(path);
-    if (r.kind !== "text") {
-      projectMemoryCache.set(workspaceRoot, { content: null, mtime: Date.now() });
-      return null;
-    }
-    const content =
-      r.content.length > KAI_MD_MAX_BYTES
-        ? r.content.slice(0, KAI_MD_MAX_BYTES)
-        : r.content;
-    projectMemoryCache.set(workspaceRoot, { content, mtime: Date.now() });
-    return content;
+    const rules = await loadProjectRules(workspaceRoot);
+    projectRulesCache.set(workspaceRoot, { rules, mtime: Date.now() });
+    return rules;
   } catch {
-    projectMemoryCache.set(workspaceRoot, { content: null, mtime: Date.now() });
+    projectRulesCache.set(workspaceRoot, { rules: null, mtime: Date.now() });
     return null;
   }
 }
@@ -92,8 +85,25 @@ export function createContextAwareTransport(deps: Deps) {
     let extensionStepCount = 0;
 
     const live = deps.getLive();
-    const projectMemory = await readKaiMd(live.workspaceRoot);
+    const projectRules = await readProjectRules(live.workspaceRoot);
+    const projectMemory = projectRules ? formatRulesForPrompt(projectRules) : null;
+    // Load auto-memory (agent-written persistent project knowledge).
+    const autoMemory = await loadProjectMemoryCached(live.workspaceRoot);
+    const autoMemoryBlock = autoMemory?.trim()
+      ? `\n\n## AUTO MEMORY — Agent-written project knowledge\n${autoMemory.trim()}`
+      : "";
+    const effectiveMemory = [projectMemory, autoMemoryBlock].filter(Boolean).join("\n") || null;
+    // Clean old checkpoints (>1h) in background — fire-and-forget.
+    if (live.workspaceRoot) void cleanOldCheckpoints(live.workspaceRoot);
     const envBlock = formatEnvBlock(live);
+    // Add smart file context — discover potentially relevant files.
+    const lastUserText = extractLastUserText(options.messages);
+    const relevantFiles =
+      lastUserText && live.workspaceRoot
+        ? getRelevantFiles(lastUserText, deps.toolContext.fileTracker, [])
+        : [];
+    const relevantBlock = formatRelevantFiles(relevantFiles);
+    const envWithRelevance = [envBlock, relevantBlock].filter(Boolean).join("\n") || null;
     // ── Context summarization ───────────────────────────────────────
     // Check if the conversation is approaching the context limit. If so,
     // summarize older messages and replace the history before running.
@@ -105,8 +115,8 @@ export function createContextAwareTransport(deps: Deps) {
       options.abortSignal,
     );
     const didSummarize = summarized !== options.messages;
-    const messagesForRun = envBlock
-      ? injectEnvIntoLastUser(summarized, envBlock)
+    const messagesForRun = envWithRelevance
+      ? injectEnvIntoLastUser(summarized, envWithRelevance)
       : summarized;
     // Gather MCP tools from all connected servers.
     const mcpTools = mcpManager.getActiveTools();
@@ -148,7 +158,7 @@ export function createContextAwareTransport(deps: Deps) {
       openaiCompatibleBaseURL: deps.getOpenaiCompatibleBaseURL?.(),
       openaiCompatibleModelId: deps.getOpenaiCompatibleModelId?.(),
       planMode: deps.getPlanMode?.(),
-      projectMemory,
+      projectMemory: effectiveMemory,
       goalContext: useGoalsStore.getState().activeGoalId ?? undefined,
       stackInfo: deps.getStackInfo?.(),
       uiMessages: messagesForRun,
@@ -201,6 +211,21 @@ function injectEnvIntoLastUser(
     return out;
   }
   return messages;
+}
+
+/** Extract text from the last user message for relevance matching. */
+function extractLastUserText(messages: UIMessage[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== "user") continue;
+    const parts = m.parts as ReadonlyArray<{ type: string; text?: string }>;
+    return parts
+      .filter((p) => p.type === "text" && p.text)
+      .map((p) => p.text!)
+      .join("\n")
+      .slice(0, 2000);
+  }
+  return null;
 }
 
 function formatEnvBlock(live: LiveSnapshot): string | null {

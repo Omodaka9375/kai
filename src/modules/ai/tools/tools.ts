@@ -9,6 +9,9 @@ import { buildTerminalTools } from "./terminal";
 import { buildTodoTools } from "./todo";
 import { buildWebTools } from "./web";
 import { buildYouTubeTools } from "./youtube";
+import { buildMemoryTools } from "./memory";
+import { buildBatchEditTools } from "./batchEdit";
+import { buildTerminalImageTools } from "./terminalImage";
 
 export { resolvePath, type ToolContext } from "./context";
 
@@ -19,6 +22,9 @@ export function buildCoreTools(ctx: import("./context").ToolContext) {
     ...buildEditTools(ctx),
     ...buildShellTools(ctx),
     ...buildTerminalTools(ctx),
+    ...buildMemoryTools(ctx),
+    ...buildBatchEditTools(ctx),
+    ...buildTerminalImageTools(ctx),
   } as const;
 }
 

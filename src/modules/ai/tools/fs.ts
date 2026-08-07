@@ -9,6 +9,7 @@ import {
 } from "../lib/security";
 import { newQueuedEditId, usePlanStore } from "../store/planStore";
 import { resolvePath, type ToolContext } from "./context";
+import { snapshotFile } from "../lib/checkpoints";
 
 const READ_BYTE_CAP = 25 * 1024;
 const READ_LINE_CAP = 2000;
@@ -214,6 +215,8 @@ export function buildFsTools(ctx: ToolContext) {
         }
 
         try {
+          // Snapshot before mutation for checkpoint undo.
+          await snapshotFile(abs);
           // Auto-create parent directories so the agent never needs a
           // separate create_directory step (avoids approval-loop bugs).
           const lastSep = Math.max(abs.lastIndexOf("/"), abs.lastIndexOf("\\"));

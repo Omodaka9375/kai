@@ -5,6 +5,7 @@ import { native } from "../lib/native";
 import { checkReadableCanonical, checkWritableCanonical } from "../lib/security";
 import { newQueuedEditId, usePlanStore } from "../store/planStore";
 import { resolvePath, type ToolContext } from "./context";
+import { snapshotFile } from "../lib/checkpoints";
 
 type EditResult =
   | { ok: true; replacements: number; bytesWritten: number; path: string }
@@ -354,6 +355,8 @@ export function buildEditTools(ctx: ToolContext) {
             path: abs,
           };
         }
+        // Snapshot before mutation for checkpoint undo.
+        await snapshotFile(abs);
         const result = await applyEdits(
           abs,
           [{ old_string, new_string, replace_all, line_hint }],
@@ -418,6 +421,40 @@ export function buildEditTools(ctx: ToolContext) {
           ctx.fileTracker.markModified(abs);
         }
         return result;
+      },
+    }),
+
+    checkpoint_undo: tool({
+      description:
+        "Restore files from the last AI edit checkpoint. Reverts the most recent batch of write_file/edit/multi_edit operations. Use this to undo AI changes when the result isn't what you expected. Auto-executes (no approval needed — user must explicitly invoke this tool).",
+      inputSchema: z.object({}),
+      execute: async () => {
+        const root = ctx.getWorkspaceRoot();
+        if (!root) return { error: "no workspace root — cannot find checkpoints" };
+        const { listCheckpoints, restoreCheckpoint } = await import("../lib/checkpoints");
+        const records = await listCheckpoints(root);
+        if (records.length === 0) {
+          return { message: "no checkpoints found — nothing to undo" };
+        }
+        const last = records[records.length - 1];
+        const result = await restoreCheckpoint(last);
+        // Delete the checkpoint file after successful restore.
+        try {
+          const ckDir = `${root.replace(/\\/g, "/").replace(/\/$/, "")}/.kai/checkpoints`;
+          const files = await native.readDir(ckDir);
+          for (const f of files) {
+            if (f.name.includes(String(last.timestamp))) {
+              await native.deleteFile(`${ckDir}/${f.name}`);
+              break;
+            }
+          }
+        } catch { /* best effort */ }
+        return {
+          restored: result.restored,
+          deleted: result.deleted,
+          errors: result.errors.length > 0 ? result.errors : undefined,
+          checkpoint_age_seconds: Math.round((Date.now() - last.timestamp) / 1000),
+        };
       },
     }),
   } as const;
