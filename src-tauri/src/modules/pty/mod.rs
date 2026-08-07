@@ -179,7 +179,8 @@ pub fn pty_close(state: tauri::State<PtyState>, id: u32) -> Result<(), String> {
                     t0.elapsed().as_millis()
                 );
             })
-            .expect("spawn pty drop thread");
+            .map_err(|e| log::warn!("pty_close: failed to spawn drop thread for id={id}: {e}"))
+            .ok();
     } else {
         log::debug!("pty_close: unknown id={id}");
     }

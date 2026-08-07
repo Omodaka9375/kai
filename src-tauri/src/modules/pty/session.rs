@@ -164,7 +164,7 @@ pub fn spawn(
                 log::warn!("pty backpressure: dropped {dropped_bytes} bytes (cap {MAX_PENDING})");
             }
         })
-        .expect("spawn pty reader thread");
+        .map_err(|e| format!("spawn pty reader thread: {e}"))?;
 
     let on_data_flush = on_data.clone();
     let pending_f = pending.clone();
@@ -188,7 +188,7 @@ pub fn spawn(
                 break;
             }
         })
-        .expect("spawn pty flusher thread");
+        .map_err(|e| format!("spawn pty flusher thread: {e}"))?;
 
     let on_data_exit = on_data;
     let pending_e = pending;
@@ -248,7 +248,7 @@ pub fn spawn(
                 log::debug!("pty exit send failed (channel closed): {e}");
             }
         })
-        .expect("spawn pty waiter thread");
+        .map_err(|e| format!("spawn pty waiter thread: {e}"))?;
 
     Ok((session, size))
 }

@@ -9,6 +9,7 @@ use ignore::{WalkBuilder, WalkState};
 use serde::Serialize;
 
 use super::to_canon;
+use crate::modules::lock::mutex_lock;
 use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 
 const FILE_SIZE_CAP: u64 = 5 * 1024 * 1024;
@@ -137,7 +138,7 @@ pub fn fs_grep(
                 path,
                 UTF8(|line_num, text| {
                     let line_text = text.trim_end_matches('\n').to_string();
-                    let mut guard = hits.lock().unwrap();
+                    let mut guard = mutex_lock(&hits);
                     if guard.len() >= cap {
                         truncated.store(true, Ordering::Relaxed);
                         return Ok(false);
@@ -157,7 +158,7 @@ pub fn fs_grep(
     });
 
     let final_hits = Arc::try_unwrap(hits)
-        .map(|m| m.into_inner().unwrap())
+        .map(|m| m.into_inner().unwrap_or_default())
         .unwrap_or_default();
 
     Ok(GrepResponse {

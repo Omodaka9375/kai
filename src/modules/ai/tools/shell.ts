@@ -33,7 +33,7 @@ export function cancelAllShellSessions(): void {
           native.shellSessionClose(id);
         }
       }, 3000);
-    }).catch(() => {});
+    }).catch((e) => { console.debug("shellSessionCancel failed during cancelAllShellSessions:", e); });
   }
   // Also clear the session map so the next agent run creates a fresh shell
   // instead of reusing the stuck one.
@@ -46,7 +46,7 @@ export function closeShellSession(sessionId: string): void {
   // session id since we don't know the workspace scope at deletion time.
   for (const [key, entry] of sessionShells) {
     if (key === sessionId || key.startsWith(`${sessionId}:`)) {
-      void entry.promise.then((id) => native.shellSessionClose(id)).catch(() => {});
+      void entry.promise.then((id) => native.shellSessionClose(id)).catch((e) => { console.debug("shellSessionClose failed during closeShellSession:", e); });
       sessionShells.delete(key);
     }
   }
@@ -187,7 +187,7 @@ export function buildShellTools(ctx: ToolContext) {
           let aborted = false;
           const onAbort = () => {
             aborted = true;
-            void native.shellSessionCancel(shellId).catch(() => {});
+            void native.shellSessionCancel(shellId).catch((e) => { console.debug("shellSessionCancel on abort failed:", e); });
           };
           options?.abortSignal?.addEventListener("abort", onAbort, { once: true });
 

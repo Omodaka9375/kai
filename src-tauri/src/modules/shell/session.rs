@@ -23,8 +23,6 @@ pub struct ShellSession {
     pub cancel: Arc<AtomicBool>,
     /// Per-session sentinel string used to extract cwd from command output.
     sentinel: String,
-    #[allow(dead_code)]
-    pub started_at_ms: u64,
 }
 
 #[derive(Serialize)]
@@ -57,17 +55,12 @@ fn new_sentinel() -> String {
 
 impl ShellSession {
     pub fn new(initial_cwd: String, workspace: WorkspaceEnv) -> Self {
-        let started_at_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
         Self {
             cwd: Mutex::new(initial_cwd),
             workspace,
             pristine: AtomicBool::new(true),
             cancel: Arc::new(AtomicBool::new(false)),
             sentinel: new_sentinel(),
-            started_at_ms,
         }
     }
 
