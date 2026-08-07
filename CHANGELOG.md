@@ -4,6 +4,13 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.1.1]
+
+### Fixed
+- **Tool call leak after toggling auto-approve**: `stripIncompleteToolCalls` now drops entire assistant messages that contain unresolved tool-call parts, not just the tool parts themselves. Previously, orphaned text from a stripped tool call leaked into the next turn's history, causing models to emit raw XML tool-call syntax and spiral into loops at ~30–40% context usage.
+- **PowerShell mangled inline node commands**: On Windows, one-shot shell commands now use `-EncodedCommand` with UTF-16LE base64 encoding instead of `-Command`. This prevents PowerShell from interpreting special characters (`&`, `|`, `<`, `>`, `"`, `$`, `@()`) inside shell commands, which previously broke inline `node -e` expressions and chained commands.
+- **Multi-edit CRLF corruption**: `applyEdits` now normalizes the entire file content to LF once before applying any edits, then restores the original line-ending style at the end. The per-edit CRLF↔LF positional mapping (`eolAwareFind`, `eolAwareExactFind`) has been removed — all matching now uses plain `indexOf` with fuzzy fallback in a consistent LF-only space, eliminating positional drift in sequential edits.
+
 ## [1.1.0]
 
 ### Fixed
