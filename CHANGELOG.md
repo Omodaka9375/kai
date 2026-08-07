@@ -4,6 +4,36 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.1.2]
+
+### Added
+
+- **Project Rules Directory (`.kai/rules/`)**: KAI now walks up the ancestor tree from the workspace root collecting all `KAI.md` and `KAI.local.md` files (modeled after Claude Code's CLAUDE.md discovery). The `.kai/rules/*.md` directory supports path-scoped YAML frontmatter, letting teams organize instructions into topic-specific files that apply only to matching file patterns. All discovered rules are concatenated and injected into the system prompt on every session start.
+
+- **Automatic Edit Checkpoints**: Every `write_file`, `edit`, `multi_edit`, and `batch_edit` call now snapshots the original file content before mutating it. Snapshots are stored in `.kai/checkpoints/` with timestamp and session ID. The new `checkpoint_undo` tool restores the most recent batch of edits in a single call. Checkpoints older than 1 hour are cleaned automatically on each agent run.
+
+- **Auto-Memory / Self-Writing Context**: Each project gets a persistent memory file at `~/.kai/memory/<project-hash>/MEMORY.md`. The new `save_memory` tool lets the agent persist build commands, conventions, debugging discoveries, and architectural decisions across sessions. The first 200 lines are automatically loaded into every session's context window.
+
+- **Multi-File Atomic Edits (`batch_edit`)**: The new `batch_edit` tool applies edits across multiple files in a single all-or-nothing operation. If any edit fails, all changes are rolled back via checkpoint snapshots. Single user approval covers the entire batch. Capped at 10 files per batch.
+
+- **Terminal Image Protocol (`display_image`)**: The new `display_image` tool renders images inline in the active terminal via the iTerm2 OSC 1337 inline image protocol. The agent can push base64-encoded PNG/JPEG/GIF directly to the terminal cursor position. Also includes an OSC 1337 parser for PTY output so images piped through shell commands render natively.
+
+- **Agent Hooks System (`.kai/hooks/`)**: Lifecycle hook scripts that execute before and after tool calls. `pre_tool.sh` runs before every tool and can block execution via non-zero exit code. `post_tool.sh` runs after successful tool calls (fire-and-forget). Tool-specific hooks (`pre_edit.sh`, `post_write_file.sh`, etc.) are also supported. Hooks receive `TOOL_NAME`, `TOOL_INPUT`, `TOOL_PATH`, and `TOOL_RESULT` environment variables.
+
+- **Smart File Context (Auto-Attach)**: A keyword-based relevance engine now auto-discovers potentially relevant files at the start of each agent run. It scores files tracked by `FileTracker` (recently modified > recently read > open in editor) against the user's message and injects the top matches into the `<env>` block. This eliminates the agent's initial "search phase" for many common tasks.
+
+### Fixed
+
+- **Poison-tolerant mutex in parallel grep workers**: `fs_grep`'s parallel walker now uses `mutex_lock()` instead of raw `.lock().unwrap()`, preventing a single panicking worker from poisoning the mutex and cascading failure to every other worker thread.
+
+- **Thread spawn failures no longer panic**: PTY reader, flusher, waiter, and drop thread spawns now return `Err` instead of `.expect()`-panicking when OS thread creation fails. The drop-thread in `pty_close` degrades gracefully with a log warning instead of taking down the command handler.
+
+- **Dead code removed**: `ShellSession::started_at_ms` and its `#[allow(dead_code)]` annotation removed — the field was written but never read.
+
+- **Silent error swallows now logged**: Three `Promise.catch(() => {})` sites in the shell session lifecycle (`cancelAllShellSessions`, `closeShellSession`, abort-handler) now emit `console.debug` so cleanup failures are traceable.
+
+---
+
 ## [1.1.1]
 
 ### Fixed
