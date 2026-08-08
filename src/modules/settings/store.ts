@@ -5,6 +5,7 @@ import {
   OPENAI_COMPATIBLE_DEFAULT_BASE_URL,
   type AutocompleteProviderId,
   type ModelId,
+  type ThinkingMode,
 } from "@/modules/ai/config";
 import type { KeyBinding, ShortcutId } from "@/modules/shortcuts/shortcuts";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -84,6 +85,8 @@ export type Preferences = {
   projectModelIds: Record<string, string>;
   /** Max steps a subagent may take before it is stopped. Default 24. */
   subagentMaxSteps: number;
+  /** Extended thinking / reasoning mode. Applies to models tagged "reasoning". */
+  thinkingMode: ThinkingMode;
 };
 
 const STORE_PATH = "Kai-settings.json";
@@ -120,6 +123,7 @@ const KEY_UI_THEME = "uiThemeId";
 const KEY_COMFYUI_BASE_URL = "comfyuiBaseURL";
 const KEY_COMFYUI_WORKFLOW = "comfyuiWorkflow";
 const KEY_SUBAGENT_MAX_STEPS = "subagentMaxSteps";
+const KEY_THINKING_MODE = "thinkingMode";
 
 export const TERMINAL_FONT_SIZE_DEFAULT = 14;
 export const TERMINAL_FONT_SIZE_MIN = 8;
@@ -171,6 +175,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   recentProjects: [],
   projectModelIds: {},
   subagentMaxSteps: 24,
+  thinkingMode: "off" as ThinkingMode,
 };
 
 const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
@@ -279,6 +284,8 @@ export async function loadPreferences(): Promise<Preferences> {
       get<Record<string, string>>("projectModelIds") ?? DEFAULT_PREFERENCES.projectModelIds,
     subagentMaxSteps:
       get<number>(KEY_SUBAGENT_MAX_STEPS) ?? DEFAULT_PREFERENCES.subagentMaxSteps,
+    thinkingMode:
+      get<ThinkingMode>(KEY_THINKING_MODE) ?? DEFAULT_PREFERENCES.thinkingMode,
   };
 }
 
@@ -429,6 +436,10 @@ export async function setSubagentMaxSteps(value: number): Promise<void> {
   await writePref(KEY_SUBAGENT_MAX_STEPS, clamped);
 }
 
+export async function setThinkingMode(value: ThinkingMode): Promise<void> {
+  await writePref(KEY_THINKING_MODE, value);
+}
+
 export async function setLastWorkspaceCwd(value: string): Promise<void> {
   await store.set(KEY_LAST_WORKSPACE_CWD, value);
   await store.save();
@@ -488,6 +499,7 @@ export async function onPreferencesChange(
     [KEY_COMFYUI_WORKFLOW]: "comfyuiWorkflow",
     projectModelIds: "projectModelIds",
     [KEY_SUBAGENT_MAX_STEPS]: "subagentMaxSteps",
+    [KEY_THINKING_MODE]: "thinkingMode",
   };
   // Same-process writes still fire onChange immediately; cross-window writes
   // arrive via the Tauri event emitted by writePref().

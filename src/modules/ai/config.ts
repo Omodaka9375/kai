@@ -129,6 +129,35 @@ export type ModelCapabilities = {
 
 export type ModelTag = "vision" | "reasoning" | "tools" | "coding" | "free";
 
+/** Thinking / extended reasoning mode. Off = no thinking. Low/Med/High map to
+ *  provider-specific budget tokens or effort levels. Only applies to models
+ *  tagged "reasoning". */
+export type ThinkingMode = "off" | "low" | "medium" | "high";
+
+/** Token budgets per thinking mode for Anthropic (thinking.budgetTokens). */
+export const THINKING_BUDGET_ANTHROPIC: Record<ThinkingMode, number> = {
+  off: 0,
+  low: 4000,
+  medium: 16000,
+  high: 32000,
+};
+
+/** Reasoning effort strings per mode for OpenAI. */
+export const THINKING_EFFORT_OPENAI: Record<ThinkingMode, string> = {
+  off: "",
+  low: "low",
+  medium: "medium",
+  high: "high",
+};
+
+/** Thinking budget tokens for Google Gemini. */
+export const THINKING_BUDGET_GOOGLE: Record<ThinkingMode, number> = {
+  off: 0,
+  low: 4096,
+  medium: 8192,
+  high: 16384,
+};
+
 export type ModelInfo = {
   id: string;
   provider: ProviderId;

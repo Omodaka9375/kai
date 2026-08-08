@@ -64,6 +64,7 @@ type Deps = {
   getPlanMode?: () => boolean;
   getSessionId?: () => string | null;
   getStackInfo?: () => StackInfo | null;
+  getThinkingMode?: () => string;
 };
 
 type SendOptions = {
@@ -161,6 +162,7 @@ export function createContextAwareTransport(deps: Deps) {
       projectMemory: effectiveMemory,
       goalContext: useGoalsStore.getState().activeGoalId ?? undefined,
       stackInfo: deps.getStackInfo?.(),
+      thinkingMode: deps.getThinkingMode?.() ?? "off",
       uiMessages: messagesForRun,
       abortSignal: options.abortSignal,
       mcpTools: Object.keys(mcpTools).length > 0 ? mcpTools : undefined,

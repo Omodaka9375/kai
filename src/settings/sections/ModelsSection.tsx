@@ -18,6 +18,7 @@ import {
   providerSupportsKey,
   type ModelId,
   type ProviderId,
+  type ThinkingMode,
 } from "@/modules/ai/config";
 import { clearKey, getAllKeys, setKey } from "@/modules/ai/lib/keyring";
 import { usePreferencesStore } from "@/modules/settings/preferences";
@@ -35,6 +36,7 @@ import {
   setOpenaiCompatibleBaseURL,
   setOpenaiCompatibleContextSize,
   setOpenaiCompatibleModelId,
+  setThinkingMode,
 } from "@/modules/settings/store";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -97,6 +99,8 @@ export function ModelsSection() {
         lmstudioModelId={lmstudioModelId}
         openaiCompatModelId={openaiCompatModelId}
       />
+
+      <ThinkingModeBlock />
 
       <div className="flex flex-col gap-2">
         <div className="flex items-baseline justify-between">
@@ -1051,6 +1055,58 @@ function MediaProvidersBlock() {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function ThinkingModeBlock() {
+  const thinkingMode = usePreferencesStore((s) => s.thinkingMode);
+  const THINKING_LABELS: Record<ThinkingMode, string> = {
+    off: "Off — no extended thinking",
+    low: "Low — brief reasoning (4K tokens)",
+    medium: "Medium — balanced reasoning (16K)",
+    high: "High — deep reasoning (32K)",
+  };
+  return (
+    <div className="flex flex-col gap-2">
+      <Label>Thinking mode</Label>
+      <p className="text-[10.5px] leading-relaxed text-muted-foreground">
+        Extended reasoning for models tagged with &quot;reasoning&quot;.
+        Applies to Anthropic (extended thinking), OpenAI (reasoning effort),
+        and Google (thinking config). Higher budgets cost more tokens.
+      </p>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="outline"
+            className="h-9 justify-between gap-2 px-2.5 text-[12px] w-fit"
+          >
+            <span>{THINKING_LABELS[thinkingMode]}</span>
+            <HugeiconsIcon
+              icon={ArrowDown01Icon}
+              size={12}
+              strokeWidth={2}
+              className="opacity-70"
+            />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="min-w-[280px]">
+          {(Object.entries(THINKING_LABELS) as [ThinkingMode, string][]).map(
+            ([key, label]) => (
+              <DropdownMenuItem
+                key={key}
+                onSelect={() => void setThinkingMode(key)}
+                className={cn(
+                  "text-[12px]",
+                  key === thinkingMode && "bg-accent/50",
+                )}
+              >
+                {label}
+              </DropdownMenuItem>
+            ),
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }

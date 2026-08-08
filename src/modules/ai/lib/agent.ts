@@ -14,8 +14,12 @@ import {
   MAX_AGENT_STEPS,
   providerNeedsKey,
   SYSTEM_PROMPT,
+  THINKING_BUDGET_ANTHROPIC,
+  THINKING_BUDGET_GOOGLE,
+  THINKING_EFFORT_OPENAI,
   type ModelId,
   type ProviderId,
+  type ThinkingMode,
 } from "../config";
 import { buildTools, type ToolContext } from "../tools/tools";
 import { compactModelMessagesDetailed } from "./compact";
@@ -370,6 +374,7 @@ export type RunAgentOptions = {
   projectMemory?: string | null;
   goalContext?: string | null;
   stackInfo?: StackInfo | null;
+  thinkingMode?: string;
   uiMessages: UIMessage[];
   abortSignal?: AbortSignal;
   /** Extra tools from MCP servers, already namespaced. */
@@ -528,6 +533,38 @@ export async function runAgentStream(opts: RunAgentOptions) {
 
   const finalMessages = applyCacheBreakpoints(messages, provider);
 
+  // Build provider-specific thinking / reasoning options.
+  const thinkingMode: ThinkingMode = (opts.thinkingMode ?? "off") as ThinkingMode;
+  const modelTags = getModel(modelId).tags;
+  const isReasoningModel = modelTags?.includes("reasoning");
+  const thinkingProviderOpts: Record<string, Record<string, unknown>> = {};
+  if (thinkingMode !== "off" && isReasoningModel) {
+    switch (provider) {
+      case "anthropic":
+        thinkingProviderOpts.anthropic = {
+          thinking: {
+            type: "enabled" as const,
+            budgetTokens: THINKING_BUDGET_ANTHROPIC[thinkingMode],
+          },
+        };
+        break;
+      case "openai":
+        thinkingProviderOpts.openai = {
+          reasoningEffort: THINKING_EFFORT_OPENAI[thinkingMode],
+        };
+        break;
+      case "google":
+        thinkingProviderOpts.google = {
+          thinkingConfig: {
+            thinkingBudget: THINKING_BUDGET_GOOGLE[thinkingMode],
+            includeThoughts: true,
+          },
+        };
+        break;
+    }
+  }
+  const hasProviderOpts = Object.keys(thinkingProviderOpts).length > 0;
+
   // Initialize stream guard for loop detection
   const streamGuard = getGlobalStreamGuard();
   let stepsSeen = 0;
@@ -537,6 +574,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
     tools: buildTools(opts.toolContext, opts.mcpTools),
     stopWhen: stepCountIs(MAX_AGENT_STEPS),
     abortSignal: opts.abortSignal,
+    ...(hasProviderOpts ? { providerOptions: thinkingProviderOpts } : {}),
     onStepFinish: (step) => {
       stepsSeen++;
 
@@ -585,7 +623,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
         finishReason,
       });
     },
-  });
+  } as Parameters<typeof streamText>[0]);
 }
 
 export { EMPTY_USAGE };

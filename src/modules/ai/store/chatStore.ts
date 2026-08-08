@@ -330,6 +330,7 @@ function makeChatSync(sessionId: string): Chat<UIMessage> {
       usePreferencesStore.getState().openaiCompatibleModelId,
     getSessionId: () => sessionId,
     getStackInfo: () => stackInfo,
+    getThinkingMode: () => usePreferencesStore.getState().thinkingMode,
     onStep: (step) => {
       if (step === null) {
         streamStartedAtRef.current = null;
