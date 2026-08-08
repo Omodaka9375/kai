@@ -441,10 +441,10 @@ function SessionPicker() {
 
   const filteredSessions = useMemo(() => {
     if (!workspaceRoot) return sessions;
-    const normalized = workspaceRoot.replace(/[\\/]+$/, "");
+    const normalized = workspaceRoot.replace(/\\/g, "/").replace(/\/+$/, "");
     return sessions.filter((s) => {
-      if (!s.workspaceRoot) return false; // Untagged sessions are filtered at the store level — don't leak cross-workspace
-      return s.workspaceRoot.replace(/[\\/]+$/, "") === normalized;
+      if (!s.workspaceRoot) return false; // Untagged sessions don't belong to any workspace — filter out
+      return s.workspaceRoot.replace(/\\/g, "/").replace(/\/+$/, "") === normalized;
     });
   }, [sessions, workspaceRoot]);
 

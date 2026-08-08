@@ -530,27 +530,26 @@ export const useChatStore = create<StoreState>((set, get) => ({
       );
     }
 
-    // Filter sessions to the current workspace root. Sessions without a
-    // workspaceRoot (from before this feature was added) are kept — they'll
-    // be auto-tagged with the current root the first time the user opens them.
-    const workspaceSessions = normalizedRoot
-      ? sessions.filter((s) => {
-          const sRoot = norm(s.workspaceRoot);
-          return sRoot === normalizedRoot || !sRoot;
-        })
-      : sessions;
+    // Keep ALL sessions from the store — never filter at the store level.
+    // Filtering is done at the display layer (SessionPicker) so sessions
+    // from other workspaces survive across workspace switches. Previously
+    // we filtered here and wrote the filtered list back to the store via
+    // saveSessionsList, permanently deleting cross-workspace sessions.
+    const allSessions = sessions;
 
-    // Reuse the most recent untitled "New chat" session if one exists from
-    // the previous run — no point stacking empty placeholder sessions every
-    // launch. Otherwise prepend a fresh one.
-    const reusable =
-      workspaceSessions[0]?.title === "New chat"
-        ? workspaceSessions[0]
-        : null;
+    // Find an existing untitled "New chat" session for this workspace so
+    // we don't stack empty placeholders on every launch.
+    const reusable = allSessions.find(
+      (s) =>
+        s.title === "New chat" &&
+        (norm(s.workspaceRoot) === normalizedRoot ||
+          (!s.workspaceRoot && normalizedRoot == null)),
+    );
+
     let nextSessions: SessionMeta[];
     let freshId: string;
     if (reusable) {
-      nextSessions = workspaceSessions;
+      nextSessions = allSessions;
       freshId = reusable.id;
     } else {
       freshId = newSessionId();
@@ -561,7 +560,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
         updatedAt: Date.now(),
         workspaceRoot: root,
       };
-      nextSessions = [fresh, ...workspaceSessions];
+      nextSessions = [fresh, ...allSessions];
       void saveSessionsList(nextSessions).catch((err) =>
         console.error("[hydrateSessions] Failed to persist sessions:", err),
       );
