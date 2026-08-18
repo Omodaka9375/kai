@@ -334,30 +334,95 @@ function wrapAsciiArt(text: string): string {
 }
 
 /** Strip leaked model thinking/channel tokens and raw tool call syntax. */
+/** Remove a partial trailing token like `<|cha` or `<foo` at the very end of
+ *  a still-streaming text. Linear scan (no regex) — the previous `$`-anchored
+ *  global regexes were O(braces·len) on content with many `<`/`|` chars.
+ *  Requires at least one alphanumeric so we don't eat legitimate symbols
+ *  like `<-` or `|->`. */
+function stripTrailingPartialTag(s: string): string {
+  const n = s.length;
+  if (n === 0) return s;
+  let j = n;
+  while (j > 0) {
+    const c = s.charCodeAt(j - 1);
+    const isRunChar =
+      (c >= 48 && c <= 57) || // 0-9
+      (c >= 65 && c <= 90) || // A-Z
+      (c >= 97 && c <= 122) || // a-z
+      c === 95 || // _
+      c === 45; // -
+    if (!isRunChar) break;
+    j--;
+  }
+  if (j === n || j === 0) return s;
+  // First char after the tag marker must be alphanumeric or underscore
+  // (not `-`/`_`-only), matching the original `[a-z_0-9]` requirement.
+  const first = s.charCodeAt(j);
+  const isFirstAlnum =
+    (first >= 48 && first <= 57) ||
+    (first >= 65 && first <= 90) ||
+    (first >= 97 && first <= 122) ||
+    first === 95;
+  if (!isFirstAlnum) return s;
+  const prev = s[j - 1];
+  if (prev === "|" && j >= 2 && s[j - 2] === "<") return s.slice(0, j - 2);
+  if (prev === "|" || prev === "<") return s.slice(0, j - 1);
+  return s;
+}
+
 function stripLeakedTokens(text: string): string {
-  let cleaned = text
-    .replace(/<\|channel\|?>[\s\S]*?<\|?channel\|>/gi, "")
-    .replace(/<\|(?:start|end)_of_thought\|>/gi, "")
-    .replace(/<\|thinking\|>[\s\S]*?<\| \/thinking\|>/gi, "")
-    .replace(/<\|thinking\|>[\s\S]*?<\|?\/thinking\|>/gi, "")
-    // Strip XML-style <thinking>…</thinking> blocks (complete or dangling open tag)
-    .replace(/<thinking>[\s\S]*?<\/thinking>/gi, "")
-    // Only strip a dangling <thinking> if NO closing </thinking> follows
-    .replace(/<thinking>(?![\s\S]*<\/thinking>)[\s\S]*$/gi, "")
-    .replace(/<\|im_(?:start|end)\|>[^\n]*/g, "")
-    // Raw tool call syntax leaked by Gemma 4 and similar models.
-    .replace(/<\|?tool_call_?[a-z_]*(?::|\|?>)?/gi, "")
-    .replace(/<\|?\/tool_call_?[a-z_]*(?:\|?>)?/gi, "")
-    .replace(/call:[a-z_]+\{[^}]*\}(?:<[^>]*>)?/gi, "")
-    .replace(/<tool_call>?/gi, "")
-    .replace(/<\/tool_call>?/gi, "")
-    // Strip raw leaked JSON tool-call payloads containing <|"|> delimiters
-    .replace(/(?:^|,)?\s*\{[\s\S]*?(?:new_string|old_string|path|proposedContent|proposed_content)\s*:\s*<\|"\|>[\s\S]*?\}(?:\s*,?)?/gi, "")
-    .replace(/<\|"\|>/g, "")
-    // Strip any trailing partial or incomplete tags/tokens at the very end of the text stream.
-    // Require at least one alphanumeric so we don't eat legitimate symbols like <- or |->
-    .replace(/(?:<\|?|\|)[a-z_0-9][a-z_0-9\-]*$/i, "")
-    .replace(/<[a-z_0-9][a-z_0-9\-]*$/i, "");
+  let cleaned = text;
+
+  // Every replace is guarded by a cheap indexOf on its trigger token, so the
+  // regexes never scan content that can't match them. This is critical for
+  // streaming: `stripLeakedTokens` runs on the WHOLE accumulated text on
+  // every streamed token (both text and reasoning parts). The unguarded JSON
+  // regex below is O(braces·len) — when a model "thinks" about code/JSON the
+  // text is full of `{`, so each token triggered a quadratic scan and froze
+  // the app until the reasoning finished.
+
+  // Raw leaked JSON tool-call payloads containing <|"|> delimiters — runs
+  // FIRST because the payload regex needs the delimiter to still be present
+  // (the later <|"|> cleanup below would otherwise consume it).
+  if (cleaned.includes('<|"|>')) {
+    cleaned = cleaned.replace(
+      /(?:^|,)?\s*\{[\s\S]*?(?:new_string|old_string|path|proposedContent|proposed_content)\s*:\s*<\|"\|>[\s\S]*?\}(?:\s*,?)?/gi,
+      "",
+    );
+  }
+
+  if (cleaned.includes("<|")) {
+    cleaned = cleaned
+      .replace(/<\|channel\|?>[\s\S]*?<\|?channel\|>/gi, "")
+      .replace(/<\|(?:start|end)_of_thought\|>/gi, "")
+      .replace(/<\|thinking\|>[\s\S]*?<\| \/thinking\|>/gi, "")
+      .replace(/<\|thinking\|>[\s\S]*?<\|?\/thinking\|>/gi, "")
+      .replace(/<\|im_(?:start|end)\|>[^\n]*/g, "")
+      // Raw tool call syntax leaked by Gemma 4 and similar models.
+      .replace(/<\|?tool_call_?[a-z_]*(?::|\|?>)?/gi, "")
+      .replace(/<\|?\/tool_call_?[a-z_]*(?:\|?>)?/gi, "")
+      .replace(/<\|"\|>/g, "");
+  }
+  // Strip XML-style <thinking>…</thinking> blocks (complete or dangling open
+  // tag). Only strip a dangling <thinking> if NO closing </thinking> follows.
+  if (cleaned.includes("<thinking")) {
+    cleaned = cleaned
+      .replace(/<thinking>[\s\S]*?<\/thinking>/gi, "")
+      .replace(/<thinking>(?![\s\S]*<\/thinking>)[\s\S]*$/gi, "");
+  }
+  if (
+    cleaned.includes("call:") ||
+    cleaned.includes("<tool_call") ||
+    cleaned.includes("</tool_call")
+  ) {
+    cleaned = cleaned
+      .replace(/call:[a-z_]+\{[^}]*\}(?:<[^>]*>)?/gi, "")
+      .replace(/<tool_call>?/gi, "")
+      .replace(/<\/tool_call>?/gi, "");
+  }
+  // Strip any trailing partial or incomplete tags/tokens at the very end of
+  // the text stream (linear scan).
+  cleaned = stripTrailingPartialTag(cleaned);
 
   // Convert LaTeX math arrow symbols to standard Unicode arrows
   cleaned = cleaned

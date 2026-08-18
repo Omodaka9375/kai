@@ -710,7 +710,34 @@ export const useChatStore = create<StoreState>((set, get) => ({
     const activeId = get().activeSessionId;
     if (!activeId) return null;
     try {
-      const { newId, messages } = await forkSessionFromStore(activeId, atMessageIndex);
+      // Fork from the LIVE conversation (what the user actually sees), not
+      // the persisted snapshot. The store copy can be shorter than the UI —
+      // saveMessages trims to 512KB keeping only the most recent messages,
+      // and the debounced persist can lag a few hundred ms — which made
+      // Fork silently throw "invalid message index" and do nothing.
+      let messages: UIMessage[] = [];
+      let newId = "";
+      const live = chats.get(activeId)?.messages;
+      if (
+        live &&
+        atMessageIndex >= 0 &&
+        atMessageIndex < live.length &&
+        live.length > 0
+      ) {
+        // Live path: slice the conversation the user is actually seeing.
+        messages = stripIncompleteToolMessages(
+          live.slice(0, atMessageIndex + 1),
+        );
+        newId = newSessionId();
+        await saveMessages(newId, messages);
+      } else {
+        // Chat not resident (shouldn't happen for the displayed session) —
+        // fall back to the persisted snapshot.
+        const stored = await forkSessionFromStore(activeId, atMessageIndex);
+        messages = stored.messages;
+        newId = stored.newId;
+      }
+      if (messages.length === 0) throw new Error("source session not found");
       const meta: SessionMeta = {
         id: newId,
         title: "Fork",
