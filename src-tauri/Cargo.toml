@@ -64,6 +64,9 @@ windows-sys = { version = "0.59", features = [
 	"Win32_System_JobObjects",
 	"Win32_System_Threading",
 ] }
+# Raw WebView2 COM bindings — lets us grant MICROPHONE/CAMERA permissions
+# (wry's default PermissionRequested handler only auto-approves clipboard).
+webview2-com = "0.38"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-autostart = "2"

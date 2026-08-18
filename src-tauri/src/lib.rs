@@ -6,6 +6,52 @@ use std::sync::Mutex;
 use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_window_state::StateFlags;
 
+/// Grant MICROPHONE (and CAMERA) permissions on a WebView2 webview.
+///
+/// wry's built-in `PermissionRequested` handler only auto-approves
+/// `CLIPBOARD_READ`; every other permission (including microphone, which
+/// `navigator.mediaDevices.getUserMedia` needs for voice dictation) is left
+/// denied. Register an additional handler here that explicitly allows
+/// MICROPHONE / CAMERA so in-app dictation works on the packaged app.
+#[cfg(target_os = "windows")]
+fn grant_media_permissions(window: &tauri::WebviewWindow) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        COREWEBVIEW2_PERMISSION_KIND, COREWEBVIEW2_PERMISSION_KIND_CAMERA,
+        COREWEBVIEW2_PERMISSION_KIND_MICROPHONE, COREWEBVIEW2_PERMISSION_STATE_ALLOW,
+    };
+    use webview2_com::PermissionRequestedEventHandler;
+
+    let _ = window.with_webview(move |webview| {
+        let controller = webview.controller();
+        // SAFETY: these calls happen on the main thread that owns the webview,
+        // matching WebView2's COM apartment requirements.
+        unsafe {
+            let Ok(core) = controller.CoreWebView2() else {
+                return;
+            };
+            // Keep `token` alive for the lifetime of `core` (the handler is
+            // only invoked synchronously by us; registration outlives the
+            // webview because WebView2 owns the handler).
+            let mut token = Default::default();
+            let _ = core.add_PermissionRequested(
+                &PermissionRequestedEventHandler::create(Box::new(|_, args| {
+                    if let Some(args) = args {
+                        let mut kind = COREWEBVIEW2_PERMISSION_KIND::default();
+                        let _ = args.PermissionKind(&mut kind);
+                        if kind == COREWEBVIEW2_PERMISSION_KIND_MICROPHONE
+                            || kind == COREWEBVIEW2_PERMISSION_KIND_CAMERA
+                        {
+                            let _ = args.SetState(COREWEBVIEW2_PERMISSION_STATE_ALLOW);
+                        }
+                    }
+                    Ok(())
+                })),
+                &mut token,
+            );
+        }
+    });
+}
+
 /// Drained on first read so HMR / re-mounts can't replay the launch dir.
 #[derive(Default)]
 struct LaunchDir(Mutex<Option<String>>);
@@ -71,6 +117,11 @@ async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Res
     let builder = builder.decorations(false).transparent(true);
 
     let window = builder.build().map_err(|e| e.to_string())?;
+
+    // Grant microphone/camera access on the settings webview too (WebView2
+    // denies media by default — only clipboard is auto-approved by wry).
+    #[cfg(target_os = "windows")]
+    grant_media_permissions(&window);
 
     // Some Linux compositors (GNOME/Mutter with CSD-by-default) ignore the
     // builder-time decorations flag — re-assert it after realize.
