@@ -16,6 +16,7 @@ import {
   TerminalIcon,
   TextSelectIcon,
   UndoIcon,
+  UserWarning01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
@@ -273,21 +274,36 @@ export function AiInputBar() {
                       ? "Stop & transcribe"
                       : c.voice.transcribing
                         ? "Transcribing…"
-                        : "Voice input"
+                        : c.voice.error
+                          ? c.voice.error
+                          : "Voice input"
                   }
-                  onClick={() =>
-                    c.voice.recording ? c.voice.stop() : void c.voice.start()
-                  }
+                  onClick={() => {
+                    if (c.voice.recording) {
+                      c.voice.stop();
+                    } else {
+                      if (c.voice.error) c.voice.clearError();
+                      void c.voice.start();
+                    }
+                  }}
                   disabled={c.isBusy || c.voice.transcribing}
                   className={cn(
                     "shrink-0 size-6 flex items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50",
-                    c.voice.recording && "bg-destructive/15 text-destructive hover:bg-destructive/20 hover:text-destructive animate-pulse"
+                    c.voice.recording &&
+                      "bg-destructive/15 text-destructive hover:bg-destructive/20 hover:text-destructive animate-pulse",
+                    c.voice.error && "text-amber-600 dark:text-amber-400",
                   )}
                 >
                   {c.voice.recording ? (
                     <span className="size-1.5 rounded-full bg-destructive" />
                   ) : c.voice.transcribing ? (
                     <Spinner className="size-3" />
+                  ) : c.voice.error ? (
+                    <HugeiconsIcon
+                      icon={UserWarning01Icon}
+                      size={14}
+                      strokeWidth={1.75}
+                    />
                   ) : (
                     <HugeiconsIcon icon={Mic01Icon} size={14} strokeWidth={1.75} />
                   )}
@@ -428,6 +444,24 @@ export function AiInputBar() {
                 <Spinner className="size-3" />
               )}
               <span className="truncate">{voiceLabel}</span>
+            </motion.div>
+          )}
+          {c.voice.error && (
+            <motion.div
+              key="voice-error"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.12 }}
+              className="flex items-center gap-1.5 px-1 text-[10.5px] text-amber-600 dark:text-amber-400"
+            >
+              <HugeiconsIcon
+                icon={UserWarning01Icon}
+                size={12}
+                strokeWidth={2}
+                className="shrink-0"
+              />
+              <span className="truncate">{c.voice.error}</span>
             </motion.div>
           )}
         </AnimatePresence>
