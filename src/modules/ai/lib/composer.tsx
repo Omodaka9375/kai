@@ -9,9 +9,12 @@ import {
 import { useWhisperRecording } from "../hooks/useWhisperRecording";
 import { expandSnippetTokens, type Snippet } from "../lib/snippets";
 import { tryRunSlashCommand, type SlashCommandMeta } from "./slashCommands";
-import { getOrCreateChat, useChatStore } from "../store/chatStore";
+import {
+  getOrCreateChat,
+  stopSession,
+  useChatStore,
+} from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
-import { cancelAllShellSessions } from "../tools/shell";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 
 export type FileAttachment = {
@@ -347,8 +350,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
 
   const stop = () => {
     if (!sessionId) return;
-    cancelAllShellSessions();
-    void getOrCreateChat(sessionId).stop();
+    stopSession(sessionId);
   };
 
   const canSend =

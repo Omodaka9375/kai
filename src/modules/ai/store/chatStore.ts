@@ -330,7 +330,17 @@ function makeChatSync(sessionId: string): Chat<UIMessage> {
       usePreferencesStore.getState().openaiCompatibleModelId,
     getSessionId: () => sessionId,
     getStackInfo: () => stackInfo,
-    getThinkingMode: () => usePreferencesStore.getState().thinkingMode,
+    // Resolve the effective thinking mode for the *selected* model: a
+    // per-model override wins, otherwise the global default applies.
+    getThinkingMode: () => {
+      const prefs = usePreferencesStore.getState();
+      const { selectedModelId } = useChatStore.getState();
+      return (
+        prefs.modelThinkingModes[selectedModelId] ??
+        prefs.thinkingMode ??
+        "off"
+      );
+    },
     onStep: (step) => {
       if (step === null) {
         streamStartedAtRef.current = null;
@@ -417,8 +427,10 @@ export const useChatStore = create<StoreState>((set, get) => ({
     const fn = get().approvalResponder;
     if (fn) fn(approvalId, approved);
     // When the user explicitly denies a tool call, stop the agent so it
-    // doesn't keep making more calls. The user wants to intervene.
-    if (!approved) stop();
+    // doesn't keep making more calls. The user wants to intervene. Abort
+    // only — don't strip pending approvals here, because the approval
+    // response above is still being applied and we must not race it.
+    if (!approved) abortSession(get().activeSessionId ?? "");
   },
 
   apiKeys: { ...EMPTY_PROVIDER_KEYS },
@@ -768,9 +780,84 @@ export async function sendMessage(text: string): Promise<boolean> {
   return true;
 }
 
+/** Tool-part states that count as fully resolved (safe to keep). */
+const COMPLETE_PART_STATES = new Set([
+  "output-available",
+  "output-error",
+  "approval-responded",
+]);
+
+function hasPendingApprovals(chat: Chat<UIMessage>): boolean {
+  for (const m of chat.messages) {
+    if (m.role !== "assistant") continue;
+    for (const p of m.parts as unknown[]) {
+      if ((p as { state?: string }).state === "approval-requested") return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Drop assistant messages that still hold an unfinished tool-call part
+ * (e.g. an `approval-requested` we never responded to). Mirrors the
+ * transport's `stripIncompleteToolCalls`: keeping a message whose tool call
+ * never got an output/approval response would corrupt the next request.
+ */
+function stripIncompleteToolMessages(messages: UIMessage[]): UIMessage[] {
+  if (messages.length === 0) return messages;
+  return messages.filter((m) => {
+    if (m.role !== "assistant") return true;
+    for (const p of m.parts) {
+      const ptype = (p as { type?: string }).type ?? "";
+      if (!ptype.startsWith("tool-") && ptype !== "dynamic-tool") continue;
+      const state = (p as { state?: string }).state;
+      if (state == null || !COMPLETE_PART_STATES.has(state)) return false;
+    }
+    return true;
+  });
+}
+
+function releasePendingApprovals(chat: Chat<UIMessage>): void {
+  if (!hasPendingApprovals(chat)) return;
+  const cleaned = stripIncompleteToolMessages(chat.messages);
+  if (cleaned !== chat.messages) {
+    chat.messages = cleaned;
+  }
+}
+
+/**
+ * Abort the chat's active run without touching pending approvals. Used after
+ * an explicit approval response so we don't race the response application.
+ */
+export function abortSession(sessionId: string): void {
+  cancelAllShellSessions();
+  const chat = chats.get(sessionId);
+  if (!chat) return;
+  void chat.stop();
+}
+
+/**
+ * Stop the agent and release any pending approvals.
+ *
+ * `Chat.stop()` only aborts an in-flight (`streaming`/`submitted`) run — it
+ * is a no-op when the agent is paused awaiting a tool approval (status
+ * `ready`). If the user ignores an approval card, the orphaned
+ * `approval-requested` part pins the session in the `awaiting-approval`
+ * busy state forever: the Stop button appears dead and new messages are
+ * blocked. So on stop we also strip those stale parts, which drops
+ * `approvalsPending` back to 0 and frees the session.
+ */
+export function stopSession(sessionId: string): void {
+  cancelAllShellSessions();
+  const chat = chats.get(sessionId);
+  if (!chat) return;
+  void chat.stop().finally(() => {
+    releasePendingApprovals(chat);
+  });
+}
+
 export function stop(): void {
   const id = useChatStore.getState().activeSessionId;
   if (!id) return;
-  cancelAllShellSessions();
-  void chats.get(id)?.stop();
+  stopSession(id);
 }

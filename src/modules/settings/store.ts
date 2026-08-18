@@ -87,6 +87,9 @@ export type Preferences = {
   subagentMaxSteps: number;
   /** Extended thinking / reasoning mode. Applies to models tagged "reasoning". */
   thinkingMode: ThinkingMode;
+  /** Per-model thinking overrides, keyed by ModelId. A model with no entry
+   *  falls back to the global `thinkingMode`. */
+  modelThinkingModes: Record<string, ThinkingMode>;
 };
 
 const STORE_PATH = "Kai-settings.json";
@@ -124,6 +127,7 @@ const KEY_COMFYUI_BASE_URL = "comfyuiBaseURL";
 const KEY_COMFYUI_WORKFLOW = "comfyuiWorkflow";
 const KEY_SUBAGENT_MAX_STEPS = "subagentMaxSteps";
 const KEY_THINKING_MODE = "thinkingMode";
+const KEY_MODEL_THINKING_MODES = "modelThinkingModes";
 
 export const TERMINAL_FONT_SIZE_DEFAULT = 14;
 export const TERMINAL_FONT_SIZE_MIN = 8;
@@ -176,6 +180,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   projectModelIds: {},
   subagentMaxSteps: 24,
   thinkingMode: "off" as ThinkingMode,
+  modelThinkingModes: {},
 };
 
 const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
@@ -286,6 +291,9 @@ export async function loadPreferences(): Promise<Preferences> {
       get<number>(KEY_SUBAGENT_MAX_STEPS) ?? DEFAULT_PREFERENCES.subagentMaxSteps,
     thinkingMode:
       get<ThinkingMode>(KEY_THINKING_MODE) ?? DEFAULT_PREFERENCES.thinkingMode,
+    modelThinkingModes:
+      get<Record<string, ThinkingMode>>(KEY_MODEL_THINKING_MODES) ??
+      DEFAULT_PREFERENCES.modelThinkingModes,
   };
 }
 
@@ -440,6 +448,22 @@ export async function setThinkingMode(value: ThinkingMode): Promise<void> {
   await writePref(KEY_THINKING_MODE, value);
 }
 
+/** Set (or clear, when `null`) a model-specific thinking override. */
+export async function setModelThinkingMode(
+  modelId: string,
+  mode: ThinkingMode | null,
+): Promise<void> {
+  const current =
+    (await store.get<Record<string, ThinkingMode>>(KEY_MODEL_THINKING_MODES)) ??
+    {};
+  if (mode == null) {
+    delete current[modelId];
+  } else {
+    current[modelId] = mode;
+  }
+  await writePref(KEY_MODEL_THINKING_MODES, current);
+}
+
 export async function setLastWorkspaceCwd(value: string): Promise<void> {
   await store.set(KEY_LAST_WORKSPACE_CWD, value);
   await store.save();
@@ -500,6 +524,7 @@ export async function onPreferencesChange(
     projectModelIds: "projectModelIds",
     [KEY_SUBAGENT_MAX_STEPS]: "subagentMaxSteps",
     [KEY_THINKING_MODE]: "thinkingMode",
+    [KEY_MODEL_THINKING_MODES]: "modelThinkingModes",
   };
   // Same-process writes still fire onChange immediately; cross-window writes
   // arrive via the Tauri event emitted by writePref().

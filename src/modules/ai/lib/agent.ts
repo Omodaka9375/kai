@@ -17,6 +17,7 @@ import {
   THINKING_BUDGET_ANTHROPIC,
   THINKING_BUDGET_GOOGLE,
   THINKING_EFFORT_OPENAI,
+  THINKING_EFFORT_XAI,
   type ModelId,
   type ProviderId,
   type ThinkingMode,
@@ -559,6 +560,13 @@ export async function runAgentStream(opts: RunAgentOptions) {
             thinkingBudget: THINKING_BUDGET_GOOGLE[thinkingMode],
             includeThoughts: true,
           },
+        };
+        break;
+      case "xai":
+        // Grok chat endpoint only accepts "low" | "high"; medium maps to
+        // "high" (see THINKING_EFFORT_XAI).
+        thinkingProviderOpts.xai = {
+          reasoningEffort: THINKING_EFFORT_XAI[thinkingMode],
         };
         break;
     }

@@ -158,6 +158,15 @@ export const THINKING_BUDGET_GOOGLE: Record<ThinkingMode, number> = {
   high: 16384,
 };
 
+/** Reasoning effort strings per mode for xAI (Grok). The chat endpoint only
+ *  accepts "low" | "high", so "medium" maps up to "high". */
+export const THINKING_EFFORT_XAI: Record<ThinkingMode, string> = {
+  off: "",
+  low: "low",
+  medium: "high",
+  high: "high",
+};
+
 export type ModelInfo = {
   id: string;
   provider: ProviderId;
