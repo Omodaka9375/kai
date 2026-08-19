@@ -324,6 +324,11 @@ export const native = {
       repoRoot,
       workspace: currentWorkspaceEnv(),
     }),
+  gitPull: (repoRoot: string) =>
+    invoke<void>("git_pull", {
+      repoRoot,
+      workspace: currentWorkspaceEnv(),
+    }),
   gitPush: (repoRoot: string) =>
     invoke<GitPushResult>("git_push", {
       repoRoot,

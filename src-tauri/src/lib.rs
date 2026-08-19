@@ -210,6 +210,7 @@ pub fn run() {
             git::commands::git_commit,
             git::commands::git_fetch,
             git::commands::git_pull_ff_only,
+            git::commands::git_pull,
             git::commands::git_push,
             git::commands::git_log,
             git::commands::git_show_commit,

@@ -928,6 +928,31 @@ pub fn pull_ff_only(
     ensure_success(&output, "git pull --ff-only failed")
 }
 
+/// Fetch + merge (not ff-only). This is the default `git pull` behavior:
+/// fetches and then merges, which can produce conflicts on divergent branches.
+pub fn pull(
+    registry: &WorkspaceRegistry,
+    repo_root: &str,
+    workspace: &WorkspaceEnv,
+) -> Result<()> {
+    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
+    ensure_git_available(&repo_root.workspace)?;
+    // Fetch first so we have the latest remote refs.
+    let _ = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        ["fetch", "--prune"],
+        NETWORK_TIMEOUT_SECS,
+    )?;
+    let output = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        ["pull"],
+        NETWORK_TIMEOUT_SECS,
+    )?;
+    ensure_success(&output, "git pull failed")
+}
+
 fn nothing_to_commit(output: &GitOutput) -> bool {
     let stderr = String::from_utf8_lossy(&output.stderr).to_ascii_lowercase();
     let stdout = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();

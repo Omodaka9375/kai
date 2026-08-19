@@ -181,6 +181,19 @@ pub async fn git_pull_ff_only(
 }
 
 #[tauri::command]
+pub async fn git_pull(
+    repo_root: String,
+    workspace: Option<WorkspaceEnv>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    blocking(app, move |r| {
+        operations::pull(r, &repo_root, &workspace).map_err(Into::into)
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn git_push(
     repo_root: String,
     workspace: Option<WorkspaceEnv>,

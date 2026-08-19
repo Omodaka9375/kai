@@ -76,7 +76,8 @@ function getContextualAction(
   status: GitStatusSnapshot | null,
 ): SourceControlRemoteAction | null {
   if (!status?.upstream) return null;
-  if (status.ahead > 0 && status.behind > 0) return null;
+  // When diverged, the user should pull (which will merge) to resolve.
+  if (status.ahead > 0 && status.behind > 0) return "pull";
   if (status.behind > 0) return "pull";
   if (status.ahead > 0) return "push";
   return "fetch";
@@ -96,9 +97,9 @@ export function getSourceControlRemoteIndicator(
       visible: true,
       label: `↑${summary.ahead} ↓${summary.behind}`,
       title:
-        "Branch has diverged from upstream. Use Source Control or the terminal to resolve it.",
-      disabled: true,
-      action: null,
+        "Branch has diverged — pull will merge. Merge conflicts may need manual resolution.",
+      disabled: summary.busyAction !== null,
+      action: "pull",
     };
   }
   if (summary.behind > 0) {
@@ -387,7 +388,13 @@ export function useSourceControl(
         } else if (action === "pull") {
           await native.gitFetch(repo.repoRoot);
           touchAutoFetch(autoFetchByRepoRef.current, repo.repoRoot);
-          await native.gitPullFfOnly(repo.repoRoot);
+          // Use ff-only when safe (behind but not diverged), full merge when
+          // diverged so conflicts are surfaced in the source-control panel.
+          if (status.ahead > 0 && status.behind > 0) {
+            await native.gitPull(repo.repoRoot);
+          } else {
+            await native.gitPullFfOnly(repo.repoRoot);
+          }
         } else {
           await native.gitPush(repo.repoRoot);
         }

@@ -29,7 +29,6 @@ import {
   ArrowUp01Icon,
   CheckmarkCircle01Icon,
   Download01Icon,
-  FolderCloudIcon,
   FolderGitTwoIcon,
   MinusSignIcon,
   MinusSignSquareIcon,
@@ -201,10 +200,8 @@ export const SourceControlPanel = memo(function SourceControlPanel({
 
   const canPull =
     hasUpstream &&
-    !isDiverged &&
     !scm.actionBusy &&
     !sourceControl.busyAction;
-  const canFetch = hasUpstream && !scm.actionBusy && !sourceControl.busyAction;
 
   const footerFeedback = useMemo(() => {
     if (scm.actionError)
@@ -248,10 +245,6 @@ export const SourceControlPanel = memo(function SourceControlPanel({
       }, 450);
     });
   }, [scm]);
-
-  const handleFetch = useCallback(() => {
-    void sourceControl.runRemoteAction("fetch");
-  }, [sourceControl]);
 
   const handlePull = useCallback(() => {
     void sourceControl.runRemoteAction("pull");
@@ -469,7 +462,6 @@ export const SourceControlPanel = memo(function SourceControlPanel({
 
   if (!open) return null;
 
-  const fetchBusy = sourceControl.busyAction === "fetch";
   const pullBusy = sourceControl.busyAction === "pull";
 
   return (
@@ -518,32 +510,16 @@ export const SourceControlPanel = memo(function SourceControlPanel({
           </div>
           <div className="flex shrink-0 items-center gap-0.5">
             <IconActionButton
-              label={fetchBusy ? "Fetching…" : "Fetch from remote"}
-              disabled={!canFetch}
-              onClick={handleFetch}
-              side="bottom"
-            >
-              {fetchBusy ? (
-                <Spinner className="size-3" />
-              ) : (
-                <HugeiconsIcon
-                  icon={FolderCloudIcon}
-                  size={14}
-                  strokeWidth={1.85}
-                />
-              )}
-            </IconActionButton>
-            <IconActionButton
               label={
                 pullBusy
-                  ? "Pulling\u2026"
-                  : isDiverged
-                    ? "Branch diverged \u2014 resolve in terminal"
-                    : !hasUpstream
-                      ? "No upstream configured"
+                  ? "Pulling…"
+                  : !hasUpstream
+                    ? "No upstream configured"
+                    : isDiverged
+                      ? `Pull & merge ${scm.status?.behind ?? 0} commits — conflicts may need resolution`
                       : (scm.status?.behind ?? 0) > 0
                         ? `Pull ${scm.status?.behind ?? 0} commits (fast-forward)`
-                        : "Pull from remote"
+                        : "Pull from remote (up to date)"
               }
               disabled={!canPull}
               onClick={handlePull}
@@ -629,7 +605,7 @@ export const SourceControlPanel = memo(function SourceControlPanel({
                     <span>Ch: {scm.commitMessage.length}</span>
                   ) : (
                     <span className="flex gap-2 items-center">
-                      {commitShortcut} <p>to commit</p>
+                      {commitShortcut} to commit
                     </span>
                   )}
                 </div>
@@ -671,21 +647,30 @@ export const SourceControlPanel = memo(function SourceControlPanel({
                 </div>
               </div>
 
-              <div className="flex min-w-0 items-center gap-1.5 text-[10.5px] text-muted-foreground">
+              <div className="flex min-w-0 items-center gap-2 text-[10.5px]">
                 <span
                   className={cn(
-                    "size-1.5 shrink-0 rounded-full transition-colors",
+                    "flex h-4 min-w-[3.25rem] shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-medium leading-none",
                     canCommit
-                      ? "bg-emerald-500 shadow-[0_0_6px_var(--color-emerald-500)]"
+                      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
                       : stagedCount > 0
-                        ? "bg-amber-500"
-                        : "bg-muted-foreground/35",
+                        ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                        : "border-border/40 bg-muted/30 text-muted-foreground",
                   )}
-                />
-                <span className="truncate font-medium text-foreground/85">
+                >
+                  <span
+                    className={cn(
+                      "size-1.5 rounded-full",
+                      canCommit
+                        ? "bg-emerald-500"
+                        : stagedCount > 0
+                          ? "bg-amber-500"
+                          : "bg-muted-foreground/40",
+                    )}
+                  />
                   {stagedCount === 0
-                    ? "Nothing staged"
-                    : `${stagedCount} ${stagedCount === 1 ? "file" : "files"} staged`}
+                    ? "Empty"
+                    : `${stagedCount} staged`}
                 </span>
                 <span className="ml-auto shrink-0 truncate text-muted-foreground/65">
                   {pushStatusLabel}
