@@ -375,7 +375,7 @@ export function buildEditTools(ctx: ToolContext) {
 
     multi_edit: tool({
       description:
-        "Apply several replacements to ONE file in a single call. Same exact-match rules as edit: every old_string must be copied verbatim from the file. Edits apply in order to the running buffer; if any old_string is missing or non-unique, NOTHING is written (all-or-nothing). Prefer this over repeated edit calls when changing several spots in the same file. Asks for user approval.",
+        "Apply several replacements to ONE file in a single call. Same exact-match rules as edit: every old_string must be copied verbatim from the file. Edits apply in order to the running buffer; if any old_string is missing or non-unique, the batch is retried edit-by-edit so correct edits still land — only the failing ones are reported. Prefer this over repeated edit calls when changing several spots in the same file. Asks for user approval.",
       inputSchema: z.object({
         path: z.string().optional(),
         edits: z
@@ -408,19 +408,80 @@ export function buildEditTools(ctx: ToolContext) {
             path: abs,
           };
         }
+        await snapshotFile(abs);
+        // Try batch first — fast path when all old_strings match.
         const result = await applyEdits(
           abs,
           edits,
           "multi_edit",
           ctx.readCache,
         );
-        if ("error" in result) {
-          editFailures.set(abs, failures + 1);
-        } else {
+        if ("ok" in result) {
           editFailures.delete(abs);
           ctx.fileTracker.markModified(abs);
+          return result;
         }
-        return result;
+        // Batch failed — retry each edit individually so correct edits
+        // still land and only the mismatched ones are reported.
+        const succeeded: Array<{
+          old_string: string;
+          replacements: number;
+        }> = [];
+        const failed: Array<{
+          old_string: string;
+          error: string;
+        }> = [];
+        for (let i = 0; i < edits.length; i++) {
+          const e = edits[i];
+          const r = await applyEdits(
+            abs,
+            [e],
+            "edit",
+            ctx.readCache,
+          );
+          if ("ok" in r && r.ok) {
+            succeeded.push({
+              old_string: e.old_string.slice(0, 80),
+              replacements: (r as Extract<EditResult, { ok: true }>).replacements,
+            });
+          } else {
+            const err = r as Extract<EditResult, { ok: false }>;
+            failed.push({
+              old_string: e.old_string.slice(0, 80),
+              error: err.error,
+            });
+          }
+        }
+        if (succeeded.length === 0) {
+          editFailures.set(abs, failures + 1);
+          return {
+            ok: false,
+            error:
+              `All ${edits.length} edits failed. ` +
+              (failed.length === 1
+                ? `Reason: ${failed[0].error}`
+                : `First failure: ${failed[0].error}`),
+            path: abs,
+            applied: 0,
+            failed: edits.length,
+          } as EditResult;
+        }
+        // Partial success — reset failure counter, mark file modified.
+        editFailures.delete(abs);
+        ctx.fileTracker.markModified(abs);
+        return {
+          ok: true as const,
+          replacements: succeeded.reduce((sum, s) => sum + s.replacements, 0),
+          bytesWritten: 0,
+          path: abs,
+          applied: succeeded.length,
+          failed: failed.length,
+          failures: failed.map((f) => f.error),
+          note:
+            failed.length > 0
+              ? `${succeeded.length} of ${edits.length} edits applied. The remaining ${failed.length} must be redone with corrected old_string values.`
+              : undefined,
+        };
       },
     }),
 
