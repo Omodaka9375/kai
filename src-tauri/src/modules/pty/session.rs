@@ -56,6 +56,12 @@ impl Drop for Session {
 }
 static SPAWN_LOCK: Mutex<()> = Mutex::new(());
 
+const CONPTY_SETTLE_MS: u64 = 50;
+
+/// Tracks the last PTY spawn timestamp to avoid racing ConPTY.
+/// Used instead of holding SPAWN_LOCK during the settle sleep.
+static LAST_SPAWN_AT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 pub fn spawn(
     cols: u16,
     rows: u16,
@@ -65,6 +71,9 @@ pub fn spawn(
     on_data: Channel<Response>,
     on_exit: Channel<i32>,
 ) -> Result<(Arc<Session>, PtySize), String> {
+    // Serialize concurrent pty_open calls. Without this, rapid sequential
+    // ConPTY spawns can leave the second PTY's output pipe stalled (conhost
+    // hasn't finished wiring the first session's pipes).
     let _spawn_guard = mutex_lock(&SPAWN_LOCK);
 
     let pty_system = native_pty_system();
@@ -80,14 +89,32 @@ pub fn spawn(
     let mut child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
     drop(pair.slave);
 
+    // Release spawn lock before the settle sleep so other PTY operations
+    // (resize, write) are never blocked by a concurrent spawn.
+    drop(_spawn_guard);
+
     // ponytail: ConPTY settle — rapid sequential ConPTY spawns can leave the
-    // second PTY's output pipe stalled (conhost hasn't finished wiring the
-    // first session's pipes). A short yield inside the SPAWN_LOCK prevents
-    // the next openpty from racing the kernel. 50ms is enough for conhost;
-    // upgrade to an event-based readiness signal if this causes visible
-    // latency on bulk tab-opens.
+    // second PTY's output pipe stalled. A lock-free throttle based on last
+    // spawn timestamp prevents the race without blocking the whole executor.
     #[cfg(windows)]
-    std::thread::sleep(Duration::from_millis(50));
+    {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let prev = LAST_SPAWN_AT.load(Ordering::Acquire);
+        let elapsed = now.saturating_sub(prev);
+        if elapsed < CONPTY_SETTLE_MS {
+            std::thread::sleep(Duration::from_millis(CONPTY_SETTLE_MS - elapsed));
+        }
+        LAST_SPAWN_AT.store(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64,
+            Ordering::Release,
+        );
+    }
 
     let killer = child.clone_killer();
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;

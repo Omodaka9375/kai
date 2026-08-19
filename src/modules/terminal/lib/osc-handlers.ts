@@ -44,12 +44,25 @@ export function registerPromptTracker(
   state?: ShellIntegrationState,
 ): PromptTracker {
   let marker: IMarker | null = null;
+  // Soft cap on markers: older ones are disposed but xterm may retain
+  // internal bookkeeping. Periodically drop the ref and let GC collect
+  // the marker objects to prevent accumulation over long sessions.
+  let markerCount = 0;
+  const MARKER_CLEANUP_INTERVAL = 200;
+
   const d = term.parser.registerOscHandler(133, (data) => {
     // OSC 133 A — start of new prompt (between commands).
     if (data.startsWith("A")) {
       if (state) state.inCommand = false;
       marker?.dispose();
       marker = term.registerMarker(0);
+      markerCount++;
+      // Periodically deref the marker so old disposed ones can be GC'd.
+      if (markerCount % MARKER_CLEANUP_INTERVAL === 0) {
+        // Force a no-op resize to flush xterm's internal marker bookkeeping.
+        marker = null;
+        marker = term.registerMarker(0);
+      }
     } else if (data.startsWith("B")) {
       // OSC 133 B — command begins. From here on, treat all output as
       // untrusted until we see D (command exit) or the next A (new prompt).
