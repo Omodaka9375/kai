@@ -2,6 +2,7 @@ import {
   convertToModelMessages,
   stepCountIs,
   streamText,
+  wrapLanguageModel,
   type LanguageModel,
   type ModelMessage,
   type UIMessage,
@@ -27,6 +28,7 @@ import { compactModelMessagesDetailed } from "./compact";
 import type { ProviderKeys } from "./keyring";
 import { createProxyFetch } from "./proxyFetch";
 import { normalizeForProvider } from "./providerNormalize";
+import { createDsmlMiddleware } from "./dsmlMiddleware";
 import {
   getRulePacksForStack,
   formatRulePacksForPrompt,
@@ -573,11 +575,19 @@ export async function runAgentStream(opts: RunAgentOptions) {
   }
   const hasProviderOpts = Object.keys(thinkingProviderOpts).length > 0;
 
+  // Wrap model with DSML middleware to convert DSML tool calls from DeepSeek
+  // V4 models (OpenRouter) into proper structured tool calls before the stream
+  // completes, so the agent doesn't silently stop mid-thinking.
+  const wrappedModel = wrapLanguageModel({
+    model: model as Parameters<typeof wrapLanguageModel>[0]["model"],
+    middleware: createDsmlMiddleware({ providerFilter: "openrouter" }),
+  });
+
   // Initialize stream guard for loop detection
   const streamGuard = getGlobalStreamGuard();
   let stepsSeen = 0;
   return streamText({
-    model,
+    model: wrappedModel,
     messages: finalMessages,
     tools: buildTools(opts.toolContext, opts.mcpTools),
     stopWhen: stepCountIs(MAX_AGENT_STEPS),
