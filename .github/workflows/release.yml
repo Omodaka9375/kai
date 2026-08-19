@@ -15,21 +15,37 @@ jobs:
     outputs:
       release-id: ${{ steps.create.outputs.result }}
     steps:
-      - name: Create draft release
+      - name: Create or reuse draft release
         id: create
         uses: actions/github-script@v7
         with:
           script: |
+            const tag = context.ref.replace('refs/tags/', '');
+            // If an existing release is present for this tag, reuse its ID
+            // so tauri-action doesn't cache a stale latest.json asset path.
+            try {
+              const { data: existing } = await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag,
+              });
+              core.info(`Reusing release id=${existing.id} for tag=${tag}`);
+              return existing.id;
+            } catch (e) {
+              if (e.status !== 404) throw e;
+            }
             const { data } = await github.rest.repos.createRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              tag_name: context.ref.replace('refs/tags/', ''),
-              name: `Kai ${context.ref.replace('refs/tags/', '')}`,
+              tag_name: tag,
+              name: `Kai ${tag}`,
               body: 'See the assets to download and install. Auto-update is built in.',
               draft: true,
               prerelease: false,
             });
+            core.info(`Created release id=${data.id} for tag=${tag}`);
             return data.id;
+          result-encoding: string
 
   # ── 2. Build on each platform and attach assets to the single release ──
   publish-tauri:
