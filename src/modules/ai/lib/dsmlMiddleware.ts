@@ -18,8 +18,9 @@
  * mid-thinking.
  *
  * This middleware intercepts the low-level V3 stream, buffers
- * reasoning+text deltas, and on finish injects synthetic
- * tool-input-* events parsed from any DSML fragments found.
+ * reasoning+text deltas, and on finish (or stream end without finish)
+ * injects synthetic tool-input-* events parsed from any DSML fragments
+ * found.
  */
 
 import { generateId, type LanguageModelMiddleware } from "ai";
@@ -29,26 +30,23 @@ import { generateId, type LanguageModelMiddleware } from "ai";
 // Some renderings may use HTML entities (&amp;#95;&amp;#95;) from
 // different prompt-template encodings.
 
-/** Match any DSML namespace prefix variation. */
-const INVOKE_MARKER = new RegExp(
-    "<(?:__|&#95;&#95;|&#x5F;&#x5F;)invoke\\s+name=\"([^\"]+)\">",
-  );
+const DSML_ALT = "(?:__|&#95;&#95;|&#x5F;&#x5F;)";
 
 /** Match a tool-calls block (accepts any namespace form). */
 const TOOL_CALLS_RE = new RegExp(
-  "<(?:__|&#95;&#95;|&#x5F;&#x5F;)tool_calls>([\\s\\S]*?)</(?:__|&#95;&#95;|&#x5F;&#x5F;)tool_calls>",
+  `<${DSML_ALT}tool_calls>([\\s\\S]*?)</${DSML_ALT}tool_calls>`,
   "g",
 );
 
-/** Match an invoke tag inside a block. */
+/** Match an invoke tag inside a block — whitespace-tolerant. */
 const INVOKE_RE = new RegExp(
-  "<(?:__|&#95;&#95;|&#x5F;&#x5F;)invoke\\s+name=\"([^\"]+)\">\\s*([\\s\\S]*?)\\s*</(?:__|&#95;&#95;|&#x5F;&#x5F;)invoke>",
+  `<${DSML_ALT}invoke\\s*name\\s*=\\s*"([^"]+)"\\s*>\\s*([\\s\\S]*?)\\s*</${DSML_ALT}invoke>`,
   "gs",
 );
 
-/** Match a parameter tag. */
+/** Match a parameter tag — whitespace-tolerant. */
 const PARAM_RE = new RegExp(
-  "<(?:__|&#95;&#95;|&#x5F;&#x5F;)parameter\\s+name=\"([^\"]+)\"\\s+string=\"(true|false)\">([\\s\\S]*?)</(?:__|&#95;&#95;|&#x5F;&#x5F;)parameter>",
+  `<${DSML_ALT}parameter\\s*name\\s*=\\s*"([^"]+)"\\s*string\\s*=\\s*"(true|false)"\\s*>\\s*([\\s\\S]*?)\\s*</${DSML_ALT}parameter>`,
   "gs",
 );
 
@@ -68,10 +66,8 @@ type DsmlToolCall = {
 export function parseDsmlToolCalls(text: string): DsmlToolCall[] {
   const calls: DsmlToolCall[] = [];
 
-  // Strategy: first try to find wrapped blocks, then fall back to bare
-  // <__invoke> tags (some models skip the <__tool_calls> wrapper).
+  // Strategy: first try wrapped blocks, then fall back to bare invoke tags.
 
-  // Reset all regex lastIndex.
   TOOL_CALLS_RE.lastIndex = 0;
   INVOKE_RE.lastIndex = 0;
   PARAM_RE.lastIndex = 0;
@@ -80,8 +76,14 @@ export function parseDsmlToolCalls(text: string): DsmlToolCall[] {
   let foundBlock = false;
   while ((blockMatch = TOOL_CALLS_RE.exec(text)) !== null) {
     foundBlock = true;
-    const block = blockMatch[1];
-    parseBlock(block, calls);
+    INVOKE_RE.lastIndex = 0;
+    let invokeMatch: RegExpExecArray | null;
+    while ((invokeMatch = INVOKE_RE.exec(blockMatch[1])) !== null) {
+      calls.push({
+        toolName: invokeMatch[1],
+        arguments: parseParams(invokeMatch[2]),
+      });
+    }
   }
 
   // If no wrapped blocks found, search the entire text for bare invoke tags.
@@ -89,26 +91,14 @@ export function parseDsmlToolCalls(text: string): DsmlToolCall[] {
     INVOKE_RE.lastIndex = 0;
     let invokeMatch: RegExpExecArray | null;
     while ((invokeMatch = INVOKE_RE.exec(text)) !== null) {
-      const toolName = invokeMatch[1];
-      const paramsBody = invokeMatch[2];
-      const args = parseParams(paramsBody);
-      calls.push({ toolName, arguments: args });
+      calls.push({
+        toolName: invokeMatch[1],
+        arguments: parseParams(invokeMatch[2]),
+      });
     }
   }
 
   return calls;
-}
-
-function parseBlock(block: string, out: DsmlToolCall[]): void {
-  INVOKE_RE.lastIndex = 0;
-
-  let invokeMatch: RegExpExecArray | null;
-  while ((invokeMatch = INVOKE_RE.exec(block)) !== null) {
-    const toolName = invokeMatch[1];
-    const paramsBody = invokeMatch[2];
-    const args = parseParams(paramsBody);
-    out.push({ toolName, arguments: args });
-  }
 }
 
 function parseParams(paramsBody: string): Record<string, unknown> {
@@ -137,9 +127,8 @@ function parseParams(paramsBody: string): Record<string, unknown> {
 
 /** Quick check: does text contain DSML tool-call markup? */
 export function hasDsml(text: string): boolean {
-  return INVOKE_MARKER.test(text) ||
-    text.includes("&lt;__invoke name=&quot;") ||
-    /__invoke\s+name=/.test(text);
+  // Fast path: check for either form
+  return text.includes("__invoke") || text.includes("&#95;&#95;invoke");
 }
 
 // ── Stream-level tool-call injection ───────────────────────────────────────
@@ -168,6 +157,44 @@ function emitToolCallEvents(
   });
 }
 
+function tryInjectDsml(
+  controller: ReadableStreamDefaultController<Part>,
+  reasonBuf: string[],
+  textBuf: string[],
+  provider: string,
+): boolean {
+  const fullText = [...reasonBuf, ...textBuf].join("");
+
+  // Decode HTML-escaped DSML (e.g. &lt;__invoke...&gt;)
+  const decoded = fullText
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, "&");
+
+  if (!hasDsml(decoded)) return false;
+
+  const toolCalls = parseDsmlToolCalls(decoded);
+  if (toolCalls.length === 0) return false;
+
+  console.debug(
+    "[kai] dsmlMiddleware: injecting %d synthetic tool call(s) for provider=%s",
+    toolCalls.length,
+    provider,
+  );
+
+  for (const tc of toolCalls) {
+    emitToolCallEvents(
+      controller,
+      generateId(),
+      tc.toolName,
+      JSON.stringify(tc.arguments),
+    );
+  }
+
+  return true;
+}
+
 // ── Middleware ─────────────────────────────────────────────────────────────
 
 export function createDsmlMiddleware(): LanguageModelMiddleware {
@@ -194,13 +221,25 @@ export function createDsmlMiddleware(): LanguageModelMiddleware {
           try {
             while (true) {
               const { done, value } = await reader.read();
-              if (done) break;
+              if (done) {
+                // Stream ended without an explicit finish/error event.
+                // Treat as finish and check for DSML.
+                if (!sawToolCall) {
+                  tryInjectDsml(controller, reasonBuf, textBuf, provider);
+                }
+                if (finishPart) controller.enqueue(finishPart);
+                controller.close();
+                return;
+              }
 
-              if (value?.type === "tool-input-start") {
+              // Track real tool calls.
+              if (value?.type === "tool-call" || value?.type === "tool-input-start") {
                 sawToolCall = true;
                 controller.enqueue(value);
                 continue;
               }
+
+              // Accumulate reasoning / text for DSML scanning.
               if (value?.type === "reasoning-delta") {
                 reasonBuf.push(String(value.delta ?? ""));
                 controller.enqueue(value);
@@ -211,47 +250,30 @@ export function createDsmlMiddleware(): LanguageModelMiddleware {
                 controller.enqueue(value);
                 continue;
               }
-              // Some providers emit complete text/reasoning parts (non-delta).
-              if ((value?.type === "text" || value?.type === "reasoning") && typeof (value as { text?: unknown }).text === "string") {
+              // Non-delta text/reasoning parts.
+              if (
+                (value?.type === "text" || value?.type === "reasoning") &&
+                typeof (value as { text?: unknown }).text === "string"
+              ) {
                 textBuf.push(String((value as { text: string }).text));
                 controller.enqueue(value);
                 continue;
               }
+
+              // Hold finish/error until we've checked for DSML.
               if (value?.type === "finish" || value?.type === "error") {
                 finishPart = value;
-                continue;
+                // Inject DSML before emitting finish/error.
+                if (!sawToolCall) {
+                  tryInjectDsml(controller, reasonBuf, textBuf, provider);
+                }
+                controller.enqueue(value);
+                controller.close();
+                return;
               }
+
               controller.enqueue(value);
             }
-
-            if (!sawToolCall && finishPart) {
-              const fullText = [...reasonBuf, ...textBuf].join("");
-              // Decode HTML-escaped DSML (e.g. &lt;__invoke...&gt;)
-              const decoded = fullText
-                .replace(/&lt;/g, "<")
-                .replace(/&gt;/g, ">")
-                .replace(/&quot;/g, '"')
-                .replace(/&amp;/g, "&");
-              if (hasDsml(decoded)) {
-                const toolCalls = parseDsmlToolCalls(decoded);
-                console.debug(
-                  "[kai] dsmlMiddleware: injected synthetic tool calls for provider=%s (%d tools)",
-                  provider,
-                  toolCalls.length,
-                );
-                for (const tc of toolCalls) {
-                  emitToolCallEvents(
-                    controller,
-                    generateId(),
-                    tc.toolName,
-                    JSON.stringify(tc.arguments),
-                  );
-                }
-              }
-            }
-
-            if (finishPart) controller.enqueue(finishPart);
-            controller.close();
           } catch (err) {
             controller.error(err);
           }
