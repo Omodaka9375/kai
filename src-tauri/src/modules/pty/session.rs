@@ -56,10 +56,12 @@ impl Drop for Session {
 }
 static SPAWN_LOCK: Mutex<()> = Mutex::new(());
 
+#[cfg(windows)]
 const CONPTY_SETTLE_MS: u64 = 50;
 
 /// Tracks the last PTY spawn timestamp to avoid racing ConPTY.
 /// Used instead of holding SPAWN_LOCK during the settle sleep.
+#[cfg(windows)]
 static LAST_SPAWN_AT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 pub fn spawn(
