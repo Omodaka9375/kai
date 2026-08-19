@@ -507,7 +507,7 @@ export function useSourceControlPanel(
     cancelReconcile();
     reconcileTimerRef.current = window.setTimeout(() => {
       reconcileTimerRef.current = 0;
-      void summary.refresh({ remote: "never" });
+      void summary.refresh({ remote: "never", mutation: true });
     }, RECONCILE_DEBOUNCE_MS);
   }, [cancelReconcile, summary]);
 
@@ -651,7 +651,7 @@ export function useSourceControlPanel(
       } catch (error) {
         setActionError(normalizeError(error));
         cancelReconcile();
-        await summary.refresh({ remote: "never" }).catch(() => {});
+        await summary.refresh({ remote: "never", mutation: true }).catch(() => {});
       } finally {
         setLocalActionBusy(null);
       }
@@ -843,7 +843,7 @@ export function useSourceControlPanel(
         `Committed ${result.commitSha.slice(0, 7)} ${result.summary}`,
       );
       invalidateRepoDiffs(repo.repoRoot);
-      await summary.refresh({ remote: "never" });
+      await summary.refresh({ remote: "never", mutation: true });
     } catch (error) {
       setActionError(normalizeError(error));
     } finally {

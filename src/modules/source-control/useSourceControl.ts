@@ -39,6 +39,7 @@ export type SourceControlSummary = {
   ) => void;
   refresh: (options?: {
     remote?: SourceControlRefreshMode;
+    mutation?: boolean;
   }) => Promise<void>;
   runRemoteAction: (
     mode?: SourceControlRemoteActionMode,
@@ -339,15 +340,21 @@ export function useSourceControl(
   );
 
   const refresh = useCallback(
-    async (options?: { remote?: SourceControlRefreshMode }) => {
+    async (options?: { remote?: SourceControlRefreshMode; mutation?: boolean }) => {
       const remoteMode = options?.remote ?? "never";
-      const inflight = inflightRef.current;
-      if (inflight) {
-        const cur = inflightModeRef.current;
-        const upgrade =
-          (cur === "never" && remoteMode !== "never") ||
-          (cur === "auto" && remoteMode === "always");
-        if (!upgrade) return inflight;
+      // After a mutation (commit/push/stage/unstage), any in-flight
+      // refresh carries stale data from before the mutation completed.
+      // Skip the dedup and force a fresh read so the panel updates
+      // immediately instead of showing ghost entries for 5-10 seconds.
+      if (!options?.mutation) {
+        const inflight = inflightRef.current;
+        if (inflight) {
+          const cur = inflightModeRef.current;
+          const upgrade =
+            (cur === "never" && remoteMode !== "never") ||
+            (cur === "auto" && remoteMode === "always");
+          if (!upgrade) return inflight;
+        }
       }
       inflightModeRef.current = remoteMode;
       const run = doRefresh(remoteMode).finally(() => {
@@ -399,12 +406,12 @@ export function useSourceControl(
           await native.gitPush(repo.repoRoot);
         }
         setState((current) => ({ ...current, lastRemoteError: null }));
-        await refresh({ remote: "never" });
+        await refresh({ remote: "never", mutation: true });
         return { ok: true, action };
       } catch (error) {
         const message = normalizeError(error);
         setState((current) => ({ ...current, lastRemoteError: message }));
-        await refresh({ remote: "never" }).catch(() => {});
+        await refresh({ remote: "never", mutation: true }).catch(() => {});
         return { ok: false, action, error: message };
       } finally {
         setState((current) => ({ ...current, busyAction: null }));
