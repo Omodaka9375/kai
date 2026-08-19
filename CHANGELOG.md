@@ -4,6 +4,58 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.1.5]
+
+### Added
+
+- **Auto-fill commit message for single-file changes**: When exactly one file is staged, the commit message input pre-fills with `Add <file>`, `Update <file>`, `Remove <file>`, or `Rename <file>` based on the file's git status code (A/U → Add, D → Remove, R → Rename, M → Update).
+
+### Fixed
+
+- **Terminal typing becomes sluggish over time**: The global PTY spawn mutex (`SPAWN_LOCK`) was held during a 50ms ConPTY settle sleep on Windows, blocking `pty_write` (keystrokes) and `pty_resize` behind every spawn. The lock is now released before the sleep, replaced with a lock-free atomic timestamp throttle.
+- **DSML tool calls still leaked and stalled on DeepSeek V4**: Multiple fixes for the DSML middleware — added `|DSML|` namespace variant matching, HTML entity decoding (`__` → `__`), whitespace-tolerant regexes, bare invoke tag fallback, and handling of stream-end without an explicit `finish` event. The provider filter was also removed so DSML detection applies to all providers.
+- **Multi-edit strictly all-or-nothing**: Previously one mismatched `old_string` in a `multi_edit` batch rejected every edit. It now retries each edit individually on batch failure — correct edits land immediately, only mismatches are reported.
+- **Edited shell commands printed as text instead of running**: When the user edits a command in the approval card and clicks "Run edited", the command is now injected directly into the active terminal PTY with `\r` — no agent round-trip, no visible chat noise.
+- **Source control files ghosted for 5–10 seconds after commit/push**: Post-mutation refreshes were blocked by an in-flight refresh started before the mutation completed. `refresh()` now accepts a `mutation: true` flag that bypasses inflight dedup, forcing an immediate fresh read.
+- **Fetch and Pull as two separate buttons confused users**: Removed the separate Fetch button. Pull now handles fetch+merge in one click. Added `git_pull` (non-ff-only) Rust command for diverged branches — previously pull was locked to `--ff-only`, so diverged branches were stuck showing "resolve in terminal."
+- **OS window title showed only "KAI"**: `document.title` only touches the HTML `<title>` tag; now uses `getCurrentWindow().setTitle()` from `@tauri-apps/api/window` so the native title bar shows `<project-folder> — KAI`.
+- **CI: `cargo clippy` failed on Linux**: `CONPTY_SETTLE_MS` and `LAST_SPAWN_AT` were only referenced inside `#[cfg(windows)]` but declared in module scope without the gate. Added `#[cfg(windows)]` to both declarations.
+
+### Changed
+
+- **Status pill in source control**: The bare green/amber dot was replaced with a bordered pill matching the green/amber/gray convention (e.g. `● 3 staged` on a green-tinted badge).
+
+---
+
+## [1.1.4]
+
+### Added
+
+- **Editable shell command approval cards**: When the LLM proposes a shell command and approval is required, a pencil/edit icon appears. Clicking it swaps the command display for a resizable textarea. "Run edited" injects the edited command directly into the active terminal. The command preview also wraps correctly in the mini-window instead of running as a single long line.
+
+### Fixed
+
+- **DeepSeek V4 stops mid-execution on OpenRouter**: DeepSeek V4 models emit tool calls as DSML XML markup (`<__tool_calls>…`) instead of structured `tool_calls`. OpenRouter passes the raw markup through, so the stream ends with `finishReason: stop` and zero tool calls. Added a V3 `LanguageModelMiddleware` that buffers reasoning/text deltas during the stream and injects synthetic `tool-input-*` events parsed from DSML fragments on `finish`.
+
+---
+
+## [1.1.3]
+
+### Added
+
+- **Per-model thinking modes**: Thinking mode (`off` / `low` / `medium` / `high`) can now be set per model in Settings — model-pinned override wins over the global default. Provider-specific thinking parameters are mapped for Anthropic (`thinking.budgetTokens`), OpenAI (`reasoningEffort`), Google (`thinkingConfig.thinkingBudget`), and xAI (`reasoningEffort`).
+
+### Fixed
+
+- **UI freeze while model is "thinking"**: `stripLeakedTokens` ran an O(braces × text-length) regex on every streamed token, freezing the UI for seconds during long reasoning blocks. Guards now skip the regex when the token doesn't contain a known trigger character, and the generic `<` strip runs after JSON-payload detection to prevent collisions.
+- **Fork button silently no-ops**: `forkSession` read from the persisted snapshot of messages, which could be shorter than the live UI array due to debounced persist or length-trimming. Now slices the live in-memory chat messages, with store as fallback.
+- **Voice dictation non-functional on Windows**: Added WebView2 `PermissionRequested` handler that `SetState(ALLOW)`s `MICROPHONE` and `CAMERA` (wry only auto-grants `CLIPBOARD_READ`). Frontend hardened with `withTimeout` on `getUserMedia` (8s), transcribe (45s), and a Speech-API watchdog.
+- **Stop button stuck on pending approval**: The AI SDK `Chat.stop()` is a no-op when the status is `ready` (e.g. awaiting tool approval). `stopSession()` now follows `chat.stop()` with `releasePendingApprovals()` which strips stale `approval-requested` tool parts from the chat.
+- **Long-context degrader re-injects full thinking traces**: `providerNormalize.ts` converted every `reasoning` part to `<thinking>…` text for non-Anthropic targets at each step. Now only the LAST assistant message's reasoning is carried forward; older traces are dropped.
+- **Session data loss across workspace switches**: `hydrateSessions` now filters sessions to the current workspace root and re-hydrates on workspace switch. The session picker no longer leaks untagged legacy sessions from other projects.
+
+---
+
 ## [1.1.2]
 
 ### Added
