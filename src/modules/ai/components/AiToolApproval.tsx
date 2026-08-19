@@ -17,7 +17,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ToolUIPart } from "ai";
 import { memo, useCallback, useState } from "react";
-import { useChatStore, getOrCreateChat } from "../store/chatStore";
+import { useChatStore } from "../store/chatStore";
 import { getToolActionInfo, analyzeShellCommand } from "../lib/policy";
 
 type Props = {
@@ -64,23 +64,15 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue }: Props) {
 
   const handleApprove = useCallback(() => {
     if (isShell && isEditing && editedCommand !== commandText) {
-      // Deny the original tool call and queue the edited command as a
-      // steering message. Use an imperative tool-invocation instruction
-      // so the model calls bash_run instead of echoing the command as text.
+      // Deny the original tool call and inject the edited command directly
+      // into the active terminal — no agent round-trip.
       onRespond(false);
-      const sessionId = useChatStore.getState().activeSessionId;
-      if (sessionId) {
-        const chat = getOrCreateChat(sessionId);
-        chat.stop();
-        const cwd = String(input.cwd ?? useChatStore.getState().live.getCwd() ?? "").replace(/\\/g, "/");
-        useChatStore.getState().setSteeringMessage(
-          `Run this shell command now using bash_run tool (call the tool, don't echo the command as text):\n\ncommand: ${editedCommand}\ncwd: ${cwd}`,
-        );
-      }
+      const live = useChatStore.getState().live;
+      live.injectIntoActivePty(editedCommand + "\r");
     } else {
       onRespond(true);
     }
-  }, [isShell, isEditing, editedCommand, commandText, onRespond, input]);
+  }, [isShell, isEditing, editedCommand, commandText, onRespond]);
 
   // Queued behind an earlier approval — compact placeholder, no actions.
   if (queue?.queued) {
