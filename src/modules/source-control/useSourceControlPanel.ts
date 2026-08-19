@@ -400,6 +400,37 @@ export function useSourceControlPanel(
   );
 
   const allClean = stagedEntries.length === 0 && unstagedEntries.length === 0;
+
+  // Auto-fill a default commit message when a single file is staged.
+  const defaultMessageRef = useRef<string | null>(null);
+  const stagedKeysRef = useRef("");
+  useEffect(() => {
+    if (stagedEntries.length === 0) {
+      stagedKeysRef.current = "";
+      if (commitMessage === defaultMessageRef.current) setCommitMessage("");
+      defaultMessageRef.current = null;
+      return;
+    }
+    const keys = stagedEntries.map((e) => e.key).join(",");
+    if (keys === stagedKeysRef.current) return;
+    stagedKeysRef.current = keys;
+
+    if (stagedEntries.length === 1) {
+      const e = stagedEntries[0];
+      const name = e.path.replace(/\\/g, "/").split("/").pop() ?? e.path;
+      const verb =
+        e.statusCode === "A" || e.statusCode === "U" ? "Add"
+        : e.statusCode === "D" ? "Remove"
+        : e.statusCode === "R" ? "Rename"
+        : "Update";
+      const msg = `${verb} ${name}`;
+      defaultMessageRef.current = msg;
+      setCommitMessage(msg);
+    }
+    // >1 files: leave the user's message alone.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stagedEntries, commitMessage]);
+
   const canPush = !!status?.upstream && status.behind === 0;
   const selectedModel = getModel(selectedModelId);
   const aiBusy = agentStatus !== "idle" && agentStatus !== "error";
