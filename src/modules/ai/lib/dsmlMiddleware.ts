@@ -30,7 +30,7 @@ import { generateId, type LanguageModelMiddleware } from "ai";
 // Some renderings may use HTML entities (&amp;#95;&amp;#95;) from
 // different prompt-template encodings.
 
-const DSML_ALT = "(?:__|&#95;&#95;|&#x5F;&#x5F;)";
+const DSML_ALT = "(?:__|&#95;&#95;|&#x5F;&#x5F;|\\|DSML\\|)";
 
 /** Match a tool-calls block (accepts any namespace form). */
 const TOOL_CALLS_RE = new RegExp(
@@ -128,7 +128,8 @@ function parseParams(paramsBody: string): Record<string, unknown> {
 /** Quick check: does text contain DSML tool-call markup? */
 export function hasDsml(text: string): boolean {
   // Fast path: check for either form
-  return text.includes("__invoke") || text.includes("&#95;&#95;invoke");
+  return text.includes("__invoke") || text.includes("&#95;&#95;invoke") ||
+    text.includes("|DSML|invoke") || text.includes("|DSML|tool_calls");
 }
 
 // ── Stream-level tool-call injection ───────────────────────────────────────
