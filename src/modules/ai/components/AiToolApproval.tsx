@@ -8,6 +8,7 @@ import {
   FileEditIcon,
   FilePlusIcon,
   FolderAddIcon,
+  PencilEdit01Icon,
   TerminalIcon,
   Tick02Icon,
   ToolsIcon,
@@ -15,8 +16,8 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ToolUIPart } from "ai";
-import { memo } from "react";
-import { useChatStore } from "../store/chatStore";
+import { memo, useCallback, useState } from "react";
+import { useChatStore, getOrCreateChat } from "../store/chatStore";
 import { getToolActionInfo, analyzeShellCommand } from "../lib/policy";
 
 type Props = {
@@ -44,6 +45,39 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue }: Props) {
   const input = part.input as Record<string, unknown>;
   const autoApprovedIds = useChatStore((s) => s.autoApprovedIds);
   const wasAutoApproved = autoApprovedIds.has(part.approval.id);
+
+  const isShell = toolName === "bash_run" || toolName === "bash_background";
+  const commandText = isShell ? String(input.command ?? "") : "";
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedCommand, setEditedCommand] = useState("");
+
+  // When entering edit mode, seed with the original command.
+  const enterEdit = useCallback(() => {
+    setEditedCommand(commandText);
+    setIsEditing(true);
+  }, [commandText]);
+
+  const cancelEdit = useCallback(() => {
+    setIsEditing(false);
+    setEditedCommand("");
+  }, []);
+
+  const handleApprove = useCallback(() => {
+    if (isShell && isEditing && editedCommand !== commandText) {
+      // Deny the original tool call and queue the edited command.
+      onRespond(false);
+      const sessionId = useChatStore.getState().activeSessionId;
+      if (sessionId) {
+        const chat = getOrCreateChat(sessionId);
+        chat.stop();
+        useChatStore.getState().setSteeringMessage(
+          `Run this command: ${editedCommand}`,
+        );
+      }
+    } else {
+      onRespond(true);
+    }
+  }, [isShell, isEditing, editedCommand, commandText, onRespond]);
 
   // Queued behind an earlier approval — compact placeholder, no actions.
   if (queue?.queued) {
@@ -121,7 +155,13 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue }: Props) {
       </div>
 
       <div className="px-3 py-2.5">
-        <PreviewBlock toolName={toolName} input={input} />
+        <PreviewBlock
+          toolName={toolName}
+          input={input}
+          editing={isEditing}
+          editedValue={editedCommand}
+          onEditChange={setEditedCommand}
+        />
 
         {/* Policy risk level and warnings */}
         {(policyInfo.riskLevel !== "low" || shellAnalysis?.warnings.length) && (
@@ -181,24 +221,65 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue }: Props) {
       </div>
 
       <div className="flex items-center justify-end gap-1.5 border-t border-border/60 px-3 py-2">
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => onRespond(false)}
-          className="h-7 gap-1.5 text-[11px]"
-        >
-          <HugeiconsIcon icon={Cancel01Icon} size={12} strokeWidth={2} />
-          Deny
-        </Button>
-        <Button
-          size="sm"
-          variant="default"
-          onClick={() => onRespond(true)}
-          className="h-7 gap-1.5 text-[11px]"
-        >
-          <HugeiconsIcon icon={Tick02Icon} size={12} strokeWidth={2} />
-          Approve
-        </Button>
+        {isEditing ? (
+          <>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={cancelEdit}
+              className="h-7 gap-1.5 text-[11px]"
+            >
+              <HugeiconsIcon icon={Cancel01Icon} size={12} strokeWidth={2} />
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              variant="default"
+              onClick={handleApprove}
+              className="h-7 gap-1.5 text-[11px]"
+            >
+              <HugeiconsIcon icon={Tick02Icon} size={12} strokeWidth={2} />
+              Run edited
+            </Button>
+          </>
+        ) : (
+          <>
+            {isShell && (
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={enterEdit}
+                className="mr-auto size-7"
+                aria-label="Edit command"
+                title="Edit command"
+              >
+                <HugeiconsIcon
+                  icon={PencilEdit01Icon}
+                  size={13}
+                  strokeWidth={1.75}
+                />
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => onRespond(false)}
+              className="h-7 gap-1.5 text-[11px]"
+            >
+              <HugeiconsIcon icon={Cancel01Icon} size={12} strokeWidth={2} />
+              Deny
+            </Button>
+            <Button
+              size="sm"
+              variant="default"
+              onClick={() => onRespond(true)}
+              className="h-7 gap-1.5 text-[11px]"
+            >
+              <HugeiconsIcon icon={Tick02Icon} size={12} strokeWidth={2} />
+              Approve
+            </Button>
+          </>
+        )}
       </div>
     </div>
   );
@@ -223,12 +304,19 @@ export const AiToolApproval = memo(AiToolApprovalImpl, (a, b) => {
 function PreviewBlock({
   toolName,
   input,
+  editing,
+  editedValue,
+  onEditChange,
 }: {
   toolName: string;
   input: Record<string, unknown>;
+  editing?: boolean;
+  editedValue?: string;
+  onEditChange?: (v: string) => void;
 }) {
   if (toolName === "bash_run" || toolName === "bash_background") {
     const cwd = typeof input.cwd === "string" ? input.cwd : null;
+    const command = String(input.command ?? "");
     return (
       <div className="space-y-1.5">
         {cwd && (
@@ -236,13 +324,27 @@ function PreviewBlock({
             {cwd}
           </div>
         )}
-        <pre
-          className={cn(
-            "max-h-40 overflow-auto rounded-md bg-muted/60 p-2 font-mono text-[11px] leading-relaxed",
-          )}
-        >
-          {String(input.command ?? "")}
-        </pre>
+        {editing ? (
+          <textarea
+            value={editedValue ?? command}
+            onChange={(e) => onEditChange?.(e.target.value)}
+            className={cn(
+              "w-full rounded-md border border-border bg-card p-2 font-mono text-[11px] leading-relaxed",
+              "resize-none outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/30",
+            )}
+            rows={Math.min((editedValue ?? command).split("\n").length, 8)}
+            spellCheck={false}
+            autoFocus
+          />
+        ) : (
+          <pre
+            className={cn(
+              "max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted/60 p-2 font-mono text-[11px] leading-relaxed",
+            )}
+          >
+            {command}
+          </pre>
+        )}
       </div>
     );
   }
