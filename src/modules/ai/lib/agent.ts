@@ -580,7 +580,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // completes, so the agent doesn't silently stop mid-thinking.
   const wrappedModel = wrapLanguageModel({
     model: model as Parameters<typeof wrapLanguageModel>[0]["model"],
-    middleware: createDsmlMiddleware({ providerFilter: "openrouter" }),
+    middleware: createDsmlMiddleware(),
   });
 
   // Initialize stream guard for loop detection

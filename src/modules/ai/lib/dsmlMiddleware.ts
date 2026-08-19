@@ -26,30 +26,34 @@ import { generateId, type LanguageModelMiddleware } from "ai";
 
 // ── DSML regex patterns ────────────────────────────────────────────────────
 // The DSML namespace is the literal two-underscore string "__".
+// Some renderings may use HTML entities (&amp;#95;&amp;#95;) from
+// different prompt-template encodings.
 
-const NS = "__";
+/** Match any DSML namespace prefix variation. */
+const INVOKE_MARKER = new RegExp(
+    "<(?:__|&#95;&#95;|&#x5F;&#x5F;)invoke\\s+name=\"([^\"]+)\">",
+  );
 
-/** Match a full <__tool_calls>...</__tool_calls> block. */
+/** Match a tool-calls block (accepts any namespace form). */
 const TOOL_CALLS_RE = new RegExp(
-  `<${NS}tool_calls>([\\s\\S]*?)</${NS}tool_calls>`,
+  "<(?:__|&#95;&#95;|&#x5F;&#x5F;)tool_calls>([\\s\\S]*?)</(?:__|&#95;&#95;|&#x5F;&#x5F;)tool_calls>",
   "g",
 );
 
-/** Match <__invoke name="tool_name">...</__invoke> (dotAll). */
+/** Match an invoke tag inside a block. */
 const INVOKE_RE = new RegExp(
-  `<${NS}invoke name="([^"]+)">([\\s\\S]*?)</${NS}invoke>`,
+  "<(?:__|&#95;&#95;|&#x5F;&#x5F;)invoke\\s+name=\"([^\"]+)\">\\s*([\\s\\S]*?)\\s*</(?:__|&#95;&#95;|&#x5F;&#x5F;)invoke>",
   "gs",
 );
 
-/** Match <__parameter name="key" string="true|false">value</__parameter> (dotAll). */
+/** Match a parameter tag. */
 const PARAM_RE = new RegExp(
-  `<${NS}parameter name="([^"]+)" string="(true|false)">([\\s\\S]*?)</${NS}parameter>`,
+  "<(?:__|&#95;&#95;|&#x5F;&#x5F;)parameter\\s+name=\"([^\"]+)\"\\s+string=\"(true|false)\">([\\s\\S]*?)</(?:__|&#95;&#95;|&#x5F;&#x5F;)parameter>",
   "gs",
 );
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-/** Opaque stream part — we only care about a few string fields at runtime. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Part = any;
 
@@ -58,53 +62,36 @@ type DsmlToolCall = {
   arguments: Record<string, unknown>;
 };
 
-export type DsmlMiddlewareOptions = {
-  /**
-   * Only apply to specific provider ids (e.g. "openrouter").
-   * If omitted, applies to every provider.
-   */
-  providerFilter?: string | string[];
-};
-
 // ── DSML parser ────────────────────────────────────────────────────────────
 
 /** Extract tool calls from raw model text containing DSML fragments. */
 export function parseDsmlToolCalls(text: string): DsmlToolCall[] {
   const calls: DsmlToolCall[] = [];
 
+  // Strategy: first try to find wrapped blocks, then fall back to bare
+  // <__invoke> tags (some models skip the <__tool_calls> wrapper).
+
+  // Reset all regex lastIndex.
   TOOL_CALLS_RE.lastIndex = 0;
+  INVOKE_RE.lastIndex = 0;
+  PARAM_RE.lastIndex = 0;
 
   let blockMatch: RegExpExecArray | null;
+  let foundBlock = false;
   while ((blockMatch = TOOL_CALLS_RE.exec(text)) !== null) {
+    foundBlock = true;
     const block = blockMatch[1];
+    parseBlock(block, calls);
+  }
 
+  // If no wrapped blocks found, search the entire text for bare invoke tags.
+  if (!foundBlock) {
     INVOKE_RE.lastIndex = 0;
     let invokeMatch: RegExpExecArray | null;
-    while ((invokeMatch = INVOKE_RE.exec(block)) !== null) {
+    while ((invokeMatch = INVOKE_RE.exec(text)) !== null) {
       const toolName = invokeMatch[1];
       const paramsBody = invokeMatch[2];
-
-      const args: Record<string, unknown> = {};
-
-      PARAM_RE.lastIndex = 0;
-      let paramMatch: RegExpExecArray | null;
-      while ((paramMatch = PARAM_RE.exec(paramsBody)) !== null) {
-        const key = paramMatch[1];
-        const isString = paramMatch[2] === "true";
-        const rawValue = paramMatch[3];
-
-        if (isString) {
-          args[key] = rawValue;
-        } else {
-          // JSON-encoded value — attempt to parse
-          try {
-            args[key] = JSON.parse(rawValue);
-          } catch {
-            args[key] = rawValue;
-          }
-        }
-      }
-
+      const args = parseParams(paramsBody);
       calls.push({ toolName, arguments: args });
     }
   }
@@ -112,9 +99,47 @@ export function parseDsmlToolCalls(text: string): DsmlToolCall[] {
   return calls;
 }
 
+function parseBlock(block: string, out: DsmlToolCall[]): void {
+  INVOKE_RE.lastIndex = 0;
+
+  let invokeMatch: RegExpExecArray | null;
+  while ((invokeMatch = INVOKE_RE.exec(block)) !== null) {
+    const toolName = invokeMatch[1];
+    const paramsBody = invokeMatch[2];
+    const args = parseParams(paramsBody);
+    out.push({ toolName, arguments: args });
+  }
+}
+
+function parseParams(paramsBody: string): Record<string, unknown> {
+  const args: Record<string, unknown> = {};
+
+  PARAM_RE.lastIndex = 0;
+  let paramMatch: RegExpExecArray | null;
+  while ((paramMatch = PARAM_RE.exec(paramsBody)) !== null) {
+    const key = paramMatch[1];
+    const isString = paramMatch[2] === "true";
+    const rawValue = paramMatch[3];
+
+    if (isString) {
+      args[key] = rawValue;
+    } else {
+      try {
+        args[key] = JSON.parse(rawValue);
+      } catch {
+        args[key] = rawValue;
+      }
+    }
+  }
+
+  return args;
+}
+
 /** Quick check: does text contain DSML tool-call markup? */
 export function hasDsml(text: string): boolean {
-  return text.includes(`${NS}invoke name="`);
+  return INVOKE_MARKER.test(text) ||
+    text.includes("&lt;__invoke name=&quot;") ||
+    /__invoke\s+name=/.test(text);
 }
 
 // ── Stream-level tool-call injection ───────────────────────────────────────
@@ -145,25 +170,13 @@ function emitToolCallEvents(
 
 // ── Middleware ─────────────────────────────────────────────────────────────
 
-export function createDsmlMiddleware(
-  options: DsmlMiddlewareOptions = {},
-): LanguageModelMiddleware {
-  const filter = options.providerFilter
-    ? Array.isArray(options.providerFilter)
-      ? new Set(options.providerFilter)
-      : new Set([options.providerFilter])
-    : null;
-
+export function createDsmlMiddleware(): LanguageModelMiddleware {
   return {
     specificationVersion: "v3",
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     wrapStream: (async ({ doStream, model }: any) => {
-      const provider: string = model.provider;
-      if (filter && !filter.has(provider)) {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-return
-        return doStream();
-      }
+      const provider: string = (model as { provider?: string }).provider ?? "";
 
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       const result: { stream: ReadableStream<Part>; [k: string]: unknown } =
@@ -198,7 +211,13 @@ export function createDsmlMiddleware(
                 controller.enqueue(value);
                 continue;
               }
-              if (value?.type === "finish") {
+              // Some providers emit complete text/reasoning parts (non-delta).
+              if ((value?.type === "text" || value?.type === "reasoning") && typeof (value as { text?: unknown }).text === "string") {
+                textBuf.push(String((value as { text: string }).text));
+                controller.enqueue(value);
+                continue;
+              }
+              if (value?.type === "finish" || value?.type === "error") {
                 finishPart = value;
                 continue;
               }
@@ -207,8 +226,19 @@ export function createDsmlMiddleware(
 
             if (!sawToolCall && finishPart) {
               const fullText = [...reasonBuf, ...textBuf].join("");
-              if (hasDsml(fullText)) {
-                const toolCalls = parseDsmlToolCalls(fullText);
+              // Decode HTML-escaped DSML (e.g. &lt;__invoke...&gt;)
+              const decoded = fullText
+                .replace(/&lt;/g, "<")
+                .replace(/&gt;/g, ">")
+                .replace(/&quot;/g, '"')
+                .replace(/&amp;/g, "&");
+              if (hasDsml(decoded)) {
+                const toolCalls = parseDsmlToolCalls(decoded);
+                console.debug(
+                  "[kai] dsmlMiddleware: injected synthetic tool calls for provider=%s (%d tools)",
+                  provider,
+                  toolCalls.length,
+                );
                 for (const tc of toolCalls) {
                   emitToolCallEvents(
                     controller,
