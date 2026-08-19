@@ -86,6 +86,7 @@ import {
   useWorkspaceEnvStore,
   type WorkspaceEnv,
 } from "@/modules/workspace";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { homeDir } from "@tauri-apps/api/path";
 import type { SearchAddon } from "@xterm/addon-search";
 import { AnimatePresence, motion } from "motion/react";
@@ -495,10 +496,13 @@ export default function App() {
   // Reflect the current project folder in the window title so the user can
   // distinguish multiple KAI instances in the taskbar / Alt+Tab.
   useEffect(() => {
-    if (!explorerRoot) return;
-    const name =
-      explorerRoot.split(/[\\/]/).filter(Boolean).pop() ?? explorerRoot;
-    document.title = name ? `${name} — KAI` : "KAI";
+    const name = explorerRoot
+      ? explorerRoot.split(/[\\/]/).filter(Boolean).pop() ?? explorerRoot
+      : null;
+    const w = getCurrentWindow();
+    const title = name ? `${name} — KAI` : "KAI";
+    void w.setTitle(title);
+    document.title = title;
   }, [explorerRoot]);
 
   // Persist the workspace root so it's restored on next launch.
