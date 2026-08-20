@@ -13,6 +13,17 @@ import { resolvePath, type ToolContext } from "./context";
 import { snapshotFile } from "../lib/checkpoints";
 import { djb2 } from "../lib/hash";
 
+/** Normalize line endings to \n for comparison purposes only. */
+function normEol(s: string): string {
+  return s.replace(/\r\n/g, "\n");
+}
+
+/** Strip trailing whitespace from each line, preserving line endings. */
+function stripTrailingWs(s: string, filePath: string): string {
+  if (/\.(md|mdx)$/i.test(filePath)) return s;
+  return s.replace(/[^\S\n\r]+$/gm, "");
+}
+
 type BatchEditResult =
   | { ok: true; files: number; replacements: number }
   | { ok: false; error: string; file?: string };
@@ -73,17 +84,32 @@ export function buildBatchEditTools(ctx: ToolContext) {
           let current = snapshots.get(abs) ?? "";
           if (current === null) current = "";
 
-          const idx = current.indexOf(edit.old_string);
+          // Normalize line endings to LF for matching, same as edit.ts.
+          const useCrlf = current.includes("\r\n");
+          const currentNorm = normEol(current);
+          const oldNorm = normEol(edit.old_string);
+          const newNorm = stripTrailingWs(normEol(edit.new_string), abs);
+
+          if (oldNorm === newNorm) {
+            await rollback(snapshots);
+            return {
+              ok: false,
+              error: `old_string and new_string are identical in "${abs}"`,
+              file: reqPath,
+            };
+          }
+
+          const idx = currentNorm.indexOf(oldNorm);
           if (idx === -1) {
             await rollback(snapshots);
             return {
               ok: false,
-              error: `old_string not found in "${abs}": ${JSON.stringify(edit.old_string.slice(0, 80))}`,
+              error: `old_string not found in "${abs}": ${JSON.stringify(oldNorm.slice(0, 80))}`,
               file: reqPath,
             };
           }
           // Check uniqueness.
-          const secondIdx = current.indexOf(edit.old_string, idx + 1);
+          const secondIdx = currentNorm.indexOf(oldNorm, idx + 1);
           if (secondIdx !== -1) {
             await rollback(snapshots);
             return {
@@ -93,10 +119,15 @@ export function buildBatchEditTools(ctx: ToolContext) {
             };
           }
 
-          const newContent =
-            current.slice(0, idx) +
-            edit.new_string +
-            current.slice(idx + edit.old_string.length);
+          // Work entirely in LF-normalized space (idx is relative to currentNorm,
+          // not current). Then restore original line-ending style.
+          let newContentNorm =
+            currentNorm.slice(0, idx) +
+            newNorm +
+            currentNorm.slice(idx + oldNorm.length);
+          let newContent = useCrlf
+            ? newContentNorm.replace(/\n/g, "\r\n")
+            : newContentNorm;
           results.push({ path: abs, newContent });
           // Update in-memory snapshot for subsequent edits on same file.
           snapshots.set(abs, newContent);
