@@ -18,6 +18,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import type { ToolUIPart } from "ai";
 import { memo, useCallback, useState } from "react";
 import { useChatStore } from "../store/chatStore";
+import { abortSession } from "../store/chatStore";
 import { getToolActionInfo, analyzeShellCommand } from "../lib/policy";
 
 type Props = {
@@ -69,6 +70,12 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue }: Props) {
       onRespond(false);
       const live = useChatStore.getState().live;
       live.injectIntoActivePty(editedCommand + "\r");
+      // Abort the agent so it can't re-issue the original (unedited)
+      // command. This is the ONLY place abortSession is called on
+      // denial — normal Deny lets the agent see the rejection and
+      // continue gracefully.
+      const sessionId = useChatStore.getState().activeSessionId;
+      if (sessionId) abortSession(sessionId);
     } else {
       onRespond(true);
     }

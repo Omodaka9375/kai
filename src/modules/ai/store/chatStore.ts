@@ -432,11 +432,12 @@ export const useChatStore = create<StoreState>((set, get) => ({
   respondToApproval: (approvalId, approved) => {
     const fn = get().approvalResponder;
     if (fn) fn(approvalId, approved);
-    // When the user explicitly denies a tool call, stop the agent so it
-    // doesn't keep making more calls. The user wants to intervene. Abort
-    // only — don't strip pending approvals here, because the approval
-    // response above is still being applied and we must not race it.
-    if (!approved) abortSession(get().activeSessionId ?? "");
+    // Do NOT abort on denial — the agent should see the "tool call denied"
+    // result and continue gracefully. Aborting kills the entire agent run
+    // for a single rejected tool call, which causes "(User canceled)" to
+    // leak into the model's context and stops the agent prematurely.
+    // The only place abort is still needed: the "Run edited" flow in
+    // AiToolApproval, which calls abortSession directly after denial.
   },
 
   apiKeys: { ...EMPTY_PROVIDER_KEYS },
@@ -902,7 +903,8 @@ export function respondToApprovalStandalone(
   const state = useChatStore.getState();
   const fn = state.approvalResponder;
   if (fn) fn(approvalId, approved);
-  if (!approved) abortSession(state.activeSessionId ?? "");
+  // Same rationale as respondToApproval: don't abort on denial.
+  // The agent should see the denial and continue gracefully.
 }
 
 /**
