@@ -229,14 +229,22 @@ function splitThinkingBlocks(
   text: string,
 ): { thinking: boolean; text: string }[] {
   const out: { thinking: boolean; text: string }[] = [];
-  // Match complete blocks only — unclosed ones stay in text so the
-  // streaming text part keeps rendering while the model is still thinking.
-  const re = /<thinking>([\s\S]*?)<\/thinking>/gi;
+
+  // Unified regex that matches XML-style <thinking>...</thinking>,
+  // pipe-delimited <|thinking|>...</|thinking|>, and AI SDK thought
+  // protocol </think>... (Vercel AI SDK v6 format).
+  const re = new RegExp(
+    "<thinking>([\\s\\S]*?)<\\/thinking>" +
+      "|<\\|thinking\\|>([\\s\\S]*?)<\\|\\/thinking\\|>" +
+      "|\\n{2}</think>([\\s\\S]*?)\\n{2}",
+    "gi",
+  );
   let last = 0;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     if (m.index > last) out.push({ thinking: false, text: text.slice(last, m.index) });
-    const inner = m[1].trim();
+    // Group 1 = XML, group 2 = pipe-delimited, group 3 = AI SDK protocol
+    const inner = (m[1] ?? m[2] ?? m[3] ?? "").trim();
     if (inner) out.push({ thinking: true, text: inner });
     last = m.index + m[0].length;
   }
@@ -409,6 +417,10 @@ function stripLeakedTokens(text: string): string {
     cleaned = cleaned
       .replace(/<thinking>[\s\S]*?<\/thinking>/gi, "")
       .replace(/<thinking>(?![\s\S]*<\/thinking>)[\s\S]*$/gi, "");
+  }
+  // Strip AI SDK thought protocol markers (Vercel AI SDK v6).
+  if (cleaned.includes("</")) {
+    cleaned = cleaned.replace(/\n{2}[\s\S]*?\n{2}/gi, "");
   }
   if (
     cleaned.includes("call:") ||
@@ -1102,7 +1114,7 @@ const RenderedPart = memo(function RenderedPart({
     const raw = (part as unknown as { text: string }).text;
     // If the text contains <thinking>…</thinking> blocks (models that don't
     // emit a separate reasoning part), split and render them as pills.
-    if (/<thinking>/i.test(raw)) {
+    if (/<thinking>|<\|thinking\||<\/thinking>/i.test(raw)) {
       const segments = splitThinkingBlocks(raw);
       // Check if there's any non-thinking visible text after stripping tokens
       const hasVisibleText = segments.some(

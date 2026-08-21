@@ -1,54 +1,27 @@
 /**
  * DSML (DeepSeek Markup Language) stream middleware.
  *
- * DeepSeek V4 models emit tool calls using a DSML XML format with the
- * `__` namespace token (two underscores), e.g.:
+ * DeepSeek V4 models emit tool calls using a DSML XML format where the
+ * namespace prefix varies across providers / prompt templates:
  *
- *   <__tool_calls>
- *     <__invoke name="edit">
- *       <__parameter name="path" string="true">src/file.ts</__parameter>
- *       <__parameter name="old_string" string="true">...</__parameter>
- *       <__parameter name="new_string" string="true">...</__parameter>
- *     </__invoke>
- *   </__tool_calls>
+ *   __ variant:      <__tool_calls><__invoke name="edit">...
+ *   |DSML| variant:  <|DSML|tool_calls><|DSML|invoke name="edit">...
+ *   &#95;&#95;:     <&#95;&#95;tool_calls>... (HTML entities)
  *
  * When routed through providers that don't convert DSML into structured
  * OpenAI-format tool_calls (notably OpenRouter), the stream ends with
  * finishReason: stop and zero tool calls — the agent silently stops
  * mid-thinking.
  *
- * This middleware intercepts the low-level V3 stream, buffers
- * reasoning+text deltas, and on finish (or stream end without finish)
- * injects synthetic tool-input-* events parsed from any DSML fragments
- * found.
+ * STRATEGY: Instead of trying to enumerate every possible namespace
+ * character/encoding, we use **structural** tag matching. Any opening
+ * tag `<PREFIXinvoke name="...">` with its matching `</PREFIXinvoke>`
+ * closing tag is parsed — regardless of what PREFIX is. Same for
+ * `tool_calls` wrappers and `parameter` tags. This catches `__`,
+ * `|DSML|`, `&#95;&#95;`, and any future variant without a code change.
  */
 
 import { generateId, type LanguageModelMiddleware } from "ai";
-
-// ── DSML regex patterns ────────────────────────────────────────────────────
-// The DSML namespace is the literal two-underscore string "__".
-// Some renderings may use HTML entities (&amp;#95;&amp;#95;) from
-// different prompt-template encodings.
-
-const DSML_ALT = "(?:__|&#95;&#95;|&#x5F;&#x5F;|\\|DSML\\|)";
-
-/** Match a tool-calls block (accepts any namespace form). */
-const TOOL_CALLS_RE = new RegExp(
-  `<${DSML_ALT}tool_calls>([\\s\\S]*?)</${DSML_ALT}tool_calls>`,
-  "g",
-);
-
-/** Match an invoke tag inside a block — whitespace-tolerant. */
-const INVOKE_RE = new RegExp(
-  `<${DSML_ALT}invoke\\s*name\\s*=\\s*"([^"]+)"\\s*>\\s*([\\s\\S]*?)\\s*</${DSML_ALT}invoke>`,
-  "gs",
-);
-
-/** Match a parameter tag — whitespace-tolerant. */
-const PARAM_RE = new RegExp(
-  `<${DSML_ALT}parameter\\s*name\\s*=\\s*"([^"]+)"\\s*string\\s*=\\s*"(true|false)"\\s*>\\s*([\\s\\S]*?)\\s*</${DSML_ALT}parameter>`,
-  "gs",
-);
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -60,56 +33,113 @@ type DsmlToolCall = {
   arguments: Record<string, unknown>;
 };
 
-// ── DSML parser ────────────────────────────────────────────────────────────
+// ── Structural DSML parser ─────────────────────────────────────────────────
+//
+// We don't try to enumerate namespaces. Instead we look for the STRUCTURE:
+//
+//   <PREFIX tool_calls>          → tool-calls block marker
+//   </PREFIX tool_calls>         → tool-calls block closer
+//   <PREFIX invoke name="X">     → invoke tag
+//   </PREFIX invoke>             → invoke closer
+//   <PREFIX parameter name="K" string="B">V</PREFIX parameter>
+//
+// Where PREFIX is 1-20 non-whitespace, non-`>` characters.
+
+const TOOL_CALLS_OPEN_RE = /<([^\s>]{1,20})tool_calls\s*>/g;
+const INVOKE_OPEN_RE = /<([^\s>]{1,20})invoke\s+name\s*=\s*"([^"]+)"\s*>/gs;
+const PARAM_RE = /<([^\s>]{1,20})parameter\s+name\s*=\s*"([^"]+)"\s+string\s*=\s*"(true|false)"\s*>([\s\S]*?)<\/\1parameter>/gs;
+
+/**
+ * Given a namespace prefix like "__" or "|DSML|", build the literal
+ * closing tag and find it in text from startPos.
+ */
+function findClosingTag(
+  text: string,
+  prefix: string,
+  tag: string,
+  startPos: number,
+): number {
+  const closer = "</" + prefix + tag + ">";
+  return text.indexOf(closer, startPos);
+}
 
 /** Extract tool calls from raw model text containing DSML fragments. */
 export function parseDsmlToolCalls(text: string): DsmlToolCall[] {
   const calls: DsmlToolCall[] = [];
 
-  // Strategy: first try wrapped blocks, then fall back to bare invoke tags.
-
-  TOOL_CALLS_RE.lastIndex = 0;
-  INVOKE_RE.lastIndex = 0;
-  PARAM_RE.lastIndex = 0;
-
+  // Step 1: Find all <PREFIXtool_calls> blocks.
+  TOOL_CALLS_OPEN_RE.lastIndex = 0;
   let blockMatch: RegExpExecArray | null;
-  let foundBlock = false;
-  while ((blockMatch = TOOL_CALLS_RE.exec(text)) !== null) {
-    foundBlock = true;
-    INVOKE_RE.lastIndex = 0;
-    let invokeMatch: RegExpExecArray | null;
-    while ((invokeMatch = INVOKE_RE.exec(blockMatch[1])) !== null) {
-      calls.push({
-        toolName: invokeMatch[1],
-        arguments: parseParams(invokeMatch[2]),
-      });
-    }
+
+  while ((blockMatch = TOOL_CALLS_OPEN_RE.exec(text)) !== null) {
+    const prefix = blockMatch[1];
+    const blockStart = blockMatch.index + blockMatch[0].length;
+    const blockEnd = findClosingTag(text, prefix, "tool_calls", blockStart);
+    if (blockEnd === -1) continue;
+
+    const block = text.slice(blockStart, blockEnd);
+    parseInvokesInBlock(block, prefix, calls);
+
+    // Advance past this block.
+    TOOL_CALLS_OPEN_RE.lastIndex = blockEnd + prefix.length + 14;
   }
 
-  // If no wrapped blocks found, search the entire text for bare invoke tags.
-  if (!foundBlock) {
-    INVOKE_RE.lastIndex = 0;
+  // Step 2: If no tool_calls wrapper found, look for bare invoke tags.
+  if (calls.length === 0) {
+    INVOKE_OPEN_RE.lastIndex = 0;
     let invokeMatch: RegExpExecArray | null;
-    while ((invokeMatch = INVOKE_RE.exec(text)) !== null) {
-      calls.push({
-        toolName: invokeMatch[1],
-        arguments: parseParams(invokeMatch[2]),
-      });
+    while ((invokeMatch = INVOKE_OPEN_RE.exec(text)) !== null) {
+      const prefix = invokeMatch[1];
+      const toolName = invokeMatch[2];
+      const bodyStart = invokeMatch.index + invokeMatch[0].length;
+      const bodyEnd = findClosingTag(text, prefix, "invoke", bodyStart);
+      if (bodyEnd === -1) continue;
+
+      const paramsBody = text.slice(bodyStart, bodyEnd);
+      const args = parseParams(paramsBody, prefix);
+      calls.push({ toolName, arguments: args });
     }
   }
 
   return calls;
 }
 
-function parseParams(paramsBody: string): Record<string, unknown> {
+function parseInvokesInBlock(
+  block: string,
+  prefix: string,
+  out: DsmlToolCall[],
+): void {
+  INVOKE_OPEN_RE.lastIndex = 0;
+  let invokeMatch: RegExpExecArray | null;
+
+  while ((invokeMatch = INVOKE_OPEN_RE.exec(block)) !== null) {
+    const invokePrefix = invokeMatch[1];
+    if (invokePrefix !== prefix) continue;
+
+    const toolName = invokeMatch[2];
+    const bodyStart = invokeMatch.index + invokeMatch[0].length;
+    const bodyEnd = findClosingTag(block, prefix, "invoke", bodyStart);
+    if (bodyEnd === -1) continue;
+
+    const paramsBody = block.slice(bodyStart, bodyEnd);
+    const args = parseParams(paramsBody, prefix);
+    out.push({ toolName, arguments: args });
+  }
+}
+
+function parseParams(paramsBody: string, prefix: string): Record<string, unknown> {
   const args: Record<string, unknown> = {};
 
   PARAM_RE.lastIndex = 0;
   let paramMatch: RegExpExecArray | null;
+
   while ((paramMatch = PARAM_RE.exec(paramsBody)) !== null) {
-    const key = paramMatch[1];
-    const isString = paramMatch[2] === "true";
-    const rawValue = paramMatch[3];
+    const pfx = paramMatch[1];
+    if (pfx !== prefix) continue;
+
+    const key = paramMatch[2];
+    const isString = paramMatch[3] === "true";
+    const rawValue = paramMatch[4];
 
     if (isString) {
       args[key] = rawValue;
@@ -127,9 +157,10 @@ function parseParams(paramsBody: string): Record<string, unknown> {
 
 /** Quick check: does text contain DSML tool-call markup? */
 export function hasDsml(text: string): boolean {
-  // Fast path: check for either form
-  return text.includes("__invoke") || text.includes("&#95;&#95;invoke") ||
-    text.includes("|DSML|invoke") || text.includes("|DSML|tool_calls");
+  TOOL_CALLS_OPEN_RE.lastIndex = 0;
+  if (TOOL_CALLS_OPEN_RE.test(text)) return true;
+  return /<\/[^\s>]{1,20}invoke\s*>/.test(text) ||
+    /<[^\s>]{1,20}invoke\s+name\s*=\s*"/.test(text);
 }
 
 // ── Stream-level tool-call injection ───────────────────────────────────────
@@ -223,8 +254,6 @@ export function createDsmlMiddleware(): LanguageModelMiddleware {
             while (true) {
               const { done, value } = await reader.read();
               if (done) {
-                // Stream ended without an explicit finish/error event.
-                // Treat as finish and check for DSML.
                 if (!sawToolCall) {
                   tryInjectDsml(controller, reasonBuf, textBuf, provider);
                 }
@@ -233,14 +262,12 @@ export function createDsmlMiddleware(): LanguageModelMiddleware {
                 return;
               }
 
-              // Track real tool calls.
               if (value?.type === "tool-call" || value?.type === "tool-input-start") {
                 sawToolCall = true;
                 controller.enqueue(value);
                 continue;
               }
 
-              // Accumulate reasoning / text for DSML scanning.
               if (value?.type === "reasoning-delta") {
                 reasonBuf.push(String(value.delta ?? ""));
                 controller.enqueue(value);
@@ -251,7 +278,6 @@ export function createDsmlMiddleware(): LanguageModelMiddleware {
                 controller.enqueue(value);
                 continue;
               }
-              // Non-delta text/reasoning parts.
               if (
                 (value?.type === "text" || value?.type === "reasoning") &&
                 typeof (value as { text?: unknown }).text === "string"
@@ -261,10 +287,8 @@ export function createDsmlMiddleware(): LanguageModelMiddleware {
                 continue;
               }
 
-              // Hold finish/error until we've checked for DSML.
               if (value?.type === "finish" || value?.type === "error") {
                 finishPart = value;
-                // Inject DSML before emitting finish/error.
                 if (!sawToolCall) {
                   tryInjectDsml(controller, reasonBuf, textBuf, provider);
                 }
