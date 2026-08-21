@@ -17,6 +17,7 @@ import { IS_WINDOWS, IS_MAC, IS_LINUX } from "@/lib/platform";
 
 import { extensionRegistry } from "./extensions";
 import { agentBus } from "./eventBus";
+import { createFenceState } from "./fence";
 import { loadProjectRules, formatRulesForPrompt, type ProjectRules } from "./projectRules";
 import { cleanOldCheckpoints } from "./checkpoints";
 import { getRelevantFiles, formatRelevantFiles } from "./relevance";
@@ -72,6 +73,23 @@ type SendOptions = {
   abortSignal?: AbortSignal;
   [k: string]: unknown;
 };
+
+/** Per-session fence state cache. Created once per session, never rotated. */
+const fenceStateCache = new Map<string, import("./fence").FenceState>();
+
+function getFenceState(sessionId: string): import("./fence").FenceState {
+  let state = fenceStateCache.get(sessionId);
+  if (!state) {
+    state = createFenceState();
+    fenceStateCache.set(sessionId, state);
+  }
+  return state;
+}
+
+/** Clear fence state when a session is deleted. */
+export function clearFenceState(sessionId: string): void {
+  fenceStateCache.delete(sessionId);
+}
 
 export function createContextAwareTransport(deps: Deps) {
   const run = async (options: SendOptions) => {
@@ -167,6 +185,7 @@ export function createContextAwareTransport(deps: Deps) {
       abortSignal: options.abortSignal,
       mcpTools: Object.keys(mcpTools).length > 0 ? mcpTools : undefined,
       mcpSummary: mcpSummary.length > 0 ? mcpSummary : undefined,
+      fenceState: getFenceState(sessionId),
     });
     // When summarization trimmed the history, pass the trimmed set as
     // originalMessages so the Chat instance adopts it. Otherwise the Chat

@@ -12,6 +12,7 @@ import { buildYouTubeTools } from "./youtube";
 import { buildMemoryTools } from "./memory";
 import { buildBatchEditTools } from "./batchEdit";
 import { buildTerminalImageTools } from "./terminalImage";
+import { buildWatchTools } from "./watch";
 
 export { resolvePath, type ToolContext } from "./context";
 
@@ -25,6 +26,7 @@ export function buildCoreTools(ctx: import("./context").ToolContext) {
     ...buildMemoryTools(ctx),
     ...buildBatchEditTools(ctx),
     ...buildTerminalImageTools(ctx),
+    ...buildWatchTools(ctx),
   } as const;
 }
 

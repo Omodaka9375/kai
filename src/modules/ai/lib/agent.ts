@@ -35,6 +35,8 @@ import {
   type StackInfo,
 } from "./stackDetector";
 export type { StackInfo };
+import { fenceSystemPrompt } from "./fence";
+import { withToolGuard } from "./toolFencing";
 import { getGlobalStreamGuard, type LoopDetectionResult } from "./streamGuard";
 
 const localProxyFetch = createProxyFetch({ allowPrivateNetwork: true });
@@ -384,6 +386,8 @@ export type RunAgentOptions = {
   mcpTools?: Record<string, unknown>;
   /** Human-readable summary of connected MCP servers for the system prompt. */
   mcpSummary?: { name: string; tools: string[]; instructions: string | null }[];
+  /** Fence state for prompt-injection defense. Created per session. */
+  fenceState?: import("./fence").FenceState;
 };
 
 /**
@@ -502,6 +506,8 @@ export async function runAgentStream(opts: RunAgentOptions) {
       }).join("\n")}`
     : "";
 
+  const fencePrompt = opts.fenceState ? fenceSystemPrompt(opts.fenceState) : "";
+
   const stableSystem = buildStableSystem(
     modelId,
     opts.agentPersona ?? null,
@@ -509,7 +515,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
     opts.projectMemory ?? null,
     opts.goalContext ?? null,
     opts.stackInfo ?? null,
-  ) + mcpBlock;
+  ) + mcpBlock + fencePrompt;
 
   const rawHistory = sanitizeModelMessages(
     stripDataUrlPrefixes(
@@ -586,10 +592,17 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // Initialize stream guard for loop detection
   const streamGuard = getGlobalStreamGuard();
   let stepsSeen = 0;
+
+  // Build and optionally fence tools for prompt-injection defense.
+  const tools = buildTools(opts.toolContext, opts.mcpTools);
+  const fencedTools = opts.fenceState
+    ? withToolGuard(tools as Record<string, unknown>, opts.fenceState)
+    : tools;
+
   return streamText({
     model: wrappedModel,
     messages: finalMessages,
-    tools: buildTools(opts.toolContext, opts.mcpTools),
+    tools: fencedTools,
     stopWhen: stepCountIs(MAX_AGENT_STEPS),
     abortSignal: opts.abortSignal,
     ...(hasProviderOpts ? { providerOptions: thinkingProviderOpts } : {}),

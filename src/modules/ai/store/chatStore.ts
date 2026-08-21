@@ -34,6 +34,8 @@ import {
 import { pushRecentModel, persistProjectModel } from "../lib/modelPrefs";
 import { cancelAllShellSessions } from "../tools/shell";
 import { createContextAwareTransport } from "../lib/transport";
+import { clearFenceState } from "../lib/transport";
+import { reapSessionWatches, closeWatchSessionShell } from "../tools/watch";
 import type { ToolContext } from "../tools/tools";
 import { resetEditFailures } from "../tools/edit";
 import { FileTracker } from "../lib/fileTracker";
@@ -168,6 +170,8 @@ type StoreState = {
   consumeSelections: () => PendingSelection[];
 
   agentMeta: AgentMeta;
+  /** Monotonic tick for forcing re-renders (e.g. injected watch messages). */
+  _tick: number;
   patchAgentMeta: (patch: Partial<AgentMeta>) => void;
   resetAgentMeta: () => void;
 
@@ -192,6 +196,8 @@ type StoreState = {
   renameSession: (id: string, title: string) => void;
   /** Persist messages of a session and bump its updatedAt + auto-title. */
   persistMessages: (id: string, messages: UIMessage[]) => void;
+  /** Inject a system-originated user message (e.g. watch result) without triggering a new agent run. */
+  injectMessage: (id: string, text: string) => void;
   /** Fork the current session at a message index, creating a new branch. */
   forkSession: (atMessageIndex: number) => Promise<string | null>;
   /** Steering message queued while agent is busy. */
@@ -495,6 +501,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
   },
 
   agentMeta: IDLE_META,
+  _tick: 0,
   patchAgentMeta: (patch) =>
     set((s) => ({ agentMeta: { ...s.agentMeta, ...patch } })),
   resetAgentMeta: () => set({ agentMeta: IDLE_META }),
@@ -648,6 +655,9 @@ export const useChatStore = create<StoreState>((set, get) => ({
     }
     void deleteSessionData(id);
     void useTodosStore.getState().clearSession(id);
+    reapSessionWatches(id);
+    closeWatchSessionShell(id);
+    clearFenceState(id);
 
     if (remaining.length === 0) {
       const fresh: SessionMeta = {
@@ -705,6 +715,22 @@ export const useChatStore = create<StoreState>((set, get) => ({
     );
     set({ sessions: next });
     void saveSessionsList(next);
+  },
+  injectMessage: (id, text) => {
+    const chat = getOrCreateChat(id);
+    // Push a system-originated user message into the chat's message array.
+    // sendAutomaticallyWhen only triggers on assistant messages, so this
+    // won't auto-trigger a new agent run.
+    chat.messages = [
+      ...chat.messages,
+      {
+        id: `watch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        role: "user",
+        parts: [{ type: "text" as const, text }],
+      } as UIMessage,
+    ];
+    // Force a Zustand re-render so the UI shows the injected message.
+    set({ _tick: Date.now() });
   },
   forkSession: async (atMessageIndex) => {
     const activeId = get().activeSessionId;
