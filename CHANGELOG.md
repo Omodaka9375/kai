@@ -4,6 +4,18 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.1.9]
+
+### Fixed
+
+- **_effect field leaking to model, causing premature agent stop**: The `withToolGuard` wrapper in `toolFencing.ts` was annotating every tool result with `_effect` (`COMMITTED`/`NONE`/etc.) via `annotate()`. These internal tracking fields were never stripped before the model saw the result. The model interpreted `"COMMITTED"` as a completion/stop signal, causing the agent to stop with a green "Stopped" indicator after the first RUN or EDIT. Now `_effect`, `_outputWarnings`, and `_outputWarningNote` are deleted from the result in the wrapper's return path before reaching the AI SDK.
+
+### Added
+
+- **Thinking toggle for OpenAI-compatible local models in Settings**: The `openaiCompatibleThinkingMode` preference (already in store.ts) is now wired to the model transport — resolves in `getThinkingMode()` when the selected model is `openai-compatible-custom`. The `openai-compatible` and `lmstudio` providers now emit `reasoningEffort` via `providerOptions.openai` so vLLM, Ollama, Fireworks, and other local endpoints honor the toggle. Settings page: Reasoning button group (off/low/med/high) added to the OpenAI-compatible block, next to the Context field.
+
+---
+
 ## [1.1.8]
 
 ### Added
