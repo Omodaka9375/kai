@@ -32,7 +32,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { SLASH_COMMANDS, Kai_CMD_RE } from "../lib/slashCommands";
 import { Spinner } from "@/components/ui/spinner";
-import { useChatStore, sendMessage } from "../store/chatStore";
+import { useChatStore, sendMessage, respondToApprovalStandalone } from "../store/chatStore";
 import type {
   ChatStatus,
   DynamicToolUIPart,
@@ -440,19 +440,11 @@ function stripLeakedTokens(text: string): string {
   return cleaned.trim();
 }
 
-type ApprovalArg = {
-  id: string;
-  approved: boolean;
-  reason?: string;
-};
-
 type Props = {
   messages: UIMessage[];
   status: ChatStatus;
   error: Error | undefined;
   clearError: () => void;
-  addToolApprovalResponse: (arg: ApprovalArg) => void | PromiseLike<void>;
-  stop: () => void | PromiseLike<void>;
 };
 
 export function AiChatView({
@@ -460,7 +452,6 @@ export function AiChatView({
   status,
   error,
   clearError,
-  addToolApprovalResponse,
 }: Props) {
   const scrollCtx = useRef<StickToBottomContext | null>(null);
   const isBusy = status === "submitted" || status === "streaming";
@@ -493,8 +484,8 @@ export function AiChatView({
   })();
 
   const onApproval = useCallback(
-    (id: string, approved: boolean) => addToolApprovalResponse({ id, approved }),
-    [addToolApprovalResponse],
+    (id: string, approved: boolean) => respondToApprovalStandalone(id, approved),
+    [],
   );
 
   if (messages.length === 0) {

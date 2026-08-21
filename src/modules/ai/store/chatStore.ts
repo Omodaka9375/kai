@@ -864,6 +864,22 @@ export function abortSession(sessionId: string): void {
 }
 
 /**
+ * Standalone responder — routes an approval decision through the store's
+ * approval responder and aborts the agent on denial. Exported so leaf
+ * UI components (AiChatView, AiMiniWindow) can resolve approvals without
+ * needing a Zustand hook. Used by AiChat.tsx's onApproval callback.
+ */
+export function respondToApprovalStandalone(
+  approvalId: string,
+  approved: boolean,
+): void {
+  const state = useChatStore.getState();
+  const fn = state.approvalResponder;
+  if (fn) fn(approvalId, approved);
+  if (!approved) abortSession(state.activeSessionId ?? "");
+}
+
+/**
  * Stop the agent and release any pending approvals.
  *
  * `Chat.stop()` only aborts an in-flight (`streaming`/`submitted`) run — it
