@@ -12,6 +12,7 @@
 
 import type { FenceState } from "./fence";
 import { type EffectStatus } from "./effectStatus";
+import { guardToolOutput, formatGuardWarning } from "./outputGuard";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ToolDef = any;
@@ -106,8 +107,18 @@ export function withToolGuard(
     (wrapped as any).execute = async (...args: any[]) => {
       const raw = await (execute as (...a: unknown[]) => unknown)(...args);
       const effect = resolveEffect(name, raw, baseEffect);
-      const result = annotate(raw, effect);
-      return doFence ? fenceToolOutput(name, result, fenceState) : result;
+      let result = annotate(raw, effect);
+      // Run output guard before fencing — the warnings are added to
+      // the result so the model sees them alongside the fenced content.
+      if (doFence) {
+        const guard = guardToolOutput(name, result);
+        if (guard.hasWarnings) {
+          const note = formatGuardWarning(guard);
+          if (note) result = { ...result, _outputWarnings: guard.warnings, _outputWarningNote: note };
+        }
+        result = fenceToolOutput(name, result, fenceState);
+      }
+      return result;
     };
     out[name] = wrapped;
   }
