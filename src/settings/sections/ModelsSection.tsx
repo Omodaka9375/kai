@@ -17,9 +17,7 @@ import {
   providerNeedsKey,
   providerSupportsKey,
   type ModelId,
-  type ModelInfo,
   type ProviderId,
-  type ThinkingMode,
 } from "@/modules/ai/config";
 import { clearKey, getAllKeys, setKey } from "@/modules/ai/lib/keyring";
 import { usePreferencesStore } from "@/modules/settings/preferences";
@@ -37,8 +35,6 @@ import {
   setOpenaiCompatibleBaseURL,
   setOpenaiCompatibleContextSize,
   setOpenaiCompatibleModelId,
-  setModelThinkingMode,
-  setThinkingMode,
 } from "@/modules/settings/store";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -101,8 +97,6 @@ export function ModelsSection() {
         lmstudioModelId={lmstudioModelId}
         openaiCompatModelId={openaiCompatModelId}
       />
-
-      <ThinkingModeBlock />
 
       <div className="flex flex-col gap-2">
         <div className="flex items-baseline justify-between">
@@ -1061,201 +1055,4 @@ function MediaProvidersBlock() {
   );
 }
 
-const THINKING_LABELS: Record<ThinkingMode, string> = {
-  off: "Off — no extended thinking",
-  low: "Low",
-  medium: "Medium",
-  high: "High",
-};
 
-const GLOBAL_SCOPE = "__global__";
-
-function ThinkingModeBlock() {
-  const thinkingMode = usePreferencesStore((s) => s.thinkingMode);
-  const modelThinkingModes = usePreferencesStore((s) => s.modelThinkingModes);
-  const [scope, setScope] = useState<string>(GLOBAL_SCOPE);
-
-  // Only models that actually support extended reasoning are configurable.
-  const reasoningModels = useMemo(
-    () =>
-      (MODELS as readonly ModelInfo[]).filter(
-        (m) => m.tags?.includes("reasoning"),
-      ),
-    [],
-  );
-
-  const isGlobal = scope === GLOBAL_SCOPE;
-  const hasOverride = !isGlobal && scope in modelThinkingModes;
-  const effective = isGlobal
-    ? thinkingMode
-    : modelThinkingModes[scope] ?? thinkingMode;
-  const scopeModel = isGlobal ? null : getModel(scope as ModelId);
-
-  const pick = (mode: ThinkingMode | null) => {
-    if (isGlobal) void setThinkingMode(mode ?? "off");
-    else void setModelThinkingMode(scope, mode);
-  };
-
-  return (
-    <div className="flex flex-col gap-2">
-      <Label>Thinking mode</Label>
-      <p className="text-[10.5px] leading-relaxed text-muted-foreground">
-        Extended reasoning is configured per model — each model keeps its own
-        level, so switching between a reasoning model and a fast model never
-        carries the wrong setting over. Models without a specific override use
-        the global default. Levels map to provider-specific knobs: Anthropic
-        (thinking budget), OpenAI (reasoning effort), Google (thinking
-        budget), xAI (reasoning effort). Higher levels cost more tokens.
-      </p>
-
-      <div className="flex flex-wrap items-center gap-1.5">
-        {/* Scope: which model this setting applies to. */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="outline"
-              className="h-9 justify-between gap-2 px-2.5 text-[12px]"
-            >
-              <span className="flex items-center gap-2">
-                {scopeModel ? (
-                  <ProviderIcon provider={scopeModel.provider} size={14} />
-                ) : null}
-                {scopeModel ? scopeModel.label : "All models (default)"}
-              </span>
-              <HugeiconsIcon
-                icon={ArrowDown01Icon}
-                size={12}
-                strokeWidth={2}
-                className="opacity-70"
-              />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="start"
-            side="bottom"
-            sideOffset={6}
-            avoidCollisions={false}
-            className="min-w-[280px] p-1"
-          >
-            <DropdownMenuItem
-              onSelect={() => setScope(GLOBAL_SCOPE)}
-              className={cn(
-                "flex items-center gap-2 text-[12px]",
-                isGlobal && "bg-accent/50",
-              )}
-            >
-              <span className="flex flex-1 flex-col">
-                <span>All models (default)</span>
-                <span className="text-[10px] text-muted-foreground">
-                  Fallback used when a model has no override
-                </span>
-              </span>
-            </DropdownMenuItem>
-            <div className="mx-1 my-1 border-t border-border/60" />
-            <div className="max-h-[220px] overflow-y-auto overscroll-contain pr-1">
-              {reasoningModels.map((mod) => {
-                const active = scope === mod.id;
-                const overridden = mod.id in modelThinkingModes;
-                return (
-                  <DropdownMenuItem
-                    key={mod.id}
-                    onSelect={() => setScope(mod.id)}
-                    className={cn(
-                      "flex items-start gap-2 text-[12px]",
-                      active && "bg-accent/50",
-                    )}
-                  >
-                    <ProviderIcon provider={mod.provider} size={13} />
-                    <span className="flex flex-1 flex-col">
-                      <span className="flex items-center gap-1.5">
-                        {mod.label}
-                        {overridden ? (
-                          <span className="rounded-sm border border-border/70 bg-muted/50 px-1 text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
-                            custom
-                          </span>
-                        ) : null}
-                      </span>
-                      <span className="text-[10px] text-muted-foreground">
-                        {mod.hint}
-                      </span>
-                    </span>
-                  </DropdownMenuItem>
-                );
-              })}
-            </div>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        {/* Level for the selected scope. */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="outline"
-              className="h-9 justify-between gap-2 px-2.5 text-[12px]"
-            >
-              <span className="flex items-center gap-2">
-                {hasOverride ? (
-                  <span className="size-1.5 rounded-full bg-primary" />
-                ) : null}
-                {THINKING_LABELS[effective]}
-                {!isGlobal && !hasOverride ? (
-                  <span className="text-[10px] font-normal text-muted-foreground">
-                    (default)
-                  </span>
-                ) : null}
-              </span>
-              <HugeiconsIcon
-                icon={ArrowDown01Icon}
-                size={12}
-                strokeWidth={2}
-                className="opacity-70"
-              />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="min-w-[240px]">
-            {!isGlobal ? (
-              <>
-                <DropdownMenuItem
-                  onSelect={() => pick(null)}
-                  className={cn(
-                    "text-[12px]",
-                    !hasOverride && "bg-accent/50",
-                  )}
-                >
-                  <span className="flex flex-col">
-                    <span>Use default</span>
-                    <span className="text-[10px] text-muted-foreground">
-                      Fall back to &quot;{THINKING_LABELS[thinkingMode]}&quot;
-                    </span>
-                  </span>
-                </DropdownMenuItem>
-                <div className="mx-1 my-1 border-t border-border/60" />
-              </>
-            ) : null}
-            {(Object.entries(THINKING_LABELS) as [ThinkingMode, string][]).map(
-              ([key, label]) => {
-                const active = isGlobal
-                  ? key === thinkingMode
-                  : hasOverride && key === modelThinkingModes[scope];
-                return (
-                  <DropdownMenuItem
-                    key={key}
-                    onSelect={() => pick(key)}
-                    className={cn("text-[12px]", active && "bg-accent/50")}
-                  >
-                    {label}
-                    {key === "off" ? (
-                      <span className="ml-2 text-[10px] text-muted-foreground">
-                        no extended thinking
-                      </span>
-                    ) : null}
-                  </DropdownMenuItem>
-                );
-              },
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-    </div>
-  );
-}

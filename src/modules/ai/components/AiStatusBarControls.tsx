@@ -43,11 +43,13 @@ import {
   type ModelId,
   type ModelInfo,
   type ProviderId,
+  type ThinkingMode,
 } from "../config";
 import { useOpenRouterModelsStore } from "../store/openrouterModelsStore";
 import { toggleFavoriteModel } from "../lib/modelPrefs";
 import { useChatStore } from "../store/chatStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
+import { setModelThinkingMode } from "@/modules/settings/store";
 
 const PROVIDER_ICON = {
   openai: ChatGptIcon,
@@ -119,12 +121,53 @@ export function AiStatusBarControls() {
 
 type Tab = "all" | "favorites" | "recent";
 
+const THINKING_CYCLE: ThinkingMode[] = ["off", "low", "medium", "high"];
+const THINKING_ICON_LABEL: Record<ThinkingMode, string> = {
+  off: "off",
+  low: "low",
+  medium: "med",
+  high: "high",
+};
+
+function cycleThinkingMode(current: ThinkingMode): ThinkingMode {
+  const idx = THINKING_CYCLE.indexOf(current);
+  return THINKING_CYCLE[(idx + 1) % THINKING_CYCLE.length];
+}
+
+function ThinkingToggle({
+  active,
+  onClick,
+}: {
+  active: ThinkingMode;
+  onClick: (e: React.MouseEvent) => void;
+}) {
+  const label = THINKING_ICON_LABEL[active];
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={`Thinking: ${active}. Click to cycle.`}
+      className={cn(
+        "ml-auto flex items-center gap-0.5 rounded-full px-1 py-0.5 text-[9px] font-medium tabular-nums transition-colors",
+        active === "off"
+          ? "text-muted-foreground/50 hover:bg-accent hover:text-muted-foreground"
+          : "text-primary hover:bg-primary/10",
+      )}
+    >
+      <HugeiconsIcon icon={BrainIcon} size={10} strokeWidth={1.75} />
+      <span>{label}</span>
+    </button>
+  );
+}
+
 function ModelDropdown() {
   const selected = useChatStore((s) => s.selectedModelId);
   const apiKeys = useChatStore((s) => s.apiKeys);
   const setSelected = useChatStore((s) => s.setSelectedModelId);
   const favoriteIds = usePreferencesStore((s) => s.favoriteModelIds);
   const recentIds = usePreferencesStore((s) => s.recentModelIds);
+  const thinkingMode = usePreferencesStore((s) => s.thinkingMode);
+  const modelThinkingModes = usePreferencesStore((s) => s.modelThinkingModes);
   const current = getModel(selected);
   // For custom endpoints, show the actual model ID instead of generic label.
   const lmModelId = usePreferencesStore((s) => s.lmstudioModelId);
@@ -223,7 +266,7 @@ function ModelDropdown() {
 
       <DropdownMenuContent
         align="end"
-        className="w-[28rem] p-0 overflow-hidden rounded-xl border border-border/70 shadow-xl"
+        className="w-[34rem] p-0 overflow-hidden rounded-xl border border-border/70 shadow-xl"
         onFocusCapture={(e) => {
           if (e.target !== inputRef.current) inputRef.current?.focus();
         }}
@@ -322,6 +365,8 @@ function ModelDropdown() {
                   hasKey={hasKeyFor(m.provider)}
                   favorite={favoriteIds.includes(m.id)}
                   showProviderIcon={activeProvider === null}
+                  thinkingMode={thinkingMode}
+                  modelThinkingModes={modelThinkingModes}
                   onPick={() => {
                     if (!hasKeyFor(m.provider)) {
                       void openSettingsWindow("models");
@@ -330,6 +375,14 @@ function ModelDropdown() {
                     setSelected(m.id as ModelId);
                   }}
                   onToggleFavorite={() => void toggleFavoriteModel(m.id)}
+                  onToggleThinking={(modelId) =>
+                    void setModelThinkingMode(
+                      modelId,
+                      cycleThinkingMode(
+                        modelThinkingModes[modelId] ?? thinkingMode,
+                      ),
+                    )
+                  }
                 />
               ))
             )}
@@ -448,17 +501,29 @@ function ModelRow({
   hasKey,
   favorite,
   showProviderIcon,
+  thinkingMode,
+  modelThinkingModes,
   onPick,
   onToggleFavorite,
+  onToggleThinking,
 }: {
   model: ModelInfo;
   selected: boolean;
   hasKey: boolean;
   favorite: boolean;
   showProviderIcon: boolean;
+  thinkingMode: ThinkingMode;
+  modelThinkingModes: Record<string, ThinkingMode>;
   onPick: () => void;
   onToggleFavorite: () => void;
+  onToggleThinking: (modelId: string) => void;
 }) {
+  const isReasoning = model.tags?.includes("reasoning");
+  const hasOverride = isReasoning && model.id in modelThinkingModes;
+  const effective = hasOverride
+    ? modelThinkingModes[model.id]
+    : thinkingMode;
+
   return (
     <DropdownMenuItem
       onSelect={(e) => {
@@ -518,6 +583,17 @@ function ModelRow({
       </div>
 
       <CapabilityBars caps={model.capabilities} />
+
+      {isReasoning ? (
+        <ThinkingToggle
+          active={effective}
+          onClick={(e: React.MouseEvent) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onToggleThinking(model.id);
+          }}
+        />
+      ) : null}
 
       {selected ? (
         <HugeiconsIcon
