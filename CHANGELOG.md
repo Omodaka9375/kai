@@ -4,6 +4,26 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.1.8]
+
+### Added
+
+- **Prompt-injection fence system**: Nonce-delimited trust boundaries around every tool output. Tool results are wrapped in `[start tool_NONCE]…[end tool_NONCE]` markers declared in the system prompt. Fence-like markers inside untrusted content are neutralized with zero-width spaces so an attacker can't forge trust boundaries. Multiple trust zones: `tool`, `web`, `mcp`.
+- **EffectStatus — typed tool outcomes**: Every tool result is now annotated with one of six typed outcomes: `COMMITTED`, `NONE`, `UNKNOWN`, `PARTIAL`, `ROLLED_BACK`, `REJECTED`. Resolved per-tool from exit codes, timeout flags, and partial multi_edit results. Removes phantom-state assumptions where the model treats every result as "succeeded."
+- **Watch system**: Periodic shell command polling with a condition DSL and change detection. Agents can create watches with `fire_on_match` (condition true) or `fire_on_change` (output diff from baseline) mode. Results are injected as user messages that don't auto-trigger new agent runs. Max 5 watches per session, auto-reaped on session close.
+- **Output guard — heuristic injection detection**: Four-tier safety check on tool results before they reach the model: prompt injection, role injection, meta-injection (fake DSML/tool calls), and camouflage (zero-width/bidi characters). Runs greedily — stops at the first matched tier. Warnings attach to results so the model sees them alongside fenced content.
+- **Trajectory model**: Provider-neutral canonical conversation representation with `Turn` / `TurnBlock` types, `fromUIMessage` / `toUIMessage` converters, content-addressed attachment references, and `turnsToSummary` compaction helper. Decouples persistence from the AI SDK's internal `UIMessage` format.
+- **Tool irreversibility registry**: Every tool tagged as `read_only`, `reversible`, or `irreversible`. The approval UI can use this to show the user what they're committing to before approving.
+- **Per-model thinking toggle in model picker**: Each reasoning model row in the status-bar dropdown shows a brain-icon toggle that cycles `off → low → med → high` with a single click. Persisted per-model via `setModelThinkingMode`. Removed the Settings modal's `ThinkingModeBlock` — thinking control is now one click away in the main UI.
+- **Background shell owner scoping**: Background processes now carry a `owner` (chat session ID) and `label` field. `shell_bg_reap` kills all background processes owned by a given session, preventing cross-contamination between parallel agent conversations. Called automatically on session delete.
+
+### Fixed
+
+- **Don't abort agent on normal tool denial**: `respondToApproval` was calling `abortSession()` on every denial, killing the entire agent run and leaking `(User canceled)` into context. Now only "Run edited" aborts (to prevent the original command from re-running); normal Deny lets the agent see the rejection and continue gracefully.
+- **Dead terminal on project open**: React strict mode's double-mount left `ptyOpening = true` from the first mount's in-flight spawn. The second mount skipped spawning, and if the first spawn failed (ConPTY race, bad cwd), the terminal stayed empty forever. Now: (1) removes the `!ptyOpening` guard so the second mount always re-attempts, (2) one automatic retry after 1s, (3) on final failure, writes a red error into the terminal. Also bumped the silent-prompt nudge from 1.5s → 3s for pwsh + heavy Oh-My-Posh modules.
+
+---
+
 ## [1.1.7]
 
 ### Fixed
