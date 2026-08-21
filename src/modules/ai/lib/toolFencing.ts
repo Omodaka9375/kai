@@ -118,6 +118,12 @@ export function withToolGuard(
         }
         result = fenceToolOutput(name, result, fenceState);
       }
+      // Strip internal metadata before it reaches the model. The model
+      // has no explanation for _effect (e.g. "COMMITTED") and may
+      // misinterpret it as a stop/completion signal.
+      delete (result as Record<string, unknown>)._effect;
+      delete (result as Record<string, unknown>)._outputWarnings;
+      delete (result as Record<string, unknown>)._outputWarningNote;
       return result;
     };
     out[name] = wrapped;
