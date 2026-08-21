@@ -229,11 +229,13 @@ export const native = {
     invoke<void>("shell_session_close", { id }),
   shellSessionCancel: (id: number) =>
     invoke<void>("shell_session_cancel", { id }),
-  shellBgSpawn: (command: string, cwd?: string | null) =>
+  shellBgSpawn: (command: string, cwd?: string | null, owner?: string, label?: string) =>
     invoke<number>("shell_bg_spawn", {
       command,
       cwd: cwd ?? null,
       workspace: currentWorkspaceEnv(),
+      owner: owner ?? null,
+      label: label ?? null,
     }),
   shellBgLogs: (handle: number, sinceOffset?: number) =>
     invoke<{
@@ -244,6 +246,7 @@ export const native = {
       exit_code: number | null;
     }>("shell_bg_logs", { handle, sinceOffset: sinceOffset ?? null }),
   shellBgKill: (handle: number) => invoke<void>("shell_bg_kill", { handle }),
+  shellBgReap: (owner: string) => invoke<number>("shell_bg_reap", { owner }),
   shellBgList: () =>
     invoke<
       {

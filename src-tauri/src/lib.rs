@@ -225,6 +225,7 @@ pub fn run() {
             shell::shell_bg_spawn,
             shell::shell_bg_logs,
             shell::shell_bg_kill,
+            shell::shell_bg_reap,
             shell::shell_bg_list,
             workspace::wsl_list_distros,
             workspace::wsl_default_distro,

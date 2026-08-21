@@ -292,6 +292,8 @@ pub fn shell_bg_spawn(
     command: String,
     cwd: Option<String>,
     workspace: Option<WorkspaceEnv>,
+    owner: Option<String>,
+    label: Option<String>,
 ) -> Result<u32, String> {
     // Hold the write lock across reap → spawn → cap-check → insert so
     // concurrent callers don't race on the count and waste spawned processes.
@@ -305,7 +307,13 @@ pub fn shell_bg_spawn(
     // may be exceeded by one, which is acceptable (MAX_BG_PROCS is a soft
     // limit, not a hard sandbox).
     drop(map);
-    let proc = background::spawn(command, cwd, WorkspaceEnv::from_option(workspace))?;
+    let proc = background::spawn(
+        command,
+        cwd,
+        WorkspaceEnv::from_option(workspace),
+        owner,
+        label,
+    )?;
     let mut map = rwlock_write(&state.bg);
     const BG_ID_BOUND: u32 = 128;
     let mut id = None;
@@ -342,6 +350,25 @@ pub fn shell_bg_kill(state: tauri::State<ShellState>, handle: u32) -> Result<(),
         proc.kill();
     }
     Ok(())
+}
+
+/// Reap (kill) all background processes owned by the given session ID.
+/// Called when a chat session closes so parallel agents don't cross-contaminate.
+#[tauri::command]
+pub fn shell_bg_reap(
+    state: tauri::State<ShellState>,
+    owner: String,
+) -> Result<u32, String> {
+    let mut map = rwlock_write(&state.bg);
+    let mut killed = 0u32;
+    for proc in map.values() {
+        if proc.owner.as_deref() == Some(&owner) {
+            proc.kill();
+            killed += 1;
+        }
+    }
+    map.retain(|_, p| !p.has_exited());
+    Ok(killed)
 }
 
 #[tauri::command]

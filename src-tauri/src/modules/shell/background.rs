@@ -23,6 +23,11 @@ pub struct BackgroundProc {
     pub exited: AtomicBool,
     pub exit_code: AtomicI32,
     pub exit_unknown: AtomicBool,
+    /// Owning chat session ID — when the session closes, all owned processes
+    /// are reaped so parallel agents don't cross-contaminate.
+    pub owner: Option<String>,
+    /// Human-readable label for listing / status display.
+    pub label: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -42,6 +47,8 @@ pub struct BackgroundProcInfo {
     pub started_at_ms: u64,
     pub exited: bool,
     pub exit_code: Option<i32>,
+    pub owner: Option<String>,
+    pub label: Option<String>,
 }
 
 impl BackgroundProc {
@@ -84,6 +91,8 @@ impl BackgroundProc {
             started_at_ms: self.started_at_ms,
             exited,
             exit_code,
+            owner: self.owner.clone(),
+            label: self.label.clone(),
         }
     }
 }
@@ -98,6 +107,8 @@ pub fn spawn(
     command: String,
     cwd: Option<String>,
     workspace: WorkspaceEnv,
+    owner: Option<String>,
+    label: Option<String>,
 ) -> Result<Arc<BackgroundProc>, String> {
     let trimmed = command.trim().to_string();
     if trimmed.is_empty() {
@@ -136,6 +147,8 @@ pub fn spawn(
         exited: AtomicBool::new(false),
         exit_code: AtomicI32::new(0),
         exit_unknown: AtomicBool::new(false),
+        owner,
+        label,
     });
 
     {

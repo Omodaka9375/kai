@@ -50,6 +50,8 @@ export function closeShellSession(sessionId: string): void {
       sessionShells.delete(key);
     }
   }
+  // Reap background processes owned by this session.
+  void native.shellBgReap(sessionId).catch(() => {});
 }
 
 async function getSessionShell(
@@ -240,7 +242,11 @@ export function buildShellTools(ctx: ToolContext) {
         if (!safety.ok) return { error: safety.reason };
         const effectiveCwd = cwd ?? ctx.getCwd();
         try {
-          const handle = await native.shellBgSpawn(command, effectiveCwd);
+          const owner = ctx.getSessionId() ?? undefined;
+          const label = command.length > 80
+            ? command.slice(0, 77) + "..."
+            : command;
+          const handle = await native.shellBgSpawn(command, effectiveCwd, owner, label);
           return { handle, command, cwd: effectiveCwd, ok: true };
         } catch (e) {
           return { error: String(e) };
