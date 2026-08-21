@@ -132,6 +132,74 @@ function deliverPtyBytes(leafId: number, bytes: Uint8Array): void {
   if (!s.disposed) feedErrorDetector(textDecoder.decode(bytes, { stream: true }));
 }
 
+/**
+ * Open a PTY with a single automatic retry on failure.
+ *
+ * ConPTY races, transient I/O errors, and cwd permission issues can
+ * cause the first spawn to fail. A 1-second retry often resolves it.
+ * On the second failure, write the error into the terminal so the
+ * user knows the shell didn't start — no more silent dead terminals.
+ */
+function openPtySession(
+  leafId: number,
+  s: Session,
+  cwd: string | undefined,
+  attempt: number,
+): void {
+  openPtyForSession(leafId, s, cwd)
+    .then((pty) => {
+      s.ptyOpening = false;
+      if (s.disposed) {
+        pty.close();
+        return;
+      }
+      s.pty = pty;
+      s.receivedOutput = false;
+      if (s.cols > 0 && s.rows > 0) pty.resize(s.cols, s.rows);
+
+      // In React strict mode the .then() may fire after attachSession
+      // called bindLeafToSlot but before the React re-mount wired the
+      // container. Re-bind if needed.
+      if (s.container && !s.hasSlot) bindLeafToSlot(leafId, s);
+
+      // Prompt nudge: ConPTY shells can render the initial prompt
+      // before the frontend wires the output channel. Some shells
+      // (pwsh with Oh-My-Posh + heavy modules) take 2-3 seconds.
+      const nudge = (ms: number, action: () => void) => {
+        const id = setTimeout(() => {
+          s.nudgeTimers = s.nudgeTimers.filter((t) => t !== id);
+          if (!s.receivedOutput && !s.disposed && s.pty === pty) action();
+        }, ms);
+        s.nudgeTimers.push(id);
+      };
+      nudge(500, () => {
+        void pty.resize(s.cols || 80, s.rows || 24);
+      });
+      nudge(3000, () => {
+        void pty.write("\r");
+      });
+    })
+    .catch((e) => {
+      s.ptyOpening = false;
+      console.error("[Kai] openPty failed (attempt %d):", attempt, e);
+      if (attempt < 1 && !s.disposed) {
+        s.ptyOpening = true;
+        setTimeout(() => {
+          if (s.disposed) return;
+          openPtySession(leafId, s, s.initialCwd, attempt + 1);
+        }, 1000);
+      } else if (!s.disposed && s.container) {
+        // Show error in the terminal — no more silent dead panes.
+        const slot = getSlotForLeaf(leafId);
+        if (slot) {
+          slot.term.write(
+            `\r\n\x1b[31mShell failed to start:\x1b[0m ${String(e)}\r\n`,
+          );
+        }
+      }
+    });
+}
+
 async function openPtyForSession(
   leafId: number,
   s: Session,
@@ -231,46 +299,13 @@ function attachSession(
 
   if (s.visibleNow) bindLeafToSlot(leafId, s);
 
-  if (!s.pty && !s.ptyOpening && !s.shellExited) {
+  if (!s.pty && !s.shellExited) {
+    // Clear any stale ptyOpening flag from a previous failed attempt.
+    // In React strict mode, the first mount's spawn may still be
+    // in-flight when the second mount runs — don't let a stuck flag
+    // prevent recovery.
     s.ptyOpening = true;
-    openPtyForSession(leafId, s, s.initialCwd)
-      .then((pty) => {
-        s.ptyOpening = false;
-        if (s.disposed) {
-          pty.close();
-          return;
-        }
-        s.pty = pty;
-        s.receivedOutput = false;
-        if (s.cols > 0 && s.rows > 0) pty.resize(s.cols, s.rows);
-
-        // ponytail: prompt nudge — on ConPTY the shell can render its
-        // initial prompt into a size/pipe state that the frontend hasn't
-        // wired yet, so the prompt vanishes. Schedule escalating nudges:
-        //   500ms  — resize to current dims (makes shell redraw)
-        //   1500ms — send CR if still silent (forces prompt at empty input)
-        // Ceiling: doesn't help if the shell itself is broken; upgrade to
-        // an OSC 133 readiness handshake if this proves insufficient.
-        const nudge = (ms: number, action: () => void) => {
-          const id = setTimeout(() => {
-            s.nudgeTimers = s.nudgeTimers.filter((t) => t !== id);
-            if (!s.receivedOutput && !s.disposed && s.pty === pty) action();
-          }, ms);
-          s.nudgeTimers.push(id);
-        };
-        nudge(500, () => {
-          const c = s.cols || 80;
-          const r = s.rows || 24;
-          void pty.resize(c, r);
-        });
-        nudge(1500, () => {
-          void pty.write("\r");
-        });
-      })
-      .catch((e) => {
-        s.ptyOpening = false;
-        console.error("[Kai] openPty failed:", e);
-      });
+    openPtySession(leafId, s, s.initialCwd, 0 /* attempt */);
   }
 }
 
@@ -309,6 +344,11 @@ export async function respawnSession(
   } catch (e) {
     s.ptyOpening = false;
     console.error("[Kai] respawn openPty failed:", e);
+    if (slot) {
+      slot.term.write(
+        `\r\n\x1b[31mShell failed to start:\x1b[0m ${String(e)}\r\n`,
+      );
+    }
     return;
   }
   s.ptyOpening = false;
