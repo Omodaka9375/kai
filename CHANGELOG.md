@@ -4,6 +4,18 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.1.7]
+
+### Fixed
+
+- **DSML tool calls still leaked on DeepSeek V4**: Complete rewrite of the DSML middleware parser to use structural tag matching instead of enumerating namespace variants. Now finds any `<PREFIXinvoke name="...">...</PREFIXinvoke>` pair by matching opening and closing tags via the PREFIX string — catches `__`, `|DSML|`, `&#95;&#95;`, and any future variant without code changes.
+- **`</thinking>` tags mangled in chat UI**: `splitThinkingBlocks` now handles three thinking-block formats: XML-style `<thinking>`, pipe-delimited `<|thinking|>`, and AI SDK thought protocol `...` markers. The detection gate in the chat renderer also recognizes all three so mixed-format thinking blocks render as collapsed reasoning pills instead of leaking as visible text.
+- **"Run edited" ran the original command too**: When the user edited a shell command in the approval card and clicked "Run edited", the agent was not stopped after the denial — it immediately re-issued the original (unedited) command. Now the denial routes through `respondToApprovalStandalone` which calls `abortSession()` to kill the agent after denial. Also removed the now-unused `addToolApprovalResponse` prop from `AiChatView` and `AiMiniWindow`.
+- **`batch_edit` failed on CRLF files**: `batchEdit` did raw `indexOf` on file content without line-ending normalization. On Windows (CRLF files), the model's LF-only `old_string` values never matched. Now mirrors `edit.ts`'s pipeline: normalizes both sides to LF before matching, works in LF space, then restores the original line-ending style.
+- **CI: Rust 1.98 clippy `chunks_exact_to_as_chunks`**: Replaced `chunks_exact(2)` with `as_chunks::<2>()` in the UTF-16 BOM detection code in `fs_read_file`.
+
+---
+
 ## [1.1.5]
 
 ### Added
