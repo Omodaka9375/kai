@@ -73,6 +73,8 @@ export type Preferences = {
   lmstudioContextSize: number;
   /** Context window size in tokens for OpenAI-compatible model. 0 = use default (128k). */
   openaiCompatibleContextSize: number;
+  /** Thinking mode for the OpenAI-compatible endpoint model. off/low/medium/high. */
+  openaiCompatibleThinkingMode: ThinkingMode;
   /** Active UI color theme. "default" uses the built-in Kai palette. */
   uiThemeId: string;
   /** ComfyUI local server URL. */
@@ -122,6 +124,7 @@ const KEY_DEFAULT_SHELL = "defaultShell";
 const KEY_LAST_WORKSPACE_CWD = "lastWorkspaceCwd";
 const KEY_LMSTUDIO_CTX_SIZE = "lmstudioContextSize";
 const KEY_COMPAT_CTX_SIZE = "openaiCompatibleContextSize";
+const KEY_COMPAT_THINKING = "openaiCompatibleThinkingMode";
 const KEY_UI_THEME = "uiThemeId";
 const KEY_COMFYUI_BASE_URL = "comfyuiBaseURL";
 const KEY_COMFYUI_WORKFLOW = "comfyuiWorkflow";
@@ -173,6 +176,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   lastWorkspaceCwd: "",
   lmstudioContextSize: 0,
   openaiCompatibleContextSize: 0,
+  openaiCompatibleThinkingMode: "off" as ThinkingMode,
   uiThemeId: "default",
   comfyuiBaseURL: "http://*********:8188",
   comfyuiWorkflow: "",
@@ -277,6 +281,9 @@ export async function loadPreferences(): Promise<Preferences> {
     openaiCompatibleContextSize:
       get<number>(KEY_COMPAT_CTX_SIZE) ??
       DEFAULT_PREFERENCES.openaiCompatibleContextSize,
+    openaiCompatibleThinkingMode:
+      get<ThinkingMode>(KEY_COMPAT_THINKING) ??
+      DEFAULT_PREFERENCES.openaiCompatibleThinkingMode,
     uiThemeId:
       get<string>(KEY_UI_THEME) ?? DEFAULT_PREFERENCES.uiThemeId,
     comfyuiBaseURL:
@@ -427,6 +434,10 @@ export async function setOpenaiCompatibleContextSize(value: number): Promise<voi
   await writePref(KEY_COMPAT_CTX_SIZE, value);
 }
 
+export async function setOpenaiCompatibleThinkingMode(value: ThinkingMode): Promise<void> {
+  await writePref(KEY_COMPAT_THINKING, value);
+}
+
 export async function setUiThemeId(value: string): Promise<void> {
   await writePref(KEY_UI_THEME, value);
 }
@@ -518,6 +529,7 @@ export async function onPreferencesChange(
     [KEY_LAST_WORKSPACE_CWD]: "lastWorkspaceCwd",
     [KEY_LMSTUDIO_CTX_SIZE]: "lmstudioContextSize",
     [KEY_COMPAT_CTX_SIZE]: "openaiCompatibleContextSize",
+    [KEY_COMPAT_THINKING]: "openaiCompatibleThinkingMode",
     [KEY_UI_THEME]: "uiThemeId",
     [KEY_COMFYUI_BASE_URL]: "comfyuiBaseURL",
     [KEY_COMFYUI_WORKFLOW]: "comfyuiWorkflow",

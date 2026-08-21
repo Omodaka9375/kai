@@ -341,6 +341,12 @@ function makeChatSync(sessionId: string): Chat<UIMessage> {
     getThinkingMode: () => {
       const prefs = usePreferencesStore.getState();
       const { selectedModelId } = useChatStore.getState();
+      // The openai-compatible-custom model uses its own dedicated
+      // thinking mode so local endpoints (vLLM, Ollama, etc.) can
+      // control reasoning effort without a model-specific override.
+      if (selectedModelId === "openai-compatible-custom") {
+        return prefs.openaiCompatibleThinkingMode ?? "off";
+      }
       return (
         prefs.modelThinkingModes[selectedModelId] ??
         prefs.thinkingMode ??

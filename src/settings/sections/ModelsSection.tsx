@@ -18,6 +18,7 @@ import {
   providerSupportsKey,
   type ModelId,
   type ProviderId,
+  type ThinkingMode,
 } from "@/modules/ai/config";
 import { clearKey, getAllKeys, setKey } from "@/modules/ai/lib/keyring";
 import { usePreferencesStore } from "@/modules/settings/preferences";
@@ -35,6 +36,7 @@ import {
   setOpenaiCompatibleBaseURL,
   setOpenaiCompatibleContextSize,
   setOpenaiCompatibleModelId,
+  setOpenaiCompatibleThinkingMode,
 } from "@/modules/settings/store";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -461,6 +463,7 @@ function OpenAICompatibleBlock({
 }) {
   const baseURL = usePreferencesStore((s) => s.openaiCompatibleBaseURL);
   const modelId = usePreferencesStore((s) => s.openaiCompatibleModelId);
+  const thinkingMode = usePreferencesStore((s) => s.openaiCompatibleThinkingMode);
   const [urlDraft, setUrlDraft] = useState(baseURL);
   const [modelDraft, setModelDraft] = useState(modelId);
   const [keyDraft, setKeyDraft] = useState("");
@@ -605,6 +608,25 @@ function OpenAICompatibleBlock({
             placeholder="128000"
             className="h-8 w-32 font-mono text-[11.5px]"
           />
+        </FieldRow>
+
+        <FieldRow label="Reasoning">
+          <div className="flex items-center gap-0.5">
+            {(["off", "low", "medium", "high"] as ThinkingMode[]).map((mode) => (
+              <Button
+                key={mode}
+                size="sm"
+                variant={thinkingMode === mode ? "default" : "outline"}
+                onClick={() => void setOpenaiCompatibleThinkingMode(mode)}
+                className="h-7 px-2 text-[11px]"
+              >
+                {mode}
+              </Button>
+            ))}
+          </div>
+          <span className="text-[10px] text-muted-foreground mt-1">
+            Sends reasoning_effort param — supported by vLLM, Ollama, Z.AI, Fireworks, etc.
+          </span>
         </FieldRow>
 
         <StatusLine status={testStatus} />

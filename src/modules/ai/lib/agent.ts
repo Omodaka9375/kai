@@ -546,8 +546,11 @@ export async function runAgentStream(opts: RunAgentOptions) {
   const thinkingMode: ThinkingMode = (opts.thinkingMode ?? "off") as ThinkingMode;
   const modelTags = getModel(modelId).tags;
   const isReasoningModel = modelTags?.includes("reasoning");
+  // Custom endpoints (openai-compatible, LM Studio) always allow thinking
+  // so users can control reasoning effort for their local models.
+  const isCustomEndpoint = modelId === "openai-compatible-custom" || modelId === "lmstudio-local";
   const thinkingProviderOpts: Record<string, Record<string, unknown>> = {};
-  if (thinkingMode !== "off" && isReasoningModel) {
+  if (thinkingMode !== "off" && (isReasoningModel || isCustomEndpoint)) {
     switch (provider) {
       case "anthropic":
         thinkingProviderOpts.anthropic = {
@@ -575,6 +578,15 @@ export async function runAgentStream(opts: RunAgentOptions) {
         // "high" (see THINKING_EFFORT_XAI).
         thinkingProviderOpts.xai = {
           reasoningEffort: THINKING_EFFORT_XAI[thinkingMode],
+        };
+        break;
+      case "openai-compatible":
+      case "lmstudio":
+        // OpenAI-compatible endpoints use the same params as the openai
+        // provider. vLLM, Ollama, Z.AI, Fireworks, etc. accept
+        // `reasoning_effort` natively.
+        thinkingProviderOpts.openai = {
+          reasoningEffort: THINKING_EFFORT_OPENAI[thinkingMode],
         };
         break;
     }
