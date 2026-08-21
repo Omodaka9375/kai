@@ -142,6 +142,7 @@ function ThinkingToggle({
   onClick: (e: React.MouseEvent) => void;
 }) {
   const label = THINKING_ICON_LABEL[active];
+  const on = active !== "off";
   return (
     <button
       type="button"
@@ -149,9 +150,9 @@ function ThinkingToggle({
       title={`Thinking: ${active}. Click to cycle.`}
       className={cn(
         "ml-auto flex items-center gap-0.5 rounded-full px-1 py-0.5 text-[9px] font-medium tabular-nums transition-colors",
-        active === "off"
-          ? "text-muted-foreground/50 hover:bg-accent hover:text-muted-foreground"
-          : "text-primary hover:bg-primary/10",
+        on
+          ? "text-muted-foreground hover:bg-accent hover:text-foreground"
+          : "text-muted-foreground/50 hover:bg-accent hover:text-muted-foreground",
       )}
     >
       <HugeiconsIcon icon={BrainIcon} size={10} strokeWidth={1.75} />
