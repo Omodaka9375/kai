@@ -69,8 +69,8 @@ pub fn fs_read_file(path: String, workspace: Option<WorkspaceEnv>) -> Result<Rea
         if bytes[0] == 0xFF && bytes[1] == 0xFE {
             // UTF-16 LE
             let words: Vec<u16> = bytes[2..]
-                .chunks_exact(2)
-                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                .as_chunks::<2>().0.iter()
+                .map(|c| u16::from_le_bytes(*c))
                 .collect();
             return match String::from_utf16(&words) {
                 Ok(content) => Ok(ReadResult::Text { content, size }),
@@ -80,8 +80,8 @@ pub fn fs_read_file(path: String, workspace: Option<WorkspaceEnv>) -> Result<Rea
         if bytes[0] == 0xFE && bytes[1] == 0xFF {
             // UTF-16 BE
             let words: Vec<u16> = bytes[2..]
-                .chunks_exact(2)
-                .map(|c| u16::from_be_bytes([c[0], c[1]]))
+                .as_chunks::<2>().0.iter()
+                .map(|c| u16::from_be_bytes(*c))
                 .collect();
             return match String::from_utf16(&words) {
                 Ok(content) => Ok(ReadResult::Text { content, size }),
