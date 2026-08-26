@@ -18,6 +18,7 @@ pub fn get_ocr_text(bytes: &[u8]) -> Result<String, String> {
     let exe = find_tesseract()?;
     let output = Command::new(exe)
         .arg(&tmp)
+        .arg(&tmp)
         .arg(&tmp_out)
         .arg("-l")
         .arg("eng")
