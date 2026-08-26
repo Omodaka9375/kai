@@ -277,9 +277,9 @@ function splitThinkingBlocks(
  * Without this, markdown collapses single-newline lines into one paragraph.
  */
 function wrapAsciiArt(text: string): string {
-  // Must have at least 3 lines to be a diagram.
+  // Must have at least 1 line with box-drawing or art chars.
   const lines = text.split("\n");
-  if (lines.length < 3) return text;
+  if (lines.length === 0) return text;
 
   // Unicode box-drawing + block elements.
   const BOX_RE = /[\u2500-\u257F\u2580-\u259F\u25A0-\u25FF]/;
@@ -298,7 +298,11 @@ function wrapAsciiArt(text: string): string {
   let inFence = false;
 
   const flushArt = () => {
-    if (artRun.length >= 3) {
+    // Fence single-line Unicode box-drawing diagrams — they collapse to
+    // one unreadable blob in markdown otherwise.
+    const hasBoxDrawing = artRun.some((l) => BOX_RE.test(l));
+    const shouldFence = artRun.length >= 2 || (artRun.length === 1 && hasBoxDrawing);
+    if (shouldFence) {
       out.push("```text");
       out.push(...artRun);
       out.push("```");
@@ -309,8 +313,15 @@ function wrapAsciiArt(text: string): string {
     inArt = false;
   };
 
-  const isArtLine = (line: string): boolean =>
-    BOX_RE.test(line) || ASCII_LINE_RE.test(line);
+  const isArtLine = (line: string): boolean => {
+    if (BOX_RE.test(line)) return true;
+    if (ASCII_LINE_RE.test(line)) return true;
+    // Lines bracketed by frame chars at both ends (e.g. "│ Content  │", "+--+")
+    if (/^\s*[|+\-\\/=<>].*[|+\-\\/=<>]\s*$/.test(line)) return true;
+    // Lines composed entirely of frame/decorator chars (e.g. "+-----+", "-------")
+    if (/^[\s|+\-\\/=<>^v.#*~:]+$/.test(line) && line.trim().length >= 3) return true;
+    return false;
+  };
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
