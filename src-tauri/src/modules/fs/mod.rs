@@ -1,4 +1,6 @@
+pub mod extract;
 pub mod file;
+pub mod ocr;
 pub mod grep;
 pub mod mutate;
 pub mod search;

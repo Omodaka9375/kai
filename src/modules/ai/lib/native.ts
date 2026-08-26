@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 
 export type ReadResult =
-  | { kind: "text"; content: string; size: number }
+  | { kind: "text"; content: string; size: number; format?: string }
   | { kind: "binary"; size: number }
   | { kind: "toolarge"; size: number; limit: number };
 

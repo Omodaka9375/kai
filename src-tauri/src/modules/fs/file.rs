@@ -3,6 +3,7 @@ use std::time::UNIX_EPOCH;
 
 use serde::Serialize;
 
+use super::extract;
 use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 
 const MAX_READ_BYTES: u64 = 10 * 1024 * 1024; // 10 MB
@@ -14,6 +15,9 @@ pub enum ReadResult {
     Text {
         content: String,
         size: u64,
+        /// Extraction format for handled binary kinds (archive/audio/image).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        format: Option<String>,
     },
     Binary {
         size: u64,
@@ -49,6 +53,17 @@ pub fn fs_read_file(path: String, workspace: Option<WorkspaceEnv>) -> Result<Rea
         e.to_string()
     })?;
 
+    // Handle extractable binary formats (archive/audio/image) before the
+    // generic size/binary sniff. `extract::extract` returns Ok(None) for
+    // unrecognized kinds and the sniff runs as before.
+    if let Ok(Some(ex)) = extract::extract(&p) {
+        return Ok(ReadResult::Text {
+            content: ex.content,
+            size: meta.len(),
+            format: Some(ex.format),
+        });
+    }
+
     let size = meta.len();
     if size > MAX_READ_BYTES {
         return Ok(ReadResult::TooLarge {
@@ -73,7 +88,11 @@ pub fn fs_read_file(path: String, workspace: Option<WorkspaceEnv>) -> Result<Rea
                 .map(|c| u16::from_le_bytes(*c))
                 .collect();
             return match String::from_utf16(&words) {
-                Ok(content) => Ok(ReadResult::Text { content, size }),
+                Ok(content) => Ok(ReadResult::Text {
+                    content,
+                    size,
+                    format: None,
+                }),
                 Err(_) => Ok(ReadResult::Binary { size }),
             };
         }
@@ -84,7 +103,11 @@ pub fn fs_read_file(path: String, workspace: Option<WorkspaceEnv>) -> Result<Rea
                 .map(|c| u16::from_be_bytes(*c))
                 .collect();
             return match String::from_utf16(&words) {
-                Ok(content) => Ok(ReadResult::Text { content, size }),
+                Ok(content) => Ok(ReadResult::Text {
+                    content,
+                    size,
+                    format: None,
+                }),
                 Err(_) => Ok(ReadResult::Binary { size }),
             };
         }
@@ -97,7 +120,11 @@ pub fn fs_read_file(path: String, workspace: Option<WorkspaceEnv>) -> Result<Rea
     }
 
     match String::from_utf8(bytes) {
-        Ok(content) => Ok(ReadResult::Text { content, size }),
+        Ok(content) => Ok(ReadResult::Text {
+            content,
+            size,
+            format: None,
+        }),
         Err(_) => Ok(ReadResult::Binary { size }),
     }
 }

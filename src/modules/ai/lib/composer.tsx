@@ -16,6 +16,7 @@ import {
 } from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
 import { currentWorkspaceEnv } from "@/modules/workspace";
+import { modelTextOnly, extractAttachmentText } from "../extraction";
 
 export type FileAttachment = {
   id: string;
@@ -332,6 +333,39 @@ export function AiComposerProvider({ children }: ProviderProps) {
           filename: f.name,
         });
       }
+    }
+
+    // Text-only models (DeepSeek etc.) can't accept `file` parts — extract
+    // text first, then substitute a plain text part. On failures, keep the
+    // original (file) part and let the model reject it properly with a note.
+    const isTextOnly = modelTextOnly(useChatStore.getState().selectedModelId);
+    if (isTextOnly) {
+      const stripped: typeof parts = [];
+      for (const p of parts) {
+        if ((p as any).type === "file" && (p as any).url) {
+          const filename = (p as any).filename ?? "attachment";
+          let fallback: string | null = null;
+          try {
+            fallback = await extractAttachmentText({
+              id: (p as any).filename ?? (p as any).url,
+              name: filename,
+              kind: "image",
+              mediaType: (p as any).mediaType,
+              url: (p as any).url,
+              text: undefined,
+              size: 0,
+            });
+          } catch (e) {
+            console.warn("extractAttachmentText failed:", e);
+          }
+          const text = fallback ?? `[attachment "${filename}"] (failed extraction — model may reject it)`;
+          stripped.push({ type: "text", text });
+        } else {
+          stripped.push(p);
+        }
+      }
+      parts.splice(0, parts.length, ...stripped);
+      console.warn("[kai] text-only model — file parts replaced with extracted text");
     }
 
     if (!sessionId) return;

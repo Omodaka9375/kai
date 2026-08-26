@@ -18,7 +18,7 @@ export function buildFsTools(ctx: ToolContext) {
   return {
     read_file: tool({
       description:
-        "Read a file's text content. Supports UTF-8 text files, PDF, and DOCX. Defaults to the first 2000 lines (capped at 25KB). Pass `offset`/`limit` for line-based windowing of large text files. Refuses binary (except PDF/DOCX), oversized, or sensitive files (.env, keys, credentials). If the file hasn't changed since your last read in this session, returns `unchanged: true` with a short preview. Pass `force: true` if you need the full content again (e.g. the earlier read has scrolled out of context).",
+        "Read a file's text content. Supports UTF-8 text files, plus PDF, DOCX, ZIP/JAR archives, audio (mp3/flac/m4a/ogg/wav), and images (png/jpg/webp/gif/tiff with OCR when available). DOCX/PDF are handled by JS parsers; the rest are extracted server-side by format. Returns first 2000 lines (max 25KB). Refuses oversized or sensitive files (.env, keys, credentials). If unchanged since last read, returns a short preview. Pass `force: true` to re-fetch.",
       inputSchema: z.object({
         path: z
           .string()
@@ -56,7 +56,6 @@ export function buildFsTools(ctx: ToolContext) {
               content: text.slice(0, READ_BYTE_CAP),
               size: text.length,
               format: docType,
-              ...(text.length > READ_BYTE_CAP ? { truncated: true } : {}),
             };
           } catch (e) {
             return { error: String(e), path: abs };
