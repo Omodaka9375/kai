@@ -236,7 +236,26 @@ pub fn fs_stat(path: String, workspace: Option<WorkspaceEnv>) -> Result<FileStat
     })
 }
 
-/// Write raw binary bytes — used by the document generator in the frontend.
+//// Read CHANGELOG.md for the updater popup.
+/// Prefers the bundled copy; falls back to the working directory.
+#[tauri::command]
+pub fn fs_read_changelog() -> Result<String, String> {
+    match std::fs::read_to_string("CHANGELOG.md") {
+        Ok(content) => Ok(content),
+        Err(_) => {
+            // Bundled copy — read from same directory as the executable.
+            let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+            let asset = exe.parent().map(|p| p.join("CHANGELOG.md"));
+            if let Some(p) = asset {
+                std::fs::read_to_string(p).map_err(|e| e.to_string())
+            } else {
+                Err("".to_string())
+            }
+        }
+    }
+}
+
+// Write raw binary bytes — used by the document generator in the frontend.
 #[tauri::command]
 pub fn fs_write_file_bytes(
     path: String,

@@ -185,6 +185,7 @@ pub fn run() {
             pty::pty_close,
             fs::tree::list_subdirs,
             fs::tree::fs_read_dir,
+            fs::file::fs_read_changelog,
             fs::file::fs_read_file,
             fs::file::fs_write_file,
             fs::file::fs_stat,

@@ -9,8 +9,10 @@ import {
 } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useUpdater } from "./useUpdater";
+import { invoke } from "@tauri-apps/api/core";
+import { parseChangelogSection } from "./parseChangelog";
 
 type DistroKey = "arch" | "debian" | "fedora";
 
@@ -44,12 +46,30 @@ export function UpdaterDialog() {
   const manualVersion =
     status.kind === "manual-available" ? status.info.version : "";
   const activeCommand = distroCommand(distro, manualVersion);
+  const [changelog, setChangelog] = useState<{
+    loading: boolean;
+    sections: { title: string; body: string[] }[] | null;
+  }>({ loading: true, sections: null });
 
   const open =
     status.kind === "available" ||
     status.kind === "manual-available" ||
     status.kind === "downloading" ||
     status.kind === "ready";
+
+  // Fetch CHANGELOG.md from fs — immediately read the associated section.
+  useEffect(() => {
+    const version =
+      status.kind === "available" ? status.update?.version : status.kind === "manual-available" ? status.info.version : null;
+    if (version) {
+      invoke<string>("fs_read_changelog")
+        .then((text) => {
+          const sections = parseChangelogSection(text, version);
+          setChangelog({ loading: false, sections });
+        })
+        .catch(() => setChangelog({ loading: false, sections: null }));
+    }
+  }, [status]);
 
   if (!open) return null;
 
@@ -113,6 +133,27 @@ export function UpdaterDialog() {
         )}
         {downloading && progress === null && (
           <Progress value={undefined} className="mt-2 animate-pulse" />
+        )}
+
+        {!downloading && changelog.sections && (
+          <div className="mt-1 max-h-[200px] overflow-y-auto rounded-md border border-border/60 bg-muted/40 px-2.5 py-2 text-[11px]">
+            {changelog.sections.map((sec) => (
+              <div key={sec.title}>
+                {sec.title === "Added" || sec.title === "Fixed" ? (
+                  <p className="mb-0.5 font-semibold uppercase text-[10.5px] text-muted-foreground">
+                    {sec.title}
+                  </p>
+                ) : null}
+                <ul className="space-y-0.5 text-muted-foreground">
+                  {sec.body.map((line, idx) => (
+                    <li key={idx} className="leading-4">
+                      {line}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
         )}
 
         {manual && (
