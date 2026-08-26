@@ -83,6 +83,15 @@ function formatTodos(sessionId: string | null): string | null {
     return `${icon} ${t.title}`;
   });
 
+  const pending = todos.filter((t) => t.status !== "completed");
+  if (pending.length > 0) {
+    lines.push("");
+    lines.push(
+      "**TASK NOT COMPLETE.** Continue from where you stopped. " +
+        "Do NOT recap — just keep going with the next action.",
+    );
+  }
+
   return lines.join("\n");
 }
 
