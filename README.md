@@ -25,13 +25,13 @@ Kai is a fast, cross-platform terminal built on **Tauri 2 + Rust** and **React 1
 
 **Editor** — CodeMirror 6 with 44 languages, find & replace, inline AI autocomplete, edit diffs with approval flow, 9 editor themes, Vim mode (with `:w`/`:q` Ex commands), image & PDF preview, and **Open in Live Preview** (right-click any HTML file to spawn a local background HTTP server and preview it instantly in-app).
 
-**AI Agent** — bring your own key. Supports OpenAI, Anthropic, Google, Groq, xAI, Cerebras, DeepSeek, Mistral, OpenRouter, and direct Z.ai (GLM) integration. Supports **Clipboard Image Pasting (`Ctrl+V`)** to attach screenshots instantly, and **Interactive Todo Toggling** with auto-closing completion lists. Local models via LM Studio or Ollama.
+**AI Agent** — bring your own key. Supports OpenAI, Anthropic, Google, Groq, xAI, Cerebras, DeepSeek, Mistral, OpenRouter, and direct Z.ai (GLM) integration. Supports **Clipboard Image Pasting (`Ctrl+V`)** to attach screenshots instantly, **Universal File Extraction** (zip/audio/image/video locally extracted as text), and **Interactive Todo Toggling** with auto-closing completion lists. Local models via LM Studio or Ollama.
 
 **Image & Video Generation** — generate images and videos directly from chat. Image: OpenAI GPT Image 2, Google Nano Banana 2, xAI Grok Imagine, ComfyUI (local). Video: Kling 3.0, Google Veo 3.1, ByteDance Seedance 2.0, ComfyUI. Inline rendering with lightbox and download.
 
 **MCP** — connect external tool servers via Model Context Protocol. Browse and install from the official registry.
 
-**More** — file explorer, built-in web preview (featuring a one-tap Stop button), REST API tester, 8 UI themes, voice input (Whisper), PDF/DOCX reading, **Direct PDF Export (`convert_to_pdf`)** to convert Markdown/Word directly to styled PDFs, YouTube transcript summarization, `Kai.md` project memory, context summarization, auto-approve modes.
+**More** — file explorer, built-in web preview (featuring a one-tap Stop button), REST API tester, 8 UI themes, voice input (Whisper), PDF/DOCX reading, **Universal File Extraction** (ZIP/JAR listing, audio metadata, image OCR via tesseract), **Direct PDF Export (`convert_to_pdf`)** to convert Markdown/Word directly to styled PDFs, YouTube transcript summarization, `Kai.md` project memory, context summarization, auto-approve modes.
 
 ## Agent Personas
 
