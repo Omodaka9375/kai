@@ -23,14 +23,16 @@ import {
   ArrowExpand01Icon,
   Delete02Icon,
   FilterIcon,
+  PencilEdit01Icon,
   TerminalIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { motion } from "motion/react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { estimateCost, getModel, getModelContextLimit } from "../config";
 import { saveSessionsList, type SessionMeta } from "../lib/sessions";
 import { getOrCreateChat, useChatStore } from "../store/chatStore";
+import { Input } from "@/components/ui/input";
 import { usePlanStore } from "../store/planStore";
 import { AgentSwitcher } from "./AgentSwitcher";
 import { AiChatView } from "./AiChat";
@@ -503,12 +505,37 @@ function SessionRow({
   onSelect: () => void;
   onDelete: () => void;
 }) {
+  const renameSession = useChatStore((s) => s.renameSession);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(session.title || "");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const commit = () => {
+    const trimmed = draft.trim();
+    if (trimmed && trimmed !== (session.title || "")) {
+      renameSession(session.id, trimmed);
+    }
+    setEditing(false);
+  };
+
+  useEffect(() => {
+    if (editing) {
+      setDraft(session.title || "");
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }
+  }, [editing, session.title]);
+
   return (
     <DropdownMenuItem
       onSelect={(e) => {
-        // Don't dismiss if user clicked the trash icon — handle below.
+        // Don't dismiss if user clicked controls — handle below.
         const target = e.target as HTMLElement | null;
-        if (target?.closest("[data-session-delete]")) {
+        if (
+          target?.closest("[data-session-delete]") ||
+          target?.closest("[data-session-edit]") ||
+          target?.tagName === "INPUT"
+        ) {
           e.preventDefault();
           return;
         }
@@ -519,21 +546,56 @@ function SessionRow({
         active && "bg-accent/40",
       )}
     >
-      <span className="min-w-0 flex-1 truncate">
-        {session.title || "New chat"}
-      </span>
-      <button
-        type="button"
-        data-session-delete
-        onClick={(e) => {
-          e.stopPropagation();
-          onDelete();
-        }}
-        title="Delete session"
-        className="rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
-      >
-        <HugeiconsIcon icon={Delete02Icon} size={11} strokeWidth={1.75} />
-      </button>
+      {editing ? (
+        <Input
+          ref={inputRef}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              commit();
+            }
+            if (e.key === "Escape") {
+              setEditing(false);
+            }
+          }}
+          className="h-6 min-w-0 flex-1 px-1.5 py-0 font-sans text-[11px]"
+        />
+      ) : (
+        <span className="min-w-0 flex-1 truncate">
+          {session.title || "New chat"}
+        </span>
+      )}
+      {editing ? null : (
+        <>
+          <button
+            type="button"
+            data-session-edit
+            onClick={(e) => {
+              e.stopPropagation();
+              setEditing(true);
+            }}
+            title="Rename session"
+            className="rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100"
+          >
+            <HugeiconsIcon icon={PencilEdit01Icon} size={11} strokeWidth={1.75} />
+          </button>
+          <button
+            type="button"
+            data-session-delete
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+            title="Delete session"
+            className="rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
+          >
+            <HugeiconsIcon icon={Delete02Icon} size={11} strokeWidth={1.75} />
+          </button>
+        </>
+      )}
     </DropdownMenuItem>
   );
 }
