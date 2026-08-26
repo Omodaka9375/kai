@@ -4,6 +4,22 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.2.0]
+
+### Added
+
+- **Universal file extraction**: Attach or read binary files — the agent extracts them locally instead of erroring. ZIP/JAR/APK archives become entry listings with inline previews of small text files; audio (mp3/flac/m4a/ogg/wav) becomes a metadata card (tags, duration, bitrate); images (png/jpg/webp/gif/tiff) become dimensions plus OCR text when a recognizer is available. Handled server-side in `fs_read_file` (`extract.rs` + `ocr.rs`), surfaced through `read_file` and file attachments.
+- **Text-only model fallback for attachments**: When the selected model has no vision capability (e.g. DeepSeek), image/file attachments are swapped for locally extracted text before send, so they never hard-error the conversation. If extraction still fails, a safe placeholder keeps the chat flowing.
+- **Update popup "What's new"**: The update/restart dialog now reads `CHANGELOG.md` and renders the `Added`/`Fixed` sections for the incoming version below the prompt, so you see what changed before installing.
+
+### Fixed
+
+- **OCR fails fast when tesseract is missing**: `get_ocr_text` short-circuits cleanly when the `tesseract` binary isn't on PATH or in standard install locations — no temp-file churn, image extraction degrades to metadata-only.
+- **Session title leaks snippet markup**: Sessions started with a snippet showed `<snippet name="…">` as the chat name. `deriveTitle` now strips `<snippet>` and `<Kai-command>` blocks before deriving the title.
+- **Clippy cleanups**: Removed `format!`-in-`format!` nesting and a `////` doc-comment typo so `cargo clippy --all-targets --locked -- -D warnings` passes.
+
+---
+
 ## [1.1.9]
 
 ### Fixed
