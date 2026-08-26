@@ -225,6 +225,22 @@ type AnyPart = UIMessagePart<Record<string, never>, Record<string, never>>;
  * everything else (including unclosed trailing <thinking> blocks that are
  * still streaming) becomes thinking=false.
  */
+/** Regex matching any thinking-block boundary marker (opening or closing). */
+const THINKING_BOUNDARY_RE = new RegExp(
+  "<\\/?thinking>|<\\|\\/?thinking\\|>|\\n{2}\\s* response|\\n{2}\\s*",
+  "gi",
+);
+
+/**
+ * Strip orphaned thinking markers from visible text. These can leak when
+ * the model emits a closing tag like `</thinking>` or `<|/thinking|>` or
+ * an AI SDK `` / `` marker without a matching opening tag
+ * (the opening was consumed upstream by the AI SDK's reasoning detector).
+ */
+function stripThinkingMarkers(text: string): string {
+  return text.replace(THINKING_BOUNDARY_RE, "").trimStart();
+}
+
 function splitThinkingBlocks(
   text: string,
 ): { thinking: boolean; text: string }[] {
@@ -242,13 +258,16 @@ function splitThinkingBlocks(
   let last = 0;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
-    if (m.index > last) out.push({ thinking: false, text: text.slice(last, m.index) });
+    if (m.index > last) out.push({ thinking: false, text: stripThinkingMarkers(text.slice(last, m.index)) });
     // Group 1 = XML, group 2 = pipe-delimited, group 3 = AI SDK protocol
     const inner = (m[1] ?? m[2] ?? m[3] ?? "").trim();
     if (inner) out.push({ thinking: true, text: inner });
     last = m.index + m[0].length;
   }
-  if (last < text.length) out.push({ thinking: false, text: text.slice(last) });
+  if (last < text.length) {
+    const cleaned = stripThinkingMarkers(text.slice(last));
+    if (cleaned.trim()) out.push({ thinking: false, text: cleaned });
+  }
   return out;
 }
 
