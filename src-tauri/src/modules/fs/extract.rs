@@ -151,8 +151,8 @@ fn audio(path: &Path, size: u64) -> Result<Option<ExtractMeta>, String> {
     for tag in tagged.tags() {
         for item in tag.items() {
             content.push_str(&format!(
-                "\n{}: {}",
-                format!("{:?}", item.key()),
+                "\n{:?}: {}",
+                item.key(),
                 item.value().text().unwrap_or_default()
             ));
             if content.len() > 32 * 1024 {

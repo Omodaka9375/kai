@@ -236,7 +236,7 @@ pub fn fs_stat(path: String, workspace: Option<WorkspaceEnv>) -> Result<FileStat
     })
 }
 
-//// Read CHANGELOG.md for the updater popup.
+/// Read CHANGELOG.md for the updater popup.
 /// Prefers the bundled copy; falls back to the working directory.
 #[tauri::command]
 pub fn fs_read_changelog() -> Result<String, String> {
