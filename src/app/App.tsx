@@ -997,17 +997,21 @@ export default function App() {
   }, [cycleSidebarView]);
 
   const openGitGraphFromContext = useCallback(async () => {
-    const known = sourceControl.hasRepo ? sourceControl.repo : null;
-    if (known) {
-      openCommitHistoryTab({
-        repoRoot: known.repoRoot,
-        branch: sourceControl.status?.branch ?? null,
-      });
-      return;
-    }
-    if (!sourceControlContextPath) return;
+    // Resolve the repo from the CURRENT project root on every click. We
+    // intentionally do NOT read `sourceControl.repo` here: that cache is keyed
+    // to `sourceControlPath`, which collapses to the launch dir
+    // (badgeContextPath) whenever the active tab is a terminal — i.e. the
+    // previously-opened project. Reusing it opened the old project's history
+    // until the user visited Source Control (which re-keys the hook).
+    //
+    // Project root is stable: explorerRoot is pinned at launch / on
+    // File > Open Project and does NOT follow terminal `cd`. So we resolve
+    // from the pinned root, never from the terminal's live cwd (the user may
+    // have cd'd into a subdir or elsewhere — the project is still the root).
+    const contextPath = explorerRoot ?? sourceControlContextPath;
+    if (!contextPath) return;
     try {
-      const repo = await native.gitResolveRepo(sourceControlContextPath);
+      const repo = await native.gitResolveRepo(contextPath);
       if (!repo) return;
       openCommitHistoryTab({ repoRoot: repo.repoRoot, branch: repo.branch });
     } catch {
@@ -1015,9 +1019,7 @@ export default function App() {
     }
   }, [
     openCommitHistoryTab,
-    sourceControl.hasRepo,
-    sourceControl.repo,
-    sourceControl.status?.branch,
+    explorerRoot,
     sourceControlContextPath,
   ]);
 
