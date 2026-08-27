@@ -24,6 +24,7 @@ import {
 } from "react";
 import { Streamdown } from "streamdown";
 import { ChatStreamingProvider } from "./chat-code";
+import { ChatTable } from "./chat-table";
 import { MarkdownCode } from "./markdown-code";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
@@ -321,7 +322,7 @@ export type MessageResponseProps = ComponentProps<typeof Streamdown> & {
   streaming?: boolean;
 };
 
-const streamdownComponents = { code: MarkdownCode };
+const streamdownComponents = { code: MarkdownCode, table: ChatTable };
 
 /**
  * Disable table download — blob-URL anchor clicks don't trigger downloads
