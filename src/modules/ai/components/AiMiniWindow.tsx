@@ -442,11 +442,15 @@ function SessionPicker() {
   const filteredSessions = useMemo(() => {
     if (!workspaceRoot) return sessions;
     const normalized = workspaceRoot.replace(/\\/g, "/").replace(/\/+$/, "");
+    const norm = (s: SessionMeta) =>
+      (s.workspaceRoot ?? "").replace(/\\/g, "/").replace(/\/+$/, "");
     return sessions.filter((s) => {
-      if (!s.workspaceRoot) return false; // Untagged sessions don't belong to any workspace — filter out
-      return s.workspaceRoot.replace(/\\/g, "/").replace(/\/+$/, "") === normalized;
+      // Always show the active session regardless of workspace.
+      if (s.id === activeId) return true;
+      if (!s.workspaceRoot) return false;
+      return norm(s) === normalized;
     });
-  }, [sessions, workspaceRoot]);
+  }, [sessions, workspaceRoot, activeId]);
 
   const sorted = [...filteredSessions].sort((a, b) => b.updatedAt - a.updatedAt);
 

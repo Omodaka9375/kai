@@ -655,13 +655,18 @@ export const useChatStore = create<StoreState>((set, get) => ({
           (!s.workspaceRoot && normalizedRoot == null)),
     );
 
+    const currentActiveId = get().activeSessionId;
     let nextSessions: SessionMeta[];
-    let freshId: string;
+    let nextActiveId: string | null = currentActiveId;
+
     if (reusable) {
+      // Use the existing session but don't force-switch — keep the
+      // current session active so the user doesn't lose context when
+      // the workspace root changes (e.g. by cding in the terminal).
       nextSessions = allSessions;
-      freshId = reusable.id;
+      if (!currentActiveId) nextActiveId = reusable.id;
     } else {
-      freshId = newSessionId();
+      const freshId = newSessionId();
       const fresh: SessionMeta = {
         id: freshId,
         title: "New chat",
@@ -670,17 +675,20 @@ export const useChatStore = create<StoreState>((set, get) => ({
         workspaceRoot: root,
       };
       nextSessions = [fresh, ...allSessions];
+      // Only auto-switch if there's no active session — otherwise
+      // keep the current one so the user's conversation isn't lost.
+      if (!currentActiveId) nextActiveId = freshId;
       void saveSessionsList(nextSessions).catch((err) =>
         console.error("[hydrateSessions] Failed to persist sessions:", err),
       );
     }
-    void saveActiveId(freshId).catch((err) =>
+    void saveActiveId(nextActiveId!).catch((err) =>
       console.error("[hydrateSessions] Failed to persist activeId:", err),
     );
 
     set({
       sessions: nextSessions,
-      activeSessionId: freshId,
+      activeSessionId: nextActiveId,
       sessionsHydrated: true,
       lastHydratedWorkspace: root,
     });

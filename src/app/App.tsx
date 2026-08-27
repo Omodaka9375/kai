@@ -378,6 +378,9 @@ export default function App() {
     void resolveCwd().then((cwd) => {
       setLaunchCwd(cwd);
       setLaunchCwdResolved(true);
+      // Pin the workspace root to the launch directory so `cd`-ing in
+      // the terminal doesn't cause the explorer / AI sessions to reset.
+      if (cwd) setRootRef.current(cwd);
       // Create the initial tab now that we know the cwd.
       if (tabs.length === 0) {
         newTab(cwd ?? undefined);
@@ -487,11 +490,18 @@ export default function App() {
     }
   }, [tabs]);
 
-  const { explorerRoot, inheritedCwdForNewTab } = useWorkspaceCwd(
+  const { explorerRoot, inheritedCwdForNewTab, _setRoot } = useWorkspaceCwd(
     activeTab,
     tabs,
     launchCwd ?? home,
-  );
+  ) as ReturnType<typeof useWorkspaceCwd> & { _setRoot: (cwd: string) => void };
+  const setRootRef = useRef(_setRoot);
+  setRootRef.current = _setRoot;
+
+  const onOpenProject = useCallback((path: string) => {
+    setRootRef.current(path);
+    resetWorkspace(path);
+  }, [resetWorkspace]);
 
   // Reflect the current project folder in the window title so the user can
   // distinguish multiple KAI instances in the taskbar / Alt+Tab.
@@ -824,10 +834,6 @@ export default function App() {
     },
     [newTab],
   );
-
-  const onOpenProject = useCallback((path: string) => {
-    resetWorkspace(path);
-  }, [resetWorkspace]);
 
   const dirtyEditorTabs = useMemo(
     () => tabs.filter((t): t is EditorTab => t.kind === "editor" && t.dirty),
