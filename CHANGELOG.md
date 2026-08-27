@@ -4,6 +4,22 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.2.2]
+
+### Added
+
+- **MCP server diagnostics**: MCP child process stderr is now piped instead of discarded — logged (truncated to 2000 chars/line) and forwarded to the frontend, surfacing `mcp-remote` OAuth/Node/bridge errors that were previously invisible. Spawn success (pid + sanitized args), spawn failures, and the real child exit code are logged; a waiter thread reports the actual exit code instead of `code=None`.
+
+### Fixed
+
+- **Escape in editor/terminal silently stopped the running agent**: The global Escape handler in the AI mini-window stopped the agent whenever it was busy, guarding only `INPUT`/`TEXTAREA` targets. CodeMirror (contenteditable div) and xterm (div/canvas) fell through, so Escape used to dismiss autocomplete, enter vim normal mode, or drive shell menus killed the run mid-tool and surfaced as a bare "Stopped" badge. The handler now bails when the keydown originates from a contenteditable surface or `.xterm`. Intentional stops (Stop button, TodoStrip, Escape with chat focus) unchanged.
+- **Git Graph opened the previous project's history**: The sidebar button read `sourceControl.repo` when cached, but that cache is keyed to the launch dir whenever the active tab is a terminal. The button now resolves the repo from the pinned `explorerRoot` (launch dir / File > Open Project, immune to terminal `cd`) on every click via `git rev-parse --show-toplevel`.
+- **Explainable Stopped status**: The green "Stopped" dot now renders a precise label from the provider finish reason — Completed, Context limit reached, Blocked by content filter, Ended after tool call, or Provider error — with a Continue button on non-clean stops.
+- **Same-file edit races**: Added a per-path mutation lock (`mutationLock.ts`) serializing edit / multi_edit / batch_edit / write_file on the same file while keeping cross-file edits parallel. On a stale-match retry failure the tool now explains why and suggests `multi_edit`. Tool descriptions steer the model to `multi_edit` for multiple same-file changes. Edit-failure counters are scoped per session via `WeakMap` (removing dead `resetEditFailures` call sites).
+- **MCP stderr truncate crash**: `truncate()` sliced at a raw byte index and panicked when byte 2000 split a multi-byte character, killing the stderr reader thread. Now uses `floor_char_boundary`.
+
+---
+
 ## [1.2.1]
 
 ### Added
