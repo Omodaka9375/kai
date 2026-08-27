@@ -928,8 +928,9 @@ pub fn pull_ff_only(
     ensure_success(&output, "git pull --ff-only failed")
 }
 
-/// Fetch + merge (not ff-only). This is the default `git pull` behavior:
-/// fetches and then merges, which can produce conflicts on divergent branches.
+/// Full merge pull (not ff-only). `git pull` handles its own fetch, so
+/// there's no need to run a separate fetch first. Uses `--no-rebase` to
+/// ensure a merge commit even if pull.rebase is configured globally.
 pub fn pull(
     registry: &WorkspaceRegistry,
     repo_root: &str,
@@ -937,17 +938,10 @@ pub fn pull(
 ) -> Result<()> {
     let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
     ensure_git_available(&repo_root.workspace)?;
-    // Fetch first so we have the latest remote refs.
-    let _ = run_git(
-        &repo_root.workspace,
-        Some(&repo_root.git_path),
-        ["fetch", "--prune"],
-        NETWORK_TIMEOUT_SECS,
-    )?;
     let output = run_git(
         &repo_root.workspace,
         Some(&repo_root.git_path),
-        ["pull"],
+        ["pull", "--no-rebase"],
         NETWORK_TIMEOUT_SECS,
     )?;
     ensure_success(&output, "git pull failed")

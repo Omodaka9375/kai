@@ -4,6 +4,23 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.2.1]
+
+### Added
+
+- **Plain Text table copy**: The table copy dropdown in chat now includes a fourth "Plain Text" option alongside Markdown, CSV, and TSV. Uses column-aligned padding with `|` separators for readability. Built on Streamdown's `extractTableDataFromElement()` — no parsing logic duplicated.
+- **Provider error messages**: The AI SDK's `RetryError` ("Failed after 3 attempts. Last error: Provider returned an error") is now unwrapped to show the actual HTTP status code, response body, and URL. Detectable failure modes get actionable messages: 413 (request too large → reduce MCP tools), 429 (rate limited → wait/switch), 408/504 (timeout → reduce conversation length), 401/403 (auth → check Settings).
+- **Inline session rename**: Session titles in the AiMiniWindow dropdown can now be edited inline. Hover reveals a pencil icon alongside the trash icon; clicking it swaps the title for an Input field. Commit on Enter/Blur, cancel on Escape.
+
+### Fixed
+
+- **cd in terminal resets workspace**: `useWorkspaceCwd` was deriving `explorerRoot` from the first terminal's live CWD, which changes on every `cd`. Navigating to another project directory shifted the workspace root, triggering `hydrateSessions` and resetting the file tree + AI sessions. Now `explorerRoot` is pinned to the launch directory at startup.
+- **Agent stops prematurely after context compaction**: `buildSessionState()` produced a summary with todos and file snapshots but no instruction to keep working. The model saw a checklist and concluded "task is done." Now `formatTodos()` injects a bold "TASK NOT COMPLETE. Continue from where you stopped." directive when pending items exist. System prompt also strengthened with an explicit "NEVER stop after a successful tool call unless the task is complete" rule.
+- **Orphaned thinking markers in chat**: The model sometimes emits `</thinking>`, `<|/thinking|>`, or `` markers without a matching opening tag (consumed upstream by the AI SDK's reasoning detector). These now get stripped from visible text by `stripThinkingMarkers()`.
+- **ASCII/box-drawing diagrams collapse to one line**: `wrapAsciiArt` lowered its line threshold from 3→2 and added two new detection patterns: lines bracketed by frame chars at both ends (e.g. `│ Content  │`), and lines composed entirely of decorator chars (e.g. `+-----+`). Single-line box-drawing also gets fenced.
+
+---
+
 ## [1.2.0]
 
 ### Added

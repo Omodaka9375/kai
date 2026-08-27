@@ -393,10 +393,9 @@ export function useSourceControl(
           await native.gitFetch(repo.repoRoot);
           touchAutoFetch(autoFetchByRepoRef.current, repo.repoRoot);
         } else if (action === "pull") {
-          await native.gitFetch(repo.repoRoot);
-          touchAutoFetch(autoFetchByRepoRef.current, repo.repoRoot);
-          // Use ff-only when safe (behind but not diverged), full merge when
-          // diverged so conflicts are surfaced in the source-control panel.
+          // When behind but not diverged: fast-forward is safe and clean.
+          // When diverged (ahead + behind): non-ff merge — `git pull` in
+          // Rust handles fetch internally, so no separate fetch needed.
           if (status.ahead > 0 && status.behind > 0) {
             await native.gitPull(repo.repoRoot);
           } else {

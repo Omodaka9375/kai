@@ -647,10 +647,11 @@ export const SourceControlPanel = memo(function SourceControlPanel({
                 </div>
               </div>
 
-              <div className="flex min-w-0 items-center gap-2 text-[10.5px]">
-                <span
-                  className={cn(
-                    "flex h-4 min-w-[3.25rem] shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-medium leading-none",
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center gap-2">
+                  <span
+                    className={cn(
+                    "flex h-4 shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-medium leading-none",
                     canCommit
                       ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
                       : stagedCount > 0
@@ -672,9 +673,11 @@ export const SourceControlPanel = memo(function SourceControlPanel({
                     ? "Empty"
                     : `${stagedCount} staged`}
                 </span>
-                <span className="ml-auto shrink-0 truncate text-muted-foreground/65">
+                <span className="min-w-0 flex-1 truncate text-[10px] text-muted-foreground/65">
                   {pushStatusLabel}
                 </span>
+              </div>
+
               </div>
 
               <div className="grid w-full grid-cols-2 gap-1.5">
@@ -1214,14 +1217,14 @@ function CommitFeedback({
     }
     setVisibleFeedback(feedback);
     setIsVisible(true);
-    const hideTimer = window.setTimeout(() => setIsVisible(false), 3600);
+    const hideTimer = window.setTimeout(() => setIsVisible(false), 6000);
     const clearTimer = window.setTimeout(() => {
       setVisibleFeedback((current) =>
         current?.message === feedback.message && current.tone === feedback.tone
           ? null
           : current,
       );
-    }, 3900);
+    }, 6300);
     return () => {
       window.clearTimeout(hideTimer);
       window.clearTimeout(clearTimer);
@@ -1234,23 +1237,23 @@ function CommitFeedback({
   return (
     <div
       className={cn(
-        "pointer-events-none absolute inset-x-3 top-[calc(100%-0.25rem)] z-20 flex min-w-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] leading-snug shadow-lg shadow-black/15 backdrop-blur transition-all duration-200",
+        "mt-1 flex min-w-0 items-start gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] leading-snug shadow-sm backdrop-blur transition-all duration-200",
         isVisible ? "translate-y-0 opacity-100" : "-translate-y-1 opacity-0",
         isError
-          ? "border-destructive/30 bg-card/95 text-destructive"
-          : "border-border/70 bg-card/95 text-muted-foreground",
+          ? "border-destructive/30 bg-destructive/5 text-destructive"
+          : "border-emerald-500/20 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300",
       )}
     >
       <span
         className={cn(
-          "size-1.5 shrink-0 rounded-full",
+          "mt-[3px] size-1.5 shrink-0 rounded-full",
           isError ? "bg-destructive" : "bg-emerald-500",
         )}
       />
       <span
         className={cn(
-          "min-w-0 flex-1 truncate",
-          isError ? "text-destructive" : "text-muted-foreground",
+          "min-w-0 flex-1 break-words whitespace-normal",
+          isError ? "text-destructive" : "",
         )}
       >
         {visibleFeedback.message}
