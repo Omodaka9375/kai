@@ -504,6 +504,7 @@ export function AiChatView({
       ? lastMessage.id
       : null;
   const hitStepCap = useChatStore((s) => s.agentMeta.hitStepCap);
+  const finishReason = useChatStore((s) => s.agentMeta.finishReason);
   const compactionNotice = useChatStore((s) => s.agentMeta.compactionNotice);
   const summarizing = useChatStore((s) => s.agentMeta.summarizing);
   const summaryNotice = useChatStore((s) => s.agentMeta.summaryNotice);
@@ -524,6 +525,39 @@ export function AiChatView({
     // If it ends with a tool call, the user has no visual cue it's done.
     return type.startsWith("tool-") || type === "dynamic-tool";
   })();
+  // Translate the raw provider finish reason into a human label so "Stopped"
+  // distinguishes an actual completion from a context-limit, content-filter,
+  // or tool-call cutoff.
+  const stopLabel = (() => {
+    switch (finishReason) {
+      case "length":
+        return "Context limit reached";
+      case "content-filter":
+        return "Blocked by content filter";
+      case "tool-calls":
+        return "Ended after tool call";
+      case "error":
+        return "Provider error";
+      case "stop":
+        return "Completed";
+      default:
+        return "Stopped";
+    }
+  })();
+  const stopTone =
+    finishReason === "stop"
+      ? "text-emerald-600 dark:text-emerald-400"
+      : finishReason === "length" || finishReason === "content-filter"
+        ? "text-amber-600 dark:text-amber-400"
+        : finishReason === "error"
+          ? "text-destructive"
+          : "text-muted-foreground";
+  const onContinue = useCallback(() => {
+    patchAgentMeta({ hitStepCap: false, finishReason: "" });
+    void sendMessage(
+      "Continue from where you stopped. Don't recap — just keep going.",
+    );
+  }, [patchAgentMeta]);
 
   const onApproval = useCallback(
     (id: string, approved: boolean) => respondToApprovalStandalone(id, approved),
@@ -592,20 +626,22 @@ export function AiChatView({
           </div>
         )}
         {showDone && (
-          <div className="flex items-center gap-1.5 px-1 text-[11px] text-emerald-600 dark:text-emerald-400">
-            <span className="size-1.5 rounded-full bg-emerald-500" />
-            Stopped
+          <div className={cn("flex items-center gap-1.5 px-1 text-[11px]", stopTone)}>
+            <span className="size-1.5 rounded-full bg-current" />
+            {stopLabel}
+            {finishReason && finishReason !== "stop" && (
+              <button
+                type="button"
+                onClick={onContinue}
+                className="ml-1 rounded-md border border-border/60 bg-background px-2 py-0.5 text-[11px] font-medium text-foreground transition-colors hover:bg-accent"
+              >
+                Continue
+              </button>
+            )}
           </div>
         )}
         {showContinue && (
-          <ContinueRow
-            onContinue={() => {
-              patchAgentMeta({ hitStepCap: false });
-              void sendMessage(
-                "Continue from where you stopped. Don't recap — just keep going.",
-              );
-            }}
-          />
+          <ContinueRow onContinue={onContinue} />
         )}
         {error && (
           <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">

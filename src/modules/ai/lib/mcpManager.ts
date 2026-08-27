@@ -7,6 +7,7 @@ import { createProxyFetch } from "./proxyFetch";
 
 type McpStdioEvent =
   | { kind: "message"; data: string }
+  | { kind: "stderr"; data: string }
   | { kind: "exit"; code: number | null }
   | { kind: "error"; message: string };
 
@@ -41,7 +42,17 @@ class TauriStdioTransport {
             // Ignore non-JSON lines (e.g. stderr leaking into stdout).
           }
           break;
+        case "stderr":
+          // Surface server diagnostics. Do NOT feed these to the MCP client
+          // protocol handler (they are not JSON-RPC messages).
+          console.warn(`[mcp:${this.config.name}] stderr:`, event.data);
+          break;
         case "exit":
+          if (event.code != null && event.code !== 0) {
+            console.error(
+              `[mcp:${this.config.name}] exited with code ${event.code}`,
+            );
+          }
           this.onclose?.();
           break;
         case "error":

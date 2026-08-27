@@ -1,12 +1,18 @@
 use serde::Serialize;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::RwLock;
+use std::sync::{Arc, Mutex, RwLock};
+use std::thread;
+use std::time::Duration;
 use tauri::ipc::Channel;
 
 use crate::modules::lock::rwlock_write;
+
+/// Max length of a single stderr line forwarded to the log. Prevents a
+/// pathological MCP server from flooding Kai.log with one massive line.
+const MAX_STDERR_LINE: usize = 2000;
 
 /// Events streamed back to the frontend for a stdio MCP session.
 #[derive(Clone, Serialize)]
@@ -15,17 +21,20 @@ pub enum McpEvent {
     /// A complete JSON-RPC line read from the child's stdout.
     #[serde(rename = "message")]
     Message { data: String },
+    /// A line read from the child's stderr (diagnostics, not JSON-RPC).
+    #[serde(rename = "stderr")]
+    Stderr { data: String },
     /// The child process exited.
     #[serde(rename = "exit")]
     Exit { code: Option<i32> },
-    /// An IO error reading from stdout.
+    /// An IO error reading from stdout/stderr.
     #[serde(rename = "error")]
     Error { message: String },
 }
 
 struct McpSession {
-    child: Child,
-    /// Flag to signal the reader thread to stop.
+    stdin: ChildStdin,
+    child: Arc<Mutex<Child>>,
     _id: u32,
 }
 
@@ -77,7 +86,7 @@ pub fn mcp_stdio_open(
 
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+        .stderr(Stdio::piped());
 
     if let Some(ref d) = cwd {
         cmd.current_dir(d);
@@ -88,38 +97,116 @@ pub fn mcp_stdio_open(
         }
     }
 
-    let mut child = cmd.spawn().map_err(|e| format!("spawn failed: {e}"))?;
+    let mut child = cmd.spawn().map_err(|e| {
+        log::error!(
+            "mcp id={id} spawn failed command={} args={:?}: {e}",
+            command,
+            args
+        );
+        format!("spawn failed: {e}")
+    })?;
+    let pid = child.id();
+    log::info!("mcp id={id} pid={pid} command={} args={:?}", command, args);
 
-    // Take stdout and spawn a reader thread that forwards lines to the channel.
+    // Take all three stdio streams. stdin stays in the session (so the
+    // frontend can write JSON-RPC requests); stdout/stderr are consumed by
+    // reader threads; the Child handle is shared with a waiter thread that
+    // reports the real exit code.
+    let stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| "failed to capture stdin".to_string())?;
     let stdout = child
         .stdout
         .take()
         .ok_or_else(|| "failed to capture stdout".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "failed to capture stderr".to_string())?;
 
-    std::thread::spawn(move || {
-        let reader = BufReader::new(stdout);
-        for line in reader.lines() {
-            match line {
-                Ok(data) => {
-                    let trimmed = data.trim().to_string();
-                    if trimmed.is_empty() {
-                        continue;
+    let child = Arc::new(Mutex::new(child));
+
+    // stdout reader → JSON-RPC messages.
+    let stdout_ch = on_message.clone();
+    let _ = thread::Builder::new()
+        .name("KAI-mcp-stdout".into())
+        .spawn(move || {
+            let reader = BufReader::new(stdout);
+            for line in reader.lines() {
+                match line {
+                    Ok(data) => {
+                        let trimmed = data.trim().to_string();
+                        if trimmed.is_empty() {
+                            continue;
+                        }
+                        let _ = stdout_ch.send(McpEvent::Message { data: trimmed });
                     }
-                    let _ = on_message.send(McpEvent::Message { data: trimmed });
-                }
-                Err(e) => {
-                    let _ = on_message.send(McpEvent::Error {
-                        message: e.to_string(),
-                    });
-                    break;
+                    Err(e) => {
+                        let _ = stdout_ch.send(McpEvent::Error {
+                            message: format!("stdout read failed: {e}"),
+                        });
+                        break;
+                    }
                 }
             }
-        }
-        // stdout closed — child likely exited.
-        let _ = on_message.send(McpEvent::Exit { code: None });
-    });
+        });
 
-    let session = McpSession { child, _id: id };
+    // stderr reader → forwarded to frontend + logged for diagnosis.
+    let stderr_ch = on_message.clone();
+    let _ = thread::Builder::new()
+        .name("KAI-mcp-stderr".into())
+        .spawn(move || {
+            let reader = BufReader::new(stderr);
+            for line in reader.lines() {
+                match line {
+                    Ok(data) => {
+                        let trimmed = data.trim().to_string();
+                        if trimmed.is_empty() {
+                            continue;
+                        }
+                        log::info!("mcp id={id} stderr: {}", truncate(&trimmed, MAX_STDERR_LINE));
+                        let _ = stderr_ch.send(McpEvent::Stderr { data: trimmed });
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+    // waiter thread → polls the reaped status so the frontend sees the real
+    // exit code (not just "stdout closed").
+    let exit_ch = on_message.clone();
+    let waiter_child = child.clone();
+    let _ = thread::Builder::new()
+        .name("KAI-mcp-waiter".into())
+        .spawn(move || {
+            loop {
+                let status = {
+                    let mut c = match waiter_child.lock() {
+                        Ok(c) => c,
+                        Err(_) => break,
+                    };
+                    match c.try_wait() {
+                        Ok(Some(status)) => Some(status),
+                        Ok(None) => None,
+                        Err(_) => None, // already reaped by mcp_stdio_close
+                    }
+                };
+                if let Some(status) = status {
+                    let code = status.code();
+                    log::info!("mcp id={id} exited code={code:?}");
+                    let _ = exit_ch.send(McpEvent::Exit { code });
+                    break;
+                }
+                thread::sleep(Duration::from_millis(100));
+            }
+        });
+
+    let session = McpSession {
+        stdin,
+        child,
+        _id: id,
+    };
     rwlock_write(&state.sessions).insert(id, session);
 
     Ok(id)
@@ -127,29 +214,44 @@ pub fn mcp_stdio_open(
 
 /// Send a JSON-RPC message to a stdio MCP session's stdin.
 #[tauri::command]
-pub fn mcp_stdio_send(state: tauri::State<'_, McpState>, id: u32, message: String) -> Result<(), String> {
+pub fn mcp_stdio_send(
+    state: tauri::State<'_, McpState>,
+    id: u32,
+    message: String,
+) -> Result<(), String> {
     let mut sessions = rwlock_write(&state.sessions);
     let session = sessions
         .get_mut(&id)
         .ok_or_else(|| format!("no mcp session {id}"))?;
-    let stdin = session
-        .child
-        .stdin
-        .as_mut()
-        .ok_or_else(|| "stdin not available".to_string())?;
     // MCP stdio protocol: newline-delimited JSON.
-    writeln!(stdin, "{message}").map_err(|e| format!("write failed: {e}"))?;
-    stdin.flush().map_err(|e| format!("flush failed: {e}"))?;
+    writeln!(session.stdin, "{message}").map_err(|e| format!("write failed: {e}"))?;
+    session
+        .stdin
+        .flush()
+        .map_err(|e| format!("flush failed: {e}"))?;
     Ok(())
 }
 
 /// Close a stdio MCP session, killing the child process.
 #[tauri::command]
-pub fn mcp_stdio_close(state: tauri::State<'_, McpState>, id: u32) -> Result<(), String> {
+pub fn mcp_stdio_close(
+    state: tauri::State<'_, McpState>,
+    id: u32,
+) -> Result<(), String> {
     let mut sessions = rwlock_write(&state.sessions);
-    if let Some(mut session) = sessions.remove(&id) {
-        let _ = session.child.kill();
-        let _ = session.child.wait();
+    if let Some(session) = sessions.remove(&id) {
+        if let Ok(mut child) = session.child.lock() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
     }
     Ok(())
+}
+
+fn truncate(s: &str, max: usize) -> &str {
+    if s.len() <= max {
+        s
+    } else {
+        &s[..max]
+    }
 }

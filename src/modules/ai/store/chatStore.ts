@@ -144,6 +144,8 @@ export type AgentMeta = {
   lastInputTokens: number;
   lastCachedTokens: number;
   hitStepCap: boolean;
+  /** Raw finish reason from the provider (stop, length, tool-calls, etc.). */
+  finishReason: string;
   compactionNotice: { droppedCount: number; at: number } | null;
   /** True while the model is generating a context summary. */
   summarizing: boolean;
@@ -168,6 +170,7 @@ const IDLE_META: AgentMeta = {
   lastInputTokens: 0,
   lastCachedTokens: 0,
   hitStepCap: false,
+  finishReason: "",
   compactionNotice: null,
   summarizing: false,
   summaryNotice: null,
@@ -441,7 +444,10 @@ function makeChatSync(sessionId: string): Chat<UIMessage> {
       });
     },
     onFinishMeta: (info) => {
-      useChatStore.getState().patchAgentMeta({ hitStepCap: info.hitStepCap });
+      useChatStore.getState().patchAgentMeta({
+        hitStepCap: info.hitStepCap,
+        finishReason: info.finishReason,
+      });
     },
     onUsage: (delta) => {
       const cur = useChatStore.getState().agentMeta.tokens;

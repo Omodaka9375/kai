@@ -374,7 +374,11 @@ export function AiComposerProvider({ children }: ProviderProps) {
       typeof chat.sendMessage
     >[0]);
     const store = useChatStore.getState();
-    store.patchAgentMeta({ hitStepCap: false, compactionNotice: null });
+    store.patchAgentMeta({
+      hitStepCap: false,
+      finishReason: "",
+      compactionNotice: null,
+    });
     if (!store.mini.open) store.openMini();
     setValue("");
     setFiles([]);
