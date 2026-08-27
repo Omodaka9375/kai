@@ -11,6 +11,7 @@ All notable changes to the KAI terminal emulator project are documented in this 
 - **Plain Text table copy**: The table copy dropdown in chat now includes a fourth "Plain Text" option alongside Markdown, CSV, and TSV. Uses column-aligned padding with `|` separators for readability. Built on Streamdown's `extractTableDataFromElement()` — no parsing logic duplicated.
 - **Provider error messages**: The AI SDK's `RetryError` ("Failed after 3 attempts. Last error: Provider returned an error") is now unwrapped to show the actual HTTP status code, response body, and URL. Detectable failure modes get actionable messages: 413 (request too large → reduce MCP tools), 429 (rate limited → wait/switch), 408/504 (timeout → reduce conversation length), 401/403 (auth → check Settings).
 - **Inline session rename**: Session titles in the AiMiniWindow dropdown can now be edited inline. Hover reveals a pencil icon alongside the trash icon; clicking it swaps the title for an Input field. Commit on Enter/Blur, cancel on Escape.
+- **Branch name pill links to GitHub**: The branch name badge in the source control sidebar header now acts as a link to the GitHub tree browse URL (`https://github.com/<owner>/<repo>/tree/<branch>`). Uses `git_remote_url` (Rust) to fetch the origin URL and `parseGithubBranchUrl()` to extract owner/repo. Falls back to a static pill for non-GitHub remotes or detached HEAD.
 
 ### Fixed
 
