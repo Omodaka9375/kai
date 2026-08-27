@@ -52,6 +52,82 @@ type Live = {
   openPreview: (url: string) => boolean;
 };
 
+// ── Error display — surface RetryError / APICallError details ──────────
+
+type ErrorLike = {
+  message?: string;
+  errors?: (ErrorLike | null)[];
+  lastError?: ErrorLike | null;
+  statusCode?: number | null;
+  responseBody?: string | null;
+  url?: string | null;
+  isRetryable?: boolean;
+};
+
+/** Extract actionable error details from an AI SDK RetryError chain. */
+function resolveErrorDisplay(raw: unknown): string {
+  const e = raw as ErrorLike | null;
+  if (!e) return "Unknown error";
+
+  // Duck-typed RetryError: has an `errors` array of underlying errors.
+  const errors = Array.isArray(e.errors) ? e.errors.filter(Boolean) : [];
+  if (errors.length === 0) return e.message ?? String(raw);
+
+  // Find the most informative underlying error: prefer one with statusCode.
+  let best: ErrorLike | null = null;
+  for (let i = errors.length - 1; i >= 0; i--) {
+    const err = errors[i]!;
+    if (err.statusCode != null) {
+      best = err;
+      break;
+    }
+    if (!best) best = err;
+  }
+  if (!best) return e.message ?? String(raw);
+
+  const code = best.statusCode;
+  const body = best.responseBody?.slice(0, 500) ?? "";
+  const url = best.url ?? "";
+  const providerMsg = best.message ?? "";
+
+  // Detect common failure modes and return actionable messages.
+  if (code === 413 || /payload too large|request too large|exceeds.*limit/i.test(body)) {
+    return (
+      "Request too large (HTTP 413). Your prompt + MCP tool schemas may exceed the provider's max input size. " +
+      "Try: disconnect unnecessary MCP servers, or use a model with a larger context window."
+    );
+  }
+  if (code === 429 || /rate limit/i.test(body)) {
+    return (
+      "Rate limited (HTTP 429). The provider is throttling requests. " +
+      "Try: wait a minute and retry, or switch to a different provider."
+    );
+  }
+  if (code === 408 || code === 504 || /timeout|timed out/i.test(providerMsg)) {
+    return (
+      `Request timed out (HTTP ${code}). The model may be overloaded or the request is too large. ` +
+      "Try: reduce conversation length, disconnect MCP servers, or switch models."
+    );
+  }
+  if (code === 401 || code === 403) {
+    return (
+      `Authentication error (HTTP ${code}). Your API key may be invalid or missing. ` +
+      "Check Settings → Models for the active provider."
+    );
+  }
+  if (code != null) {
+    return [
+      `Provider error (HTTP ${code})`,
+      body ? `: ${body.slice(0, 200)}` : "",
+      url ? `\n\nURL: ${url}` : "",
+    ].join("");
+  }
+
+  // No status code — surface the underlying message if it's more specific.
+  if (providerMsg && providerMsg !== e.message) return providerMsg;
+  return e.message ?? String(raw);
+}
+
 export type AgentRunStatus =
   | "idle"
   | "thinking"
@@ -421,9 +497,15 @@ function makeChatSync(sessionId: string): Chat<UIMessage> {
         console.debug("[kai] suppressed stale approval error:", msg);
         return;
       }
+      // Surface RetryError details. The AI SDK wraps provider errors in
+      // RetryError with an `errors` array. The top-level message is generic
+      // ("Failed after 3 attempts. Last error: Provider returned an error"),
+      // but the underlying APICallError has the actual status code, response
+      // body, and URL. Extract those so the user sees actionable info.
+      const display = resolveErrorDisplay(e);
       useChatStore.getState().patchAgentMeta({
         status: "error",
-        error: msg,
+        error: display,
       });
     },
   });
