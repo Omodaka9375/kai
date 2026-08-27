@@ -326,13 +326,6 @@ function getEditFailures(ctx: ToolContext): Map<string, number> {
   return map;
 }
 
-/** Clear the edit failure counter — call on session switch/delete. */
-export function resetEditFailures(ctx?: ToolContext): void {
-  if (ctx) {
-    editFailures.delete(ctx);
-  }
-}
-
 export function buildEditTools(ctx: ToolContext) {
   return {
     edit: tool({

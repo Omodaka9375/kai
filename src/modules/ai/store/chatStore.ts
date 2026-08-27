@@ -37,7 +37,6 @@ import { createContextAwareTransport } from "../lib/transport";
 import { clearFenceState } from "../lib/transport";
 import { reapSessionWatches, closeWatchSessionShell } from "../tools/watch";
 import type { ToolContext } from "../tools/tools";
-import { resetEditFailures } from "../tools/edit";
 import { FileTracker } from "../lib/fileTracker";
 import { agentBus } from "../lib/eventBus";
 import { detectStack, type StackInfo } from "../lib/stackDetector";
@@ -726,7 +725,6 @@ export const useChatStore = create<StoreState>((set, get) => ({
     if (get().activeSessionId === id) return;
     if (!get().sessions.some((s) => s.id === id)) return;
     const fromId = get().activeSessionId;
-    resetEditFailures();
     agentBus.emit("session:switch", { fromId, toId: id });
 
     // Lazily seed the chat with persisted messages the first time we open

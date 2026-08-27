@@ -252,6 +252,8 @@ fn truncate(s: &str, max: usize) -> &str {
     if s.len() <= max {
         s
     } else {
-        &s[..max]
+        // floor_char_boundary avoids panicking when `max` splits a multi-byte
+        // char (e.g. €, emoji) — a panic would kill the stderr reader thread.
+        &s[..s.floor_char_boundary(max)]
     }
 }
