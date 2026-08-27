@@ -6,6 +6,7 @@ import { checkReadableCanonical, checkWritableCanonical } from "../lib/security"
 import { newQueuedEditId, usePlanStore } from "../store/planStore";
 import { resolvePath, type ToolContext } from "./context";
 import { snapshotFile } from "../lib/checkpoints";
+import { withFileMutationLock } from "../lib/mutationLock";
 
 type EditResult =
   | { ok: true; replacements: number; bytesWritten: number; path: string }
@@ -311,20 +312,32 @@ async function ensureReadCache(
   }
 }
 
-/** Per-path edit failure counter. Resets on success or session switch. */
-const editFailures = new Map<string, number>();
+/** Per-path edit failure counter. Resets on success or session switch.
+ *  Scoped per ToolContext so cross-session counters don't interfere. */
+const editFailures = new WeakMap<ToolContext, Map<string, number>>();
 const MAX_EDIT_RETRIES = 3;
 
+function getEditFailures(ctx: ToolContext): Map<string, number> {
+  let map = editFailures.get(ctx);
+  if (!map) {
+    map = new Map();
+    editFailures.set(ctx, map);
+  }
+  return map;
+}
+
 /** Clear the edit failure counter — call on session switch/delete. */
-export function resetEditFailures(): void {
-  editFailures.clear();
+export function resetEditFailures(ctx?: ToolContext): void {
+  if (ctx) {
+    editFailures.delete(ctx);
+  }
 }
 
 export function buildEditTools(ctx: ToolContext) {
   return {
     edit: tool({
       description:
-        "Replace text in an existing file. HOW IT WORKS: the tool searches the file for old_string and swaps it for new_string. RULES: (1) old_string must be copied EXACTLY from the file — every character, space, and indent; never invent or paraphrase it. (2) To INSERT without deleting, set old_string to the line before/after the spot and repeat that line inside new_string with your addition. (3) If old_string appears more than once, either widen it with surrounding lines to make it unique, or pass line_hint. (4) To create a NEW file use write_file instead. Asks for user approval.",
+        "Replace text in an existing file. HOW IT WORKS: the tool searches the file for old_string and swaps it for new_string. RULES: (1) old_string must be copied EXACTLY from the file — every character, space, and indent; never invent or paraphrase it. (2) To INSERT without deleting, set old_string to the line before/after the spot and repeat that line inside new_string with your addition. (3) If old_string appears more than once, either widen it with surrounding lines to make it unique, or pass line_hint. (4) To create a NEW file use write_file instead. (5) If you need multiple changes to the SAME file, use multi_edit — it applies edits sequentially inside one atomic write. Never emit separate edit calls for the same file in one step (they race each other). Asks for user approval.",
       inputSchema: z.object({
         path: z.string().optional(),
         old_string: z
@@ -347,29 +360,52 @@ export function buildEditTools(ctx: ToolContext) {
         const abs = safety.canonical;
         const guard = await ensureReadCache(abs, ctx);
         if (guard) return guard;
-        const failures = editFailures.get(abs) ?? 0;
+        const failures = getEditFailures(ctx).get(abs) ?? 0;
         if (failures >= MAX_EDIT_RETRIES) {
-          editFailures.delete(abs);
+          getEditFailures(ctx).delete(abs);
           return {
             error: `edit failed ${MAX_EDIT_RETRIES} times on this file. Use write_file to replace the entire file content instead.`,
             path: abs,
           };
         }
-        // Snapshot before mutation for checkpoint undo.
-        await snapshotFile(abs);
-        const result = await applyEdits(
-          abs,
-          [{ old_string, new_string, replace_all, line_hint }],
-          "edit",
-          ctx.readCache,
-        );
-        if ("error" in result) {
-          editFailures.set(abs, failures + 1);
-        } else {
-          editFailures.delete(abs);
-          ctx.fileTracker.markModified(abs);
-        }
-        return result;
+        // Serialize against other edits/writes to the SAME file so parallel
+        // tool calls from one step don't clobber each other via stale reads.
+        return withFileMutationLock([abs], async () => {
+          // Snapshot before mutation for checkpoint undo.
+          await snapshotFile(abs);
+          const edits = [{ old_string, new_string, replace_all, line_hint }];
+          const result = await applyEdits(abs, edits, "edit", ctx.readCache);
+          if (result.ok) {
+            getEditFailures(ctx).delete(abs);
+            ctx.fileTracker.markModified(abs);
+            return result;
+          }
+          // If old_string wasn't found, re-read the file (a prior concurrent
+          // edit to the same file may have shifted content) and retry once.
+          const retryable =
+            result.error.startsWith("old_string not found");
+          if (retryable) {
+            // Force cache refresh so applyEdits re-reads from disk.
+            ctx.readCache.delete(abs);
+            const retry = await applyEdits(abs, edits, "edit", ctx.readCache);
+            if ("ok" in retry) {
+              getEditFailures(ctx).delete(abs);
+              ctx.fileTracker.markModified(abs);
+              return retry;
+            }
+            // Retry also failed — the target was consumed by a racing edit.
+            // Append a hint so the model recovers instead of giving up.
+            getEditFailures(ctx).set(abs, failures + 1);
+            return {
+              ...result,
+              error:
+                result.error +
+                "\n\n(Still not found after re-read. This usually means another edit to the same file already consumed or displaced the target text. Re-read the file to get the current content, then resubmit. Better: use multi_edit for all same-file changes — it runs edits sequentially in one atomic operation instead of racing.)",
+            };
+          }
+          getEditFailures(ctx).set(abs, failures + 1);
+          return result;
+        });
       },
     }),
 
@@ -400,88 +436,104 @@ export function buildEditTools(ctx: ToolContext) {
         const abs = safety.canonical;
         const guard = await ensureReadCache(abs, ctx);
         if (guard) return guard;
-        const failures = editFailures.get(abs) ?? 0;
+        const failures = getEditFailures(ctx).get(abs) ?? 0;
         if (failures >= MAX_EDIT_RETRIES) {
-          editFailures.delete(abs);
+          getEditFailures(ctx).delete(abs);
           return {
             error: `multi_edit failed ${MAX_EDIT_RETRIES} times on this file. Use write_file to replace the entire file content instead.`,
             path: abs,
           };
         }
-        await snapshotFile(abs);
-        // Try batch first — fast path when all old_strings match.
-        const result = await applyEdits(
-          abs,
-          edits,
-          "multi_edit",
-          ctx.readCache,
-        );
-        if ("ok" in result) {
-          editFailures.delete(abs);
-          ctx.fileTracker.markModified(abs);
-          return result;
-        }
-        // Batch failed — retry each edit individually so correct edits
-        // still land and only the mismatched ones are reported.
-        const succeeded: Array<{
-          old_string: string;
-          replacements: number;
-        }> = [];
-        const failed: Array<{
-          old_string: string;
-          error: string;
-        }> = [];
-        for (let i = 0; i < edits.length; i++) {
-          const e = edits[i];
-          const r = await applyEdits(
+        return withFileMutationLock([abs], async () => {
+          await snapshotFile(abs);
+          // Try batch first — fast path when all old_strings match.
+          let result = await applyEdits(
             abs,
-            [e],
-            "edit",
+            edits,
+            "multi_edit",
             ctx.readCache,
           );
-          if ("ok" in r && r.ok) {
-            succeeded.push({
-              old_string: e.old_string.slice(0, 80),
-              replacements: (r as Extract<EditResult, { ok: true }>).replacements,
-            });
-          } else {
-            const err = r as Extract<EditResult, { ok: false }>;
-            failed.push({
-              old_string: e.old_string.slice(0, 80),
-              error: err.error,
-            });
+          // Retry once if old_string wasn't found (concurrent same-file edit
+          // shifted content). Re-read from disk fresh.
+          if (
+            "error" in result &&
+            result.error.startsWith("old_string not found")
+          ) {
+            ctx.readCache.delete(abs);
+            result = await applyEdits(
+              abs,
+              edits,
+              "multi_edit",
+              ctx.readCache,
+            );
           }
-        }
-        if (succeeded.length === 0) {
-          editFailures.set(abs, failures + 1);
+          if (result.ok) {
+            getEditFailures(ctx).delete(abs);
+            ctx.fileTracker.markModified(abs);
+            return result;
+          }
+          // Batch failed — retry each edit individually so correct edits
+          // still land and only the mismatched ones are reported.
+          const succeeded: Array<{
+            old_string: string;
+            replacements: number;
+          }> = [];
+          const failed: Array<{
+            old_string: string;
+            error: string;
+          }> = [];
+          for (let i = 0; i < edits.length; i++) {
+            const e = edits[i];
+            const r = await applyEdits(
+              abs,
+              [e],
+              "edit",
+              ctx.readCache,
+            );
+            if ("ok" in r && r.ok) {
+              succeeded.push({
+                old_string: e.old_string.slice(0, 80),
+                replacements: (r as Extract<EditResult, { ok: true }>).replacements,
+              });
+            } else {
+              const err = r as Extract<EditResult, { ok: false }>;
+              failed.push({
+                old_string: e.old_string.slice(0, 80),
+                error: err.error,
+              });
+            }
+          }
+          if (succeeded.length === 0) {
+            getEditFailures(ctx).set(abs, failures + 1);
+            return {
+              ok: false,
+              error:
+                `All ${edits.length} edits failed. ` +
+                (failed.length === 1
+                  ? `Reason: ${failed[0].error}`
+                  : `First failure: ${failed[0].error}`),
+              path: abs,
+              applied: 0,
+              failed: edits.length,
+            } as EditResult;
+          }
+          // Partial success — reset failure counter, mark file modified.
+          getEditFailures(ctx).delete(abs);
+          ctx.fileTracker.markModified(abs);
           return {
-            ok: false,
-            error:
-              `All ${edits.length} edits failed. ` +
-              (failed.length === 1
-                ? `Reason: ${failed[0].error}`
-                : `First failure: ${failed[0].error}`),
+            ok: true as const,
+            replacements: succeeded.reduce((sum, s) => sum + s.replacements, 0),
+            bytesWritten: 0,
             path: abs,
-            applied: 0,
-            failed: edits.length,
-          } as EditResult;
-        }
-        // Partial success — reset failure counter, mark file modified.
-        editFailures.delete(abs);
-        ctx.fileTracker.markModified(abs);
-        return {
-          ok: true as const,
-          replacements: succeeded.reduce((sum, s) => sum + s.replacements, 0),
-          bytesWritten: 0,
-          path: abs,
-          applied: succeeded.length,
-          failed: failed.length,
-          failures: failed.map((f) => f.error),
-          note:
-            failed.length > 0
-              ? `${succeeded.length} of ${edits.length} edits applied. The remaining ${failed.length} must be redone with corrected old_string values.`
-              : undefined,
-        };
+            applied: succeeded.length,
+            failed: failed.length,
+            failures: failed.map((f) => f.error),
+            note:
+              failed.length > 0
+                ? `${succeeded.length} of ${edits.length} edits applied. The remaining ${failed.length} must be redone with corrected old_string values.`
+                : undefined,
+          };
+        });
       },
     }),
 

@@ -10,6 +10,7 @@ import {
 import { newQueuedEditId, usePlanStore } from "../store/planStore";
 import { resolvePath, type ToolContext } from "./context";
 import { snapshotFile } from "../lib/checkpoints";
+import { withFileMutationLock } from "../lib/mutationLock";
 
 const READ_BYTE_CAP = 25 * 1024;
 const READ_LINE_CAP = 2000;
@@ -213,29 +214,33 @@ export function buildFsTools(ctx: ToolContext) {
           };
         }
 
-        try {
-          // Snapshot before mutation for checkpoint undo.
-          await snapshotFile(abs);
-          // Auto-create parent directories so the agent never needs a
-          // separate create_directory step (avoids approval-loop bugs).
-          const lastSep = Math.max(abs.lastIndexOf("/"), abs.lastIndexOf("\\"));
-          if (lastSep > 0) {
-            const parentDir = abs.slice(0, lastSep);
-            try {
-              await native.createDir(parentDir);
-            } catch {
-              // Parent already exists — ignore.
+        // Serialize against other edits/writes to the SAME file so parallel
+        // tool calls from one step don't clobber each other.
+        return withFileMutationLock([abs], async () => {
+          try {
+            // Snapshot before mutation for checkpoint undo.
+            await snapshotFile(abs);
+            // Auto-create parent directories so the agent never needs a
+            // separate create_directory step (avoids approval-loop bugs).
+            const lastSep = Math.max(abs.lastIndexOf("/"), abs.lastIndexOf("\\"));
+            if (lastSep > 0) {
+              const parentDir = abs.slice(0, lastSep);
+              try {
+                await native.createDir(parentDir);
+              } catch {
+                // Parent already exists — ignore.
+              }
             }
-          }
-          await native.writeFile(abs, content);
-          ctx.readCache.set(abs, { size: content.length, hash: djb2(content) });
-          ctx.fileTracker.markModified(abs);
-          window.dispatchEvent(new CustomEvent("Kai:fs-changed", { detail: abs }));
+            await native.writeFile(abs, content);
+            ctx.readCache.set(abs, { size: content.length, hash: djb2(content) });
+            ctx.fileTracker.markModified(abs);
+            window.dispatchEvent(new CustomEvent("Kai:fs-changed", { detail: abs }));
 
-          return { path: abs, bytesWritten: content.length, ok: true };
-        } catch (e) {
-          return { error: String(e), path: abs };
-        }
+            return { path: abs, bytesWritten: content.length, ok: true };
+          } catch (e) {
+            return { error: String(e), path: abs };
+          }
+        });
       },
     }),
 
