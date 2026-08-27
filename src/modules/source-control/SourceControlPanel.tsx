@@ -47,6 +47,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
+import { native } from "@/modules/ai/lib/native";
 import type { SourceControlSummary } from "./useSourceControl";
 import {
   useSourceControlPanel,
@@ -104,6 +105,16 @@ function entryPathLabel(entry: SourceControlEntry): string {
 function upstreamBadgeLabel(upstream: string | null | undefined): string {
   if (!upstream) return "No upstream";
   return upstream;
+}
+
+/** Convert a git remote URL + branch name into a GitHub tree browse URL.
+ *  Handles https://, git@, and ssh:// formats. Returns null for
+ *  non-GitHub remotes. */
+function parseGithubBranchUrl(remoteUrl: string, branch: string): string | null {
+  const m =
+    remoteUrl.match(/github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?(?:\/|$)/);
+  if (!m) return null;
+  return `https://github.com/${m[1]}/tree/${branch}`;
 }
 
 function statusTone(code: string): string {
@@ -167,6 +178,20 @@ export const SourceControlPanel = memo(function SourceControlPanel({
     if (!scm.status) return "Source Control";
     return scm.status.isDetached ? "detached" : scm.status.branch;
   }, [scm.status]);
+  const [branchUrl, setBranchUrl] = useState<string | null>(null);
+  useEffect(() => {
+    const repoRoot = scm.status?.repoRoot;
+    if (!repoRoot || !scm.status || scm.status.isDetached) {
+      setBranchUrl(null);
+      return;
+    }
+    let cancelled = false;
+    native.gitRemoteUrl(repoRoot).then((raw) => {
+      if (cancelled || !raw) return;
+      setBranchUrl(parseGithubBranchUrl(raw, scm.status!.branch));
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [scm.status?.repoRoot, scm.status?.branch, scm.status?.isDetached]);
 
   const commitShortcut = IS_MAC ? "⌘↩" : "Ctrl+Enter";
   const generateShortcut = IS_MAC ? "⌘G" : "Ctrl+G";
@@ -469,15 +494,33 @@ export const SourceControlPanel = memo(function SourceControlPanel({
       <aside className="flex h-full min-w-0 flex-col bg-card/80 backdrop-blur [contain:layout_style]">
         <header className="flex shrink-0 items-center justify-between gap-2 border-b border-border/50 px-3 pb-2.5 pt-3">
           <div className="flex min-w-0 items-center gap-1.5">
-            <div className="inline-flex min-w-0 items-center gap-1.5 rounded-md bg-foreground/5 px-2 py-1 text-[11.5px] font-medium leading-none text-foreground transition-colors hover:bg-foreground/10">
-              <HugeiconsIcon
-                icon={FolderGitTwoIcon}
-                size={12}
-                strokeWidth={1.9}
-                className="shrink-0 text-muted-foreground"
-              />
-              <span className="max-w-[140px] truncate">{repoLabel}</span>
-            </div>
+            {branchUrl ? (
+              <a
+                href={branchUrl}
+                target="_blank"
+                rel="noreferrer"
+                title={`View ${scm.status?.branch ?? "branch"} on GitHub`}
+                className="inline-flex min-w-0 items-center gap-1.5 rounded-md bg-foreground/5 px-2 py-1 text-[11.5px] font-medium leading-none text-foreground transition-colors hover:bg-foreground/10"
+              >
+                <HugeiconsIcon
+                  icon={FolderGitTwoIcon}
+                  size={12}
+                  strokeWidth={1.9}
+                  className="shrink-0 text-muted-foreground"
+                />
+                <span className="max-w-[140px] truncate">{repoLabel}</span>
+              </a>
+            ) : (
+              <div className="inline-flex min-w-0 items-center gap-1.5 rounded-md bg-foreground/5 px-2 py-1 text-[11.5px] font-medium leading-none text-foreground transition-colors hover:bg-foreground/10">
+                <HugeiconsIcon
+                  icon={FolderGitTwoIcon}
+                  size={12}
+                  strokeWidth={1.9}
+                  className="shrink-0 text-muted-foreground"
+                />
+                <span className="max-w-[140px] truncate">{repoLabel}</span>
+              </div>
+            )}
             {scm.status && (scm.status.ahead > 0 || scm.status.behind > 0) ? (
               <div className="flex shrink-0 items-center gap-0.5 text-[10px] font-semibold tabular-nums leading-none">
                 {scm.status.ahead > 0 ? (
