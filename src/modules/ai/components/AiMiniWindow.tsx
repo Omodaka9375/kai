@@ -77,6 +77,16 @@ export function AiMiniWindow() {
         const target = e.target as HTMLElement | null;
         const tag = target?.tagName;
         if (tag === "INPUT" || tag === "TEXTAREA") return;
+        // CodeMirror (and any contenteditable surface) reports tagName "DIV" —
+        // without this check, pressing Escape in the editor (dismiss
+        // autocomplete, vim normal mode) would silently kill a running agent.
+        if (target?.isContentEditable || target?.closest("[contenteditable]")) {
+          return;
+        }
+        // Same for the terminal: xterm renders into a div/canvas and forwards
+        // Escape to the shell (vim, fzf, menus). The raw keydown still bubbles
+        // to window — don't let it stop the agent.
+        if (target?.closest(".xterm")) return;
         if (c.isBusy) {
           e.preventDefault();
           cancelAllShellSessions();
