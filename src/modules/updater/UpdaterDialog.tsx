@@ -12,7 +12,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { useState, useEffect } from "react";
 import { useUpdater } from "./useUpdater";
 import { invoke } from "@tauri-apps/api/core";
-import { parseChangelogSection } from "./parseChangelog";
+import { parseChangelogSection, parseReleaseNotes } from "./parseChangelog";
 
 type DistroKey = "arch" | "debian" | "fedora";
 
@@ -57,17 +57,46 @@ export function UpdaterDialog() {
     status.kind === "downloading" ||
     status.kind === "ready";
 
-  // Fetch CHANGELOG.md from fs — immediately read the associated section.
+  // Fetch release notes for the version on offer.
+  //
+  // The updater plugin's `Update.body` actually carries the release notes
+  // directly from the updater JSON `notes` field, so `available` is preferred.
+  // `manual-available` (Linux) gets the GitHub release `body`. Rendering only
+  // happens while the note text matches — no work is done `ready`/`downloading`
+  // states after install starts.
   useEffect(() => {
-    const version =
-      status.kind === "available" ? status.update?.version : status.kind === "manual-available" ? status.info.version : null;
-    if (version) {
-      invoke<string>("fs_read_changelog")
-        .then((text) => {
-          const sections = parseChangelogSection(text, version);
+    if (status.kind === "available") {
+      const body = status.update?.body?.trim();
+      if (body) {
+        const sections = parseReleaseNotes(body);
+        if (sections.length > 0) {
           setChangelog({ loading: false, sections });
-        })
+          return;
+        }
+      }
+      // Fall back to the bundled CHANGELOG.md if notes are missing/empty.
+      invoke<string>("fs_read_changelog")
+        .then((text) =>
+          setChangelog({
+            loading: false,
+            sections: parseChangelogSection(text, status.update?.version ?? ""),
+          }),
+        )
         .catch(() => setChangelog({ loading: false, sections: null }));
+    } else if (status.kind === "manual-available") {
+      const body = status.info.body?.trim();
+      if (body) {
+        setChangelog({ loading: false, sections: parseReleaseNotes(body) });
+      } else {
+        invoke<string>("fs_read_changelog")
+          .then((text) =>
+            setChangelog({
+              loading: false,
+              sections: parseChangelogSection(text, status.info.version),
+            }),
+          )
+          .catch(() => setChangelog({ loading: false, sections: null }));
+      }
     }
   }, [status]);
 
@@ -124,7 +153,7 @@ export function UpdaterDialog() {
                   : formatBytes(status.downloaded)
                 : manual
                   ? `You're on v${manual.currentVersion}. Pick your distro and run the command, or grab the package from GitHub.`
-                  : update?.body || "A new version is ready to install."}
+                  : "A new version is ready to install."}
           </DialogDescription>
         </DialogHeader>
 

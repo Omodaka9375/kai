@@ -14,7 +14,31 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       release-id: ${{ steps.create.outputs.result }}
+      release-body: ${{ steps.notes.outputs.body }}
     steps:
+      - uses: actions/checkout@v4
+
+      # Extract the CHANGELOG.md section for this tag so the GitHub release
+      # body AND the updater latest.json `notes` field (which tauri-action
+      # derives from `releaseBody`) carry real release notes.
+      - name: Extract release notes from CHANGELOG.md
+        id: notes
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          section=$(awk -v v="## [${version}]" '
+            $0 == v { found=1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md)
+          if [ -z "$section" ]; then
+            section="See the assets to download and install. Auto-update is built in."
+          fi
+          # Delimit multiline output so it survives the step's stdout capture.
+          echo "body<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$section" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
       - name: Create or reuse draft release
         id: create
         uses: actions/github-script@v7
@@ -39,7 +63,7 @@ jobs:
               repo: context.repo.repo,
               tag_name: tag,
               name: `Kai ${tag}`,
-              body: 'See the assets to download and install. Auto-update is built in.',
+              body: `${{ steps.notes.outputs.body }}`,
               draft: true,
               prerelease: false,
             });
@@ -126,7 +150,7 @@ jobs:
           releaseId: ${{ needs.create-release.outputs.release-id }}
           tagName: ${{ github.ref_name }}
           releaseName: "Kai ${{ github.ref_name }}"
-          releaseBody: "See the assets to download and install. Auto-update is built in."
+          releaseBody: ${{ needs.create-release.outputs.release-body }}
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
