@@ -1,6 +1,7 @@
 import { PopoverContent } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useEffect, useRef } from "react";
 import type { SlashCommandMeta } from "../lib/slashCommands";
 import type { Snippet } from "../lib/snippets";
 
@@ -24,6 +25,15 @@ export function SnippetPickerContent({
   const commands = items.filter((it) => it.kind === "command");
   const snippets = items.filter((it) => it.kind === "snippet");
   let cursor = -1;
+
+  // Follow keyboard navigation: when the active item changes, scroll it into
+  // view so arrows don't strand the highlight below the visible fold.
+  const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  useEffect(() => {
+    const el = itemRefs.current[activeIndex];
+    if (!el) return;
+    el.scrollIntoView({ block: "nearest" });
+  }, [activeIndex]);
 
   return (
     <PopoverContent
@@ -53,6 +63,9 @@ export function SnippetPickerContent({
                   return (
                     <li key={`cmd-${c.name}`}>
                       <button
+                        ref={(el) => {
+                          itemRefs.current[i] = el;
+                        }}
                         type="button"
                         onMouseEnter={() => onHover(i)}
                         onClick={() => onPick(it)}
@@ -96,6 +109,9 @@ export function SnippetPickerContent({
                   return (
                     <li key={`sn-${s.id}`}>
                       <button
+                        ref={(el) => {
+                          itemRefs.current[i] = el;
+                        }}
                         type="button"
                         onMouseEnter={() => onHover(i)}
                         onClick={() => onPick(it)}
