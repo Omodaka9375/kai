@@ -133,7 +133,7 @@ export function UpdaterDialog() {
           dismiss();
       }}
     >
-      <DialogContent className="sm:max-w-[440px]">
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-[440px]">
         <DialogHeader>
           <DialogTitle>
             {ready
