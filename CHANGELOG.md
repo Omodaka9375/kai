@@ -4,6 +4,15 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.2.4]
+
+### Fixed
+
+- **Updater dialog grew off-screen**: long release notes now scroll inside a capped dialog (`max-h-[85vh]` + `overflow-y-auto`) instead of pushing the popup past the viewport.
+- **Release notes rendered as raw text**: the updater dialog dumped bullets as plain text nodes, so `**bold**` and inline code showed literally. Notes now render as markdown via `Streamdown` (same pipeline as chat and markdown preview).
+
+---
+
 ## [1.2.3]
 
 ### Fixed
