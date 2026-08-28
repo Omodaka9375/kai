@@ -180,10 +180,16 @@ pub fn fs_canonicalize(path: String, workspace: Option<WorkspaceEnv>) -> Result<
     let workspace = WorkspaceEnv::from_option(workspace);
     let p = resolve_path(&path, &workspace);
     let canon = std::fs::canonicalize(&p).map_err(|e| e.to_string())?;
-    // Strip the Windows `\\?\` extended-length prefix so the frontend's
-    // path comparator sees the same form regardless of OS.
+    // Strip the Windows extended-length prefixes so the frontend's path
+    // comparator sees the same form regardless of OS. `\\?\UNC\` (network
+    // paths, incl. WSL mounts) becomes `\\`; `\\?\` (long local paths) is
+    // removed entirely. Mirror git/utils.rs canonical_dir.
     let s = canon.to_string_lossy().to_string();
-    let s = s.strip_prefix(r"\\?\").unwrap_or(&s).to_string();
+    let s = s
+        .strip_prefix(r"\\?\UNC\")
+        .map(|rest| format!(r"\\{rest}"))
+        .or_else(|| s.strip_prefix(r"\\?\").map(String::from))
+        .unwrap_or(s);
     Ok(s.replace('\\', "/"))
 }
 

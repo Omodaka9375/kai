@@ -56,9 +56,12 @@ function pathOfInput(input: unknown): string | null {
   return typeof p === "string" && p.length > 0 ? p : null;
 }
 
-function collectMutationPaths(messages: ModelMessage[]): Set<string> {
-  const paths = new Set<string>();
-  for (const m of messages) {
+function collectLastMutationIdxPerPath(
+  messages: ModelMessage[],
+): Map<string, number> {
+  const lastIdx = new Map<string, number>();
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
     if (!Array.isArray(m.content)) continue;
     for (const part of m.content as ToolPart[]) {
       if (part.type !== "tool-call") continue;
@@ -70,11 +73,11 @@ function collectMutationPaths(messages: ModelMessage[]): Set<string> {
         name === "create_directory"
       ) {
         const p = pathOfInput(part.input);
-        if (p) paths.add(p);
+        if (p) lastIdx.set(p, i);
       }
     }
   }
-  return paths;
+  return lastIdx;
 }
 
 function collectLastReadIdxPerPath(
@@ -98,7 +101,7 @@ function dropSupersededReads(messages: ModelMessage[]): {
   out: ModelMessage[];
   touched: boolean;
 } {
-  const mutated = collectMutationPaths(messages);
+  const lastMutationIdx = collectLastMutationIdxPerPath(messages);
   const lastReadIdx = collectLastReadIdxPerPath(messages);
 
   const callIdxToPath = new Map<string, string>();
@@ -123,9 +126,15 @@ function dropSupersededReads(messages: ModelMessage[]): {
       if (typeof id !== "string") return part;
       const path = callIdxToPath.get(id);
       if (!path) return part;
+      // A read result is superseded only when something LATER changed or
+      // re-read the same file. (A read that happens AFTER the last mutation
+      // reflects current content and must be kept — the old global-set logic
+      // wrongly elided verification reads.)
+      const laterMutation = lastMutationIdx.get(path);
+      const laterRead = lastReadIdx.get(path);
       const isStale =
-        mutated.has(path) ||
-        (lastReadIdx.has(path) && (lastReadIdx.get(path) as number) > i);
+        (laterMutation !== undefined && laterMutation > i) ||
+        (laterRead !== undefined && laterRead > i);
       if (!isStale) return part;
       const r = elideToolResult(part);
       if (r.changed) local = true;

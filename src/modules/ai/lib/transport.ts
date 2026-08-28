@@ -292,28 +292,40 @@ async function maybeSummarize(
   const tokenEstimate = JSON.stringify(modelMsgs).length / 4;
   if (tokenEstimate < MIN_TOKEN_ESTIMATE_FOR_SUMMARY) return messages;
 
-  const fileSnapshot = deps.toolContext.fileTracker.getSnapshot();
-  const stateBlock = buildSessionState({
-    messages,
-    fileSnapshot,
-    sessionId: deps.getSessionId?.() ?? null,
-  });
+  // Surface the compressing state in the chat UI (spinner + notice).
+  useChatStore.getState().patchAgentMeta({ summarizing: true });
+  try {
+    const fileSnapshot = deps.toolContext.fileTracker.getSnapshot();
+    const stateBlock = buildSessionState({
+      messages,
+      fileSnapshot,
+      sessionId: deps.getSessionId?.() ?? null,
+    });
 
-  // Trim to the last N message pairs, prepend the session state snapshot.
-  const cutoff = findUIMessageTailCutoff(messages, SUMMARY_KEEP_TAIL_PAIRS);
-  const tail = messages.slice(cutoff);
+    // Trim to the last N message pairs, prepend the session state snapshot.
+    const cutoff = findUIMessageTailCutoff(messages, SUMMARY_KEEP_TAIL_PAIRS);
+    const tail = messages.slice(cutoff);
 
-  const summaryMessage: UIMessage = {
-    id: `summary-${Date.now()}`,
-    role: "assistant",
-    parts: [{ type: "text", text: stateBlock }],
-  };
+    const summaryMessage: UIMessage = {
+      id: `summary-${Date.now()}`,
+      role: "assistant",
+      parts: [{ type: "text", text: stateBlock }],
+    };
 
-  const trimmed = [summaryMessage, ...tail];
+    const trimmed = [summaryMessage, ...tail];
 
-  // Persistence is handled by AgentRunBridge which fires on every
-  // messages change, including after summarization replaces history.
-  return trimmed;
+    useChatStore.getState().patchAgentMeta({
+      summarizing: false,
+      summaryNotice: { at: Date.now() },
+    });
+
+    // Persistence is handled by AgentRunBridge which fires on every
+    // messages change, including after summarization replaces history.
+    return trimmed;
+  } catch (err) {
+    useChatStore.getState().patchAgentMeta({ summarizing: false });
+    throw err;
+  }
 }
 
 /** Find tail cutoff index in UIMessage[] (counts user messages as pairs). */

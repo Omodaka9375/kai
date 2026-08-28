@@ -1165,6 +1165,18 @@ const ReadRow = memo(function ReadRow({ part }: { part: AnyPart }) {
 
 type ApprovalQueueInfo = { queued: boolean; position: number; total: number };
 
+/**
+ * Markdown whose only content is horizontal-rule lines (`---`, `***`, `___`)
+ * and whitespace. Some models emit a bare `---` separator as their whole
+ * "text" part; Streamdown renders that as an empty `<hr />` bubble. Treat it
+ * as nothing so the chat never shows an empty message block.
+ */
+function isBlankMarkdown(text: string): boolean {
+  const lines = text.split(/\r?\n/);
+  const hr = /^\s*(?:[-*_]\s*){3,}\s*$/;
+  return lines.every((line) => line.trim() === "" || hr.test(line));
+}
+
 const RenderedPart = memo(function RenderedPart({
   part,
   onApproval,
@@ -1183,9 +1195,11 @@ const RenderedPart = memo(function RenderedPart({
     if (/<thinking>|<\|thinking\||<\/thinking>/i.test(raw)) {
       const segments = splitThinkingBlocks(raw);
       // Check if there's any non-thinking visible text after stripping tokens
-      const hasVisibleText = segments.some(
-        (s) => !s.thinking && stripLeakedTokens(s.text).trim(),
-      );
+      const hasVisibleText = segments.some((s) => {
+        if (s.thinking) return false;
+        const t = stripLeakedTokens(s.text);
+        return Boolean(t.trim()) && !isBlankMarkdown(t);
+      });
       const hasThinking = segments.some((s) => s.thinking);
       if (!hasVisibleText && !hasThinking) return null;
       return (
@@ -1200,7 +1214,7 @@ const RenderedPart = memo(function RenderedPart({
               );
             }
             const cleaned = stripLeakedTokens(seg.text);
-            if (!cleaned.trim()) return null;
+            if (!cleaned.trim() || isBlankMarkdown(cleaned)) return null;
             return (
               <MessageResponse key={i} streaming={streaming && i === segments.length - 1}>
                 {cleaned}
@@ -1211,7 +1225,7 @@ const RenderedPart = memo(function RenderedPart({
       );
     }
     const cleaned = stripLeakedTokens(raw);
-    if (!cleaned) return null;
+    if (!cleaned || isBlankMarkdown(cleaned)) return null;
     return (
       <MessageResponse streaming={streaming}>
         {cleaned}

@@ -1,6 +1,8 @@
 pub mod background;
 pub mod ringbuffer;
 pub mod session;
+#[cfg(windows)]
+pub mod job;
 
 use std::collections::HashMap;
 use std::io::Read;
@@ -99,6 +101,18 @@ fn run_blocking(
     run_blocking_cancellable(command, cwd, workspace, dur, None)
 }
 
+/// Kill the process group led by `child` on Unix. The one-shot command is
+/// spawned with `process_group(0)` so the leader's pid == the group id;
+/// signaling the negated pid reaps the shell AND every descendant.
+#[cfg(unix)]
+fn kill_child_tree(child: &std::process::Child) {
+    let pid = child.id() as libc::pid_t;
+    // SAFETY: negated pid targets the process group the child leads.
+    unsafe {
+        libc::kill(-pid, libc::SIGKILL);
+    }
+}
+
 fn run_blocking_cancellable(
     command: String,
     cwd: Option<String>,
@@ -119,6 +133,10 @@ fn run_blocking_cancellable(
         e.to_string()
     })?;
 
+    // Kill the whole tree on timeout/cancel, not just the wrapper shell.
+    #[cfg(windows)]
+    let job = crate::modules::shell::job::KillJob::assign(child.id()).ok();
+
     let mut stdout_pipe = child.stdout.take().ok_or("no stdout pipe")?;
     let mut stderr_pipe = child.stderr.take().ok_or("no stderr pipe")?;
 
@@ -136,12 +154,24 @@ fn run_blocking_cancellable(
             Err(e) => return Err(e.to_string()),
         }
         if started.elapsed() >= dur {
+            #[cfg(windows)]
+            if let Some(ref j) = job {
+                j.terminate();
+            }
+            #[cfg(unix)]
+            kill_child_tree(&child);
             let _ = child.kill();
             let _ = child.wait();
             timed_out = true;
             break None;
         }
         if cancel.is_some_and(|c| c.load(std::sync::atomic::Ordering::Relaxed)) {
+            #[cfg(windows)]
+            if let Some(ref j) = job {
+                j.terminate();
+            }
+            #[cfg(unix)]
+            kill_child_tree(&child);
             let _ = child.kill();
             let _ = child.wait();
             timed_out = true;
@@ -419,6 +449,11 @@ pub(crate) fn build_oneshot_command(
     {
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
         let mut cmd = Command::new(shell);
+        // New process group so kill_child_tree can reap descendants.
+        {
+            use std::os::unix::process::CommandExt;
+            unsafe { cmd.process_group(0); }
+        }
         cmd.arg("-lc").arg(command);
         Ok(cmd)
     }

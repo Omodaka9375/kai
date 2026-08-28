@@ -202,7 +202,7 @@ function injectWatchResult(
 
   // Inject as a system message so the model sees it as new information.
   const sessionId = w.sessionId;
-  useChatStore.getState().injectMessage(sessionId, text);
+  void useChatStore.getState().injectMessage(sessionId, text);
 }
 
 // ── Tool implementations ──────────────────────────────────────────────────

@@ -12,25 +12,40 @@ use std::process::Command;
 /// Extract visible text from image bytes (PNG/JPG/etc.).
 /// Returns Err when OCR is unavailable.
 pub fn get_ocr_text(bytes: &[u8]) -> Result<String, String> {
-    let tmp = std::env::temp_dir().join("kai-ocr-input.bin");
-    std::fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
-    let tmp_out = std::env::temp_dir().join("kai-ocr-output.txt");
+    // Unique temp paths so concurrent OCR calls never race on the same files.
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let unique = format!("kai-ocr-{}-{}", std::process::id(), stamp);
+    let input = std::env::temp_dir().join(format!("{unique}.bin"));
+    // tesseract syntax is `tesseract <input> <output-stem>` — it writes
+    // `<output-stem>.txt` itself. We must NOT pass the .txt path as an arg
+    // (passing it made tesseract treat it as a stray config filename and
+    // never write the file).
+    let output_stem = std::env::temp_dir().join(&unique);
+    std::fs::write(&input, bytes).map_err(|e| e.to_string())?;
     let exe = find_tesseract()?;
-    let output = Command::new(exe)
-        .arg(&tmp)
-        .arg(&tmp)
-        .arg(&tmp_out)
+    let result = Command::new(exe)
+        .arg(&input)
+        .arg(&output_stem)
         .arg("-l")
         .arg("eng")
         .output()
-        .map_err(|e| e.to_string())?;
-    if !output.status.success() {
-        return Err("tesseract exited non-zero".to_string());
-    }
-    let text = std::fs::read_to_string(&tmp_out).map_err(|e| e.to_string())?;
-    std::fs::remove_file(&tmp).ok();
-    std::fs::remove_file(&tmp_out).ok();
-    Ok(text)
+        .map_err(|e| e.to_string());
+
+    // Best-effort cleanup regardless of outcome.
+    let text_path = output_stem.with_extension("txt");
+    let text = result.and_then(|output| {
+        if !output.status.success() {
+            return Err("tesseract exited non-zero".to_string());
+        }
+        std::fs::read_to_string(&text_path)
+            .map_err(|e| format!("failed to read OCR output: {e}"))
+    });
+    std::fs::remove_file(&input).ok();
+    std::fs::remove_file(&text_path).ok();
+    text
 }
 
 fn find_tesseract() -> Result<std::path::PathBuf, String> {

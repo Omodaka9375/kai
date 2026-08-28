@@ -56,6 +56,13 @@ fn ip_kind(ip: IpAddr) -> IpKind {
             if v.is_loopback() || v.is_unspecified() || v.is_multicast() {
                 return IpKind::Loopback;
             }
+            // IPv4-mapped IPv6 literals (e.g. `[::ffff:127.0.0.1]`,
+            // `[::ffff:a9fe:a9fe]` = 169.254.169.254). `is_loopback()` is only
+            // true for `::1`, so without mapping back to IPv4 these bypass the
+            // private/metadata/loopback block entirely.
+            if let Some(v4) = v.to_ipv4() {
+                return ip_kind(IpAddr::V4(v4));
+            }
             // Cloud metadata IPv6 (AWS): fd00:ec2::254
             let segs = v.segments();
             if segs[0] == 0xfd00 && segs[1] == 0xec2 {

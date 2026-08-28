@@ -275,7 +275,7 @@ type StoreState = {
   /** Persist messages of a session and bump its updatedAt + auto-title. */
   persistMessages: (id: string, messages: UIMessage[]) => void;
   /** Inject a system-originated user message (e.g. watch result) without triggering a new agent run. */
-  injectMessage: (id: string, text: string) => void;
+  injectMessage: (id: string, text: string) => Promise<void>;
   /** Fork the current session at a message index, creating a new branch. */
   forkSession: (atMessageIndex: number) => Promise<string | null>;
   /** Steering message queued while agent is busy. */
@@ -344,6 +344,12 @@ export function flushPersist(id?: string): void {
  */
 function makeChatSync(sessionId: string): Chat<UIMessage> {
   const readCache = new Map<string, { size: number; hash: number }>();
+
+  // The Chat outlives its owning session switch: switching to another
+  // session does NOT stop this chat, so its stream callbacks keep firing.
+  // Without a guard, a run started in session A would overwrite session B's
+  // `agentMeta` (status/step/tokens/error) after the user has switched away.
+  const isActive = () => useChatStore.getState().activeSessionId === sessionId;
 
   // Start stack detection in the background - don't block chat creation
   const workspaceRoot = useChatStore.getState().live.getWorkspaceRoot();
@@ -435,20 +441,23 @@ function makeChatSync(sessionId: string): Chat<UIMessage> {
       if (step === null) {
         streamStartedAtRef.current = null;
       }
-      useChatStore.getState().patchAgentMeta({ step });
+      if (isActive()) useChatStore.getState().patchAgentMeta({ step });
     },
     onCompact: (info) => {
+      if (!isActive()) return;
       useChatStore.getState().patchAgentMeta({
         compactionNotice: { droppedCount: info.droppedCount, at: Date.now() },
       });
     },
     onFinishMeta: (info) => {
+      if (!isActive()) return;
       useChatStore.getState().patchAgentMeta({
         hitStepCap: info.hitStepCap,
         finishReason: info.finishReason,
       });
     },
     onUsage: (delta) => {
+      if (!isActive()) return;
       const cur = useChatStore.getState().agentMeta.tokens;
       const newOutputTokens = cur.outputTokens + delta.outputTokens;
       const now = Date.now();
@@ -507,6 +516,7 @@ function makeChatSync(sessionId: string): Chat<UIMessage> {
       // ("Failed after 3 attempts. Last error: Provider returned an error"),
       // but the underlying APICallError has the actual status code, response
       // body, and URL. Extract those so the user sees actionable info.
+      if (!isActive()) return;
       const display = resolveErrorDisplay(e);
       useChatStore.getState().patchAgentMeta({
         status: "error",
@@ -634,9 +644,11 @@ export const useChatStore = create<StoreState>((set, get) => ({
       return;
 
     let sessions: SessionMeta[] = [];
+    let loadedActiveId: string | null = null;
     try {
       const loaded = await loadAll();
       sessions = loaded.sessions;
+      loadedActiveId = loaded.activeId;
     } catch (err) {
       console.error(
         "[hydrateSessions] Failed to load sessions — resetting store:",
@@ -644,12 +656,33 @@ export const useChatStore = create<StoreState>((set, get) => ({
       );
     }
 
-    // Keep ALL sessions from the store — never filter at the store level.
-    // Filtering is done at the display layer (SessionPicker) so sessions
-    // from other workspaces survive across workspace switches. Previously
-    // we filtered here and wrote the filtered list back to the store via
-    // saveSessionsList, permanently deleting cross-workspace sessions.
-    const allSessions = sessions;
+    // Keep ALL sessions — never filter at the store level. Filtering happens
+    // at the display layer (SessionPicker) so sessions from other workspaces
+    // survive workspace switches. (Previously we filtered here and wrote the
+    // filtered list back via saveSessionsList, permanently deleting
+    // cross-workspace sessions.)
+    //
+    // Merge in memory: when this is a re-hydration (workspace switched while
+    // loadAll() was in flight) the in-memory list is MORE current than the
+    // snapshot, so treat it as the base and only add persisted sessions that
+    // aren't already present. This also prevents resurrecting sessions the
+    // user just deleted. On the very first hydration the in-memory list is
+    // empty/stale and the snapshot wins.
+    const inMemory = get().sessions;
+    const isRehydrate = get().sessionsHydrated;
+    let allSessions: SessionMeta[];
+    if (isRehydrate) {
+      const liveIds = new Set(inMemory.map((s) => s.id));
+      // Preserve in-memory order as the head, append snapshot-only entries.
+      const snapshotOnly = sessions.filter((s) => !liveIds.has(s.id));
+      allSessions = [...inMemory, ...snapshotOnly];
+    } else {
+      const seenIds = new Set(sessions.map((s) => s.id));
+      allSessions = [
+        ...sessions,
+        ...inMemory.filter((s) => !seenIds.has(s.id)),
+      ];
+    }
 
     // Find an existing untitled "New chat" session for this workspace so
     // we don't stack empty placeholders on every launch.
@@ -661,6 +694,9 @@ export const useChatStore = create<StoreState>((set, get) => ({
     );
 
     const currentActiveId = get().activeSessionId;
+    // On cold start, restore the persisted last-active session before
+    // falling back to a fresh/reusable one.
+    const restoredActiveId = loadedActiveId ?? null;
     let nextSessions: SessionMeta[];
     let nextActiveId: string | null = currentActiveId;
 
@@ -669,7 +705,13 @@ export const useChatStore = create<StoreState>((set, get) => ({
       // current session active so the user doesn't lose context when
       // the workspace root changes (e.g. by cding in the terminal).
       nextSessions = allSessions;
-      if (!currentActiveId) nextActiveId = reusable.id;
+      if (!currentActiveId) {
+        nextActiveId =
+          restoredActiveId != null &&
+          allSessions.some((s) => s.id === restoredActiveId)
+            ? restoredActiveId
+            : reusable.id;
+      }
     } else {
       const freshId = newSessionId();
       const fresh: SessionMeta = {
@@ -682,12 +724,29 @@ export const useChatStore = create<StoreState>((set, get) => ({
       nextSessions = [fresh, ...allSessions];
       // Only auto-switch if there's no active session — otherwise
       // keep the current one so the user's conversation isn't lost.
-      if (!currentActiveId) nextActiveId = freshId;
+      if (!currentActiveId) {
+        nextActiveId =
+          restoredActiveId != null &&
+          allSessions.some((s) => s.id === restoredActiveId)
+            ? restoredActiveId
+            : freshId;
+      }
       void saveSessionsList(nextSessions).catch((err) =>
         console.error("[hydrateSessions] Failed to persist sessions:", err),
       );
     }
-    void saveActiveId(nextActiveId!).catch((err) =>
+    // Safety net: `activeSessionId` must always reference a session in the
+    // list the UI reads, otherwise SessionPicker renders nothing. Fall back
+    // to a session bound to this workspace, then the newest session.
+    if (!nextSessions.some((s) => s.id === nextActiveId)) {
+      nextActiveId =
+        nextSessions.find((s) => norm(s.workspaceRoot) === normalizedRoot)
+          ?.id ??
+        nextSessions[0]?.id ??
+        null;
+    }
+
+    void saveActiveId(nextActiveId).catch((err) =>
       console.error("[hydrateSessions] Failed to persist activeId:", err),
     );
 
@@ -730,6 +789,11 @@ export const useChatStore = create<StoreState>((set, get) => ({
     // Lazily seed the chat with persisted messages the first time we open
     // this session. Subsequent switches reuse the cached Chat instance.
     const flip = () => {
+      // Stale-request guard: if the user switched again (or the target was
+      // deleted) before `loadMessages` resolved, don't yank activeSessionId
+      // back to this session.
+      if (get().activeSessionId !== fromId) return;
+      if (!get().sessions.some((s) => s.id === id)) return;
       set({ activeSessionId: id, agentMeta: IDLE_META });
       void saveActiveId(id);
     };
@@ -738,6 +802,9 @@ export const useChatStore = create<StoreState>((set, get) => ({
       return;
     }
     void loadMessages(id).then((m) => {
+      // Only seed if this session hasn't already been opened (its own chat
+      // instantiated) while the load was in flight — using seedMessages now
+      // would be discarded or, worse, clobber a live chat's history.
       if (m && m.length > 0 && !chats.has(id)) seedMessages.set(id, m);
       flip();
     });
@@ -775,10 +842,28 @@ export const useChatStore = create<StoreState>((set, get) => ({
     }
 
     const wasActive = get().activeSessionId === id;
-    const nextActive = wasActive ? remaining[0].id : get().activeSessionId;
+    const nextActive: string | null = wasActive
+      ? remaining[0].id
+      : get().activeSessionId;
     set({ sessions: remaining, activeSessionId: nextActive });
     void saveSessionsList(remaining);
-    if (wasActive) void saveActiveId(nextActive);
+    if (wasActive && nextActive) {
+      const next = nextActive;
+      void saveActiveId(next);
+      // Route the fallback activation through the same lazy load/seed path
+      // as a normal switch, so the newly active session's persisted history
+      // is hydrated instead of being overwritten with an empty chat.
+      if (!chats.has(next) && !seedMessages.has(next)) {
+        void loadMessages(next).then((m) => {
+          // The user may have switched away while loading — only honor if
+          // this session is still active and its chat wasn't built meanwhile.
+          if (get().activeSessionId !== next) return;
+          if (m && m.length > 0 && !chats.has(next)) {
+            seedMessages.set(next, m);
+          }
+        });
+      }
+    }
   },
 
   renameSession: (id, title) => {
@@ -807,17 +892,37 @@ export const useChatStore = create<StoreState>((set, get) => ({
     const sessions = get().sessions;
     const meta = sessions.find((s) => s.id === id);
     if (!meta) return;
+    // Bump updatedAt on real message growth (not per token) so recency
+    // ordering in SessionPicker stays correct for already-titled sessions.
     const isUntitled = !meta.title || meta.title === "New chat";
-    if (!isUntitled) return;
-    const nextTitle = deriveTitle(messages);
-    if (nextTitle === meta.title) return;
+    const count = messages.length;
+    const countChanged = count !== (meta.lastMessageCount ?? -1);
+    const nextTitle = isUntitled ? deriveTitle(messages) : meta.title;
+    if (!countChanged && nextTitle === meta.title) return;
     const next = sessions.map((s) =>
-      s.id === id ? { ...s, title: nextTitle, updatedAt: Date.now() } : s,
+      s.id === id
+        ? {
+            ...s,
+            title: nextTitle,
+            updatedAt: Date.now(),
+            lastMessageCount: count,
+          }
+        : s,
     );
     set({ sessions: next });
     void saveSessionsList(next);
   },
-  injectMessage: (id, text) => {
+  injectMessage: async (id, text) => {
+    // Hydrate persisted history BEFORE constructing a chat, so evicting a
+    // session from the LRU and receiving a watch/steering message while it's
+    // inactive can't instantiate an empty Chat and clobber the real history.
+    const hasChat = chats.has(id);
+    if (!hasChat && !seedMessages.has(id)) {
+      const m = await loadMessages(id);
+      if (m && m.length > 0 && !chats.has(id) && !seedMessages.has(id)) {
+        seedMessages.set(id, m);
+      }
+    }
     const chat = getOrCreateChat(id);
     // Push a system-originated user message into the chat's message array.
     // sendAutomaticallyWhen only triggers on assistant messages, so this

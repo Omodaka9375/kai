@@ -9,6 +9,8 @@ export type SessionMeta = {
   parentId?: string;
   forkMessageIndex?: number;
   workspaceRoot?: string | null;
+  /** Last observed message count, used to bump `updatedAt` only on real growth. */
+  lastMessageCount?: number;
 };
 
 const STORE_PATH = "kai-sessions.json";

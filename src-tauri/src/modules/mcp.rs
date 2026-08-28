@@ -38,6 +38,26 @@ struct McpSession {
     _id: u32,
 }
 
+/// Quote a single argument for cmd.exe `/C` command line.
+/// Paths containing spaces, commas, semicolons, or `=` are wrapped in
+/// double quotes; internal double quotes are escaped as `\"`.
+/// This mirrors the quoting logic `Command::new` uses internally, but
+/// cmd.exe itself needs the string to be pre-quoted when passed as a
+/// single `/C` argument.
+fn quote_cmd_arg(arg: &str) -> String {
+    if arg.is_empty() {
+        return "\"\"".to_string();
+    }
+    let needs_quote = arg.contains(|c: char| {
+        c == ' ' || c == '\t' || c == ',' || c == ';' || c == '='
+    });
+    if !needs_quote {
+        return arg.to_string();
+    }
+    let escaped = arg.replace('"', "\\\"");
+    format!("\"{escaped}\"")
+}
+
 #[derive(Default)]
 pub struct McpState {
     sessions: RwLock<HashMap<u32, McpSession>>,
@@ -68,13 +88,16 @@ pub fn mcp_stdio_open(
         use std::os::windows::process::CommandExt;
         let mut c = Command::new("cmd.exe");
         c.creation_flags(0x08000000); // CREATE_NO_WINDOW
-        // Build a single command line: command arg1 arg2 ...
-        let full = if args.is_empty() {
-            command.clone()
-        } else {
-            format!("{} {}", command, args.join(" "))
-        };
-        c.args(["/C", &full]);
+        // Build a single command line with each component quoted for cmd.exe.
+        // The previous `command arg1 arg2` join misparsed paths with spaces
+        // (e.g. `C:\Program Files\nodejs\npx.cmd`) and let `&`/`|`/`>` in
+        // arguments act as cmd metacharacters.
+        let mut full = quote_cmd_arg(&command);
+        for a in &args {
+            full.push(' ');
+            full.push_str(&quote_cmd_arg(a));
+        }
+        c.args(["/D", "/S", "/C", &full]);
         c
     };
     #[cfg(not(target_os = "windows"))]

@@ -261,11 +261,11 @@ pub fn spawn(
             if let Err(e) = reader_thread.join() {
                 log::error!("pty reader thread panicked: {e:?}");
             }
-            // Join the flusher so panics are observed (the flusher exits
-            // when `done` is set to true after the reader finishes).
-            if let Err(e) = flusher_thread.join() {
-                log::error!("pty flusher thread panicked: {e:?}");
-            }
+            // Join the flusher so panics are observed. The flusher exits only
+            // once `done` is true AND pending is empty — so we must drain the
+            // final pending tail and signal `done` BEFORE joining, otherwise
+            // the flusher loops forever and this thread deadlocks (which also
+            // means on_exit never fires).
             let tail = std::mem::take(&mut *mutex_lock(&pending_e));
             if !tail.is_empty() {
                 if let Err(e) = on_data_exit.send(Response::new(tail)) {
@@ -273,6 +273,9 @@ pub fn spawn(
                 }
             }
             done_e.store(true, Ordering::Release);
+            if let Err(e) = flusher_thread.join() {
+                log::error!("pty flusher thread panicked: {e:?}");
+            }
             if let Err(e) = on_exit.send(code) {
                 log::debug!("pty exit send failed (channel closed): {e}");
             }
