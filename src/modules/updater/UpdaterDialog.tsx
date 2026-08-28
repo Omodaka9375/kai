@@ -10,6 +10,7 @@ import {
 import { Progress } from "@/components/ui/progress";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useState, useEffect } from "react";
+import { Streamdown } from "streamdown";
 import { useUpdater } from "./useUpdater";
 import { invoke } from "@tauri-apps/api/core";
 import { parseChangelogSection, parseReleaseNotes } from "./parseChangelog";
@@ -165,23 +166,21 @@ export function UpdaterDialog() {
         )}
 
         {!downloading && changelog.sections && (
-          <div className="mt-1 max-h-[200px] overflow-y-auto rounded-md border border-border/60 bg-muted/40 px-2.5 py-2 text-[11px]">
-            {changelog.sections.map((sec) => (
-              <div key={sec.title}>
-                {sec.title === "Added" || sec.title === "Fixed" ? (
-                  <p className="mb-0.5 font-semibold uppercase text-[10.5px] text-muted-foreground">
-                    {sec.title}
-                  </p>
-                ) : null}
-                <ul className="space-y-0.5 text-muted-foreground">
-                  {sec.body.map((line, idx) => (
-                    <li key={idx} className="leading-4">
-                      {line}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
+          <div className="mt-1 max-h-[200px] overflow-y-auto rounded-md border border-border/60 bg-muted/40 px-3 py-2">
+            <Streamdown
+              className="prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+              linkSafety={{ enabled: false }}
+              skipHtml
+            >
+              {changelog.sections
+                .map(
+                  (sec) =>
+                    `### ${sec.title}\n${sec.body
+                      .map((b) => `- ${b}`)
+                      .join("\n")}`,
+                )
+                .join("\n\n")}
+            </Streamdown>
           </div>
         )}
 
