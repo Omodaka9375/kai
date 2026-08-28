@@ -25,7 +25,7 @@ Kai is a fast, cross-platform terminal built on **Tauri 2 + Rust** and **React 1
 
 **Editor** — CodeMirror 6 with 44 languages, find & replace, inline AI autocomplete, edit diffs with approval flow, 9 editor themes, Vim mode (with `:w`/`:q` Ex commands), image & PDF preview, and **Open in Live Preview** (right-click any HTML file to spawn a local background HTTP server and preview it instantly in-app).
 
-**AI Agent** — bring your own key. Supports OpenAI, Anthropic, Google, Groq, xAI, Cerebras, DeepSeek, Mistral, OpenRouter, and direct Z.ai (GLM) integration. Supports **Clipboard Image Pasting (`Ctrl+V`)** to attach screenshots instantly, **Universal File Extraction** (zip/audio/image/video locally extracted as text), and **Interactive Todo Toggling** with auto-closing completion lists. Local models via LM Studio or Ollama.
+**AI Agent** — bring your own key. Supports OpenAI, Anthropic, Google, Groq, xAI, Cerebras, DeepSeek, Mistral, OpenRouter, and direct Z.ai (GLM) integration. Supports **Clipboard Image Pasting (`Ctrl+V`)** to attach screenshots instantly, **Universal File Extraction** (zip/audio/image/video locally extracted as text), and **Interactive Todo Toggling** with auto-closing completion lists. **Per-model thinking control** — a brain toggle on each reasoning model cycles thinking effort off/low/medium/high, mapping to provider-native reasoning budgets/efforts. Local models via LM Studio or Ollama.
 
 **Image & Video Generation** — generate images and videos directly from chat. Image: OpenAI GPT Image 2, Google Nano Banana 2, xAI Grok Imagine, ComfyUI (local). Video: Kling 3.0, Google Veo 3.1, ByteDance Seedance 2.0, ComfyUI. Inline rendering with lightbox and download.
 
