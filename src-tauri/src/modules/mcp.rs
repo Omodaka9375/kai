@@ -44,6 +44,7 @@ struct McpSession {
 /// This mirrors the quoting logic `Command::new` uses internally, but
 /// cmd.exe itself needs the string to be pre-quoted when passed as a
 /// single `/C` argument.
+#[cfg(target_os = "windows")]
 fn quote_cmd_arg(arg: &str) -> String {
     if arg.is_empty() {
         return "\"\"".to_string();

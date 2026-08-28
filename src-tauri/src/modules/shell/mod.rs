@@ -452,7 +452,7 @@ pub(crate) fn build_oneshot_command(
         // New process group so kill_child_tree can reap descendants.
         {
             use std::os::unix::process::CommandExt;
-            unsafe { cmd.process_group(0); }
+            cmd.process_group(0);
         }
         cmd.arg("-lc").arg(command);
         Ok(cmd)
