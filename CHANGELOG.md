@@ -8,19 +8,19 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ### Fixed
 
-- **PTY exit deadlock — terminals never reported process exit**: The session waiter thread joined the output flusher before signaling `done`, but the flusher only exits when `done` is set and pending output is drained — so every normal child exit deadlocked and `on_exit` never fired. The waiter now drains the final pending tail and sets `done` before joining the flusher, and exit events dispatch after the flusher unwinds.
-- **SSRF bypass via IPv4-mapped IPv6 literals**: `[::ffff:127.0.0.1]` and `[::ffff:a9fe:a9fe]` (169.254.169.254) were classified as public because the metadata/private checks only handled real IPv4 and `::1`. `ip_kind` now maps IPv4-mapped IPv6 addresses back to IPv4 before classifying, closing both the direct-request and redirect paths.
-- **One-shot / background shells left orphaned children holding pipes**: Killing the wrapper shell (`sh -lc` / `pwsh -EncodedCommand` / `cmd /C`) on timeout or cancel left grandchildren running and keeping stdout/stderr pipes open, so drain threads hung forever. Commands now run in their own process group (Unix `kill(-pgid, SIGKILL)`) or a `KILL_ON_JOB_CLOSE` Job Object (Windows `shell/job.rs`), and the whole tree is terminated.
-- **OCR never produced text**: `tesseract` was invoked with the input path duplicated (`tesseract in in out.txt`), so recognized text landed at `in.bin.txt` while the code read a file that was never written. Fixed to `tesseract <input> <output-stem>` with unique per-call temp paths to avoid concurrent races.
-- **WSL/UNC path round-trips broke**: `fs_canonicalize` only stripped the `\\?\` prefix, so `\\?\UNC\wsl.localhost\...` devolved into an invalid `UNC\...` path. It now handles `\\?\UNC\` → `\\...` the same way `git/utils.rs` does.
-- **MCP stdio spawning mangled paths on Windows**: The child command line was built as `command arg1 arg2` and passed to `cmd /C`, so paths with spaces (`C:\Program Files\nodejs\npx.cmd`) misparsed and `&`/`|` became cmd metacharacters. Each component is now quoted and launched via `/D /S /C`.
-- **AI session races** (chatStore): A run in one session could overwrite another session's status/tokens/error after switching — every stream callback now passes an `isActive()` guard. Also: the persisted last-active session is restored on cold start; re-hydration no longer resurrects just-deleted sessions; deleting the active session seeds the fallback's history instead of clobbering it with an empty chat; `switchSession` guards against stale loads; `injectMessage` hydrates history before constructing a chat; `updatedAt` bumps on message growth so recency ordering stays correct; compaction elides only reads superseded by a later mutation/read (verification reads survive); the summarization spinner and notice now actually render.
-- **Empty "Text block" bubbles**: Assistant text parts that reduce to a lone `---` (or only horizontal rules) no longer render as empty message bubbles in chat.
-- **Session dropdown missing after opening a project**: `hydrateSessions` could rebuild the session list from a stale snapshot while an auto `newSession()` landed mid-flight, orphaning `activeSessionId`. In-memory sessions are now merged and `activeSessionId` is kept well-formed, so the New Chat / session-picker pill always renders.
-- **Updater popup showed placeholder notes**: `latest.json` shipped a hard-coded "See the assets to download and install." placeholder because the release workflow used a placeholder `releaseBody` (tauri-action derives `latest.json`'s `notes` from it). The dialog now parses `update.body` / release notes into changelog sections (falling back to the bundled `CHANGELOG.md`), and the release workflow extracts the real tag section from `CHANGELOG.md` into both the GitHub release body and updater notes.
-- **Redundant "Ended after tool call" + Continue while approval pending**: When the agent paused on an approval, the stop line and Continue button duplicated the accept/deny buttons. They are now suppressed whenever an approval is outstanding.
-- **Snippet picker keyboard navigation left items off-screen**: Arrow-key selection highlighted snippets below the fold but never scrolled them into view. The active item now scrolls into view, mirroring the file picker.
-- **Groq thinking toggle was a no-op**: Groq's reasoning-tagged models (`deepseek-r1-distill-llama-70b`) showed the thinking toggle but never sent any reasoning parameter. Added `THINKING_EFFORT_GROQ` and wired the Groq case in `agent.ts` to emit `reasoning_effort`.
+- **PTY exit deadlock**: terminals never reported process exit — flusher was joined before signaling `done`.
+- **SSRF bypass**: IPv4-mapped IPv6 literals (`::ffff:127.0.0.1`, `::ffff:a9fe:a9fe`) now classify as loopback/private.
+- **Orphaned shell children**: timeout/cancel now kills the whole process tree (Unix process group, Windows Job Object).
+- **OCR never produced text**: tesseract invoked with a duplicated input path — now uses a unique output stem.
+- **WSL/UNC paths**: `fs_canonicalize` now strips the `\\?\UNC\` prefix.
+- **MCP stdio on Windows**: child command line is now properly quoted, not `cmd /C` string-joined.
+- **AI session races**: stream callbacks are active-session guarded; last-active session restored; stale loads/evictions fixed.
+- **Empty "Text block" bubbles**: lone `---` no longer renders an empty chat bubble.
+- **Session dropdown missing**: `hydrateSessions` no longer orphans `activeSessionId` on auto `newSession()`.
+- **Updater placeholder notes**: real `CHANGELOG.md` section now feeds release body + `latest.json` notes.
+- **Redundant stop line**: suppressed "Ended after tool call" + Continue while an approval is pending.
+- **Snippet picker scroll**: keyboard selection now scrolls the active item into view.
+- **Groq thinking no-op**: wired `reasoning_effort` for Groq reasoning models.
 
 ---
 
