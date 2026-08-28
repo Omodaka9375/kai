@@ -167,6 +167,16 @@ export const THINKING_EFFORT_XAI: Record<ThinkingMode, string> = {
   high: "high",
 };
 
+/** Reasoning effort strings per mode for Groq. Groq's `reasoning_effort`
+ *  enum is `none | default | low | medium | high`; we mirror the OpenAI
+ *  strings so `thinkingMode` semantics stay consistent across providers. */
+export const THINKING_EFFORT_GROQ: Record<ThinkingMode, string> = {
+  off: "",
+  low: "low",
+  medium: "medium",
+  high: "high",
+};
+
 export type ModelInfo = {
   id: string;
   provider: ProviderId;

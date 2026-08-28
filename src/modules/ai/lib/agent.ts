@@ -18,6 +18,7 @@ import {
   THINKING_BUDGET_ANTHROPIC,
   THINKING_BUDGET_GOOGLE,
   THINKING_EFFORT_OPENAI,
+  THINKING_EFFORT_GROQ,
   THINKING_EFFORT_XAI,
   type ModelId,
   type ProviderId,
@@ -578,6 +579,13 @@ export async function runAgentStream(opts: RunAgentOptions) {
         // "high" (see THINKING_EFFORT_XAI).
         thinkingProviderOpts.xai = {
           reasoningEffort: THINKING_EFFORT_XAI[thinkingMode],
+        };
+        break;
+      case "groq":
+        // Groq accepts reasoning_effort natively (and a reasoning-format
+        // toggle).
+        thinkingProviderOpts.groq = {
+          reasoningEffort: THINKING_EFFORT_GROQ[thinkingMode],
         };
         break;
       case "openai-compatible":
