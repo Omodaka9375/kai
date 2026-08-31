@@ -4,6 +4,17 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.2.5]
+
+### Fixed
+
+- **README images blocked in markdown preview**: `skipHtml` dropped raw `<img>` tags and relative paths couldn't resolve against the webview origin. The preview now rewrites `<img>` to markdown image syntax, reads relative images via `fs_read_file_bytes`, and inlines them as `data:` URLs (remote `https:` images pass through). CSP `img-src` widened to allow `https:` and `http://localhost:*`.
+- **List item rendered as a text block**: `wrapAsciiArt` misclassified markdown list items containing box-drawing or `|`-bracketed content as ASCII art and wrapped them in code fences. List items are now excluded from art detection.
+- **App froze during LLM streaming (terminal lagged too)**: `stripLeakedTokens` + Streamdown re-parsed the full accumulated text on every streamed token (O(n²)). Streamed text now renders at a throttled ~12fps with an exact flush on stop, and the copy button computes cleaned text lazily on click instead of per render.
+- **Chats with an ignored tool approval were unrecoverable**: sessions whose last run ended on an unapproved tool call opened blank and couldn't be re-selected. `hydrateSessions` now seeds the restored active session's history before flipping the active id, and loaded history strips incomplete `approval-requested` tool parts at the part level so the session recovers instead of pinning `awaiting-approval`.
+
+---
+
 ## [1.2.4]
 
 ### Fixed
