@@ -147,6 +147,11 @@ export const native = {
       bytes,
       workspace: currentWorkspaceEnv(),
     }),
+  readFileBytes: (path: string) =>
+    invoke<number[]>("fs_read_file_bytes", {
+      path,
+      workspace: currentWorkspaceEnv(),
+    }),
   canonicalize: (path: string) =>
     invoke<string>("fs_canonicalize", {
       path,

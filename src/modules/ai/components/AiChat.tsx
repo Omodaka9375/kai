@@ -68,9 +68,13 @@ function ForkButton({ messageIndex }: { messageIndex: number }) {
   );
 }
 
-function CopyButton({ text }: { text: string }) {
+function CopyButton({ getText }: { getText: () => string }) {
   const [copied, setCopied] = useState(false);
   const onClick = () => {
+    // Compute the text lazily — stripping leaked tokens over every text part
+    // on every render (for a pre-filled prop) ran on each streamed token and
+    // contributed to the streaming freeze. Only pay the cost on click.
+    const text = getText();
     if (!text) return;
     void navigator.clipboard.writeText(text).then(() => {
       setCopied(true);
@@ -313,7 +317,15 @@ function wrapAsciiArt(text: string): string {
     inArt = false;
   };
 
+  // A markdown list item (`- …`, `* …`, `1. …`, `+ …`) must never be
+  // classified as ASCII art. Otherwise a list item whose text happens to
+  // contain box-drawing or frame characters (or bracketed `| … |` content)
+  // gets wrapped in a code fence, which breaks the list and renders the item
+  // as a literal text block.
+  const LIST_ITEM_RE = /^\s*(?:[-*+]|\d{1,3}[.)])\s+\S/;
+
   const isArtLine = (line: string): boolean => {
+    if (LIST_ITEM_RE.test(line)) return false;
     if (BOX_RE.test(line)) return true;
     if (ASCII_LINE_RE.test(line)) return true;
     // Lines bracketed by frame chars at both ends (e.g. "│ Content  │", "+--+")
@@ -839,12 +851,21 @@ const RenderedMessage = memo(function RenderedMessage({
     return out;
   }, [message.parts]);
 
-  const assistantText = useMemo(() => {
+  // Lazy: only compute the full cleaned text when the user copies. Building
+  // it on every render re-ran stripLeakedTokens over every text part per
+  // streamed token.
+  const getAssistantText = useCallback(() => {
     return message.parts
       .filter((p): p is { type: "text"; text: string } => p.type === "text")
       .map((p) => stripLeakedTokens(p.text))
       .join("\n");
   }, [message.parts]);
+
+  const hasAssistantText = message.parts.some(
+    (p) =>
+      p.type === "text" &&
+      ((p as { text?: string }).text ?? "").trim().length > 0,
+  );
 
   return (
     <Message from={message.role}>
@@ -885,7 +906,11 @@ const RenderedMessage = memo(function RenderedMessage({
                     <RenderedPart
                       part={g.part}
                       onApproval={onApproval}
-                      streaming={streaming && g.idx === lastTextIdx}
+                      streaming={
+                        streaming &&
+                        (g.idx === lastTextIdx ||
+                          partType(g.part) === "reasoning")
+                      }
                       approvalQueue={
                         gApprovalId && queueIndex > 0
                           ? {
@@ -908,9 +933,9 @@ const RenderedMessage = memo(function RenderedMessage({
             </div>
           </MessageContent>
         </div>
-        {assistantText.trim() ? (
+        {hasAssistantText ? (
           <div className="pt-0.5">
-            <CopyButton text={assistantText} />
+            <CopyButton getText={getAssistantText} />
           </div>
         ) : null}
       </div>
@@ -1184,6 +1209,61 @@ function isBlankMarkdown(text: string): boolean {
   return lines.every((line) => line.trim() === "" || hr.test(line));
 }
 
+const STREAM_TEXT_THROTTLE_MS = 80;
+
+/**
+ * Streaming perf: a part's raw text grows on every token, and re-running
+ * `stripLeakedTokens` + Streamdown over the whole accumulated text per token
+ * is O(n²) — it saturates the main thread, freezes the chat UI, and lags the
+ * terminal until the LLM finishes. This throttles the *visible* text while a
+ * part is live: tokens are batched at ~12 fps, and the exact final text is
+ * flushed the moment streaming stops.
+ */
+function useThrottledStreamingText(raw: string, live: boolean): string {
+  const [text, setText] = useState(raw);
+  const latestRef = useRef(raw);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wasLiveRef = useRef(live);
+
+  useEffect(() => {
+    latestRef.current = raw;
+    const wasLive = wasLiveRef.current;
+    wasLiveRef.current = live;
+
+    if (!live) {
+      if (timerRef.current != null) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      setText(raw);
+      return;
+    }
+
+    // Paint the first tokens immediately when streaming begins.
+    if (!wasLive) setText(raw);
+
+    // Schedule at most one pending flush. Deliberately NOT cleared on raw
+    // changes (that would starve updates until tokens pause); it re-arms
+    // itself after firing and reads the latest text via `latestRef`.
+    if (timerRef.current == null) {
+      timerRef.current = setTimeout(() => {
+        timerRef.current = null;
+        setText(latestRef.current);
+      }, STREAM_TEXT_THROTTLE_MS);
+    }
+  }, [raw, live]);
+
+  // Unmount cleanup only.
+  useEffect(
+    () => () => {
+      if (timerRef.current != null) clearTimeout(timerRef.current);
+    },
+    [],
+  );
+
+  return text;
+}
+
 const RenderedPart = memo(function RenderedPart({
   part,
   onApproval,
@@ -1195,6 +1275,16 @@ const RenderedPart = memo(function RenderedPart({
   streaming: boolean;
   approvalQueue?: ApprovalQueueInfo | null;
 }) {
+  // Only text/reasoning parts stream. For them, throttle the visible text so
+  // stripLeakedTokens + Streamdown run at most ~12 fps instead of per token.
+  const rawText =
+    part.type === "text" || part.type === "reasoning"
+      ? (part as unknown as { text: string }).text
+      : "";
+  const live = streaming && (part.type === "text" || part.type === "reasoning");
+  const throttled = useThrottledStreamingText(rawText, live);
+  const cleanedText = useMemo(() => stripLeakedTokens(throttled), [throttled]);
+
   if (part.type === "text") {
     const raw = (part as unknown as { text: string }).text;
     // If the text contains <thinking>…</thinking> blocks (models that don't
@@ -1231,24 +1321,20 @@ const RenderedPart = memo(function RenderedPart({
         </>
       );
     }
-    const cleaned = stripLeakedTokens(raw);
-    if (!cleaned || isBlankMarkdown(cleaned)) return null;
+    if (!cleanedText || isBlankMarkdown(cleanedText)) return null;
     return (
       <MessageResponse streaming={streaming}>
-        {cleaned}
+        {cleanedText}
       </MessageResponse>
     );
   }
 
   if (part.type === "reasoning") {
-    const reasoningText = stripLeakedTokens(
-      (part as unknown as { text: string }).text,
-    );
-    if (!reasoningText) return null;
+    if (!cleanedText) return null;
     return (
       <Reasoning>
         <ReasoningTrigger />
-        <ReasoningContent>{reasoningText}</ReasoningContent>
+        <ReasoningContent>{cleanedText}</ReasoningContent>
       </Reasoning>
     );
   }

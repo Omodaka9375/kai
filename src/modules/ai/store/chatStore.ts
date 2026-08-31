@@ -750,6 +750,33 @@ export const useChatStore = create<StoreState>((set, get) => ({
       console.error("[hydrateSessions] Failed to persist activeId:", err),
     );
 
+    // Seed the restored/next active session's persisted history BEFORE
+    // flipping activeSessionId. If we flip first, React renders the body and
+    // getOrCreateChat() constructs an EMPTY Chat (seedMessages is still empty,
+    // loadMessages is async), and selecting that session later is a no-op
+    // (switchSession early-returns when it's already active) — so a session
+    // whose last run ended on an ignored approval would open blank forever.
+    if (nextActiveId) {
+      if (!chats.has(nextActiveId) && !seedMessages.has(nextActiveId)) {
+        try {
+          const m = await loadMessages(nextActiveId);
+          if (
+            m &&
+            m.length > 0 &&
+            !chats.has(nextActiveId) &&
+            !seedMessages.has(nextActiveId)
+          ) {
+            seedMessages.set(nextActiveId, stripIncompleteToolMessages(m));
+          }
+        } catch (err) {
+          console.error(
+            "[hydrateSessions] Failed to seed active session:",
+            err,
+          );
+        }
+      }
+    }
+
     set({
       sessions: nextSessions,
       activeSessionId: nextActiveId,
@@ -805,7 +832,9 @@ export const useChatStore = create<StoreState>((set, get) => ({
       // Only seed if this session hasn't already been opened (its own chat
       // instantiated) while the load was in flight — using seedMessages now
       // would be discarded or, worse, clobber a live chat's history.
-      if (m && m.length > 0 && !chats.has(id)) seedMessages.set(id, m);
+      if (m && m.length > 0 && !chats.has(id)) {
+        seedMessages.set(id, stripIncompleteToolMessages(m));
+      }
       flip();
     });
   },
@@ -859,7 +888,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
           // this session is still active and its chat wasn't built meanwhile.
           if (get().activeSessionId !== next) return;
           if (m && m.length > 0 && !chats.has(next)) {
-            seedMessages.set(next, m);
+            seedMessages.set(next, stripIncompleteToolMessages(m));
           }
         });
       }
@@ -920,7 +949,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
     if (!hasChat && !seedMessages.has(id)) {
       const m = await loadMessages(id);
       if (m && m.length > 0 && !chats.has(id) && !seedMessages.has(id)) {
-        seedMessages.set(id, m);
+        seedMessages.set(id, stripIncompleteToolMessages(m));
       }
     }
     const chat = getOrCreateChat(id);
@@ -1057,23 +1086,39 @@ function hasPendingApprovals(chat: Chat<UIMessage>): boolean {
 }
 
 /**
- * Drop assistant messages that still hold an unfinished tool-call part
- * (e.g. an `approval-requested` we never responded to). Mirrors the
- * transport's `stripIncompleteToolCalls`: keeping a message whose tool call
- * never got an output/approval response would corrupt the next request.
+ * Drop unfinished tool-call PARTS from assistant messages (e.g. an
+ * `approval-requested` we never responded to). Mirrors the transport's
+ * `stripIncompleteToolCalls`: keeping a message whose tool call never got an
+ * output/approval response would corrupt the next request — and, when loaded
+ * from disk, the orphaned `approval-requested` part pins the session in the
+ * `awaiting-approval` busy state forever.
+ *
+ * Strips at the PART level (not the whole message) so the assistant's visible
+ * text surrounding the abandoned tool call is preserved.
  */
 function stripIncompleteToolMessages(messages: UIMessage[]): UIMessage[] {
   if (messages.length === 0) return messages;
-  return messages.filter((m) => {
-    if (m.role !== "assistant") return true;
-    for (const p of m.parts) {
-      const ptype = (p as { type?: string }).type ?? "";
-      if (!ptype.startsWith("tool-") && ptype !== "dynamic-tool") continue;
-      const state = (p as { state?: string }).state;
-      if (state == null || !COMPLETE_PART_STATES.has(state)) return false;
+  let changed = false;
+  const out: UIMessage[] = [];
+  for (const m of messages) {
+    if (m.role !== "assistant") {
+      out.push(m);
+      continue;
     }
-    return true;
-  });
+    const kept = m.parts.filter((p) => {
+      const ptype = (p as { type?: string }).type ?? "";
+      if (!ptype.startsWith("tool-") && ptype !== "dynamic-tool") return true;
+      const state = (p as { state?: string }).state;
+      return state != null && COMPLETE_PART_STATES.has(state);
+    });
+    if (kept.length === m.parts.length) {
+      out.push(m);
+    } else {
+      changed = true;
+      if (kept.length > 0) out.push({ ...m, parts: kept } as UIMessage);
+    }
+  }
+  return changed ? out : messages;
 }
 
 function releasePendingApprovals(chat: Chat<UIMessage>): void {
