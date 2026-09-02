@@ -694,7 +694,7 @@ export const SourceControlPanel = memo(function SourceControlPanel({
                 <div className="flex items-center gap-2">
                   <span
                     className={cn(
-                    "flex h-4 shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-medium leading-none",
+                    "flex h-4 shrink-0 items-center rounded-full border px-2 py-0.5 text-[10px] font-medium leading-none",
                     canCommit
                       ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
                       : stagedCount > 0
@@ -702,16 +702,6 @@ export const SourceControlPanel = memo(function SourceControlPanel({
                         : "border-border/40 bg-muted/30 text-muted-foreground",
                   )}
                 >
-                  <span
-                    className={cn(
-                      "size-1.5 rounded-full",
-                      canCommit
-                        ? "bg-emerald-500"
-                        : stagedCount > 0
-                          ? "bg-amber-500"
-                          : "bg-muted-foreground/40",
-                    )}
-                  />
                   {stagedCount === 0
                     ? "Empty"
                     : `${stagedCount} staged`}
@@ -1287,12 +1277,6 @@ function CommitFeedback({
           : "border-emerald-500/20 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300",
       )}
     >
-      <span
-        className={cn(
-          "mt-[3px] size-1.5 shrink-0 rounded-full",
-          isError ? "bg-destructive" : "bg-emerald-500",
-        )}
-      />
       <span
         className={cn(
           "min-w-0 flex-1 break-words whitespace-normal",
