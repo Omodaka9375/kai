@@ -362,6 +362,9 @@ pub fn ensure_success(output: &GitOutput, context: &'static str) -> Result<()> {
     if let Some(err) = classify_auth_error(&stderr) {
         return Err(err);
     }
+    if let Some(summary) = summarize_git_failure(context, &stderr) {
+        return Err(GitError::CommandFailed { context, detail: summary });
+    }
     let detail = if !stderr.is_empty() {
         stderr
     } else if !stdout.is_empty() {
@@ -369,7 +372,56 @@ pub fn ensure_success(output: &GitOutput, context: &'static str) -> Result<()> {
     } else {
         "unknown git error".into()
     };
-    Err(GitError::CommandFailed { context, detail })
+    Err(GitError::CommandFailed {
+        context,
+        detail: truncate_git_detail(detail),
+    })
+}
+
+/// Maximum characters kept in a git error detail before truncation. Keeps the
+/// source-control feedback pill readable for noisy failures (e.g. `git pull`
+/// dumping a full fetch ref list into stderr).
+const MAX_ERROR_DETAIL_CHARS: usize = 400;
+
+/// Reduce well-known, noisy git failures to a short, actionable message.
+/// `git push`/`git pull` otherwise surface multi-line `hint:` blocks and the
+/// entire `From <url>` fetch ref list, which floods the error pill.
+fn summarize_git_failure(context: &str, stderr: &str) -> Option<String> {
+    let lower = stderr.to_ascii_lowercase();
+
+    if context.starts_with("git push") {
+        if lower.contains("fetch first") || lower.contains("non-fast-forward") {
+            return Some(
+                "The remote branch has commits you don't have locally. Pull first, then push again."
+                    .into(),
+            );
+        }
+    }
+
+    if context.starts_with("git pull") {
+        if lower.contains("not possible to fast-forward")
+            || lower.contains("non-fast-forward")
+            || lower.contains("diverged")
+        {
+            return Some(
+                "Local and remote branches have diverged. Pull with merge to integrate remote changes."
+                    .into(),
+            );
+        }
+    }
+
+    None
+}
+
+/// Truncate a detail string to `MAX_ERROR_DETAIL_CHARS` chars, appending an
+/// ellipsis when it was cut.
+fn truncate_git_detail(detail: String) -> String {
+    if detail.chars().count() <= MAX_ERROR_DETAIL_CHARS {
+        return detail;
+    }
+    let mut truncated: String = detail.chars().take(MAX_ERROR_DETAIL_CHARS).collect();
+    truncated.push('…');
+    truncated
 }
 
 fn classify_auth_error(stderr: &str) -> Option<GitError> {
@@ -430,8 +482,9 @@ mod tests {
     #[cfg(windows)]
     use super::build_git_command;
     use super::{
-        parse_git_version, prune_expired_availability_entries, version_meets_minimum, Availability,
-        AvailabilityCache, AVAILABILITY_TTL,
+        parse_git_version, prune_expired_availability_entries, summarize_git_failure,
+        truncate_git_detail, version_meets_minimum, Availability, AvailabilityCache,
+        AVAILABILITY_TTL, MAX_ERROR_DETAIL_CHARS,
     };
     #[cfg(windows)]
     use crate::modules::workspace::WorkspaceEnv;
@@ -466,6 +519,34 @@ mod tests {
         // patch component must not regress the comparison
         assert!(version_meets_minimum("2.23.5", "2.23.4"));
         assert!(!version_meets_minimum("2.23.3", "2.23.4"));
+    }
+
+    #[test]
+    fn summarizes_push_rejection() {
+        let stderr =
+            "To https://example.com/repo.git\n ! [rejected] main -> main (fetch first)\nerror: failed to push some refs";
+        let summary = summarize_git_failure("git push failed", stderr);
+        assert!(summary.as_deref().is_some_and(|s| s.contains("Pull first")));
+    }
+
+    #[test]
+    fn summarizes_pull_fast_forward_failure() {
+        let stderr = "From https://example.com/repo\n abc..def main -> origin/main\nfatal: Not possible to fast-forward, aborting.";
+        let summary = summarize_git_failure("git pull --ff-only failed", stderr);
+        assert!(summary.as_deref().is_some_and(|s| s.contains("diverged")));
+    }
+
+    #[test]
+    fn truncates_long_details() {
+        let truncated = truncate_git_detail("x".repeat(1000));
+        assert_eq!(truncated.chars().count(), MAX_ERROR_DETAIL_CHARS + 1);
+        assert!(truncated.ends_with('…'));
+    }
+
+    #[test]
+    fn leaves_short_details_untouched() {
+        let short = "short error".to_string();
+        assert_eq!(truncate_git_detail(short.clone()), short);
     }
 
     #[test]

@@ -779,6 +779,23 @@ const RenderedMessage = memo(function RenderedMessage({
       .map((p) => p.text)
       .join("\n");
 
+    // Watch notifications are injected as user-role messages but carry
+    // markdown (`**Watch fired**: \`label\` …`, fenced code blocks). The
+    // plain-`<p>` branch renders that markdown as literal text, so route
+    // these through Streamdown instead.
+    const isWatchMessage =
+      ((message as { metadata?: { kind?: string } }).metadata?.kind ?? "") ===
+      "watch";
+    if (isWatchMessage) {
+      return (
+        <Message from="user">
+          <MessageContent>
+            <MessageResponse>{rawText}</MessageResponse>
+          </MessageContent>
+        </Message>
+      );
+    }
+
     const cmdMatch = rawText.match(Kai_CMD_RE);
     const commandName = cmdMatch?.[1] ?? null;
     const withoutCmd = cmdMatch ? rawText.slice(cmdMatch[0].length) : rawText;

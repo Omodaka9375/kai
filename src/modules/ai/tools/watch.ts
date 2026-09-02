@@ -180,14 +180,62 @@ function evaluateCondition(
 
 // ── Result injection ──────────────────────────────────────────────────────
 
+// PowerShell serializes native-command stderr into CLIXML when the console
+// host detects a redirected stream: `#< CLIXML` + `<Objs …><S S="Error">…</S>`.
+// The text inside <S> uses `_xHHHH_` hex escapes (`_x001B_` = ESC,
+// `_x000D__x000A_` = CRLF) plus XML entities. Decode it back into readable
+// lines so a watch on a failing command shows the actual error, not an XML blob.
+const CLIXML_ESCAPE_RE = /_x([0-9a-fA-F]{4})_/g;
+const XML_ENTITY_RE = /&(lt|gt|amp|quot|apos);/g;
+const ANSI_CSI_RE = /\x1b\[[0-9;]*[A-Za-z]/g;
+
+function decodeClixmlEscapes(s: string): string {
+  return s.replace(CLIXML_ESCAPE_RE, (_m, hex: string) =>
+    String.fromCharCode(parseInt(hex, 16)),
+  );
+}
+
+function decodeXmlEntities(s: string): string {
+  const map: Record<string, string> = {
+    lt: "<",
+    gt: ">",
+    amp: "&",
+    quot: '"',
+    apos: "'",
+  };
+  return s.replace(XML_ENTITY_RE, (_m, name: string) => map[name] ?? _m);
+}
+
+/**
+ * If `text` is PowerShell CLIXML, extract the human-readable content of each
+ * `<S>` element (decoded + ANSI-stripped). Returns `text` unchanged when the
+ * input isn't CLIXML or no `<S>` elements were found.
+ */
+function stripClixml(text: string): string {
+  if (!text.includes("CLIXML")) return text;
+  const parts: string[] = [];
+  const re = /<S\b[^>]*>([\s\S]*?)<\/S>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const decoded = decodeXmlEntities(decodeClixmlEscapes(m[1]));
+    const clean = decoded
+      .replace(ANSI_CSI_RE, "")
+      .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "")
+      .trim();
+    if (clean) parts.push(clean);
+  }
+  if (parts.length === 0) return text;
+  return parts.join("\n");
+}
+
 function injectWatchResult(
   w: WatchState,
   result: { exit_code: number | null; stdout: string; stderr: string; timed_out: boolean; cwd_after?: string },
 ): void {
   const label = w.label ?? w.command;
   const exitCode = result.exit_code ?? "?";
-  const stdoutTrimmed = (result.stdout ?? "").slice(0, 2000);
-  const stderrTrimmed = (result.stderr ?? "").slice(0, 500);
+  const stdoutTrimmed = stripClixml(result.stdout ?? "").slice(0, 2000);
+  const stderrTrimmed = stripClixml(result.stderr ?? "").slice(0, 500);
 
   let text = `**Watch fired**: \`${label}\` (exit: ${exitCode}, poll #${w.polls})\n\n`;
   if (stdoutTrimmed) {

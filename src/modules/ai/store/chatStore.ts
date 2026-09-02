@@ -962,6 +962,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
         id: `watch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         role: "user",
         parts: [{ type: "text" as const, text }],
+        metadata: { kind: "watch" },
       } as UIMessage,
     ];
     // Force a Zustand re-render so the UI shows the injected message.
