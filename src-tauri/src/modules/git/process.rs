@@ -389,25 +389,24 @@ const MAX_ERROR_DETAIL_CHARS: usize = 400;
 fn summarize_git_failure(context: &str, stderr: &str) -> Option<String> {
     let lower = stderr.to_ascii_lowercase();
 
-    if context.starts_with("git push") {
-        if lower.contains("fetch first") || lower.contains("non-fast-forward") {
-            return Some(
-                "The remote branch has commits you don't have locally. Pull first, then push again."
-                    .into(),
-            );
-        }
+    if context.starts_with("git push")
+        && (lower.contains("fetch first") || lower.contains("non-fast-forward"))
+    {
+        return Some(
+            "The remote branch has commits you don't have locally. Pull first, then push again."
+                .into(),
+        );
     }
 
-    if context.starts_with("git pull") {
-        if lower.contains("not possible to fast-forward")
+    if context.starts_with("git pull")
+        && (lower.contains("not possible to fast-forward")
             || lower.contains("non-fast-forward")
-            || lower.contains("diverged")
-        {
-            return Some(
-                "Local and remote branches have diverged. Pull with merge to integrate remote changes."
-                    .into(),
-            );
-        }
+            || lower.contains("diverged"))
+    {
+        return Some(
+            "Local and remote branches have diverged. Pull with merge to integrate remote changes."
+                .into(),
+        );
     }
 
     None

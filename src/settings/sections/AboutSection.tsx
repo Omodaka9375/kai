@@ -80,37 +80,6 @@ export function AboutSection() {
         </dd>
       </dl>
 
-      <div className="rounded-xl border border-border/60 bg-card/60 p-5">
-        <h3 className="mb-3 text-[13px] font-semibold tracking-tight">Features</h3>
-        <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-[12px] text-muted-foreground">
-          {[
-            "Multi-tab terminal with WebGL",
-            "Split panes & inline search",
-            "Code editor (CodeMirror 6)",
-            "Vim mode & 7 editor themes",
-            "File explorer with fuzzy search",
-            "Built-in web preview",
-            "AI assistant (BYOK)",
-            "10+ AI providers supported",
-            "Local models (LM Studio, Ollama)",
-            "MCP tool server support",
-            "MCP Registry browser",
-            "Skills system (#handle)",
-            "Auto-approve mode",
-            "Voice input (Whisper / browser)",
-            "PDF & DOCX reading",
-            "Web browse & search tools",
-            "Multi-agent support",
-            "Project memory (KAI.md)",
-          ].map((f) => (
-            <span key={f} className="flex items-start gap-1.5">
-              <span className="mt-[3px] size-1 shrink-0 rounded-full bg-foreground/30" />
-              {f}
-            </span>
-          ))}
-        </div>
-      </div>
-
       <div className="flex flex-col gap-1.5">
         <div className="flex flex-wrap gap-2">
           {updater.status.kind === "available" ? (
@@ -194,6 +163,37 @@ export function AboutSection() {
         {updater.status.kind === "error" && (
           <p className="text-[11px] text-destructive">{updater.status.message}</p>
         )}
+      </div>
+
+      <div className="rounded-xl border border-border/60 bg-card/60 p-5">
+        <h3 className="mb-3 text-[13px] font-semibold tracking-tight">Features</h3>
+        <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-[12px] text-muted-foreground">
+          {[
+            "Multi-tab terminal with WebGL",
+            "Split panes & inline search",
+            "Code editor (CodeMirror 6)",
+            "Vim mode & 7 editor themes",
+            "File explorer with fuzzy search",
+            "Built-in web preview",
+            "AI assistant (BYOK)",
+            "10+ AI providers supported",
+            "Local models (LM Studio, Ollama)",
+            "MCP tool server support",
+            "MCP Registry browser",
+            "Skills system (#handle)",
+            "Auto-approve mode",
+            "Voice input (Whisper / browser)",
+            "PDF & DOCX reading",
+            "Web browse & search tools",
+            "Multi-agent support",
+            "Project memory (KAI.md)",
+          ].map((f) => (
+            <span key={f} className="flex items-start gap-1.5">
+              <span className="mt-[3px] size-1 shrink-0 rounded-full bg-foreground/30" />
+              {f}
+            </span>
+          ))}
+        </div>
       </div>
     </div>
   );
