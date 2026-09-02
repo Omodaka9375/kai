@@ -4,6 +4,16 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.2.6]
+
+### Fixed
+
+- **Git push/pull error pill flooded the panel**: a rejected push or failed pull dumped multi-line `hint:` blocks and the full `From <url>` fetch ref list into the red feedback pill. Push rejections (`fetch first` / `non-fast-forward`) and pull failures (`not possible to fast-forward` / diverged) now surface a short actionable summary, and any remaining unclassified git detail is capped at 400 chars with an ellipsis.
+- **Watch notifications rendered as raw text**: watch-fired messages carry markdown (`**Watch fired**: \`label\``, fenced stdout/stderr), but were injected as user-role messages and drawn through the plain-text branch, so the markdown showed literally. They're now tagged and rendered through `Streamdown`, the same pipeline as chat and markdown preview.
+- **PowerShell CLIXML in watch output**: when a watched command's stderr/stdout is redirected, PowerShell serializes it as `#< CLIXML` XML. Watch injection now decodes that back into readable lines — extracting `<S>` element text, expanding `_xHHHH_` hex escapes, resolving XML entities, and stripping ANSI CSI sequences.
+
+---
+
 ## [1.2.5]
 
 ### Fixed
