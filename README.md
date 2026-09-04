@@ -1,7 +1,7 @@
 <div align="center">
   <img src="public/logo.png" width="96" height="96" alt="Kai" />
 
-  <p>Minimal, private AI-native terminal emulator</p>
+  <p>Minimal, private AI-native terminal</p>
 
   <p>
     <a href="https://github.com/Omodaka9375/kai/releases/latest"><img src="https://img.shields.io/github/v/release/Omodaka9375/kai?style=flat-square&label=download" alt="download" /></a>
