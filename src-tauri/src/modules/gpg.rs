@@ -70,6 +70,7 @@ fn run_gpg(workspace: &WorkspaceEnv, program: &str, args: &[&str]) -> Result<Out
 
 #[cfg(windows)]
 fn detect_local_program() -> Option<String> {
+    use std::os::windows::process::CommandExt;
     const CANDIDATES: &[&str] = &[
         "gpg",
         r"C:\Program Files\Git\usr\bin\gpg.exe",
@@ -77,7 +78,9 @@ fn detect_local_program() -> Option<String> {
         r"C:\Program Files (x86)\GnuPG\bin\gpg.exe",
     ];
     for candidate in CANDIDATES {
-        if let Ok(out) = Command::new(candidate).arg("--version").output() {
+        let mut cmd = Command::new(candidate);
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW — don't flash a console
+        if let Ok(out) = cmd.arg("--version").output() {
             if out.status.success() {
                 return Some((*candidate).to_string());
             }
