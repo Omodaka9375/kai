@@ -13,7 +13,9 @@ use std::process::{Command, Output};
 
 use serde::Serialize;
 
-use crate::modules::workspace::{validate_wsl_distro_name, WorkspaceEnv};
+use crate::modules::workspace::WorkspaceEnv;
+#[cfg(windows)]
+use crate::modules::workspace::validate_wsl_distro_name;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -49,22 +51,17 @@ fn run_gpg(workspace: &WorkspaceEnv, program: &str, args: &[&str]) -> Result<Out
         #[cfg(windows)]
         validate_wsl_distro_name(distro)?;
         let mut c = Command::new("wsl.exe");
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            c.creation_flags(0x08000000); // CREATE_NO_WINDOW
-        }
         c.arg("-d").arg(distro).arg("--exec").arg(program);
         c
     } else {
-        let mut c = Command::new(program);
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            c.creation_flags(0x08000000); // CREATE_NO_WINDOW
-        }
-        c
+        Command::new(program)
     };
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
     cmd.args(args)
         .env("LC_ALL", "C")
         .output()

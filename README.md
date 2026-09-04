@@ -12,12 +12,16 @@
 
 ---
 
-Kai is a fast, cross-platform terminal built on **Tauri 2 + Rust** and **React 19**. Terminal, code editor, file explorer, web preview, and AI agent — in one app, under 10 MB, zero telemetry.
+Kai is a fast, cross-platform terminal built on **Tauri 2 + Rust** and **React 19**. Terminal, code editor, file explorer, web preview, and AI agent — in one app, lightweight, zero telemetry.
 
 <p align="center">
   <img src="docs/terminal.png" width="48%" alt="Terminal" />
   <img src="docs/split-panes.png" width="48%" alt="AI agent" />
 </p>
+
+## Contents
+
+- [Features](#features) · [Agent Personas](#agent-personas) · [Install](#install) · [Quick Start](#quick-start) · [Configuration Guides](#configuration-guides) · [Build from Source](#build-from-source) · [Tech Stack](#tech-stack)
 
 ## Features
 
@@ -31,7 +35,9 @@ Kai is a fast, cross-platform terminal built on **Tauri 2 + Rust** and **React 1
 
 **MCP** — connect external tool servers via Model Context Protocol. Browse and install from the official registry.
 
-**More** — file explorer, built-in web preview (featuring a one-tap Stop button), REST API tester, 8 UI themes, voice input (Whisper), PDF/DOCX reading, **Universal File Extraction** (ZIP/JAR listing, audio metadata, image OCR via tesseract), **Direct PDF Export (`convert_to_pdf`)** to convert Markdown/Word directly to styled PDFs, YouTube transcript summarization, `Kai.md` project memory, context summarization, auto-approve modes.
+**Git** — stage, commit, push and review diffs from the source-control panel, with optional GPG commit signing (auto-sign or approval modes) so commits show GitHub's Verified badge.
+
+**More** — file explorer, built-in web preview (featuring a one-tap Stop button), REST API tester, 8 UI themes, local Whisper voice transcription (offline, bundled Silero VAD), PDF/DOCX reading, **Universal File Extraction** (ZIP/JAR listing, audio metadata, image OCR via tesseract), **Direct PDF Export (`convert_to_pdf`)** to convert Markdown/Word directly to styled PDFs, YouTube transcript summarization, `Kai.md` project memory, context summarization, auto-approve modes.
 
 ## Agent Personas
 

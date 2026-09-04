@@ -2,7 +2,7 @@
 //!
 //! - **macOS**: macOS Keychain (via `keyring` crate) — encrypted at rest.
 //! - **Windows**: Credential Manager (via `keyring` crate) — encrypted per-user.
-//! - **Linux**: a plaintext JSON file at `~/.local/share/app.interlooper.KAI/
+//! - **Linux**: a plaintext JSON file at `~/.local/share/app.kai.terminal/
 //!   secrets.json`, mode 0600 (owner-only read/write). The default `keyring`
 //!   backend on Linux is the Secret Service over D-Bus, which silently fails
 //!   on systems without gnome-keyring/kwallet (and on the "login" collection
