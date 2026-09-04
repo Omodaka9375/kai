@@ -30,9 +30,6 @@ import { initVimGlobals, vimHandlersExtension } from "./lib/vim";
 initVimGlobals();
 import { resolveLanguage } from "./lib/languageResolver";
 import { useDocument } from "./lib/useDocument";
-import { inlineCompletion } from "./lib/autocomplete/inlineExtension";
-import { getKey } from "@/modules/ai/lib/keyring";
-import { onKeysChanged } from "@/modules/settings/store";
 import { invoke } from "@tauri-apps/api/core";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 
@@ -117,36 +114,6 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
     const cmRef = useRef<ReactCodeMirrorRef>(null);
     const editorThemeId = usePreferencesStore((s) => s.editorTheme);
     const vimMode = usePreferencesStore((s) => s.vimMode);
-    const languageRef = useRef<string | null>(null);
-    const apiKeyRef = useRef<string | null>(null);
-
-    useEffect(() => {
-      let cancelled = false;
-      const refresh = async () => {
-        const provider = usePreferencesStore.getState().autocompleteProvider;
-        if (provider === "lmstudio") {
-          apiKeyRef.current = null;
-          return;
-        }
-        const k = await getKey(provider);
-        if (!cancelled) apiKeyRef.current = k;
-      };
-      void refresh();
-      let unlistenKeys: (() => void) | undefined;
-      void onKeysChanged(() => void refresh()).then((un) => {
-        unlistenKeys = un;
-      });
-      const unsubPrefs = usePreferencesStore.subscribe((state, prev) => {
-        if (state.autocompleteProvider !== prev.autocompleteProvider) {
-          void refresh();
-        }
-      });
-      return () => {
-        cancelled = true;
-        unlistenKeys?.();
-        unsubPrefs();
-      };
-    }, []);
     const themeExt = EDITOR_THEME_EXT[editorThemeId] ?? EDITOR_THEME_EXT.atomone;
 
     // Stabilize save + onSaved via refs
@@ -158,9 +125,6 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
     onSavedRef.current = onSaved;
     const onCloseRef = useRef(onClose);
     onCloseRef.current = onClose;
-
-    const pathRef = useRef(path);
-    pathRef.current = path;
 
     const extensions = useMemo(
       () => [
@@ -180,20 +144,6 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
         })),
         ...buildSharedExtensions(),
         languageCompartment.of([]),
-        inlineCompletion({
-          getPrefs: () => {
-            const s = usePreferencesStore.getState();
-            return {
-              enabled: s.autocompleteEnabled,
-              provider: s.autocompleteProvider,
-              modelId: s.autocompleteModelId,
-              apiKey: apiKeyRef.current,
-              lmstudioBaseURL: s.lmstudioBaseURL,
-            };
-          },
-          getPath: () => pathRef.current,
-          getLanguage: () => languageRef.current,
-        }),
         keymap.of([
           {
             key: "Mod-s",
@@ -223,8 +173,6 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
 
     useEffect(() => {
       let cancelled = false;
-      const ext = path.split(".").pop()?.toLowerCase() ?? null;
-      languageRef.current = ext;
       resolveLanguage(path).then((ext) => {
         if (cancelled) return;
         const view = cmRef.current?.view;

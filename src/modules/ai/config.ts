@@ -241,7 +241,7 @@ export const MODELS = [
     provider: "openai",
     label: "GPT-5.4 nano",
     hint: "Fastest",
-    description: "Tiny and instant — great for autocomplete.",
+    description: "Tiny and instant — great for quick snippets.",
     capabilities: { intelligence: 3, speed: 5, cost: 5 },
     tags: ["tools"],
   },
@@ -463,7 +463,7 @@ export const MODELS = [
     tags: ["coding"],
   },
 
-  // ── Cerebras (autocomplete-tier) ──────────────────────────────────────────
+  // ── Cerebras (fast-tier) ─────────────────────────────────────────────────
   {
     id: "gpt-oss-120b",
     provider: "cerebras",
@@ -492,7 +492,7 @@ export const MODELS = [
     tags: ["tools", "coding"],
   },
 
-  // ── Groq (autocomplete-tier) ──────────────────────────────────────────────
+  // ── Groq (fast-tier) ─────────────────────────────────────────────────────
   {
     id: "openai/gpt-oss-20b",
     provider: "groq",
@@ -1015,32 +1015,6 @@ export function providerSupportsKey(id: ProviderId): boolean {
   if (providerNeedsKey(id)) return true;
   const p = getProvider(id);
   return !!p.keyOptional;
-}
-
-/** Any provider can power the editor's inline autocomplete; latency is the
- *  user's choice. The picker filters down to fast tiers in the UI. */
-export type AutocompleteProviderId = ProviderId;
-
-/** Sensible default model id per provider for inline autocomplete. */
-export const DEFAULT_AUTOCOMPLETE_MODEL: Partial<Record<ProviderId, string>> = {
-  cerebras: "gpt-oss-120b",
-  groq: "openai/gpt-oss-20b",
-  lmstudio: "qwen2.5-coder-7b-instruct",
-  openai: "gpt-5.6-luna",
-  anthropic: "claude-haiku-4-5",
-  google: "gemini-3.5-flash",
-  xai: "grok-4-fast-reasoning",
-  deepseek: "deepseek-v4-flash",
-  openrouter: "openai/gpt-5.4-mini",
-  "openai-compatible": "",
-  zai: "glm-5.1",
-};
-
-/** Curated list of fast models suitable for inline completion (speed ≥ 4). */
-export function getAutocompleteEligibleModels(): readonly ModelInfo[] {
-  return MODELS.filter(
-    (m) => m.capabilities.speed >= 4 && m.id !== "openai-compatible-custom",
-  );
 }
 
 export const LMSTUDIO_DEFAULT_BASE_URL = "http://localhost:1234/v1";
