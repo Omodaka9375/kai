@@ -960,25 +960,13 @@ export default function App() {
     // No active tab: use explorer root (which tracks the workspace).
     return explorerRoot ?? workspaceFallbackPath;
   })();
-  const hasOpenGitTab = useMemo(
-    () =>
-      tabs.some(
-        (t) =>
-          t.kind === "git-diff" ||
-          t.kind === "git-history" ||
-          t.kind === "git-commit-file",
-      ),
-    [tabs],
-  );
-  const sourceControlActive =
-    hasOpenGitTab || sidebarView === "source-control";
-  // Stable per-session path so switching tabs / cd-ing in a shell does NOT
-  // re-fire git IPC for the badge. The active panel resolves the current
-  // context path on its own when the user actually opens git.
-  const badgeContextPath = workspaceFallbackPath;
-  const sourceControlPath = sourceControlActive
-    ? sourceControlContextPath
-    : badgeContextPath;
+  // The rail badge and the panel must read the SAME git context. Resolving
+  // the badge against a pinned launch dir while the panel follows the active
+  // tab's live context made the icon count diverge from what the panel showed
+  // when opened (e.g. badge counted the launch repo while the terminal had
+  // `cd`'d into a different, clean repo). Resolve the active context once and
+  // share it between both surfaces.
+  const sourceControlPath = sourceControlContextPath;
 
   // Automatically authorize standard workspaces/folders in the Rust registry
   // when the user explicitly navigates to them (via terminal cd, active file tab, etc.)
@@ -998,11 +986,11 @@ export default function App() {
 
   const openGitGraphFromContext = useCallback(async () => {
     // Resolve the repo from the CURRENT project root on every click. We
-    // intentionally do NOT read `sourceControl.repo` here: that cache is keyed
-    // to `sourceControlPath`, which collapses to the launch dir
-    // (badgeContextPath) whenever the active tab is a terminal — i.e. the
-    // previously-opened project. Reusing it opened the old project's history
-    // until the user visited Source Control (which re-keys the hook).
+    // intentionally do NOT read `sourceControl.repo` here: that cache tracks
+    // the active tab's live context (a terminal `cd` re-keys it), which is
+    // not necessarily the project the user means by "Git Graph". Resolve from
+    // the pinned root so the graph always opens the current project, never a
+    // transient terminal cwd.
     //
     // Project root is stable: explorerRoot is pinned at launch / on
     // File > Open Project and does NOT follow terminal `cd`. So we resolve
