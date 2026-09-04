@@ -57,6 +57,13 @@ type Session = {
 
 const sessions = new Map<number, Session>();
 
+// Upper bound on waiting for the font pipeline before binding the renderer
+// slot. A stalled `document.fonts.ready` (heavy first paint with the AI window
+// visible / many chat sessions) must not leave the terminal permanently
+// unbound. On timeout the slot binds with the current fallback font metrics
+// and xterm re-fits on the next resize.
+const FONT_READY_TIMEOUT_MS = 2500;
+
 configureRendererPool({
   resolveLeaf(leafId) {
     const s = sessions.get(leafId);
@@ -112,8 +119,13 @@ function ensureSession(leafId: number, initialCwd?: string): Session {
   sessions.set(leafId, session);
 
   session.ready = (async () => {
-    await ensureMonoFontsLoaded();
-    await document.fonts.ready;
+    await Promise.race([
+      (async () => {
+        await ensureMonoFontsLoaded();
+        await document.fonts.ready;
+      })(),
+      new Promise<void>((resolve) => setTimeout(resolve, FONT_READY_TIMEOUT_MS)),
+    ]);
   })();
 
   return session;
@@ -198,6 +210,13 @@ function openPtySession(
         }
       }
     });
+}
+
+/** Start the PTY shell unless it is already running, starting, or dead. */
+function startPtyIfNeeded(leafId: number, s: Session): void {
+  if (s.disposed || s.shellExited || s.pty || s.ptyOpening) return;
+  s.ptyOpening = true;
+  openPtySession(leafId, s, s.initialCwd, 0);
 }
 
 async function openPtyForSession(
@@ -299,14 +318,7 @@ function attachSession(
 
   if (s.visibleNow) bindLeafToSlot(leafId, s);
 
-  if (!s.pty && !s.shellExited) {
-    // Clear any stale ptyOpening flag from a previous failed attempt.
-    // In React strict mode, the first mount's spawn may still be
-    // in-flight when the second mount runs — don't let a stuck flag
-    // prevent recovery.
-    s.ptyOpening = true;
-    openPtySession(leafId, s, s.initialCwd, 0 /* attempt */);
-  }
+  startPtyIfNeeded(leafId, s);
 }
 
 function detachSession(leafId: number): void {
@@ -401,15 +413,25 @@ export function useTerminalSession({
   useEffect(() => {
     let cancelled = false;
     const s = ensureSession(leafId, initialCwd);
+    const callbacks: Callbacks = {
+      onSearchReady: (a) => cbRef.current.onSearchReady?.(a),
+      onExit: (c) => cbRef.current.onExit?.(c),
+      onCwd: (c) => cbRef.current.onCwd?.(c),
+    };
+
+    // Spawn the shell immediately. The renderer slot still binds after fonts
+    // load below, but the PTY itself must never wait on `document.fonts.ready`:
+    // a heavy first paint (AI window visible, many chat sessions) can starve
+    // font resolution and leave the first terminal permanently blank. Output
+    // is buffered in the dormant ring until the slot binds.
+    s.callbacks = callbacks;
+    startPtyIfNeeded(leafId, s);
+
     s.ready.then(() => {
       if (cancelled || s.disposed) return;
       const node = container.current;
       if (!node) return;
-      attachSession(leafId, node, {
-        onSearchReady: (a) => cbRef.current.onSearchReady?.(a),
-        onExit: (c) => cbRef.current.onExit?.(c),
-        onCwd: (c) => cbRef.current.onCwd?.(c),
-      });
+      attachSession(leafId, node, callbacks);
       if (s.visibleNow && s.focusedNow) focusSlot(leafId);
     });
     return () => {
