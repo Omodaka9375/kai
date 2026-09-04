@@ -5,6 +5,7 @@
       {
         "label": "main",
         "title": "KAI",
+        "dragDropEnabled": false,
         "decorations": false,
         "transparent": true,
         "visible": false,
