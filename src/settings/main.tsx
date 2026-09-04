@@ -8,7 +8,10 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import ReactDOM from "react-dom/client";
 import { ThemeProvider } from "@/modules/theme";
 import { USE_CUSTOM_WINDOW_CONTROLS } from "@/lib/platform";
+import { installConsoleLogBridge } from "@/lib/logging";
 import { SettingsApp } from "./SettingsApp";
+
+installConsoleLogBridge();
 
 if (USE_CUSTOM_WINDOW_CONTROLS) {
   document.documentElement.dataset.chrome = "borderless";

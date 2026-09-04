@@ -3,10 +3,12 @@ import { Clock01Icon, GithubIcon, Globe02Icon, RefreshIcon } from "@hugeicons/co
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useUpdater } from "@/modules/updater/useUpdater";
 import { getName, getVersion } from "@tauri-apps/api/app";
+import { homeDir } from "@tauri-apps/api/path";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { arch, platform } from "@tauri-apps/plugin-os";
 import { useEffect, useState } from "react";
 import { SectionHeader } from "../components/SectionHeader";
+import { buildIssueBody, diagnostics } from "../lib/diagnostics";
 
 const REPO_URL = "https://github.com/Omodaka9375/kai";
 const WEBSITE = "https://omodaka9375.github.io/kai";
@@ -24,6 +26,8 @@ export function AboutSection() {
   const [version, setVersion] = useState("");
   const [name, setName] = useState("Kai");
   const [build, setBuild] = useState("");
+  const [reporting, setReporting] = useState(false);
+  const [reportError, setReportError] = useState("");
   const updater = useUpdater({ autoCheck: false });
 
   useEffect(() => {
@@ -38,6 +42,40 @@ export function AboutSection() {
       setBuild("");
     }
   }, []);
+
+  const reportIssue = async () => {
+    setReporting(true);
+    setReportError("");
+    try {
+      const bundle = await diagnostics.collect();
+      const home = await homeDir().catch(() => null);
+      const body = buildIssueBody(bundle, home);
+      const title = encodeURIComponent(
+        `Bug report — v${bundle.version} (${bundle.os}/${bundle.arch})`,
+      );
+      const url = `${REPO_URL}/issues/new?title=${title}&body=${encodeURIComponent(body)}`;
+      await openUrl(url);
+    } catch (e) {
+      setReportError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setReporting(false);
+    }
+  };
+
+  const copyDiagnostics = async () => {
+    setReporting(true);
+    setReportError("");
+    try {
+      const bundle = await diagnostics.collect();
+      const home = await homeDir().catch(() => null);
+      const body = buildIssueBody(bundle, home);
+      await navigator.clipboard.writeText(body);
+    } catch (e) {
+      setReportError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setReporting(false);
+    }
+  };
 
   return (
     <div className="flex flex-col gap-6">
@@ -155,13 +193,27 @@ export function AboutSection() {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => void openUrl(`${REPO_URL}/issues/new`)}
+            onClick={() => void reportIssue()}
+            disabled={reporting}
+            title="Open a new GitHub issue with logs pre-attached"
           >
             Report an issue
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => void copyDiagnostics()}
+            disabled={reporting}
+            title="Copy a redacted diagnostic bundle to the clipboard"
+          >
+            Copy diagnostics
           </Button>
         </div>
         {updater.status.kind === "error" && (
           <p className="text-[11px] text-destructive">{updater.status.message}</p>
+        )}
+        {reportError && (
+          <p className="text-[11px] text-destructive">{reportError}</p>
         )}
       </div>
 

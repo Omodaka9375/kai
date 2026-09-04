@@ -9,7 +9,10 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import ReactDOM from "react-dom/client";
 import App from "./app/App";
 import { initLaunchDir } from "./lib/launchDir";
+import { installConsoleLogBridge } from "./lib/logging";
 import { USE_CUSTOM_WINDOW_CONTROLS } from "./lib/platform";
+
+installConsoleLogBridge();
 
 if (USE_CUSTOM_WINDOW_CONTROLS) {
   document.documentElement.dataset.chrome = "borderless";

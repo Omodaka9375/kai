@@ -1,7 +1,7 @@
 mod modules;
 
 use modules::lock::mutex_lock;
-use modules::{fs, git, gpg, mcp, net, pty, secrets, shell, whisper, workspace};
+use modules::{diagnostics, fs, git, gpg, mcp, net, pty, secrets, shell, whisper, workspace};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_window_state::StateFlags;
@@ -163,11 +163,31 @@ pub fn run() {
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(tauri_plugin_log::log::LevelFilter::Info)
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(3))
+                .max_file_size(2_000_000)
+                .targets([
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                        file_name: Some("kai".into()),
+                    }),
+                ])
                 .build(),
         )
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            // Resolve the log dir once and install the crash-snapshot panic
+            // hook + record the dir for diagnostics_collect.
+            let log_dir = app
+                .path()
+                .app_log_dir()
+                .unwrap_or_else(|_| std::env::temp_dir());
+            let _ = std::fs::create_dir_all(&log_dir);
+            diagnostics::install_panic_hook(log_dir.clone());
+            app.manage(diagnostics::CrashDir(Mutex::new(Some(log_dir))));
+            Ok(())
+        })
         .manage(pty::PtyState::default())
         .manage(shell::ShellState::default())
         .manage(secrets::SecretsState::default())
@@ -240,6 +260,7 @@ pub fn run() {
             workspace::wsl_home,
             workspace::workspace_authorize,
             workspace::workspace_current_dir,
+            diagnostics::diagnostics_collect,
             get_launch_dir,
             open_settings_window,
             pick_project_folder,
