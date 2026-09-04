@@ -4,6 +4,16 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.2.8]
+
+### Fixed
+
+- README/markdown preview images now render (raw `<img>` tags and relative local images were leaking as literal text/base64).
+- Opening General settings no longer flashes a console window on Windows (gpg detection now spawns without a console).
+- Dragging files from the explorer into the terminal inserts their relative path again (the native Windows drop handler was swallowing internal HTML5 drops).
+
+---
+
 ## [1.2.7]
 
 ### Added
