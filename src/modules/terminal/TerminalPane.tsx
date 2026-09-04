@@ -50,6 +50,24 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, Props>(
       onCwd: (c) => onCwd?.(leafId, c),
     });
 
+    const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+      // Allow dropping file paths onto the terminal. We accept any drag that
+      // carries a text payload (our explorer drags use text/plain).
+      if (e.dataTransfer.types.includes("text/plain")) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+      }
+    };
+
+    const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+      const text = e.dataTransfer.getData("text/plain");
+      if (!text) return;
+      e.preventDefault();
+      // Insert the dragged relative path(s) as if typed at the prompt.
+      session.write(text);
+      session.focus();
+    };
+
     useEffect(() => {
       // Defer one frame so CSS-variable token resolution sees the new class.
       const id = requestAnimationFrame(() => session.applyTheme());
@@ -75,6 +93,8 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, Props>(
           visibility: visible ? "visible" : "hidden",
           pointerEvents: visible ? "auto" : "none",
         }}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
       />
     );
   },

@@ -98,6 +98,21 @@ function EntryRowImpl(props: EntryRowProps) {
     onContextMenuSelect(path);
   };
 
+  const handleDragStart = (e: React.DragEvent<HTMLButtonElement>) => {
+    if (tree.renaming) return;
+    // Drag the whole selection when this row is part of it, otherwise just
+    // this row. The terminal reads the relative paths (text/plain) and
+    // inserts them; the absolute paths ride along for future consumers.
+    const paths = isSelected ? selectedPaths : [path];
+    const rel = paths.map((p) => {
+      const r = relativePath(rootPath, p);
+      return /\s/.test(r) ? `"${r}"` : r;
+    });
+    e.dataTransfer.effectAllowed = "copy";
+    e.dataTransfer.setData("text/plain", rel.join(" "));
+    e.dataTransfer.setData("application/x-kai-files", JSON.stringify(paths));
+  };
+
   return (
     <ContextMenu onOpenChange={(open) => { if (!open) { isConfirmingRef.current = false; setIsConfirming(false); isConfirmingMultiRef.current = false; setIsConfirmingMulti(false); } }}>
       <ContextMenuTrigger asChild>
@@ -125,6 +140,8 @@ function EntryRowImpl(props: EntryRowProps) {
             onClick={handleClick}
             onContextMenu={handleContextMenu}
             onDoubleClick={() => !isDir && tree.beginRename(path)}
+            draggable
+            onDragStart={handleDragStart}
             className={cn(
               "group flex h-6 w-full min-w-0 cursor-pointer items-center gap-2 rounded-sm px-1.5 text-left text-[13px] text-foreground/85 transition-colors hover:bg-accent/70",
               isSelected && "bg-accent text-foreground",
