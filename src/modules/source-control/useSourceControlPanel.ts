@@ -90,6 +90,14 @@ type SourceControlPanelState = {
   generateCommitMessage: () => Promise<void>;
   commit: () => Promise<void>;
   push: () => Promise<void>;
+  /** Signing state — mirrors Settings → General → Commit signing. */
+  commitSigningEnabled: boolean;
+  commitSigningMode: "auto" | "approval";
+  commitSigningKey: string;
+  /** Approval-mode confirm gate before a signed commit. */
+  pendingSignConfirm: boolean;
+  confirmSignCommit: (sign: boolean) => Promise<void>;
+  cancelSignCommit: () => void;
 };
 
 function normalizeError(error: unknown): string {
@@ -361,6 +369,15 @@ export function useSourceControlPanel(
   const openaiCompatibleModelId = usePreferencesStore(
     (state) => state.openaiCompatibleModelId,
   );
+  const commitSigningEnabled = usePreferencesStore(
+    (state) => state.commitSigningEnabled,
+  );
+  const commitSigningMode = usePreferencesStore(
+    (state) => state.commitSigningMode,
+  );
+  const commitSigningKey = usePreferencesStore(
+    (state) => state.commitSigningKey,
+  );
   const [panelState, setPanelState] = useState<PanelState>("closed");
   const [repo, setRepo] = useState<GitRepoInfo | null>(null);
   const [status, setStatus] = useState<GitStatusSnapshot | null>(null);
@@ -376,6 +393,7 @@ export function useSourceControlPanel(
     | { scope: "all"; entries: SourceControlEntry[] }
     | null
   >(null);
+  const [pendingSignConfirm, setPendingSignConfirm] = useState(false);
   const selectedRef = useRef<DiffSelection | null>(null);
   const reconcileTimerRef = useRef(0);
 
@@ -831,25 +849,55 @@ export function useSourceControlPanel(
     stagedEntries,
   ]);
 
+  const doCommit = useCallback(
+    async (sign: boolean) => {
+      if (!repo || summary.busyAction) return;
+      setLocalActionBusy("commit");
+      setActionMessage(null);
+      setActionError(null);
+      setPendingSignConfirm(false);
+      try {
+        const result = await native.gitCommit(repo.repoRoot, commitMessage, {
+          sign,
+          signingKey: commitSigningKey || null,
+        });
+        setCommitMessage("");
+        setActionMessage(
+          `Committed ${result.commitSha.slice(0, 7)} ${result.summary}${sign ? " (signed)" : ""}`,
+        );
+        invalidateRepoDiffs(repo.repoRoot);
+        await summary.refresh({ remote: "never", mutation: true });
+      } catch (error) {
+        setActionError(normalizeError(error));
+      } finally {
+        setLocalActionBusy(null);
+      }
+    },
+    [commitMessage, commitSigningKey, repo, summary],
+  );
+
   const commit = useCallback(async () => {
     if (!repo || summary.busyAction) return;
-    setLocalActionBusy("commit");
-    setActionMessage(null);
-    setActionError(null);
-    try {
-      const result = await native.gitCommit(repo.repoRoot, commitMessage);
-      setCommitMessage("");
-      setActionMessage(
-        `Committed ${result.commitSha.slice(0, 7)} ${result.summary}`,
-      );
-      invalidateRepoDiffs(repo.repoRoot);
-      await summary.refresh({ remote: "never", mutation: true });
-    } catch (error) {
-      setActionError(normalizeError(error));
-    } finally {
-      setLocalActionBusy(null);
+    // Auto mode signs unconditionally via global config (sign flag is redundant
+    // but harmless). Approval mode asks first, defaulting to a signed commit.
+    if (commitSigningEnabled && commitSigningMode === "approval") {
+      setPendingSignConfirm(true);
+      return;
     }
-  }, [commitMessage, repo, summary]);
+    await doCommit(commitSigningEnabled && commitSigningMode === "auto");
+  }, [repo, summary, commitSigningEnabled, commitSigningMode, doCommit]);
+
+  const confirmSignCommit = useCallback(
+    async (sign: boolean) => {
+      setPendingSignConfirm(false);
+      await doCommit(sign);
+    },
+    [doCommit],
+  );
+
+  const cancelSignCommit = useCallback(() => {
+    setPendingSignConfirm(false);
+  }, []);
 
   const push = useCallback(async () => {
     if (!repo) return;
@@ -922,5 +970,11 @@ export function useSourceControlPanel(
     generateCommitMessage,
     commit,
     push,
+    commitSigningEnabled,
+    commitSigningMode,
+    commitSigningKey,
+    pendingSignConfirm,
+    confirmSignCommit,
+    cancelSignCommit,
   };
 }

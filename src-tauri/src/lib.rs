@@ -1,7 +1,7 @@
 mod modules;
 
 use modules::lock::mutex_lock;
-use modules::{fs, git, mcp, net, pty, secrets, shell, workspace};
+use modules::{fs, git, gpg, mcp, net, pty, secrets, shell, workspace};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_window_state::StateFlags;
@@ -218,6 +218,12 @@ pub fn run() {
             git::commands::git_commit_files,
             git::commands::git_commit_file_diff,
             git::commands::git_remote_url,
+            git::commands::git_config_get,
+            git::commands::git_config_set,
+            git::commands::git_config_unset,
+            gpg::gpg_status,
+            gpg::gpg_list_keys,
+            gpg::gpg_export_public,
             shell::shell_run_command,
             shell::shell_session_open,
             shell::shell_session_run,

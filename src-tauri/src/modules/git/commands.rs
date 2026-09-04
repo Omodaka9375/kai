@@ -144,12 +144,22 @@ pub async fn git_discard(
 pub async fn git_commit(
     repo_root: String,
     message: String,
+    sign: Option<bool>,
+    signing_key: Option<String>,
     workspace: Option<WorkspaceEnv>,
     app: AppHandle,
 ) -> Result<GitCommitResult, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     blocking(app, move |r| {
-        operations::commit(r, &repo_root, &message, &workspace).map_err(Into::into)
+        operations::commit(
+            r,
+            &repo_root,
+            &message,
+            sign.unwrap_or(false),
+            signing_key.as_deref(),
+            &workspace,
+        )
+        .map_err(Into::into)
     })
     .await
 }
@@ -291,6 +301,46 @@ pub async fn git_remote_url(
     let workspace = WorkspaceEnv::from_option(workspace);
     blocking(app, move |r| {
         operations::remote_url(r, &repo_root, &remote, &workspace).map_err(Into::into)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn git_config_get(
+    key: String,
+    workspace: Option<WorkspaceEnv>,
+    app: AppHandle,
+) -> Result<Option<String>, String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    blocking(app, move |_r| {
+        operations::config_get(&workspace, &key).map_err(Into::into)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn git_config_set(
+    key: String,
+    value: String,
+    workspace: Option<WorkspaceEnv>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    blocking(app, move |_r| {
+        operations::config_set(&workspace, &key, &value).map_err(Into::into)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn git_config_unset(
+    key: String,
+    workspace: Option<WorkspaceEnv>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    blocking(app, move |_r| {
+        operations::config_unset(&workspace, &key).map_err(Into::into)
     })
     .await
 }

@@ -375,6 +375,8 @@ pub fn commit(
     registry: &WorkspaceRegistry,
     repo_root: &str,
     message: &str,
+    sign: bool,
+    signing_key: Option<&str>,
     workspace: &WorkspaceEnv,
 ) -> Result<GitCommitResult> {
     let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
@@ -384,10 +386,19 @@ pub fn commit(
         return Err(GitError::EmptyCommitMessage);
     }
 
+    let mut args: Vec<OsString> = vec!["commit".into(), "-m".into(), trimmed.into()];
+    if sign {
+        args.push("-S".into());
+        if let Some(key) = signing_key.filter(|k| !k.is_empty()) {
+            args.push("-u".into());
+            args.push(key.into());
+        }
+    }
+
     let output = run_git(
         &repo_root.workspace,
         Some(&repo_root.git_path),
-        [OsStr::new("commit"), OsStr::new("-m"), OsStr::new(trimmed)],
+        args,
         DEFAULT_TIMEOUT_SECS,
     )?;
     if output.exit_code != Some(0) && nothing_to_commit(&output) {
@@ -783,6 +794,73 @@ pub fn remote_url(
         &repo_root.git_path,
         ["config", "--get", &format!("remote.{name}.url")],
     )
+}
+
+fn is_config_key_safe(key: &str) -> bool {
+    // Restrict to the signing keys this feature manages. Blocks injection of
+    // arbitrary git config (e.g. `alias`, `core.*`, `credential.*`).
+    matches!(
+        key,
+        "commit.gpgsign" | "user.signingkey" | "gpg.program" | "gpg.format"
+    )
+}
+
+fn validate_config_value(value: &str) -> Result<()> {
+    if value.chars().any(|c| c == '\n' || c == '\r' || c == '\0') {
+        return Err(GitError::command("git config", "invalid config value"));
+    }
+    Ok(())
+}
+
+pub fn config_get(workspace: &WorkspaceEnv, key: &str) -> Result<Option<String>> {
+    ensure_git_available(workspace)?;
+    if !is_config_key_safe(key) {
+        return Err(GitError::command("git config", "unsupported config key"));
+    }
+    git_stdout_line_opt(workspace, "", ["config", "--global", "--get", key])
+}
+
+pub fn config_set(workspace: &WorkspaceEnv, key: &str, value: &str) -> Result<()> {
+    ensure_git_available(workspace)?;
+    if !is_config_key_safe(key) {
+        return Err(GitError::command("git config", "unsupported config key"));
+    }
+    validate_config_value(value)?;
+    let output = run_git(
+        workspace,
+        None,
+        [
+            OsStr::new("config"),
+            OsStr::new("--global"),
+            OsStr::new(key),
+            OsStr::new(value),
+        ],
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    ensure_success(&output, "git config failed")
+}
+
+pub fn config_unset(workspace: &WorkspaceEnv, key: &str) -> Result<()> {
+    ensure_git_available(workspace)?;
+    if !is_config_key_safe(key) {
+        return Err(GitError::command("git config", "unsupported config key"));
+    }
+    let output = run_git(
+        workspace,
+        None,
+        [
+            OsStr::new("config"),
+            OsStr::new("--global"),
+            OsStr::new("--unset"),
+            OsStr::new(key),
+        ],
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    // `--unset` exits 5 when the key is absent — treat that as success.
+    if output.exit_code == Some(5) {
+        return Ok(());
+    }
+    ensure_success(&output, "git config failed")
 }
 
 fn is_remote_name_char(c: char) -> bool {

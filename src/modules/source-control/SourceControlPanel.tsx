@@ -856,6 +856,37 @@ export const SourceControlPanel = memo(function SourceControlPanel({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <AlertDialog
+        open={scm.pendingSignConfirm}
+        onOpenChange={(o) => {
+          if (!o) scm.cancelSignCommit();
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Sign this commit?</AlertDialogTitle>
+            <AlertDialogDescription>
+              GPG signing is set to "approval needed". Sign with your selected key
+              (shows a Verified badge on GitHub), or commit without signing.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => scm.cancelSignCommit()}>
+              Cancel
+            </AlertDialogCancel>
+            <Button
+              variant="secondary"
+              onClick={() => void scm.confirmSignCommit(false)}
+            >
+              Commit unsigned
+            </Button>
+            <AlertDialogAction onClick={() => void scm.confirmSignCommit(true)}>
+              Sign & commit
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </TooltipProvider>
   );
 });

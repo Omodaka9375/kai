@@ -90,6 +90,20 @@ export type GitPushResult = {
   pushed: boolean;
 };
 
+export type GpgKey = {
+  fingerprint: string;
+  keyId: string;
+  name: string;
+  emails: string[];
+};
+
+export type GpgStatus = {
+  available: boolean;
+  program: string | null;
+  version: string | null;
+  error: string | null;
+};
+
 export type GitLogEntry = {
   sha: string;
   shortSha: string;
@@ -316,10 +330,41 @@ export const native = {
       entries,
       workspace: currentWorkspaceEnv(),
     }),
-  gitCommit: (repoRoot: string, message: string) =>
+  gitCommit: (
+    repoRoot: string,
+    message: string,
+    opts?: { sign?: boolean; signingKey?: string | null },
+  ) =>
     invoke<GitCommitResult>("git_commit", {
       repoRoot,
       message,
+      sign: opts?.sign ?? false,
+      signingKey: opts?.signingKey ?? null,
+      workspace: currentWorkspaceEnv(),
+    }),
+  gitConfigGet: (key: string) =>
+    invoke<string | null>("git_config_get", {
+      key,
+      workspace: currentWorkspaceEnv(),
+    }),
+  gitConfigSet: (key: string, value: string) =>
+    invoke<void>("git_config_set", {
+      key,
+      value,
+      workspace: currentWorkspaceEnv(),
+    }),
+  gitConfigUnset: (key: string) =>
+    invoke<void>("git_config_unset", {
+      key,
+      workspace: currentWorkspaceEnv(),
+    }),
+  gpgStatus: () =>
+    invoke<GpgStatus>("gpg_status", { workspace: currentWorkspaceEnv() }),
+  gpgListKeys: () =>
+    invoke<GpgKey[]>("gpg_list_keys", { workspace: currentWorkspaceEnv() }),
+  gpgExportPublic: (fingerprint: string) =>
+    invoke<string>("gpg_export_public", {
+      fingerprint,
       workspace: currentWorkspaceEnv(),
     }),
   gitFetch: (repoRoot: string) =>

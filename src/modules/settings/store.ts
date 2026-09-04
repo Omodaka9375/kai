@@ -92,6 +92,13 @@ export type Preferences = {
   /** Per-model thinking overrides, keyed by ModelId. A model with no entry
    *  falls back to the global `thinkingMode`. */
   modelThinkingModes: Record<string, ThinkingMode>;
+  /** GPG commit signing. Off by default. */
+  commitSigningEnabled: boolean;
+  /** "auto" sets global git config (all commits signed); "approval" signs only
+   *  source-control panel commits after a per-commit confirm. */
+  commitSigningMode: "auto" | "approval";
+  /** Fingerprint of the user-selected GPG signing key (empty when unset). */
+  commitSigningKey: string;
 };
 
 const STORE_PATH = "Kai-settings.json";
@@ -131,6 +138,9 @@ const KEY_COMFYUI_WORKFLOW = "comfyuiWorkflow";
 const KEY_SUBAGENT_MAX_STEPS = "subagentMaxSteps";
 const KEY_THINKING_MODE = "thinkingMode";
 const KEY_MODEL_THINKING_MODES = "modelThinkingModes";
+const KEY_COMMIT_SIGNING_ENABLED = "commitSigningEnabled";
+const KEY_COMMIT_SIGNING_MODE = "commitSigningMode";
+const KEY_COMMIT_SIGNING_KEY = "commitSigningKey";
 
 export const TERMINAL_FONT_SIZE_DEFAULT = 14;
 export const TERMINAL_FONT_SIZE_MIN = 8;
@@ -185,6 +195,9 @@ export const DEFAULT_PREFERENCES: Preferences = {
   subagentMaxSteps: 24,
   thinkingMode: "off" as ThinkingMode,
   modelThinkingModes: {},
+  commitSigningEnabled: false,
+  commitSigningMode: "auto",
+  commitSigningKey: "",
 };
 
 const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
@@ -301,6 +314,15 @@ export async function loadPreferences(): Promise<Preferences> {
     modelThinkingModes:
       get<Record<string, ThinkingMode>>(KEY_MODEL_THINKING_MODES) ??
       DEFAULT_PREFERENCES.modelThinkingModes,
+    commitSigningEnabled:
+      get<boolean>(KEY_COMMIT_SIGNING_ENABLED) ??
+      DEFAULT_PREFERENCES.commitSigningEnabled,
+    commitSigningMode:
+      get<"auto" | "approval">(KEY_COMMIT_SIGNING_MODE) ??
+      DEFAULT_PREFERENCES.commitSigningMode,
+    commitSigningKey:
+      get<string>(KEY_COMMIT_SIGNING_KEY) ??
+      DEFAULT_PREFERENCES.commitSigningKey,
   };
 }
 
@@ -459,6 +481,20 @@ export async function setThinkingMode(value: ThinkingMode): Promise<void> {
   await writePref(KEY_THINKING_MODE, value);
 }
 
+export async function setCommitSigningEnabled(value: boolean): Promise<void> {
+  await writePref(KEY_COMMIT_SIGNING_ENABLED, value);
+}
+
+export async function setCommitSigningMode(
+  value: "auto" | "approval",
+): Promise<void> {
+  await writePref(KEY_COMMIT_SIGNING_MODE, value);
+}
+
+export async function setCommitSigningKey(value: string): Promise<void> {
+  await writePref(KEY_COMMIT_SIGNING_KEY, value);
+}
+
 /** Set (or clear, when `null`) a model-specific thinking override. */
 export async function setModelThinkingMode(
   modelId: string,
@@ -537,6 +573,9 @@ export async function onPreferencesChange(
     [KEY_SUBAGENT_MAX_STEPS]: "subagentMaxSteps",
     [KEY_THINKING_MODE]: "thinkingMode",
     [KEY_MODEL_THINKING_MODES]: "modelThinkingModes",
+    [KEY_COMMIT_SIGNING_ENABLED]: "commitSigningEnabled",
+    [KEY_COMMIT_SIGNING_MODE]: "commitSigningMode",
+    [KEY_COMMIT_SIGNING_KEY]: "commitSigningKey",
   };
   // Same-process writes still fire onChange immediately; cross-window writes
   // arrive via the Tauri event emitted by writePref().
