@@ -260,6 +260,13 @@ export function Header({
             </DropdownMenuItem>
 
             <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => void openSettingsWindow("general&isolate=true")} className="gap-2 text-xs">
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground/80">
+                <circle cx="8" cy="8" r="3.5" />
+                <path d="M8 1.5v1M8 13.5v1M1.5 8h1M13.5 8h1M3.4 3.4l.7.7M12.6 12.6l.7.7M3.4 12.6l.7-.7M12.6 3.4l.7-.7" />
+              </svg>
+              <span className="flex-1">General</span>
+            </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => void openSettingsWindow("models&isolate=true")} className="gap-2 text-xs">
               <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground/80">
                 <path d="M8 1.5c-3 0-5.5 2-5.5 5s2 4.5 2 4.5l.5.5h6l.5-.5s2-1.5 2-4.5-2.5-5-5.5-5z" />
@@ -292,13 +299,6 @@ export function Header({
               <span className="text-[10px] text-muted-foreground/60 font-mono">
                 {IS_MAC ? "⌘/" : "Ctrl+/"}
               </span>
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => void openSettingsWindow("general&isolate=true")} className="gap-2 text-xs">
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground/80">
-                <circle cx="8" cy="8" r="3.5" />
-                <path d="M8 1.5v1M8 13.5v1M1.5 8h1M13.5 8h1M3.4 3.4l.7.7M12.6 12.6l.7.7M3.4 12.6l.7-.7M12.6 3.4l.7-.7" />
-              </svg>
-              <span className="flex-1">Appearance</span>
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => void openSettingsWindow("about&isolate=true")} className="gap-2 text-xs">
               <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground/80">
