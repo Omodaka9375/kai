@@ -4,6 +4,24 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.2.9]
+
+### Added
+
+- One-click issue reporting that pre-fills a GitHub issue with logs and crash snapshots.
+- Copy diagnostics button for the full redacted bundle (home path and secrets stripped).
+
+### Changed
+
+- Image/video generation no longer blocks the chat — results appear when ready.
+- ComfyUI video duration defaults to 5s and is injected into the workflow.
+
+### Fixed
+
+- Window title now shows `KAI — <project>` (was missing the set-title permission).
+
+---
+
 ## [1.2.8]
 
 ### Fixed
