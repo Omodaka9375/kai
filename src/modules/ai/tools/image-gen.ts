@@ -5,6 +5,7 @@ import { generateOpenAIImage } from "../lib/media/openai-image";
 import { generateGoogleImage } from "../lib/media/google-image";
 import { generateXAIImage } from "../lib/media/xai-image";
 import { generateComfyImage } from "../lib/media/comfyui";
+import { spawnMediaTask } from "../lib/media/task";
 import type { ImageResult } from "../lib/media/types";
 import type { ToolContext } from "./context";
 
@@ -43,33 +44,47 @@ Auto-executes — no approval needed.`,
           .optional()
           .describe("Quality level: 'low', 'medium', 'high', or 'auto'. Defaults to auto."),
       }),
-      execute: async ({ prompt, provider, size, quality }) => {
+      execute: async ({ prompt, provider, size, quality }, options) => {
         const keys = useChatStore.getState().apiKeys;
+        const signal = options?.abortSignal;
 
-        // ComfyUI: no key needed, uses workflow from settings
+        // ComfyUI: no key needed, uses workflow from settings. Generation runs
+        // in the background and patches its result into this tool-call part.
         if (provider === "comfyui") {
-          try {
-            const prefs = await import("@/modules/settings/preferences").then(
-              (m) => m.usePreferencesStore.getState(),
-            );
-            if (!prefs.comfyuiWorkflow) {
-              return { error: "No ComfyUI workflow uploaded. Go to Settings → Models → ComfyUI and upload a workflow JSON." };
-            }
-            const workflow = JSON.parse(prefs.comfyuiWorkflow) as Record<string, unknown>;
-            const result = await generateComfyImage(prefs.comfyuiBaseURL, workflow, prompt);
-            return {
-              type: "image" as const,
-              provider: result.provider,
-              mimeType: result.mimeType,
-              width: result.width,
-              height: result.height,
-              base64: result.base64,
-              url: result.url,
-              prompt,
-            };
-          } catch (e) {
-            return { error: String(e) };
+          const prefs = await import("@/modules/settings/preferences").then(
+            (m) => m.usePreferencesStore.getState(),
+          );
+          if (!prefs.comfyuiWorkflow) {
+            return { error: "No ComfyUI workflow uploaded. Go to Settings → Models → ComfyUI and upload a workflow JSON." };
           }
+          let workflow: Record<string, unknown>;
+          try {
+            workflow = JSON.parse(prefs.comfyuiWorkflow) as Record<string, unknown>;
+          } catch {
+            return { error: "ComfyUI workflow is not valid JSON. Re-export it using 'Save (API Format)'." };
+          }
+
+          spawnMediaTask(_ctx.getSessionId(), options.toolCallId, signal, () =>
+            generateComfyImage(prefs.comfyuiBaseURL, workflow, prompt, { signal }).then(
+              (result) => ({
+                type: "image" as const,
+                provider: result.provider,
+                mimeType: result.mimeType,
+                width: result.width,
+                height: result.height,
+                base64: result.base64,
+                url: result.url,
+                prompt,
+              }),
+            ),
+          );
+
+          return {
+            status: "generating",
+            kind: "image",
+            provider: "comfyui",
+            prompt,
+          };
         }
 
         const key = keys[provider as keyof typeof keys];
@@ -79,13 +94,13 @@ Auto-executes — no approval needed.`,
           };
         }
 
-        try {
-          const result = await callProvider(provider as "openai" | "google" | "xai", key, {
+        spawnMediaTask(_ctx.getSessionId(), options.toolCallId, signal, () =>
+          callProvider(provider as "openai" | "google" | "xai", key, {
             prompt,
             size,
             quality,
-          });
-          return {
+            signal,
+          }).then((result) => ({
             type: "image" as const,
             provider: result.provider,
             mimeType: result.mimeType,
@@ -94,10 +109,15 @@ Auto-executes — no approval needed.`,
             base64: result.base64,
             url: result.url,
             prompt,
-          };
-        } catch (e) {
-          return { error: String(e) };
-        }
+          })),
+        );
+
+        return {
+          status: "generating",
+          kind: "image",
+          provider: provider as "openai" | "google" | "xai",
+          prompt,
+        };
       },
     }),
   } as const;
@@ -106,7 +126,7 @@ Auto-executes — no approval needed.`,
 async function callProvider(
   provider: "openai" | "google" | "xai",
   key: string,
-  opts: { prompt: string; size?: string; quality?: string },
+  opts: { prompt: string; size?: string; quality?: string; signal?: AbortSignal },
 ): Promise<ImageResult> {
   switch (provider) {
     case "openai":

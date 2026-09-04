@@ -29,6 +29,8 @@ export type ImageGenerateOpts = {
   quality?: string;
   /** Base64 of a reference image for editing. */
   referenceImage?: string;
+  /** Aborts an in-flight generation (best-effort; poll loops honor it). */
+  signal?: AbortSignal;
 };
 
 /** Normalized video generation interface. */
@@ -38,4 +40,6 @@ export type VideoGenerateOpts = {
   aspectRatio?: string;
   /** Base64 of a reference image to animate. */
   referenceImage?: string;
+  /** Aborts an in-flight generation (best-effort; poll loops honor it). */
+  signal?: AbortSignal;
 };

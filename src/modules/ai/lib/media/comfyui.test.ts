@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { injectPrompt } from "./comfyui";
+import { injectDuration, injectPrompt } from "./comfyui";
 
 describe("injectPrompt", () => {
   it("injects into CLIPTextEncode node", () => {
@@ -82,5 +82,64 @@ describe("injectPrompt", () => {
     const copy = JSON.parse(JSON.stringify(workflow));
     injectPrompt(structuredClone(workflow), "new");
     expect(workflow).toEqual(copy);
+  });
+});
+
+describe("injectDuration", () => {
+  it("sets frame count from duration and detected fps", () => {
+    const workflow = {
+      "1": {
+        class_type: "KSampler",
+        inputs: { frames: 16, fps: 24, steps: 20 },
+      },
+    };
+    const result = injectDuration(workflow, 5) as Record<
+      string,
+      { inputs: { frames: number; fps: number } }
+    >;
+    expect(result["1"].inputs.frames).toBe(120); // 5s * 24fps
+  });
+
+  it("defaults fps to 24 when no fps node exists", () => {
+    const workflow = {
+      "1": {
+        class_type: "EmptyHunyuanLatentVideo",
+        inputs: { length: 25, width: 512, height: 512 },
+      },
+    };
+    const result = injectDuration(workflow, 3) as Record<
+      string,
+      { inputs: { length: number } }
+    >;
+    expect(result["1"].inputs.length).toBe(72); // 3s * 24fps
+  });
+
+  it("sets a plain duration input directly", () => {
+    const workflow = {
+      "1": {
+        class_type: "Custom",
+        inputs: { duration: 10 },
+      },
+    };
+    const result = injectDuration(workflow, 5) as Record<
+      string,
+      { inputs: { duration: number } }
+    >;
+    expect(result["1"].inputs.duration).toBe(5);
+  });
+
+  it("leaves non-frame inputs untouched", () => {
+    const workflow = {
+      "1": {
+        class_type: "KSampler",
+        inputs: { seed: 42, steps: 20 },
+      },
+    };
+    const result = injectDuration(workflow, 5) as Record<
+      string,
+      { inputs: { seed: number; steps: number } }
+    >;
+    expect(result["1"].inputs.seed).toBe(42);
+    expect(result["1"].inputs.steps).toBe(20);
   });
 });

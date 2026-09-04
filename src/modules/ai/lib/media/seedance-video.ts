@@ -8,7 +8,7 @@ const MAX_POLLS = 120;
 /** Generate a video via ByteDance Seedance 2.0. */
 export async function generateSeedanceVideo(
   apiKey: string,
-  opts: { prompt: string; duration?: number; aspectRatio?: string; referenceImage?: string },
+  opts: { prompt: string; duration?: number; aspectRatio?: string; referenceImage?: string; signal?: AbortSignal },
 ): Promise<VideoResult> {
   const body: Record<string, unknown> = {
     model: "seedance-2",
@@ -22,6 +22,7 @@ export async function generateSeedanceVideo(
   }
 
   // Submit task
+  if (opts.signal?.aborted) throw abortError();
   const submitText = await httpPost(apiKey, "/generations", body);
   const submitJson = JSON.parse(submitText) as { id?: string; error?: { message?: string } };
   if (!submitJson.id) {
@@ -31,6 +32,7 @@ export async function generateSeedanceVideo(
   // Poll for completion
   const taskId = submitJson.id;
   for (let i = 0; i < MAX_POLLS; i++) {
+    if (opts.signal?.aborted) throw abortError();
     await sleep(POLL_INTERVAL_MS);
     const pollText = await httpGet(apiKey, `/generations/${taskId}`);
     const poll = JSON.parse(pollText) as {
@@ -86,4 +88,8 @@ async function httpGet(apiKey: string, path: string): Promise<string> {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function abortError(): Error {
+  return new Error("Generation cancelled.");
 }

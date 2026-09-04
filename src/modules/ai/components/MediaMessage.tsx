@@ -40,6 +40,27 @@ export function isMediaOutput(
   return o.type === "image" || o.type === "video";
 }
 
+/** A media-generation job that is still running in the background. */
+export type MediaGeneratingOutput = {
+  status: "generating";
+  kind: "image" | "video";
+  provider: string;
+  prompt: string;
+};
+
+/** Detect if a tool output is an in-progress background generation. */
+export function isGeneratingMedia(
+  output: unknown,
+): output is MediaGeneratingOutput {
+  if (!output || typeof output !== "object") return false;
+  const o = output as Record<string, unknown>;
+  return (
+    o.status === "generating" &&
+    (o.kind === "image" || o.kind === "video") &&
+    typeof o.provider === "string"
+  );
+}
+
 /** Inline image or video in the chat conversation. */
 export const MediaMessage = memo(function MediaMessage({ output }: Props) {
   const [lightbox, setLightbox] = useState(false);

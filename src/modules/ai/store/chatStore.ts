@@ -262,6 +262,9 @@ type StoreState = {
   autoApprovedIds: Set<string>;
   markAutoApproved: (id: string) => void;
 
+  /** Set the final `output` of a tool-call part (background media result). */
+  resolveMedia: (sessionId: string, toolCallId: string, output: unknown) => void;
+
   // Sessions
   sessionsHydrated: boolean;
   lastHydratedWorkspace: string | null;
@@ -609,6 +612,34 @@ export const useChatStore = create<StoreState>((set, get) => ({
   patchAgentMeta: (patch) =>
     set((s) => ({ agentMeta: { ...s.agentMeta, ...patch } })),
   resetAgentMeta: () => set({ agentMeta: IDLE_META }),
+
+  resolveMedia: (sessionId, toolCallId, output) => {
+    const chat = chats.get(sessionId);
+    if (!chat) return;
+    const msgs = chat.messages;
+    let mutated = false;
+    const next = msgs.map((m) => {
+      if (m.role !== "assistant") return m;
+      let touched = false;
+      const parts = m.parts.map((p) => {
+        const tc = (p as { toolCallId?: string }).toolCallId;
+        if (tc !== toolCallId) return p;
+        const state = (p as { state?: string }).state;
+        // Only patch a part the SDK already finalized (has a result slot).
+        if (state !== "output-available" && state !== "output-error") return p;
+        touched = true;
+        return { ...(p as Record<string, unknown>), output } as unknown as typeof p;
+      });
+      if (!touched) return m;
+      mutated = true;
+      return { ...m, parts } as typeof m;
+    });
+    if (mutated) {
+      chat.messages = next;
+      set({ _tick: Date.now() });
+      void saveMessages(sessionId, next);
+    }
+  },
 
   autoApprove: "off" as AutoApproveMode,
   setAutoApprove: (mode) => set({ autoApprove: mode }),

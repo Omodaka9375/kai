@@ -12,6 +12,8 @@ export async function generateOpenAIImage(
   const size = opts.size ?? "1024x1024";
   const quality = opts.quality ?? "auto";
 
+  if (opts.signal?.aborted) throw new Error("Generation cancelled.");
+
   const body = JSON.stringify({
     model: MODEL,
     prompt: opts.prompt,

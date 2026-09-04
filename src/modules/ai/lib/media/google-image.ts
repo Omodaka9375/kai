@@ -10,6 +10,8 @@ export async function generateGoogleImage(
 ): Promise<ImageResult> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey}`;
 
+  if (opts.signal?.aborted) throw new Error("Generation cancelled.");
+
   const body = JSON.stringify({
     contents: [
       {

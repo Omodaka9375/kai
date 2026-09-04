@@ -7,7 +7,7 @@ const MAX_POLLS = 120;
 /** Generate a video via Google Veo 3.1. */
 export async function generateGoogleVideo(
   apiKey: string,
-  opts: { prompt: string; duration?: number; aspectRatio?: string },
+  opts: { prompt: string; duration?: number; aspectRatio?: string; signal?: AbortSignal },
 ): Promise<VideoResult> {
   // Submit generation request
   const submitUrl = `https://generativelanguage.googleapis.com/v1beta/models/veo-3.1:generateVideos?key=${apiKey}`;
@@ -19,6 +19,7 @@ export async function generateGoogleVideo(
     },
   });
 
+  if (opts.signal?.aborted) throw abortError();
   const submitResp = await httpPost(submitUrl, body);
   const submitJson = JSON.parse(submitResp) as { name?: string; error?: { message?: string } };
   if (!submitJson.name) {
@@ -28,6 +29,7 @@ export async function generateGoogleVideo(
   // Poll operation
   const opName = submitJson.name;
   for (let i = 0; i < MAX_POLLS; i++) {
+    if (opts.signal?.aborted) throw abortError();
     await sleep(POLL_INTERVAL_MS);
     const pollUrl = `https://generativelanguage.googleapis.com/v1beta/${opName}?key=${apiKey}`;
     const pollResp = await httpGet(pollUrl, apiKey);
@@ -83,4 +85,8 @@ async function httpGet(url: string, _apiKey: string): Promise<string> {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function abortError(): Error {
+  return new Error("Generation cancelled.");
 }

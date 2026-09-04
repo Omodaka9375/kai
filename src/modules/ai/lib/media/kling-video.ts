@@ -20,7 +20,7 @@ type KlingTaskResponse = {
 /** Generate a video via Kling 3.0 API. */
 export async function generateKlingVideo(
   apiKey: string,
-  opts: { prompt: string; duration?: number; aspectRatio?: string; referenceImage?: string },
+  opts: { prompt: string; duration?: number; aspectRatio?: string; referenceImage?: string; signal?: AbortSignal },
 ): Promise<VideoResult> {
   const body: Record<string, unknown> = {
     model_name: "kling-v3",
@@ -35,6 +35,7 @@ export async function generateKlingVideo(
   }
 
   // Submit task
+  if (opts.signal?.aborted) throw abortError();
   const submitResp = await klingRequest(apiKey, "POST", "/videos/text2video", body);
   const taskId = submitResp.data?.task_id;
   if (!taskId) {
@@ -43,6 +44,7 @@ export async function generateKlingVideo(
 
   // Poll for completion
   for (let i = 0; i < MAX_POLLS; i++) {
+    if (opts.signal?.aborted) throw abortError();
     await sleep(POLL_INTERVAL_MS);
     const status = await klingRequest(apiKey, "GET", `/videos/text2video/${taskId}`);
     const taskStatus = status.data?.task_status;
@@ -100,4 +102,8 @@ async function klingRequest(
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function abortError(): Error {
+  return new Error("Generation cancelled.");
 }

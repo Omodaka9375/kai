@@ -9,6 +9,8 @@ export async function generateXAIImage(
   apiKey: string,
   opts: ImageGenerateOpts,
 ): Promise<ImageResult> {
+  if (opts.signal?.aborted) throw new Error("Generation cancelled.");
+
   const body = JSON.stringify({
     model: MODEL,
     prompt: opts.prompt,

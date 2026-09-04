@@ -5,10 +5,12 @@ import { generateKlingVideo } from "../lib/media/kling-video";
 import { generateGoogleVideo } from "../lib/media/google-video";
 import { generateSeedanceVideo } from "../lib/media/seedance-video";
 import { generateComfyVideo } from "../lib/media/comfyui";
+import { spawnMediaTask } from "../lib/media/task";
 import type { VideoResult } from "../lib/media/types";
 import type { ToolContext } from "./context";
 
 const PROVIDER_ENUM = ["kling", "google", "seedance", "comfyui"] as const;
+const DEFAULT_DURATION = 5;
 
 export function buildVideoGenTools(_ctx: ToolContext) {
   return {
@@ -41,29 +43,47 @@ Video generation takes 1-5 minutes. Auto-executes — no approval needed.`,
           .optional()
           .describe("Aspect ratio (e.g. '16:9', '9:16', '1:1'). Defaults to 16:9."),
       }),
-      execute: async ({ prompt, provider, duration, aspect_ratio }) => {
-        // ComfyUI: no key needed, uses workflow from settings
+      execute: async ({ prompt, provider, duration, aspect_ratio }, options) => {
+        const effectiveDuration = duration ?? DEFAULT_DURATION;
+        const signal = options?.abortSignal;
+
+        // ComfyUI: no key needed, uses workflow from settings. Generation is
+        // slow (and can be minutes long), so it runs in the background and
+        // patches its result into this tool-call part when done.
         if (provider === "comfyui") {
+          const prefs = await import("@/modules/settings/preferences").then(
+            (m) => m.usePreferencesStore.getState(),
+          );
+          if (!prefs.comfyuiWorkflow) {
+            return { error: "No ComfyUI workflow uploaded. Go to Settings → Models → ComfyUI and upload a workflow JSON." };
+          }
+          let workflow: Record<string, unknown>;
           try {
-            const prefs = await import("@/modules/settings/preferences").then(
-              (m) => m.usePreferencesStore.getState(),
-            );
-            if (!prefs.comfyuiWorkflow) {
-              return { error: "No ComfyUI workflow uploaded. Go to Settings → Models → ComfyUI and upload a workflow JSON." };
-            }
-            const workflow = JSON.parse(prefs.comfyuiWorkflow) as Record<string, unknown>;
-            const result = await generateComfyVideo(prefs.comfyuiBaseURL, workflow, prompt);
-            return {
+            workflow = JSON.parse(prefs.comfyuiWorkflow) as Record<string, unknown>;
+          } catch {
+            return { error: "ComfyUI workflow is not valid JSON. Re-export it using 'Save (API Format)'." };
+          }
+
+          spawnMediaTask(_ctx.getSessionId(), options.toolCallId, signal, () =>
+            generateComfyVideo(prefs.comfyuiBaseURL, workflow, prompt, {
+              duration: effectiveDuration,
+              signal,
+            }).then((result) => ({
               type: "video" as const,
               provider: result.provider,
               mimeType: result.mimeType,
               durationSeconds: result.durationSeconds,
               url: result.url,
               prompt,
-            };
-          } catch (e) {
-            return { error: String(e) };
-          }
+            })),
+          );
+
+          return {
+            status: "generating",
+            kind: "video",
+            provider: "comfyui",
+            prompt,
+          };
         }
 
         const keys = useChatStore.getState().apiKeys;
@@ -80,23 +100,28 @@ Video generation takes 1-5 minutes. Auto-executes — no approval needed.`,
           };
         }
 
-        try {
-          const result = await callProvider(provider as "kling" | "google" | "seedance", key, {
+        spawnMediaTask(_ctx.getSessionId(), options.toolCallId, signal, () =>
+          callProvider(provider as "kling" | "google" | "seedance", key, {
             prompt,
-            duration,
+            duration: effectiveDuration,
             aspectRatio: aspect_ratio,
-          });
-          return {
+            signal,
+          }).then((result) => ({
             type: "video" as const,
             provider: result.provider,
             mimeType: result.mimeType,
             durationSeconds: result.durationSeconds,
             url: result.url,
             prompt,
-          };
-        } catch (e) {
-          return { error: String(e) };
-        }
+          })),
+        );
+
+        return {
+          status: "generating",
+          kind: "video",
+          provider: provider as "kling" | "google" | "seedance",
+          prompt,
+        };
       },
     }),
   } as const;
@@ -119,7 +144,7 @@ async function getMediaKey(provider: string): Promise<string | null> {
 async function callProvider(
   provider: "kling" | "google" | "seedance",
   key: string,
-  opts: { prompt: string; duration?: number; aspectRatio?: string },
+  opts: { prompt: string; duration?: number; aspectRatio?: string; signal?: AbortSignal },
 ): Promise<VideoResult> {
   switch (provider) {
     case "kling":

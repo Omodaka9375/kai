@@ -43,7 +43,7 @@ import type {
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { StickToBottomContext } from "use-stick-to-bottom";
 import { AiToolApproval } from "./AiToolApproval";
-import { MediaMessage, isMediaOutput } from "./MediaMessage";
+import { MediaMessage, isMediaOutput, isGeneratingMedia } from "./MediaMessage";
 
 function ForkButton({ messageIndex }: { messageIndex: number }) {
   const forkSession = useChatStore((s) => s.forkSession);
@@ -1404,6 +1404,23 @@ const RenderedTool = memo(function RenderedTool({
     isMediaOutput(part.output)
   ) {
     return <MediaMessage output={part.output} />;
+  }
+
+  // Show a live "generating…" state for media jobs running in the background.
+  if (
+    (toolName === "generate_image" || toolName === "generate_video") &&
+    "output" in part &&
+    isGeneratingMedia(part.output)
+  ) {
+    const g = part.output;
+    return (
+      <div className="flex items-center gap-2 rounded-lg border border-border/40 bg-card/60 px-3 py-2.5 text-xs text-muted-foreground">
+        <Spinner />
+        <span className="truncate">
+          Generating {g.kind} via {g.provider}…
+        </span>
+      </div>
+    );
   }
 
   return (
