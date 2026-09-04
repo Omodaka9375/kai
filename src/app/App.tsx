@@ -510,7 +510,7 @@ export default function App() {
       ? explorerRoot.split(/[\\/]/).filter(Boolean).pop() ?? explorerRoot
       : null;
     const w = getCurrentWindow();
-    const title = name ? `${name} — KAI` : "KAI";
+    const title = name ? `KAI — ${name}` : "KAI";
     void w.setTitle(title);
     document.title = title;
   }, [explorerRoot]);
