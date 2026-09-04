@@ -32,8 +32,13 @@ export type EntryRowProps = {
   tree: Tree;
   isSelected: boolean;
   isRenaming: boolean;
+  selectedPaths: string[];
   onOpenFile: (path: string, pin?: boolean) => void;
   onSelectPath: (path: string) => void;
+  onToggleSelect: (path: string) => void;
+  onRangeSelect: (path: string) => void;
+  onContextMenuSelect: (path: string) => void;
+  onDeletePaths: (paths: string[]) => void;
   onRevealInTerminal?: (path: string) => void;
   onAttachToAgent?: (path: string) => void;
   onPreviewMarkdown?: (path: string) => void;
@@ -51,8 +56,13 @@ function EntryRowImpl(props: EntryRowProps) {
     tree,
     isSelected,
     isRenaming,
+    selectedPaths,
     onOpenFile,
     onSelectPath,
+    onToggleSelect,
+    onRangeSelect,
+    onContextMenuSelect,
+    onDeletePaths,
     onRevealInTerminal,
     onAttachToAgent,
     onPreviewMarkdown,
@@ -60,20 +70,36 @@ function EntryRowImpl(props: EntryRowProps) {
   } = props;
 
   const [isConfirming, setIsConfirming] = useState(false);
+  const [isConfirmingMulti, setIsConfirmingMulti] = useState(false);
   const isConfirmingRef = useRef(false);
+  const isConfirmingMultiRef = useRef(false);
   const iconUrl = isDir ? folderIconUrl(name, isExpanded) : fileIconUrl(name);
   const createTarget = isDir ? path : path.slice(0, path.lastIndexOf("/")) || rootPath;
   const paddingLeft = 6 + depth * 12;
+  const multi = selectedPaths.length > 1;
 
-  const handleClick = () => {
+  const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     if (tree.renaming) return;
+    if (e.shiftKey) {
+      onRangeSelect(path);
+      return;
+    }
+    if (e.metaKey || e.ctrlKey) {
+      onToggleSelect(path);
+      return;
+    }
     onSelectPath(path);
     if (isDir) tree.toggle(path);
     else onOpenFile(path);
   };
 
+  const handleContextMenu = () => {
+    if (tree.renaming) return;
+    onContextMenuSelect(path);
+  };
+
   return (
-    <ContextMenu onOpenChange={(open) => { if (!open) { isConfirmingRef.current = false; setIsConfirming(false); } }}>
+    <ContextMenu onOpenChange={(open) => { if (!open) { isConfirmingRef.current = false; setIsConfirming(false); isConfirmingMultiRef.current = false; setIsConfirmingMulti(false); } }}>
       <ContextMenuTrigger asChild>
         {isRenaming ? (
           <div
@@ -97,6 +123,7 @@ function EntryRowImpl(props: EntryRowProps) {
             type="button"
             data-fs-path={path}
             onClick={handleClick}
+            onContextMenu={handleContextMenu}
             onDoubleClick={() => !isDir && tree.beginRename(path)}
             className={cn(
               "group flex h-6 w-full min-w-0 cursor-pointer items-center gap-2 rounded-sm px-1.5 text-left text-[13px] text-foreground/85 transition-colors hover:bg-accent/70",
@@ -132,105 +159,144 @@ function EntryRowImpl(props: EntryRowProps) {
           if (tree.renaming || tree.pendingCreate) e.preventDefault();
         }}
       >
-        {!isDir && (
-          <ContextMenuItem
-            className={COMPACT_ITEM}
-            onSelect={() => onOpenFile(path, true)}
-          >
-            Open
-          </ContextMenuItem>
-        )}
-        {!isDir && /\.(html|htm)$/i.test(name) && onOpenPreview && (
-          <ContextMenuItem
-            className={COMPACT_ITEM}
-            onSelect={async () => {
-              const lastSep = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
-              const parentDir = lastSep > 0 ? path.slice(0, lastSep) : path;
-              const command = `npx --yes http-server "${parentDir}" --port 5500`;
-              try {
-                // Spawn the background server
-                await native.shellBgSpawn(command, parentDir);
-                // Open the preview tab pointing to the file on port 5500
-                onOpenPreview(`http://localhost:5500/${name}`);
-              } catch (e) {
-                console.error("Live preview launch failed:", e);
+        {multi ? (
+          <>
+            <ContextMenuItem
+              className={COMPACT_ITEM}
+              onSelect={() => void copyToClipboard(selectedPaths.join("\n"))}
+            >
+              Copy Paths
+            </ContextMenuItem>
+            <ContextMenuItem
+              className={COMPACT_ITEM}
+              onSelect={() =>
+                void copyToClipboard(
+                  selectedPaths.map((p) => relativePath(rootPath, p)).join("\n"),
+                )
               }
-            }}
-          >
-            Open in Live Preview
-          </ContextMenuItem>
+            >
+              Copy Relative Paths
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+            <ContextMenuItem
+              className={COMPACT_ITEM}
+              variant="destructive"
+              onSelect={(e) => {
+                if (isConfirmingMultiRef.current) {
+                  onDeletePaths(selectedPaths);
+                } else {
+                  e.preventDefault();
+                  isConfirmingMultiRef.current = true;
+                  setIsConfirmingMulti(true);
+                }
+              }}
+            >
+              {isConfirmingMulti
+                ? "Click again to confirm"
+                : `Delete ${selectedPaths.length} items`}
+            </ContextMenuItem>
+          </>
+        ) : (
+          <>
+            {!isDir && (
+              <ContextMenuItem
+                className={COMPACT_ITEM}
+                onSelect={() => onOpenFile(path, true)}
+              >
+                Open
+              </ContextMenuItem>
+            )}
+            {!isDir && /\.(html|htm)$/i.test(name) && onOpenPreview && (
+              <ContextMenuItem
+                className={COMPACT_ITEM}
+                onSelect={async () => {
+                  const lastSep = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+                  const parentDir = lastSep > 0 ? path.slice(0, lastSep) : path;
+                  const command = `npx --yes http-server "${parentDir}" --port 5500`;
+                  try {
+                    await native.shellBgSpawn(command, parentDir);
+                    onOpenPreview(`http://localhost:5500/${name}`);
+                  } catch (e) {
+                    console.error("Live preview launch failed:", e);
+                  }
+                }}
+              >
+                Open in Live Preview
+              </ContextMenuItem>
+            )}
+            {!isDir && /\.md$/i.test(name) && onPreviewMarkdown && (
+              <ContextMenuItem
+                className={COMPACT_ITEM}
+                onSelect={() => onPreviewMarkdown(path)}
+              >
+                Preview
+              </ContextMenuItem>
+            )}
+            {isDir && onRevealInTerminal && (
+              <ContextMenuItem
+                className={COMPACT_ITEM}
+                onSelect={() => onRevealInTerminal(path)}
+              >
+                Open in Terminal
+              </ContextMenuItem>
+            )}
+            <ContextMenuItem
+              className={COMPACT_ITEM}
+              onSelect={() => void revealInFinder(path)}
+            >
+              Reveal in Finder
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+            <ContextMenuItem
+              className={COMPACT_ITEM}
+              onSelect={() => tree.beginCreate(createTarget, "file")}
+            >
+              New File
+            </ContextMenuItem>
+            <ContextMenuItem
+              className={COMPACT_ITEM}
+              onSelect={() => tree.beginCreate(createTarget, "dir")}
+            >
+              New Folder
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+            <ContextMenuItem
+              className={COMPACT_ITEM}
+              onSelect={() => void copyToClipboard(path)}
+            >
+              Copy Path
+            </ContextMenuItem>
+            <ContextMenuItem
+              className={COMPACT_ITEM}
+              onSelect={() => void copyToClipboard(relativePath(rootPath, path))}
+            >
+              Copy Relative Path
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+            <ContextMenuItem
+              className={COMPACT_ITEM}
+              onSelect={() => onAttachToAgent?.(path)}
+            >
+              Attach to Agent
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+            <ContextMenuItem
+              className={COMPACT_ITEM}
+              variant="destructive"
+              onSelect={(e) => {
+                if (isConfirmingRef.current) {
+                  onDeletePaths([path]);
+                } else {
+                  e.preventDefault();
+                  isConfirmingRef.current = true;
+                  setIsConfirming(true);
+                }
+              }}
+            >
+              {isConfirming ? "Click again to confirm" : "Delete"}
+            </ContextMenuItem>
+          </>
         )}
-        {!isDir && /\.md$/i.test(name) && onPreviewMarkdown && (
-          <ContextMenuItem
-            className={COMPACT_ITEM}
-            onSelect={() => onPreviewMarkdown(path)}
-          >
-            Preview
-          </ContextMenuItem>
-        )}
-        {isDir && onRevealInTerminal && (
-          <ContextMenuItem
-            className={COMPACT_ITEM}
-            onSelect={() => onRevealInTerminal(path)}
-          >
-            Open in Terminal
-          </ContextMenuItem>
-        )}
-        <ContextMenuItem
-          className={COMPACT_ITEM}
-          onSelect={() => void revealInFinder(path)}
-        >
-          Reveal in Finder
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem
-          className={COMPACT_ITEM}
-          onSelect={() => tree.beginCreate(createTarget, "file")}
-        >
-          New File
-        </ContextMenuItem>
-        <ContextMenuItem
-          className={COMPACT_ITEM}
-          onSelect={() => tree.beginCreate(createTarget, "dir")}
-        >
-          New Folder
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem
-          className={COMPACT_ITEM}
-          onSelect={() => void copyToClipboard(path)}
-        >
-          Copy Path
-        </ContextMenuItem>
-        <ContextMenuItem
-          className={COMPACT_ITEM}
-          onSelect={() => void copyToClipboard(relativePath(rootPath, path))}
-        >
-          Copy Relative Path
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem
-          className={COMPACT_ITEM}
-          onSelect={() => onAttachToAgent?.(path)}
-        >
-          Attach to Agent
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem
-          className={COMPACT_ITEM}
-          variant="destructive"
-          onSelect={(e) => {
-            if (isConfirmingRef.current) {
-              void tree.deletePath(path);
-            } else {
-              e.preventDefault();
-              isConfirmingRef.current = true;
-              setIsConfirming(true);
-            }
-          }}
-        >
-          {isConfirming ? "Click again to confirm" : "Delete"}
-        </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
   );

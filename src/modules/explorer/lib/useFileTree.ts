@@ -222,15 +222,28 @@ export function useFileTree(rootPath: string | null, options?: Options) {
     [renaming, fetchChildren, options],
   );
 
-  const deletePath = useCallback(
-    async (path: string) => {
-      try {
-        await invoke("fs_delete", { path, workspace: currentWorkspaceEnv() });
-        options?.onPathDeleted?.(path);
-        await fetchChildren(dirname(path));
-      } catch (e) {
-        console.error("fs_delete failed:", e);
+  const deletePaths = useCallback(
+    async (paths: string[]) => {
+      if (paths.length === 0) return;
+      // Drop descendants so we never try to delete a path after its parent
+      // (which would already be gone) — process shortest paths first.
+      const sorted = [...paths].sort((a, b) => a.length - b.length);
+      const roots: string[] = [];
+      for (const p of sorted) {
+        if (roots.some((r) => p === r || p.startsWith(`${r}/`))) continue;
+        roots.push(p);
       }
+      const parents = new Set<string>();
+      for (const path of roots) {
+        try {
+          await invoke("fs_delete", { path, workspace: currentWorkspaceEnv() });
+          options?.onPathDeleted?.(path);
+          parents.add(dirname(path));
+        } catch (e) {
+          console.error("fs_delete failed:", e);
+        }
+      }
+      for (const parent of parents) await fetchChildren(parent);
     },
     [fetchChildren, options],
   );
@@ -249,7 +262,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
     beginRename,
     cancelRename,
     commitRename,
-    deletePath,
+    deletePaths,
     joinPath,
   };
 }

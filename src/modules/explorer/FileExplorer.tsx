@@ -161,6 +161,8 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(
   ) {
     const tree = useFileTree(rootPath, { onPathRenamed, onPathDeleted });
     const [selectedPath, setSelectedPath] = useState<string | null>(null);
+    const [selection, setSelection] = useState<Set<string>>(new Set());
+    const anchorRef = useRef<string | null>(null);
     const [isSearchOpen, setIsSearchOpen] = useState(false);
     const [isSearchActive, setIsSearchActive] = useState(false);
     const searchRef = useRef<ExplorerSearchHandle>(null);
@@ -178,11 +180,81 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(
       return out;
     }, [rows]);
 
+    const selectOnly = useCallback((path: string) => {
+      setSelectedPath(path);
+      setSelection(new Set([path]));
+      anchorRef.current = path;
+    }, []);
+
+    const toggleSelect = useCallback((path: string) => {
+      setSelectedPath(path);
+      anchorRef.current = path;
+      setSelection((prev) => {
+        const next = new Set(prev);
+        if (next.has(path)) next.delete(path);
+        else next.add(path);
+        return next;
+      });
+    }, []);
+
+    const rangeSelect = useCallback((path: string) => {
+      const anchor = anchorRef.current;
+      if (!anchor || !entryIndexByPath.has(anchor)) {
+        selectOnly(path);
+        return;
+      }
+      const from = entryPaths.indexOf(anchor);
+      const to = entryPaths.indexOf(path);
+      if (from === -1 || to === -1) {
+        selectOnly(path);
+        return;
+      }
+      const lo = Math.min(from, to);
+      const hi = Math.max(from, to);
+      const next = new Set<string>();
+      for (let i = lo; i <= hi; i++) next.add(entryPaths[i]);
+      setSelection(next);
+      setSelectedPath(path);
+    }, [entryPaths, entryIndexByPath, selectOnly]);
+
+    const handleRowContextMenu = useCallback((path: string) => {
+      setSelectedPath(path);
+      anchorRef.current = path;
+      setSelection((prev) => (prev.has(path) ? prev : new Set([path])));
+    }, []);
+
+    const selectedPaths = useMemo(() => {
+      const out: string[] = [];
+      for (const row of rows)
+        if (row.kind === "entry" && selection.has(row.path)) out.push(row.path);
+      return out;
+    }, [rows, selection]);
+
+    const deleteSelectedPaths = useCallback((paths: string[]) => {
+      void tree.deletePaths(paths);
+      setSelection(new Set());
+      setSelectedPath(null);
+      anchorRef.current = null;
+    }, [tree]);
+
     useEffect(() => {
       if (selectedPath && !entryIndexByPath.has(selectedPath)) {
         setSelectedPath(null);
       }
     }, [entryIndexByPath, selectedPath]);
+
+    useEffect(() => {
+      if (selection.size === 0) return;
+      let changed = false;
+      const next = new Set(selection);
+      for (const p of selection) {
+        if (!entryIndexByPath.has(p)) {
+          next.delete(p);
+          changed = true;
+        }
+      }
+      if (changed) setSelection(next);
+    }, [entryIndexByPath, selection]);
 
     // Auto-refresh when the AI agent creates/writes files.
     useEffect(() => {
@@ -234,7 +306,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(
           containerRef.current?.focus();
           if (!selectedPath && entryPaths.length > 0) {
             const first = entryPaths[0];
-            setSelectedPath(first);
+            selectOnly(first);
             requestAnimationFrame(() => scrollEntryIntoView(first));
           }
         },
@@ -245,7 +317,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(
           return active instanceof Node && c.contains(active);
         },
       }),
-      [entryPaths, scrollEntryIntoView, selectedPath],
+      [entryPaths, scrollEntryIntoView, selectedPath, selectOnly],
     );
 
     useGlobalShortcuts({
@@ -294,7 +366,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(
       const move = (next: number) => {
         const clamped = Math.max(0, Math.min(entryPaths.length - 1, next));
         const path = entryPaths[clamped];
-        setSelectedPath(path);
+        selectOnly(path);
         requestAnimationFrame(() => scrollEntryIntoView(path));
       };
 
@@ -365,10 +437,15 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(
               depth={row.depth}
               rootPath={rootPath}
               tree={tree}
-              isSelected={selectedPath === row.path}
+              isSelected={selection.has(row.path)}
               isRenaming={row.kind === "rename"}
+              selectedPaths={selectedPaths}
               onOpenFile={onOpenFile}
-              onSelectPath={setSelectedPath}
+              onSelectPath={selectOnly}
+              onToggleSelect={toggleSelect}
+              onRangeSelect={rangeSelect}
+              onContextMenuSelect={handleRowContextMenu}
+              onDeletePaths={deleteSelectedPaths}
               onRevealInTerminal={onRevealInTerminal}
               onAttachToAgent={onAttachToAgent}
               onPreviewMarkdown={onPreviewMarkdown}
