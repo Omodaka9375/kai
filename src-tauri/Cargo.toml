@@ -59,6 +59,10 @@ image = { version = "0.25", default-features = false, features = [
   "webp",
 ] }
 
+# Local voice transcription (whisper.cpp). CPU-only build keeps the toolchain
+# portable across all three platforms; no GPU feature flags enabled.
+whisper-rs = "0.16"
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 

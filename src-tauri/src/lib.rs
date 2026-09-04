@@ -1,7 +1,7 @@
 mod modules;
 
 use modules::lock::mutex_lock;
-use modules::{fs, git, gpg, mcp, net, pty, secrets, shell, workspace};
+use modules::{fs, git, gpg, mcp, net, pty, secrets, shell, whisper, workspace};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_window_state::StateFlags;
@@ -177,6 +177,7 @@ pub fn run() {
             registry
         })
         .manage(mcp::McpState::default())
+        .manage(whisper::WhisperManager::default())
         .manage(LaunchDir(Mutex::new(parse_launch_dir())))
         .invoke_handler(tauri::generate_handler![
             pty::pty_open,
@@ -254,6 +255,11 @@ pub fn run() {
             net::openrouter_list_models,
             net::ai_http_request,
             net::ai_http_stream,
+            whisper::whisper_model_status,
+            whisper::whisper_download_model,
+            whisper::whisper_cancel_download,
+            whisper::whisper_delete_model,
+            whisper::whisper_transcribe,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -47,8 +47,15 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { Channel } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useState } from "react";
-import { native, type GpgKey, type GpgStatus } from "@/modules/ai/lib/native";
+import {
+  native,
+  type GpgKey,
+  type GpgStatus,
+  type WhisperDownloadEvent,
+  type WhisperModelStatus,
+} from "@/modules/ai/lib/native";
 import { SectionHeader } from "../components/SectionHeader";
 import { SettingRow } from "../components/SettingRow";
 
@@ -393,6 +400,8 @@ export function GeneralSection() {
 
       <CommitSigningBlock />
 
+      <LocalVoiceBlock />
+
       <div className="flex flex-col gap-2">
         <Label>Startup</Label>
         <div className="flex flex-col gap-2">
@@ -668,6 +677,130 @@ function ProxyUrlField() {
           )}
         </div>
       </SettingRow>
+    </div>
+  );
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+function LocalVoiceBlock() {
+  const [status, setStatus] = useState<WhisperModelStatus | null>(null);
+  const [downloaded, setDownloaded] = useState(0);
+  const [total, setTotal] = useState(0);
+  const [downloading, setDownloading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      setStatus(await native.whisperModelStatus());
+    } catch (e) {
+      setError(String(e));
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const download = useCallback(async () => {
+    setError(null);
+    setDownloaded(0);
+    setTotal(0);
+    setDownloading(true);
+    try {
+      const channel = new Channel<WhisperDownloadEvent>();
+      channel.onmessage = (ev) => {
+        if (ev.phase === "progress") {
+          setDownloaded(ev.downloaded);
+          setTotal(ev.total);
+        } else if (ev.phase === "done") {
+          setDownloading(false);
+          setStatus({ downloaded: true, downloading: false, path: ev.message, size: ev.total });
+        } else if (ev.phase === "error") {
+          setDownloading(false);
+          setError(ev.message ?? "Download failed.");
+        }
+      };
+      await native.whisperDownloadModel(channel);
+      await refresh();
+    } catch (e) {
+      setDownloading(false);
+      const msg = String(e);
+      // A cancel is a user action, not an error worth surfacing.
+      if (!/cancelled/i.test(msg)) setError(msg);
+    }
+  }, [refresh]);
+
+  const remove = useCallback(async () => {
+    setError(null);
+    try {
+      await native.whisperDeleteModel();
+      await refresh();
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [refresh]);
+
+  const pct =
+    total > 0 ? Math.min(100, Math.round((downloaded / total) * 100)) : 0;
+  const modelDownloaded = status?.downloaded ?? false;
+
+  return (
+    <div className="flex flex-col gap-2">
+      <Label>Local voice transcription</Label>
+      <SettingRow
+        title="Whisper model (large-v3-turbo q5_0)"
+        description={
+          modelDownloaded
+            ? `Downloaded (${formatBytes(status?.size ?? 0)}). Voice input runs fully offline and beats cloud APIs automatically.`
+            : "Download a pre-quantized Whisper model (~547 MB) from HuggingFace so voice transcription runs locally. Nothing is bundled by default."
+        }
+      >
+        <div className="flex items-center gap-1.5">
+          {modelDownloaded ? (
+            <Button size="xs" variant="outline" onClick={() => void remove()}>
+              Remove
+            </Button>
+          ) : downloading ? (
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={() => void native.whisperCancelDownload()}
+            >
+              Cancel
+            </Button>
+          ) : (
+            <Button size="xs" onClick={() => void download()}>
+              Download
+            </Button>
+          )}
+        </div>
+      </SettingRow>
+
+      {downloading && (
+        <div className="flex flex-col gap-1 px-3 py-2">
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full bg-foreground/70 transition-all"
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+          <span className="text-[10.5px] text-muted-foreground">
+            {pct}% · {formatBytes(downloaded)} / {formatBytes(total)}
+          </span>
+        </div>
+      )}
+
+      {error && (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-[11px] text-destructive">
+          {error}
+        </div>
+      )}
     </div>
   );
 }

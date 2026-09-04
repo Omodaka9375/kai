@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 
 export type ReadResult =
@@ -102,6 +102,20 @@ export type GpgStatus = {
   program: string | null;
   version: string | null;
   error: string | null;
+};
+
+export type WhisperModelStatus = {
+  downloaded: boolean;
+  downloading: boolean;
+  path: string | null;
+  size: number | null;
+};
+
+export type WhisperDownloadEvent = {
+  phase: "progress" | "done" | "error";
+  downloaded: number;
+  total: number;
+  message: string | null;
 };
 
 export type GitLogEntry = {
@@ -425,4 +439,11 @@ export const native = {
       name: name ?? null,
       workspace: currentWorkspaceEnv(),
     }),
+  whisperModelStatus: () => invoke<WhisperModelStatus>("whisper_model_status"),
+  whisperDownloadModel: (onEvent: Channel<WhisperDownloadEvent>) =>
+    invoke<void>("whisper_download_model", { onEvent }),
+  whisperCancelDownload: () => invoke<void>("whisper_cancel_download"),
+  whisperDeleteModel: () => invoke<void>("whisper_delete_model"),
+  whisperTranscribe: (audioBase64: string) =>
+    invoke<string>("whisper_transcribe", { audioBase64 }),
 };

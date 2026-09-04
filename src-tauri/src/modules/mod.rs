@@ -7,4 +7,5 @@ pub mod net;
 pub mod pty;
 pub mod secrets;
 pub mod shell;
+pub mod whisper;
 pub mod workspace;

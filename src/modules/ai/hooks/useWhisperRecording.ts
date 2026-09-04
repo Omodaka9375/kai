@@ -1,6 +1,7 @@
 import { createOpenAI } from "@ai-sdk/openai";
 import { experimental_transcribe as transcribe } from "ai";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { native } from "../lib/native";
 import { useChatStore } from "../store/chatStore";
 
 const MIME_CANDIDATES = [
@@ -55,6 +56,47 @@ async function transcribeBlob(blob: Blob, apiKey: string): Promise<string> {
     audio: buf,
   });
   return text;
+}
+
+/** Decode a captured container (webm/opus, mp4, …) into 16 kHz mono f32 PCM. */
+async function decodeTo16kMonoF32(blob: Blob): Promise<Float32Array> {
+  const arrayBuffer = await blob.arrayBuffer();
+  const decodeCtx = new AudioContext();
+  try {
+    const audioBuffer = await decodeCtx.decodeAudioData(arrayBuffer);
+    const targetRate = 16_000;
+    const frames = Math.max(1, Math.ceil(audioBuffer.duration * targetRate));
+    const offline = new OfflineAudioContext(1, frames, targetRate);
+    const src = offline.createBufferSource();
+    src.buffer = audioBuffer;
+    src.connect(offline.destination);
+    src.start(0);
+    const rendered = await offline.startRendering();
+    return rendered.getChannelData(0);
+  } finally {
+    void decodeCtx.close();
+  }
+}
+
+function f32ToBase64(samples: Float32Array): string {
+  const bytes = new Uint8Array(samples.length * 4);
+  const view = new DataView(bytes.buffer);
+  for (let i = 0; i < samples.length; i++) {
+    view.setFloat32(i * 4, samples[i], true); // little-endian
+  }
+  let binary = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+/** Local whisper transcription: decode → 16k mono f32 → base64 → Rust. */
+async function transcribeBlobLocal(blob: Blob): Promise<string> {
+  const samples = await decodeTo16kMonoF32(blob);
+  if (samples.length === 0) return "";
+  return native.whisperTranscribe(f32ToBase64(samples));
 }
 
 /** Check if the Browser Speech Recognition API is available (WebView2/Chromium). */
@@ -224,73 +266,80 @@ export function useWhisperRecording({
     }
   }, [fail]);
 
-  const startWhisper = useCallback(async () => {
-    if (!apiKey) {
-      fail("Whisper voice input needs an OpenAI API key (Settings → AI).");
-      return;
-    }
-    try {
-      const stream = await withTimeout(
-        navigator.mediaDevices.getUserMedia({ audio: true }),
-        GET_MEDIA_TIMEOUT_MS,
-        "Timed out waiting for microphone access",
-      );
-      streamRef.current = stream;
-      const mimeType = pickMime();
-      const rec = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-      chunksRef.current = [];
-      rec.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
-      };
-      rec.onstop = async () => {
-        const blob = new Blob(chunksRef.current, {
-          type: rec.mimeType || "audio/webm",
-        });
+  const startWhisper = useCallback(
+    async (useLocal: boolean) => {
+      if (!useLocal && !apiKey) {
+        fail("Whisper voice input needs an OpenAI API key (Settings → AI).");
+        return;
+      }
+      const cloudKey = apiKey ?? "";
+      try {
+        const stream = await withTimeout(
+          navigator.mediaDevices.getUserMedia({ audio: true }),
+          GET_MEDIA_TIMEOUT_MS,
+          "Timed out waiting for microphone access",
+        );
+        streamRef.current = stream;
+        const mimeType = pickMime();
+        const rec = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
         chunksRef.current = [];
+        rec.ondataavailable = (e) => {
+          if (e.data.size > 0) chunksRef.current.push(e.data);
+        };
+        rec.onstop = async () => {
+          const blob = new Blob(chunksRef.current, {
+            type: rec.mimeType || "audio/webm",
+          });
+          chunksRef.current = [];
+          teardownStream();
+          if (blob.size === 0) {
+            setState("idle");
+            return;
+          }
+          setState("transcribing");
+          try {
+            // Local Whisper auto-wins over the OpenAI API when downloaded.
+            const text = await withTimeout(
+              useLocal
+                ? transcribeBlobLocal(blob)
+                : transcribeBlob(blob, cloudKey),
+              TRANSCRIBE_TIMEOUT_MS,
+              "Speech transcription timed out",
+            );
+            if (text.trim()) onResultRef.current(text.trim());
+          } catch (e) {
+            console.error("whisper.transcribe", e);
+            setError(
+              typeof (e as Error)?.message === "string" &&
+                String((e as Error).message).length > 0
+                ? `Transcription failed: ${String((e as Error).message)}`
+                : "Transcription failed.",
+            );
+          } finally {
+            setState("idle");
+          }
+        };
+        recRef.current = rec;
+        rec.start();
+        startingRef.current = false;
+        clearWatchdog();
+        setState("recording");
+      } catch (e) {
+        const msg = typeof (e as Error)?.message === "string"
+          ? String((e as Error).message)
+          : String(e);
         teardownStream();
-        if (blob.size === 0) {
-          setState("idle");
-          return;
-        }
-        setState("transcribing");
-        try {
-          const text = await withTimeout(
-            transcribeBlob(blob, apiKey),
-            TRANSCRIBE_TIMEOUT_MS,
-            "Speech transcription timed out",
-          );
-          if (text.trim()) onResultRef.current(text.trim());
-        } catch (e) {
-          console.error("whisper.transcribe", e);
-          setError(
-            typeof (e as Error)?.message === "string" &&
-              String((e as Error).message).length > 0
-              ? `Transcription failed: ${String((e as Error).message)}`
-              : "Transcription failed.",
-          );
-        } finally {
-          setState("idle");
-        }
-      };
-      recRef.current = rec;
-      rec.start();
-      startingRef.current = false;
-      clearWatchdog();
-      setState("recording");
-    } catch (e) {
-      const msg = typeof (e as Error)?.message === "string"
-        ? String((e as Error).message)
-        : String(e);
-      teardownStream();
-      startingRef.current = false;
-      setError(
-        looksLikeDenied(msg)
-          ? "Microphone permission denied. Enable mic access for this app in your OS / WebView settings."
-          : `Could not start microphone: ${msg}`,
-      );
-      setState("idle");
-    }
-  }, [apiKey, fail, teardownStream]);
+        startingRef.current = false;
+        setError(
+          looksLikeDenied(msg)
+            ? "Microphone permission denied. Enable mic access for this app in your OS / WebView settings."
+            : `Could not start microphone: ${msg}`,
+        );
+        setState("idle");
+      }
+    },
+    [apiKey, fail, teardownStream],
+  );
 
   const start = useCallback(() => {
     if (startingRef.current || state !== "idle") return;
@@ -300,12 +349,24 @@ export function useWhisperRecording({
     }
     setError(null);
     startingRef.current = true;
-    if (useWhisper) {
-      // startWhisper is async and catches its own errors; keep it non-blocking.
-      void startWhisper();
-    } else {
-      startSpeechApi();
-    }
+
+    // Determine the freshest transcription route each time. Priority:
+    // local model (if downloaded) → OpenAI whisper-1 (if key) → browser API.
+    void (async () => {
+      let useLocal = false;
+      try {
+        const s = await native.whisperModelStatus();
+        useLocal = s.downloaded;
+      } catch {
+        useLocal = false;
+      }
+      if (useLocal || useWhisper) {
+        // startWhisper is async and catches its own errors; keep non-blocking.
+        void startWhisper(useLocal);
+      } else {
+        startSpeechApi();
+      }
+    })();
   }, [state, supported, useWhisper, startWhisper, startSpeechApi]);
 
   const clearError = useCallback(() => setError(null), []);
