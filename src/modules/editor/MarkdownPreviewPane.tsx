@@ -1,6 +1,6 @@
 import { native } from "@/modules/ai/lib/native";
-import { useEffect, useState } from "react";
-import { Streamdown } from "streamdown";
+import { useEffect, useMemo, useState } from "react";
+import { Streamdown, type Components } from "streamdown";
 
 type Props = {
   path: string;
@@ -54,35 +54,39 @@ function bytesToBase64(bytes: number[]): string {
 }
 
 /**
- * Make README/markdown images render:
- * 1. Convert raw `<img …>` HTML to markdown image syntax — Streamdown runs
- *    with `skipHtml`, which drops raw HTML tags, so README's `<img>` badges
- *    and screenshots never showed.
- * 2. Resolve relative image paths against the markdown file's directory and
- *    inline them as `data:` URLs. The webview origin can't resolve
- *    file-system-relative paths, and data URLs bypass remote-fetch CSP rules.
- * Remote http(s) images are left as-is (the CSP `img-src` allows `https:`).
+ * Streamdown runs with `skipHtml`, so raw `<img>` tags never render. Convert
+ * them to markdown image syntax first — the markdown parser then produces the
+ * same hast image node as a `![...](...)` reference.
  */
-async function rewriteImages(md: string, filePath: string): Promise<string> {
-  const baseDir = dirname(filePath);
-  const out = md.replace(IMG_TAG_RE, (_m, attrs: string) => {
+function htmlImagesToMarkdown(md: string): string {
+  return md.replace(IMG_TAG_RE, (_m, attrs: string) => {
     const src = attr(attrs, "src");
     if (!src) return "";
     const alt = attr(attrs, "alt") ?? "";
     return `![${alt}](${src})`;
   });
+}
 
-  // Collect unique relative image targets.
+/**
+ * Resolve local (non-remote) markdown images to `data:` URLs, keyed by their
+ * original `src` string. We deliberately do NOT inline these back into the
+ * markdown: Streamdown's sanitizer strips any `src` whose protocol isn't
+ * http/https — including `data:`. Instead the resolved URL is handed to a
+ * custom `img` component, so the value never passes through the sanitizer.
+ */
+async function resolveLocalImages(
+  md: string,
+  filePath: string,
+): Promise<Map<string, string>> {
+  const baseDir = dirname(filePath);
   const targets = new Map<string, string>(); // abs path -> original src
-  out.replace(MD_IMAGE_RE, (_m, _alt, src: string) => {
+  md.replace(MD_IMAGE_RE, (_m, _alt, src: string) => {
     if (isRemote(src)) return _m;
     const abs = baseDir ? `${baseDir}${src.replace(/\\/g, "/")}` : src;
     if (!targets.has(abs)) targets.set(abs, src);
     return _m;
   });
-  if (targets.size === 0) return out;
 
-  // Inline local images as data URLs (best effort — leave src unchanged on failure).
   const resolved = new Map<string, string>();
   await Promise.all(
     Array.from(targets.entries()).map(async ([abs, src]) => {
@@ -92,32 +96,33 @@ async function rewriteImages(md: string, filePath: string): Promise<string> {
         const bytes = await native.readFileBytes(abs);
         resolved.set(src, `data:${mime};base64,${bytesToBase64(bytes)}`);
       } catch {
-        // Missing/inaccessible image — leave the markdown untouched.
+        // Missing/inaccessible image — leave src unresolved.
       }
     }),
   );
-  if (resolved.size === 0) return out;
-
-  return out.replace(MD_IMAGE_RE, (m, alt, src: string) =>
-    resolved.has(src) ? `![${alt}](${resolved.get(src)})` : m,
-  );
+  return resolved;
 }
 
 export function MarkdownPreviewPane({ path, visible }: Props) {
   const [content, setContent] = useState<string | null>(null);
+  const [images, setImages] = useState<Map<string, string>>(new Map());
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setContent(null);
+    setImages(new Map());
     setError(null);
     native
       .readFile(path)
       .then(async (r) => {
         if (cancelled) return;
         if (r.kind === "text") {
-          const rewritten = await rewriteImages(r.content, path);
-          if (!cancelled) setContent(rewritten);
+          const md = htmlImagesToMarkdown(r.content);
+          const imgs = await resolveLocalImages(md, path);
+          if (cancelled) return;
+          setContent(md);
+          setImages(imgs);
         } else if (r.kind === "binary") {
           setError("Binary file — cannot preview.");
         } else if (r.kind === "toolarge") {
@@ -131,6 +136,18 @@ export function MarkdownPreviewPane({ path, visible }: Props) {
       cancelled = true;
     };
   }, [path]);
+
+  const components = useMemo<Components>(
+    () => ({
+      img: (props) => {
+        const { node, src, alt, ...rest } = props;
+        void node;
+        const resolved = typeof src === "string" ? images.get(src) : undefined;
+        return <img {...rest} src={resolved ?? src} alt={alt} />;
+      },
+    }),
+    [images],
+  );
 
   if (!visible) return null;
 
@@ -157,6 +174,7 @@ export function MarkdownPreviewPane({ path, visible }: Props) {
           className="prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
           linkSafety={{ enabled: false }}
           skipHtml
+          components={components}
         >
           {content}
         </Streamdown>
