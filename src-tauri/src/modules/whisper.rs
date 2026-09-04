@@ -242,8 +242,8 @@ fn decode_audio(base64_str: &str) -> Result<Vec<f32>, String> {
         return Err("invalid audio payload: not f32-aligned".into());
     }
     let mut samples = Vec::with_capacity(bytes.len() / 4);
-    for chunk in bytes.chunks_exact(4) {
-        samples.push(f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
+    for &chunk in bytes.as_chunks::<4>().0 {
+        samples.push(f32::from_le_bytes(chunk));
     }
     Ok(samples)
 }
