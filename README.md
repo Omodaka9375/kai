@@ -23,7 +23,7 @@ Kai is a fast, cross-platform terminal built on **Tauri 2 + Rust** and **React 1
 
 **Terminal** — xterm.js + WebGL, multi-tab, split panes, shell integration (bash/zsh/PowerShell/cmd), inline search, smart error detection with one-click AI fix, toroidal **Conway's Game of Life thinking spinner**, and **Escape-key streaming interrupt**.
 
-**Editor** — CodeMirror 6 with 44 languages, find & replace, inline AI autocomplete, edit diffs with approval flow, 9 editor themes, Vim mode (with `:w`/`:q` Ex commands), image & PDF preview, and **Open in Live Preview** (right-click any HTML file to spawn a local background HTTP server and preview it instantly in-app).
+**Editor** — CodeMirror 6 with 44 languages, find & replace, edit diffs with approval flow, 9 editor themes, Vim mode (with `:w`/`:q` Ex commands), image & PDF preview, and **Open in Live Preview** (right-click any HTML file to spawn a local background HTTP server and preview it instantly in-app).
 
 **AI Agent** — bring your own key. Supports OpenAI, Anthropic, Google, Groq, xAI, Cerebras, DeepSeek, Mistral, OpenRouter, and direct Z.ai (GLM) integration. Supports **Clipboard Image Pasting (`Ctrl+V`)** to attach screenshots instantly, **Universal File Extraction** (zip/audio/image/video locally extracted as text), and **Interactive Todo Toggling** with auto-closing completion lists. **Per-model thinking control** — a brain toggle on each reasoning model cycles thinking effort off/low/medium/high, mapping to provider-native reasoning budgets/efforts. Local models via LM Studio or Ollama.
 
@@ -67,7 +67,7 @@ KAI has full support for local, offline-only development. To use a local GGUF mo
 1.  Open **LM Studio** and navigate to the **Developer** tab.
 2.  Start the local HTTP server. Note the base URL (usually `http://localhost:1234/v1`).
 3.  In KAI, open **Settings → Models** and enter the Base URL and the active **Model ID** (e.g. `qwen3.3-coder-instruct`). Click **Save**.
-4.  You can now select **LM Studio (Local)** in your chat or autocomplete dropdown for 100% private intelligence.
+4.  You can now select **LM Studio (Local)** in your chat for 100% private intelligence.
 
 ### 2. One-Click MCP installations
 
