@@ -4,6 +4,27 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.2.7]
+
+### Added
+
+- Local Whisper voice transcription with bundled Silero VAD.
+- Optional GPG commit signing with auto-sign and approval-needed modes.
+- Explorer multi-select (Shift/Ctrl+Click) with batch context actions.
+- Drag files/folders from the explorer into the terminal to insert their path.
+
+### Changed
+
+- Removed AI inline autocomplete feature and its references.
+
+### Fixed
+
+- Terminal no longer blanks on heavy startup (PTY spawn no longer waits on fonts).
+- Source-control badge count now tracks the active panel's git context.
+- Hamburger menu "Appearance" entry renamed "General" and moved above Models.
+
+---
+
 ## [1.2.6]
 
 ### Fixed
