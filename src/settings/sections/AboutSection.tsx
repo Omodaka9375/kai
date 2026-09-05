@@ -8,7 +8,12 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { arch, platform } from "@tauri-apps/plugin-os";
 import { useEffect, useState } from "react";
 import { SectionHeader } from "../components/SectionHeader";
-import { buildIssueBody, diagnostics } from "../lib/diagnostics";
+import {
+  MAX_ISSUE_URL_BYTES,
+  buildIssueBody,
+  diagnostics,
+  fitBodyForUrl,
+} from "../lib/diagnostics";
 
 const REPO_URL = "https://github.com/Omodaka9375/kai";
 const WEBSITE = "https://omodaka9375.github.io/kai";
@@ -49,11 +54,15 @@ export function AboutSection() {
     try {
       const bundle = await diagnostics.collect();
       const home = await homeDir().catch(() => null);
-      const body = buildIssueBody(bundle, home);
-      const title = encodeURIComponent(
-        `Bug report — v${bundle.version} (${bundle.os}/${bundle.arch})`,
-      );
-      const url = `${REPO_URL}/issues/new?title=${title}&body=${encodeURIComponent(body)}`;
+      const title = `Bug report — v${bundle.version} (${bundle.os}/${bundle.arch})`;
+      const base = `${REPO_URL}/issues/new?title=${encodeURIComponent(title)}&body=`;
+
+      // Budget the body so title + base + body stay under GitHub's ~8 KB
+      // URL limit (the full bundle is still available via "Copy diagnostics").
+      const budget =
+        MAX_ISSUE_URL_BYTES - (base.length + encodeURIComponent(title).length);
+      const body = fitBodyForUrl(buildIssueBody(bundle, home), budget);
+      const url = `${base}${encodeURIComponent(body)}`;
       await openUrl(url);
     } catch (e) {
       setReportError(e instanceof Error ? e.message : String(e));
