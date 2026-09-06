@@ -368,6 +368,10 @@ function makeChatSync(sessionId: string): Chat<UIMessage> {
   }
 
   const streamStartedAtRef = { current: null as number | null };
+  // The "context compacted" notice fires on every agent turn once stale reads
+  // and large tool results start getting elided — which is noise, not signal.
+  // Surface it once per session, then stay quiet.
+  const compactionNoticeShown = { current: false };
 
   const toolContext: ToolContext = {
     getCwd: () => useChatStore.getState().live.getCwd(),
@@ -448,6 +452,10 @@ function makeChatSync(sessionId: string): Chat<UIMessage> {
     },
     onCompact: (info) => {
       if (!isActive()) return;
+      // Show once per session — elision recurs every turn once the history is
+      // large enough, and repeating the notice is just noise.
+      if (compactionNoticeShown.current) return;
+      compactionNoticeShown.current = true;
       useChatStore.getState().patchAgentMeta({
         compactionNotice: { droppedCount: info.droppedCount, at: Date.now() },
       });
