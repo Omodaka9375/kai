@@ -369,6 +369,10 @@ export type RunAgentOptions = {
   toolContext: ToolContext;
   onStep?: (step: string | null) => void;
   onUsage?: (delta: AgentUsageDelta) => void;
+  /** Fires on every streamed text delta. Lets the caller track live tok/s even
+   *  when the provider does not report `usage` (LM Studio, Ollama,
+   *  openai-compatible) — those emit text chunks but zero output tokens. */
+  onTextDelta?: (text: string) => void;
   onCompact?: (info: { droppedCount: number }) => void;
   onFinishMeta?: (info: { hitStepCap: boolean; finishReason: string }) => void;
   onLoopDetected?: (info: LoopDetectionResult) => void;
@@ -631,6 +635,14 @@ export async function runAgentStream(opts: RunAgentOptions) {
     stopWhen: stepCountIs(MAX_AGENT_STEPS),
     abortSignal: opts.abortSignal,
     ...(hasProviderOpts ? { providerOptions: thinkingProviderOpts } : {}),
+    onChunk: (chunk) => {
+      // Live token-rate source for providers that don't report usage. A chunk
+      // is a text delta; estimate ~4 chars/token (matches the compact.ts
+      // approximation). This is the ONLY signal local endpoints emit.
+      if (chunk.chunk.type === "text-delta" && chunk.chunk.text) {
+        opts.onTextDelta?.(chunk.chunk.text);
+      }
+    },
     onStepFinish: (step) => {
       stepsSeen++;
 

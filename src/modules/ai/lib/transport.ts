@@ -60,6 +60,7 @@ type Deps = {
   getOpenaiCompatibleModelId?: () => string | undefined;
   onStep?: (step: string | null) => void;
   onUsage?: (delta: AgentUsageDelta) => void;
+  onTextDelta?: (text: string) => void;
   onCompact?: (info: { droppedCount: number }) => void;
   onFinishMeta?: (info: { hitStepCap: boolean; finishReason: string }) => void;
   getPlanMode?: () => boolean;
@@ -163,6 +164,7 @@ export function createContextAwareTransport(deps: Deps) {
         deps.onStep?.(step);
       },
       onUsage: deps.onUsage,
+      onTextDelta: deps.onTextDelta,
       onCompact: deps.onCompact,
       onFinishMeta: (info) => {
         deps.onFinishMeta?.(info);

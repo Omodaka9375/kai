@@ -368,6 +368,13 @@ function makeChatSync(sessionId: string): Chat<UIMessage> {
   }
 
   const streamStartedAtRef = { current: null as number | null };
+  // Chunk-based tok/s for providers that never report `usage` (LM Studio,
+  // Ollama, openai-compatible). We accumulate streamed text chars and estimate
+  // tokens at ~4 chars/token; `sawUsageOutputTokens` switches off this fallback
+  // once the provider reports real usage so API models keep their exact count.
+  const chunkStreamStartedAtRef = { current: null as number | null };
+  const chunkCharsRef = { current: 0 };
+  const sawUsageOutputTokensRef = { current: false };
   // The "context compacted" notice fires on every agent turn once stale reads
   // and large tool results start getting elided — which is noise, not signal.
   // Surface it once per session, then stay quiet.
@@ -447,8 +454,29 @@ function makeChatSync(sessionId: string): Chat<UIMessage> {
     onStep: (step) => {
       if (step === null) {
         streamStartedAtRef.current = null;
+        chunkStreamStartedAtRef.current = null;
+        chunkCharsRef.current = 0;
+        sawUsageOutputTokensRef.current = false;
       }
       if (isActive()) useChatStore.getState().patchAgentMeta({ step });
+    },
+    onTextDelta: (text) => {
+      if (!isActive()) return;
+      const now = Date.now();
+      if (chunkStreamStartedAtRef.current === null) {
+        chunkStreamStartedAtRef.current = now;
+        chunkCharsRef.current = 0;
+      }
+      chunkCharsRef.current += text.length;
+      // Do not override the usage-based rate for providers that report usage.
+      if (sawUsageOutputTokensRef.current) return;
+      const elapsedMs = now - chunkStreamStartedAtRef.current;
+      const estTokens = chunkCharsRef.current / 4;
+      const tps =
+        estTokens > 0 && elapsedMs > 0
+          ? Math.round(estTokens / (elapsedMs / 1000))
+          : 0;
+      useChatStore.getState().patchAgentMeta({ outputTps: tps });
     },
     onCompact: (info) => {
       if (!isActive()) return;
@@ -477,6 +505,11 @@ function makeChatSync(sessionId: string): Chat<UIMessage> {
       if (streamStartedAt === null && delta.outputTokens > 0) {
         streamStartedAt = now;
         streamStartedAtRef.current = streamStartedAt;
+      }
+      // Once the provider reports real usage, the chunk-based estimate is
+      // superseded — flip the flag so onTextDelta stops overwriting outputTps.
+      if (delta.outputTokens > 0) {
+        sawUsageOutputTokensRef.current = true;
       }
       const elapsedMs = streamStartedAt !== null ? now - streamStartedAt : 0;
       const outputTps =
