@@ -193,16 +193,23 @@ export function buildShellTools(ctx: ToolContext) {
           };
           options?.abortSignal?.addEventListener("abort", onAbort, { once: true });
 
-          // Auto-append --yes to npx commands to prevent interactive installation prompts from hanging the shell.
-          // Only match npx when it appears as the command (start of string, or after ; && || | & or whitespace), never inside strings.
-          let sanitizedCommand = command;
-          if (/(?:^|[;|&]\s*)\bnpx\b/.test(sanitizedCommand) && !/(?:^|[;|&]\s*)\bnpx\s+(?:-y|--yes)\b/.test(sanitizedCommand)) {
-            sanitizedCommand = sanitizedCommand.replace(/((?:^|[;|&])\s*)\bnpx\b/g, "$1npx --yes");
+          // `npx` without `--yes`/`-y` prompts interactively on a first run, which
+          // hangs the non-interactive agent shell. Previously we silently appended
+          // `--yes` — but that changed the command AFTER the user had approved the
+          // original on the approval card. Reject it instead so the command the
+          // user sees is the command that runs. Only match npx at the command
+          // position (start of string, or after ; && || | &), never inside strings.
+          const npxRe = /(?:^|[;|&]\s*)\bnpx\b/;
+          if (npxRe.test(command) && !/(?:^|[;|&]\s*)\bnpx\s+(?:-y|--yes)\b/.test(command)) {
+            return {
+              error:
+                "npx without --yes will prompt interactively and hang. Re-run with `npx --yes <pkg>` (or `-y`).",
+            };
           }
 
           const r = await native.shellSessionRun(
             shellId,
-            sanitizedCommand,
+            command,
             cwd,
             effectiveTimeout,
           );
@@ -215,7 +222,7 @@ export function buildShellTools(ctx: ToolContext) {
           }
 
           return {
-            command: sanitizedCommand,
+            command,
             stdout: stripAnsi(r.stdout),
             stderr: stripAnsi(r.stderr),
             exit_code: r.exit_code,

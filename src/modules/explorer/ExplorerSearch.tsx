@@ -119,8 +119,11 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(function E
           const res = await invoke<{ hits: { path: string; rel: string; line: number; text: string }[]; truncated: boolean }>("fs_grep", {
             pattern: q,
             root: rootPath,
-            case_insensitive: !matchCase,
-            limit: 200,
+            // Rust args are `case_insensitive` / `max_results`; Tauri maps them
+            // to camelCase for invoke(). The old snake_case keys here were
+            // silently ignored, so the match-case toggle never did anything.
+            caseInsensitive: !matchCase,
+            maxResults: 200,
             workspace: currentWorkspaceEnv(),
           });
           if (alive) {

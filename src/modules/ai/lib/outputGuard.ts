@@ -102,7 +102,7 @@ function checkCamouflage(text: string): GuardWarning[] {
   const chars: Array<{ category: string; pattern: RegExp; desc: string }> = [
     { category: "zero-width", pattern: /[\u200B\u200C\u200D\uFEFF\u00AD\u2060]/g, desc: "zero-width characters" },
     { category: "bidi", pattern: /[\u202A-\u202E\u2066-\u2069]/g, desc: "bidirectional override" },
-    { category: "tag", pattern: /[\uE0001-\uE007F]/g, desc: "Unicode tag characters" },
+    { category: "tag", pattern: /[\u{E0000}-\u{E007F}]/gu, desc: "Unicode tag characters" },
   ];
 
   for (const { pattern, desc } of chars) {
@@ -140,9 +140,20 @@ export function guardToolOutput(
 
   const combined = texts.join("\n\n");
 
+  // Each pattern is a module-level `/g` regex. `RegExp.test()` with the `g`
+  // flag is STATEFUL — it advances `lastIndex` and starts the next search from
+  // where the last one stopped, so the same input matches on one call and
+  // misses on the next (order/history dependent). Reset before every use. The
+  // codebase already does this in `hasDsml` (`lastIndex = 0`); this guard just
+  // never did.
+  const matches = (re: RegExp): boolean => {
+    re.lastIndex = 0;
+    return re.test(combined);
+  };
+
   // Tier 1: Meta-injection (most dangerous — could create fake tool calls).
   for (const { pattern, confidence, label } of META_INJECTION_PATTERNS) {
-    if (pattern.test(combined)) {
+    if (matches(pattern)) {
       warnings.push({ kind: "meta_injection", confidence, marker: label });
     }
   }
@@ -152,7 +163,7 @@ export function guardToolOutput(
 
   // Tier 2: Prompt injection.
   for (const { pattern, confidence, label } of PROMPT_INJECTION_PATTERNS) {
-    if (pattern.test(combined)) {
+    if (matches(pattern)) {
       warnings.push({ kind: "prompt_injection", confidence, marker: label });
     }
   }
@@ -162,7 +173,7 @@ export function guardToolOutput(
 
   // Tier 3: Role injection.
   for (const { pattern, confidence, label } of ROLE_INJECTION_PATTERNS) {
-    if (pattern.test(combined)) {
+    if (matches(pattern)) {
       warnings.push({ kind: "role_injection", confidence, marker: label });
     }
   }

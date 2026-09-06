@@ -58,6 +58,17 @@ export function buildTerminalImageTools(ctx: ToolContext) {
       }),
       execute: async ({ base64_data, name }) => {
         const imgName = name || "image.png";
+        // The name is interpolated straight into an OSC 1337 sequence and written
+        // into the live PTY. A name containing `BEL` (`\x07`) or `ESC` (`\x1b`) would
+        // terminate the sequence early and inject arbitrary control bytes. Base64
+        // alphabet is `[A-Za-z0-9+/=]`; reject anything else so a payload can't
+        // smuggle a terminator past the length check.
+        if (/[\x00-\x1f\x7f]/.test(imgName)) {
+          return { error: "image name must not contain control bytes" };
+        }
+        if (!/^[A-Za-z0-9+/=]*$/.test(base64_data)) {
+          return { error: "base64_data must contain only base64 characters" };
+        }
         const sizeBytes = Math.ceil((base64_data.length * 3) / 4);
         const seq = buildOsc1337(base64_data, imgName, sizeBytes);
         const ok = ctx.injectIntoActivePty(seq);

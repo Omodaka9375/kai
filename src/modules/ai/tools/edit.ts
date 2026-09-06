@@ -5,7 +5,7 @@ import { native } from "../lib/native";
 import { checkReadableCanonical, checkWritableCanonical } from "../lib/security";
 import { newQueuedEditId, usePlanStore } from "../store/planStore";
 import { resolvePath, type ToolContext } from "./context";
-import { snapshotFile } from "../lib/checkpoints";
+import { snapshotFile, beginCheckpointBatch, commitCheckpoint, discardCheckpoint } from "../lib/checkpoints";
 import { withFileMutationLock } from "../lib/mutationLock";
 
 type EditResult =
@@ -365,12 +365,14 @@ export function buildEditTools(ctx: ToolContext) {
         // tool calls from one step don't clobber each other via stale reads.
         return withFileMutationLock([abs], async () => {
           // Snapshot before mutation for checkpoint undo.
+          beginCheckpointBatch(ctx.getWorkspaceRoot(), ctx.getSessionId());
           await snapshotFile(abs);
           const edits = [{ old_string, new_string, replace_all, line_hint }];
           const result = await applyEdits(abs, edits, "edit", ctx.readCache);
           if (result.ok) {
             getEditFailures(ctx).delete(abs);
             ctx.fileTracker.markModified(abs);
+            await commitCheckpoint();
             return result;
           }
           // If old_string wasn't found, re-read the file (a prior concurrent
@@ -384,11 +386,13 @@ export function buildEditTools(ctx: ToolContext) {
             if ("ok" in retry) {
               getEditFailures(ctx).delete(abs);
               ctx.fileTracker.markModified(abs);
+              await commitCheckpoint();
               return retry;
             }
             // Retry also failed — the target was consumed by a racing edit.
             // Append a hint so the model recovers instead of giving up.
             getEditFailures(ctx).set(abs, failures + 1);
+            discardCheckpoint();
             return {
               ...result,
               error:
@@ -397,6 +401,7 @@ export function buildEditTools(ctx: ToolContext) {
             };
           }
           getEditFailures(ctx).set(abs, failures + 1);
+          discardCheckpoint();
           return result;
         });
       },
@@ -438,6 +443,7 @@ export function buildEditTools(ctx: ToolContext) {
           };
         }
         return withFileMutationLock([abs], async () => {
+          beginCheckpointBatch(ctx.getWorkspaceRoot(), ctx.getSessionId());
           await snapshotFile(abs);
           // Try batch first — fast path when all old_strings match.
           let result = await applyEdits(
@@ -463,6 +469,7 @@ export function buildEditTools(ctx: ToolContext) {
           if (result.ok) {
             getEditFailures(ctx).delete(abs);
             ctx.fileTracker.markModified(abs);
+            await commitCheckpoint();
             return result;
           }
           // Batch failed — retry each edit individually so correct edits
@@ -498,6 +505,7 @@ export function buildEditTools(ctx: ToolContext) {
           }
           if (succeeded.length === 0) {
             getEditFailures(ctx).set(abs, failures + 1);
+            discardCheckpoint();
             return {
               ok: false,
               error:
@@ -511,8 +519,12 @@ export function buildEditTools(ctx: ToolContext) {
             } as EditResult;
           }
           // Partial success — reset failure counter, mark file modified.
+          // Commit anyway: the edits that DID land still need an undo point,
+          // and leaving the batch pending would fold these files into the
+          // NEXT tool call's checkpoint instead.
           getEditFailures(ctx).delete(abs);
           ctx.fileTracker.markModified(abs);
+          await commitCheckpoint();
           return {
             ok: true as const,
             replacements: succeeded.reduce((sum, s) => sum + s.replacements, 0),
@@ -532,8 +544,9 @@ export function buildEditTools(ctx: ToolContext) {
 
     checkpoint_undo: tool({
       description:
-        "Restore files from the last AI edit checkpoint. Reverts the most recent batch of write_file/edit/multi_edit operations. Use this to undo AI changes when the result isn't what you expected. Auto-executes (no approval needed — user must explicitly invoke this tool).",
+        "Restore files from the last AI edit checkpoint. Reverts the most recent batch of write_file/edit/multi_edit operations. Use this to undo AI changes when the result isn't what you expected.",
       inputSchema: z.object({}),
+      needsApproval: true,
       execute: async () => {
         const root = ctx.getWorkspaceRoot();
         if (!root) return { error: "no workspace root — cannot find checkpoints" };
@@ -543,7 +556,7 @@ export function buildEditTools(ctx: ToolContext) {
           return { message: "no checkpoints found — nothing to undo" };
         }
         const last = records[records.length - 1];
-        const result = await restoreCheckpoint(last);
+        const result = await restoreCheckpoint(last, root);
         // Delete the checkpoint file after successful restore.
         try {
           const ckDir = `${root.replace(/\\/g, "/").replace(/\/$/, "")}/.kai/checkpoints`;
@@ -558,6 +571,7 @@ export function buildEditTools(ctx: ToolContext) {
         return {
           restored: result.restored,
           deleted: result.deleted,
+          skipped: result.skipped.length > 0 ? result.skipped : undefined,
           errors: result.errors.length > 0 ? result.errors : undefined,
           checkpoint_age_seconds: Math.round((Date.now() - last.timestamp) / 1000),
         };

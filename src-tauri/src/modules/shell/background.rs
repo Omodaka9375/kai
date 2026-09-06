@@ -28,6 +28,10 @@ pub struct BackgroundProc {
     pub owner: Option<String>,
     /// Human-readable label for listing / status display.
     pub label: Option<String>,
+    /// Windows only: KILL_ON_JOB_CLOSE Job holding the wrapper shell.
+    /// Terminating it reaps the whole tree (see `shell::job`).
+    #[cfg(windows)]
+    job: Option<super::job::KillJob>,
 }
 
 #[derive(Serialize)]
@@ -73,7 +77,29 @@ impl BackgroundProc {
         self.exited.load(Ordering::Acquire)
     }
 
+    /// Kill the wrapper shell AND its descendants.
+    ///
+    /// Killing only the wrapper is not enough: grandchildren (dev servers,
+    /// compilers) survive, and because they inherit the stdout/stderr write
+    /// ends the drain threads never see EOF — so the ring buffer keeps growing
+    /// with output from a process the user believes is stopped.
     pub fn kill(&self) {
+        #[cfg(windows)]
+        {
+            if let Some(ref job) = self.job {
+                job.terminate();
+            }
+        }
+        #[cfg(unix)]
+        {
+            // The child is spawned with `process_group(0)`, so its pid is also
+            // its process-group id. Signalling the negated pid reaps the group.
+            let pid = self.child.id() as libc::pid_t;
+            // SAFETY: negated pid targets only the group this child leads.
+            unsafe {
+                libc::kill(-pid, libc::SIGKILL);
+            }
+        }
         let _ = self.child.kill();
     }
 
@@ -128,7 +154,22 @@ pub fn spawn(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
+    // Give the wrapper its own process group so `kill()` can reap the subtree.
+    // `process_group(0)` runs setpgid in the child before exec; if that fails
+    // the spawn fails, so a successful spawn guarantees pid == pgid.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt as _;
+        cmd.process_group(0);
+    }
+
     let shared = SharedChild::spawn(&mut cmd).map_err(|e| e.to_string())?;
+
+    // Assign to the Job immediately: any grandchild spawned before assignment
+    // would escape it and survive the kill.
+    #[cfg(windows)]
+    let job = super::job::KillJob::assign(shared.id()).ok();
+
     let stdout_pipe = shared.take_stdout().ok_or("no stdout pipe")?;
     let stderr_pipe = shared.take_stderr().ok_or("no stderr pipe")?;
     let child = Arc::new(shared);
@@ -149,6 +190,8 @@ pub fn spawn(
         exit_unknown: AtomicBool::new(false),
         owner,
         label,
+        #[cfg(windows)]
+        job,
     });
 
     {

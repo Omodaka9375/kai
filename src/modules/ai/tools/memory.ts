@@ -19,6 +19,7 @@ export function buildMemoryTools(ctx: ToolContext) {
             "The knowledge to persist. Write in markdown. Be concise — this is loaded into context every session.",
           ),
       }),
+      needsApproval: true,
       execute: async ({ entry }) => {
         const root = ctx.getWorkspaceRoot();
         if (!root) return { error: "no workspace root — cannot save memory" };

@@ -126,6 +126,34 @@ const WRITE_DENY_PREFIXES = [
   "/programdata/",
 ];
 
+/**
+ * Write-only deny-list by basename.
+ *
+ * These are deliberately NOT in the read list: reading `~/.bashrc` is a normal
+ * request ("why isn't my alias loading?"), and refusing it would break real
+ * debugging. Writing them is a different matter — shell init files and git
+ * config execute arbitrary commands on your next login or git invocation, so
+ * they are the classic persistence target, and they are precisely the files
+ * whose *contents* the value-shaped redaction can only partly protect.
+ */
+const WRITE_DENY_BASENAMES: RegExp[] = [
+  /^\.bashrc(?:[.\s:]|$)/i,
+  /^\.bash_profile(?:[.\s:]|$)/i,
+  /^\.bash_login(?:[.\s:]|$)/i,
+  /^\.profile(?:[.\s:]|$)/i,
+  /^\.zshenv(?:[.\s:]|$)/i,
+  /^\.zprofile(?:[.\s:]|$)/i,
+  /^\.zshrc(?:[.\s:]|$)/i,
+  /^\.zlogin(?:[.\s:]|$)/i,
+  /^\.gitconfig(?:[.\s:]|$)/i,
+  /^gitconfig(?:[.\s:]|$)/i,
+  // PowerShell profiles execute at shell start.
+  /^microsoft\.powershell_profile\.ps1(?:[.\s:]|$)/i,
+  // Terraform variable files conventionally carry real credentials.
+  /^.+\.tfvars(?:[.\s:]|$)/i,
+  /^.+\.tfvars\.json(?:[.\s:]|$)/i,
+];
+
 export type SafetyResult = { ok: true } | { ok: false; reason: string };
 
 function basename(p: string): string {
@@ -232,6 +260,16 @@ export function checkWritable(path: string): SafetyResult {
   // Writes inherit all read restrictions, plus system-directory blocks.
   const r = checkReadable(path);
   if (!r.ok) return r;
+
+  const base = basename(path);
+  for (const re of WRITE_DENY_BASENAMES) {
+    if (re.test(base)) {
+      return {
+        ok: false,
+        reason: `Refused: "${base}" is a shell-init / credential-bearing file. Edit it manually if you really mean it.`,
+      };
+    }
+  }
 
   const cmp = comparisonForm(path);
   // Ensure the comparison surface has a leading separator for prefix matching.

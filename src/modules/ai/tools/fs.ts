@@ -9,7 +9,7 @@ import {
 } from "../lib/security";
 import { newQueuedEditId, usePlanStore } from "../store/planStore";
 import { resolvePath, type ToolContext } from "./context";
-import { snapshotFile } from "../lib/checkpoints";
+import { snapshotFile, beginCheckpointBatch, commitCheckpoint, discardCheckpoint } from "../lib/checkpoints";
 import { withFileMutationLock } from "../lib/mutationLock";
 
 const READ_BYTE_CAP = 25 * 1024;
@@ -219,6 +219,7 @@ export function buildFsTools(ctx: ToolContext) {
         return withFileMutationLock([abs], async () => {
           try {
             // Snapshot before mutation for checkpoint undo.
+            beginCheckpointBatch(ctx.getWorkspaceRoot(), ctx.getSessionId());
             await snapshotFile(abs);
             // Auto-create parent directories so the agent never needs a
             // separate create_directory step (avoids approval-loop bugs).
@@ -236,8 +237,10 @@ export function buildFsTools(ctx: ToolContext) {
             ctx.fileTracker.markModified(abs);
             window.dispatchEvent(new CustomEvent("Kai:fs-changed", { detail: abs }));
 
+            await commitCheckpoint();
             return { path: abs, bytesWritten: content.length, ok: true };
           } catch (e) {
+            discardCheckpoint();
             return { error: String(e), path: abs };
           }
         });

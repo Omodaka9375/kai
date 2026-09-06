@@ -13,9 +13,80 @@
  */
 
 import { native } from "./native";
+import { checkWritableCanonical } from "./security";
+import { IS_WINDOWS } from "@/lib/platform";
 
 const CHECKPOINTS_DIR = ".kai/checkpoints";
 const MAX_CHECKPOINT_AGE_MS = 60 * 60 * 1000; // 1 hour
+
+/** Collapse `\\` to `/` and strip trailing slashes. Matches the canonical
+ *  forward-slash path form used across the frontend (see KAI.md). */
+function norm(p: string): string {
+  return p.replace(/\\/g, "/").replace(/\/+$/, "");
+}
+
+function isAbsolute(p: string): boolean {
+  return /^[a-zA-Z]:\//.test(p) || p.startsWith("//") || p.startsWith("/");
+}
+
+/** Split into meaningful segments, rejecting `.`/empty. Returns null on any
+ *  `..` — callers must hand us an already-normalized path. */
+function segmentsOf(p: string): string[] | null {
+  const out: string[] = [];
+  for (const seg of p.split("/")) {
+    if (seg === "" || seg === ".") continue;
+    if (seg === "..") return null;
+    out.push(seg);
+  }
+  return out;
+}
+
+/**
+ * Confine a path to the workspace.
+ *
+ * Checkpoint records are plain JSON on disk inside the workspace, so their
+ * `files` keys are attacker-controllable input — a hand-planted
+ * `.kai/checkpoints/1-x.json` naming `~/.ssh/authorized_keys` would otherwise
+ * be written verbatim. This returns the normalized path when it is an
+ * absolute descendant of `workspaceRoot`, and null otherwise.
+ */
+export function confineToWorkspace(
+  workspaceRoot: string,
+  candidate: string,
+): string | null {
+  if (typeof candidate !== "string" || !candidate || candidate.includes("\0")) {
+    return null;
+  }
+  const p = norm(candidate);
+  if (!isAbsolute(p) || /[<>]/.test(p)) return null;
+
+  const pathSegs = segmentsOf(p);
+  const rootSegs = segmentsOf(norm(workspaceRoot));
+  if (!pathSegs || !rootSegs || pathSegs.length <= rootSegs.length) return null;
+
+  // Case-insensitive on Windows (case-preserving but case-insensitive FS).
+  const eq = IS_WINDOWS
+    ? (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
+    : (a: string, b: string) => a === b;
+
+  for (let i = 0; i < rootSegs.length; i++) {
+    if (!eq(rootSegs[i]!, pathSegs[i]!)) return null;
+  }
+
+  // Never restore into the checkpoint directory itself — that is the exact
+  // injection vector this function exists to close. Scoped to
+  // `.kai/checkpoints` rather than all of `.kai/`, so restoring other project
+  // files beneath it (`.kai/memory/…`, `.kai/rules`) still works.
+  const inCheckpointDir =
+    eq(pathSegs[rootSegs.length] ?? "", ".kai") &&
+    eq(pathSegs[rootSegs.length + 1] ?? "", "checkpoints");
+  if (inCheckpointDir) return null;
+
+  // Safe to return the normalized original — `segmentsOf` already proved there
+  // are no `.`/`..` segments to resolve, and this preserves drive-letter and
+  // UNC (`//host/share`) prefixes exactly as written.
+  return p;
+}
 
 export type CheckpointRecord = {
   timestamp: number;
@@ -27,12 +98,21 @@ export type CheckpointRecord = {
 /**
  * Compute workspace-relative path for a checkpoint file.
  */
+/** Guarantees unique filenames when two batches commit in the same millisecond. */
+let lastCheckpointTs = 0;
+
+function nextCheckpointTs(): number {
+  const now = Date.now();
+  lastCheckpointTs = now > lastCheckpointTs ? now : lastCheckpointTs + 1;
+  return lastCheckpointTs;
+}
+
 function checkpointPath(
   workspaceRoot: string,
   timestamp: number,
   sessionId: string,
 ): string {
-  const root = workspaceRoot.replace(/\\/g, "/").replace(/\/$/, "");
+  const root = norm(workspaceRoot);
   const safe = sessionId.replace(/[^a-zA-Z0-9_-]/g, "_");
   return `${root}/${CHECKPOINTS_DIR}/${timestamp}-${safe}.json`;
 }
@@ -68,8 +148,9 @@ export async function listCheckpoints(
     try {
       const r = await native.readFile(filePath);
       if (r.kind !== "text") continue;
-      const parsed = JSON.parse(r.content) as CheckpointRecord;
-      records.push(parsed);
+      const raw: unknown = JSON.parse(r.content);
+      const rec = validateRecord(raw);
+      if (rec) records.push(rec);
     } catch {
       // Corrupt checkpoint — skip.
     }
@@ -77,6 +158,23 @@ export async function listCheckpoints(
 
   records.sort((a, b) => a.timestamp - b.timestamp);
   return records;
+}
+
+/** Shape-check a parsed checkpoint. Rejects anything that could carry a
+ *  non-string key or a non-string|null value into `restoreCheckpoint`. */
+function validateRecord(raw: unknown): CheckpointRecord | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.timestamp !== "number" || !Number.isFinite(o.timestamp)) return null;
+  if (typeof o.sessionId !== "string") return null;
+  if (typeof o.files !== "object" || o.files === null) return null;
+
+  const files: Record<string, string | null> = {};
+  for (const [path, content] of Object.entries(o.files as Record<string, unknown>)) {
+    if (content !== null && typeof content !== "string") continue;
+    files[path] = content;
+  }
+  return { timestamp: o.timestamp, sessionId: o.sessionId, files };
 }
 
 /**
@@ -89,9 +187,14 @@ let pendingWorkspaceRoot: string | null = null;
 let pendingSessionId: string | null = null;
 
 export function beginCheckpointBatch(
-  workspaceRoot: string,
-  sessionId: string,
+  workspaceRoot: string | null,
+  sessionId: string | null,
 ): void {
+  if (!workspaceRoot || !sessionId) return;
+  // Always start a FRESH batch. Each call site calls begin() exactly once, so
+  // there is nothing to aggregate across calls — and resetting here means a
+  // batch left pending by an early `return` in some tool cannot bleed its
+  // files into the next call's checkpoint record.
   pendingCheckpoint = new Map();
   pendingWorkspaceRoot = workspaceRoot;
   pendingSessionId = sessionId;
@@ -113,34 +216,36 @@ export async function snapshotFile(absPath: string): Promise<void> {
   }
 }
 
-/** Flush the pending checkpoint batch to disk and reset. */
+/**
+ * Flush the pending checkpoint batch to disk and reset.
+ *
+ * The pending state is captured and cleared synchronously BEFORE the first
+ * await, so a concurrent tool call that begins its own batch cannot have its
+ * files swallowed into (or lost to) this one.
+ */
 export async function commitCheckpoint(): Promise<void> {
-  if (
-    !pendingCheckpoint ||
-    !pendingWorkspaceRoot ||
-    !pendingSessionId ||
-    pendingCheckpoint.size === 0
-  ) {
-    pendingCheckpoint = null;
-    pendingWorkspaceRoot = null;
-    pendingSessionId = null;
-    return;
-  }
+  const files = pendingCheckpoint;
+  const cwd = pendingWorkspaceRoot;
+  const sessionId = pendingSessionId;
 
-  // Don't snapshot in the checkpoints directory itself.
+  pendingCheckpoint = null;
+  pendingWorkspaceRoot = null;
+  pendingSessionId = null;
+
+  if (!files || files.size === 0 || !cwd || !sessionId) return;
+
   const entries: Record<string, string | null> = {};
-  for (const [path, content] of pendingCheckpoint) {
+  for (const [path, content] of files) {
     entries[path] = content;
   }
 
   const record: CheckpointRecord = {
-    timestamp: Date.now(),
-    sessionId: pendingSessionId,
+    timestamp: nextCheckpointTs(),
+    sessionId,
     files: entries,
   };
 
-  const cwd = pendingWorkspaceRoot;
-  const path = checkpointPath(cwd, record.timestamp, pendingSessionId);
+  const path = checkpointPath(cwd, record.timestamp, sessionId);
 
   try {
     await ensureCheckpointsDir(cwd);
@@ -148,10 +253,6 @@ export async function commitCheckpoint(): Promise<void> {
   } catch (e) {
     console.debug("checkpoint: failed to write", path, e);
   }
-
-  pendingCheckpoint = null;
-  pendingWorkspaceRoot = null;
-  pendingSessionId = null;
 }
 
 /** Discard the pending checkpoint batch without writing. */
@@ -165,21 +266,48 @@ export function discardCheckpoint(): void {
  * Restore files from a checkpoint record. For each file:
  *  - If content is a string: write it back
  *  - If content is null: delete the file (it was created by the AI)
+ *
+ * Every path is confined to `workspaceRoot` and re-checked through
+ * `checkWritableCanonical` (which also catches symlink traversal) before any
+ * mutation. `record.files` is treated as untrusted input — see
+ * {@link confineToWorkspace}.
  */
 export async function restoreCheckpoint(
   record: CheckpointRecord,
-): Promise<{ restored: number; deleted: number; errors: string[] }> {
+  workspaceRoot: string,
+): Promise<{ restored: number; deleted: number; skipped: string[]; errors: string[] }> {
   let restored = 0;
   let deleted = 0;
+  const skipped: string[] = [];
   const errors: string[] = [];
 
   for (const [path, content] of Object.entries(record.files)) {
+    const confined = confineToWorkspace(workspaceRoot, path);
+    if (confined === null) {
+      skipped.push(`${path} — outside workspace root`);
+      continue;
+    }
+
+    const safety = await checkWritableCanonical(confined, native.canonicalize);
+    if (!safety.ok) {
+      skipped.push(`${path} — ${safety.reason}`);
+      continue;
+    }
+
+    // Re-confine the RESOLVED path: `checkWritableCanonical` follows symlinks,
+    // so a link inside the workspace can otherwise redirect the write outside.
+    const resolved = confineToWorkspace(workspaceRoot, safety.canonical);
+    if (resolved === null) {
+      skipped.push(`${path} — resolves outside workspace root`);
+      continue;
+    }
+
     try {
       if (content === null) {
-        await native.deleteFile(path);
+        await native.deleteFile(resolved);
         deleted++;
       } else {
-        await native.writeFile(path, content);
+        await native.writeFile(resolved, content);
         restored++;
       }
     } catch (e) {
@@ -187,7 +315,7 @@ export async function restoreCheckpoint(
     }
   }
 
-  return { restored, deleted, errors };
+  return { restored, deleted, skipped, errors };
 }
 
 /**

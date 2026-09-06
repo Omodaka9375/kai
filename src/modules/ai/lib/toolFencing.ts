@@ -11,8 +11,10 @@
  */
 
 import type { FenceState } from "./fence";
+import { fence } from "./fence";
 import { type EffectStatus } from "./effectStatus";
 import { guardToolOutput, formatGuardWarning } from "./outputGuard";
+import { redactToolOutput } from "./redact";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ToolDef = any;
@@ -81,6 +83,40 @@ const NO_FENCE: Set<string> = new Set([
   "generate_image",
   "generate_video",
 ]);
+
+/**
+ * Wrap every tool's `execute` so its result is scrubbed of credential-shaped
+ * strings before anything (the model, the output guard, the transcript) sees
+ * it.
+ *
+ * This is applied as the INNERMOST wrapper — before `withToolGuard` — so the
+ * output guard and the fence both operate on already-redacted text, and so
+ * redaction still happens on the unfenced path (fencing is opt-in per session
+ * via `fenceState`; redaction is not).
+ */
+export function withToolRedaction(tools: Record<string, ToolDef>): Record<string, ToolDef> {
+  const out: Record<string, ToolDef> = {};
+
+  for (const [name, toolDef] of Object.entries(tools)) {
+    const execute = (toolDef as { execute?: (...args: unknown[]) => unknown })
+      .execute;
+    if (!execute) {
+      out[name] = toolDef;
+      continue;
+    }
+
+    const wrapped = { ...toolDef };
+    (wrapped as { execute?: (...args: unknown[]) => unknown }).execute = async (
+      ...args: unknown[]
+    ) => {
+      const raw = await (execute as (...a: unknown[]) => unknown)(...args);
+      return redactToolOutput(name, raw);
+    };
+    out[name] = wrapped;
+  }
+
+  return out;
+}
 
 /**
  * Wrap all tools with effect status annotation + output fencing.
@@ -220,6 +256,10 @@ function fenceToolOutput(
     fenceField(r, "content", state.nonces.web);
     fenceField(r, "body", state.nonces.web);
   } else if (toolName === "fs_search" || toolName === "fs_grep") {
+    // Both tools return `{ root, hits[], truncated, files_scanned }` — there is
+    // no top-level `content`/`text`, so the generic fallback below never fires.
+    // Fence the `text`/`content` field of every hit in the `hits` array.
+    fenceHits(r, "hits", state.nonces.tool);
     fenceField(r, "content", state.nonces.tool);
   } else if (toolName === "youtube_transcript") {
     fenceField(r, "transcript", state.nonces.web);
@@ -241,9 +281,30 @@ function fenceField(
 ): void {
   const v = r[key];
   if (typeof v !== "string" || v.length === 0) return;
-  const clean = v.replace(/\[start\s+\w+_\w+\]\n?/g, "")
-    .replace(/\n?\[end\s+\w+_\w+\]/g, "");
-  r[key] = `[start tool_${nonce}]\n${clean}\n[end tool_${nonce}]`;
+  r[key] = fence("tool", nonce, v);
+}
+
+/** Fence string fields (`text`, `content`, `body`) of every element in an
+ *  array-valued key, e.g. grep/glob `hits`. Leaves non-string fields and
+ *  non-array keys untouched. */
+function fenceHits(
+  r: Record<string, unknown>,
+  key: string,
+  nonce: string,
+): void {
+  const v = r[key];
+  if (!Array.isArray(v)) return;
+  r[key] = v.map((item) => {
+    if (item === null || typeof item !== "object") return item;
+    const rec = { ...(item as Record<string, unknown>) };
+    for (const field of ["text", "content", "body", "data"]) {
+      const s = rec[field];
+      if (typeof s === "string" && s.length > 0) {
+        rec[field] = fence("tool", nonce, s);
+      }
+    }
+    return rec;
+  });
 }
 
 function findTextKey(obj: Record<string, unknown>): string | null {

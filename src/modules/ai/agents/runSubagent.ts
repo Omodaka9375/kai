@@ -5,6 +5,7 @@ import type { ProviderKeys } from "../lib/keyring";
 import type { ToolContext } from "../tools/context";
 import { buildFsTools } from "../tools/fs";
 import { buildSearchTools } from "../tools/search";
+import { withToolRedaction } from "../lib/toolFencing";
 import { SUBAGENTS, type SubagentType } from "./registry";
 
 const SUBAGENT_MAX_STEPS_DEFAULT = 24;
@@ -55,6 +56,10 @@ export async function runSubagent({
   for (const t of def.tools) {
     if (t in readOnly) tools[t] = readOnly[t];
   }
+  // Subagent tools are built directly (no withToolGuard upstream), so redaction
+  // has to be applied here too — otherwise a read_file from inside a subagent
+  // reaches the provider completely unscrubbed.
+  const redactedTools = withToolRedaction(tools);
 
   // Resolve model id for local providers that use a user-configured model name.
   const m = getModel(modelId);
@@ -77,7 +82,7 @@ export async function runSubagent({
     model,
     system: def.systemPrompt,
     prompt,
-    tools: tools as Parameters<typeof generateText>[0]["tools"],
+    tools: redactedTools as Parameters<typeof generateText>[0]["tools"],
     stopWhen: stepCountIs(maxSteps ?? SUBAGENT_MAX_STEPS_DEFAULT),
     abortSignal,
     onStepFinish: (step) => {

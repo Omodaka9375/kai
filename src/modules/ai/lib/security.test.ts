@@ -209,3 +209,60 @@ describe("checkShellCommand — Trojan Source / bidi defense", () => {
     });
   });
 });
+
+describe("checkWritable — shell-init / credential-file deny-list", () => {
+  // These are deliberately NOT in the read list (reading ~/.bashrc is a normal
+  // request); they are write-only because they are the persistence target —
+  // executed on your next login or git invocation.
+
+  it("blocks writing shell init files", () => {
+    for (const p of [
+      "/home/me/.bashrc",
+      "/home/me/.zshrc",
+      "/home/me/.zshenv",
+      "/home/me/.profile",
+      "C:\\Users\\me\\.bash_profile",
+    ]) {
+      expect(checkWritable(p)).toMatchObject({ ok: false });
+    }
+  });
+
+  it("blocks git config", () => {
+    expect(checkWritable("/home/me/.gitconfig")).toMatchObject({ ok: false });
+    expect(checkWritable("C:\\Users\\me\\gitconfig")).toMatchObject({ ok: false });
+  });
+
+  it("blocks terraform variable files", () => {
+    expect(checkWritable("/repo/prod.tfvars")).toMatchObject({ ok: false });
+    expect(checkWritable("/repo/prod.tfvars.json")).toMatchObject({ ok: false });
+  });
+
+  it("allows READING those same files (the deny-list is write-scoped)", () => {
+    // This asymmetry is the whole point — do not "fix" it by adding these to
+    // the read list, or "why isn't my alias loading" becomes an unanswerable
+    // question.
+    expect(checkReadable("/home/me/.bashrc")).toMatchObject({ ok: true });
+    expect(checkReadable("/repo/prod.tfvars")).toMatchObject({ ok: true });
+    expect(checkWritable("/home/me/.bashrc")).toMatchObject({ ok: false });
+  });
+
+  it("does NOT block ordinary project files that share a substring", () => {
+    // The WRITE_DENY anchors are `(?:[.\s:]|$)`-terminated, so a real source
+    // file whose name merely CONTAINS one of these words must sail through —
+    // most importantly `profile.tsx` must not be mistaken for `profile.ps1`.
+    expect(checkWritable("/repo/src/router.ts")).toMatchObject({ ok: true });
+    expect(checkWritable("/repo/profile-page.tsx")).toMatchObject({ ok: true });
+    expect(checkWritable("/repo/UserProfile.tsx")).toMatchObject({ ok: true });
+    expect(checkWritable("/repo/keygen.ts")).toMatchObject({ ok: true });
+    expect(checkWritable("/repo/tfvars-schema.json")).toMatchObject({ ok: true });
+  });
+
+  it("NOTE: .env.* is blocked by the pre-existing READ list, not this one", () => {
+    // `^\.env(\..+)?` in SECRET_BASENAME_PATTERNS deliberately swallows every
+    // `.env.<suffix>`, so even a placeholder-only `.env.example` is refused.
+    // That is existing documented behaviour (no `$` anchor, so `.env.`,
+    // `.env::$DATA` etc. cannot slip past) — asserted here so a future
+    // narrowing of that pattern is a conscious decision, not an accident.
+    expect(checkWritable("/repo/.env.example")).toMatchObject({ ok: false });
+  });
+});

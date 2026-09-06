@@ -37,7 +37,7 @@ import {
 } from "./stackDetector";
 export type { StackInfo };
 import { fenceSystemPrompt } from "./fence";
-import { withToolGuard } from "./toolFencing";
+import { withToolGuard, withToolRedaction } from "./toolFencing";
 import { getGlobalStreamGuard, type LoopDetectionResult } from "./streamGuard";
 
 const localProxyFetch = createProxyFetch({ allowPrivateNetwork: true });
@@ -614,10 +614,15 @@ export async function runAgentStream(opts: RunAgentOptions) {
   let stepsSeen = 0;
 
   // Build and optionally fence tools for prompt-injection defense.
+  //
+  // Redaction is applied unconditionally and INNERMOST (see withToolRedaction)
+  // — it is not an opt-in defense like fencing, it is the guarantee that
+  // credentials never leave the machine. Order: redact → annotate → fence.
   const tools = buildTools(opts.toolContext, opts.mcpTools);
+  const redactedTools = withToolRedaction(tools as Record<string, unknown>);
   const fencedTools = opts.fenceState
-    ? withToolGuard(tools as Record<string, unknown>, opts.fenceState)
-    : tools;
+    ? withToolGuard(redactedTools, opts.fenceState)
+    : redactedTools;
 
   return streamText({
     model: wrappedModel,

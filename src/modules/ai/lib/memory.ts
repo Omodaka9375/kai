@@ -10,6 +10,7 @@
 
 import { homeDir } from "@tauri-apps/api/path";
 import { native } from "./native";
+import { neutralizeFenceMarkers, neutralizeInjectionMarkers } from "./fence";
 
 const MEMORY_DIR = ".kai/memory";
 const MAX_MEMORY_LOAD_BYTES = 25 * 1024;
@@ -67,9 +68,14 @@ export async function loadProjectMemory(
     if (r.kind !== "text") return null;
     const lines = r.content.split("\n");
     const head = lines.slice(0, MAX_MEMORY_LOAD_LINES).join("\n");
-    return head.length > MAX_MEMORY_LOAD_BYTES
+    const capped = head.length > MAX_MEMORY_LOAD_BYTES
       ? head.slice(0, MAX_MEMORY_LOAD_BYTES)
       : head;
+    // Memory is loaded into the trusted system prompt. Neutralize any fence /
+    // DSML markers an earlier poisoned tool result may have written, so a
+    // hostile MEMORY.md cannot forge a trust boundary or become a synthetic
+    // tool call.
+    return neutralizeInjectionMarkers(neutralizeFenceMarkers(capped));
   } catch {
     return null;
   }
@@ -92,7 +98,14 @@ export async function appendToMemory(
     ? `## ${timestamp} (session: ${sessionId})`
     : `## ${timestamp}`;
 
-  const block = `\n\n${header}\n${entry.trim()}\n`;
+  // Neutralize injection markers before persisting — this entry will be loaded
+  // into the trusted system prompt on every future session, so it must not
+  // carry forgeable fence markers or DSML tool-call markup.
+  const sanitized = neutralizeInjectionMarkers(
+    neutralizeFenceMarkers(entry.trim()),
+  );
+
+  const block = `\n\n${header}\n${sanitized}\n`;
 
   try {
     // Read existing content or start fresh.

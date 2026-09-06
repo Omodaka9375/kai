@@ -41,6 +41,18 @@ fn ip_kind(ip: IpAddr) -> IpKind {
             if v.is_loopback() || v.is_unspecified() || v.is_broadcast() || v.is_multicast() {
                 return IpKind::Loopback;
             }
+            // RFC 1122 "this host on this network" (0.0.0.0/8). `is_unspecified()`
+            // only catches 0.0.0.0 exactly, but on Linux/macOS the whole /8 routes
+            // to the local host — so `http://0.1.1.1:631` would otherwise reach a
+            // local printer daemon with `allowPrivateNetwork: false`.
+            if o[0] == 0 {
+                return IpKind::Loopback;
+            }
+            // 240.0.0.0/4 reserved-for-future-use: not routable, and treated as a
+            // local address by some stacks. Same class of bypass as the /8 above.
+            if o[0] >= 240 {
+                return IpKind::Loopback;
+            }
             // RFC1918 + CGNAT + benchmarking + IETF
             if o[0] == 10
                 || (o[0] == 172 && (16..=31).contains(&o[1]))
@@ -145,6 +157,19 @@ fn validate_url(url: &str, allow_private: bool) -> Result<reqwest::Url, String> 
     Ok(parsed)
 }
 
+/// True when every resolved IP is private/loopback (i.e. the endpoint is a
+/// local model server), false when ANY IP is public.
+///
+/// `danger_accept_invalid_certs(true)` is only safe for local endpoints — it
+/// exists so BYOK users behind self-signed reverse proxies (DGX boxes, Ollama
+/// behind nginx) can connect. A public host must never disable cert
+/// validation: that would silently open the door to MITM on the wider
+/// internet, and the two `lm_*` commands run before the SSRF policy's
+/// `build_safe_client` path applies its own per-host gating.
+fn is_local_only(ips: &[IpAddr]) -> bool {
+    ips.iter().all(|ip| !matches!(ip_kind(*ip), IpKind::Public))
+}
+
 /// Classify the host AND return safe IPs to pin reqwest's resolver to.
 /// Defeats DNS rebinding (second-lookup-returns-different-IP) by reusing
 /// exactly the addresses that passed `ip_kind`.
@@ -212,15 +237,13 @@ pub async fn lm_ping(base_url: String) -> Result<u16, String> {
 
     let mut builder = reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
-        .redirect(reqwest::redirect::Policy::none())
-    // SECURITY: accepts self-signed / invalid TLS certs for local model
-        // servers (DGX, lab machines, Ollama behind nginx, etc.). This is a
-        // deliberate trade-off — without it, BYOK users behind self-signed
-        // reverse proxies on private networks cannot connect. The risk is
-        // that a MITM on the same private network (corporate LAN, shared
-        // WiFi) can intercept model traffic. A per-server "trust self-signed"
-        // toggle in Settings would be the ideal long-term fix.
-        .danger_accept_invalid_certs(true);
+        .redirect(reqwest::redirect::Policy::none());
+    // SECURITY: accept self-signed / invalid TLS certs ONLY for local model
+    // servers (DGX, lab machines, Ollama behind nginx). Public hosts always
+    // require valid certs — see `is_local_only`.
+    if is_local_only(&safe_ips) {
+        builder = builder.danger_accept_invalid_certs(true);
+    }
     let addrs: Vec<SocketAddr> = safe_ips.iter().map(|ip| SocketAddr::new(*ip, 0)).collect();
     builder = builder.resolve_to_addrs(&host, &addrs);
     let client = builder.build().map_err(|e| e.to_string())?;
@@ -248,8 +271,11 @@ pub async fn lm_list_models(base_url: String) -> Result<Vec<String>, String> {
 
     let mut builder = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
-        .redirect(reqwest::redirect::Policy::none())
-        .danger_accept_invalid_certs(true);
+        .redirect(reqwest::redirect::Policy::none());
+    // Same local-only gate as `lm_ping`.
+    if is_local_only(&safe_ips) {
+        builder = builder.danger_accept_invalid_certs(true);
+    }
     let addrs: Vec<SocketAddr> = safe_ips.iter().map(|ip| SocketAddr::new(*ip, 0)).collect();
     builder = builder.resolve_to_addrs(&host, &addrs);
     let client = builder.build().map_err(|e| e.to_string())?;
@@ -616,6 +642,69 @@ mod tests {
         );
     }
 
+    /// Pin the exact CIDR boundaries. The `172.16.0.0/12` range in particular
+    /// is a classic off-by-one — it is `172.16.0.0 – 172.31.255.255`, NOT
+    /// `172.16.0.0 – 172.16.255.255` — and these ranges are checked as octet
+    /// arithmetic (`o[0] == 172 && (16..=31).contains(&o[1])`), never by
+    /// matching a textual prefix, so a `172.16.` string test would prove nothing.
+    #[test]
+    fn cidr_boundaries_are_exact() {
+        // 172.16.0.0/12 — inclusive on both ends.
+        assert_eq!(
+            ip_kind(IpAddr::V4(Ipv4Addr::new(172, 16, 0, 0))),
+            IpKind::Private,
+            "172.16.0.0 is the network address — still /12"
+        );
+        assert_eq!(
+            ip_kind(IpAddr::V4(Ipv4Addr::new(172, 31, 255, 255))),
+            IpKind::Private,
+            "top of 172.16.0.0/12"
+        );
+        // Just outside, both sides — must be Public.
+        assert_eq!(
+            ip_kind(IpAddr::V4(Ipv4Addr::new(172, 15, 255, 255))),
+            IpKind::Public
+        );
+        assert_eq!(
+            ip_kind(IpAddr::V4(Ipv4Addr::new(172, 32, 0, 0))),
+            IpKind::Public
+        );
+
+        // CGNAT 100.64.0.0/10 = 100.64.0.0 – 100.127.255.255.
+        assert_eq!(
+            ip_kind(IpAddr::V4(Ipv4Addr::new(100, 127, 255, 255))),
+            IpKind::Private
+        );
+        assert_eq!(
+            ip_kind(IpAddr::V4(Ipv4Addr::new(100, 63, 255, 255))),
+            IpKind::Public
+        );
+        assert_eq!(
+            ip_kind(IpAddr::V4(Ipv4Addr::new(100, 128, 0, 0))),
+            IpKind::Public
+        );
+
+        // 10.0.0.0/8 is the whole first octet.
+        assert_eq!(
+            ip_kind(IpAddr::V4(Ipv4Addr::new(10, 255, 255, 255))),
+            IpKind::Private
+        );
+        assert_eq!(
+            ip_kind(IpAddr::V4(Ipv4Addr::new(11, 0, 0, 0))),
+            IpKind::Public
+        );
+
+        // Benchmarking 198.18.0.0/15 = 198.18.0.0 – 198.19.255.255.
+        assert_eq!(
+            ip_kind(IpAddr::V4(Ipv4Addr::new(198, 19, 255, 255))),
+            IpKind::Private
+        );
+        assert_eq!(
+            ip_kind(IpAddr::V4(Ipv4Addr::new(198, 20, 0, 0))),
+            IpKind::Public
+        );
+    }
+
     #[test]
     fn loopback_classified_as_loopback() {
         assert_eq!(
@@ -634,6 +723,59 @@ mod tests {
         assert_eq!(
             ip_kind(IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1))),
             IpKind::Public
+        );
+    }
+
+    /// The IPv4-mapped IPv6 form must classify identically to the dotted-quad
+    /// form — `to_ipv4()` recursion is what closes that hole, so every range
+    /// above needs its `[::ffff:…]` twin checked at the boundaries.
+    #[test]
+    fn ipv4_mapped_ipv6_honours_the_same_boundaries() {
+        // 172.16.0.0/12 and its neighbours, mapped.
+        assert_eq!(
+            ip_kind("::ffff:172.16.0.0".parse().unwrap()),
+            IpKind::Private
+        );
+        assert_eq!(
+            ip_kind("::ffff:172.31.255.255".parse().unwrap()),
+            IpKind::Private
+        );
+        assert_eq!(
+            ip_kind("::ffff:172.15.255.255".parse().unwrap()),
+            IpKind::Public
+        );
+        assert_eq!(
+            ip_kind("::ffff:172.32.0.0".parse().unwrap()),
+            IpKind::Public
+        );
+        // 10/8 mapped, and the loopback that originally motivated the recursion.
+        assert_eq!(ip_kind("::ffff:10.0.0.1".parse().unwrap()), IpKind::Private);
+        assert_eq!(ip_kind("::ffff:127.0.0.1".parse().unwrap()), IpKind::Loopback);
+        // 0.0.0.0/8 mapped.
+        assert_eq!(ip_kind("::ffff:0.1.1.1".parse().unwrap()), IpKind::Loopback);
+    }
+
+    #[test]
+    fn this_host_and_reserved_ranges_are_not_public() {
+        // RFC 1122 0.0.0.0/8 — "this host on this network" routes locally on
+        // Linux/macOS. Previously only 0.0.0.0 itself was caught, so 0.1.1.1
+        // (a local CUPS daemon, say) was classified Public.
+        assert_eq!(
+            ip_kind(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))),
+            IpKind::Loopback
+        );
+        assert_eq!(
+            ip_kind(IpAddr::V4(Ipv4Addr::new(0, 1, 1, 1))),
+            IpKind::Loopback
+        );
+        assert_eq!(
+            ip_kind(IpAddr::V4(Ipv4Addr::new(0, 255, 255, 254))),
+            IpKind::Loopback
+        );
+        // 240.0.0.0/4 reserved-for-future-use.
+        assert_eq!(
+            ip_kind(IpAddr::V4(Ipv4Addr::new(240, 0, 0, 1))),
+            IpKind::Loopback
         );
     }
 

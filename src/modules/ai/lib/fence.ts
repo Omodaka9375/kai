@@ -114,17 +114,50 @@ export function neutralizeFenceMarkers(content: string): string {
 }
 
 /**
+ * Neutralize DSML tool-call markup inside untrusted content.
+ *
+ * The DSML stream middleware (`dsmlMiddleware.ts`) scans the model's *own*
+ * streamed text for `<PREFIXtool_calls>` / `<PREFIXinvoke name="…">` and turns
+ * a match into a real tool call. If tool output contains that markup and the
+ * model merely echoes it, the echo becomes a live tool call. This is the
+ * meta-injection hole the output guard detects but can no longer fix on its
+ * own (its annotations are discarded).
+ *
+ * We insert a zero-width no-break space (U+FEFF) immediately after the opening
+ * `<` of any DSML-looking tag. U+FEFF is in JavaScript's `\s` class (unlike
+ * U+200B, which is NOT), so the structural regex `/<([^\s>]{1,20})tool_calls/`
+ * can no longer start its namespace prefix there — the whole open tag stops
+ * matching. The character renders invisibly and the operation is idempotent.
+ *
+ * Deliberately surgical: only a `<` directly followed by the DSML shape is
+ * touched — a normal `<div>` or a generic `<T>` is left alone, so file
+ * contents survive an edit round-trip unchanged.
+ *
+ * Note we do NOT use `&lt;` HTML-encoding here: the DSML middleware
+ * HTML-decodes `&lt;` → `<` before parsing, so that would be immediately
+ * undone.
+ */
+const DSML_TOOL_CALLS_RE = /<(?=[^\s>]{1,20}tool_calls\s*>)/g;
+const DSML_INVOKE_RE = /<(?=[^\s>]{1,20}invoke\s+name\s*=\s*")/g;
+
+export function neutralizeInjectionMarkers(content: string): string {
+  return content
+    .replace(DSML_TOOL_CALLS_RE, "<\uFEFF")
+    .replace(DSML_INVOKE_RE, "<\uFEFF");
+}
+
+/**
  * Wrap untrusted content in a fence.
  *
- * The content is first scanned for fence-like markers (which are
- * neutralized), then wrapped.
+ * The content is first scanned for fence-like markers AND DSML injection
+ * markup (both neutralized), then wrapped.
  */
 export function fence(
   tag: FenceTag,
   nonce: FenceNonce,
   content: string,
 ): string {
-  const clean = neutralizeFenceMarkers(content);
+  const clean = neutralizeInjectionMarkers(neutralizeFenceMarkers(content));
   return `[start ${tag}_${nonce}]\n${clean}\n[end ${tag}_${nonce}]`;
 }
 

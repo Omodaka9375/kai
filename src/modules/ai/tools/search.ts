@@ -1,8 +1,21 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { native } from "../lib/native";
-import { checkReadableCanonical } from "../lib/security";
+import { checkReadable, checkReadableCanonical } from "../lib/security";
 import { resolvePath, type ToolContext } from "./context";
+
+/**
+ * Per-result secret check. `checkReadableCanonical` is only applied to the
+ * `root` argument, so without this a `grep` rooted at $HOME could surface
+ * lines from ~/.aws/credentials or ~/.ssh/id_rsa. The Rust side has no
+ * deny-list, so this is the only gate on individual result paths.
+ *
+ * Suppression is silent rather than an error — a partial result is more
+ * useful than none, and `files_scanned` still reflects the full walk.
+ */
+function isReadableResult(path: string): boolean {
+  return checkReadable(path).ok;
+}
 
 function resolveRoot(
   rawRoot: string | undefined,
@@ -81,12 +94,14 @@ export function buildSearchTools(ctx: ToolContext) {
           });
           return {
             root: r.path,
-            hits: res.hits.map((h) => ({
-              path: h.path,
-              rel: h.rel,
-              line: h.line,
-              text: clipLine(h.text),
-            })),
+            hits: res.hits
+              .filter((h) => isReadableResult(h.path))
+              .map((h) => ({
+                path: h.path,
+                rel: h.rel,
+                line: h.line,
+                text: clipLine(h.text),
+              })),
             truncated: res.truncated,
             files_scanned: res.files_scanned,
           };
@@ -118,7 +133,7 @@ export function buildSearchTools(ctx: ToolContext) {
           });
           return {
             root: r.path,
-            hits: res.hits,
+            hits: res.hits.filter((h) => isReadableResult(h.path)),
             truncated: res.truncated,
           };
         } catch (e) {

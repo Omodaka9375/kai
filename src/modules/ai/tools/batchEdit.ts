@@ -10,7 +10,7 @@ import { z } from "zod";
 import { native } from "../lib/native";
 import { checkWritableCanonical } from "../lib/security";
 import { resolvePath, type ToolContext } from "./context";
-import { snapshotFile } from "../lib/checkpoints";
+import { snapshotFile, beginCheckpointBatch, commitCheckpoint, discardCheckpoint } from "../lib/checkpoints";
 import { withFileMutationLock } from "../lib/mutationLock";
 import { djb2 } from "../lib/hash";
 
@@ -141,6 +141,7 @@ export function buildBatchEditTools(ctx: ToolContext) {
           const written: string[] = [];
           let totalReplacements = 0;
           try {
+            beginCheckpointBatch(ctx.getWorkspaceRoot(), ctx.getSessionId());
             for (const { path, newContent } of results) {
               // Snapshot before write for checkpoint undo.
               await snapshotFile(path);
@@ -156,7 +157,9 @@ export function buildBatchEditTools(ctx: ToolContext) {
                 new CustomEvent("Kai:fs-changed", { detail: path }),
               );
             }
+            await commitCheckpoint();
           } catch (e) {
+            discardCheckpoint();
             // Roll back written files on failure.
             for (const path of written) {
               const original = snapshots.get(path);
