@@ -44,6 +44,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { StickToBottomContext } from "use-stick-to-bottom";
 import { AiToolApproval } from "./AiToolApproval";
 import { MediaMessage, isMediaOutput, isGeneratingMedia } from "./MediaMessage";
+import { wrapAsciiArt } from "./wrapAsciiArt";
 
 function ForkButton({ messageIndex }: { messageIndex: number }) {
   const forkSession = useChatStore((s) => s.forkSession);
@@ -273,114 +274,6 @@ function splitThinkingBlocks(
     if (cleaned.trim()) out.push({ thinking: false, text: cleaned });
   }
   return out;
-}
-
-/**
- * Detect blocks of ASCII / Unicode box-drawing art and wrap them in
- * markdown code fences so Streamdown preserves the line breaks.
- * Without this, markdown collapses single-newline lines into one paragraph.
- */
-function wrapAsciiArt(text: string): string {
-  // Must have at least 1 line with box-drawing or art chars.
-  const lines = text.split("\n");
-  if (lines.length === 0) return text;
-
-  // Unicode box-drawing + block elements.
-  const BOX_RE = /[\u2500-\u257F\u2580-\u259F\u25A0-\u25FF]/;
-  // ASCII art indicators: │ ├ ─ ╭ etc (these are in the box-drawing range above).
-  // Also detect ASCII-only art: lines dominated by | - + / \ = characters
-  // with consistent indentation patterns.
-  const ASCII_LINE_RE = /^\s*[|\-+\/=<>^v.#*~:]{3,}/;
-
-  // Find contiguous runs of lines that look like art.
-  const out: string[] = [];
-  let artRun: string[] = [];
-  let inArt = false;
-  // Track fenced code blocks: their lines must pass through untouched,
-  // otherwise a model-fenced diagram gets a second nested ```text fence
-  // injected, which then renders as literal text inside the block.
-  let inFence = false;
-
-  const flushArt = () => {
-    // Fence single-line Unicode box-drawing diagrams — they collapse to
-    // one unreadable blob in markdown otherwise.
-    const hasBoxDrawing = artRun.some((l) => BOX_RE.test(l));
-    const shouldFence = artRun.length >= 2 || (artRun.length === 1 && hasBoxDrawing);
-    if (shouldFence) {
-      out.push("```text");
-      out.push(...artRun);
-      out.push("```");
-    } else {
-      out.push(...artRun);
-    }
-    artRun = [];
-    inArt = false;
-  };
-
-  // A markdown list item (`- …`, `* …`, `1. …`, `+ …`) must never be
-  // classified as ASCII art. Otherwise a list item whose text happens to
-  // contain box-drawing or frame characters (or bracketed `| … |` content)
-  // gets wrapped in a code fence, which breaks the list and renders the item
-  // as a literal text block.
-  const LIST_ITEM_RE = /^\s*(?:[-*+]|\d{1,3}[.)])\s+\S/;
-
-  const isArtLine = (line: string): boolean => {
-    if (LIST_ITEM_RE.test(line)) return false;
-    if (BOX_RE.test(line)) return true;
-    if (ASCII_LINE_RE.test(line)) return true;
-    // Lines bracketed by frame chars at both ends (e.g. "│ Content  │", "+--+")
-    if (/^\s*[|+\-\\/=<>].*[|+\-\\/=<>]\s*$/.test(line)) return true;
-    // Lines composed entirely of frame/decorator chars (e.g. "+-----+", "-------")
-    if (/^[\s|+\-\\/=<>^v.#*~:]+$/.test(line) && line.trim().length >= 3) return true;
-    return false;
-  };
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    // Fence delimiter (up to 3 leading spaces per CommonMark): toggle and
-    // flush any pending run so it never merges across the boundary.
-    if (/^\s{0,3}```/.test(line)) {
-      if (inArt) flushArt();
-      else if (artRun.length > 0) {
-        out.push(...artRun);
-        artRun = [];
-      }
-      inFence = !inFence;
-      out.push(line);
-      continue;
-    }
-    if (inFence) {
-      out.push(line);
-      continue;
-    }
-    const art = isArtLine(line);
-    // A blank line next to an art line stays in the art block
-    // (diagrams often have blank lines between sections).
-    const blankNearArt =
-      line.trim() === "" &&
-      artRun.length > 0 &&
-      i + 1 < lines.length &&
-      isArtLine(lines[i + 1]);
-
-    if (art || blankNearArt) {
-      if (!inArt) {
-        // Flush any preceding non-art lines as-is.
-        if (artRun.length > 0) {
-          out.push(...artRun);
-          artRun = [];
-        }
-      }
-      inArt = true;
-      artRun.push(line);
-    } else {
-      if (inArt) flushArt();
-      artRun.push(line);
-    }
-  }
-  if (inArt) flushArt();
-  else if (artRun.length > 0) out.push(...artRun);
-
-  return out.join("\n");
 }
 
 /** Strip leaked model thinking/channel tokens and raw tool call syntax. */
