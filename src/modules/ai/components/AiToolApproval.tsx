@@ -49,6 +49,7 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue }: Props) {
 
   const isShell = toolName === "bash_run" || toolName === "bash_background";
   const commandText = isShell ? String(input.command ?? "") : "";
+  const isElevated = toolName === "bash_run" && input.elevated === true;
   const [isEditing, setIsEditing] = useState(false);
   const [editedCommand, setEditedCommand] = useState("");
 
@@ -109,6 +110,11 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue }: Props) {
     ? analyzeShellCommand(input.command)
     : null;
 
+  // Elevation is a stronger trust boundary than a normal bash_run approval.
+  const elevatedInfo = isElevated
+    ? { riskLevel: "critical" as const, description: "Administrator/root privileges — OS prompt will appear" }
+    : null;
+
   if (wasAutoApproved) {
     return (
       <div className="rounded-lg border border-border/40 bg-card/60">
@@ -157,6 +163,28 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue }: Props) {
       </div>
 
       <div className="px-3 py-2.5">
+        {/* Elevated-privilege banner — hard to miss, distinct from the normal card. */}
+        {isElevated && (
+          <div className="mb-2.5 flex items-start gap-2 rounded-md border border-red-500/40 bg-red-50 px-2.5 py-2 dark:bg-red-950/20">
+            <HugeiconsIcon
+              icon={UserWarning01Icon}
+              size={15}
+              strokeWidth={2}
+              className="mt-0.5 shrink-0 text-red-600 dark:text-red-400"
+            />
+            <div className="flex-1">
+              <p className="text-[11px] font-semibold text-red-700 dark:text-red-300">
+                Elevated privileges requested
+              </p>
+              <p className="mt-0.5 text-[10px] leading-relaxed text-red-600 dark:text-red-400">
+                This command runs with administrator/root rights. An OS
+                permission prompt will appear. Approving here grants the agent
+                system-level access — only continue if you trust the command.
+              </p>
+            </div>
+          </div>
+        )}
+
         <PreviewBlock
           toolName={toolName}
           input={input}
@@ -174,17 +202,17 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue }: Props) {
                 variant="secondary"
                 className={cn(
                   "text-[10px] font-medium",
-                  policyInfo.riskLevel === "critical" && "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
-                  policyInfo.riskLevel === "high" && "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
-                  policyInfo.riskLevel === "medium" && "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400",
+                  (elevatedInfo?.riskLevel ?? policyInfo.riskLevel) === "critical" && "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
+                  (elevatedInfo?.riskLevel ?? policyInfo.riskLevel) === "high" && "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
+                  (elevatedInfo?.riskLevel ?? policyInfo.riskLevel) === "medium" && "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400",
                 )}
               >
-                {policyInfo.riskLevel === "critical" && "⚠️ Critical Risk"}
-                {policyInfo.riskLevel === "high" && "⚠️ High Risk"}
-                {policyInfo.riskLevel === "medium" && "Medium Risk"}
+                {(elevatedInfo?.riskLevel ?? policyInfo.riskLevel) === "critical" && "⚠️ Critical Risk"}
+                {(elevatedInfo?.riskLevel ?? policyInfo.riskLevel) === "high" && "⚠️ High Risk"}
+                {(elevatedInfo?.riskLevel ?? policyInfo.riskLevel) === "medium" && "Medium Risk"}
               </Badge>
               <span className="text-[11px] text-muted-foreground">
-                {policyInfo.description}
+                {elevatedInfo?.description ?? policyInfo.description}
               </span>
             </div>
 
@@ -273,12 +301,12 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue }: Props) {
             </Button>
             <Button
               size="sm"
-              variant="default"
+              variant={isElevated ? "destructive" : "default"}
               onClick={() => onRespond(true)}
               className="h-7 gap-1.5 text-[11px]"
             >
               <HugeiconsIcon icon={Tick02Icon} size={12} strokeWidth={2} />
-              Approve
+              {isElevated ? "Approve elevation" : "Approve"}
             </Button>
           </>
         )}

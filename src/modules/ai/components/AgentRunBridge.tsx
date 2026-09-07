@@ -194,6 +194,12 @@ function Bridge({
         // Determine the tool name.
         const type = (p as { type?: string }).type ?? "";
         const toolName = type.replace(/^tool-/, "");
+        // Elevation is a stronger trust boundary — never auto-approve it, even
+        // under autoApprove: "all". The user must click the elevation card.
+        const isElevated =
+          toolName === "bash_run" &&
+          (p as { input?: Record<string, unknown> }).input?.elevated === true;
+        if (isElevated) continue;
         const shouldApprove =
           autoApprove === "all" ||
           (autoApprove === "edits" && FILE_MUTATION_TOOLS.has(toolName));

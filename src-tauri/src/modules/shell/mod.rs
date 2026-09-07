@@ -3,6 +3,7 @@ pub mod ringbuffer;
 pub mod session;
 #[cfg(windows)]
 pub mod job;
+mod elevate;
 
 use std::collections::HashMap;
 use std::io::Read;
@@ -79,6 +80,31 @@ pub async fn shell_run_command(
         let _ = tx.send(run_blocking(trimmed, cwd_path, workspace, dur));
     });
 
+    rx.recv().map_err(|e| e.to_string())?
+}
+
+/// Run a command with a privilege-elevation prompt (UAC / auth dialog /
+/// polkit) and capture output. Distinct from `shell_run_command` — elevation is
+/// a stronger trust boundary and must be requested explicitly by the caller.
+#[tauri::command]
+pub async fn shell_run_elevated(
+    command: String,
+    cwd: Option<String>,
+    timeout_secs: Option<u64>,
+    workspace: Option<WorkspaceEnv>,
+) -> Result<CommandOutput, String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    let dur = Duration::from_secs(
+        timeout_secs
+            .unwrap_or(DEFAULT_TIMEOUT_SECS)
+            .clamp(1, MAX_TIMEOUT_SECS),
+    );
+
+    // Blocking spawn + wait on a worker thread so the async runtime stays free.
+    let (tx, rx) = mpsc::channel::<Result<CommandOutput, String>>();
+    thread::spawn(move || {
+        let _ = tx.send(elevate::run_elevated(command, cwd, &workspace, dur));
+    });
     rx.recv().map_err(|e| e.to_string())?
 }
 

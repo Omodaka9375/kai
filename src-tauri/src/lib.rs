@@ -246,6 +246,7 @@ pub fn run() {
             gpg::gpg_list_keys,
             gpg::gpg_export_public,
             shell::shell_run_command,
+            shell::shell_run_elevated,
             shell::shell_session_open,
             shell::shell_session_run,
             shell::shell_session_close,

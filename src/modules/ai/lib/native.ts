@@ -232,6 +232,17 @@ export const native = {
       timeoutSecs: timeoutSecs ?? null,
       workspace: currentWorkspaceEnv(),
     }),
+  runElevatedCommand: (
+    command: string,
+    cwd?: string | null,
+    timeoutSecs?: number,
+  ) =>
+    invoke<CommandOutput>("shell_run_elevated", {
+      command,
+      cwd: cwd ?? null,
+      timeoutSecs: timeoutSecs ?? null,
+      workspace: currentWorkspaceEnv(),
+    }),
 
   shellSessionOpen: (cwd?: string | null) =>
     invoke<number>("shell_session_open", {

@@ -153,13 +153,16 @@ export function buildShellTools(ctx: ToolContext) {
   return {
     bash_run: tool({
       description:
-        "Run a foreground shell command in this session's persistent agent shell. cwd persists across calls (so `cd foo` then `bash_run pwd` works). Use for short-lived commands (lint, test, search, build). For long-running or daemon processes (dev servers, watch tasks), use `bash_background`. NEVER invoke interactive tools (vim, less, top) — they will hang. Asks for user approval.",
+        "Run a foreground shell command in this session's persistent agent shell. cwd persists across calls (so `cd foo` then `bash_run pwd` works). Use for short-lived commands (lint, test, search, build). For long-running or daemon processes (dev servers, watch tasks), use `bash_background`. NEVER invoke interactive tools (vim, less, top) — they will hang. Asks for user approval. Set `elevated: true` ONLY when the command genuinely needs administrator/root privileges (installing system packages, writing to protected dirs, `net start`) — this triggers an OS privilege prompt and a stronger confirmation.",
       inputSchema: z.object({
         command: z.string(),
         timeout_secs: z.number().min(1).max(300).optional(),
+        elevated: z.boolean().optional().describe(
+          "Run with administrator/root privileges. Triggers a UAC / auth dialog. Only for commands that cannot run unprivileged.",
+        ),
       }),
       needsApproval: true,
-      execute: async ({ command, timeout_secs }, options) => {
+      execute: async ({ command, timeout_secs, elevated }, options) => {
         const safety = checkShellCommand(command);
         if (!safety.ok) return { error: safety.reason };
         // Check abort before any work — agent was stopped before we started.
@@ -207,12 +210,16 @@ export function buildShellTools(ctx: ToolContext) {
             };
           }
 
-          const r = await native.shellSessionRun(
-            shellId,
-            command,
-            cwd,
-            effectiveTimeout,
-          );
+          // Elevated mode already requests admin/root itself — a command that
+          // also calls sudo/runas would double-elevate (`sudo` inside pkexec,
+          // `runas` inside an already-elevated shell) and fail. Keep the two
+          // mechanisms mutually exclusive.
+          if (elevated && /\b(sudo|runas)\b/i.test(command)) {
+            return {
+              error:
+                "Do not combine `elevated: true` with `sudo`/`runas` — the elevated flag already runs with administrator/root privileges. Remove the sudo/runas prefix.",
+            };
+          }
 
           // Clean up abort listener to avoid leaks.
           options?.abortSignal?.removeEventListener("abort", onAbort);
@@ -221,8 +228,31 @@ export function buildShellTools(ctx: ToolContext) {
             return { error: "Command cancelled by stop.", timed_out: true };
           }
 
+          // Elevated runs are one-shot (no persistent shell session) so there
+          // is no tracked cwd afterwards; the session path reports the shell's
+          // new cwd. Branch separately to keep both result shapes precise.
+          if (elevated) {
+            const r = await native.runElevatedCommand(command, cwd, effectiveTimeout);
+            return {
+              command,
+              elevated: true,
+              stdout: stripAnsi(r.stdout),
+              stderr: stripAnsi(r.stderr),
+              exit_code: r.exit_code,
+              timed_out: r.timed_out,
+              truncated: r.truncated,
+            };
+          }
+
+          const r = await native.shellSessionRun(
+            shellId,
+            command,
+            cwd,
+            effectiveTimeout,
+          );
           return {
             command,
+            elevated: false,
             stdout: stripAnsi(r.stdout),
             stderr: stripAnsi(r.stderr),
             exit_code: r.exit_code,

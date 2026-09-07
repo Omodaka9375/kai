@@ -79,7 +79,10 @@ windows-sys = { version = "0.59", features = [
 	"Win32_Foundation",
 	"Win32_Security",
 	"Win32_System_JobObjects",
+	"Win32_System_Registry",
 	"Win32_System_Threading",
+	"Win32_UI_Shell",
+	"Win32_UI_WindowsAndMessaging",
 ] }
 # Raw WebView2 COM bindings — lets us grant MICROPHONE/CAMERA permissions
 # (wry's default PermissionRequested handler only auto-approves clipboard).
