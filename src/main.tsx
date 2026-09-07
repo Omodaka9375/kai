@@ -10,9 +10,11 @@ import ReactDOM from "react-dom/client";
 import App from "./app/App";
 import { initLaunchDir } from "./lib/launchDir";
 import { installConsoleLogBridge } from "./lib/logging";
+import { installFocusModalityGuard } from "./lib/focusModality";
 import { USE_CUSTOM_WINDOW_CONTROLS } from "./lib/platform";
 
 installConsoleLogBridge();
+installFocusModalityGuard();
 
 if (USE_CUSTOM_WINDOW_CONTROLS) {
   document.documentElement.dataset.chrome = "borderless";
