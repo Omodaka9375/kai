@@ -4,6 +4,22 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.3.1]
+
+### Added
+
+- Git stashes in Source Control — list, apply, pop, drop, and stash-all.
+
+### Fixed
+
+- Tool output no longer shows internal `[start tool_…]` fence markers.
+- Markdown headings, horizontal rules, and tables no longer render as code boxes.
+- Fetch/pull/push made reliable — descendants no longer deadlock git, explicit remote refspecs, tolerant upstream resolution.
+- Removed the redundant "Diverged from upstream" banner.
+- `.kai/` (per-user agent memory/rules/checkpoints) is now gitignored.
+
+---
+
 ## [1.3.0]
 
 ### Added
