@@ -4,6 +4,26 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.3.0]
+
+### Added
+
+- Privilege-elevated command execution (sudo/runas/UAC) across platforms.
+- "Private Terminal" option in the new-tab dropdown.
+- Agent security hardening across tool output, memory, and process lifecycle.
+
+### Fixed
+
+- Stop button now reliably halts the agent, and runaway/looping agents auto-stop.
+- Local models show live tokens/sec via a chunk-based estimate.
+- Context-compaction notice shows once per session instead of every turn.
+- Sticky focus outlines after click/drag (WebView2 `:focus-visible` quirk).
+- Commit-signing "ask for approval" honored even under auto-approve all.
+- Dead shell on project reopen now recovers.
+- Issue-prefill URL stays under GitHub's length limit.
+
+---
+
 ## [1.2.9]
 
 ### Added
