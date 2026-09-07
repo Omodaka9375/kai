@@ -300,6 +300,13 @@ function bindSlot(slot: Slot, p: AcquireParams): void {
   slot.lastH = p.container.clientHeight;
   if (slot.lastCols !== p.cols || slot.lastRows !== p.rows) {
     p.onScopeChange(slot.lastCols, slot.lastRows);
+    // Keep ConPTY in sync with the fitted viewport immediately. The PTY is
+    // spawned at a default size (80x24); if we only update the session cache
+    // here and wait for a later ResizeObserver change, ConPTY keeps rendering
+    // at the wrong dimensions — its repaints and `clear` then target the wrong
+    // row range, which shows up as artifacts overwriting past lines and a
+    // `clear` that doesn't clear the bottom of the pane.
+    adapter?.resolveLeaf(p.leafId)?.resizePty(slot.lastCols, slot.lastRows);
   }
 
   if (p.searchQuery) {
@@ -346,6 +353,7 @@ function rewireSlot(slot: Slot, p: AcquireParams): void {
   slot.lastH = p.container.clientHeight;
   if (slot.term.cols !== p.cols || slot.term.rows !== p.rows) {
     p.onScopeChange(slot.term.cols, slot.term.rows);
+    adapter?.resolveLeaf(p.leafId)?.resizePty(slot.term.cols, slot.term.rows);
   }
   p.onSearchReady(slot.searchAddon);
 }
