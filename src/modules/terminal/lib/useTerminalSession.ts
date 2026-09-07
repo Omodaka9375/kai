@@ -64,6 +64,12 @@ const sessions = new Map<number, Session>();
 // and xterm re-fits on the next resize.
 const FONT_READY_TIMEOUT_MS = 2500;
 
+// The renderer bind retries while the container ref is still unpopulated.
+// Reopening a project (`resetWorkspace`) tears down and remounts the whole tab
+// subtree, so the font-ready `.then` can land before the new container commits.
+const ATTACH_RETRY_MS = 50;
+const ATTACH_RETRY_BOUND = 40;
+
 configureRendererPool({
   resolveLeaf(leafId) {
     const s = sessions.get(leafId);
@@ -136,8 +142,13 @@ const textDecoder = new TextDecoder("utf-8", { fatal: false });
 function deliverPtyBytes(leafId: number, bytes: Uint8Array): void {
   const s = sessions.get(leafId);
   if (!s) return;
-  s.receivedOutput = true;
   const slot = getSlotForLeaf(leafId);
+  // Only count output as "received" once it reaches a live renderer. Bytes that
+  // merely land in the dormant ring have not been shown to the user yet — and
+  // the nudge timers below are the recovery path for a session whose slot never
+  // bound. Marking the flag here would silence it and leave a blank pane
+  // permanently (seen on project reopen, where the tab subtree is remounted).
+  if (slot) s.receivedOutput = true;
   if (slot) slot.term.write(bytes);
   else s.dormantRing.push(bytes);
   // Feed to error detector (skip private terminals).
@@ -316,7 +327,7 @@ function attachSession(
   s.callbacks = callbacks;
   s.container = container;
 
-  if (s.visibleNow) bindLeafToSlot(leafId, s);
+  if (s.visibleNow && !s.hasSlot) bindLeafToSlot(leafId, s);
 
   startPtyIfNeeded(leafId, s);
 }
@@ -427,15 +438,33 @@ export function useTerminalSession({
     s.callbacks = callbacks;
     startPtyIfNeeded(leafId, s);
 
-    s.ready.then(() => {
+    // Bind the renderer once the font pipeline settles. This must retry: on
+    // project reopen (`resetWorkspace`) the whole tab subtree is remounted, so
+    // `container.current` can legitimately be null at this exact moment. A
+    // single bail used to leave the session with no slot forever — the shell
+    // ran and streamed output into the dormant ring, but nothing was ever
+    // rendered.
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    const bind = (attempt: number) => {
       if (cancelled || s.disposed) return;
       const node = container.current;
-      if (!node) return;
+      if (!node) {
+        if (attempt < ATTACH_RETRY_BOUND) {
+          retryTimer = setTimeout(() => bind(attempt + 1), ATTACH_RETRY_MS);
+        } else {
+          console.warn(
+            `[Kai] terminal ${leafId}: container never mounted, renderer not bound`,
+          );
+        }
+        return;
+      }
       attachSession(leafId, node, callbacks);
       if (s.visibleNow && s.focusedNow) focusSlot(leafId);
-    });
+    };
+    s.ready.then(() => bind(0));
     return () => {
       cancelled = true;
+      if (retryTimer !== null) clearTimeout(retryTimer);
       detachSession(leafId);
     };
   }, [leafId, container, initialCwd]);
