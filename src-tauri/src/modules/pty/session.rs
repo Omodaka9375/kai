@@ -91,13 +91,12 @@ pub fn spawn(
     let mut child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
     drop(pair.slave);
 
-    // Release spawn lock before the settle sleep so other PTY operations
-    // (resize, write) are never blocked by a concurrent spawn.
-    drop(_spawn_guard);
-
-    // ponytail: ConPTY settle — rapid sequential ConPTY spawns can leave the
-    // second PTY's output pipe stalled. A lock-free throttle based on last
-    // spawn timestamp prevents the race without blocking the whole executor.
+    // ConPTY settle — rapid sequential ConPTY spawns can leave the second PTY's
+    // output pipe stalled even though `openpty + spawn_command` are serialized.
+    // Enforce a minimum gap *while still holding the spawn lock* so the next
+    // spawn cannot begin openpty/spawn_command during the settle window. This
+    // only delays other spawns — resize/write take the `PtyState` sessions
+    // lock, not `SPAWN_LOCK`, so they are never blocked by the sleep.
     #[cfg(windows)]
     {
         let now = std::time::SystemTime::now()
@@ -117,6 +116,7 @@ pub fn spawn(
             Ordering::Release,
         );
     }
+    drop(_spawn_guard);
 
     let killer = child.clone_killer();
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;

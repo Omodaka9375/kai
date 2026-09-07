@@ -51,6 +51,8 @@ type Session = {
   hasSlot: boolean;
   /** Set to true once the PTY has delivered at least one byte of output. */
   receivedOutput: boolean;
+  /** Bumped when a spawn is superseded by a watchdog retry — late PTYs close. */
+  spawnEpoch: number;
   /** Pending nudge setTimeout handles — cleared on dispose. */
   nudgeTimers: ReturnType<typeof setTimeout>[];
 };
@@ -70,6 +72,10 @@ const FONT_READY_TIMEOUT_MS = 2500;
 const ATTACH_RETRY_MS = 50;
 const ATTACH_RETRY_BOUND = 40;
 
+// A hung `pty_open` IPC (ConPTY/conhost wedged, e.g. cold start under AV scan)
+// must not pin the session in `ptyOpening` forever. Race the spawn against
+// this watchdog so it fails, resets the flag, and retries like any other error.
+const PTY_OPEN_TIMEOUT_MS = 20_000;
 configureRendererPool({
   resolveLeaf(leafId) {
     const s = sessions.get(leafId);
@@ -120,6 +126,7 @@ function ensureSession(leafId: number, initialCwd?: string): Session {
     dormantRing: new DormantRing(),
     hasSlot: false,
     receivedOutput: false,
+    spawnEpoch: 0,
     nudgeTimers: [],
   };
   sessions.set(leafId, session);
@@ -169,13 +176,38 @@ function openPtySession(
   cwd: string | undefined,
   attempt: number,
 ): void {
-  openPtyForSession(leafId, s, cwd)
+  const epoch = s.spawnEpoch;
+
+  // `pty_open` is an async IPC call. If it hangs (ConPTY/conhost wedged on a
+  // cold start) the session would sit with `ptyOpening === true` forever and
+  // never retry — a permanently blank pane. Race it against a watchdog so a
+  // hung spawn fails, resets the flag, and retries like any other error.
+  let watchdog: ReturnType<typeof setTimeout> | null = null;
+  const opened = openPtyForSession(leafId, s, cwd);
+  const timedOut = new Promise<never>((_, reject) => {
+    watchdog = setTimeout(
+      () => reject(new Error("pty_open timed out")),
+      PTY_OPEN_TIMEOUT_MS,
+    );
+  });
+
+  // If a newer attempt supersedes this one (watchdog fired, epoch bumped),
+  // close the late-arriving PTY so we don't leak a second shell into the Rust
+  // side. `.catch` is defensive — the race below already handles rejection.
+  opened
     .then((pty) => {
-      s.ptyOpening = false;
-      if (s.disposed) {
+      if (epoch !== s.spawnEpoch) void pty.close();
+    })
+    .catch(() => {});
+
+  Promise.race([opened, timedOut])
+    .then((pty) => {
+      if (watchdog) clearTimeout(watchdog);
+      if (epoch !== s.spawnEpoch || s.disposed) {
         pty.close();
         return;
       }
+      s.ptyOpening = false;
       s.pty = pty;
       s.receivedOutput = false;
       if (s.cols > 0 && s.rows > 0) pty.resize(s.cols, s.rows);
@@ -203,9 +235,12 @@ function openPtySession(
       });
     })
     .catch((e) => {
+      if (watchdog) clearTimeout(watchdog);
+      if (epoch !== s.spawnEpoch) return; // superseded by a newer attempt
       s.ptyOpening = false;
       console.error("[Kai] openPty failed (attempt %d):", attempt, e);
       if (attempt < 1 && !s.disposed) {
+        s.spawnEpoch += 1; // invalidate the hung in-flight pty_open
         s.ptyOpening = true;
         setTimeout(() => {
           if (s.disposed) return;
@@ -352,6 +387,8 @@ export async function respawnSession(
   s.dormantRing = new DormantRing();
   s.shellExited = false;
   s.pendingExit = null;
+  s.receivedOutput = false;
+  s.spawnEpoch += 1; // invalidate any in-flight spawn so it can't re-claim s.pty
 
   const slot = getSlotForLeaf(leafId);
   if (slot) {
