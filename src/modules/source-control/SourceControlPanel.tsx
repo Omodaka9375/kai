@@ -23,7 +23,6 @@ import { fileIconUrl } from "@/modules/explorer/lib/iconResolver";
 import {
   AddSquareIcon,
   AiContentGenerator02Icon,
-  Alert02Icon,
   Archive01Icon,
   ArchiveArrowDownIcon,
   ArrowDown01Icon,
@@ -82,7 +81,6 @@ const ROW_HEIGHTS = {
 type GroupId = "staged" | "unstaged" | "stash";
 
 type RowDescriptor =
-  | { kind: "banner-diverged"; key: string }
   | { kind: "banner-conflicts"; key: string }
   | { kind: "group-header"; key: string; group: GroupId; count: number }
   | { kind: "entry"; key: string; group: GroupId; entry: SourceControlEntry }
@@ -283,9 +281,6 @@ export const SourceControlPanel = memo(function SourceControlPanel({
 
   const rows = useMemo<RowDescriptor[]>(() => {
     const result: RowDescriptor[] = [];
-    if (isDiverged) {
-      result.push({ kind: "banner-diverged", key: "banner-diverged" });
-    }
     if (scm.hasConflicts) {
       result.push({ kind: "banner-conflicts", key: "banner-conflicts" });
     }
@@ -348,7 +343,6 @@ export const SourceControlPanel = memo(function SourceControlPanel({
 
     return result;
   }, [
-    isDiverged,
     scm.stagedEntries,
     scm.unstagedEntries,
     scm.stashes,
@@ -386,7 +380,6 @@ export const SourceControlPanel = memo(function SourceControlPanel({
       const row = rows[index];
       if (!row) return ROW_HEIGHTS.entry;
       switch (row.kind) {
-        case "banner-diverged":
         case "banner-conflicts":
           return ROW_HEIGHTS.banner;
         case "group-header":
@@ -1022,8 +1015,6 @@ type RowRendererProps = {
 const RowRenderer = memo(function RowRenderer(props: RowRendererProps) {
   const { row } = props;
   switch (row.kind) {
-    case "banner-diverged":
-      return <DivergedBanner />;
     case "banner-conflicts":
       return <ConflictsBanner />;
     case "group-header":
@@ -1040,23 +1031,6 @@ const RowRenderer = memo(function RowRenderer(props: RowRendererProps) {
       );
   }
 });
-
-function DivergedBanner() {
-  return (
-    <div className="mx-2 mt-1 flex h-7 items-center gap-1.5 rounded-md border border-amber-500/25 bg-amber-500/[0.07] px-2 text-[10.5px] leading-none text-amber-700 dark:text-amber-200">
-      <HugeiconsIcon
-        icon={Alert02Icon}
-        size={11}
-        strokeWidth={1.9}
-        className="shrink-0"
-      />
-      <span className="min-w-0 flex-1 truncate">
-        <span className="font-medium">Diverged from upstream</span>
-        <span className="ml-1 opacity-75">— resolve in terminal</span>
-      </span>
-    </div>
-  );
-}
 
 function ConflictsBanner() {
   return (
