@@ -166,8 +166,33 @@ export function fence(
  * Returns the original content if no matching fence pair is found.
  */
 export function unfence(content: string): string {
-  return content.replace(/\[start\s+\w+_\w+\]\n?/g, "")
-    .replace(/\n?\[end\s+\w+_\w+\]/g, "");
+  return content
+    .replace(/\[start\s+(?:tool|web|watch|mcp)_[A-Za-z0-9_-]+\]\n?/g, "")
+    .replace(/\n?\[end\s+(?:tool|web|watch|mcp)_[A-Za-z0-9_-]+\]/g, "");
+}
+
+/**
+ * Recursively strip fence markers from every string in a tool output value.
+ *
+ * Fence markers are a prompt-injection defense that only the MODEL should
+ * see — they tell it which content is untrusted tool output. The UI must show
+ * clean output, so this is applied to a COPY of the tool result at render
+ * time. It must NOT be applied to the persisted message: the model relies on
+ * the nonce markers on every subsequent turn, so the stored form stays fenced.
+ */
+export function unfenceDeep<T>(value: T): T {
+  if (typeof value === "string") return unfence(value) as unknown as T;
+  if (Array.isArray(value)) {
+    return value.map((v) => unfenceDeep(v)) as unknown as T;
+  }
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = unfenceDeep(v);
+    }
+    return out as unknown as T;
+  }
+  return value;
 }
 
 // ── Per-tool fencing helpers ──────────────────────────────────────────────

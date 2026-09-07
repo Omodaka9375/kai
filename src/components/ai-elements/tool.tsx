@@ -24,6 +24,7 @@ import {
   ToolsIcon,
 } from "@hugeicons/core-free-icons";
 import { useChatStore } from "@/modules/ai/store/chatStore";
+import { unfenceDeep } from "@/modules/ai/lib/fence";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { DynamicToolUIPart, ToolUIPart } from "ai";
 import type { ComponentProps, ReactNode } from "react";
@@ -155,6 +156,9 @@ const ToolImpl = ({
   // body, which is huge and re-renders per token.
   const showInputBody = !isHeavy && Boolean(input);
   const showOutputBody = !isHeavy && output !== undefined;
+  // Fence markers are a model-facing prompt-injection defense — the UI shows
+  // clean output. This is display-only; the persisted message stays fenced.
+  const displayOutput = showOutputBody ? unfenceDeep(output) : undefined;
   const hasDetails =
     showInputBody || showOutputBody || Boolean(errorText);
 
@@ -209,7 +213,7 @@ const ToolImpl = ({
             {showOutputBody || errorText ? (
               <ToolOutput
                 toolName={toolName}
-                output={showOutputBody ? output : undefined}
+                output={displayOutput}
                 errorText={errorText}
               />
             ) : null}
