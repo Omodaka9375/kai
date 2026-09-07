@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { native } from "../lib/native";
 import { checkReadable } from "../lib/security";
 import { resolvePath } from "../tools/tools";
+import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   FILE_MUTATION_TOOLS,
   flushPersist,
@@ -54,6 +55,17 @@ type ToolPartLike = ToolUIPart & {
 };
 
 type AnyPart = UIMessagePart<Record<string, never>, Record<string, never>>;
+
+/**
+ * Detect a `git commit` invocation inside a bash_run command, so we can force
+ * an approval when commit signing is set to "ask for approval". Matches bare
+ * `git commit`, `git commit -m ...`, and chained variants (`git add -A; git
+ * commit ...`), but not plumbing commands like `git commit-tree`.
+ */
+function isGitCommitCommand(command: string | undefined): boolean {
+  if (!command) return false;
+  return /\bgit\s+commit(?:\s|$)/.test(command) && !/\bgit\s+commit-tree\b/.test(command);
+}
 
 function Bridge({
   sessionId,
@@ -182,6 +194,13 @@ function Bridge({
     autoApprovedRef.current = new Set();
   }, [sessionId]);
 
+  // Commit-signing "ask for approval" must outrank autoApprove: "all". A signed
+  // commit is a stronger, user-owned assertion than a routine file edit, so a
+  // `git commit` from the agent should still surface a confirmation card.
+  const signingApprovalRequired = usePreferencesStore(
+    (s) => s.commitSigningEnabled && s.commitSigningMode === "approval",
+  );
+
   useEffect(() => {
     if (autoApprove === "off") return;
     for (const m of messages) {
@@ -194,12 +213,19 @@ function Bridge({
         // Determine the tool name.
         const type = (p as { type?: string }).type ?? "";
         const toolName = type.replace(/^tool-/, "");
+        const input = (p as { input?: Record<string, unknown> }).input;
         // Elevation is a stronger trust boundary — never auto-approve it, even
         // under autoApprove: "all". The user must click the elevation card.
         const isElevated =
-          toolName === "bash_run" &&
-          (p as { input?: Record<string, unknown> }).input?.elevated === true;
+          toolName === "bash_run" && input?.elevated === true;
         if (isElevated) continue;
+        // Commit signing "ask for approval" — a `git commit` from the agent
+        // must be reviewed before signing, even under autoApprove: "all".
+        const isSignedCommit =
+          toolName === "bash_run" &&
+          signingApprovalRequired &&
+          isGitCommitCommand(input?.command as string | undefined);
+        if (isSignedCommit) continue;
         const shouldApprove =
           autoApprove === "all" ||
           (autoApprove === "edits" && FILE_MUTATION_TOOLS.has(toolName));
@@ -213,7 +239,7 @@ function Bridge({
         }
       }
     }
-  }, [messages, autoApprove, addToolApprovalResponse, markAutoApproved]);
+  }, [messages, autoApprove, addToolApprovalResponse, markAutoApproved, signingApprovalRequired]);
 
   // ---- AI diff tab management ----------------------------------------------
   // We track which approvalIds have already opened a tab so re-renders don't
