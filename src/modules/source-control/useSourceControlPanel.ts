@@ -4,6 +4,7 @@ import {
   type GitDiscardEntry,
   type GitRepoInfo,
   type GitStatusSnapshot,
+  type GitStashEntry,
 } from "@/modules/ai/lib/native";
 import { useChatStore } from "@/modules/ai/store/chatStore";
 import { getModel, providerNeedsKey } from "@/modules/ai/config";
@@ -76,6 +77,15 @@ type SourceControlPanelState = {
   stagedEmptyText: string;
   unstagedEmptyText: string;
   pendingDiscard: PendingDiscard | null;
+  stashes: GitStashEntry[];
+  stashBusy: string | null;
+  stashAll: () => Promise<void>;
+  popStash: (entry: GitStashEntry) => Promise<void>;
+  applyStash: (entry: GitStashEntry) => Promise<void>;
+  requestDropStash: (entry: GitStashEntry) => void;
+  confirmDropStash: () => Promise<void>;
+  cancelDropStash: () => void;
+  pendingDropStash: GitStashEntry | null;
   setCommitMessage: (value: string) => void;
   refresh: () => Promise<void>;
   selectEntry: (entry: SourceControlEntry) => Promise<void>;
@@ -394,6 +404,11 @@ export function useSourceControlPanel(
     | null
   >(null);
   const [pendingSignConfirm, setPendingSignConfirm] = useState(false);
+  const [stashes, setStashes] = useState<GitStashEntry[]>([]);
+  const [stashBusy, setStashBusy] = useState<string | null>(null);
+  const [pendingDropStash, setPendingDropStash] = useState<GitStashEntry | null>(
+    null,
+  );
   const selectedRef = useRef<DiffSelection | null>(null);
   const reconcileTimerRef = useRef(0);
 
@@ -552,6 +567,27 @@ export function useSourceControlPanel(
     if (summary.repo) invalidateRepoDiffs(summary.repo.repoRoot);
     await summary.refresh({ remote: "never" });
   }, [isOpen, summary]);
+
+  const loadStashes = useCallback(async () => {
+    if (!isOpen) {
+      setStashes([]);
+      return;
+    }
+    const root = summary.repo?.repoRoot;
+    if (!root) {
+      setStashes([]);
+      return;
+    }
+    try {
+      setStashes(await native.gitStashList(root));
+    } catch {
+      setStashes([]);
+    }
+  }, [isOpen, summary.repo?.repoRoot]);
+
+  useEffect(() => {
+    void loadStashes();
+  }, [loadStashes]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -766,6 +802,93 @@ export function useSourceControlPanel(
     );
   }, [repo, runMutation, stagedEntries]);
 
+  const stashAll = useCallback(async () => {
+    if (!repo || summary.busyAction) return;
+    setStashBusy("stash:all");
+    setActionMessage(null);
+    setActionError(null);
+    try {
+      await native.gitStashPush(repo.repoRoot);
+      setActionMessage("Changes stashed");
+      await summary.refresh({ remote: "never", mutation: true });
+      await loadStashes();
+    } catch (error) {
+      setActionError(normalizeError(error));
+    } finally {
+      setStashBusy(null);
+    }
+  }, [repo, summary, loadStashes]);
+
+  const popStash = useCallback(
+    async (entry: GitStashEntry) => {
+      if (!repo || summary.busyAction) return;
+      setStashBusy(`pop:${entry.index}`);
+      setActionMessage(null);
+      setActionError(null);
+      try {
+        await native.gitStashPop(repo.repoRoot, entry.index);
+        setActionMessage(`Popped ${entry.refName}`);
+        await summary.refresh({ remote: "never", mutation: true });
+        await loadStashes();
+      } catch (error) {
+        setActionError(normalizeError(error));
+        await loadStashes();
+      } finally {
+        setStashBusy(null);
+      }
+    },
+    [repo, summary, loadStashes],
+  );
+
+  const applyStash = useCallback(
+    async (entry: GitStashEntry) => {
+      if (!repo || summary.busyAction) return;
+      setStashBusy(`apply:${entry.index}`);
+      setActionMessage(null);
+      setActionError(null);
+      try {
+        await native.gitStashApply(repo.repoRoot, entry.index);
+        setActionMessage(`Applied ${entry.refName}`);
+        await summary.refresh({ remote: "never", mutation: true });
+      } catch (error) {
+        setActionError(normalizeError(error));
+      } finally {
+        setStashBusy(null);
+      }
+    },
+    [repo, summary],
+  );
+
+  const requestDropStash = useCallback(
+    (entry: GitStashEntry) => {
+      if (summary.busyAction) return;
+      setPendingDropStash(entry);
+    },
+    [summary.busyAction],
+  );
+
+  const cancelDropStash = useCallback(() => {
+    setPendingDropStash(null);
+  }, []);
+
+  const confirmDropStash = useCallback(async () => {
+    const entry = pendingDropStash;
+    setPendingDropStash(null);
+    if (!repo || !entry || summary.busyAction) return;
+    setStashBusy(`drop:${entry.index}`);
+    setActionMessage(null);
+    setActionError(null);
+    try {
+      await native.gitStashDrop(repo.repoRoot, entry.index);
+      setActionMessage(`Dropped ${entry.refName}`);
+      await loadStashes();
+    } catch (error) {
+      setActionError(normalizeError(error));
+    } finally {
+      setStashBusy(null);
+    }
+  }, [pendingDropStash, repo, summary, loadStashes]);
+
   const generateCommitMessage = useCallback(async () => {
     if (!repo || stagedEntries.length === 0) return;
     if (aiBusy) {
@@ -956,6 +1079,15 @@ export function useSourceControlPanel(
     stagedEmptyText,
     unstagedEmptyText,
     pendingDiscard: pendingDiscardView,
+    stashes,
+    stashBusy,
+    stashAll,
+    popStash,
+    applyStash,
+    requestDropStash,
+    confirmDropStash,
+    cancelDropStash,
+    pendingDropStash,
     setCommitMessage,
     refresh,
     selectEntry,

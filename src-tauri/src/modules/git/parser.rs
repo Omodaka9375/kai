@@ -1,4 +1,4 @@
-use crate::modules::git::types::GitChangedFile;
+use crate::modules::git::types::{GitChangedFile, GitStashEntry};
 
 #[derive(Default)]
 pub struct PorcelainV2 {
@@ -132,6 +132,51 @@ fn is_unstaged(index_status: char, worktree_status: char) -> bool {
     worktree_status != ' ' || (index_status == '?' && worktree_status == '?')
 }
 
+/// Parse the output of `git stash list --format=%gd%x1f%h%x1f%gs`.
+///
+/// The `%gd` (e.g. `stash@{0}`) encodes the position, `%h` the short commit
+/// sha, and `%gs` the free-form stash message. `stash@{0}` is the most recent.
+/// Malformed lines are skipped rather than erroring, matching the forgiving
+/// posture of the porcelain parser.
+pub fn parse_stash_list(stdout: &str) -> Vec<GitStashEntry> {
+    let mut entries: Vec<GitStashEntry> = Vec::new();
+    for line in stdout.lines() {
+        let line = line.trim_end_matches('\r');
+        if line.is_empty() {
+            continue;
+        }
+        let mut parts = line.splitn(3, '\x1f');
+        let ref_name = parts.next().unwrap_or("");
+        let short_sha = parts.next().unwrap_or("");
+        let subject = parts.next().unwrap_or("").to_string();
+
+        let Some(index) = parse_stash_index(ref_name) else {
+            continue;
+        };
+        if !sha_is_safe(short_sha) {
+            continue;
+        }
+        entries.push(GitStashEntry {
+            index,
+            short_sha: short_sha.to_string(),
+            subject,
+            ref_name: ref_name.to_string(),
+        });
+    }
+    entries
+}
+
+/// Extract the `n` from `stash@{n}`. Returns `None` for anything else.
+fn parse_stash_index(ref_name: &str) -> Option<u32> {
+    let inner = ref_name.strip_prefix("stash@{")?.strip_suffix('}')?;
+    inner.parse::<u32>().ok()
+}
+
+/// Mirrors the commit-sha safety check in `operations.rs` (hex-only, ≤64).
+fn sha_is_safe(sha: &str) -> bool {
+    !sha.is_empty() && sha.len() <= 64 && sha.chars().all(|c| c.is_ascii_hexdigit())
+}
+
 fn status_label(index_status: char, worktree_status: char) -> String {
     match (index_status, worktree_status) {
         ('?', '?') => "Untracked".into(),
@@ -147,7 +192,52 @@ fn status_label(index_status: char, worktree_status: char) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_porcelain_v2;
+    use super::{parse_porcelain_v2, parse_stash_list};
+
+    #[test]
+    fn stash_list_parses_entries_in_order() {
+        let stdout = concat!(
+            "stash@{0}\x1fabc1234\x1fWIP on main: 8db5c7f fix ai fencing\n",
+            "stash@{1}\x1fdef5678\x1fOn feature: wip\n",
+        );
+        let entries = parse_stash_list(stdout);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].index, 0);
+        assert_eq!(entries[0].short_sha, "abc1234");
+        assert_eq!(entries[0].ref_name, "stash@{0}");
+        assert_eq!(entries[0].subject, "WIP on main: 8db5c7f fix ai fencing");
+        assert_eq!(entries[1].index, 1);
+        assert_eq!(entries[1].short_sha, "def5678");
+    }
+
+    #[test]
+    fn stash_list_skips_malformed_lines() {
+        let stdout = concat!(
+            "stash@{0}\x1fabc1234\x1fvalid\n",
+            "not-a-stash\x1fzzz\x1fgarbage\n",
+            "stash@{1}\x1fNOTHEX\x1fbad sha\n",
+            "stash@{2}\x1f1234567\x1f\n", // empty subject still valid
+        );
+        let entries = parse_stash_list(stdout);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].index, 0);
+        assert_eq!(entries[1].index, 2);
+    }
+
+    #[test]
+    fn stash_list_handles_empty_output() {
+        assert!(parse_stash_list("").is_empty());
+    }
+
+    #[test]
+    fn stash_index_rejects_garbage() {
+        assert_eq!(super::parse_stash_index("stash@{0}"), Some(0));
+        assert_eq!(super::parse_stash_index("stash@{12}"), Some(12));
+        assert_eq!(super::parse_stash_index("stash@{x}"), None);
+        assert_eq!(super::parse_stash_index("stash@{}"), None);
+        assert_eq!(super::parse_stash_index("stash@{0"), None);
+        assert_eq!(super::parse_stash_index("refs/stash"), None);
+    }
 
     #[test]
     fn porcelain_v2_parses_branch_and_files() {

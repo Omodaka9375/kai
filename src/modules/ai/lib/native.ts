@@ -151,6 +151,13 @@ export type GitDiscardEntry = {
   untracked: boolean;
 };
 
+export type GitStashEntry = {
+  index: number;
+  shortSha: string;
+  subject: string;
+  refName: string;
+};
+
 export const native = {
   workspaceCurrentDir: () => invoke<string>("workspace_current_dir"),
   workspaceAuthorize: (path: string) =>
@@ -353,6 +360,35 @@ export const native = {
     invoke<void>("git_discard", {
       repoRoot,
       entries,
+      workspace: currentWorkspaceEnv(),
+    }),
+  gitStashList: (repoRoot: string) =>
+    invoke<GitStashEntry[]>("git_stash_list", {
+      repoRoot,
+      workspace: currentWorkspaceEnv(),
+    }),
+  gitStashPush: (repoRoot: string, message?: string | null) =>
+    invoke<void>("git_stash_push", {
+      repoRoot,
+      message: message ?? null,
+      workspace: currentWorkspaceEnv(),
+    }),
+  gitStashPop: (repoRoot: string, index: number) =>
+    invoke<void>("git_stash_pop", {
+      repoRoot,
+      index,
+      workspace: currentWorkspaceEnv(),
+    }),
+  gitStashApply: (repoRoot: string, index: number) =>
+    invoke<void>("git_stash_apply", {
+      repoRoot,
+      index,
+      workspace: currentWorkspaceEnv(),
+    }),
+  gitStashDrop: (repoRoot: string, index: number) =>
+    invoke<void>("git_stash_drop", {
+      repoRoot,
+      index,
       workspace: currentWorkspaceEnv(),
     }),
   gitCommit: (

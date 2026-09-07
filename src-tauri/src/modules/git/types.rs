@@ -94,6 +94,16 @@ pub struct GitCommitFileChange {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct GitStashEntry {
+    /// Zero-based position in the stash stack (`stash@{0}` is newest).
+    pub index: u32,
+    pub short_sha: String,
+    pub subject: String,
+    pub ref_name: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GitLogEntry {
     pub sha: String,
     pub short_sha: String,

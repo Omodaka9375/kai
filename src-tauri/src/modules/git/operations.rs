@@ -2,15 +2,15 @@ use std::ffi::{OsStr, OsString};
 use std::path::Path;
 
 use crate::modules::git::errors::{GitError, Result};
-use crate::modules::git::parser::parse_porcelain_v2;
+use crate::modules::git::parser::{parse_porcelain_v2, parse_stash_list};
 use crate::modules::git::process::{
     ensure_git_available, ensure_success, git_show_text, git_stdout_line_opt, git_stdout_lines,
     read_text_file, run_git,
 };
 use crate::modules::git::types::{
     DiscardEntry, GitCommitFileChange, GitCommitResult, GitDiffContentResult, GitDiffResult,
-    GitLogEntry, GitOutput, GitPanelSnapshot, GitPushResult, GitRepoInfo, GitStatusSnapshot,
-    TextSource, DEFAULT_TIMEOUT_SECS, NETWORK_TIMEOUT_SECS,
+    GitLogEntry, GitOutput, GitPanelSnapshot, GitPushResult, GitRepoInfo, GitStashEntry,
+    GitStatusSnapshot, TextSource, DEFAULT_TIMEOUT_SECS, NETWORK_TIMEOUT_SECS,
 };
 use crate::modules::git::utils::{
     authorized_repo_root, canonical_dir, resolve_within_repo, split_upstream, ResolvedGitDirectory,
@@ -273,6 +273,119 @@ pub fn stage(
         DEFAULT_TIMEOUT_SECS,
     )?;
     ensure_success(&output, "git add failed")
+}
+
+pub fn stash_list(
+    registry: &WorkspaceRegistry,
+    repo_root: &str,
+    workspace: &WorkspaceEnv,
+) -> Result<Vec<GitStashEntry>> {
+    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
+    ensure_git_available(&repo_root.workspace)?;
+    let output = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        [
+            OsStr::new("stash"),
+            OsStr::new("list"),
+            OsStr::new("--format=%gd%x1f%h%x1f%gs"),
+        ],
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    ensure_success(&output, "git stash list failed")?;
+    let stdout = std::str::from_utf8(&output.stdout).unwrap_or("");
+    Ok(parse_stash_list(stdout))
+}
+
+pub fn stash_push(
+    registry: &WorkspaceRegistry,
+    repo_root: &str,
+    message: Option<&str>,
+    workspace: &WorkspaceEnv,
+) -> Result<()> {
+    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
+    ensure_git_available(&repo_root.workspace)?;
+    let mut args: Vec<OsString> = vec!["stash".into(), "push".into()];
+    if let Some(msg) = message.filter(|m| !m.trim().is_empty()) {
+        args.push("-m".into());
+        args.push(msg.trim().into());
+    }
+    let output = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        args,
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    if output.exit_code != Some(0) && nothing_to_stash(&output) {
+        return Err(GitError::command("git stash push", "no local changes to save"));
+    }
+    ensure_success(&output, "git stash push failed")
+}
+
+pub fn stash_pop(
+    registry: &WorkspaceRegistry,
+    repo_root: &str,
+    index: u32,
+    workspace: &WorkspaceEnv,
+) -> Result<()> {
+    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
+    ensure_git_available(&repo_root.workspace)?;
+    let spec = stash_spec(index);
+    let output = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        [OsStr::new("stash"), OsStr::new("pop"), OsStr::new(&spec)],
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    ensure_success(&output, "git stash pop failed")
+}
+
+pub fn stash_apply(
+    registry: &WorkspaceRegistry,
+    repo_root: &str,
+    index: u32,
+    workspace: &WorkspaceEnv,
+) -> Result<()> {
+    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
+    ensure_git_available(&repo_root.workspace)?;
+    let spec = stash_spec(index);
+    let output = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        [OsStr::new("stash"), OsStr::new("apply"), OsStr::new(&spec)],
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    ensure_success(&output, "git stash apply failed")
+}
+
+pub fn stash_drop(
+    registry: &WorkspaceRegistry,
+    repo_root: &str,
+    index: u32,
+    workspace: &WorkspaceEnv,
+) -> Result<()> {
+    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
+    ensure_git_available(&repo_root.workspace)?;
+    let spec = stash_spec(index);
+    let output = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        [OsStr::new("stash"), OsStr::new("drop"), OsStr::new(&spec)],
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    ensure_success(&output, "git stash drop failed")
+}
+
+/// Build a `stash@{n}` refspec from a validated numeric index. The index is a
+/// `u32` (never raw user text), so the only thing interpolated into the arg is
+/// digits.
+fn stash_spec(index: u32) -> String {
+    format!("stash@{{{index}}}")
+}
+
+fn nothing_to_stash(output: &GitOutput) -> bool {
+    let stderr = String::from_utf8_lossy(&output.stderr).to_ascii_lowercase();
+    stderr.contains("no local changes to save")
 }
 
 pub fn unstage(

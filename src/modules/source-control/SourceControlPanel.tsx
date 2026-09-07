@@ -24,10 +24,13 @@ import {
   AddSquareIcon,
   AiContentGenerator02Icon,
   Alert02Icon,
+  Archive01Icon,
+  ArchiveArrowDownIcon,
   ArrowDown01Icon,
   ArrowRight01Icon,
   ArrowUp01Icon,
   CheckmarkCircle01Icon,
+  Delete01Icon,
   Download01Icon,
   FolderGitTwoIcon,
   MinusSignIcon,
@@ -47,7 +50,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import { native } from "@/modules/ai/lib/native";
+import { native, type GitStashEntry } from "@/modules/ai/lib/native";
 import type { SourceControlSummary } from "./useSourceControl";
 import {
   useSourceControlPanel,
@@ -76,13 +79,14 @@ const ROW_HEIGHTS = {
   emptyPlaceholder: 24,
 } as const;
 
-type GroupId = "staged" | "unstaged";
+type GroupId = "staged" | "unstaged" | "stash";
 
 type RowDescriptor =
   | { kind: "banner-diverged"; key: string }
   | { kind: "banner-conflicts"; key: string }
   | { kind: "group-header"; key: string; group: GroupId; count: number }
   | { kind: "entry"; key: string; group: GroupId; entry: SourceControlEntry }
+  | { kind: "stash-row"; key: string; entry: GitStashEntry }
   | { kind: "empty"; key: string; group: GroupId; text: string };
 
 function basename(path: string): string {
@@ -161,6 +165,7 @@ export const SourceControlPanel = memo(function SourceControlPanel({
   const [refreshAnimating, setRefreshAnimating] = useState(false);
   const [stagedOpen, setStagedOpen] = useState(true);
   const [unstagedOpen, setUnstagedOpen] = useState(true);
+  const [stashesOpen, setStashesOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [focusedRowKey, setFocusedRowKey] = useState<string | null>(null);
@@ -218,6 +223,7 @@ export const SourceControlPanel = memo(function SourceControlPanel({
     : pushHint;
   const stagedCount = scm.stagedEntries.length;
   const unstagedCount = scm.unstagedEntries.length;
+  const stashCount = scm.stashes.length;
   const pushStatusLabel = upstreamBadgeLabel(scm.status?.upstream);
   const hasUpstream = !!scm.status?.upstream;
   const isDiverged =
@@ -322,15 +328,36 @@ export const SourceControlPanel = memo(function SourceControlPanel({
       }
     }
 
+    if (stashCount > 0) {
+      result.push({
+        kind: "group-header",
+        key: "header-stash",
+        group: "stash",
+        count: stashCount,
+      });
+      if (stashesOpen) {
+        for (const entry of scm.stashes) {
+          result.push({
+            kind: "stash-row",
+            key: `stash:${entry.index}`,
+            entry,
+          });
+        }
+      }
+    }
+
     return result;
   }, [
     isDiverged,
     scm.stagedEntries,
     scm.unstagedEntries,
+    scm.stashes,
     stagedCount,
+    stashCount,
     stagedOpen,
     unstagedCount,
     unstagedOpen,
+    stashesOpen,
   ]);
 
   const rowKeyToIndex = useMemo(() => {
@@ -365,6 +392,8 @@ export const SourceControlPanel = memo(function SourceControlPanel({
         case "group-header":
           return ROW_HEIGHTS.groupHeader;
         case "entry":
+          return ROW_HEIGHTS.entry;
+        case "stash-row":
           return ROW_HEIGHTS.entry;
         case "empty":
           return ROW_HEIGHTS.emptyPlaceholder;
@@ -808,16 +837,23 @@ export const SourceControlPanel = memo(function SourceControlPanel({
                           actionBusy={scm.actionBusy}
                           stagedOpen={stagedOpen}
                           unstagedOpen={unstagedOpen}
+                          stashesOpen={stashesOpen}
                           setStagedOpen={setStagedOpen}
                           setUnstagedOpen={setUnstagedOpen}
+                          setStashesOpen={setStashesOpen}
                           onFocusRow={setFocusedRowKey}
                           onStageAll={scm.stageAllEntries}
                           onUnstageAll={scm.unstageAllEntries}
                           onDiscardAll={scm.requestDiscardAll}
+                          onStashAll={scm.stashAll}
                           onSelectEntry={scm.selectEntry}
                           onStageEntry={scm.stageEntry}
                           onUnstageEntry={scm.unstageEntry}
                           onDiscardEntry={scm.requestDiscardEntry}
+                          stashBusy={scm.stashBusy}
+                          onPopStash={scm.popStash}
+                          onApplyStash={scm.applyStash}
+                          onDropStash={scm.requestDropStash}
                         />
                       </div>
                     );
@@ -887,6 +923,32 @@ export const SourceControlPanel = memo(function SourceControlPanel({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <AlertDialog
+        open={scm.pendingDropStash !== null}
+        onOpenChange={(o) => {
+          if (!o) scm.cancelDropStash();
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Drop stash?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {scm.pendingDropStash
+                ? `Drop ${scm.pendingDropStash.refName} ("${scm.pendingDropStash.subject}")? This cannot be undone.`
+                : null}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => scm.cancelDropStash()}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={() => void scm.confirmDropStash()}>
+              Drop
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </TooltipProvider>
   );
 });
@@ -938,16 +1000,23 @@ type RowRendererProps = {
   actionBusy: string | null;
   stagedOpen: boolean;
   unstagedOpen: boolean;
+  stashesOpen: boolean;
   setStagedOpen: (open: boolean) => void;
   setUnstagedOpen: (open: boolean) => void;
+  setStashesOpen: (open: boolean) => void;
   onFocusRow: (key: string | null) => void;
   onStageAll: () => Promise<void> | void;
   onUnstageAll: () => Promise<void> | void;
   onDiscardAll: () => void;
+  onStashAll: () => Promise<void> | void;
   onSelectEntry: (entry: SourceControlEntry) => Promise<void>;
   onStageEntry: (entry: SourceControlEntry) => Promise<void>;
   onUnstageEntry: (entry: SourceControlEntry) => Promise<void>;
   onDiscardEntry: (entry: SourceControlEntry) => void;
+  stashBusy: string | null;
+  onPopStash: (entry: GitStashEntry) => Promise<void> | void;
+  onApplyStash: (entry: GitStashEntry) => Promise<void> | void;
+  onDropStash: (entry: GitStashEntry) => void;
 };
 
 const RowRenderer = memo(function RowRenderer(props: RowRendererProps) {
@@ -961,6 +1030,8 @@ const RowRenderer = memo(function RowRenderer(props: RowRendererProps) {
       return <GroupHeader {...props} row={row} />;
     case "entry":
       return <EntryRow {...props} row={row} />;
+    case "stash-row":
+      return <StashRow {...props} row={row} />;
     case "empty":
       return (
         <div className="px-3 pt-0.5 text-[11px] text-muted-foreground/80">
@@ -1000,21 +1071,32 @@ function GroupHeader({
   row,
   stagedOpen,
   unstagedOpen,
+  stashesOpen,
   setStagedOpen,
   setUnstagedOpen,
+  setStashesOpen,
   actionBusy,
   onStageAll,
   onUnstageAll,
   onDiscardAll,
+  onStashAll,
+  stashBusy,
 }: RowRendererProps & {
   row: Extract<RowDescriptor, { kind: "group-header" }>;
 }) {
-  const isOpen = row.group === "staged" ? stagedOpen : unstagedOpen;
+  const isOpen =
+    row.group === "staged"
+      ? stagedOpen
+      : row.group === "unstaged"
+        ? unstagedOpen
+        : stashesOpen;
   const toggle = () => {
     if (row.group === "staged") setStagedOpen(!stagedOpen);
-    else setUnstagedOpen(!unstagedOpen);
+    else if (row.group === "unstaged") setUnstagedOpen(!unstagedOpen);
+    else setStashesOpen(!stashesOpen);
   };
-  const title = row.group === "staged" ? "Staged" : "Changes";
+  const title =
+    row.group === "staged" ? "Staged" : row.group === "unstaged" ? "Changes" : "Stashes";
 
   return (
     <div className="flex h-7 items-center gap-1.5 px-2">
@@ -1043,35 +1125,53 @@ function GroupHeader({
 
       <div className="flex shrink-0 items-center gap-0.5">
         {row.group === "unstaged" ? (
-          <>
-            <IconActionButton
-              label="Discard all changes"
-              disabled={actionBusy !== null || row.count === 0}
-              onClick={() => onDiscardAll()}
-            >
-              {actionBusy === "discard:all" ? (
-                <Spinner className="size-3" />
-              ) : (
-                <HugeiconsIcon
-                  icon={RemoveSquareIcon}
-                  size={12}
-                  strokeWidth={1.85}
-                />
-              )}
-            </IconActionButton>
-            <IconActionButton
-              label="Stage all"
-              disabled={actionBusy !== null || row.count === 0}
-              onClick={() => void onStageAll()}
-            >
-              {actionBusy === "stage:all" ? (
-                <Spinner className="size-3" />
-              ) : (
-                <HugeiconsIcon icon={AddSquareIcon} size={12} strokeWidth={2} />
-              )}
-            </IconActionButton>
-          </>
-        ) : (
+          <IconActionButton
+            label="Stash all changes"
+            disabled={actionBusy !== null || stashBusy !== null || row.count === 0}
+            onClick={() => void onStashAll()}
+          >
+            {stashBusy === "stash:all" ? (
+              <Spinner className="size-3" />
+            ) : (
+              <HugeiconsIcon
+                icon={Archive01Icon}
+                size={12}
+                strokeWidth={1.85}
+              />
+            )}
+          </IconActionButton>
+        ) : null}
+        {row.group === "unstaged" ? (
+          <IconActionButton
+            label="Discard all changes"
+            disabled={actionBusy !== null || row.count === 0}
+            onClick={() => onDiscardAll()}
+          >
+            {actionBusy === "discard:all" ? (
+              <Spinner className="size-3" />
+            ) : (
+              <HugeiconsIcon
+                icon={RemoveSquareIcon}
+                size={12}
+                strokeWidth={1.85}
+              />
+            )}
+          </IconActionButton>
+        ) : null}
+        {row.group === "unstaged" ? (
+          <IconActionButton
+            label="Stage all"
+            disabled={actionBusy !== null || row.count === 0}
+            onClick={() => void onStageAll()}
+          >
+            {actionBusy === "stage:all" ? (
+              <Spinner className="size-3" />
+            ) : (
+              <HugeiconsIcon icon={AddSquareIcon} size={12} strokeWidth={2} />
+            )}
+          </IconActionButton>
+        ) : null}
+        {row.group === "staged" ? (
           <IconActionButton
             label="Unstage all"
             disabled={actionBusy !== null || row.count === 0}
@@ -1083,7 +1183,7 @@ function GroupHeader({
               <HugeiconsIcon icon={MinusSignIcon} size={12} strokeWidth={2} />
             )}
           </IconActionButton>
-        )}
+        ) : null}
       </div>
     </div>
   );
@@ -1225,6 +1325,99 @@ const EntryRow = memo(function EntryRow({
       >
         {entry.statusCode}
       </span>
+    </div>
+  );
+});
+
+const StashRow = memo(function StashRow({
+  row,
+  stashBusy,
+  onPopStash,
+  onApplyStash,
+  onDropStash,
+}: RowRendererProps & {
+  row: Extract<RowDescriptor, { kind: "stash-row" }>;
+}) {
+  const entry = row.entry;
+  const isPopBusy = stashBusy === `pop:${entry.index}`;
+  const isApplyBusy = stashBusy === `apply:${entry.index}`;
+  const isDropBusy = stashBusy === `drop:${entry.index}`;
+  const disabled = stashBusy !== null;
+
+  return (
+    <div
+      id={`scm-row-${row.key}`}
+      className="group relative flex h-[30px] items-center gap-2 rounded-md pl-2 pr-1.5 transition-all duration-100 hover:bg-accent/30"
+    >
+      <span
+        className="pointer-events-none absolute inset-y-1 left-0 w-[2px] rounded-full bg-sky-500/70 opacity-55 group-hover:opacity-95"
+        aria-hidden
+      />
+      <HugeiconsIcon
+        icon={Archive01Icon}
+        size={14}
+        strokeWidth={1.75}
+        className="shrink-0 text-muted-foreground"
+      />
+      <div className="flex min-w-0 flex-1 items-baseline gap-1.5 leading-none">
+        <span className="shrink-0 font-mono text-[10.5px] text-muted-foreground/80">
+          {entry.refName}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-[12px] font-medium leading-tight text-foreground/95">
+          {entry.subject}
+        </span>
+      </div>
+
+      <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 data-[focused=true]:opacity-100">
+        <IconActionButton
+          label={`Apply ${entry.refName}`}
+          disabled={disabled}
+          side="top"
+          onClick={() => void onApplyStash(entry)}
+        >
+          {isApplyBusy ? (
+            <Spinner className="size-3" />
+          ) : (
+            <HugeiconsIcon
+              icon={ArchiveArrowDownIcon}
+              size={11}
+              strokeWidth={1.9}
+            />
+          )}
+        </IconActionButton>
+        <IconActionButton
+          label={`Pop ${entry.refName} (apply & drop)`}
+          disabled={disabled}
+          side="top"
+          onClick={() => void onPopStash(entry)}
+        >
+          {isPopBusy ? (
+            <Spinner className="size-3" />
+          ) : (
+            <HugeiconsIcon
+              icon={ArrowUp01Icon}
+              size={11}
+              strokeWidth={1.9}
+            />
+          )}
+        </IconActionButton>
+        <IconActionButton
+          label={`Drop ${entry.refName}`}
+          disabled={disabled}
+          side="top"
+          onClick={() => onDropStash(entry)}
+        >
+          {isDropBusy ? (
+            <Spinner className="size-3" />
+          ) : (
+            <HugeiconsIcon
+              icon={Delete01Icon}
+              size={11}
+              strokeWidth={1.9}
+            />
+          )}
+        </IconActionButton>
+      </div>
     </div>
   );
 });
