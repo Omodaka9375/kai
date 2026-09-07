@@ -55,11 +55,7 @@ fn resolve_repo_in_authorized(
         detail: String::new(),
     })?;
 
-    let upstream = git_stdout_line_opt(
-        &canonical_root.workspace,
-        &canonical_root.git_path,
-        ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
-    )?;
+    let upstream = resolve_upstream(&canonical_root)?;
 
     Ok(Some(GitRepoInfo {
         repo_root: canonical_root.git_path,
@@ -544,28 +540,24 @@ pub fn push(
     let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
     ensure_git_available(&repo_root.workspace)?;
 
-    let upstream = git_stdout_line_opt(
-        &repo_root.workspace,
-        &repo_root.git_path,
-        ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
-    )?;
-    if upstream.is_none() {
+    let upstream = upstream_parts(&repo_root)?;
+    let Some((remote, branch)) = upstream else {
         return Err(GitError::NoUpstream);
-    }
+    };
 
+    // Explicit refspec — never rely on `push.default` / branch config, which
+    // silently pushes to the wrong target (or nothing) when misconfigured.
     let output = run_git(
         &repo_root.workspace,
         Some(&repo_root.git_path),
-        ["push"],
+        [OsStr::new("push"), OsStr::new(&remote), OsStr::new(&branch)],
         NETWORK_TIMEOUT_SECS,
     )?;
     ensure_success(&output, "git push failed")?;
 
-    let upstream = upstream.expect("None case returned Err(NoUpstream) above");
-    let (remote, branch) = split_upstream(&upstream);
     Ok(GitPushResult {
-        remote,
-        branch,
+        remote: Some(remote),
+        branch: Some(branch),
         pushed: true,
     })
 }
@@ -1094,10 +1086,14 @@ pub fn fetch(
 ) -> Result<()> {
     let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
     ensure_git_available(&repo_root.workspace)?;
+    let mut args: Vec<OsString> = vec!["fetch".into(), "--prune".into()];
+    if let Some((remote, _)) = upstream_parts(&repo_root)? {
+        args.push(remote.into());
+    }
     let output = run_git(
         &repo_root.workspace,
         Some(&repo_root.git_path),
-        ["fetch", "--prune"],
+        args,
         NETWORK_TIMEOUT_SECS,
     )?;
     ensure_success(&output, "git fetch failed")
@@ -1110,10 +1106,15 @@ pub fn pull_ff_only(
 ) -> Result<()> {
     let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
     ensure_git_available(&repo_root.workspace)?;
+    let mut args: Vec<OsString> = vec!["pull".into(), "--ff-only".into()];
+    if let Some((remote, branch)) = upstream_parts(&repo_root)? {
+        args.push(remote.into());
+        args.push(branch.into());
+    }
     let output = run_git(
         &repo_root.workspace,
         Some(&repo_root.git_path),
-        ["pull", "--ff-only"],
+        args,
         NETWORK_TIMEOUT_SECS,
     )?;
     ensure_success(&output, "git pull --ff-only failed")
@@ -1129,13 +1130,71 @@ pub fn pull(
 ) -> Result<()> {
     let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
     ensure_git_available(&repo_root.workspace)?;
+    let mut args: Vec<OsString> = vec!["pull".into(), "--no-rebase".into()];
+    if let Some((remote, branch)) = upstream_parts(&repo_root)? {
+        args.push(remote.into());
+        args.push(branch.into());
+    }
     let output = run_git(
         &repo_root.workspace,
         Some(&repo_root.git_path),
-        ["pull", "--no-rebase"],
+        args,
         NETWORK_TIMEOUT_SECS,
     )?;
     ensure_success(&output, "git pull failed")
+}
+
+/// Resolve the tracked remote + branch from `@{u}` as `(remote, branch)`.
+///
+/// Returns `Ok(None)` when the branch has no upstream (a normal, frequent
+/// state) so callers can fall back to bare commands.
+fn upstream_parts(
+    repo_root: &ResolvedGitDirectory,
+) -> Result<Option<(String, String)>> {
+    let Some(u) = resolve_upstream(repo_root)? else {
+        return Ok(None);
+    };
+    let (remote, branch) = split_upstream(&u);
+    Ok(match (remote, branch) {
+        (Some(r), Some(b)) => Some((r, b)),
+        (Some(r), None) => Some((r, u)),
+        (None, Some(b)) => Some(("origin".to_string(), b)),
+        (None, None) => None,
+    })
+}
+
+/// Read the current branch's upstream (`@{u}`) as a full `remote/branch`
+/// string, or `None` when there is no upstream / detached HEAD.
+///
+/// Tolerant by design: `git rev-parse @{u}` exits 128 with "no upstream
+/// configured" on stderr when the branch has none — that is a normal state and
+/// must resolve to `None`, not surface as a hard error. (The old code path
+/// tripped on exactly this and made status/resolve flaky on fresh branches.)
+fn resolve_upstream(repo_root: &ResolvedGitDirectory) -> Result<Option<String>> {
+    let output = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    if output.timed_out {
+        return Err(GitError::TimedOut("git rev-parse @{u}"));
+    }
+    if output.exit_code != Some(0) {
+        return Ok(None);
+    }
+    let u = std::str::from_utf8(&output.stdout)
+        .unwrap_or("")
+        .lines()
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if u.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(u))
+    }
 }
 
 fn nothing_to_commit(output: &GitOutput) -> bool {

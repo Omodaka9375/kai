@@ -19,6 +19,8 @@ use crate::modules::git::types::{
 use crate::modules::workspace::WorkspaceEnv;
 #[cfg(windows)]
 use crate::modules::workspace::validate_wsl_distro_name;
+#[cfg(windows)]
+use crate::modules::shell::job::KillJob;
 
 #[derive(Clone)]
 enum Availability {
@@ -271,7 +273,25 @@ where
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    let child = Arc::new(SharedChild::spawn(&mut cmd).map_err(|e| GitError::Spawn(e.to_string()))?);
+    // Give the git process its own process group on Unix so a timeout can
+    // signal the whole group. `process_group(0)` runs setpgid in the child
+    // before exec; a successful spawn therefore guarantees pid == pgid.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt as _;
+        cmd.process_group(0);
+    }
+
+    let shared =
+        SharedChild::spawn(&mut cmd).map_err(|e| GitError::Spawn(e.to_string()))?;
+    // Assign to a KILL_ON_JOB_CLOSE Job immediately (before any grandchild
+    // spawns) so a timed-out/killed push/pull/fetch reaps ssh, Git Credential
+    // Manager, gpg, etc. Otherwise those grandchildren inherit the stdout/
+    // stderr write-ends and keep them open, so the drain threads never see
+    // EOF — deadlocking every subsequent git command in this process.
+    #[cfg(windows)]
+    let job = KillJob::assign(shared.id()).ok();
+    let child = Arc::new(shared);
     let mut stdout_pipe = child
         .take_stdout()
         .ok_or_else(|| GitError::Spawn("no stdout pipe".into()))?;
@@ -292,6 +312,19 @@ where
         Ok(Ok(status)) => (status.code(), false),
         Ok(Err(e)) => return Err(GitError::Io(e)),
         Err(mpsc::RecvTimeoutError::Timeout) => {
+            // Reap the whole tree so descendant credential helpers / ssh /
+            // gpg don't keep the stdout/stderr write-ends open and hang the
+            // drain threads (and therefore future git calls).
+            #[cfg(windows)]
+            if let Some(ref job) = job {
+                job.terminate();
+            }
+            // SAFETY: `child` is the process-group leader (process_group(0)
+            // above), so negating its pid targets only the group it leads.
+            #[cfg(unix)]
+            unsafe {
+                libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL);
+            }
             let _ = child.kill();
             let _ = child.wait();
             (None, true)
