@@ -41,6 +41,7 @@ type Props = {
   onNew: () => void;
   onNewEditor: () => void;
   onNewApiTester: () => void;
+  onNewPrivate: () => void;
   onClose: (id: number) => void;
   /** Pin (promote) a preview tab to persistent on double-click. */
   onPin: (id: number) => void;
@@ -62,6 +63,7 @@ export function TabBar({
   onNew,
   onNewEditor,
   onNewApiTester,
+  onNewPrivate,
   onClose,
   onPin,
   onMove,
@@ -311,6 +313,10 @@ export function TabBar({
               <span className="text-xs text-muted-foreground">
                 {fmtShortcut(MOD_KEY, "E")}
               </span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => onNewPrivate()}>
+              <HugeiconsIcon icon={IncognitoIcon} size={14} strokeWidth={1.75} />
+              <span className="flex-1">Private Terminal</span>
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => onNewApiTester()}>
               <HugeiconsIcon icon={ApiIcon} size={14} strokeWidth={1.75} />

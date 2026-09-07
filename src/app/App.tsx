@@ -1406,6 +1406,7 @@ export default function App() {
             onNew={openNewTab}
             onNewEditor={() => setNewEditorOpen(true)}
             onNewApiTester={newApiTesterTab}
+            onNewPrivate={openNewPrivateTab}
             onClose={handleClose}
             onPin={pinTab}
             onMove={moveTab}
