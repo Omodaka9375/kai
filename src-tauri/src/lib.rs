@@ -2,6 +2,7 @@ mod modules;
 
 use modules::lock::mutex_lock;
 use modules::{diagnostics, fs, git, gpg, mcp, net, pty, secrets, shell, whisper, workspace};
+use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_window_state::StateFlags;
@@ -56,6 +57,23 @@ fn grant_media_permissions(window: &tauri::WebviewWindow) {
 #[derive(Default)]
 struct LaunchDir(Mutex<Option<String>>);
 
+/// Identifies this process instance for per-instance isolation of otherwise-
+/// shared app resources (log file, crash snapshots). Two KAI processes running
+/// on different projects must not trample each other's logs/crash dumps.
+#[derive(Clone)]
+pub struct InstanceId(pub String);
+
+/// Per-instance WebView2 user-data directory. Two KAI processes must not share
+/// the WebView2 browser-process user-data folder (it holds a singleton lock on
+/// startup — sharing it can yield a blank window or a failed second launch).
+fn webview_data_dir(app: &tauri::AppHandle, instance_id: &str) -> PathBuf {
+    app.path()
+        .app_local_data_dir()
+        .unwrap_or_else(|_| std::env::temp_dir())
+        .join("webview2")
+        .join(instance_id)
+}
+
 #[tauri::command]
 fn get_launch_dir(state: State<'_, LaunchDir>) -> Option<String> {
     mutex_lock(&state.0).take()
@@ -93,13 +111,15 @@ async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Res
         return Ok(());
     }
 
+    let instance_id = app.state::<InstanceId>().0.clone();
     let mut builder = WebviewWindowBuilder::new(&app, "settings", WebviewUrl::App(url_path.into()))
         .title("Settings")
         .inner_size(860.0, 640.0)
         .min_inner_size(720.0, 520.0)
         .resizable(true)
         .visible(false)
-        .shadow(false);
+        .shadow(false)
+        .data_directory(webview_data_dir(&app, &instance_id));
 
     // Tie lifecycle to the main window so settings minimizes/closes with it.
     if let Some(main) = app.get_webview_window("main") {
@@ -147,6 +167,9 @@ async fn pick_project_folder(app: tauri::AppHandle) -> Result<Option<String>, St
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Distinguish concurrent instances so their mutable app-global artifacts
+    // (log rotation, crash snapshots) never collide.
+    let instance_id = format!("{}", std::process::id());
     tauri::Builder::default()
         .plugin(tauri_plugin_process::init())
         // Skip restoring VISIBLE — frontend calls window.show() after first
@@ -168,7 +191,7 @@ pub fn run() {
                 .targets([
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
-                        file_name: Some("kai".into()),
+                        file_name: Some(format!("kai-{instance_id}")),
                     }),
                 ])
                 .build(),
@@ -176,7 +199,30 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .setup(|app| {
+        .setup(move |app| {
+            // Build the main window manually so we control the WebView2 user-data
+            // dir (per-instance, in setup where we can compute the instance id).
+            // The app has no `create: true` windows — otherwise Tauri would have
+            // already built them against the shared default data dir before this
+            // hook ran, locking the second instance out of a fresh profile.
+            let main_config = app
+                .config()
+                .app
+                .windows
+                .first()
+                .cloned()
+                .expect("main window config missing");
+            let data_dir = webview_data_dir(&app.handle().clone(), &instance_id);
+            let handle = app.handle().clone();
+            let window = WebviewWindowBuilder::from_config(&handle, &main_config)
+                .and_then(|b| b.data_directory(data_dir).build())
+                .map_err(|e| format!("failed to build main window: {e}"))?;
+
+            // Grant microphone/camera access on WebView2 (media is denied by
+            // default — only clipboard is auto-approved by wry).
+            #[cfg(target_os = "windows")]
+            grant_media_permissions(&window);
+
             // Resolve the log dir once and install the crash-snapshot panic
             // hook + record the dir for diagnostics_collect.
             let log_dir = app
@@ -184,8 +230,9 @@ pub fn run() {
                 .app_log_dir()
                 .unwrap_or_else(|_| std::env::temp_dir());
             let _ = std::fs::create_dir_all(&log_dir);
-            diagnostics::install_panic_hook(log_dir.clone());
+            diagnostics::install_panic_hook(log_dir.clone(), instance_id.clone());
             app.manage(diagnostics::CrashDir(Mutex::new(Some(log_dir))));
+            app.manage(InstanceId(instance_id.clone()));
             Ok(())
         })
         .manage(pty::PtyState::default())

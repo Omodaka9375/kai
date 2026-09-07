@@ -169,7 +169,10 @@ async fn download_inner(
     let total = resp.content_length().unwrap_or(EXPECTED_WHISPER_SIZE);
 
     use futures_util::StreamExt;
-    let tmp = path.with_extension("part");
+    // Per-process temp path — two instances downloading concurrently would
+    // otherwise interleave writes into the same `.part` file and corrupt the
+    // ~547 MB model on the final rename.
+    let tmp = path.with_extension(format!("part.{}", std::process::id()));
     let mut file = std::fs::File::create(&tmp).map_err(|e| e.to_string())?;
     let mut downloaded: u64 = 0;
     let mut stream = resp.bytes_stream();
@@ -193,6 +196,9 @@ async fn download_inner(
     }
     file.flush().map_err(|e| e.to_string())?;
     drop(file);
+    // rename() to the same destination from two processes is atomic on the
+    // filesystem level; the last finisher wins with a complete file, so the
+    // shared destination stays coherent even when both instances downloaded.
     std::fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
 
     let _ = on_event.send(WhisperDownloadEvent {

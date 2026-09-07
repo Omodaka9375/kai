@@ -47,6 +47,8 @@ fn tail_bytes(path: &std::path::Path, max: usize) -> String {
 }
 
 /// Read the tail of the most recently written `.log` file in `log_dir`.
+/// Scans across instances by mtime so diagnostics also surface a crash from a
+/// sibling process that has since exited.
 fn read_latest_log_tail(log_dir: &std::path::Path) -> String {
     let Ok(entries) = fs::read_dir(log_dir) else {
         return String::new();
@@ -141,7 +143,7 @@ pub fn diagnostics_collect(
 /// Install a panic hook that snapshots the panic + backtrace to a file, so a
 /// crash can still be reported even though `panic = "abort"` tears the process
 /// down immediately after.
-pub fn install_panic_hook(log_dir: PathBuf) {
+pub fn install_panic_hook(log_dir: PathBuf, instance_id: String) {
     let hook_dir = log_dir.clone();
     std::panic::set_hook(Box::new(move |info| {
         let payload = if let Some(s) = info.payload().downcast_ref::<&str>() {
@@ -168,7 +170,7 @@ pub fn install_panic_hook(log_dir: PathBuf) {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
-            let path = hook_dir.join(format!("crash-{unix}.log"));
+            let path = hook_dir.join(format!("crash-{instance_id}-{unix}.log"));
             let _ = fs::write(&path, &text);
         }
 

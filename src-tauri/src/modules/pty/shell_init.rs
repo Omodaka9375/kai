@@ -259,9 +259,11 @@ mod unix {
                 return Ok(());
             }
         }
-        // Atomic replace: a parallel shell startup must never source a half-written file.
+        // Atomic replace: a parallel shell startup must never source a
+        // half-written file. The tmp name is PID-unique so two KAI processes
+        // installing integration concurrently don't race on the same temp path.
         let mut tmp: OsString = path.as_os_str().to_owned();
-        tmp.push(".__KAI_tmp__");
+        tmp.push(format!(".__KAI_tmp_{}__", std::process::id()));
         let tmp = PathBuf::from(tmp);
         fs::write(&tmp, content).map_err(|e| format!("write {}: {e}", tmp.display()))?;
         fs::rename(&tmp, path).map_err(|e| {
@@ -564,7 +566,7 @@ mod windows {
             }
         }
         let mut tmp: OsString = path.as_os_str().to_owned();
-        tmp.push(".__KAI_tmp__");
+        tmp.push(format!(".__KAI_tmp_{}__", std::process::id()));
         let tmp = PathBuf::from(tmp);
         fs::write(&tmp, content).map_err(|e| format!("write {}: {e}", tmp.display()))?;
         fs::rename(&tmp, path).map_err(|e| {
