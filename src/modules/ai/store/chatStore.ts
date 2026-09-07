@@ -299,6 +299,33 @@ const NOOP_LIVE: Live = {
 const CHATS_LRU_CAP = 8;
 const chats = new Map<string, Chat<UIMessage>>();
 
+/**
+ * App-owned abort controllers for in-flight agent runs, keyed by session.
+ *
+ * `Chat.stop()` (the AI SDK) only aborts its internal request controller and
+ * is a silent no-op unless the chat status is exactly `streaming`/`submitted`.
+ * A runaway model that gets stuck between steps, or whose stream the SDK has
+ * already torn down, is therefore unkillable via `chat.stop()` alone. We keep
+ * our own controller per active run and abort it unconditionally on Stop so
+ * the button is a first-class, always-works control.
+ */
+const runControllers = new Map<string, AbortController>();
+
+export function registerRunController(sessionId: string, c: AbortController): void {
+  // A new run supersedes any stale controller for the session.
+  runControllers.get(sessionId)?.abort();
+  runControllers.set(sessionId, c);
+}
+
+/** Abort the active run for a session, if any. Idempotent, and removes the
+ *  controller so a future run starts clean. */
+function abortRunController(sessionId: string): void {
+  const c = runControllers.get(sessionId);
+  if (!c) return;
+  runControllers.delete(sessionId);
+  c.abort();
+}
+
 function touchChat(id: string, c: Chat<UIMessage>) {
   if (chats.has(id)) chats.delete(id);
   chats.set(id, c);
@@ -379,6 +406,10 @@ function makeChatSync(sessionId: string): Chat<UIMessage> {
   // and large tool results start getting elided — which is noise, not signal.
   // Surface it once per session, then stay quiet.
   const compactionNoticeShown = { current: false };
+  // Late-bound ref to the Chat instance so stream callbacks (which are built
+  // before the Chat exists) can stop it on loop detection. Assigned right
+  // after the Chat is constructed below.
+  const chatRef: { current: Chat<UIMessage> | null } = { current: null };
 
   const toolContext: ToolContext = {
     getCwd: () => useChatStore.getState().live.getCwd(),
@@ -488,6 +519,18 @@ function makeChatSync(sessionId: string): Chat<UIMessage> {
         compactionNotice: { droppedCount: info.droppedCount, at: Date.now() },
       });
     },
+    onLoopDetected: (info) => {
+      if (!isActive()) return;
+      // A model stuck repeating itself won't stop on its own — kill the run.
+      // The abort controller makes this reliable even when the SDK status has
+      // already left streaming/submitted.
+      abortRunController(sessionId);
+      void chatRef.current?.stop();
+      useChatStore.getState().patchAgentMeta({
+        status: "error",
+        error: info.suggestion ?? "Agent detected in a loop and was stopped.",
+      });
+    },
     onFinishMeta: (info) => {
       if (!isActive()) return;
       useChatStore.getState().patchAgentMeta({
@@ -534,7 +577,7 @@ function makeChatSync(sessionId: string): Chat<UIMessage> {
   const initialMessages = seedMessages.get(sessionId);
   seedMessages.delete(sessionId);
 
-  return new Chat<UIMessage>({
+  const chat = new Chat<UIMessage>({
     id: sessionId,
     transport,
     messages: initialMessages,
@@ -568,6 +611,8 @@ function makeChatSync(sessionId: string): Chat<UIMessage> {
       });
     },
   });
+  chatRef.current = chat;
+  return chat;
 }
 
 export const useChatStore = create<StoreState>((set, get) => ({
@@ -913,6 +958,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
 
   deleteSession: (id) => {
     const remaining = get().sessions.filter((s) => s.id !== id);
+    abortRunController(id);
     chats.get(id)?.stop();
     chats.delete(id);
     seedMessages.delete(id);
@@ -1208,6 +1254,9 @@ function releasePendingApprovals(chat: Chat<UIMessage>): void {
  */
 export function abortSession(sessionId: string): void {
   cancelAllShellSessions();
+  // Abort our own controller FIRST — this works even when Chat.stop() is a
+  // no-op because the SDK's status is no longer streaming/submitted.
+  abortRunController(sessionId);
   const chat = chats.get(sessionId);
   if (!chat) return;
   void chat.stop();
@@ -1243,6 +1292,10 @@ export function respondToApprovalStandalone(
  */
 export function stopSession(sessionId: string): void {
   cancelAllShellSessions();
+  // Abort our own controller unconditionally — the Stop button must work even
+  // when the model is stuck in a reasoning/tool loop where `Chat.stop()` is a
+  // silent no-op (SDK status is neither streaming nor submitted).
+  abortRunController(sessionId);
   const chat = chats.get(sessionId);
   if (!chat) return;
   void chat.stop().finally(() => {

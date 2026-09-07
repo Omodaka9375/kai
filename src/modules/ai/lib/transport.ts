@@ -11,7 +11,7 @@ import type { ProviderKeys } from "./keyring";
 import { mcpManager } from "./mcpManager";
 import { buildSessionState } from "./sessionState";
 import type { ToolContext } from "../tools/tools";
-import { useChatStore } from "../store/chatStore";
+import { useChatStore, registerRunController } from "../store/chatStore";
 import { useGoalsStore } from "../store/goalsStore";
 import { IS_WINDOWS, IS_MAC, IS_LINUX } from "@/lib/platform";
 
@@ -63,6 +63,7 @@ type Deps = {
   onTextDelta?: (text: string) => void;
   onCompact?: (info: { droppedCount: number }) => void;
   onFinishMeta?: (info: { hitStepCap: boolean; finishReason: string }) => void;
+  onLoopDetected?: (info: import("./streamGuard").LoopDetectionResult) => void;
   getPlanMode?: () => boolean;
   getSessionId?: () => string | null;
   getStackInfo?: () => StackInfo | null;
@@ -96,6 +97,18 @@ export function createContextAwareTransport(deps: Deps) {
   const run = async (options: SendOptions) => {
     const sessionId = deps.getSessionId?.() ?? "unknown";
     const modelId = deps.getModelId() ?? "unknown";
+
+    // Create + register our own abort controller for this run so the Stop
+    // button can always kill it, even when the AI SDK's Chat.stop() is a
+    // no-op (status is neither streaming nor submitted). We listen to the
+    // SDK's signal too so either path aborts the other.
+    const runController = new AbortController();
+    if (sessionId !== "unknown") registerRunController(sessionId, runController);
+    const sdkSignal = options.abortSignal;
+    const forwardAbort = () => runController.abort();
+    sdkSignal?.addEventListener("abort", forwardAbort, { once: true });
+    const effectiveSignal = runController.signal;
+
     agentBus.emit("agent:start", { sessionId });
     // Fire extension hooks (fire-and-forget, errors logged internally).
     for (const ext of extensionRegistry.getAll()) {
@@ -166,6 +179,7 @@ export function createContextAwareTransport(deps: Deps) {
       onUsage: deps.onUsage,
       onTextDelta: deps.onTextDelta,
       onCompact: deps.onCompact,
+      onLoopDetected: deps.onLoopDetected,
       onFinishMeta: (info) => {
         deps.onFinishMeta?.(info);
         const finishReason = info.finishReason;
@@ -184,7 +198,7 @@ export function createContextAwareTransport(deps: Deps) {
       stackInfo: deps.getStackInfo?.(),
       thinkingMode: deps.getThinkingMode?.() ?? "off",
       uiMessages: messagesForRun,
-      abortSignal: options.abortSignal,
+      abortSignal: effectiveSignal,
       mcpTools: Object.keys(mcpTools).length > 0 ? mcpTools : undefined,
       mcpSummary: mcpSummary.length > 0 ? mcpSummary : undefined,
       fenceState: getFenceState(sessionId),
@@ -193,6 +207,14 @@ export function createContextAwareTransport(deps: Deps) {
     // originalMessages so the Chat instance adopts it. Otherwise the Chat
     // keeps the full pre-summary history, and every subsequent step
     // re-triggers summarization.
+    // NOTE: we deliberately do NOT unregister `runController` here.
+    // `toUIMessageStream()` returns synchronously, before the stream is read,
+    // so unregistering now would leave a window where the Stop button can't
+    // reach the in-flight run. Instead the controller stays registered until
+    // (a) the next run replaces it (registerRunController aborts+overwrites),
+    // or (b) the session is deleted (deleteSession). abortRunController also
+    // removes it after aborting.
+    sdkSignal?.removeEventListener("abort", forwardAbort);
     return result.toUIMessageStream({
       originalMessages: didSummarize ? summarized : options.messages,
     });

@@ -616,6 +616,12 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // Initialize stream guard for loop detection
   const streamGuard = getGlobalStreamGuard();
   let stepsSeen = 0;
+  // Track consecutive identical tool invocations to catch a model stuck in a
+  // "spam the same tool" loop. A single tool+args fingerprint repeated 3+ times
+  // in a row is a runaway, not progress.
+  const TOOL_LOOP_THRESHOLD = 3;
+  let lastToolFingerprint: string | null = null;
+  let toolRepeatCount = 0;
 
   // Build and optionally fence tools for prompt-injection defense.
   //
@@ -646,12 +652,48 @@ export async function runAgentStream(opts: RunAgentOptions) {
     onStepFinish: (step) => {
       stepsSeen++;
 
-      // Check for loop detection on text output
-      if (step.text && opts.onLoopDetected) {
-        const loopResult = streamGuard.check(step.text);
+      // Check for loop detection on BOTH visible text and reasoning output.
+      // A "thinking loop" (model stuck re-deriving the same reasoning with no
+      // visible text) is exactly the runaway case the user reported — reasoning
+      // can blow past the context window while `step.text` stays empty.
+      const loopCandidate =
+        step.text || (step as { reasoningText?: string }).reasoningText;
+      if (loopCandidate && opts.onLoopDetected) {
+        const loopResult = streamGuard.check(loopCandidate);
         if (loopResult.isLooping) {
           opts.onLoopDetected(loopResult);
         }
+      }
+
+      // Detect repeated identical tool calls across steps (the "spamming" case
+      // where the model re-issues the same command/file over and over). The
+      // text-based streamGuard can't see structured tool calls, so fingerprint
+      // them explicitly. Any *different* tool/args resets the counter.
+      const toolFingerprint = step.toolCalls?.length
+        ? step.toolCalls
+            .map((tc) => `${tc.toolName}:${JSON.stringify(tc.input ?? {})}`)
+            .sort()
+            .join("|")
+        : null;
+      if (toolFingerprint) {
+        if (toolFingerprint === lastToolFingerprint) {
+          toolRepeatCount++;
+          if (toolRepeatCount >= TOOL_LOOP_THRESHOLD && opts.onLoopDetected) {
+            opts.onLoopDetected({
+              isLooping: true,
+              detectedPattern: `Repeated tool: ${step.toolCalls?.[0]?.toolName ?? "?"}`,
+              confidence: 0.95,
+              suggestion:
+                "Agent is repeatedly calling the same tool with identical inputs. The run was stopped to break the loop.",
+            });
+          }
+        } else {
+          lastToolFingerprint = toolFingerprint;
+          toolRepeatCount = 1;
+        }
+      } else {
+        lastToolFingerprint = null;
+        toolRepeatCount = 0;
       }
 
       if (opts.onStep) {
