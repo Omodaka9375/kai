@@ -43,4 +43,7 @@ Desktop.ini
 .env
 .env.*
 !.env.example
+
+# AI agent edit-undo snapshot cache (transient, auto-cleaned after 1h)
+.kai/checkpoints/
 ~
