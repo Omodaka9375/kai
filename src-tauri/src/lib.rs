@@ -170,7 +170,7 @@ fn project_key(root: &str) -> String {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for code in norm.encode_utf16() {
         hash ^= code as u64;
-        hash = hash.wrapping_mul(0x1_0000_0001_b3);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
     }
 
     const DIGITS: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
@@ -323,6 +323,10 @@ pub fn run() {
             // default — only clipboard is auto-approved by wry).
             #[cfg(target_os = "windows")]
             grant_media_permissions(&window);
+            // `window` is otherwise only consumed by the Windows-only grant
+            // above; keep the binding live on every platform.
+            #[cfg(not(target_os = "windows"))]
+            let _ = &window;
 
             // Resolve the log dir once and install the crash-snapshot panic
             // hook + record the dir for diagnostics_collect.
