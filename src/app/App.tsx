@@ -43,6 +43,7 @@ import {
 } from "@/modules/editor";
 import { MarkdownPreviewPane } from "@/modules/editor/MarkdownPreviewPane";
 import { GitHistoryStack } from "@/modules/git-history";
+import { normalizeWorkspacePath } from "@/modules/ai/lib/workspacePath";
 import { getLaunchDir } from "@/lib/launchDir";
 import { useZoom } from "@/lib/useZoom";
 import { FileExplorer, type FileExplorerHandle } from "@/modules/explorer";
@@ -513,7 +514,7 @@ export default function App() {
   const projectModelRoot = useRef<string | null>(null);
   useEffect(() => {
     if (!prefsHydrated) return;
-    const root = explorerRoot?.replace(/\\/g, "/").replace(/\/$/, "") ?? null;
+    const root = normalizeWorkspacePath(explorerRoot);
     if (root === projectModelRoot.current) return;
     projectModelRoot.current = root;
     const saved = root ? projectModelIds[root] : undefined;

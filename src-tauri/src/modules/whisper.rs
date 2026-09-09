@@ -38,6 +38,32 @@ const SILERO_MODEL_BYTES: &[u8] = include_bytes!("../../assets/ggml-silero-v5.1.
 /// 16 kHz — the sample rate whisper.cpp expects.
 const SAMPLE_RATE: f32 = 16_000.0;
 
+/// Removes `path` on drop unless disarmed. Wraps the per-PID download temp so
+/// a mid-download error, cancel, or panic can't orphan a ~547 MB `.part.<pid>`
+/// file on disk. Declared *before* the `File` in `download_inner` so it drops
+/// after the file handle closes (Windows won't remove an open file).
+struct TmpGuard {
+    path: Option<PathBuf>,
+}
+
+impl TmpGuard {
+    fn new(path: PathBuf) -> Self {
+        Self { path: Some(path) }
+    }
+
+    fn disarm(&mut self) {
+        self.path = None;
+    }
+}
+
+impl Drop for TmpGuard {
+    fn drop(&mut self) {
+        if let Some(p) = self.path.take() {
+            let _ = std::fs::remove_file(&p);
+        }
+    }
+}
+
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct WhisperModelStatus {
@@ -174,12 +200,12 @@ async fn download_inner(
     // ~547 MB model on the final rename.
     let tmp = path.with_extension(format!("part.{}", std::process::id()));
     let mut file = std::fs::File::create(&tmp).map_err(|e| e.to_string())?;
+    let mut guard = TmpGuard::new(tmp.clone());
     let mut downloaded: u64 = 0;
     let mut stream = resp.bytes_stream();
 
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| e.to_string())?;
-        use std::io::Write;
         file.write_all(&chunk).map_err(|e| e.to_string())?;
         downloaded += chunk.len() as u64;
         let _ = on_event.send(WhisperDownloadEvent {
@@ -189,8 +215,6 @@ async fn download_inner(
             message: None,
         });
         if app.state::<WhisperManager>().cancel.load(Ordering::SeqCst) {
-            drop(file);
-            let _ = std::fs::remove_file(&tmp);
             return Err("download cancelled".into());
         }
     }
@@ -200,6 +224,7 @@ async fn download_inner(
     // filesystem level; the last finisher wins with a complete file, so the
     // shared destination stays coherent even when both instances downloaded.
     std::fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
+    guard.disarm();
 
     let _ = on_event.send(WhisperDownloadEvent {
         phase: "done".into(),

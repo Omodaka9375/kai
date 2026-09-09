@@ -333,9 +333,21 @@ export async function setRecentProjects(value: string[]): Promise<void> {
   await writePref("recentProjects", value);
 }
 
+/** Bound on per-project model overrides. Projects are keyed by normalized root;
+ * without a cap this map grows unboundedly as the user opens new projects. */
+const PROJECT_MODEL_IDS_MAX = 200;
+
 export async function setProjectModelId(workspaceRoot: string, modelId: string): Promise<void> {
   const current = await store.get<Record<string, string>>("projectModelIds") ?? {};
   current[workspaceRoot] = modelId;
+  // Evict oldest-inserted entries beyond the cap (JS objects preserve string
+  // key insertion order), keeping the map from leaking per-project entries.
+  const keys = Object.keys(current);
+  if (keys.length > PROJECT_MODEL_IDS_MAX) {
+    for (const key of keys.slice(0, keys.length - PROJECT_MODEL_IDS_MAX)) {
+      delete current[key];
+    }
+  }
   await writePref("projectModelIds", current);
 }
 

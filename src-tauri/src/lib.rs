@@ -141,6 +141,77 @@ fn gc_stale_webview_profiles(root: &std::path::Path) {
     }
 }
 
+/// Extract the PID embedded in a per-instance artifact filename.
+///
+/// `kai-<pid>.log`, `kai-<pid>_<date>.log`, `crash-<pid>-<ts>.log`, and
+/// `*.part.<pid>` all embed `std::process::id()` at a known position. Returns
+/// `None` when the name isn't one of these shapes (so shared files like
+/// `.window-state.json` or the current default `kai-sessions.json` are never
+/// touched).
+fn pid_from_filename(name: &str) -> Option<u32> {
+    // Active log file: "kai-<pid>.log" — the whole stem must be a number.
+    if let Some(stem) = name.strip_prefix("kai-").and_then(|s| s.strip_suffix(".log")) {
+        if let Ok(pid) = stem.parse() {
+            return Some(pid);
+        }
+        // Rotated archive: "kai-<pid>_<date>.log" — PID is before the first '_'.
+        if let Some(pid) = stem.split('_').next().and_then(|p| p.parse().ok()) {
+            return Some(pid);
+        }
+        return None;
+    }
+    // Crash snapshot: "crash-<pid>-<ts>.log".
+    if let Some(stem) = name.strip_prefix("crash-").and_then(|s| s.strip_suffix(".log")) {
+        return stem.split('-').next().and_then(|p| p.parse().ok());
+    }
+    // Whisper download temp: "<model-stem>.part.<pid>" (e.g.
+    // "ggml-large-v3-turbo-q5_0.part.12345"). The PID is the segment
+    // immediately after a "part" segment.
+    let segments: Vec<&str> = name.split('.').collect();
+    if let Some(i) = segments.iter().position(|s| *s == "part") {
+        if let Some(pid) = segments.get(i + 1).and_then(|p| p.parse().ok()) {
+            return Some(pid);
+        }
+    }
+    None
+}
+
+/// GC stale per-instance artifacts (log files + rotated archives, crash
+/// snapshots) left by dead processes. Mirrors `gc_stale_webview_profiles` for
+/// the non-directory artifact classes — without this they accumulate forever
+/// because the log plugin only prunes files matching the *current* PID's
+/// prefix.
+fn gc_stale_logs_and_crashes(log_dir: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(log_dir) else {
+        return;
+    };
+    let current = std::process::id();
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Some(pid) = pid_from_filename(&name) else { continue };
+        if pid == current || pid_alive(pid) {
+            continue;
+        }
+        let _ = std::fs::remove_file(entry.path());
+    }
+}
+
+/// GC orphaned Whisper download temps (`*.part.<pid>`) left by dead processes.
+fn gc_stale_whisper_parts(whisper_dir: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(whisper_dir) else {
+        return;
+    };
+    let current = std::process::id();
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Some(pid) = pid_from_filename(&name) else { continue };
+        if pid == current || pid_alive(pid) {
+            continue;
+        }
+        let _ = std::fs::remove_file(entry.path());
+    }
+}
+
 #[tauri::command]
 fn get_launch_dir(state: State<'_, LaunchDir>) -> Option<String> {
     mutex_lock(&state.0).take()
@@ -337,6 +408,18 @@ pub fn run() {
                 .app_log_dir()
                 .unwrap_or_else(|_| std::env::temp_dir());
             let _ = std::fs::create_dir_all(&log_dir);
+            // Reap per-instance artifacts (logs, crash snapshots, whisper
+            // download temps) left behind by dead processes before starting
+            // this one — without this they accumulate unboundedly.
+            gc_stale_logs_and_crashes(&log_dir);
+            if let Some(dir) = app
+                .path()
+                .app_local_data_dir()
+                .ok()
+                .map(|d| d.join("whisper"))
+            {
+                gc_stale_whisper_parts(&dir);
+            }
             diagnostics::install_panic_hook(log_dir.clone(), instance_id.clone());
             app.manage(diagnostics::CrashDir(Mutex::new(Some(log_dir))));
             app.manage(InstanceId(instance_id.clone()));
@@ -448,7 +531,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::project_key;
+    use super::{pid_from_filename, project_key};
 
     #[test]
     fn project_key_matches_frontend_fnv1a_base36() {
@@ -462,5 +545,25 @@ mod tests {
         assert_eq!(project_key("d:/code/2026/kai"), "1jdnajs935bfk");
         assert_eq!(project_key("/home/user/repo"), "2alyr4jga8r3e");
         assert_eq!(project_key("C:\\Users\\foo\\bar"), "3jdxwoglhxj6e");
+    }
+
+    #[test]
+    fn pid_from_filename_parses_all_artifact_shapes() {
+        assert_eq!(pid_from_filename("kai-12345.log"), Some(12345));
+        assert_eq!(pid_from_filename("kai-12345_20260905.log"), Some(12345));
+        assert_eq!(pid_from_filename("crash-12345-1725000000.log"), Some(12345));
+        assert_eq!(
+            pid_from_filename("ggml-large-v3-turbo-q5_0.part.12345"),
+            Some(12345)
+        );
+    }
+
+    #[test]
+    fn pid_from_filename_ignores_shared_files() {
+        // Shared / non-instance files must never be swept.
+        assert_eq!(pid_from_filename("kai-sessions.json"), None);
+        assert_eq!(pid_from_filename(".window-state.json"), None);
+        assert_eq!(pid_from_filename("kai-sessions-1jdnajs935bfk.json"), None);
+        assert_eq!(pid_from_filename("ggml-large-v3-turbo-q5_0.bin"), None);
     }
 }

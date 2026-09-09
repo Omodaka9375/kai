@@ -4,6 +4,7 @@ import {
   setProjectModelId,
   setRecentModelIds,
 } from "@/modules/settings/store";
+import { normalizeWorkspacePath } from "./workspacePath";
 
 const RECENTS_MAX = 5;
 
@@ -29,7 +30,7 @@ export async function pushRecentModel(id: string): Promise<void> {
 
 /** Save the model choice for the current project so it's restored on next open. */
 export async function persistProjectModel(id: string, workspaceRoot: string | null): Promise<void> {
-  if (!workspaceRoot) return;
-  const key = workspaceRoot.replace(/\\/g, "/").replace(/\/$/, "");
+  const key = normalizeWorkspacePath(workspaceRoot);
+  if (!key) return;
   await setProjectModelId(key, id);
 }
