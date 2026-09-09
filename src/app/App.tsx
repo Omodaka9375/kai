@@ -483,13 +483,14 @@ export default function App() {
   }, [resetWorkspace]);
 
   // Reflect the current project folder in the window title so the user can
-  // distinguish multiple KAI instances in the taskbar / Alt+Tab.
+  // distinguish multiple KAI instances in the taskbar / Alt+Tab. Show only
+  // the project name (no "KAI —" prefix).
   useEffect(() => {
     const name = explorerRoot
       ? explorerRoot.split(/[\\/]/).filter(Boolean).pop() ?? explorerRoot
       : null;
     const w = getCurrentWindow();
-    const title = name ? `KAI — ${name}` : "KAI";
+    const title = name ?? "KAI";
     void w.setTitle(title);
     document.title = title;
   }, [explorerRoot]);
