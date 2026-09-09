@@ -63,6 +63,14 @@ struct LaunchDir(Mutex<Option<String>>);
 #[derive(Clone)]
 pub struct InstanceId(pub String);
 
+/// Window-state filename keyed by launch project (`null`/no-arg → shared).
+fn lib_state_filename(launch_dir: Option<&str>) -> String {
+    match launch_dir {
+        Some(dir) => format!(".window-state-{}.json", project_key(dir)),
+        None => ".window-state.json".to_string(),
+    }
+}
+
 /// Per-instance WebView2 user-data directory. Two KAI processes must not share
 /// the WebView2 browser-process user-data folder (it holds a singleton lock on
 /// startup — sharing it can yield a blank window or a failed second launch).
@@ -153,6 +161,33 @@ fn parse_launch_dir() -> Option<String> {
     None
 }
 
+/// Stable 64-bit FNV-1a (base36) of a workspace path — mirrors the frontend
+/// `projectKey()` in `src/modules/ai/lib/sessions.ts` (UTF-16 code units), so
+/// project-scoped files share one keying scheme across subsystems.
+fn project_key(root: &str) -> String {
+    let norm = root.replace('\\', "/");
+    let norm = norm.trim_end_matches('/');
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for code in norm.encode_utf16() {
+        hash ^= code as u64;
+        hash = hash.wrapping_mul(0x1_0000_0001_b3);
+    }
+
+    const DIGITS: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+    let mut n = hash;
+    if n == 0 {
+        return "0".to_string();
+    }
+    let mut out = Vec::with_capacity(13);
+    while n > 0 {
+        out.push(DIGITS[(n % 36) as usize]);
+        n /= 36;
+    }
+    out.reverse();
+    // SAFETY: DIGITS is ASCII, so the output is valid UTF-8.
+    String::from_utf8(out).expect("base36 of ASCII digits is valid UTF-8")
+}
+
 #[tauri::command]
 async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Result<(), String> {
     let url_path = match tab.as_deref() {
@@ -237,6 +272,10 @@ pub fn run() {
         .plugin(
             tauri_plugin_window_state::Builder::new()
                 .with_state_flags(StateFlags::all() & !StateFlags::VISIBLE)
+                // Key window geometry per project so two instances on different
+                // projects don't fight over one last-closer-wins state file.
+                // Same keyspace as the frontend sessions scoping.
+                .with_filename(lib_state_filename(parse_launch_dir().as_deref()))
                 .build(),
         )
         .plugin(tauri_plugin_autostart::Builder::new().build())
@@ -399,4 +438,22 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::project_key;
+
+    #[test]
+    fn project_key_matches_frontend_fnv1a_base36() {
+        // These expected values are produced by projectKey() in
+        // src/modules/ai/lib/sessions.ts (JS BigInt FNV-1a 64, base36). The
+        // two implementations MUST stay in lockstep or sessions and
+        // window-state would target different files.
+        assert_eq!(project_key("C:/Users/Valsinarb/dev/project-a"), "1x7bjt6zcuzuu");
+        assert_eq!(project_key("D:/Code/2026/KAI"), "1se91bzijel34");
+        assert_eq!(project_key("D:\\Code\\2026\\KAI"), "1se91bzijel34");
+        assert_eq!(project_key("/home/user/repo"), "2alyr4jga8r3e");
+        assert_eq!(project_key("C:\\Users\\foo\\bar"), "3gknmn2wrn6ty");
+    }
 }

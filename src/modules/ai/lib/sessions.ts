@@ -16,9 +16,131 @@ export type SessionMeta = {
 const STORE_PATH = "kai-sessions.json";
 const KEY_SESSIONS = "sessions";
 const KEY_ACTIVE = "activeId";
+const MIGRATION_MARKER = "__migrated_to_projects__";
 const messagesKey = (id: string) => `messages:${id}`;
 
-const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
+// The active store. Swapped by `setSessionsScope` to a per-project file so two
+// concurrent KAI instances on different projects never clobber each other's
+// chat history — the store writes the whole JSON file on every save(), so a
+// shared file makes parallel sessions a last-writer-wins data race.
+let store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
+let currentScopePath: string | null = null;
+
+function normalizeRoot(root: string | null | undefined): string | null {
+  const n = root?.replace(/\\/g, "/").replace(/\/+$/, "");
+  return n && n.length > 0 ? n : null;
+}
+
+/** Stable 64-bit FNV-1a (base36) of a workspace path — compact, filename-safe. */
+function projectKey(root: string | null | undefined): string | null {
+  const n = normalizeRoot(root);
+  if (!n) return null;
+  let h = 0xcbf29ce484222325n;
+  for (let i = 0; i < n.length; i++) {
+    h ^= BigInt(n.charCodeAt(i));
+    h = (h * 0x100000001b3n) & 0xffffffffffffffffn;
+  }
+  return h.toString(36);
+}
+
+function scopedPath(root: string | null | undefined): string {
+  const key = projectKey(root);
+  return key ? `kai-sessions-${key}.json` : STORE_PATH;
+}
+
+/**
+ * Point all subsequent session reads/writes at the store for `root`.
+ * No-op if already scoped to that path. Called before hydration on boot and on
+ * workspace switch. Flushes any pending autoSave before swapping so a debounced
+ * write for the previous project isn't dropped.
+ */
+export async function setSessionsScope(
+  root: string | null | undefined,
+): Promise<void> {
+  const path = scopedPath(root);
+  if (path === currentScopePath) return;
+  try {
+    await store.save();
+  } catch {
+    // store may never have been written; ignore.
+  }
+  currentScopePath = path;
+  store = new LazyStore(path, { defaults: {}, autoSave: 200 });
+}
+
+/** One-time migration helper — runs once per process, idempotent via marker. */
+let migrationPromise: Promise<void> | null = null;
+
+export function ensureMigratedOnce(): Promise<void> {
+  if (!migrationPromise) migrationPromise = migrateLegacyToProjects();
+  return migrationPromise;
+}
+
+/**
+ * Split the legacy single-file `kai-sessions.json` (mixed workspaces) into
+ * per-project files. Sessions with no workspaceRoot stay in the legacy/global
+ * file. Runs once; guarded by a marker inside the legacy store so it never
+ * re-runs and never destroys data (the source file is trimmed, not deleted).
+ */
+async function migrateLegacyToProjects(): Promise<void> {
+  const legacy = new LazyStore(STORE_PATH, { defaults: {} });
+  const already = await legacy.get<boolean>(MIGRATION_MARKER).catch(() => false);
+  if (already) return;
+
+  const sessions =
+    (await legacy.get<SessionMeta[]>(KEY_SESSIONS).catch(() => null)) ?? [];
+  const activeId =
+    (await legacy.get<string | null>(KEY_ACTIVE).catch(() => null)) ?? null;
+
+  if (sessions.length === 0) {
+    await legacy.set(MIGRATION_MARKER, true);
+    await legacy.save().catch(() => {});
+    return;
+  }
+
+  // Group non-global sessions by project key.
+  const groups = new Map<string, SessionMeta[]>();
+  for (const s of sessions) {
+    const key = projectKey(s.workspaceRoot);
+    if (!key) continue; // null-root sessions stay in the legacy (global) file
+    const arr = groups.get(key);
+    if (arr) arr.push(s);
+    else groups.set(key, [s]);
+  }
+
+  for (const [key, members] of groups) {
+    const target = new LazyStore(`kai-sessions-${key}.json`, {
+      defaults: {},
+      autoSave: 200,
+    });
+    const existing =
+      (await target.get<SessionMeta[]>(KEY_SESSIONS).catch(() => null)) ?? [];
+    const existingIds = new Set(existing.map((x) => x.id));
+    const merged = [
+      ...existing,
+      ...members.filter((m) => !existingIds.has(m.id)),
+    ];
+    await target.set(KEY_SESSIONS, merged);
+    for (const m of members) {
+      const msgs = await legacy.get<unknown>(messagesKey(m.id)).catch(() => null);
+      if (msgs != null) await target.set(messagesKey(m.id), msgs);
+    }
+    // Preserve the last-active session within its migrated project.
+    if (activeId && members.some((m) => m.id === activeId)) {
+      await target.set(KEY_ACTIVE, activeId);
+    }
+    await target.save().catch(() => {});
+  }
+
+  // Trim the legacy file to global (unscoped) sessions only.
+  const remaining = sessions.filter((s) => !projectKey(s.workspaceRoot));
+  await legacy.set(KEY_SESSIONS, remaining);
+  if (activeId && !remaining.some((s) => s.id === activeId)) {
+    await legacy.set(KEY_ACTIVE, null);
+  }
+  await legacy.set(MIGRATION_MARKER, true);
+  await legacy.save().catch(() => {});
+}
 
 export type LoadedSessions = {
   sessions: SessionMeta[];

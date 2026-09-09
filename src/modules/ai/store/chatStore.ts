@@ -22,6 +22,7 @@ import { EMPTY_PROVIDER_KEYS, type ProviderKeys } from "../lib/keyring";
 import {
   deleteSessionData,
   deriveTitle,
+  ensureMigratedOnce,
   forkSession as forkSessionFromStore,
   loadAll,
   loadMessages,
@@ -29,6 +30,7 @@ import {
   saveActiveId,
   saveMessages,
   saveSessionsList,
+  setSessionsScope,
   type SessionMeta,
 } from "../lib/sessions";
 import { pushRecentModel, persistProjectModel } from "../lib/modelPrefs";
@@ -752,6 +754,12 @@ export const useChatStore = create<StoreState>((set, get) => ({
     const norm = (p: string | null | undefined) =>
       p?.replace(/\\/g, "/").replace(/\/+$/, "") ?? null;
     const normalizedRoot = norm(root);
+
+    // Scope the sessions store to this project's file before loading, so
+    // concurrent instances on different projects read/write disjoint files.
+    // Migration runs once per process, idempotent via a marker.
+    await ensureMigratedOnce();
+    await setSessionsScope(root);
 
     // Skip only if we've already hydrated for this exact workspace.
     if (
