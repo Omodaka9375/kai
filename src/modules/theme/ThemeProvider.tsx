@@ -33,47 +33,16 @@ type ThemeProviderState = {
 
 const ThemeProviderContext = createContext<ThemeProviderState | null>(null);
 
-// Synchronous fast-path so the initial paint isn't unstyled. The persistent
-// preference (in tauri-plugin-store) overwrites this on mount; we keep a
-// localStorage shadow of the *last applied* theme just for first-paint fidelity.
-const FAST_PATH_KEY = "Kai-ui-theme-shadow";
-const FAST_UI_THEME_KEY = "Kai-ui-theme-id-shadow";
-
-function readFastTheme(fallback: Theme): Theme {
-  if (typeof window === "undefined") return fallback;
-  const v = window.localStorage.getItem(FAST_PATH_KEY);
-  return v === "dark" || v === "light" || v === "system" ? v : fallback;
-}
-
-function writeFastTheme(t: Theme): void {
-  try {
-    window.localStorage.setItem(FAST_PATH_KEY, t);
-  } catch {
-    // ignore
-  }
-}
-
-function readFastUiTheme(): string {
-  if (typeof window === "undefined") return "default";
-  return window.localStorage.getItem(FAST_UI_THEME_KEY) ?? "default";
-}
-
-function writeFastUiTheme(id: string): void {
-  try {
-    window.localStorage.setItem(FAST_UI_THEME_KEY, id);
-  } catch {
-    // ignore
-  }
-}
-
 export function ThemeProvider({
   children,
   defaultTheme = "system",
 }: ThemeProviderProps) {
-  const [theme, setThemeState] = useState<Theme>(() =>
-    readFastTheme(defaultTheme),
-  );
-  const [uiThemeId, setUiThemeIdState] = useState<string>(readFastUiTheme);
+  // Initial paint uses the defaults; the persistent preference (in
+  // tauri-plugin-store) hydrates on mount via the effect below. We no longer
+  // mirror to localStorage: the per-PID WebView2 profile wipes it every
+  // launch, so it only ever helped in-session reloads — not worth the code.
+  const [theme, setThemeState] = useState<Theme>(defaultTheme);
+  const [uiThemeId, setUiThemeIdState] = useState<string>("default");
   const [systemDark, setSystemDark] = useState<boolean>(() =>
     typeof window === "undefined"
       ? true
@@ -92,20 +61,16 @@ export function ThemeProvider({
     void loadPreferences().then((p) => {
       if (!alive) return;
       setThemeState(p.theme);
-      writeFastTheme(p.theme);
       setUiThemeIdState(p.uiThemeId);
-      writeFastUiTheme(p.uiThemeId);
     });
     const unlistenP = onPreferencesChange((key, value) => {
       // Guard: skip if the value matches current state — prevents the
       // window that originated the change from re-applying its own write.
       if (key === "theme" && (value === "system" || value === "light" || value === "dark")) {
         setThemeState((prev) => (prev === value ? prev : value));
-        writeFastTheme(value);
       }
       if (key === "uiThemeId" && typeof value === "string") {
         setUiThemeIdState((prev) => (prev === value ? prev : value));
-        writeFastUiTheme(value);
       }
     });
     return () => {
@@ -140,13 +105,11 @@ export function ThemeProvider({
 
   const setTheme = useCallback((next: Theme) => {
     setThemeState(next);
-    writeFastTheme(next);
     void persistTheme(next);
   }, []);
 
   const setUiThemeId = useCallback((id: string) => {
     setUiThemeIdState(id);
-    writeFastUiTheme(id);
     void persistUiTheme(id);
   }, []);
 

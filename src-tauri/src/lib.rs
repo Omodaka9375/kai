@@ -162,11 +162,13 @@ fn parse_launch_dir() -> Option<String> {
 }
 
 /// Stable 64-bit FNV-1a (base36) of a workspace path — mirrors the frontend
-/// `projectKey()` in `src/modules/ai/lib/sessions.ts` (UTF-16 code units), so
-/// project-scoped files share one keying scheme across subsystems.
+/// `projectKey()` in `src/modules/ai/lib/sessions.ts` (UTF-16 code units,
+/// lowercased), so project-scoped files share one keying scheme across
+/// subsystems. The lowercase keeps `D:/Code/KAI` and `d:/code/kai` (the same
+/// project on a case-insensitive filesystem) on the same key.
 fn project_key(root: &str) -> String {
     let norm = root.replace('\\', "/");
-    let norm = norm.trim_end_matches('/');
+    let norm = norm.trim_end_matches('/').to_lowercase();
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for code in norm.encode_utf16() {
         hash ^= code as u64;
@@ -451,13 +453,14 @@ mod tests {
     #[test]
     fn project_key_matches_frontend_fnv1a_base36() {
         // These expected values are produced by projectKey() in
-        // src/modules/ai/lib/sessions.ts (JS BigInt FNV-1a 64, base36). The
-        // two implementations MUST stay in lockstep or sessions and
-        // window-state would target different files.
-        assert_eq!(project_key("C:/Users/Valsinarb/dev/project-a"), "1x7bjt6zcuzuu");
-        assert_eq!(project_key("D:/Code/2026/KAI"), "1se91bzijel34");
-        assert_eq!(project_key("D:\\Code\\2026\\KAI"), "1se91bzijel34");
+        // src/modules/ai/lib/sessions.ts (JS BigInt FNV-1a 64, base36, over
+        // the lowercased path). The two implementations MUST stay in lockstep
+        // or sessions and window-state would target different files.
+        assert_eq!(project_key("C:/Users/Valsinarb/dev/project-a"), "2tjl23iqw8hpi");
+        assert_eq!(project_key("D:/Code/2026/KAI"), "1jdnajs935bfk");
+        assert_eq!(project_key("D:\\Code\\2026\\KAI"), "1jdnajs935bfk");
+        assert_eq!(project_key("d:/code/2026/kai"), "1jdnajs935bfk");
         assert_eq!(project_key("/home/user/repo"), "2alyr4jga8r3e");
-        assert_eq!(project_key("C:\\Users\\foo\\bar"), "3gknmn2wrn6ty");
+        assert_eq!(project_key("C:\\Users\\foo\\bar"), "3jdxwoglhxj6e");
     }
 }

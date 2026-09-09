@@ -1,5 +1,6 @@
 import type { UIMessage } from "@ai-sdk/react";
 import { LazyStore } from "@tauri-apps/plugin-store";
+import { normalizeWorkspacePath } from "./workspacePath";
 
 export type SessionMeta = {
   id: string;
@@ -14,6 +15,7 @@ export type SessionMeta = {
 };
 
 const STORE_PATH = "kai-sessions.json";
+const BACKUP_STORE_PATH = "kai-sessions.backup.json";
 const KEY_SESSIONS = "sessions";
 const KEY_ACTIVE = "activeId";
 const MIGRATION_MARKER = "__migrated_to_projects__";
@@ -26,14 +28,9 @@ const messagesKey = (id: string) => `messages:${id}`;
 let store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
 let currentScopePath: string | null = null;
 
-function normalizeRoot(root: string | null | undefined): string | null {
-  const n = root?.replace(/\\/g, "/").replace(/\/+$/, "");
-  return n && n.length > 0 ? n : null;
-}
-
 /** Stable 64-bit FNV-1a (base36) of a workspace path — compact, filename-safe. */
 function projectKey(root: string | null | undefined): string | null {
-  const n = normalizeRoot(root);
+  const n = normalizeWorkspacePath(root);
   if (!n) return null;
   let h = 0xcbf29ce484222325n;
   for (let i = 0; i < n.length; i++) {
@@ -46,6 +43,24 @@ function projectKey(root: string | null | undefined): string | null {
 function scopedPath(root: string | null | undefined): string {
   const key = projectKey(root);
   return key ? `kai-sessions-${key}.json` : STORE_PATH;
+}
+
+/**
+ * Group sessions by normalized workspace identity. Returns a map from a stable
+ * key (the FNV-1a project key for non-null roots, `""` for global/unscoped) to
+ * the sessions in that bucket. Exported for migration testing.
+ */
+export function partitionSessionsByWorkspace(
+  sessions: SessionMeta[],
+): Map<string, SessionMeta[]> {
+  const groups = new Map<string, SessionMeta[]>();
+  for (const s of sessions) {
+    const key = projectKey(s.workspaceRoot) ?? "";
+    const arr = groups.get(key);
+    if (arr) arr.push(s);
+    else groups.set(key, [s]);
+  }
+  return groups;
 }
 
 /**
@@ -80,7 +95,8 @@ export function ensureMigratedOnce(): Promise<void> {
  * Split the legacy single-file `kai-sessions.json` (mixed workspaces) into
  * per-project files. Sessions with no workspaceRoot stay in the legacy/global
  * file. Runs once; guarded by a marker inside the legacy store so it never
- * re-runs and never destroys data (the source file is trimmed, not deleted).
+ * re-runs. The legacy file is trimmed in place, so a full logical backup is
+ * written to `kai-sessions.backup.json` first.
  */
 async function migrateLegacyToProjects(): Promise<void> {
   const legacy = new LazyStore(STORE_PATH, { defaults: {} });
@@ -99,16 +115,16 @@ async function migrateLegacyToProjects(): Promise<void> {
   }
 
   // Group non-global sessions by project key.
-  const groups = new Map<string, SessionMeta[]>();
-  for (const s of sessions) {
-    const key = projectKey(s.workspaceRoot);
-    if (!key) continue; // null-root sessions stay in the legacy (global) file
-    const arr = groups.get(key);
-    if (arr) arr.push(s);
-    else groups.set(key, [s]);
-  }
+  const groups = partitionSessionsByWorkspace(sessions);
+
+  // Best-effort rollback snapshot before any trimming. Copying the whole
+  // logical store means a failed/partial migration can be manually recovered.
+  const backup = new LazyStore(BACKUP_STORE_PATH, { defaults: {} });
+  await backup.set(KEY_SESSIONS, sessions);
+  if (activeId != null) await backup.set(KEY_ACTIVE, activeId);
 
   for (const [key, members] of groups) {
+    if (!key) continue; // "" = global/unscoped sessions stay in the legacy file
     const target = new LazyStore(`kai-sessions-${key}.json`, {
       defaults: {},
       autoSave: 200,
@@ -123,7 +139,10 @@ async function migrateLegacyToProjects(): Promise<void> {
     await target.set(KEY_SESSIONS, merged);
     for (const m of members) {
       const msgs = await legacy.get<unknown>(messagesKey(m.id)).catch(() => null);
-      if (msgs != null) await target.set(messagesKey(m.id), msgs);
+      if (msgs != null) {
+        await target.set(messagesKey(m.id), msgs);
+        await backup.set(messagesKey(m.id), msgs);
+      }
     }
     // Preserve the last-active session within its migrated project.
     if (activeId && members.some((m) => m.id === activeId)) {
@@ -131,6 +150,16 @@ async function migrateLegacyToProjects(): Promise<void> {
     }
     await target.save().catch(() => {});
   }
+  // Also snapshot messages for global (unscoped) sessions, which stay in the
+  // legacy file but are still worth backing up.
+  for (const [key, members] of groups) {
+    if (key) continue;
+    for (const m of members) {
+      const msgs = await legacy.get<unknown>(messagesKey(m.id)).catch(() => null);
+      if (msgs != null) await backup.set(messagesKey(m.id), msgs);
+    }
+  }
+  await backup.save().catch(() => {});
 
   // Trim the legacy file to global (unscoped) sessions only.
   const remaining = sessions.filter((s) => !projectKey(s.workspaceRoot));

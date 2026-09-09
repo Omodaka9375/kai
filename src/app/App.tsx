@@ -54,7 +54,7 @@ import {
 import { PreviewStack, type PreviewPaneHandle } from "@/modules/preview";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import { onKeysChanged, setLastWorkspaceCwd, setRecentProjects, setSidebarView, setSidebarWidth } from "@/modules/settings/store";
+import { onKeysChanged, setLastWorkspaceCwd, setRecentProjects, setSidebarView, setSidebarWidth, SIDEBAR_WIDTH_DEFAULT, SIDEBAR_WIDTH_MIN, SIDEBAR_WIDTH_MAX } from "@/modules/settings/store";
 import { ShortcutsDialog } from "@/modules/shortcuts";
 import { useAppShortcuts } from "./useAppShortcuts";
 import {
@@ -101,9 +101,7 @@ function dirname(path: string | null): string | null {
   return normalized.slice(0, idx);
 }
 
-const SIDEBAR_DEFAULT_WIDTH = 200;
-const SIDEBAR_MIN_WIDTH = 200;
-const SIDEBAR_MAX_WIDTH = 480;
+
 
 // Initialize agent bus event handlers once.
 initBusHandlers();
@@ -163,7 +161,7 @@ export default function App() {
   const explorerReturnFocusRef = useRef<HTMLElement | null>(null);
 
   const sidebarRef = useRef<PanelImperativeHandle | null>(null);
-  const sidebarWidthRef = useRef(SIDEBAR_DEFAULT_WIDTH);
+  const sidebarWidthRef = useRef(SIDEBAR_WIDTH_DEFAULT);
   const sidebarWidthWriteTimerRef = useRef(0);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarView, setSidebarViewState] = useState<SidebarViewId>("explorer");
@@ -422,9 +420,19 @@ export default function App() {
     const s = usePreferencesStore.getState();
     sidebarWidthRef.current = s.sidebarWidth;
     setSidebarViewState(s.sidebarView);
-    const panel = sidebarRef.current;
-    if (panel && s.sidebarWidth !== SIDEBAR_DEFAULT_WIDTH) {
-      panel.resize(`${s.sidebarWidth}px`);
+
+    const applyWidth = () => {
+      const panel = sidebarRef.current;
+      if (panel && s.sidebarWidth !== SIDEBAR_WIDTH_DEFAULT) {
+        panel.resize(`${s.sidebarWidth}px`);
+      }
+    };
+    // The panel ref may not be attached yet when prefs resolve (hydration can
+    // beat the resizable panel mount). Retry once on the next frame.
+    applyWidth();
+    if (s.sidebarWidth !== SIDEBAR_WIDTH_DEFAULT && !sidebarRef.current) {
+      const raf = requestAnimationFrame(applyWidth);
+      return () => cancelAnimationFrame(raf);
     }
   }, [prefsHydrated]);
   const projectModelIds = usePreferencesStore((s) => s.projectModelIds);
@@ -1406,8 +1414,8 @@ export default function App() {
                 id="sidebar"
                 panelRef={sidebarRef}
                 defaultSize={`${sidebarWidthRef.current}px`}
-                minSize={`${SIDEBAR_MIN_WIDTH}px`}
-                maxSize={`${SIDEBAR_MAX_WIDTH}px`}
+                minSize={`${SIDEBAR_WIDTH_MIN}px`}
+                maxSize={`${SIDEBAR_WIDTH_MAX}px`}
                 collapsible
                 collapsedSize={0}
                 onResize={(size) => {

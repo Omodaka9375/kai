@@ -31,6 +31,7 @@ import { motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { estimateCost, getModel, getModelContextLimit } from "../config";
 import { saveSessionsList, type SessionMeta } from "../lib/sessions";
+import { normalizeWorkspacePath } from "../lib/workspacePath";
 import { getOrCreateChat, useChatStore } from "../store/chatStore";
 import { Input } from "@/components/ui/input";
 import { usePlanStore } from "../store/planStore";
@@ -110,9 +111,10 @@ export function AiMiniWindow() {
     const activeSession = sessions.find((s) => s.id === sessionId);
     if (!activeSession) return;
 
-    // Normalize paths
-    const normalized = workspaceRoot.replace(/\\/g, "/").replace(/\/$/, "");
-    const activeRoot = activeSession.workspaceRoot?.replace(/\\/g, "/").replace(/\/$/, "");
+    // Normalize paths (case-insensitive identity — see normalizeWorkspacePath).
+    // workspaceRoot is truthy-guarded above, so this is never null here.
+    const normalized = normalizeWorkspacePath(workspaceRoot)!;
+    const activeRoot = normalizeWorkspacePath(activeSession.workspaceRoot);
 
     // If the active session doesn't have a workspaceRoot associated yet, associate it with the current project!
     if (!activeSession.workspaceRoot) {
@@ -134,7 +136,7 @@ export function AiMiniWindow() {
     if (activeRoot && !isSubfolderOrSame) {
       const projectSessions = sessions.filter((s) => {
         if (!s.workspaceRoot) return false; // Don't auto-switch back to legacy empty ones
-        const sRoot = s.workspaceRoot.replace(/\\/g, "/").replace(/\/$/, "");
+        const sRoot = normalizeWorkspacePath(s.workspaceRoot);
         // Match sessions whose root is a parent of (or equal to) normalized
         return normalized === sRoot || normalized.startsWith(sRoot + "/");
       });
@@ -451,9 +453,8 @@ function SessionPicker() {
 
   const filteredSessions = useMemo(() => {
     if (!workspaceRoot) return sessions;
-    const normalized = workspaceRoot.replace(/\\/g, "/").replace(/\/+$/, "");
-    const norm = (s: SessionMeta) =>
-      (s.workspaceRoot ?? "").replace(/\\/g, "/").replace(/\/+$/, "");
+    const normalized = normalizeWorkspacePath(workspaceRoot);
+    const norm = (s: SessionMeta) => normalizeWorkspacePath(s.workspaceRoot ?? "");
     return sessions.filter((s) => {
       // Always show the active session regardless of workspace.
       if (s.id === activeId) return true;

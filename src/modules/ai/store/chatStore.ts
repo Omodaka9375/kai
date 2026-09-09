@@ -34,6 +34,7 @@ import {
   type SessionMeta,
 } from "../lib/sessions";
 import { pushRecentModel, persistProjectModel } from "../lib/modelPrefs";
+import { normalizeWorkspacePath } from "../lib/workspacePath";
 import { cancelAllShellSessions } from "../tools/shell";
 import { createContextAwareTransport } from "../lib/transport";
 import { clearFenceState } from "../lib/transport";
@@ -751,8 +752,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
 
   hydrateSessions: async (workspaceRoot?: string | null) => {
     const root = workspaceRoot ?? get().live?.getWorkspaceRoot?.() ?? null;
-    const norm = (p: string | null | undefined) =>
-      p?.replace(/\\/g, "/").replace(/\/+$/, "") ?? null;
+    const norm = normalizeWorkspacePath;
     const normalizedRoot = norm(root);
 
     // Scope the sessions store to this project's file before loading, so

@@ -413,11 +413,11 @@ function clampScrollback(value: number): number {
   );
 }
 
-const SIDEBAR_WIDTH_DEFAULT = 200;
-const SIDEBAR_WIDTH_MIN = 200;
-const SIDEBAR_WIDTH_MAX = 480;
+export const SIDEBAR_WIDTH_DEFAULT = 200;
+export const SIDEBAR_WIDTH_MIN = 200;
+export const SIDEBAR_WIDTH_MAX = 480;
 
-function clampSidebarWidth(value: number): number {
+export function clampSidebarWidth(value: number): number {
   if (!Number.isFinite(value)) return SIDEBAR_WIDTH_DEFAULT;
   return Math.min(
     SIDEBAR_WIDTH_MAX,
