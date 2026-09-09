@@ -94,6 +94,12 @@ export type Preferences = {
   commitSigningMode: "auto" | "approval";
   /** Fingerprint of the user-selected GPG signing key (empty when unset). */
   commitSigningKey: string;
+  /** Sidebar width in pixels (persisted across launches). */
+  sidebarWidth: number;
+  /** Active sidebar panel view. */
+  sidebarView: "explorer" | "source-control" | "extensions";
+  /** Timestamp (ms) of the last automatic update check. */
+  updaterLastCheck: number;
 };
 
 const STORE_PATH = "Kai-settings.json";
@@ -133,6 +139,9 @@ const KEY_MODEL_THINKING_MODES = "modelThinkingModes";
 const KEY_COMMIT_SIGNING_ENABLED = "commitSigningEnabled";
 const KEY_COMMIT_SIGNING_MODE = "commitSigningMode";
 const KEY_COMMIT_SIGNING_KEY = "commitSigningKey";
+const KEY_SIDEBAR_WIDTH = "sidebarWidth";
+const KEY_SIDEBAR_VIEW = "sidebarView";
+const KEY_UPDATER_LAST_CHECK = "updaterLastCheck";
 
 export const TERMINAL_FONT_SIZE_DEFAULT = 14;
 export const TERMINAL_FONT_SIZE_MIN = 8;
@@ -187,6 +196,9 @@ export const DEFAULT_PREFERENCES: Preferences = {
   commitSigningEnabled: false,
   commitSigningMode: "auto",
   commitSigningKey: "",
+  sidebarWidth: 200,
+  sidebarView: "explorer",
+  updaterLastCheck: 0,
 };
 
 const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
@@ -303,6 +315,13 @@ export async function loadPreferences(): Promise<Preferences> {
     commitSigningKey:
       get<string>(KEY_COMMIT_SIGNING_KEY) ??
       DEFAULT_PREFERENCES.commitSigningKey,
+    sidebarWidth: clampSidebarWidth(
+      get<number>(KEY_SIDEBAR_WIDTH) ?? DEFAULT_PREFERENCES.sidebarWidth,
+    ),
+    sidebarView: validSidebarView(get(KEY_SIDEBAR_VIEW)),
+    updaterLastCheck:
+      get<number>(KEY_UPDATER_LAST_CHECK) ??
+      DEFAULT_PREFERENCES.updaterLastCheck,
   };
 }
 
@@ -392,6 +411,29 @@ function clampScrollback(value: number): number {
     TERMINAL_SCROLLBACK_MAX,
     Math.max(TERMINAL_SCROLLBACK_MIN, Math.round(value)),
   );
+}
+
+const SIDEBAR_WIDTH_DEFAULT = 200;
+const SIDEBAR_WIDTH_MIN = 200;
+const SIDEBAR_WIDTH_MAX = 480;
+
+function clampSidebarWidth(value: number): number {
+  if (!Number.isFinite(value)) return SIDEBAR_WIDTH_DEFAULT;
+  return Math.min(
+    SIDEBAR_WIDTH_MAX,
+    Math.max(SIDEBAR_WIDTH_MIN, Math.round(value)),
+  );
+}
+
+function validSidebarView(value: unknown): Preferences["sidebarView"] {
+  if (
+    value === "explorer" ||
+    value === "source-control" ||
+    value === "extensions"
+  ) {
+    return value;
+  }
+  return "explorer";
 }
 
 export async function setTerminalScrollback(value: number): Promise<void> {
@@ -484,6 +526,30 @@ export async function setLastWorkspaceCwd(value: string): Promise<void> {
   // cross-window sync needed.
 }
 
+export async function setSidebarWidth(value: number): Promise<void> {
+  await store.set(KEY_SIDEBAR_WIDTH, clampSidebarWidth(value));
+  await store.save();
+  // No event emit — sidebar layout is main-window-only.
+}
+
+export async function setSidebarView(
+  value: Preferences["sidebarView"],
+): Promise<void> {
+  await store.set(KEY_SIDEBAR_VIEW, value);
+  await store.save();
+  // No event emit — sidebar layout is main-window-only.
+}
+
+export async function getUpdaterLastCheck(): Promise<number> {
+  const value = await store.get<number>(KEY_UPDATER_LAST_CHECK);
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+export async function setUpdaterLastCheck(value: number): Promise<void> {
+  await store.set(KEY_UPDATER_LAST_CHECK, value);
+  await store.save();
+}
+
 export async function setShortcuts(
   value: Record<ShortcutId, KeyBinding[]> | {},
 ): Promise<void> {
@@ -539,6 +605,9 @@ export async function onPreferencesChange(
     [KEY_COMMIT_SIGNING_ENABLED]: "commitSigningEnabled",
     [KEY_COMMIT_SIGNING_MODE]: "commitSigningMode",
     [KEY_COMMIT_SIGNING_KEY]: "commitSigningKey",
+    [KEY_SIDEBAR_WIDTH]: "sidebarWidth",
+    [KEY_SIDEBAR_VIEW]: "sidebarView",
+    [KEY_UPDATER_LAST_CHECK]: "updaterLastCheck",
   };
   // Same-process writes still fire onChange immediately; cross-window writes
   // arrive via the Tauri event emitted by writePref().

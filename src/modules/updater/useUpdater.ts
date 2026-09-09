@@ -3,8 +3,8 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { useCallback, useEffect, useState } from "react";
 import { IS_LINUX } from "@/lib/platform";
+import { getUpdaterLastCheck, setUpdaterLastCheck } from "@/modules/settings/store";
 
-const LAST_CHECK_KEY = "Kai:updater:last-check";
 const CHECK_INTERVAL_MS = 30 * 60 * 1000;
 const GITHUB_LATEST_RELEASE =
   "https://api.github.com/repos/Omodaka9375/kai/releases/latest";
@@ -86,7 +86,7 @@ export function useUpdater({ autoCheck = true }: HookOptions = {}) {
 
   const runCheck = useCallback(async ({ manual }: Options = {}) => {
     if (!manual) {
-      const last = Number(localStorage.getItem(LAST_CHECK_KEY) ?? 0);
+      const last = await getUpdaterLastCheck();
       if (Date.now() - last < CHECK_INTERVAL_MS) return;
     }
     setStatus({ kind: "checking" });
@@ -96,7 +96,7 @@ export function useUpdater({ autoCheck = true }: HookOptions = {}) {
         if (info) {
           setStatus({ kind: "manual-available", info });
         } else {
-          localStorage.setItem(LAST_CHECK_KEY, String(Date.now()));
+          await setUpdaterLastCheck(Date.now());
           setStatus({ kind: "uptodate" });
         }
         return;
@@ -105,7 +105,7 @@ export function useUpdater({ autoCheck = true }: HookOptions = {}) {
       if (update) {
         setStatus({ kind: "available", update });
       } else {
-        localStorage.setItem(LAST_CHECK_KEY, String(Date.now()));
+        await setUpdaterLastCheck(Date.now());
         setStatus({ kind: "uptodate" });
       }
     } catch (err) {

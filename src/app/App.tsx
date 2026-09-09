@@ -54,7 +54,7 @@ import {
 import { PreviewStack, type PreviewPaneHandle } from "@/modules/preview";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import { onKeysChanged, setLastWorkspaceCwd, setRecentProjects } from "@/modules/settings/store";
+import { onKeysChanged, setLastWorkspaceCwd, setRecentProjects, setSidebarView, setSidebarWidth } from "@/modules/settings/store";
 import { ShortcutsDialog } from "@/modules/shortcuts";
 import { useAppShortcuts } from "./useAppShortcuts";
 import {
@@ -104,42 +104,6 @@ function dirname(path: string | null): string | null {
 const SIDEBAR_DEFAULT_WIDTH = 200;
 const SIDEBAR_MIN_WIDTH = 200;
 const SIDEBAR_MAX_WIDTH = 480;
-const SIDEBAR_WIDTH_STORAGE_KEY = "Kai.sidebar.width";
-const SIDEBAR_VIEW_STORAGE_KEY = "Kai.sidebar.view";
-
-function clampSidebarWidth(width: number): number {
-  return Math.min(
-    SIDEBAR_MAX_WIDTH,
-    Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)),
-  );
-}
-
-function readSidebarWidth(): number {
-  try {
-    const stored = window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY);
-    const parsed = stored ? Number.parseInt(stored, 10) : NaN;
-    return Number.isFinite(parsed)
-      ? clampSidebarWidth(parsed)
-      : SIDEBAR_DEFAULT_WIDTH;
-  } catch {
-    return SIDEBAR_DEFAULT_WIDTH;
-  }
-}
-
-function readSidebarView(): SidebarViewId {
-  try {
-    const stored = window.localStorage.getItem(SIDEBAR_VIEW_STORAGE_KEY);
-    if (
-      stored === "explorer" ||
-      stored === "source-control" ||
-      stored === "extensions"
-    )
-      return stored;
-  } catch {
-    // ignore
-  }
-  return "explorer";
-}
 
 // Initialize agent bus event handlers once.
 initBusHandlers();
@@ -199,17 +163,13 @@ export default function App() {
   const explorerReturnFocusRef = useRef<HTMLElement | null>(null);
 
   const sidebarRef = useRef<PanelImperativeHandle | null>(null);
-  const sidebarWidthRef = useRef(readSidebarWidth());
+  const sidebarWidthRef = useRef(SIDEBAR_DEFAULT_WIDTH);
   const sidebarWidthWriteTimerRef = useRef(0);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [sidebarView, setSidebarViewState] = useState<SidebarViewId>(readSidebarView);
+  const [sidebarView, setSidebarViewState] = useState<SidebarViewId>("explorer");
   const persistSidebarView = useCallback((view: SidebarViewId) => {
     setSidebarViewState(view);
-    try {
-      window.localStorage.setItem(SIDEBAR_VIEW_STORAGE_KEY, view);
-    } catch {
-      // storage may fail in private mode
-    }
+    void setSidebarView(view);
   }, []);
   const toggleSidebar = useCallback(() => {
     const p = sidebarRef.current;
@@ -241,11 +201,7 @@ export default function App() {
     }
     sidebarWidthWriteTimerRef.current = window.setTimeout(() => {
       sidebarWidthWriteTimerRef.current = 0;
-      try {
-        window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(next));
-      } catch {
-        // ignore
-      }
+      void setSidebarWidth(next);
     }, 200);
   }, []);
   useEffect(() => {
@@ -457,6 +413,20 @@ export default function App() {
   useEffect(() => {
     void initPrefs();
   }, [initPrefs]);
+
+  // Apply persisted sidebar geometry once prefs hydrate. Per-PID WebView2
+  // profiles mean localStorage no longer survives launches, so the store is
+  // the authoritative restore path.
+  useEffect(() => {
+    if (!prefsHydrated) return;
+    const s = usePreferencesStore.getState();
+    sidebarWidthRef.current = s.sidebarWidth;
+    setSidebarViewState(s.sidebarView);
+    const panel = sidebarRef.current;
+    if (panel && s.sidebarWidth !== SIDEBAR_DEFAULT_WIDTH) {
+      panel.resize(`${s.sidebarWidth}px`);
+    }
+  }, [prefsHydrated]);
   const projectModelIds = usePreferencesStore((s) => s.projectModelIds);
 
   const hydrateSessions = useChatStore((s) => s.hydrateSessions);

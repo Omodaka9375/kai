@@ -67,11 +67,70 @@ pub struct InstanceId(pub String);
 /// the WebView2 browser-process user-data folder (it holds a singleton lock on
 /// startup — sharing it can yield a blank window or a failed second launch).
 fn webview_data_dir(app: &tauri::AppHandle, instance_id: &str) -> PathBuf {
+    webview_data_root(app).join(instance_id)
+}
+
+/// The container holding every per-PID WebView2 profile dir.
+fn webview_data_root(app: &tauri::AppHandle) -> PathBuf {
     app.path()
         .app_local_data_dir()
         .unwrap_or_else(|_| std::env::temp_dir())
         .join("webview2")
-        .join(instance_id)
+}
+
+/// True when a process with `pid` is still alive. Used to GC only profiles of
+/// dead instances (a live sibling's profile has it held open / locks files, so
+/// removing it would fail or corrupt it).
+#[cfg(unix)]
+fn pid_alive(pid: u32) -> bool {
+    // SAFETY: `kill(pid, 0)` performs an existence check only — it sends no
+    // signal and never terminates anything.
+    let res = unsafe { libc::kill(pid as libc::pid_t, 0) };
+    res == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+#[cfg(target_os = "windows")]
+fn pid_alive(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE, STILL_ACTIVE};
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+
+    // SAFETY: `handle` is validated before use and closed before returning.
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() || handle == INVALID_HANDLE_VALUE {
+            return false;
+        }
+        let mut code = 0u32;
+        let ok = GetExitCodeProcess(handle, &mut code);
+        CloseHandle(handle);
+        ok != 0 && code == STILL_ACTIVE as u32
+    }
+}
+
+/// Best-effort GC of stale per-PID WebView2 profiles left by previous KAI
+/// launches. Removes only directories named after a PID whose process is gone;
+/// a live instance's profile is always skipped (and also holds file locks that
+/// would make removal fail anyway on Windows).
+fn gc_stale_webview_profiles(root: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    let current = std::process::id();
+    for entry in entries.flatten() {
+        let Ok(ft) = entry.file_type() else { continue };
+        if !ft.is_dir() {
+            continue;
+        }
+        let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else {
+            continue;
+        };
+        if pid == current || pid_alive(pid) {
+            continue;
+        }
+        let _ = std::fs::remove_dir_all(entry.path());
+    }
 }
 
 #[tauri::command]
@@ -214,6 +273,9 @@ pub fn run() {
                 .expect("main window config missing");
             let data_dir = webview_data_dir(&app.handle().clone(), &instance_id);
             let handle = app.handle().clone();
+            // Reap orphaned profiles from prior launches before starting this
+            // one (skips live sibling processes).
+            gc_stale_webview_profiles(&webview_data_root(&handle));
             let window = WebviewWindowBuilder::from_config(&handle, &main_config)
                 .and_then(|b| b.data_directory(data_dir).build())
                 .map_err(|e| format!("failed to build main window: {e}"))?;
