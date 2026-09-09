@@ -4,6 +4,12 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.3.2]
+
+- Multi-instance support — concurrent instances on different projects no longer collide on shared state (per-process WebView2 profiles, logs, and tmp files; per-project sessions and window geometry).
+
+---
+
 ## [1.3.1]
 
 ### Added
