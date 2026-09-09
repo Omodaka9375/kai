@@ -59,6 +59,13 @@ export function wrapAsciiArt(text: string): string {
   const ATX_HEADING_RE = /^\s{0,3}#{1,6}(?:\s|$)/;
   const SETEXT_UNDERLINE_RE = /^\s{0,3}(?:=+|-+)\s*$/;
   const THEMATIC_BREAK_RE = /^\s{0,3}(?:[-_*](?:[\t ]|$)){3,}$/;
+  // Markdown emphasis (`**bold**`, `***bold***`, `__underline__`, `___…___`)
+  // must never be art. A line like `**#1 — …**` starts with `**` then `#` —
+  // both in the ASCII art char class, so `**#` matched the 3+ leading art
+  // chars and fenced a bold heading as a plain-text block. The lookahead
+  // requires a non-delimiter content char so real art (`********`,
+  // `*-----*`, `* * *`) is unaffected.
+  const EMPHASIS_RE = /^\s{0,3}(\*{2,3}|_{2,3})(?=[^\s*_])/;
 
   // GFM tables: a header row (`| A | B |`) followed by a separator row
   // (`|---|---|`) renders natively in markdown — it must never be fenced as
@@ -74,6 +81,7 @@ export function wrapAsciiArt(text: string): string {
     if (ATX_HEADING_RE.test(line)) return false;
     if (SETEXT_UNDERLINE_RE.test(line)) return false;
     if (THEMATIC_BREAK_RE.test(line)) return false;
+    if (EMPHASIS_RE.test(line)) return false;
     if (BOX_RE.test(line)) return true;
     if (ASCII_LINE_RE.test(line)) return true;
     // Lines bracketed by frame chars at both ends (e.g. "│ Content  │", "+--+")

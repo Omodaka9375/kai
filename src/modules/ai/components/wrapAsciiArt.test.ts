@@ -31,6 +31,31 @@ describe("wrapAsciiArt — markdown structure must not become art", () => {
     expect(wrapAsciiArt(input)).toBe(input);
   });
 
+  it("leaves a bold heading starting with **# alone", () => {
+    const input = "**#1 — Case-insensitive workspace identity**";
+    expect(wrapAsciiArt(input)).toBe(input);
+  });
+
+  it("leaves a bold list-item lead starting with **# alone", () => {
+    const input = "- **#1 — Fix** rest of line";
+    expect(wrapAsciiArt(input)).toBe(input);
+  });
+
+  it("leaves a bold-italic underline lead alone", () => {
+    const input = "___Title___ and more text";
+    expect(wrapAsciiArt(input)).toBe(input);
+  });
+
+  it("still fences ASCII art with + and | frame chars", () => {
+    const input = "+-----+\n| hi  |\n+-----+";
+    expect(wrapAsciiArt(input)).toBe("```text\n" + input + "\n```");
+  });
+
+  it("still fences an art block whose border line is a pure char run", () => {
+    const input = "-----+\n| hi |\n+----+";
+    expect(wrapAsciiArt(input)).toBe("```text\n" + input + "\n```");
+  });
+
   it("still fences real box-drawing diagrams", () => {
     const input = "┌─────┐\n│ hi  │\n└─────┘";
     expect(wrapAsciiArt(input)).toBe("```text\n" + input + "\n```");
