@@ -4,6 +4,12 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.3.3]
+
+- Case-insensitive workspace identity (sessions/window-state/model keys), session-migration backup, startup sweep of stale per-instance artifacts (logs, crash dumps, whisper temps), window title shows project name only, and a few markdown/UI polish fixes.
+
+---
+
 ## [1.3.2]
 
 - Multi-instance support — concurrent instances on different projects no longer collide on shared state (per-process WebView2 profiles, logs, and tmp files; per-project sessions and window geometry).
