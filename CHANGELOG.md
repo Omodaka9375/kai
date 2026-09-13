@@ -4,6 +4,13 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.3.4]
+
+- Added guard for Windows specific double terminal trigger issue
+- Fixed rendering images and videos in editor. OCR extraction is explicit
+  
+---
+
 ## [1.3.3]
 
 - Case-insensitive workspace identity (sessions/window-state/model keys), session-migration backup, startup sweep of stale per-instance artifacts (logs, crash dumps, whisper temps), window title shows project name only, and a few markdown/UI polish fixes.
