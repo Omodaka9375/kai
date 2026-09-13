@@ -57,6 +57,7 @@ export type Slot = {
   fitTimer: ReturnType<typeof setTimeout> | null;
   ptyTimer: ReturnType<typeof setTimeout> | null;
   unhideRaf: number | null;
+  unhideTimer: ReturnType<typeof setTimeout> | null;
   webglRecoveryTimer: ReturnType<typeof setTimeout> | null;
   lastCols: number;
   lastRows: number;
@@ -139,6 +140,7 @@ function createSlot(): Slot {
     fitTimer: null,
     ptyTimer: null,
     unhideRaf: null,
+    unhideTimer: null,
     webglRecoveryTimer: null,
     lastCols: term.cols,
     lastRows: term.rows,
@@ -322,23 +324,45 @@ function bindSlot(slot: Slot, p: AcquireParams): void {
   p.onSearchReady(slot.searchAddon);
 }
 
+// Unhiding must not depend on rAF alone: while the OS window is hidden
+// (packaged boots start hidden until first paint) Chromium does not run the
+// rAF loop, and pending callbacks can sit queued indefinitely on WebView2 —
+// leaving the slot permanently `visibility:hidden`: a bound, streaming,
+// yet blank terminal pane. A short timer guarantees the unhide.
+const UNHIDE_FALLBACK_MS = 400;
+
 function scheduleUnhide(slot: Slot): void {
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    slot.unhideRaf = null;
+    slot.unhideTimer = null;
+    slot.host.style.visibility = "";
+    console.info(
+      `[Kai-term leaf=${slot.currentLeafId ?? "?"}] slot unhidden ` +
+        `${slot.host.offsetWidth}x${slot.host.offsetHeight}px ` +
+        `connected=${slot.host.isConnected}`,
+    );
+    const leafId = slot.currentLeafId;
+    if (leafId !== null && adapter?.isLeafFocused(leafId)) {
+      slot.term.focus();
+    }
+  };
   slot.unhideRaf = requestAnimationFrame(() => {
-    slot.unhideRaf = requestAnimationFrame(() => {
-      slot.unhideRaf = null;
-      slot.host.style.visibility = "";
-      const leafId = slot.currentLeafId;
-      if (leafId !== null && adapter?.isLeafFocused(leafId)) {
-        slot.term.focus();
-      }
-    });
+    slot.unhideRaf = requestAnimationFrame(() => finish());
   });
+  slot.unhideTimer = setTimeout(finish, UNHIDE_FALLBACK_MS);
 }
 
 function cancelPendingUnhide(slot: Slot): void {
   if (slot.unhideRaf !== null) {
     cancelAnimationFrame(slot.unhideRaf);
     slot.unhideRaf = null;
+  }
+  if (slot.unhideTimer !== null) {
+    clearTimeout(slot.unhideTimer);
+    slot.unhideTimer = null;
   }
 }
 

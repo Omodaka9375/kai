@@ -76,6 +76,12 @@ const ATTACH_RETRY_BOUND = 40;
 // must not pin the session in `ptyOpening` forever. Race the spawn against
 // this watchdog so it fails, resets the flag, and retries like any other error.
 const PTY_OPEN_TIMEOUT_MS = 20_000;
+
+/** Leaf-keyed lifecycle logging — `pty opened id=N` lines are unkeyed on the
+ *  Rust side, so this is the only way to tell which tab a spawn belongs to. */
+function logLeaf(leafId: number, msg: string): void {
+  console.info(`[Kai-term leaf=${leafId}] ${msg}`);
+}
 configureRendererPool({
   resolveLeaf(leafId) {
     const s = sessions.get(leafId);
@@ -155,9 +161,11 @@ function deliverPtyBytes(leafId: number, bytes: Uint8Array): void {
   // the nudge timers below are the recovery path for a session whose slot never
   // bound. Marking the flag here would silence it and leave a blank pane
   // permanently (seen on project reopen, where the tab subtree is remounted).
-  if (slot) s.receivedOutput = true;
-  if (slot) slot.term.write(bytes);
-  else s.dormantRing.push(bytes);
+  if (slot) {
+    if (!s.receivedOutput) logLeaf(leafId, "first output delivered to renderer");
+    s.receivedOutput = true;
+    slot.term.write(bytes);
+  } else s.dormantRing.push(bytes);
   // Feed to error detector (skip private terminals).
   if (!s.disposed) feedErrorDetector(textDecoder.decode(bytes, { stream: true }));
 }
@@ -204,12 +212,14 @@ function openPtySession(
     .then((pty) => {
       if (watchdog) clearTimeout(watchdog);
       if (epoch !== s.spawnEpoch || s.disposed) {
+        logLeaf(leafId, `spawn superseded (epoch ${epoch}→${s.spawnEpoch}) or disposed — closing late PTY`);
         pty.close();
         return;
       }
       s.ptyOpening = false;
       s.pty = pty;
       s.receivedOutput = false;
+      logLeaf(leafId, `pty open ok (attempt ${attempt})`);
       if (s.cols > 0 && s.rows > 0) pty.resize(s.cols, s.rows);
 
       // In React strict mode the .then() may fire after attachSession
@@ -238,7 +248,7 @@ function openPtySession(
       if (watchdog) clearTimeout(watchdog);
       if (epoch !== s.spawnEpoch) return; // superseded by a newer attempt
       s.ptyOpening = false;
-      console.error("[Kai] openPty failed (attempt %d):", attempt, e);
+      console.error(`[Kai-term leaf=${leafId}] openPty failed (attempt ${attempt}):`, e);
       if (attempt < 1 && !s.disposed) {
         s.spawnEpoch += 1; // invalidate the hung in-flight pty_open
         s.ptyOpening = true;
@@ -298,7 +308,8 @@ async function openPtyForSession(
 
 function bindLeafToSlot(leafId: number, s: Session): void {
   if (!s.container) return;
-  acquireSlot({
+  logLeaf(leafId, `binding renderer slot (shellExited=${s.shellExited})`);
+  const slot = acquireSlot({
     leafId,
     container: s.container,
     snapshot: s.snapshot,
@@ -333,6 +344,12 @@ function bindLeafToSlot(leafId: number, s: Session): void {
   });
   s.snapshot = null;
   s.hasSlot = true;
+  logLeaf(
+    leafId,
+    `renderer slot #${slot.id} bound ` +
+      `container=${s.container.clientWidth}x${s.container.clientHeight}px ` +
+      `cols=${slot.term.cols} rows=${slot.term.rows}`,
+  );
   if (s.lastCwd !== null) s.callbacks.onCwd?.(s.lastCwd);
   if (s.pendingExit !== null) {
     const code = s.pendingExit;
@@ -490,7 +507,7 @@ export function useTerminalSession({
           retryTimer = setTimeout(() => bind(attempt + 1), ATTACH_RETRY_MS);
         } else {
           console.warn(
-            `[Kai] terminal ${leafId}: container never mounted, renderer not bound`,
+            `[Kai-term leaf=${leafId}] container never mounted after ${ATTACH_RETRY_BOUND} retries — renderer not bound`,
           );
         }
         return;
@@ -498,7 +515,17 @@ export function useTerminalSession({
       attachSession(leafId, node, callbacks);
       if (s.visibleNow && s.focusedNow) focusSlot(leafId);
     };
-    s.ready.then(() => bind(0));
+    s.ready.then(
+      () => bind(0),
+      (e) => {
+        // The font gate must never be the reason a terminal stays blank.
+        console.error(
+          `[Kai-term leaf=${leafId}] font gate rejected — binding anyway:`,
+          e,
+        );
+        bind(0);
+      },
+    );
     return () => {
       cancelled = true;
       if (retryTimer !== null) clearTimeout(retryTimer);

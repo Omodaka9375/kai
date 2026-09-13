@@ -21,7 +21,12 @@ if (USE_CUSTOM_WINDOW_CONTROLS) {
 }
 
 // Seed before first paint so default tab mounts at target cwd (no flicker).
-await initLaunchDir();
+// Race with a timeout — a wedged IPC on a cold per-PID WebView2 profile must
+// not stop ReactDOM.render from ever running (white window, no terminal).
+await Promise.race([
+  initLaunchDir(),
+  new Promise<void>((resolve) => setTimeout(resolve, 2000)),
+]);
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <App />,

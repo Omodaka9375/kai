@@ -321,7 +321,13 @@ export default function App() {
     const resolveCwd = async (): Promise<string | null> => {
       const launch = getLaunchDir();
       if (launch) return launch;
-      await usePreferencesStore.getState().init();
+      // A prefs-init failure (corrupt/locked store under a second concurrent
+      // instance) must not block the launch tab — fall through to home.
+      try {
+        await usePreferencesStore.getState().init();
+      } catch (e) {
+        console.warn("[Kai] launch: preferences init failed:", e);
+      }
       const saved = usePreferencesStore.getState().lastWorkspaceCwd;
       if (saved) return saved;
       try {
@@ -330,17 +336,50 @@ export default function App() {
         return null;
       }
     };
-    void resolveCwd().then((cwd) => {
-      setLaunchCwd(cwd);
-      setLaunchCwdResolved(true);
-      // Pin the workspace root to the launch directory so `cd`-ing in
-      // the terminal doesn't cause the explorer / AI sessions to reset.
-      if (cwd) setRootRef.current(cwd);
-      // Create the initial tab now that we know the cwd.
-      if (tabs.length === 0) {
-        newTab(cwd ?? undefined);
+
+    // Exactly one launch tab, ever. Reading the mount-time `tabs` closure was
+    // stale (always []) — a late resolution could stack a duplicate tab on
+    // top of one the user already opened with Ctrl+T while we were waiting.
+    let launchTabCreated = false;
+    const ensureLaunchTab = (cwd: string | null | undefined) => {
+      if (launchTabCreated) return;
+      if (tabsRef.current.length > 0) {
+        launchTabCreated = true;
+        return;
       }
-    });
+      launchTabCreated = true;
+      newTab(cwd ?? undefined);
+    };
+
+    // Watchdog: prefs hydration / the store plugin can wedge (seen in the
+    // wild — an instance whose entire session logged zero pty spawns because
+    // resolveCwd never settled, leaving the app with no terminal at all).
+    // 5s is far beyond a healthy resolve; create the tab anyway.
+    const watchdog = setTimeout(() => {
+      if (launchTabCreated) return;
+      console.error(
+        "[Kai] launch: cwd resolution did not settle in 5s — creating fallback terminal tab",
+      );
+      ensureLaunchTab(home);
+    }, 5000);
+
+    resolveCwd()
+      .then((cwd) => {
+        clearTimeout(watchdog);
+        setLaunchCwd(cwd);
+        setLaunchCwdResolved(true);
+        // Pin the workspace root to the launch directory so `cd`-ing in
+        // the terminal doesn't cause the explorer / AI sessions to reset.
+        if (cwd) setRootRef.current(cwd);
+        // Create the initial tab now that we know the cwd.
+        ensureLaunchTab(cwd);
+      })
+      .catch((e) => {
+        clearTimeout(watchdog);
+        console.error("[Kai] launch: cwd resolution failed:", e);
+        setLaunchCwdResolved(true);
+        ensureLaunchTab(home);
+      });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
