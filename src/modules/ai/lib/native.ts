@@ -165,10 +165,11 @@ export const native = {
       path,
       workspace: currentWorkspaceEnv(),
     }),
-  readFile: (path: string) =>
+  readFile: (path: string, extract?: boolean) =>
     invoke<ReadResult>("fs_read_file", {
       path,
       workspace: currentWorkspaceEnv(),
+      extract: extract ?? false,
     }),
   writeFile: (path: string, content: string) =>
     invoke<void>("fs_write_file", {

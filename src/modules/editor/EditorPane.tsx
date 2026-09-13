@@ -34,6 +34,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 
 const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico", "avif"]);
+const VIDEO_EXTS = new Set(["mp4", "webm", "mov", "mkv", "avi"]);
 const PDF_EXT = "pdf";
 
 const MIME_MAP: Record<string, string> = {
@@ -47,6 +48,11 @@ const MIME_MAP: Record<string, string> = {
   ico: "image/x-icon",
   avif: "image/avif",
   pdf: "application/pdf",
+  mp4: "video/mp4",
+  webm: "video/webm",
+  mov: "video/quicktime",
+  mkv: "video/x-matroska",
+  avi: "video/x-msvideo",
 };
 
 function fileExt(path: string): string {
@@ -282,7 +288,7 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
     }
     if (doc.status === "binary") {
       const ext = fileExt(path);
-      if (IMAGE_EXTS.has(ext) || ext === PDF_EXT) {
+      if (IMAGE_EXTS.has(ext) || VIDEO_EXTS.has(ext) || ext === PDF_EXT) {
         return <BinaryPreview path={path} ext={ext} />;
       }
       return (
@@ -353,6 +359,14 @@ function BinaryPreview({ path, ext }: { path: string; ext: string }) {
           className="max-h-full max-w-full object-contain rounded"
           draggable={false}
         />
+      </div>
+    );
+  }
+
+  if (VIDEO_EXTS.has(ext)) {
+    return (
+      <div className="flex h-full items-center justify-center overflow-auto bg-background p-4">
+        <video src={url} controls className="max-h-full max-w-full rounded" />
       </div>
     );
   }

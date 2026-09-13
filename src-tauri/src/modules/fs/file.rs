@@ -45,7 +45,15 @@ pub struct FileStat {
 }
 
 #[tauri::command]
-pub fn fs_read_file(path: String, workspace: Option<WorkspaceEnv>) -> Result<ReadResult, String> {
+/// `extract: Some(true)` opts in to binary extraction (archive listing /
+/// audio metadata / image dimensions + OCR). Only the AI `read_file` tool
+/// passes it; the editor omits the param so images come back as `Binary`
+/// and render as a preview instead of an OCR/metadata text card.
+pub fn fs_read_file(
+    path: String,
+    workspace: Option<WorkspaceEnv>,
+    extract: Option<bool>,
+) -> Result<ReadResult, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     let p = resolve_path(&path, &workspace);
     let meta = std::fs::metadata(&p).map_err(|e| {
@@ -56,12 +64,14 @@ pub fn fs_read_file(path: String, workspace: Option<WorkspaceEnv>) -> Result<Rea
     // Handle extractable binary formats (archive/audio/image) before the
     // generic size/binary sniff. `extract::extract` returns Ok(None) for
     // unrecognized kinds and the sniff runs as before.
-    if let Ok(Some(ex)) = extract::extract(&p) {
-        return Ok(ReadResult::Text {
-            content: ex.content,
-            size: meta.len(),
-            format: Some(ex.format),
-        });
+    if extract == Some(true) {
+        if let Ok(Some(ex)) = extract::extract(&p) {
+            return Ok(ReadResult::Text {
+                content: ex.content,
+                size: meta.len(),
+                format: Some(ex.format),
+            });
+        }
     }
 
     let size = meta.len();

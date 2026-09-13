@@ -19,7 +19,7 @@ export function buildFsTools(ctx: ToolContext) {
   return {
     read_file: tool({
       description:
-        "Read a file's text content. Supports UTF-8 text files, plus PDF, DOCX, ZIP/JAR archives, audio (mp3/flac/m4a/ogg/wav), and images (png/jpg/webp/gif/tiff with OCR when available). DOCX/PDF are handled by JS parsers; the rest are extracted server-side by format. Returns first 2000 lines (max 25KB). Refuses oversized or sensitive files (.env, keys, credentials). If unchanged since last read, returns a short preview. Pass `force: true` to re-fetch.",
+        "Read a file's text content. Supports UTF-8 text files, plus PDF, DOCX, ZIP/JAR archives, audio (mp3/flac/m4a/ogg/wav), and images (png/jpg/webp/gif/tiff; OCR only when a tesseract binary is installed on the user's system — otherwise dimensions only). DOCX/PDF are handled by JS parsers; the rest are extracted server-side by format. Returns first 2000 lines (max 25KB). Refuses oversized or sensitive files (.env, keys, credentials). If unchanged since last read, returns a short preview. Pass `force: true` to re-fetch.",
       inputSchema: z.object({
         path: z
           .string()
@@ -64,7 +64,10 @@ export function buildFsTools(ctx: ToolContext) {
         }
 
         try {
-          const r = await native.readFile(abs);
+          // extract: true opts into binary extraction (archive listing, audio
+          // metadata, image dimensions + OCR when tesseract is available).
+          // Every other readFile caller gets plain text/binary semantics.
+          const r = await native.readFile(abs, true);
           if (r.kind === "binary")
             return { error: "binary file refused", path: abs, size: r.size };
           if (r.kind === "toolarge")

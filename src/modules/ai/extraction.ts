@@ -35,7 +35,10 @@ export async function extractAttachmentText(
   const tmp = `kai-att-${attach.id}.dat`;
   try {
     await native.writeFileBytes(tmp, [...bytes]);
-    const r = await native.readFile(tmp);
+    // extract: true — this path is specifically for OCR/metadata extraction
+    // of image attachments (the .dat temp has no extension, so extraction
+    // needs the explicit opt-in).
+    const r = await native.readFile(tmp, true);
     native.deleteFile(tmp).catch(() => {});
     if (r.kind !== "text") return null;
     return r.content;
