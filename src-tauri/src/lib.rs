@@ -420,6 +420,20 @@ pub fn run() {
             {
                 gc_stale_whisper_parts(&dir);
             }
+            // One-shot shell commands run via script files (not
+            // -EncodedCommand — AV flags that as dropper behavior). Point
+            // them at app data and sweep anything a crash left behind.
+            #[cfg(windows)]
+            {
+                let dir = app
+                    .path()
+                    .app_local_data_dir()
+                    .unwrap_or_else(|_| std::env::temp_dir());
+                let _ = std::fs::create_dir_all(&dir);
+                let cmd_dir = dir.join("shell-cmd");
+                shell::init_shell_cmd_dir(dir);
+                shell::sweep_stale_shell_scripts(&cmd_dir);
+            }
             diagnostics::install_panic_hook(log_dir.clone(), instance_id.clone());
             app.manage(diagnostics::CrashDir(Mutex::new(Some(log_dir))));
             app.manage(InstanceId(instance_id.clone()));

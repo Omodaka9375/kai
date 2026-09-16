@@ -7,15 +7,13 @@ mod elevate;
 
 use std::collections::HashMap;
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, RwLock};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-#[cfg(windows)]
-use base64::Engine;
 use serde::Serialize;
 
 use crate::modules::lock::{rwlock_read, rwlock_write};
@@ -438,17 +436,92 @@ pub fn shell_bg_list(state: tauri::State<ShellState>) -> Result<Vec<BackgroundPr
     Ok(out)
 }
 
-/// Encode a UTF-8 string as UTF-16LE base64 for PowerShell's -EncodedCommand.
+// ──────────────────────────────────────────────────────────────────────────
+// One-shot PowerShell script execution (Windows)
+//
+// Commands run via `pwsh -File <script>` instead of `-EncodedCommand`:
+// antivirus real-time command-line scanners (Malwarebytes et al.) flag
+// `pwsh -EncodedCommand <base64>` as dropper behavior (Trojan.Dropper) and
+// quarantine the host process. A plain script file under the app's own data
+// dir is the same pattern the PTY bootstrap uses and is not flagged.
+// ──────────────────────────────────────────────────────────────────────────
+
 #[cfg(windows)]
-fn encode_utf16le_base64(s: &str) -> String {
-    use base64::engine::general_purpose::STANDARD;
-    let utf16: Vec<u16> = s.encode_utf16().collect();
-    let mut bytes = Vec::with_capacity(utf16.len() * 2);
-    for unit in utf16 {
-        bytes.push(unit as u8);
-        bytes.push((unit >> 8) as u8);
+static SHELL_CMD_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Script files older than this are swept (crash leftovers included).
+#[cfg(windows)]
+const SHELL_SCRIPT_TTL: Duration = Duration::from_secs(60 * 60);
+
+/// Time-gate for the TTL sweep so we don't readdir on every command.
+#[cfg(windows)]
+static SHELL_SCRIPT_SWEEP_AT: AtomicU64 = AtomicU64::new(0);
+
+/// Set the directory one-shot command scripts are written to. Called once
+/// from app setup with the Tauri app-local-data dir.
+#[cfg(windows)]
+pub fn init_shell_cmd_dir(dir: PathBuf) {
+    let _ = SHELL_CMD_DIR.set(dir);
+}
+
+#[cfg(windows)]
+fn shell_cmd_dir() -> PathBuf {
+    SHELL_CMD_DIR
+        .get()
+        .cloned()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("shell-cmd")
+}
+
+/// Remove one-shot shell scripts older than the TTL. Public so app setup
+/// can sweep crash leftovers at boot (Linux/macOS: no-op).
+#[cfg(windows)]
+pub fn sweep_stale_shell_scripts(dir: &Path) {
+    let now = SystemTime::now();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if p.extension().and_then(|e| e.to_str()) != Some("ps1") {
+            continue;
+        }
+        let Ok(modified) = entry.metadata().and_then(|m| m.modified()) else {
+            continue;
+        };
+        if now
+            .duration_since(modified)
+            .unwrap_or(Duration::ZERO)
+            > SHELL_SCRIPT_TTL
+        {
+            let _ = std::fs::remove_file(&p);
+        }
     }
-    STANDARD.encode(&bytes)
+}
+
+/// Write `command` to a unique one-shot script file (UTF-8 with BOM —
+/// Windows PowerShell 5.1 reads BOM-less scripts as ANSI and would mangle
+/// non-ASCII content).
+#[cfg(windows)]
+fn write_shell_script(dir: &Path, command: &str) -> Result<PathBuf, String> {
+    std::fs::create_dir_all(dir).map_err(|e| {
+        log::warn!("shell script dir create failed ({}): {e}", dir.display());
+        e.to_string()
+    })?;
+    static CTR: AtomicU64 = AtomicU64::new(0);
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let c = CTR.fetch_add(1, Ordering::Relaxed);
+    let path = dir.join(format!("{ts:x}-{}-{c}.ps1", std::process::id()));
+    let mut bytes: Vec<u8> = vec![0xEF, 0xBB, 0xBF];
+    bytes.extend_from_slice(command.as_bytes());
+    std::fs::write(&path, bytes).map_err(|e| {
+        log::warn!("shell script write failed ({}): {e}", path.display());
+        e.to_string()
+    })?;
+    Ok(path)
 }
 
 pub(crate) fn build_oneshot_command(
@@ -499,13 +572,29 @@ pub(crate) fn build_oneshot_command(
         if is_cmd {
             cmd.arg("/C").arg(command);
         } else {
-            // Use -EncodedCommand with base64-encoded UTF-16LE to prevent
-            // PowerShell from interpreting special characters in the command
-            // string (& | < > \" $ @() etc.). Without this, inline node
-            // commands and chained shell expressions get mangled.
+            // Run via a script file — NOT `-EncodedCommand` (see the module
+            // note above: AV command-line scanners flag it as a dropper).
+            // A file also sidesteps PowerShell's argv parsing, so special
+            // characters (& | < > \" $ @() etc.) survive verbatim.
+            let dir = shell_cmd_dir();
+            let now_secs = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let last = SHELL_SCRIPT_SWEEP_AT.load(Ordering::Relaxed);
+            if now_secs.saturating_sub(last) >= 60
+                && SHELL_SCRIPT_SWEEP_AT
+                    .compare_exchange(last, now_secs, Ordering::Relaxed, Ordering::Relaxed)
+                    .is_ok()
+            {
+                sweep_stale_shell_scripts(&dir);
+            }
+            let script = write_shell_script(&dir, command)?;
             cmd.arg("-NoProfile")
-                .arg("-EncodedCommand")
-                .arg(encode_utf16le_base64(command));
+                .arg("-ExecutionPolicy")
+                .arg("Bypass")
+                .arg("-File")
+                .arg(&script);
         }
         Ok(cmd)
     }
