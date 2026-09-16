@@ -4,19 +4,21 @@
  *
  * Strategy:
  *  - Before any write_file / edit / multi_edit, snapshot the current file
- *    content into `.kai/checkpoints/<timestamp>-<session>.json`.
- *  - The checkpoint file lives inside the workspace (not user data dir) so it's
- *    discoverable and deletable by the user.
+ *    content into `~/.kai/checkpoints/<workspace-hash>/<ts>-<session>.json`.
+ *  - Checkpoints live OUTSIDE the workspace (like auto-memory) so they never
+ *    appear in the user's file tree, git status, or a commit. No .gitignore
+ *    mangling of user repos is needed.
  *  - A `checkpoint_undo` tool lets the agent (or user via chat) restore the
  *    last checkpoint batch.
- *  - Auto-clean checkpoints older than 1 hour on session close.
+ *  - Auto-clean checkpoints older than 1 hour on session close, plus a
+ *    one-time sweep of the legacy in-workspace `.kai/checkpoints` location.
  */
 
+import { getKaiStateDir } from "./kaiPaths";
 import { native } from "./native";
 import { checkWritableCanonical } from "./security";
 import { IS_WINDOWS } from "@/lib/platform";
 
-const CHECKPOINTS_DIR = ".kai/checkpoints";
 const MAX_CHECKPOINT_AGE_MS = 60 * 60 * 1000; // 1 hour
 
 /** Collapse `\\` to `/` and strip trailing slashes. Matches the canonical
@@ -73,14 +75,12 @@ export function confineToWorkspace(
     if (!eq(rootSegs[i]!, pathSegs[i]!)) return null;
   }
 
-  // Never restore into the checkpoint directory itself — that is the exact
-  // injection vector this function exists to close. Scoped to
-  // `.kai/checkpoints` rather than all of `.kai/`, so restoring other project
-  // files beneath it (`.kai/memory/…`, `.kai/rules`) still works.
-  const inCheckpointDir =
-    eq(pathSegs[rootSegs.length] ?? "", ".kai") &&
-    eq(pathSegs[rootSegs.length + 1] ?? "", "checkpoints");
-  if (inCheckpointDir) return null;
+  // Never restore into `.kai` state dirs that may hold checkpoint records —
+  // that is the exact re-seeding vector this function exists to close.
+  // `.kai/rules`, `.kai/hooks` etc. are user-authored project files and remain
+  // restorable.
+  const inKaiStateDir = eq(pathSegs[rootSegs.length] ?? "", ".kai");
+  if (inKaiStateDir) return null;
 
   // Safe to return the normalized original — `segmentsOf` already proved there
   // are no `.`/`..` segments to resolve, and this preserves drive-letter and
@@ -108,29 +108,41 @@ function nextCheckpointTs(): number {
 }
 
 function checkpointPath(
-  workspaceRoot: string,
+  checkpointDir: string,
   timestamp: number,
   sessionId: string,
 ): string {
-  const root = norm(workspaceRoot);
   const safe = sessionId.replace(/[^a-zA-Z0-9_-]/g, "_");
-  return `${root}/${CHECKPOINTS_DIR}/${timestamp}-${safe}.json`;
+  return `${checkpointDir}/${timestamp}-${safe}.json`;
 }
 
-function ensureCheckpointsDir(workspaceRoot: string): Promise<void> {
-  const dir = `${workspaceRoot.replace(/\\/g, "/").replace(/\/$/, "")}/${CHECKPOINTS_DIR}`;
-  return native.createDir(dir).catch(() => {
-    // Directory already exists — fine.
-  });
+async function ensureCheckpointsDir(
+  workspaceRoot: string,
+): Promise<string | null> {
+  try {
+    const dir = await getKaiStateDir(workspaceRoot, "checkpoints");
+    await native.createDir(dir).catch(() => {
+      // Directory already exists — fine.
+    });
+    return dir;
+  } catch {
+    // homeDir() unavailable (shouldn't happen in Tauri) — no checkpointing.
+    return null;
+  }
 }
 
 /**
- * List all checkpoint files in the workspace, oldest first.
+ * List all checkpoint files for a workspace, oldest first.
  */
 export async function listCheckpoints(
   workspaceRoot: string,
 ): Promise<CheckpointRecord[]> {
-  const dir = `${workspaceRoot.replace(/\\/g, "/").replace(/\/$/, "")}/${CHECKPOINTS_DIR}`;
+  let dir: string;
+  try {
+    dir = await getKaiStateDir(workspaceRoot, "checkpoints");
+  } catch {
+    return [];
+  }
   let entries: { name: string; kind: string }[];
   try {
     entries = (await native.readDir(dir)).map((e) => ({
@@ -245,10 +257,11 @@ export async function commitCheckpoint(): Promise<void> {
     files: entries,
   };
 
-  const path = checkpointPath(cwd, record.timestamp, sessionId);
+  const dir = await ensureCheckpointsDir(cwd);
+  if (!dir) return;
+  const path = checkpointPath(dir, record.timestamp, sessionId);
 
   try {
-    await ensureCheckpointsDir(cwd);
     await native.writeFile(path, JSON.stringify(record, null, 2));
   } catch (e) {
     console.debug("checkpoint: failed to write", path, e);
@@ -324,7 +337,12 @@ export async function restoreCheckpoint(
 export async function cleanOldCheckpoints(
   workspaceRoot: string,
 ): Promise<number> {
-  const dir = `${workspaceRoot.replace(/\\/g, "/").replace(/\/$/, "")}/${CHECKPOINTS_DIR}`;
+  let dir: string;
+  try {
+    dir = await getKaiStateDir(workspaceRoot, "checkpoints");
+  } catch {
+    return 0;
+  }
   let entries: { name: string; kind: string }[];
   try {
     entries = (await native.readDir(dir)).map((e) => ({
@@ -355,4 +373,29 @@ export async function cleanOldCheckpoints(
   }
 
   return cleaned;
+}
+
+/**
+ * Remove the legacy in-workspace checkpoint location
+ * (`<workspace>/.kai/checkpoints`), used before checkpoints moved to
+ * `~/.kai/checkpoints/<hash>/`. Checkpoints are ephemeral (1h TTL) and this
+ * is agent-generated state, so deleting the leftover directory outright is
+ * correct — it never contains user files.
+ */
+export async function sweepLegacyCheckpoints(
+  workspaceRoot: string,
+): Promise<void> {
+  const dir = `${norm(workspaceRoot)}/.kai/checkpoints`;
+  try {
+    await native.readDir(dir);
+  } catch {
+    return; // Not there — nothing to sweep.
+  }
+  try {
+    await native.deleteFile(dir);
+    console.info("[kai] swept legacy in-workspace checkpoints dir:", dir);
+  } catch (e) {
+    // Best effort — a locked file inside will be swept on a later run.
+    console.debug("[kai] legacy checkpoints sweep failed:", dir, e);
+  }
 }

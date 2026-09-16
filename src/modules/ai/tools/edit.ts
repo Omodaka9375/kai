@@ -559,7 +559,8 @@ export function buildEditTools(ctx: ToolContext) {
         const result = await restoreCheckpoint(last, root);
         // Delete the checkpoint file after successful restore.
         try {
-          const ckDir = `${root.replace(/\\/g, "/").replace(/\/$/, "")}/.kai/checkpoints`;
+          const { getKaiStateDir } = await import("../lib/kaiPaths");
+          const ckDir = await getKaiStateDir(root, "checkpoints");
           const files = await native.readDir(ckDir);
           for (const f of files) {
             if (f.name.includes(String(last.timestamp))) {

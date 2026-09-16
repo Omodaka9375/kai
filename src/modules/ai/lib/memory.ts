@@ -8,25 +8,12 @@
  * The agent uses `save_memory` to persist learnings and `read_file` to recall.
  */
 
-import { homeDir } from "@tauri-apps/api/path";
+import { getKaiStateDir } from "./kaiPaths";
 import { native } from "./native";
 import { neutralizeFenceMarkers, neutralizeInjectionMarkers } from "./fence";
 
-const MEMORY_DIR = ".kai/memory";
 const MAX_MEMORY_LOAD_BYTES = 25 * 1024;
 const MAX_MEMORY_LOAD_LINES = 200;
-
-/**
- * Hash a path string into a safe filename component.
- * Simple DJB2 — matches what the hash module uses.
- */
-function djb2(s: string): number {
-  let hash = 5381;
-  for (let i = 0; i < s.length; i++) {
-    hash = ((hash << 5) + hash + s.charCodeAt(i)) | 0;
-  }
-  return hash >>> 0;
-}
 
 /**
  * Resolve the memory directory path for a given workspace root.
@@ -35,10 +22,7 @@ function djb2(s: string): number {
 export async function getProjectMemoryDir(
   workspaceRoot: string,
 ): Promise<string> {
-  const home = await homeDir();
-  const root = workspaceRoot.replace(/\\/g, "/").replace(/\/$/, "");
-  const hash = djb2(root).toString(16);
-  return `${home.replace(/\\/g, "/").replace(/\/$/, "")}/${MEMORY_DIR}/${hash}`;
+  return getKaiStateDir(workspaceRoot, "memory");
 }
 
 /**

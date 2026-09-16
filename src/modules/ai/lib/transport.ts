@@ -19,7 +19,7 @@ import { extensionRegistry } from "./extensions";
 import { agentBus } from "./eventBus";
 import { createFenceState } from "./fence";
 import { loadProjectRules, formatRulesForPrompt, type ProjectRules } from "./projectRules";
-import { cleanOldCheckpoints } from "./checkpoints";
+import { cleanOldCheckpoints, sweepLegacyCheckpoints } from "./checkpoints";
 import { getRelevantFiles, formatRelevantFiles } from "./relevance";
 import { loadProjectMemoryCached } from "./memory";
 
@@ -127,7 +127,10 @@ export function createContextAwareTransport(deps: Deps) {
       : "";
     const effectiveMemory = [projectMemory, autoMemoryBlock].filter(Boolean).join("\n") || null;
     // Clean old checkpoints (>1h) in background — fire-and-forget.
-    if (live.workspaceRoot) void cleanOldCheckpoints(live.workspaceRoot);
+    if (live.workspaceRoot) {
+      void cleanOldCheckpoints(live.workspaceRoot);
+      void sweepLegacyCheckpoints(live.workspaceRoot);
+    }
     const envBlock = formatEnvBlock(live);
     // Add smart file context — discover potentially relevant files.
     const lastUserText = extractLastUserText(options.messages);
