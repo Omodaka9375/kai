@@ -150,9 +150,9 @@ function Bridge({
       chat.stop();
       return;
     }
-    // Consume the message immediately so the state update doesn't cause the
-    // effect cleanup to cancel our send (setSteeringMessage triggers a
-    // re-render which would clearTimeout a delayed send).
+    // Consume the message before sending: reading `steeringRef.current` first
+    // and clearing the store second keeps the value stable across the
+    // re-render that setSteeringMessage(null) triggers.
     setSteeringMessage(null);
     const msg = steeringRef.current ?? steeringMessage;
     void chat.sendMessage({

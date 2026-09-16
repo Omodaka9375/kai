@@ -214,7 +214,16 @@ export function createContextAwareTransport(deps: Deps) {
     // (a) the next run replaces it (registerRunController aborts+overwrites),
     // or (b) the session is deleted (deleteSession). abortRunController also
     // removes it after aborting.
-    sdkSignal?.removeEventListener("abort", forwardAbort);
+    //
+    // The same holds for the `forwardAbort` listener: it must stay attached
+    // for the entire streaming phase. Removing it after runAgentStream
+    // returns (which resolves as soon as streamText() returns its result
+    // object — before the SDK reads a single chunk) disconnected Chat.stop()
+    // for the whole run: the SDK aborted its signal into a dead listener and
+    // the model kept streaming. The listener is `{ once: true }` and the SDK
+    // allocates a fresh AbortController per makeRequest, so there is no leak
+    // and no cross-run interference (a late fire on a superseded controller
+    // is a no-op).
     return result.toUIMessageStream({
       originalMessages: didSummarize ? summarized : options.messages,
     });

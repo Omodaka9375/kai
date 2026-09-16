@@ -244,7 +244,13 @@ export function AiComposerProvider({ children }: ProviderProps) {
     if (isBusy) {
       const trimmed = value.trim();
       if (trimmed) {
-        useChatStore.getState().setSteeringMessage(trimmed);
+        // Append to a still-pending steering message instead of overwriting
+        // it — a second redirect queued before the run stops must not be
+        // silently dropped.
+        const pending = useChatStore.getState().steeringMessage;
+        useChatStore
+          .getState()
+          .setSteeringMessage(pending ? `${pending}\n\n${trimmed}` : trimmed);
         setValue("");
       }
       return;
