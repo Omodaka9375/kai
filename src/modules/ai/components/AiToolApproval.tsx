@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import {
+  AiBrain03Icon,
   Cancel01Icon,
   CheckmarkCircle02Icon,
   Edit02Icon,
@@ -19,6 +20,7 @@ import type { ToolUIPart } from "ai";
 import { memo, useCallback, useState } from "react";
 import { useChatStore } from "../store/chatStore";
 import { abortSession } from "../store/chatStore";
+import { setEditedToolInput } from "../lib/toolInputOverrides";
 import { getToolActionInfo, analyzeShellCommand } from "../lib/policy";
 
 type Props = {
@@ -37,6 +39,7 @@ const TOOL_META: Record<string, { label: string; icon: typeof FilePlusIcon }> =
     create_directory: { label: "Create directory", icon: FolderAddIcon },
     bash_run: { label: "Run shell command", icon: TerminalIcon },
     bash_background: { label: "Spawn background process", icon: TerminalIcon },
+    save_memory: { label: "Save memory", icon: AiBrain03Icon },
   };
 
 function AiToolApprovalImpl({ part, toolName, onRespond, queue }: Props) {
@@ -48,16 +51,23 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue }: Props) {
   const wasAutoApproved = autoApprovedIds.has(part.approval.id);
 
   const isShell = toolName === "bash_run" || toolName === "bash_background";
+  const isMemory = toolName === "save_memory";
+  // Tools whose single text field the user can edit in the card before
+  // approving. Shell edits run via terminal injection (see handleApprove);
+  // memory edits travel out-of-band to the tool's execute (see
+  // toolInputOverrides).
+  const isEditable = isShell || isMemory;
   const commandText = isShell ? String(input.command ?? "") : "";
+  const entryText = isMemory ? String(input.entry ?? "") : "";
   const isElevated = toolName === "bash_run" && input.elevated === true;
   const [isEditing, setIsEditing] = useState(false);
   const [editedCommand, setEditedCommand] = useState("");
 
   // When entering edit mode, seed with the original command.
   const enterEdit = useCallback(() => {
-    setEditedCommand(commandText);
+    setEditedCommand(isShell ? commandText : entryText);
     setIsEditing(true);
-  }, [commandText]);
+  }, [isShell, commandText, entryText]);
 
   const cancelEdit = useCallback(() => {
     setIsEditing(false);
@@ -65,6 +75,13 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue }: Props) {
   }, []);
 
   const handleApprove = useCallback(() => {
+    if (isMemory && isEditing) {
+      // Register the edited entry; the tool consumes it at execute time via
+      // its toolCallId (the SDK approval response cannot carry new input).
+      setEditedToolInput(part.toolCallId, { entry: editedCommand });
+      onRespond(true);
+      return;
+    }
     if (isShell && isEditing && editedCommand !== commandText) {
       // Deny the original tool call and inject the edited command directly
       // into the active terminal — no agent round-trip.
@@ -80,7 +97,7 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue }: Props) {
     } else {
       onRespond(true);
     }
-  }, [isShell, isEditing, editedCommand, commandText, onRespond]);
+  }, [isMemory, isShell, isEditing, editedCommand, commandText, part.toolCallId, onRespond]);
 
   // Queued behind an earlier approval — compact placeholder, no actions.
   if (queue?.queued) {
@@ -269,12 +286,12 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue }: Props) {
               className="h-7 gap-1.5 text-[11px]"
             >
               <HugeiconsIcon icon={Tick02Icon} size={12} strokeWidth={2} />
-              Run edited
+              {isMemory ? "Save edited" : "Run edited"}
             </Button>
           </>
         ) : (
           <>
-            {isShell && (
+            {isEditable && (
               <Button
                 size="icon"
                 variant="ghost"
@@ -373,6 +390,37 @@ function PreviewBlock({
             )}
           >
             {command}
+          </pre>
+        )}
+      </div>
+    );
+  }
+  if (toolName === "save_memory") {
+    const entry = String(input.entry ?? "");
+    return (
+      <div className="space-y-1.5">
+        <div className="text-[10.5px] text-muted-foreground">
+          Persistent project memory — loaded into every future session
+        </div>
+        {editing ? (
+          <textarea
+            value={editedValue ?? entry}
+            onChange={(e) => onEditChange?.(e.target.value)}
+            className={cn(
+              "w-full rounded-md border border-border bg-card p-2 text-[11px] leading-relaxed",
+              "resize-none outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/30",
+            )}
+            rows={Math.min((editedValue ?? entry).split("\n").length + 1, 14)}
+            spellCheck={false}
+            autoFocus
+          />
+        ) : (
+          <pre
+            className={cn(
+              "max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/60 p-2 text-[11px] leading-relaxed",
+            )}
+          >
+            {entry}
           </pre>
         )}
       </div>

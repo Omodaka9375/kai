@@ -4,6 +4,7 @@
 
 import { tool } from "ai";
 import { z } from "zod";
+import { consumeEditedToolInput } from "../lib/toolInputOverrides";
 import { appendToMemory } from "../lib/memory";
 import { type ToolContext } from "./context";
 
@@ -20,13 +21,27 @@ export function buildMemoryTools(ctx: ToolContext) {
           ),
       }),
       needsApproval: true,
-      execute: async ({ entry }) => {
+      execute: async ({ entry }, options) => {
+        // The approval card may have let the user edit the entry — the
+        // edited text replaces the model's proposal verbatim.
+        const edited = consumeEditedToolInput(options?.toolCallId ?? "");
+        const finalEntry =
+          edited && typeof edited.entry === "string"
+            ? edited.entry.trim()
+            : entry.trim();
+        if (!finalEntry) {
+          return { error: "empty entry — nothing to save" };
+        }
         const root = ctx.getWorkspaceRoot();
         if (!root) return { error: "no workspace root — cannot save memory" };
         const sessionId = ctx.getSessionId();
         try {
-          await appendToMemory(root, entry, sessionId ?? undefined);
-          return { ok: true, saved_to: "<workspace>/.kai/memory/<hash>/MEMORY.md" };
+          await appendToMemory(root, finalEntry, sessionId ?? undefined);
+          return {
+            ok: true,
+            saved_to: "~/.kai/memory/<hash>/MEMORY.md",
+            ...(edited ? { edited: true } : {}),
+          };
         } catch (e) {
           return { error: String(e) };
         }
