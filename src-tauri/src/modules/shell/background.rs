@@ -40,6 +40,7 @@ pub struct BackgroundProc {
 }
 
 /// Monotonic per-process counter for unique sandbox pidfile names.
+#[cfg_attr(not(windows), allow(dead_code))]
 fn started_counter() -> u64 {
     static CTR: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     CTR.fetch_add(1, Ordering::Relaxed)

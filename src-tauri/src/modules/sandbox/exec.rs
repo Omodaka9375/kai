@@ -1,14 +1,9 @@
 //! OS-level confinement (Layer 2) for agent shell commands.
 //!
 //! Wraps the one-shot shell command in the platform's confinement runner:
-//!   - Linux:   bubblewrap (`bwrap`) — read-only root fs, rw project bind,
-//!              private /tmp + /dev, `--unshare-net`, dies with the parent.
-//!   - macOS:   `sandbox-exec` with a generated Seatbelt profile.
-//!   - Windows: not enforced in this layer (L1 policy only). A true Windows
-//!              L2 needs a dedicated WSL sandbox distro (imported rootfs with
-//!              drvfs mounts disabled) — routing through a default distro
-//!              would expose the FULL host disk via /mnt/c, which is worse
-//!              than no sandbox.
+//!   - Linux: bubblewrap (`bwrap`) — read-only root fs, rw project bind, private /tmp + /dev, `--unshare-net`, dies with the parent.
+//!   - macOS: `sandbox-exec` with a generated Seatbelt profile.
+//!   - Windows: not enforced in this layer (L1 policy only). A true Windows L2 needs a dedicated WSL sandbox distro (imported rootfs with drvfs mounts disabled) — routing through a default distro would expose the FULL host disk via /mnt/c, which is worse than no sandbox.
 //!
 //! Only `workspaceOnly` mode routes here — `readOnly` keeps L1 semantics
 //! (an OS wall would also block reads, which readOnly explicitly allows).

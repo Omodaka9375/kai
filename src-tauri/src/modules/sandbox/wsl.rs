@@ -14,13 +14,8 @@
 //!     inside the sandbox VM is the confinement boundary, not an escape.
 //!
 //! Known limits (documented honestly):
-//!   - NETWORK: WSL2 distros share ONE network namespace inside the utility
-//!     VM — per-distro network isolation is architecturally impossible.
-//!     Windows L2 is filesystem confinement only.
-//!     - CANCEL/TIMEOUT: killing the wsl.exe client does NOT kill the in-distro
-//!     process. Wrapped commands therefore run under busybox `timeout` with
-//!     the host timeout + slack, so an orphaned in-distro command dies on its
-//!     own shortly after the host gives up.
+//!   - NETWORK: WSL2 distros share ONE network namespace inside the utility VM — per-distro network isolation is architecturally impossible; Windows L2 is filesystem confinement only.
+//!   - CANCEL/TIMEOUT: killing the wsl.exe client does NOT kill the in-distro process — wrapped commands run under busybox `timeout` with the host timeout + slack, so an orphaned in-distro command dies on its own shortly after the host gives up.
 //!
 //! Cross-platform note: this module compiles on ALL platforms because the
 //! `sandbox_wsl_*` commands are registered unconditionally in the invoke
@@ -45,7 +40,10 @@ use tauri::Manager;
 #[cfg(windows)]
 use crate::modules::workspace::decode_command_output;
 
-/// Registered WSL distro name for the sandbox.
+/// Registered WSL distro name for the sandbox. Windows-only at runtime,
+/// but compiled cross-platform; non-Windows builds see no caller, hence the
+/// cfg-gated dead-code allowance (tests still exercise it everywhere).
+#[cfg_attr(not(windows), allow(dead_code))]
 pub const DISTRO_NAME: &str = "kai-sandbox";
 
 /// Alpine minirootfs — busybox sh/mount/mountpoint/timeout, no package setup.
@@ -98,6 +96,7 @@ pub fn distro_installed_cached() -> bool {
 /// DJB2 — same construction as the frontend (kaiPaths.ts) but local-only:
 /// the mountpoint just needs stability per project path, not cross-language
 /// agreement.
+#[cfg_attr(not(windows), allow(dead_code))]
 fn djb2(s: &str) -> u32 {
     let mut hash: u32 = 5381;
     for b in s.bytes() {
@@ -109,12 +108,14 @@ fn djb2(s: &str) -> u32 {
 /// Stable per-project mountpoint. Windows paths arrive with varying case AND
 /// separator styles between calls — normalize both before hashing so the
 /// mountpoint is stable.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn mountpoint_for(root: &str) -> String {
     let norm = root.to_lowercase().replace('\\', "/");
     format!("/ws/{:08x}", djb2(&norm))
 }
 
 /// POSIX single-quote escaping for embedding a string in a `sh -c` script.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn sh_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
@@ -122,6 +123,7 @@ pub fn sh_quote(s: &str) -> String {
 /// Map a host cwd to its in-sandbox path. Subdirectories of the project root
 /// map under the mountpoint; anything else (or no cwd) maps to the
 /// mountpoint itself.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn translate_cwd(root: &str, cwd: Option<&str>) -> String {
     let mp = mountpoint_for(root);
     let Some(cwd) = cwd.filter(|c| !c.is_empty()) else {

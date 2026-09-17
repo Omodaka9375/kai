@@ -360,10 +360,10 @@ fn create_inner(root: &Path, dir: &Path) -> Result<ShadowInfo, String> {
         let entry = entry.map_err(|e| e.to_string())?;
         let ft = entry.file_type().map_err(|e| e.to_string())?;
         let name_str = entry.file_name().to_string_lossy().into_owned();
-        if ft.is_dir() && HEAVY_DIRS.contains(&name_str.as_str()) {
-            if symlink_any(&entry.path(), &dir.join(&name_str)).is_ok() {
-                shared.push(name_str);
-            }
+        if ft.is_dir() && HEAVY_DIRS.contains(&name_str.as_str())
+            && symlink_any(&entry.path(), &dir.join(&name_str)).is_ok()
+        {
+            shared.push(name_str);
         }
     }
 
@@ -404,12 +404,12 @@ fn create_inner(root: &Path, dir: &Path) -> Result<ShadowInfo, String> {
             continue;
         }
         if ft.is_symlink() {
-            let target = std::fs::read_link(&src).map_err(|e| e.to_string())?;
+            let target = std::fs::read_link(src).map_err(|e| e.to_string())?;
             symlink_any(&target, &dst).map_err(|e| format!("link {}: {e}", dst.display()))?;
             continue;
         }
         // Regular file.
-        let size = std::fs::metadata(&src).map(|m| m.len()).unwrap_or(0);
+        let size = std::fs::metadata(src).map(|m| m.len()).unwrap_or(0);
         total_bytes += size;
         if total_bytes > MAX_TREE_BYTES {
             let _ = std::fs::remove_dir_all(dir);
@@ -422,8 +422,8 @@ fn create_inner(root: &Path, dir: &Path) -> Result<ShadowInfo, String> {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
         }
-        std::fs::copy(&src, &dst).map_err(|e| format!("copy {}: {e}", src.display()))?;
-        inventory.insert(rel, stamp(&src));
+        std::fs::copy(&src, dst).map_err(|e| format!("copy {}: {e}", src.display()))?;
+        inventory.insert(rel, stamp(src));
     }
 
     // ── 3. .git copied as-is (walker skips it above) so agent git ops are
