@@ -30,6 +30,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { estimateCost, getModel, getModelContextLimit } from "../config";
+import { effectiveContextLimit, SYSTEM_OVERHEAD_TOKENS } from "../lib/compact";
 import { saveSessionsList, type SessionMeta } from "../lib/sessions";
 import { normalizeWorkspacePath } from "../lib/workspacePath";
 import { getOrCreateChat, useChatStore } from "../store/chatStore";
@@ -351,9 +352,19 @@ function ContextIndicator({ messages }: { messages: UIMessage[] }) {
   const lastInput = useChatStore((s) => s.agentMeta.lastInputTokens);
   const lastCached = useChatStore((s) => s.agentMeta.lastCachedTokens);
   const estimated = useMemo(() => estimateTokens(messages), [messages]);
-  const used = lastInput > 0 ? lastInput : estimated;
+  // The provider reports the size of the request it actually received —
+  // AFTER compaction elided/truncated tool results. A huge raw history can
+  // trip compaction while `lastInput` stays small, which made the ring look
+  // fine while the pipeline was already compressing. Take the max of the
+  // two so the indicator reflects raw-history pressure, never less.
+  const used = lastInput > 0 ? Math.max(lastInput, estimated) : estimated;
   const reported = tokens.inputTokens + tokens.outputTokens;
-  const max = getModelContextLimit(modelId);
+  // The conversation budget is the model window minus system prompt + tool
+  // schemas. Compaction thresholds (40/60/75%) are measured against this same
+  // effective limit — using it as the ring denominator keeps the UI honest
+  // about when compaction will trigger, instead of showing a low percentage
+  // against the raw model window while the pipeline is already compacting.
+  const max = effectiveContextLimit(getModelContextLimit(modelId));
   const modelLabel = useMemo(() => {
     try {
       return getModel(modelId).label;
@@ -378,7 +389,7 @@ function ContextIndicator({ messages }: { messages: UIMessage[] }) {
             <span className="font-mono text-foreground">{modelLabel}</span>
           </div>
           <div className="mt-1 flex items-center justify-between text-muted-foreground">
-            <span>{lastInput > 0 ? "Last request" : "Estimated context"}</span>
+            <span>{used === lastInput && used > 0 ? "Last request" : "Estimated context"}</span>
             <span className="font-mono text-foreground">
               {formatTokens(used)}
             </span>
@@ -427,12 +438,23 @@ function ContextIndicator({ messages }: { messages: UIMessage[] }) {
               {formatTokens(max)}
             </span>
           </div>
+          <div className="flex items-center justify-between text-muted-foreground">
+            <span>Model window</span>
+            <span className="font-mono text-foreground">
+              {formatTokens(getModelContextLimit(modelId))}
+            </span>
+          </div>
+          <div className="flex items-center justify-between text-muted-foreground">
+            <span>Reserved (system+tools)</span>
+            <span className="font-mono text-foreground">
+              {formatTokens(Math.min(SYSTEM_OVERHEAD_TOKENS, getModelContextLimit(modelId)))}
+            </span>
+          </div>
         </ContextContentBody>
         <ContextContentFooter>
           <span className="text-[10px] italic text-muted-foreground">
-            {lastInput > 0
-              ? "Last request reflects current context size; session totals are cumulative."
-              : "Token count is approximate (chars / 4)."}
+            Ring shows pressure on the conversation budget (model window minus
+            system prompt + tool schemas); compaction starts at 40%.
           </span>
         </ContextContentFooter>
       </ContextContent>

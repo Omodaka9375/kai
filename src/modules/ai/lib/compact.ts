@@ -173,7 +173,16 @@ export function compactModelMessages(
  * - Cache/structural overhead: ~2k tokens
  * Total: ~15–20k. We use 18k as a safe middle estimate.
  */
-const SYSTEM_OVERHEAD_TOKENS = 18_000;
+export const SYSTEM_OVERHEAD_TOKENS = 18_000;
+
+/**
+ * Conversation budget after subtracting the system prompt + tool schemas.
+ * This is the denominator every compaction threshold is measured against —
+ * the UI context ring uses it too so both show the same pressure.
+ */
+export function effectiveContextLimit(contextLimit: number): number {
+  return Math.max(contextLimit - SYSTEM_OVERHEAD_TOKENS, 8_000);
+}
 
 /** Max characters to keep from a truncated tool result body. */
 const TOOL_RESULT_TRUNCATE_CHARS = 3_000;
@@ -208,7 +217,7 @@ export function compactModelMessagesDetailed(
 
   // The effective budget for conversation is the context limit minus the
   // system prompt + tool definitions that are added later by runAgentStream.
-  const effectiveLimit = Math.max(contextLimit - SYSTEM_OVERHEAD_TOKENS, 8_000);
+  const effectiveLimit = effectiveContextLimit(contextLimit);
 
   // ── Phase 1: drop superseded reads (stale file content) ──
   // Trigger earlier — at 40% of effective limit, not 50%.
