@@ -31,6 +31,7 @@ import {
   setTerminalScrollback,
   setTerminalWebglEnabled,
   setVimMode,
+  setEditorWordWrap,
   setCommitSigningEnabled,
   setCommitSigningMode,
   setCommitSigningKey,
@@ -75,6 +76,7 @@ export function GeneralSection() {
   const autostart = usePreferencesStore((s) => s.autostart);
   const restoreWindowState = usePreferencesStore((s) => s.restoreWindowState);
   const vimMode = usePreferencesStore((s) => s.vimMode);
+  const editorWordWrap = usePreferencesStore((s) => s.editorWordWrap);
   const showHidden = usePreferencesStore((s) => s.showHidden);
   const terminalWebglEnabled = usePreferencesStore(
     (s) => s.terminalWebglEnabled,
@@ -215,6 +217,15 @@ export function GeneralSection() {
           <Switch
             checked={vimMode}
             onCheckedChange={(v) => void setVimMode(v)}
+          />
+        </SettingRow>
+        <SettingRow
+          title="Word wrap"
+          description="Wrap long lines instead of expanding the editor horizontally. Applies to text, markdown, and code files."
+        >
+          <Switch
+            checked={editorWordWrap}
+            onCheckedChange={(v) => void setEditorWordWrap(v)}
           />
         </SettingRow>
       </div>

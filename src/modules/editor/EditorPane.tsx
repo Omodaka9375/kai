@@ -24,6 +24,7 @@ import {
   buildSharedExtensions,
   languageCompartment,
   vimCompartment,
+  wrapCompartment,
 } from "./lib/extensions";
 import { initVimGlobals, vimHandlersExtension } from "./lib/vim";
 
@@ -120,6 +121,7 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
     const cmRef = useRef<ReactCodeMirrorRef>(null);
     const editorThemeId = usePreferencesStore((s) => s.editorTheme);
     const vimMode = usePreferencesStore((s) => s.vimMode);
+    const wordWrap = usePreferencesStore((s) => s.editorWordWrap);
     const themeExt = EDITOR_THEME_EXT[editorThemeId] ?? EDITOR_THEME_EXT.atomone;
 
     // Stabilize save + onSaved via refs
@@ -150,6 +152,11 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
         })),
         ...buildSharedExtensions(),
         languageCompartment.of([]),
+        wrapCompartment.of(
+          usePreferencesStore.getState().editorWordWrap
+            ? EditorView.lineWrapping
+            : [],
+        ),
         keymap.of([
           {
             key: "Mod-s",
@@ -176,6 +183,16 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
         ),
       });
     }, [vimMode]);
+
+    useEffect(() => {
+      const view = cmRef.current?.view;
+      if (!view) return;
+      view.dispatch({
+        effects: wrapCompartment.reconfigure(
+          wordWrap ? EditorView.lineWrapping : [],
+        ),
+      });
+    }, [wordWrap]);
 
     useEffect(() => {
       let cancelled = false;
