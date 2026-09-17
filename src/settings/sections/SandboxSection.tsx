@@ -1,6 +1,9 @@
-import { native, type SandboxMode, type SandboxStatus } from "@/modules/ai/lib/native";
+import { Button } from "@/components/ui/button";
+import { native, type SandboxMode, type SandboxSetupEvent, type SandboxStatus } from "@/modules/ai/lib/native";
 import { invalidateSandboxCache } from "@/modules/ai/lib/sandbox";
 import { useChatStore } from "@/modules/ai/store/chatStore";
+import { IS_WINDOWS } from "@/lib/platform";
+import { Channel } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { SectionHeader } from "../components/SectionHeader";
 import { SettingRow } from "../components/SettingRow";
@@ -89,6 +92,42 @@ export function SandboxSection() {
     }
   };
 
+  // ── Windows sandbox distro lifecycle ────────────────────────────────
+  const [wslBusy, setWslBusy] = useState(false);
+  const [wslProgress, setWslProgress] = useState<SandboxSetupEvent | null>(null);
+  const [wslError, setWslError] = useState("");
+
+  const onSetupWsl = async () => {
+    if (wslBusy) return;
+    setWslBusy(true);
+    setWslError("");
+    setWslProgress(null);
+    const onEvent = new Channel<SandboxSetupEvent>();
+    onEvent.onmessage = (e) => setWslProgress(e);
+    try {
+      await native.sandboxWslSetup(onEvent);
+      void native.sandboxStatus().then((s) => setStatus(s));
+    } catch (e) {
+      setWslError(String(e));
+    } finally {
+      setWslBusy(false);
+    }
+  };
+
+  const onRemoveWsl = async () => {
+    if (wslBusy) return;
+    setWslBusy(true);
+    setWslError("");
+    try {
+      await native.sandboxWslRemove();
+      void native.sandboxStatus().then((s) => setStatus(s));
+    } catch (e) {
+      setWslError(String(e));
+    } finally {
+      setWslBusy(false);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-6">
       <SectionHeader
@@ -135,6 +174,67 @@ export function SandboxSection() {
           )}
         </div>
       </SettingRow>
+
+      {IS_WINDOWS && status?.wsl ? (
+        <SettingRow
+          title="Windows sandbox distro"
+          description="A dedicated minimal WSL distro (kai-sandbox) with host-drive automount disabled — agent shells see ONLY the project. Filesystem confinement; network isolation is not possible per-distro under WSL2."
+        >
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={wslBusy}
+                onClick={() => void onSetupWsl()}
+              >
+                {wslBusy ? "Working…" : "Install sandbox distro"}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={wslBusy}
+                onClick={() => void onRemoveWsl()}
+              >
+                Remove
+              </Button>
+            </div>
+
+            {wslProgress?.phase === "download" && wslProgress.total > 0 ? (
+              <div className="flex flex-col gap-1">
+                <div className="h-1 w-56 overflow-hidden rounded-full bg-border">
+                  <div
+                    className="h-full bg-primary transition-all"
+                    style={{
+                      width: `${Math.round((wslProgress.downloaded / wslProgress.total) * 100)}%`,
+                    }}
+                  />
+                </div>
+                <span className="font-mono text-[11px] text-muted-foreground">
+                  {formatBytes(wslProgress.downloaded)} / {formatBytes(wslProgress.total)}
+                </span>
+              </div>
+            ) : null}
+            {wslProgress?.phase === "import" ? (
+              <span className="text-[11.5px] text-muted-foreground">Importing distro — this takes ~10 seconds…</span>
+            ) : null}
+            {wslProgress?.phase === "done" ? (
+              <span className="text-[11.5px] text-emerald-500">Sandbox distro ready</span>
+            ) : null}
+            {wslError ? (
+              <span className="text-[11.5px] text-red-500">{wslError}</span>
+            ) : null}
+          </div>
+        </SettingRow>
+      ) : null}
     </div>
   );
+}
+
+function formatBytes(n: number): string {
+  if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  if (n >= 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${n} B`;
 }

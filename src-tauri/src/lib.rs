@@ -504,6 +504,8 @@ pub fn run() {
             modules::sandbox::sandbox_status,
             modules::sandbox::sandbox_load_config,
             modules::sandbox::sandbox_save_config,
+            modules::sandbox::wsl::sandbox_wsl_setup,
+            modules::sandbox::wsl::sandbox_wsl_remove,
             shell::shell_run_command,
             shell::shell_run_elevated,
             shell::shell_session_open,

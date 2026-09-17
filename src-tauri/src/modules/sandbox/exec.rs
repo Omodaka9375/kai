@@ -49,11 +49,17 @@ fn note_once(what: &'static str) {
 /// Wrap `command` for OS confinement. Returns `Ok(None)` when this platform
 /// has no runner available (caller falls through to the plain command).
 /// The returned Command still needs stdio/cwd set by the caller.
+/// `watchdog_secs` arms an in-runner watchdog where killing the host client
+/// would not kill the confined process (WSL) — None for platforms where the
+/// host controls the process tree directly. `pid_file` (WSL background procs)
+/// records the in-distro leader pid so `kill_in_distro` can reap it later.
 pub fn try_wrap(
     command: &str,
     spec: &SandboxSpec,
     workspace: &WorkspaceEnv,
     cwd: Option<&str>,
+    watchdog_secs: Option<u64>,
+    pid_file: Option<&str>,
 ) -> Result<Option<Command>, String> {
     // A WSL repo resolves its paths inside the distro; the host runner
     // cannot see those. Skip OS confinement there — L1 applies.
@@ -72,9 +78,24 @@ pub fn try_wrap(
             return Ok(Some(cmd));
         }
     }
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    #[cfg(windows)]
     {
-        let _ = (command, spec, cwd);
+        if let Some(root) = spec.root.to_str() {
+            if let Some(cmd) = crate::modules::sandbox::wsl::wrap_wsl(
+                command,
+                root,
+                cwd,
+                watchdog_secs,
+                pid_file,
+            ) {
+                return Ok(Some(cmd));
+            }
+        }
+        note_once("sandbox distro not installed — install it in Settings > Sandbox");
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    {
+        let _ = (command, spec, cwd, watchdog_secs, pid_file);
         note_once("no OS confinement runner on this platform");
     }
     Ok(None)
@@ -236,7 +257,7 @@ mod tests {
         // WSL repos can't use host runners — plain fallback, not an error.
         let spec = SandboxSpec { root: PathBuf::from("/mnt/x") };
         let ws = WorkspaceEnv::Wsl { distro: "Ubuntu".into() };
-        let r = try_wrap("echo hi", &spec, &ws, None).unwrap();
+        let r = try_wrap("echo hi", &spec, &ws, None, None, None).unwrap();
         assert!(r.is_none());
     }
 }

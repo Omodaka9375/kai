@@ -174,14 +174,19 @@ fn run_blocking_cancellable(
             // workspaceOnly: OS-confine the whole agent shell (Layer 2). When
             // the platform runner is missing, try_wrap yields None and L1
             // stays the gate — same plain command as without a sandbox.
+            // The WSL arm needs a watchdog: killing wsl.exe does not kill
+            // the in-distro process, so an in-runner `timeout` reaps it.
             let spec = crate::modules::sandbox::exec::SandboxSpec {
                 root: PathBuf::from(root),
             };
+            let watchdog = Some(dur.as_secs().saturating_add(30));
             match crate::modules::sandbox::exec::try_wrap(
                 &command,
                 &spec,
                 &workspace,
                 cwd.as_deref(),
+                watchdog,
+                None,
             )? {
                 Some(wrapped) => wrapped,
                 None => build_oneshot_command(&command, &workspace, cwd.as_deref())?,

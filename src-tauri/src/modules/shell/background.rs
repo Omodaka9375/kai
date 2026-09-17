@@ -28,10 +28,21 @@ pub struct BackgroundProc {
     pub owner: Option<String>,
     /// Human-readable label for listing / status display.
     pub label: Option<String>,
+    /// Windows sandbox distro only: in-distro path of the pidfile the
+    /// confined leader wrote. kill() reaps the in-distro process through it —
+    /// killing the wsl.exe client alone does not reach in-distro processes.
+    #[cfg(windows)]
+    pub sandbox_pid_file: Option<String>,
     /// Windows only: KILL_ON_JOB_CLOSE Job holding the wrapper shell.
     /// Terminating it reaps the whole tree (see `shell::job`).
     #[cfg(windows)]
     job: Option<super::job::KillJob>,
+}
+
+/// Monotonic per-process counter for unique sandbox pidfile names.
+fn started_counter() -> u64 {
+    static CTR: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    CTR.fetch_add(1, Ordering::Relaxed)
 }
 
 #[derive(Serialize)]
@@ -86,6 +97,11 @@ impl BackgroundProc {
     pub fn kill(&self) {
         #[cfg(windows)]
         {
+            // Sandboxed (WSL distro) procs first: the Job only holds the
+            // wsl.exe client — the confined process survives it.
+            if let Some(ref pf) = self.sandbox_pid_file {
+                crate::modules::sandbox::wsl::kill_in_distro(pf);
+            }
             if let Some(ref job) = self.job {
                 job.terminate();
             }
@@ -141,6 +157,8 @@ pub fn spawn(
     if trimmed.is_empty() {
         return Err("empty command".into());
     }
+    #[cfg(windows)]
+    let mut sandbox_pid_file: Option<String> = None;
     if let Some(ref dir) = cwd {
         if !resolve_path(dir, &workspace).is_dir() {
             return Err(format!("cwd is not a directory: {dir}"));
@@ -150,18 +168,49 @@ pub fn spawn(
     let mut cmd = match sandbox_root.as_deref().filter(|r| !r.is_empty()) {
         Some(root) => {
             // workspaceOnly: OS confinement (Layer 2); falls through to the
-            // plain command when the platform runner is unavailable.
+            // plain command when the platform runner is unavailable. No
+            // watchdog (long-lived by design); instead the in-distro leader
+            // writes a pid file under the project mount so kill() can reap
+            // it — killing the wsl.exe client alone does not reach it.
             let spec = crate::modules::sandbox::exec::SandboxSpec {
                 root: std::path::PathBuf::from(root),
             };
-            match crate::modules::sandbox::exec::try_wrap(
-                &trimmed,
-                &spec,
-                &workspace,
-                cwd.as_deref(),
-            )? {
-                Some(wrapped) => wrapped,
-                None => super::build_oneshot_command(&trimmed, &workspace, cwd.as_deref())?,
+            // In-distro pidfile (under the project mount, drvfs rw). The
+            // background record keeps the IN-DISTRO path — kill_in_distro
+            // reads it from inside the distro.
+            #[cfg(windows)]
+            {
+                let mp = crate::modules::sandbox::wsl::mountpoint_for(root);
+                let pid_name = format!("kai-bg-{}-{}.pid", std::process::id(), started_counter());
+                let pid_file = format!("{mp}/.kai-bg/{pid_name}");
+                match crate::modules::sandbox::exec::try_wrap(
+                    &trimmed,
+                    &spec,
+                    &workspace,
+                    cwd.as_deref(),
+                    None,
+                    Some(&pid_file),
+                )? {
+                    Some(wrapped) => {
+                        sandbox_pid_file = Some(pid_file);
+                        wrapped
+                    }
+                    None => super::build_oneshot_command(&trimmed, &workspace, cwd.as_deref())?,
+                }
+            }
+            #[cfg(not(windows))]
+            {
+                match crate::modules::sandbox::exec::try_wrap(
+                    &trimmed,
+                    &spec,
+                    &workspace,
+                    cwd.as_deref(),
+                    None,
+                    None,
+                )? {
+                    Some(wrapped) => wrapped,
+                    None => super::build_oneshot_command(&trimmed, &workspace, cwd.as_deref())?,
+                }
             }
         }
         None => super::build_oneshot_command(&trimmed, &workspace, cwd.as_deref())?,
@@ -209,6 +258,8 @@ pub fn spawn(
         exit_unknown: AtomicBool::new(false),
         owner,
         label,
+        #[cfg(windows)]
+        sandbox_pid_file,
         #[cfg(windows)]
         job,
     });

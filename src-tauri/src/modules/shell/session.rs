@@ -91,7 +91,16 @@ impl ShellSession {
         }
         let cwd = self.current_cwd();
         let effective_workspace = workspace_hint.unwrap_or_else(|| self.workspace.clone());
-        let wrapped = wrap_with_sentinel(&trimmed, &effective_workspace, &self.sentinel);
+        // When OS-confined (workspaceOnly), the command may run inside a
+        // non-PowerShell runner (busybox sh in the WSL sandbox distro) — the
+        // sentinel tail must then be POSIX, not the PowerShell wrapper the
+        // Windows-local path normally emits.
+        let sandboxed = sandbox_root.is_some_and(|r| !r.is_empty());
+        let wrapped = if sandboxed {
+            wrap_posix_with_sentinel(&trimmed, &self.sentinel)
+        } else {
+            wrap_with_sentinel(&trimmed, &effective_workspace, &self.sentinel)
+        };
 
         self.cancel.store(false, Ordering::Release);
         let cancel = self.cancel.clone();

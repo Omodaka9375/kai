@@ -119,6 +119,13 @@ export type SandboxStatus = {
   kernel: string | null;
 };
 
+export type SandboxSetupEvent = {
+  phase: "download" | "import" | "done";
+  downloaded: number;
+  total: number;
+  message: string | null;
+};
+
 export type WhisperModelStatus = {
   downloaded: boolean;
   downloading: boolean;
@@ -460,6 +467,9 @@ export const native = {
       mode,
       workspace: currentWorkspaceEnv(),
     }),
+  sandboxWslSetup: (onEvent: Channel<SandboxSetupEvent>) =>
+    invoke<void>("sandbox_wsl_setup", { onEvent }),
+  sandboxWslRemove: () => invoke<void>("sandbox_wsl_remove"),
   gpgListKeys: () =>
     invoke<GpgKey[]>("gpg_list_keys", { workspace: currentWorkspaceEnv() }),
   gpgExportPublic: (fingerprint: string) =>

@@ -16,6 +16,7 @@ use std::process::Command;
 use serde::{Deserialize, Serialize};
 
 pub mod exec;
+pub mod wsl;
 
 use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 
