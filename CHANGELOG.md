@@ -4,6 +4,12 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.3.5]
+
+- Checkpoints moved out of user workspaces (`~/.kai/` with legacy sweep), steering messages no longer swallowed mid-run, agent shell no longer AV-flagged, context ring matches compaction thresholds, ResizeObserver leak + estimateTokens recompute storm fixed, health counters in About, editable save_memory approval cards.
+
+---
+
 ## [1.3.4]
 
 - Added guard for Windows specific double terminal trigger issue
