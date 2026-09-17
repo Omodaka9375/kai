@@ -4,6 +4,24 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.3.6]
+
+### Added
+
+- Agent sandbox with three enforcement layers, configurable per project (`.kai/sandbox.json`, Settings > Sandbox):
+  - **Policy (all platforms)** — `off` / `readOnly` / `workspaceOnly`. File tools are confined to the project (readable/writable path checks, symlink-traversal aware), and shell commands naming paths outside the project are gated before execution.
+  - **OS confinement (workspaceOnly)** — sandboxed agent shells run under OS-level walls: bubblewrap read-only root with a writable project mount and no network (Linux), Seatbelt profiles denying network and writes outside the project (macOS), and a dedicated minimal `kai-sandbox` WSL distro with per-project mounts (Windows). Platform availability is probed and shown in Settings.
+  - **Shadow sessions** — the agent works in an isolated copy of the project (`~/.kai/shadow/`); you merge or discard at the end. Merges are conflict-safe: files changed in both places are reported, never clobbered; deletions are listed, never auto-applied. Copies respect `.gitignore`, share `node_modules` when possible, and cap at 2 GiB. Sessions survive restarts.
+- Sandbox badge in the AI session header showing the active mode.
+
+### Fixed
+
+- Shell sandbox gating no longer false-positives on everyday commands (relative test paths, sed/awk programs, URLs, date formats, quoted arguments); it now classifies whole arguments and still catches absolute, home, and `..` traversal paths outside the project.
+- Shadow merge can never write the shadow's `.git` internals over the real repository.
+- Gitignored build outputs (`dist/`, `target/`, `.next/`, …) no longer bloat shadow copies.
+
+---
+
 ## [1.3.5]
 
 - Checkpoints moved out of user workspaces (`~/.kai/` with legacy sweep), steering messages no longer swallowed mid-run, agent shell no longer AV-flagged, context ring matches compaction thresholds, ResizeObserver leak + estimateTokens recompute storm fixed, health counters in About, editable save_memory approval cards.
