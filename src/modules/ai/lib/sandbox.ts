@@ -178,3 +178,18 @@ export const SANDBOX_LABELS: Record<SandboxMode, string> = {
   readOnly: "Sandbox: read-only (writes confined to project)",
   workspaceOnly: "Sandbox: workspace only (all IO confined to project)",
 };
+
+/**
+ * The OS-confinement root (Layer 2) for shell commands, or null when the
+ * sandbox is off / readOnly. Only `workspaceOnly` OS-confines: an OS wall
+ * would also block reads, which readOnly explicitly allows. Passed to the
+ * Rust `sandbox_root` param on shell commands; the Rust side falls back to
+ * the plain command when the platform runner (bwrap / sandbox-exec) is
+ * missing.
+ */
+export async function sandboxExecRoot(): Promise<string | null> {
+  const root = currentRoot;
+  if (!root) return null;
+  const mode = await loadSandboxMode(root);
+  return mode === "workspaceOnly" ? root : null;
+}

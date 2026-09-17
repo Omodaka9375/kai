@@ -15,6 +15,8 @@ use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
+pub mod exec;
+
 use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 
 /// Sandboxing mode for the current project.

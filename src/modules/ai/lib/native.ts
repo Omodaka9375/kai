@@ -248,12 +248,14 @@ export const native = {
     command: string,
     cwd?: string | null,
     timeoutSecs?: number,
+    sandboxRoot?: string | null,
   ) =>
     invoke<CommandOutput>("shell_run_command", {
       command,
       cwd: cwd ?? null,
       timeoutSecs: timeoutSecs ?? null,
       workspace: currentWorkspaceEnv(),
+      sandboxRoot: sandboxRoot ?? null,
     }),
   runElevatedCommand: (
     command: string,
@@ -277,6 +279,7 @@ export const native = {
     command: string,
     cwd?: string | null,
     timeoutSecs?: number,
+    sandboxRoot?: string | null,
   ) =>
     invoke<{
       stdout: string;
@@ -291,18 +294,26 @@ export const native = {
       cwd: cwd ?? null,
       timeoutSecs: timeoutSecs ?? null,
       workspace: currentWorkspaceEnv(),
+      sandboxRoot: sandboxRoot ?? null,
     }),
   shellSessionClose: (id: number) =>
     invoke<void>("shell_session_close", { id }),
   shellSessionCancel: (id: number) =>
     invoke<void>("shell_session_cancel", { id }),
-  shellBgSpawn: (command: string, cwd?: string | null, owner?: string, label?: string) =>
+  shellBgSpawn: (
+    command: string,
+    cwd?: string | null,
+    owner?: string,
+    label?: string,
+    sandboxRoot?: string | null,
+  ) =>
     invoke<number>("shell_bg_spawn", {
       command,
       cwd: cwd ?? null,
       workspace: currentWorkspaceEnv(),
       owner: owner ?? null,
       label: label ?? null,
+      sandboxRoot: sandboxRoot ?? null,
     }),
   shellBgLogs: (handle: number, sinceOffset?: number) =>
     invoke<{

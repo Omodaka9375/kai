@@ -27,7 +27,7 @@ import { tool, generateId } from "ai";
 import { z } from "zod";
 import type { ToolContext } from "./context";
 import { checkShellCommand } from "../lib/security";
-import { checkShellSandbox } from "../lib/sandbox";
+import { checkShellSandbox, sandboxExecRoot } from "../lib/sandbox";
 
 export type WatchMode = "fire_on_match" | "fire_on_change";
 
@@ -132,6 +132,7 @@ async function poll(w: WatchState): Promise<void> {
       w.command,
       w.cwd,
       30, // 30s timeout per poll
+      await sandboxExecRoot(),
     );
 
     const fingerprint = `${result.exit_code}:${result.stdout}:${result.stderr}`;

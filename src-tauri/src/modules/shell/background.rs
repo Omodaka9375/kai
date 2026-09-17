@@ -135,6 +135,7 @@ pub fn spawn(
     workspace: WorkspaceEnv,
     owner: Option<String>,
     label: Option<String>,
+    sandbox_root: Option<String>,
 ) -> Result<Arc<BackgroundProc>, String> {
     let trimmed = command.trim().to_string();
     if trimmed.is_empty() {
@@ -146,7 +147,25 @@ pub fn spawn(
         }
     }
 
-    let mut cmd = super::build_oneshot_command(&trimmed, &workspace, cwd.as_deref())?;
+    let mut cmd = match sandbox_root.as_deref().filter(|r| !r.is_empty()) {
+        Some(root) => {
+            // workspaceOnly: OS confinement (Layer 2); falls through to the
+            // plain command when the platform runner is unavailable.
+            let spec = crate::modules::sandbox::exec::SandboxSpec {
+                root: std::path::PathBuf::from(root),
+            };
+            match crate::modules::sandbox::exec::try_wrap(
+                &trimmed,
+                &spec,
+                &workspace,
+                cwd.as_deref(),
+            )? {
+                Some(wrapped) => wrapped,
+                None => super::build_oneshot_command(&trimmed, &workspace, cwd.as_deref())?,
+            }
+        }
+        None => super::build_oneshot_command(&trimmed, &workspace, cwd.as_deref())?,
+    };
     if let (WorkspaceEnv::Local, Some(ref dir)) = (&workspace, &cwd) {
         cmd.current_dir(dir);
     }

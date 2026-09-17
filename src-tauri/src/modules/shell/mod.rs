@@ -54,6 +54,7 @@ pub async fn shell_run_command(
     cwd: Option<String>,
     timeout_secs: Option<u64>,
     workspace: Option<WorkspaceEnv>,
+    sandbox_root: Option<String>,
 ) -> Result<CommandOutput, String> {
     let trimmed = command.trim().to_string();
     if trimmed.is_empty() {
@@ -80,8 +81,15 @@ pub async fn shell_run_command(
     // The blocking spawn + wait runs on a worker thread so the Tauri async
     // runtime stays unblocked.
     let (tx, rx) = mpsc::channel::<Result<CommandOutput, String>>();
+    let sandbox = sandbox_root.filter(|s| !s.is_empty());
     thread::spawn(move || {
-        let _ = tx.send(run_blocking(trimmed, cwd_path, workspace, dur));
+        let _ = tx.send(run_blocking_sandbox(
+            trimmed,
+            cwd_path,
+            workspace,
+            dur,
+            sandbox,
+        ));
     });
 
     rx.recv().map_err(|e| e.to_string())?
@@ -118,17 +126,27 @@ pub(crate) fn run_blocking_cancellable_pub(
     workspace: WorkspaceEnv,
     dur: Duration,
     cancel: Option<&std::sync::atomic::AtomicBool>,
+    sandbox_root: Option<&str>,
 ) -> Result<CommandOutput, String> {
-    run_blocking_cancellable(command, cwd, workspace, dur, cancel)
+    run_blocking_cancellable(command, cwd, workspace, dur, cancel, sandbox_root)
 }
 
-fn run_blocking(
+/// `run_blocking` with an OS-confinement root (workspaceOnly sandbox mode).
+fn run_blocking_sandbox(
     command: String,
     cwd: Option<String>,
     workspace: WorkspaceEnv,
     dur: Duration,
+    sandbox_root: Option<String>,
 ) -> Result<CommandOutput, String> {
-    run_blocking_cancellable(command, cwd, workspace, dur, None)
+    run_blocking_cancellable(
+        command,
+        cwd,
+        workspace,
+        dur,
+        None,
+        sandbox_root.as_deref(),
+    )
 }
 
 /// Kill the process group led by `child` on Unix. The one-shot command is
@@ -149,8 +167,28 @@ fn run_blocking_cancellable(
     workspace: WorkspaceEnv,
     dur: Duration,
     cancel: Option<&std::sync::atomic::AtomicBool>,
+    sandbox_root: Option<&str>,
 ) -> Result<CommandOutput, String> {
-    let mut cmd = build_oneshot_command(&command, &workspace, cwd.as_deref())?;
+    let mut cmd = match sandbox_root.filter(|r| !r.is_empty()) {
+        Some(root) => {
+            // workspaceOnly: OS-confine the whole agent shell (Layer 2). When
+            // the platform runner is missing, try_wrap yields None and L1
+            // stays the gate — same plain command as without a sandbox.
+            let spec = crate::modules::sandbox::exec::SandboxSpec {
+                root: PathBuf::from(root),
+            };
+            match crate::modules::sandbox::exec::try_wrap(
+                &command,
+                &spec,
+                &workspace,
+                cwd.as_deref(),
+            )? {
+                Some(wrapped) => wrapped,
+                None => build_oneshot_command(&command, &workspace, cwd.as_deref())?,
+            }
+        }
+        None => build_oneshot_command(&command, &workspace, cwd.as_deref())?,
+    };
     if let (WorkspaceEnv::Local, Some(dir)) = (&workspace, cwd) {
         cmd.current_dir(dir);
     }
@@ -320,6 +358,7 @@ pub async fn shell_session_run(
     cwd: Option<String>,
     timeout_secs: Option<u64>,
     workspace: Option<WorkspaceEnv>,
+    sandbox_root: Option<String>,
 ) -> Result<SessionRunOutput, String> {
     let session = rwlock_read(&state.sessions)
         .get(&id)
@@ -331,8 +370,15 @@ pub async fn shell_session_run(
             .clamp(1, MAX_TIMEOUT_SECS),
     );
     let (tx, rx) = mpsc::channel();
+    let sandbox = sandbox_root.filter(|s| !s.is_empty());
     thread::spawn(move || {
-        let _ = tx.send(session.run(command, cwd, workspace, dur));
+        let _ = tx.send(session.run(
+            command,
+            cwd,
+            workspace,
+            dur,
+            sandbox.as_deref(),
+        ));
     });
     rx.recv().map_err(|e| e.to_string())?
 }
@@ -362,6 +408,7 @@ pub fn shell_bg_spawn(
     workspace: Option<WorkspaceEnv>,
     owner: Option<String>,
     label: Option<String>,
+    sandbox_root: Option<String>,
 ) -> Result<u32, String> {
     // Hold the write lock across reap → spawn → cap-check → insert so
     // concurrent callers don't race on the count and waste spawned processes.
@@ -381,6 +428,7 @@ pub fn shell_bg_spawn(
         WorkspaceEnv::from_option(workspace),
         owner,
         label,
+        sandbox_root.filter(|s| !s.is_empty()),
     )?;
     let mut map = rwlock_write(&state.bg);
     const BG_ID_BOUND: u32 = 128;

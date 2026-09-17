@@ -74,6 +74,7 @@ impl ShellSession {
         cwd_hint: Option<String>,
         workspace_hint: Option<WorkspaceEnv>,
         timeout: Duration,
+        sandbox_root: Option<&str>,
     ) -> Result<SessionRunOutput, String> {
         let trimmed = command.trim().to_string();
         if trimmed.is_empty() {
@@ -96,6 +97,7 @@ impl ShellSession {
         let cancel = self.cancel.clone();
         let (tx, rx) = mpsc::channel::<Result<super::CommandOutput, String>>();
         let cwd_for_thread = cwd.clone();
+        let sandbox_root = sandbox_root.map(|s| s.to_string());
         thread::spawn(move || {
             let _ = tx.send(super::run_blocking_cancellable_pub(
                 wrapped,
@@ -103,6 +105,7 @@ impl ShellSession {
                 effective_workspace,
                 timeout,
                 Some(&cancel),
+                sandbox_root.as_deref(),
             ));
         });
         let raw = rx.recv().map_err(|e| e.to_string())??;

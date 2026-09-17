@@ -2,7 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { native } from "../lib/native";
 import { checkShellCommand } from "../lib/security";
-import { checkShellSandbox } from "../lib/sandbox";
+import { checkShellSandbox, sandboxExecRoot } from "../lib/sandbox";
 import type { ToolContext } from "./context";
 import { currentWorkspaceEnv, workspaceScopeKey } from "@/modules/workspace";
 
@@ -252,6 +252,7 @@ export function buildShellTools(ctx: ToolContext) {
             command,
             cwd,
             effectiveTimeout,
+            await sandboxExecRoot(),
           );
           return {
             command,
@@ -288,7 +289,13 @@ export function buildShellTools(ctx: ToolContext) {
           const label = command.length > 80
             ? command.slice(0, 77) + "..."
             : command;
-          const handle = await native.shellBgSpawn(command, effectiveCwd, owner, label);
+          const handle = await native.shellBgSpawn(
+            command,
+            effectiveCwd,
+            owner,
+            label,
+            await sandboxExecRoot(),
+          );
           return { handle, command, cwd: effectiveCwd, ok: true };
         } catch (e) {
           return { error: String(e) };
