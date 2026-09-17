@@ -7,12 +7,18 @@ mod elevate;
 
 use std::collections::HashMap;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+#[cfg(windows)]
+use std::path::Path;
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
+#[cfg(windows)]
+use std::sync::atomic::AtomicU64;
 use std::sync::{mpsc, Arc, RwLock};
 use std::thread;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
+#[cfg(windows)]
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 
