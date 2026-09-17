@@ -17,21 +17,32 @@
 //!   - NETWORK: WSL2 distros share ONE network namespace inside the utility
 //!     VM — per-distro network isolation is architecturally impossible.
 //!     Windows L2 is filesystem confinement only.
-//!   - CANCEL/TIMEOUT: killing the wsl.exe client does NOT kill the in-distro
+//!     - CANCEL/TIMEOUT: killing the wsl.exe client does NOT kill the in-distro
 //!     process. Wrapped commands therefore run under busybox `timeout` with
 //!     the host timeout + slack, so an orphaned in-distro command dies on its
 //!     own shortly after the host gives up.
-
-#![cfg(windows)]
-
-use std::path::PathBuf;
-use std::process::Command;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+//!
+//! Cross-platform note: this module compiles on ALL platforms because the
+//! `sandbox_wsl_*` commands are registered unconditionally in the invoke
+//! handler (generate_handler! cannot cfg-gate entries). Windows-only items
+//! are `#[cfg(windows)]`-gated; the commands cfg-split their bodies with
+//! non-Windows stubs (same pattern as workspace::wsl_*). The pure helpers
+//! (mountpoint_for / sh_quote / translate_cwd) compile everywhere so their
+//! unit tests run in CI on every platform.
 
 use serde::Serialize;
 use tauri::ipc::Channel;
+
+#[cfg(windows)]
+use std::path::PathBuf;
+#[cfg(windows)]
+use std::process::Command;
+#[cfg(windows)]
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+#[cfg(windows)]
 use tauri::Manager;
 
+#[cfg(windows)]
 use crate::modules::workspace::decode_command_output;
 
 /// Registered WSL distro name for the sandbox.
@@ -39,22 +50,19 @@ pub const DISTRO_NAME: &str = "kai-sandbox";
 
 /// Alpine minirootfs — busybox sh/mount/mountpoint/timeout, no package setup.
 /// Version-pinned; a 404 (release archived) surfaces as a clear setup error.
+#[cfg(windows)]
 const ALPINE_URL: &str = "https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/x86_64/alpine-minirootfs-3.21.0-x86_64.tar.gz";
-
-/// wsl.conf disabling automount, written into the imported distro. Manual
-/// drvfs mounts remain available — automount only controls the blanket
-/// /mnt/<drive> boot mounts.
-/// (Inlined into import_distro's printf — kept here as documentation.)
-const _: () = ();
 
 /// Installed-state cache: 0 = unknown, 1 = installed, 2 = not installed.
 /// Avoids paying a `wsl -l -q` spawn (up to ~800 ms cold) per sandboxed
 /// command. Setup/remove flip the cached value so no stale window remains.
+#[cfg(windows)]
 static INSTALLED: AtomicU8 = AtomicU8::new(0);
+#[cfg(windows)]
 static SETUP_RUNNING: AtomicBool = AtomicBool::new(false);
 
-fn wsl(args: &[&str]) -> Result<std::process::Output, String> {
-    let mut cmd = Command::new("wsl.exe");
+#[cfg(windows)]
+fn wsl(args: &[&str]) -> Result<std::process::Output, String> {   let mut cmd = Command::new("wsl.exe");
     {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
@@ -63,6 +71,7 @@ fn wsl(args: &[&str]) -> Result<std::process::Output, String> {
 }
 
 /// Raw registration check via `wsl -l -q` (UTF-16 output — decode).
+#[cfg(windows)]
 pub fn distro_installed() -> bool {
     let Ok(out) = wsl(&["-l", "-q"]) else {
         return false;
@@ -74,6 +83,7 @@ pub fn distro_installed() -> bool {
 }
 
 /// Cached variant for the per-command hot path.
+#[cfg(windows)]
 pub fn distro_installed_cached() -> bool {
     match INSTALLED.load(Ordering::Relaxed) {
         1 => return true,
@@ -143,6 +153,7 @@ pub fn translate_cwd(root: &str, cwd: Option<&str>) -> String {
 /// its PID to the file just before exec'ing the command, so the host can
 /// kill the in-distro process on demand — killing wsl.exe alone does not
 /// reach it.
+#[cfg(windows)]
 pub fn wrap_wsl(
     command: &str,
     root: &str,
@@ -193,6 +204,7 @@ pub fn wrap_wsl(
 /// Kill the in-distro process recorded in `pid_file` (background procs).
 /// Best-effort: a missing file means the process already exited (or never
 /// started) — not an error.
+#[cfg(windows)]
 pub fn kill_in_distro(pid_file: &str) {
     let script = format!(
         "if [ -f {f} ]; then kill -9 \"$(cat {f})\" 2>/dev/null; rm -f {f}; fi",
@@ -226,6 +238,7 @@ pub struct SandboxSetupEvent {
     pub message: Option<String>,
 }
 
+#[cfg(windows)]
 fn distro_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let dir = app
         .path()
@@ -241,14 +254,23 @@ pub async fn sandbox_wsl_setup(
     app: tauri::AppHandle,
     on_event: Channel<SandboxSetupEvent>,
 ) -> Result<(), String> {
-    if SETUP_RUNNING.swap(true, Ordering::SeqCst) {
-        return Err("sandbox distro setup already in progress".into());
+    #[cfg(not(windows))]
+    {
+        let _ = (app, on_event);
+        Err("the WSL sandbox is only available on Windows".into())
     }
-    let result = setup_inner(&app, &on_event).await;
-    SETUP_RUNNING.store(false, Ordering::SeqCst);
-    result
+    #[cfg(windows)]
+    {
+        if SETUP_RUNNING.swap(true, Ordering::SeqCst) {
+            return Err("sandbox distro setup already in progress".into());
+        }
+        let result = setup_inner(&app, &on_event).await;
+        SETUP_RUNNING.store(false, Ordering::SeqCst);
+        result
+    }
 }
 
+#[cfg(windows)]
 async fn setup_inner(
     app: &tauri::AppHandle,
     on_event: &Channel<SandboxSetupEvent>,
@@ -329,6 +351,7 @@ async fn setup_inner(
     }
 }
 
+#[cfg(windows)]
 fn import_distro(dir: &std::path::Path, tar: &std::path::Path) -> Result<(), String> {
     let out = wsl(&[
         "--import",
@@ -368,24 +391,32 @@ fn import_distro(dir: &std::path::Path, tar: &std::path::Path) -> Result<(), Str
 /// Unregister the sandbox distro and drop its directory.
 #[tauri::command]
 pub async fn sandbox_wsl_remove(app: tauri::AppHandle) -> Result<(), String> {
-    let dir = distro_dir(&app)?;
-    let out = tokio::task::spawn_blocking(move || {
-        let result = wsl(&["--unregister", DISTRO_NAME]);
-        let _ = std::fs::remove_dir_all(&dir);
-        result
-    })
-    .await
-    .map_err(|e| e.to_string())??;
-    if !out.status.success() {
-        let stderr = decode_command_output(&out.stderr);
-        return Err(format!(
-            "wsl --unregister failed ({}): {}",
-            out.status,
-            stderr.trim()
-        ));
+    #[cfg(not(windows))]
+    {
+        let _ = app;
+        Err("the WSL sandbox is only available on Windows".into())
     }
-    INSTALLED.store(2, Ordering::Relaxed);
-    Ok(())
+    #[cfg(windows)]
+    {
+        let dir = distro_dir(&app)?;
+        let out = tokio::task::spawn_blocking(move || {
+            let result = wsl(&["--unregister", DISTRO_NAME]);
+            let _ = std::fs::remove_dir_all(&dir);
+            result
+        })
+        .await
+        .map_err(|e| e.to_string())??;
+        if !out.status.success() {
+            let stderr = decode_command_output(&out.stderr);
+            return Err(format!(
+                "wsl --unregister failed ({}): {}",
+                out.status,
+                stderr.trim()
+            ));
+        }
+        INSTALLED.store(2, Ordering::Relaxed);
+        Ok(())
+    }
 }
 
 #[cfg(test)]

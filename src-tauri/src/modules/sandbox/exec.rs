@@ -61,6 +61,10 @@ pub fn try_wrap(
     watchdog_secs: Option<u64>,
     pid_file: Option<&str>,
 ) -> Result<Option<Command>, String> {
+    // Consumed only by the Windows (WSL) arm; sink them elsewhere so they
+    // don't warn under CI clippy `-D warnings`.
+    #[cfg(not(windows))]
+    let _ = (watchdog_secs, pid_file);
     // A WSL repo resolves its paths inside the distro; the host runner
     // cannot see those. Skip OS confinement there — L1 applies.
     if workspace.is_wsl() {
@@ -95,7 +99,7 @@ pub fn try_wrap(
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
     {
-        let _ = (command, spec, cwd, watchdog_secs, pid_file);
+        let _ = (command, spec, cwd);
         note_once("no OS confinement runner on this platform");
     }
     Ok(None)
