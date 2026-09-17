@@ -29,6 +29,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { SandboxBadge } from "./SandboxBadge";
 import { estimateCost, getModel, getModelContextLimit } from "../config";
 import { effectiveContextLimit, SYSTEM_OVERHEAD_TOKENS } from "../lib/compact";
 import { saveSessionsList, type SessionMeta } from "../lib/sessions";
@@ -293,6 +294,7 @@ function Header({
     <div className="relative flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border/60 px-3">
       <div className="flex min-w-0 items-center gap-1.5">
         <AgentSwitcher isMiniWindow />
+        <SandboxBadge />
         {messages !== undefined ? (
           <ContextIndicator messages={messages} />
         ) : null}

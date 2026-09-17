@@ -104,6 +104,21 @@ export type GpgStatus = {
   error: string | null;
 };
 
+export type SandboxMode = "off" | "readOnly" | "workspaceOnly";
+
+export type SandboxConfig = {
+  mode: SandboxMode;
+};
+
+export type SandboxStatus = {
+  landlock: boolean;
+  bwrap: boolean;
+  sandboxExec: boolean;
+  wsl: boolean;
+  docker: boolean;
+  kernel: string | null;
+};
+
 export type WhisperModelStatus = {
   downloaded: boolean;
   downloading: boolean;
@@ -422,6 +437,18 @@ export const native = {
     }),
   gpgStatus: () =>
     invoke<GpgStatus>("gpg_status", { workspace: currentWorkspaceEnv() }),
+  sandboxStatus: () => invoke<SandboxStatus>("sandbox_status"),
+  sandboxLoadConfig: (root: string) =>
+    invoke<SandboxConfig>("sandbox_load_config", {
+      root,
+      workspace: currentWorkspaceEnv(),
+    }),
+  sandboxSaveConfig: (root: string, mode: SandboxMode) =>
+    invoke<void>("sandbox_save_config", {
+      root,
+      mode,
+      workspace: currentWorkspaceEnv(),
+    }),
   gpgListKeys: () =>
     invoke<GpgKey[]>("gpg_list_keys", { workspace: currentWorkspaceEnv() }),
   gpgExportPublic: (fingerprint: string) =>

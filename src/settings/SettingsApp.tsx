@@ -11,6 +11,7 @@ import {
   SparklesIcon,
   UserMultiple02Icon,
   KeyboardIcon,
+  Shield01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
@@ -22,6 +23,7 @@ const ModelsSection = lazy(() => import("./sections/ModelsSection").then((m) => 
 const AgentsSection = lazy(() => import("./sections/AgentsSection").then((m) => ({ default: m.AgentsSection })));
 const SnippetsSection = lazy(() => import("./sections/SnippetsSection").then((m) => ({ default: m.SnippetsSection })));
 const McpSection = lazy(() => import("./sections/McpSection").then((m) => ({ default: m.McpSection })));
+const SandboxSection = lazy(() => import("./sections/SandboxSection").then((m) => ({ default: m.SandboxSection })));
 const AboutSection = lazy(() => import("./sections/AboutSection").then((m) => ({ default: m.AboutSection })));
 
 type TabDef = { id: SettingsTab; label: string; icon: typeof Settings01Icon; component: React.LazyExoticComponent<() => React.JSX.Element> };
@@ -34,6 +36,7 @@ const TABS: TabDef[] =
     { id: "agents", label: "Agents", icon: UserMultiple02Icon, component: AgentsSection },
     { id: "snippets", label: "Snippets", icon: SparklesIcon, component: SnippetsSection },
     { id: "mcp", label: "MCP Servers", icon: PuzzleIcon, component: McpSection },
+    { id: "sandbox", label: "Sandbox", icon: Shield01Icon, component: SandboxSection },
     { id: "about", label: "About", icon: InformationCircleIcon, component: AboutSection },
   ];
 
@@ -44,6 +47,7 @@ const VALID_TABS: SettingsTab[] = [
   "agents",
   "snippets",
   "mcp",
+  "sandbox",
   "about",
 ];
 

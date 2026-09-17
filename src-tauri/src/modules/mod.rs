@@ -6,6 +6,7 @@ pub mod gpg;
 pub mod mcp;
 pub mod net;
 pub mod pty;
+pub mod sandbox;
 pub mod secrets;
 pub mod shell;
 pub mod whisper;
