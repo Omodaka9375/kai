@@ -295,6 +295,13 @@ export function Header({
               </svg>
               <span className="flex-1">MCP Servers</span>
             </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void openSettingsWindow("sandbox&isolate=true")} className="gap-2 text-xs">
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground/80">
+                <path d="M8 1.5l5.5 2v4.4c0 3.3-2.3 5.8-5.5 6.6-3.2-.8-5.5-3.3-5.5-6.6V3.5z" />
+                <path d="M5.5 8l2 2 3-3.5" />
+              </svg>
+              <span className="flex-1">Sandbox</span>
+            </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => void openSettingsWindow("shortcuts&isolate=true")} className="gap-2 text-xs">
               <HugeiconsIcon icon={KeyboardIcon} size={13} strokeWidth={1.75} className="text-muted-foreground/80" />
               <span className="flex-1">Shortcuts</span>
