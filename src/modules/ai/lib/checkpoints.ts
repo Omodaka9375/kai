@@ -397,5 +397,18 @@ export async function sweepLegacyCheckpoints(
   } catch (e) {
     // Best effort — a locked file inside will be swept on a later run.
     console.debug("[kai] legacy checkpoints sweep failed:", dir, e);
+    return;
+  }
+  // Also drop the `.kai` container when it is now empty, so the leftover
+  // dir doesn't linger as untracked noise in git status. ONLY when empty —
+  // `.kai/rules` / `.kai/hooks` are user-authored project config and stay.
+  // (deleteFile → remove_dir_all, so the emptiness check is what protects
+  // those; never call it on `.kai` unconditionally.)
+  const kaiDir = `${norm(workspaceRoot)}/.kai`;
+  try {
+    const entries = await native.readDir(kaiDir);
+    if (entries.length === 0) await native.deleteFile(kaiDir);
+  } catch {
+    // Already removed or unreadable — nothing more to do.
   }
 }
