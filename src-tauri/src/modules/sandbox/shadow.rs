@@ -422,7 +422,7 @@ fn create_inner(root: &Path, dir: &Path) -> Result<ShadowInfo, String> {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
         }
-        std::fs::copy(&src, dst).map_err(|e| format!("copy {}: {e}", src.display()))?;
+        std::fs::copy(src, dst).map_err(|e| format!("copy {}: {e}", src.display()))?;
         inventory.insert(rel, stamp(src));
     }
 
