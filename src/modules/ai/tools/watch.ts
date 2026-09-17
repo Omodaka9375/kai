@@ -27,6 +27,7 @@ import { tool, generateId } from "ai";
 import { z } from "zod";
 import type { ToolContext } from "./context";
 import { checkShellCommand } from "../lib/security";
+import { checkShellSandbox } from "../lib/sandbox";
 
 export type WatchMode = "fire_on_match" | "fire_on_change";
 
@@ -280,6 +281,8 @@ export function buildWatchTools(ctx: ToolContext) {
       execute: async ({ command, interval_secs, condition, mode, label }, options) => {
         const safety = checkShellCommand(command);
         if (!safety.ok) return { error: safety.reason };
+        const sandbox = await checkShellSandbox(command);
+        if (!sandbox.ok) return { error: sandbox.reason };
         if (options?.abortSignal?.aborted) return { error: "Cancelled." };
 
         const sessionId = ctx.getSessionId();

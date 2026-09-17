@@ -2,6 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { native } from "../lib/native";
 import { checkShellCommand } from "../lib/security";
+import { checkShellSandbox } from "../lib/sandbox";
 import type { ToolContext } from "./context";
 import { currentWorkspaceEnv, workspaceScopeKey } from "@/modules/workspace";
 
@@ -165,6 +166,8 @@ export function buildShellTools(ctx: ToolContext) {
       execute: async ({ command, timeout_secs, elevated }, options) => {
         const safety = checkShellCommand(command);
         if (!safety.ok) return { error: safety.reason };
+        const sandbox = await checkShellSandbox(command);
+        if (!sandbox.ok) return { error: sandbox.reason };
         // Check abort before any work — agent was stopped before we started.
         if (options?.abortSignal?.aborted) {
           return { error: "Command cancelled — agent stopped." };
@@ -277,6 +280,8 @@ export function buildShellTools(ctx: ToolContext) {
       execute: async ({ command, cwd }) => {
         const safety = checkShellCommand(command);
         if (!safety.ok) return { error: safety.reason };
+        const sandbox = await checkShellSandbox(command);
+        if (!sandbox.ok) return { error: sandbox.reason };
         const effectiveCwd = cwd ?? ctx.getCwd();
         try {
           const owner = ctx.getSessionId() ?? undefined;

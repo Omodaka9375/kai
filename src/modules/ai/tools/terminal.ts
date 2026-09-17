@@ -1,6 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { checkShellCommand } from "../lib/security";
+import { checkShellSandbox } from "../lib/sandbox";
 import type { ToolContext } from "./context";
 
 export function buildTerminalTools(ctx: ToolContext) {
@@ -20,6 +21,8 @@ export function buildTerminalTools(ctx: ToolContext) {
       execute: async ({ command, explanation }) => {
         const safety = checkShellCommand(command);
         if (!safety.ok) return { error: safety.reason };
+        const sandbox = await checkShellSandbox(command);
+        if (!sandbox.ok) return { error: sandbox.reason };
         // Reject control bytes — the user inserts via click, but the rendered
         // command must reflect exactly what will land at the prompt.
         if (/[\n\r\x00\x1b\x07]/.test(command)) {

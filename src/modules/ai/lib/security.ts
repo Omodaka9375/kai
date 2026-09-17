@@ -28,6 +28,8 @@
  *    into a protected directory.
  */
 
+import { checkSandbox } from "./sandbox";
+
 const SECRET_BASENAME_PATTERNS: RegExp[] = [
   // Match `.env` and `.env.<suffix>` with no required tail anchor — Windows
   // strips trailing dots/spaces at open time and NTFS exposes alternate data
@@ -318,6 +320,10 @@ export async function checkReadableCanonical(
   // dot/space) that warrant a second pass against the comparison form.
   const recheck = checkReadable(canonical);
   if (!recheck.ok) return recheck;
+  // Project sandbox (see lib/sandbox.ts): workspaceOnly confines reads to
+  // the project root. No-op when the sandbox is off.
+  const sandbox = await checkSandbox("read", canonical);
+  if (!sandbox.ok) return sandbox;
   return { ok: true, canonical };
 }
 
@@ -338,6 +344,10 @@ export async function checkWritableCanonical(
     // Always recheck the canonical form — same rationale as checkReadableCanonical.
     const recheck = checkWritable(canonical);
     if (!recheck.ok) return recheck;
+    // Project sandbox: readOnly + workspaceBoth confine writes to the
+    // project root. No-op when the sandbox is off.
+    const sandbox = await checkSandbox("write", canonical);
+    if (!sandbox.ok) return sandbox;
     return { ok: true, canonical };
   } catch {
     // Target doesn't exist — canonicalize the parent so we still catch a
@@ -350,6 +360,8 @@ export async function checkWritableCanonical(
         const canonParent = await canonicalize(parent);
         const recheckParent = checkWritable(canonParent + tail);
         if (!recheckParent.ok) return recheckParent;
+        const sandbox = await checkSandbox("write", canonParent + tail);
+        if (!sandbox.ok) return sandbox;
         return { ok: true, canonical: canonParent + tail };
       } catch {
         // Parent doesn't exist either — let the caller surface the actual error.

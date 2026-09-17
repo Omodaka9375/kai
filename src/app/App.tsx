@@ -30,6 +30,7 @@ import { ApiTesterPane } from "@/modules/api-tester/ApiTesterPane";
 import { AiComposerProvider } from "@/modules/ai/lib/composer";
 import { AiErrorBoundary } from "@/modules/ai/components/AiErrorBoundary";
 import { redactSensitive } from "@/modules/ai/lib/redact";
+import { setSandboxRoot } from "@/modules/ai/lib/sandbox";
 import { native } from "@/modules/ai/lib/native";
 import { useAgentsStore } from "@/modules/ai/store/agentsStore";
 import { useMcpStore } from "@/modules/ai/store/mcpStore";
@@ -1280,6 +1281,11 @@ export default function App() {
       }
       return explorerRoot ?? launchCwd ?? home ?? null;
     };
+
+    // Keep the project sandbox confinement root in sync with the same root
+    // tools resolve against — checkSandbox (security.ts) reads it on every
+    // fs tool call.
+    setSandboxRoot(explorerRoot ?? launchCwd ?? home ?? null);
 
     setLive({
       getCwd: findCwd,
