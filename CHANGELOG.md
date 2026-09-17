@@ -16,6 +16,7 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ### Fixed
 
+- Watch results now wake the agent: a fired watch (CI/build/process monitoring) previously landed in the transcript as a silent system message — the model never reacted to it. It now triggers a new agent run when the session is idle (skipped while the agent is streaming or an approval card is pending, so it can't yank the agent out of a paused state).
 - Shell sandbox gating no longer false-positives on everyday commands (relative test paths, sed/awk programs, URLs, date formats, quoted arguments); it now classifies whole arguments and still catches absolute, home, and `..` traversal paths outside the project.
 - Shadow merge can never write the shadow's `.git` internals over the real repository.
 - Gitignored build outputs (`dist/`, `target/`, `.next/`, …) no longer bloat shadow copies.

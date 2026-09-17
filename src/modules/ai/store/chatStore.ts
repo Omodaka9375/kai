@@ -1094,8 +1094,6 @@ export const useChatStore = create<StoreState>((set, get) => ({
     }
     const chat = getOrCreateChat(id);
     // Push a system-originated user message into the chat's message array.
-    // sendAutomaticallyWhen only triggers on assistant messages, so this
-    // won't auto-trigger a new agent run.
     chat.messages = [
       ...chat.messages,
       {
@@ -1107,6 +1105,24 @@ export const useChatStore = create<StoreState>((set, get) => ({
     ];
     // Force a Zustand re-render so the UI shows the injected message.
     set({ _tick: Date.now() });
+    // ── Wake the agent. Appending via the bare `messages` setter does NOT
+    // trigger a run (only sendMessage/addToolResult consult
+    // sendAutomaticallyWhen), so a fired watch used to land in the
+    // transcript and the model never reacted. Call sendMessage() with no
+    // args: it makes a request over the current history — which now ends
+    // with the watch message. Skip when a run is already active (the
+    // stream will deliver the watch text in its context anyway) or when
+    // an approval card is pending (the user's decision owns the next
+    // move — waking here would yank the agent out of the paused state).
+    if (
+      chat.status !== "streaming" &&
+      chat.status !== "submitted" &&
+      !hasPendingApprovals(chat)
+    ) {
+      void chat.sendMessage().catch((e) => {
+        console.error("[kai] watch wake-up failed:", e);
+      });
+    }
   },
   forkSession: async (atMessageIndex) => {
     const activeId = get().activeSessionId;
