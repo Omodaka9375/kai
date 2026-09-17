@@ -37,6 +37,7 @@ import { pushRecentModel, persistProjectModel } from "../lib/modelPrefs";
 import { normalizeWorkspacePath } from "../lib/workspacePath";
 import { cancelAllShellSessions } from "../tools/shell";
 import { createContextAwareTransport } from "../lib/transport";
+import { loadShadow, withShadowRedirect } from "../lib/shadow";
 import { clearFenceState } from "../lib/transport";
 import { reapSessionWatches, closeWatchSessionShell } from "../tools/watch";
 import type { ToolContext } from "../tools/tools";
@@ -414,28 +415,41 @@ function makeChatSync(sessionId: string): Chat<UIMessage> {
   // after the Chat is constructed below.
   const chatRef: { current: Chat<UIMessage> | null } = { current: null };
 
-  const toolContext: ToolContext = {
-    getCwd: () => useChatStore.getState().live.getCwd(),
-    getWorkspaceRoot: () =>
-      useChatStore.getState().live.getWorkspaceRoot(),
-    getTerminalContext: () =>
-      useChatStore.getState().live.getTerminalContext(),
-    isActiveTerminalPrivate: () =>
-      useChatStore.getState().live.isActiveTerminalPrivate(),
-    injectIntoActivePty: (text) =>
-      useChatStore.getState().live.injectIntoActivePty(text),
-    openPreview: (url) => useChatStore.getState().live.openPreview(url),
-    readCache,
-    getSessionId: () => sessionId,
-    fileTracker: new FileTracker(),
-    getRemainingContextTokens: () => {
-      const tokens = useChatStore.getState().agentMeta.tokens;
-      const modelId = useChatStore.getState().selectedModelId;
-      const limit = getModelContextLimit(getModel(modelId).id);
-      const used = tokens.inputTokens + tokens.outputTokens;
-      return Math.max(0, limit - used);
-    },
-  };
+  const toolContext: ToolContext = (() => {
+    // Base context from live state, with shadow-session redirection: while
+    // a shadow session is active for this project, tools see the shadow
+    // tree (cwd + workspace root translated). Real paths pass through when
+    // no shadow is active, so behavior is unchanged by default.
+    const base = {
+      getCwd: () => useChatStore.getState().live.getCwd(),
+      getWorkspaceRoot: () =>
+        useChatStore.getState().live.getWorkspaceRoot(),
+    };
+    const redirected = withShadowRedirect(base);
+    // Load (don't await) — a shadow created mid-session is picked up on the
+    // next tool call via getShadow, which reads the resident map lazily.
+    void loadShadow(base.getWorkspaceRoot()).catch(() => undefined);
+    return {
+      ...redirected,
+      getTerminalContext: () =>
+        useChatStore.getState().live.getTerminalContext(),
+      isActiveTerminalPrivate: () =>
+        useChatStore.getState().live.isActiveTerminalPrivate(),
+      injectIntoActivePty: (text) =>
+        useChatStore.getState().live.injectIntoActivePty(text),
+      openPreview: (url) => useChatStore.getState().live.openPreview(url),
+      readCache,
+      getSessionId: () => sessionId,
+      fileTracker: new FileTracker(),
+      getRemainingContextTokens: () => {
+        const tokens = useChatStore.getState().agentMeta.tokens;
+        const modelId = useChatStore.getState().selectedModelId;
+        const limit = getModelContextLimit(getModel(modelId).id);
+        const used = tokens.inputTokens + tokens.outputTokens;
+        return Math.max(0, limit - used);
+      },
+    };
+  })();
 
   const transport = createContextAwareTransport({
     getKeys: () => useChatStore.getState().apiKeys,

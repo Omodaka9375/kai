@@ -126,6 +126,19 @@ export type SandboxSetupEvent = {
   message: string | null;
 };
 
+export type ShadowInfo = {
+  projectRoot: string;
+  shadowRoot: string;
+  createdAtMs: number;
+  sharedDirs: string[];
+};
+
+export type ShadowMergeReport = {
+  copied: string[];
+  deletedInShadow: string[];
+  conflicts: string[];
+};
+
 export type WhisperModelStatus = {
   downloaded: boolean;
   downloading: boolean;
@@ -470,6 +483,14 @@ export const native = {
   sandboxWslSetup: (onEvent: Channel<SandboxSetupEvent>) =>
     invoke<void>("sandbox_wsl_setup", { onEvent }),
   sandboxWslRemove: () => invoke<void>("sandbox_wsl_remove"),
+  shadowStatus: (projectRoot: string) =>
+    invoke<ShadowInfo | null>("shadow_status", { projectRoot }),
+  shadowCreate: (projectRoot: string) =>
+    invoke<ShadowInfo>("shadow_create", { projectRoot }),
+  shadowMerge: (projectRoot: string, dryRun: boolean) =>
+    invoke<ShadowMergeReport>("shadow_merge", { projectRoot, dryRun }),
+  shadowDiscard: (projectRoot: string) =>
+    invoke<void>("shadow_discard", { projectRoot }),
   gpgListKeys: () =>
     invoke<GpgKey[]>("gpg_list_keys", { workspace: currentWorkspaceEnv() }),
   gpgExportPublic: (fingerprint: string) =>

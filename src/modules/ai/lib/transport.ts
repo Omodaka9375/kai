@@ -22,6 +22,7 @@ import { loadProjectRules, formatRulesForPrompt, type ProjectRules } from "./pro
 import { cleanOldCheckpoints, sweepLegacyCheckpoints } from "./checkpoints";
 import { getRelevantFiles, formatRelevantFiles } from "./relevance";
 import { loadProjectMemoryCached } from "./memory";
+import { getShadow } from "./shadow";
 
 type RulesCacheEntry = { rules: ProjectRules | null; mtime: number };
 const projectRulesCache = new Map<string, RulesCacheEntry>();
@@ -286,6 +287,17 @@ function extractLastUserText(messages: UIMessage[]): string | null {
 }
 
 function formatEnvBlock(live: LiveSnapshot): string | null {
+  const base = formatEnvBlockInner(live);
+  // Shadow session: tools already resolve against the shadow copy — tell
+  // the model so it doesn't warn the user about paths that don't exist in
+  // the real tree, and knows merge/discard is the user's call at the end.
+  const shadow = getShadow(live.workspaceRoot);
+  if (!shadow) return base;
+  const note = `\n<shadow-session>\nYou are working in a SHADOW COPY of the project. Your file/shell tools operate on the copy — edits are NOT in the real project until the user merges. Do not tell the user to check the real tree; the merge prompt appears automatically when they finish.\n</shadow-session>`;
+  return base ? `${base}${note}` : note;
+}
+
+function formatEnvBlockInner(live: LiveSnapshot): string | null {
   const lines: string[] = [];
   const os = IS_WINDOWS ? "windows" : IS_MAC ? "macos" : IS_LINUX ? "linux" : "unknown";
   const shell = IS_WINDOWS ? "powershell" : "bash";

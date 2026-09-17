@@ -30,6 +30,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SandboxBadge } from "./SandboxBadge";
+import { ShadowStrip } from "./ShadowStrip";
 import { estimateCost, getModel, getModelContextLimit } from "../config";
 import { effectiveContextLimit, SYSTEM_OVERHEAD_TOKENS } from "../lib/compact";
 import { saveSessionsList, type SessionMeta } from "../lib/sessions";
@@ -232,6 +233,7 @@ function Body({
           c.stop();
         }}
       />
+      <ShadowStrip sessionId={sessionId} />
       <GoalPanel />
     </>
   );
