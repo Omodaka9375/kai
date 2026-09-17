@@ -18,6 +18,50 @@ use crate::modules::lock::mutex_lock;
 const LOG_TAIL_BYTES: usize = 8 * 1024;
 const CRASH_BYTES: usize = 16 * 1024;
 
+/// Resolved process memory usage, in bytes. On Windows this is the working
+/// set + private commit (the two numbers Task Manager shows); elsewhere we
+/// fall back to /proc (Linux) and rusage (macOS) so the field is populated
+/// on every platform without pulling in a crate.
+fn process_memory_bytes() -> (u64, u64) {
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
+        use windows_sys::Win32::System::Threading::GetCurrentProcess;
+        let mut pmc: PROCESS_MEMORY_COUNTERS = unsafe { std::mem::zeroed() };
+        pmc.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+        // SAFETY: pmc is a correctly-sized, zero-initialized struct and its
+        // size is passed in cb, per the API contract.
+        let ok = unsafe { GetProcessMemoryInfo(GetCurrentProcess(), &mut pmc, pmc.cb) };
+        if ok != 0 {
+            (
+                pmc.WorkingSetSize as u64,
+                pmc.PagefileUsage as u64, // private commit
+            )
+        } else {
+            (0, 0)
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Best-effort non-Windows fallbacks; (0, 0) is fine — the health
+        // panel then simply shows the counters it does have.
+        #[cfg(target_os = "linux")]
+        {
+            let status = fs::read_to_string("/proc/self/status").unwrap_or_default();
+            let rss = status
+                .lines()
+                .find(|l| l.starts_with("VmRSS:"))
+                .and_then(|l| l.split_whitespace().nth(1))
+                .and_then(|v| v.parse::<u64>().ok())
+                .map(|kb| kb * 1024)
+                .unwrap_or(0);
+            (rss, 0)
+        }
+        #[cfg(not(target_os = "linux"))]
+        (0, 0)
+    }
+}
+
 /// Where the panic hook writes crash snapshots. Set in `Builder::setup`.
 #[derive(Default)]
 pub struct CrashDir(pub Mutex<Option<PathBuf>>);
@@ -31,6 +75,48 @@ pub struct DiagnosticsBundle {
     pub log_dir: String,
     pub log_tail: String,
     pub crash: Option<String>,
+}
+
+/// Live counters surfaced in the About page health section. These exist so a
+/// "KAI slows down after hours" report can distinguish Rust-side accumulation
+/// (session maps growing, PTYs never reaped) from frontend-side issues — the
+/// counts should stay flat when the user isn't opening/closing tabs.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct HealthCounts {
+    pub pid: u32,
+    pub uptime_secs: u64,
+    pub rss_bytes: u64,
+    pub private_bytes: u64,
+    pub pty_sessions: usize,
+    pub shell_sessions: usize,
+    pub bg_processes: usize,
+}
+
+/// Process start time, used for the uptime in `health_counts`.
+static PROCESS_START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+
+#[tauri::command]
+pub fn health_counts(app: tauri::AppHandle) -> HealthCounts {
+    let (rss, private) = process_memory_bytes();
+    let pty_sessions = app
+        .state::<crate::pty::PtyState>()
+        .count();
+    let (shell_sessions, bg_processes) = app
+        .state::<crate::shell::ShellState>()
+        .counts();
+    HealthCounts {
+        pid: std::process::id(),
+        uptime_secs: PROCESS_START
+            .get_or_init(std::time::Instant::now)
+            .elapsed()
+            .as_secs(),
+        rss_bytes: rss,
+        private_bytes: private,
+        pty_sessions,
+        shell_sessions,
+        bg_processes,
+    }
 }
 
 fn tail_bytes(path: &std::path::Path, max: usize) -> String {

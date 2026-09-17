@@ -516,6 +516,26 @@ export default function App() {
   const setRootRef = useRef(_setRoot);
   setRootRef.current = _setRoot;
 
+  // Single ResizeObserver for the AI input bar height CSS var. This was
+  // previously an inline ref callback — React re-attaches inline refs on every
+  // commit, so each App re-render created one MORE observer on the same
+  // element and nothing ever disconnected them. After hours of tab switches
+  // and agent runs that was thousands of live observers (heap growth + GC
+  // pauses), one of the causes of the app slowly crawling to a halt.
+  const inputBarRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = inputBarRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      document.documentElement.style.setProperty(
+        "--kai-input-bar-h",
+        `${el.offsetHeight}px`,
+      );
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [keysLoaded]);
+
   const onOpenProject = useCallback((path: string) => {
     setRootRef.current(path);
     resetWorkspace(path);
@@ -1597,16 +1617,7 @@ export default function App() {
                       transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
                       className="overflow-hidden"
                       aria-hidden={!panelOpen}
-                      ref={(el) => {
-                        if (!el) return;
-                        const ro = new ResizeObserver(() => {
-                          document.documentElement.style.setProperty(
-                            "--kai-input-bar-h",
-                            `${el.offsetHeight}px`,
-                          );
-                        });
-                        ro.observe(el);
-                      }}
+                      ref={inputBarRef}
                     >
                       {hasComposer ? (
                         <AiErrorBoundary label="input-bar">

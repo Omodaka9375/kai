@@ -241,6 +241,14 @@ impl Default for ShellState {
     }
 }
 
+impl ShellState {
+    /// Live agent shell sessions + background processes (diagnostics —
+    /// background processes should be reaped when their owner session ends).
+    pub fn counts(&self) -> (usize, usize) {
+        (rwlock_read(&self.sessions).len(), rwlock_read(&self.bg).len())
+    }
+}
+
 impl Drop for ShellState {
     fn drop(&mut self) {
         // Kill all background processes on app exit to prevent orphans.

@@ -13,6 +13,8 @@ import {
   buildIssueBody,
   diagnostics,
   fitBodyForUrl,
+  health,
+  type HealthCounts,
 } from "../lib/diagnostics";
 
 const REPO_URL = "https://github.com/Omodaka9375/kai";
@@ -33,7 +35,27 @@ export function AboutSection() {
   const [build, setBuild] = useState("");
   const [reporting, setReporting] = useState(false);
   const [reportError, setReportError] = useState("");
+  const [hc, setHc] = useState<HealthCounts | null>(null);
   const updater = useUpdater({ autoCheck: false });
+
+  // Refresh health counters every 10 s while the settings window is open.
+  // Memory/uptime/session counts make long-session slowdown reports
+  // diagnosable: growing RSS or session counts point at Rust-side leaks,
+  // flat ones at frontend pressure.
+  useEffect(() => {
+    let alive = true;
+    const refresh = () => {
+      health.counts().then((c) => {
+        if (alive) setHc(c);
+      }).catch(() => {});
+    };
+    refresh();
+    const t = setInterval(refresh, 10_000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, []);
 
   useEffect(() => {
     void getVersion().then(setVersion);
@@ -126,6 +148,25 @@ export function AboutSection() {
           </button>
         </dd>
       </dl>
+
+      {hc && (
+        <dl className="grid grid-cols-[110px_1fr] gap-y-2.5 text-[12px]">
+          <dt className="text-muted-foreground">Memory</dt>
+          <dd className="font-mono text-[11.5px]">
+            {(hc.rssBytes / 1024 / 1024).toFixed(0)} MB · {(hc.privateBytes / 1024 / 1024).toFixed(0)} MB commit
+          </dd>
+
+          <dt className="text-muted-foreground">Uptime</dt>
+          <dd className="font-mono text-[11.5px]">
+            {Math.floor(hc.uptimeSecs / 3600)}h {Math.floor((hc.uptimeSecs % 3600) / 60)}m
+          </dd>
+
+          <dt className="text-muted-foreground">Sessions</dt>
+          <dd className="font-mono text-[11.5px]">
+            {hc.ptySessions} pty · {hc.shellSessions} agent · {hc.bgProcesses} bg
+          </dd>
+        </dl>
+      )}
 
       <div className="flex flex-col gap-1.5">
         <div className="flex flex-wrap gap-2">

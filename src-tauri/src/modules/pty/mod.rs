@@ -33,6 +33,13 @@ impl Default for PtyState {
     }
 }
 
+impl PtyState {
+    /// Number of live PTY sessions (diagnostics — should match open tabs).
+    pub fn count(&self) -> usize {
+        rwlock_read(&self.sessions).len()
+    }
+}
+
 impl Drop for PtyState {
     fn drop(&mut self) {
         // On Windows, ClosePseudoConsole (inside Session::drop) can block for

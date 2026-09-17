@@ -115,3 +115,17 @@ export function fitBodyForUrl(body: string, budget: number): string {
 export const diagnostics = {
   collect: () => invoke<DiagnosticsBundle>("diagnostics_collect"),
 };
+
+export type HealthCounts = {
+  pid: number;
+  uptimeSecs: number;
+  rssBytes: number;
+  privateBytes: number;
+  ptySessions: number;
+  shellSessions: number;
+  bgProcesses: number;
+};
+
+export const health = {
+  counts: () => invoke<HealthCounts>("health_counts"),
+};

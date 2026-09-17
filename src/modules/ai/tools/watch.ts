@@ -114,6 +114,11 @@ export function listWatches(): WatchConfig[] {
     .map(({ interval: _, lastResult: _l, polls: _p, hasBaseline: _h, active: _a, ...cfg }) => cfg);
 }
 
+/** Number of live watch timers (diagnostics). */
+export function watchCount(): number {
+  return watches.size;
+}
+
 // ── Polling ────────────────────────────────────────────────────────────────
 
 async function poll(w: WatchState): Promise<void> {

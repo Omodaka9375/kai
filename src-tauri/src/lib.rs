@@ -518,6 +518,7 @@ pub fn run() {
             workspace::workspace_authorize,
             workspace::workspace_current_dir,
             diagnostics::diagnostics_collect,
+            diagnostics::health_counts,
             get_launch_dir,
             open_settings_window,
             pick_project_folder,
