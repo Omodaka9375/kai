@@ -167,8 +167,53 @@ fn symlink_any(target: &Path, link: &Path) -> Result<(), String> {
     }
 }
 
+/// Walk a tree for merge planning: gitignore-aware (same walker settings as
+/// create), excluding `.git`, heavy dirs, and the shadow meta file. Rel keys
+/// use forward slashes. Symlinks are skipped — their targets never enter the
+/// merge plan.
+fn walk_project_tree(root: &Path, out: &mut HashMap<String, FileStamp>) -> Result<(), String> {
+    let walker = ignore::WalkBuilder::new(root)
+        .hidden(false)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .parents(true)
+        .filter_entry(|e| {
+            let name = e.file_name();
+            let is_dir = e.file_type().is_some_and(|t| t.is_dir());
+            !(is_dir && (name == ".git" || HEAVY_DIRS.iter().any(|d| name == *d)))
+                && name != META_FILE
+        })
+        .build();
+    for entry in walker {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        let Some(ft) = entry.file_type() else { continue };
+        if ft.is_symlink() {
+            continue;
+        }
+        if ft.is_dir() {
+            continue;
+        }
+        let rel = entry
+            .path()
+            .strip_prefix(root)
+            .unwrap_or(entry.path())
+            .to_string_lossy()
+            .replace('\\', "/");
+        if rel.is_empty() {
+            continue;
+        }
+        out.insert(rel, stamp(entry.path()));
+    }
+    Ok(())
+}
+
 /// Walk a tree collecting (rel → stamp) for regular files. Symlinks and
 /// their targets are skipped — shared dirs never enter the merge.
+#[allow(dead_code)]
 fn walk_tree(root: &Path, out: &mut HashMap<String, FileStamp>) -> Result<(), String> {
     let entries = match std::fs::read_dir(root) {
         Ok(e) => e,
@@ -294,6 +339,10 @@ pub async fn shadow_create(project_root: String) -> Result<ShadowInfo, String> {
         .map_err(|e| e.to_string())?
 }
 
+/// Default cap on the working-tree copy size (before .git). Huge monorepos
+/// fill the user's home disk — refuse with an actionable message instead.
+const MAX_TREE_BYTES: u64 = 2 * 1024 * 1024 * 1024; // 2 GiB
+
 fn create_inner(root: &Path, dir: &Path) -> Result<ShadowInfo, String> {
     // Clear any half-created leftovers from a failed create.
     let _ = std::fs::remove_dir_all(dir);
@@ -301,63 +350,92 @@ fn create_inner(root: &Path, dir: &Path) -> Result<ShadowInfo, String> {
 
     let mut inventory: HashMap<String, FileStamp> = HashMap::new();
     let mut shared: Vec<String> = Vec::new();
+    let mut total_bytes: u64 = 0;
 
+    // ── 1. Heavy dirs (node_modules): symlink when possible (share), else
+    // leave them OUT of the shadow entirely — the agent can recreate
+    // installs, and copying gigabytes of dependencies is never wanted.
     let entries = std::fs::read_dir(root).map_err(|e| e.to_string())?;
     for entry in entries {
         let entry = entry.map_err(|e| e.to_string())?;
         let ft = entry.file_type().map_err(|e| e.to_string())?;
-        let name = entry.file_name();
-        let name_str = name.to_string_lossy().into_owned();
-        let s = entry.path();
-        let d = dir.join(&name);
-
+        let name_str = entry.file_name().to_string_lossy().into_owned();
         if ft.is_dir() && HEAVY_DIRS.contains(&name_str.as_str()) {
-            // Try to share the heavy dir via symlink; fall back to copying it.
-            if symlink_any(&s, &d).is_ok() {
+            if symlink_any(&entry.path(), &dir.join(&name_str)).is_ok() {
                 shared.push(name_str);
-                continue;
             }
         }
-        if ft.is_symlink() {
-            let target = std::fs::read_link(&s).map_err(|e| e.to_string())?;
-            symlink_any(&target, &d)
-                .map_err(|e| format!("link {}: {e}", d.display()))?;
-            continue;
-        }
-        if ft.is_dir() {
-            copy_tree(&s, &d)?;
-            continue;
-        }
-        std::fs::copy(&s, &d).map_err(|e| format!("copy {}: {e}", s.display()))?;
-        inventory.insert(name_str, stamp(&s));
     }
 
-    // The per-subtree copy above inventories with wrong rel keys — rebuild
-    // the inventory by walking the shadow (fast stat walk, no content IO).
-    inventory.clear();
-    for name in std::fs::read_dir(dir).map_err(|e| e.to_string())? {
-        let entry = name.map_err(|e| e.to_string())?;
-        let ft = entry.file_type().map_err(|e| e.to_string())?;
-        if ft.is_symlink() {
+    // ── 2. Working tree via the `ignore` walker — respects .gitignore, so
+    // dist/, .next/, target/, build outputs, and node_modules never bloat
+    // the shadow. Same semantics as the user's own `git status` view.
+    let walker = ignore::WalkBuilder::new(root)
+        .hidden(false) // include dotfiles (.env.example, .npmrc, …)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .parents(true)
+        .filter_entry(|e| {
+            // Keep .git OUT of the walker pass — copied explicitly below so
+            // agent git ops stay isolated without re-copying internals twice.
+            !e.file_type().is_some_and(|t| t.is_dir() && e.file_name() == ".git")
+                // Heavy dirs already handled above (symlinked or skipped).
+                && !HEAVY_DIRS.iter().any(|d| e.file_name() == *d)
+        })
+        .build();
+    for entry in walker {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let Some(ft) = entry.file_type() else { continue };
+        let rel = entry
+            .path()
+            .strip_prefix(root)
+            .unwrap_or(entry.path())
+            .to_string_lossy()
+            .replace('\\', "/");
+        if rel.is_empty() {
             continue;
         }
+        let src = entry.path();
+        let dst = dir.join(&rel);
         if ft.is_dir() {
-            let mut sub = HashMap::new();
-            walk_tree(&entry.path(), &mut sub)?;
-            for (rel, st) in sub {
-                inventory.insert(
-                    format!("{}/{}", entry.file_name().to_string_lossy(), rel),
-                    st,
-                );
-            }
-        } else {
-            inventory.insert(entry.file_name().to_string_lossy().into_owned(), stamp(&entry.path()));
+            std::fs::create_dir_all(&dst)
+                .map_err(|e| format!("mkdir {}: {e}", dst.display()))?;
+            continue;
         }
+        if ft.is_symlink() {
+            let target = std::fs::read_link(&src).map_err(|e| e.to_string())?;
+            symlink_any(&target, &dst).map_err(|e| format!("link {}: {e}", dst.display()))?;
+            continue;
+        }
+        // Regular file.
+        let size = std::fs::metadata(&src).map(|m| m.len()).unwrap_or(0);
+        total_bytes += size;
+        if total_bytes > MAX_TREE_BYTES {
+            let _ = std::fs::remove_dir_all(dir);
+            return Err(format!(
+                "project working tree exceeds the {} GiB shadow cap — the shadow copy would fill your disk. Consider a smaller scope or clean ignored build outputs.",
+                MAX_TREE_BYTES / (1024 * 1024 * 1024)
+            ));
+        }
+        if let Some(parent) = dst.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
+        }
+        std::fs::copy(&src, &dst).map_err(|e| format!("copy {}: {e}", src.display()))?;
+        inventory.insert(rel, stamp(&src));
+    }
+
+    // ── 3. .git copied as-is (walker skips it above) so agent git ops are
+    // isolated and commits flow back at merge.
+    let git_src = root.join(".git");
+    if git_src.is_dir() {
+        copy_tree(&git_src, &dir.join(".git"))?;
     }
 
     let created = now_ms();
     let meta = ShadowMeta {
-        version: 1,
+        version: 2,
         project_root: root.to_string_lossy().into_owned(),
         created_at_ms: created,
         shared_dirs: shared,
@@ -393,14 +471,15 @@ fn merge_inner(
     dry_run: bool,
 ) -> Result<ShadowMergeReport, String> {
     let meta = read_meta(dir)?;
+    // Both walks use the project walker (gitignore-aware, .git + heavy dirs
+    // + the meta file excluded). CRITICAL: shadow `.git` internals must never
+    // enter the plan — "new file" copying them back would clobber the real
+    // repo's refs/objects. Agent commits in the shadow do not flow back via
+    // the merge; that is a documented L3 limitation.
     let mut shadow_walk = HashMap::new();
-    walk_tree(dir, &mut shadow_walk)?;
+    walk_project_tree(dir, &mut shadow_walk)?;
     let mut real_walk = HashMap::new();
-    walk_tree(root, &mut real_walk)?;
-
-    // Walk keys are relative to their own tree root; shadow keys include the
-    // meta file itself — exclude it from the plan.
-    shadow_walk.remove(META_FILE);
+    walk_project_tree(root, &mut real_walk)?;
 
     let plan = compute_merge_plan(&meta.inventory, &shadow_walk, &real_walk);
 
@@ -500,5 +579,61 @@ mod tests {
     #[test]
     fn project_hash_ignores_case_and_separators() {
         assert_eq!(project_hash("D:\\Code\\Proj"), project_hash("d:/code/proj"));
+    }
+
+    /// End-to-end create → modify → merge against real temp dirs: proves
+    /// gitignored build outputs are excluded from the shadow, .git is copied
+    /// but never merged back, and modified files flow to the real project.
+    #[test]
+    fn create_merge_roundtrip_respects_gitignore_and_git() {
+        let tmp = std::env::temp_dir().join(format!("kai-shadow-test-{}", std::process::id()));
+        let project = tmp.join("proj");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(project.join("src")).unwrap();
+        std::fs::write(project.join("src/main.rs"), "fn main() {}").unwrap();
+        std::fs::write(project.join("README.md"), "hello").unwrap();
+        // Gitignored build output — must NOT be shadowed.
+        std::fs::create_dir_all(project.join("target")).unwrap();
+        std::fs::write(project.join("target/huge.bin"), "x".repeat(1000)).unwrap();
+        std::fs::write(project.join(".gitignore"), "/target\n").unwrap();
+        // A real .git dir with a marker — copied into the shadow, but the
+        // merge must NEVER touch the real repo's .git.
+        std::fs::create_dir_all(project.join(".git/refs")).unwrap();
+        std::fs::write(project.join(".git/HEAD"), "ref: refs/heads/main").unwrap();
+
+        // Shadow dir directly under tmp (bypasses shadow_dir/home — the
+        // create_inner/merge_inner fns take explicit paths).
+        let shadow = tmp.join("shadow");
+        let info = create_inner(&project, &shadow).expect("create_inner");
+        assert_eq!(info.shared_dirs, Vec::<String>::new());
+        assert!(shadow.join("src/main.rs").is_file());
+        assert!(shadow.join(".git/HEAD").is_file(), ".git must be shadowed");
+        assert!(
+            !shadow.join("target/huge.bin").exists(),
+            "gitignored build output must not be shadowed"
+        );
+
+        // Agent modifies a file in the shadow.
+        std::fs::write(shadow.join("src/main.rs"), "fn main() { changed }").unwrap();
+
+        // Merge.
+        let report = merge_inner(&project, &shadow, false).expect("merge_inner");
+        assert!(report.copied.contains(&"src/main.rs".to_string()));
+        assert!(
+            !report.copied.iter().any(|r| r.starts_with(".git/")),
+            "shadow .git internals must never flow back to the real repo"
+        );
+        assert_eq!(
+            std::fs::read_to_string(project.join("src/main.rs")).unwrap(),
+            "fn main() { changed }"
+        );
+        assert_eq!(
+            std::fs::read_to_string(project.join(".git/HEAD")).unwrap(),
+            "ref: refs/heads/main",
+            "real .git untouched"
+        );
+        assert!(!shadow.exists(), "merge consumes the shadow dir");
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

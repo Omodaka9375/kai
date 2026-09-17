@@ -6,6 +6,7 @@ import {
   checkShellSandbox,
   invalidateSandboxCache,
   setSandboxRoot,
+  splitShellArgs,
 } from "./sandbox";
 
 const ROOT = "/home/user/project";
@@ -115,5 +116,77 @@ describe("checkShellSandbox - shell command gating", () => {
     setSandboxRoot(ROOT);
     __setSandboxModeForTests(ROOT, "off");
     expect((await checkShellSandbox(`rm -rf /etc`)).ok).toBe(true);
+  });
+});
+
+describe("checkShellSandbox — real-world command regressions (issue: substring tokenizer)", () => {
+  // The old tokenizer matched mid-string fragments as path claims and
+  // blocked everyday commands in workspaceOnly mode. These are the exact
+  // strings that broke.
+  beforeEach(() => {
+    setSandboxRoot(ROOT);
+    __setSandboxModeForTests(ROOT, "workspaceOnly");
+  });
+
+  it("relative paths and test globs are not absolute claims", async () => {
+    for (const cmd of [
+      "pnpm test src/lib/foo.test.ts",
+      "cargo build --release",
+      "ls src/components",
+      "git status",
+    ]) {
+      expect((await checkShellSandbox(cmd)).ok).toBe(true);
+    }
+  });
+
+  it("sed expressions, dates, regex args, shebangs in strings are not claims", async () => {
+    for (const cmd of [
+      "sed 's/foo/bar/' f.txt",
+      "date +%Y/%m",
+      "grep -E '^/usr' file",
+      "echo '#!/usr/bin/env bash' > script.sh",
+      "awk '/pattern/{print}' data.txt",
+    ]) {
+      expect((await checkShellSandbox(cmd)).ok).toBe(true);
+    }
+  });
+
+  it("URLs are not filesystem claims — even with scheme-like drive letters", async () => {
+    for (const cmd of [
+      "curl https://github.com/a/b -o out.zip",
+      "git clone https://github.com/a/b.git",
+      "npm install lodash",
+    ]) {
+      expect((await checkShellSandbox(cmd)).ok).toBe(true);
+    }
+  });
+
+  it("real outside claims still block (absolute, home, traversal)", async () => {
+    expect((await checkShellSandbox("cat /etc/passwd")).ok).toBe(false);
+    expect((await checkShellSandbox("cat ~/.ssh/config")).ok).toBe(false);
+    // Traversal escape — relative `..` that leaves the project.
+    expect((await checkShellSandbox("cat ../../secrets.txt")).ok).toBe(false);
+    // Windows drive letter + real path.
+    setSandboxRoot("D:/Code/Proj");
+    __setSandboxModeForTests("D:/Code/Proj", "workspaceOnly");
+    expect((await checkShellSandbox("cat C:/Windows/win.ini")).ok).toBe(false);
+    expect((await checkShellSandbox("cat D:/Code/Proj/src/a.ts")).ok).toBe(true);
+  });
+
+  it("quoted paths classify like unquoted ones", async () => {
+    expect((await checkShellSandbox('cat "/etc/passwd"')).ok).toBe(false);
+    expect((await checkShellSandbox("cat '/etc/passwd'")).ok).toBe(false);
+    // Quoted relative path with spaces inside the project — fine.
+    expect((await checkShellSandbox('cat "src/my file.ts"')).ok).toBe(true);
+  });
+});
+
+describe("splitShellArgs", () => {
+  it("splits on whitespace and separators, honors quotes", () => {
+    expect(splitShellArgs("cp a b.txt c d")).toEqual(["cp", "a", "b.txt", "c", "d"]);
+    expect(splitShellArgs('echo "a b" | grep x')).toEqual(["echo", "a b", "grep", "x"]);
+    expect(splitShellArgs("cat 'my file.txt'")).toEqual(["cat", "my file.txt"]);
+    expect(splitShellArgs("a && b")).toEqual(["a", "b"]);
+    expect(splitShellArgs("cmd --flag")).toEqual(["cmd", "--flag"]);
   });
 });

@@ -78,26 +78,98 @@ export async function checkSandbox(
 // ── Shell command gating ─────────────────────────────────────────────────
 //
 // Full command parsing is L2's job (OS-level confinement). This is the
-// best-effort L1 gate: extract path-LIKE tokens from the command text and
-// verify each against the sandbox root. Unresolvable tokens are allowed
-// through to the normal approval card — the user is the backstop, as with
-// every shell command today.
+// best-effort L1 gate. CLASSIFICATION RULE (learned the hard way): a path
+// claim must be a WHOLE shell argument, never a mid-string fragment —
+// the previous substring tokenizer treated `src/lib/foo.test.ts` as the
+// absolute path `/lib/foo.test.ts`, and matched sed expressions
+// (`s/foo/bar/`), URL fragments (`https://...` → drive letter `s:`),
+// date formats (`+%Y/%m`), regex args (`^/usr`), and shebangs inside
+// string literals as path claims — blocking everyday commands in
+// workspaceOnly mode.
+//
+// Unresolvable tokens fall through to the normal approval card — the user
+// is the backstop, as with every shell command today.
 
-const PATH_TOKEN_RE =
-  /(?:[A-Za-z]:)?(?:[\\/][^\s"'`<>|;,&(){}[\]]+){1,}/g;
+/** URL scheme — `https://…`, `file://…`. Never a filesystem claim. */
+const URL_RE = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//;
 
 /** Paths inside the user's own tree that tools legitimately touch even when
  * sandboxed (none today — listed for future additions like temp dirs). */
 const SHELL_ALLOW_OUTSIDE: string[] = [];
 
 /**
- * Extract path-like tokens from a shell command and check them against the
- * sandbox. Flags commands that name absolute paths outside the project.
- * Returns ok:true when nothing resolvable is outside, or when the sandbox
- * is off. Write-shaped commands (cp/mv/rm/tee/…, output redirection) are
- * blocked on ANY outside path; read-only mode allows non-write-shaped
- * commands that merely name outside paths (the approval card is the gate
- * for reads).
+ * Split a shell command into argument tokens for path classification.
+ * Quote-aware (single/double quotes strip and protect spaces); whitespace
+ * and shell separators (`; | & ( ) < >`) outside quotes are boundaries.
+ * Not a full parser — command substitutions and escapes pass through as
+ * literal text and simply fail to classify as paths.
+ */
+export function splitShellArgs(command: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let quote: '"' | "'" | null = null;
+  const push = () => {
+    if (cur) {
+      out.push(cur);
+      cur = "";
+    }
+  };
+  for (const ch of command) {
+    if (quote) {
+      if (ch === quote) quote = null;
+      else cur += ch;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      push();
+      quote = ch;
+      continue;
+    }
+    if (/[\s;|&()<>]/.test(ch)) {
+      push();
+      continue;
+    }
+    cur += ch;
+  }
+  push();
+  return out;
+}
+
+/** True when a token contains a `..` path segment — relative traversal
+ * that can escape the project (resolved against the agent's cwd). */
+function isEscapeTraversal(tok: string): boolean {
+  return tok.split(/[\\/]/).includes("..");
+}
+
+/**
+ * Classify one shell argument as a filesystem claim, or null when it is
+ * not one (options, URLs, relative paths, substitution soup).
+ *   - Windows absolute: single drive letter + separator (`D:/…`, `D:\\…`).
+ *     The drive must be ONE letter — `s://…` (URL residue) never matches.
+ *   - Unix absolute: argument STARTS with `/`.
+ *   - Home-relative: `~/…` (home is never inside the project → outside).
+ *   - Traversal: any `..` segment (relative escape, e.g. `../secrets`).
+ */
+function pathClaim(tok: string): string | null {
+  if (!tok || tok.startsWith("-")) return null; // options
+  if (URL_RE.test(tok)) return null;
+  if (/^[A-Za-z]:[\\/]/.test(tok)) return tok;
+  if (tok.startsWith("/")) {
+    // Quote-stripped substitution soup (awk programs, brace groups) is not
+    // a path. Real absolute paths carry no shell metacharacters.
+    return /[{}"'`$*?|;]/.test(tok) ? null : tok;
+  }
+  if (/^~\//.test(tok) || /^~\\/.test(tok)) return tok; // ~/… but not bare ~
+  if (isEscapeTraversal(tok)) return tok;
+  return null;
+}
+
+/**
+ * Gate a shell command against the sandbox. Flags commands whose ARGUMENTS
+ * name paths outside the project. Write-shaped commands (cp/mv/rm/tee/…,
+ * output redirection) are blocked on ANY outside claim in both modes;
+ * read-shaped commands naming outside paths are allowed in readOnly (the
+ * approval card is the gate for reads) and blocked in workspaceOnly.
  */
 export async function checkShellSandbox(
   command: string,
@@ -112,25 +184,13 @@ export async function checkShellSandbox(
       command,
     ) || /(?:^|\s)>{1,2}\s/.test(command);
 
-  const matches = command.match(PATH_TOKEN_RE) ?? [];
   const outside: string[] = [];
-  for (const raw of matches) {
-    let t = raw.replace(/[\\/]+$/, "");
-    if (!t || t.length < 2) continue;
-    // Windows drive letters without a path (`D:`) and pure-option forms
-    // like `/dev/null` style flags are not filesystem claims — skip
-    // short/unresolvable shapes.
-    if (/^[A-Za-z]:$/.test(t)) continue;
-    if (t.startsWith("-")) continue;
-    if (t.startsWith("~")) {
-      // `~`-relative claims: home is never inside the project root, so a
-      // ~ path is an outside claim unless it's a bare `~` prefix alone
-      // (too vague to enforce) — treat bare `~` as unresolvable and skip.
-      if (t === "~") continue;
-    }
-    if (isWithin(t, root)) continue;
-    if (SHELL_ALLOW_OUTSIDE.some((p) => isWithin(t, p))) continue;
-    outside.push(t);
+  for (const tok of splitShellArgs(command)) {
+    const claim = pathClaim(tok);
+    if (!claim) continue;
+    if (isWithin(claim, root)) continue;
+    if (SHELL_ALLOW_OUTSIDE.some((p) => isWithin(claim, p))) continue;
+    outside.push(claim);
   }
   if (outside.length === 0) return { ok: true };
   if (!writeShaped && mode === "readOnly") {
