@@ -64,6 +64,25 @@ const CONPTY_SETTLE_MS: u64 = 50;
 #[cfg(windows)]
 static LAST_SPAWN_AT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// Kill a spawned-but-unwrapped child and close its master off-thread.
+///
+/// Used on the failure paths AFTER `spawn_command` succeeded (reader clone /
+/// writer take failures). The child is a live shell that must not survive,
+/// and `MasterPty`'s Drop runs `ClosePseudoConsole`, which on Windows can
+/// block for hundreds of ms — so both happen on a background thread. The
+/// error is reported to the caller immediately; cleanup is fire-and-forget.
+fn cleanup_failed_spawn(
+    mut child: Box<dyn portable_pty::Child + Send + Sync>,
+    master: Box<dyn MasterPty + Send>,
+) {
+    let _ = thread::Builder::new()
+        .name("KAI-pty-spawn-fail".into())
+        .spawn(move || {
+            let _ = child.kill();
+            drop(master);
+        });
+}
+
 pub fn spawn(
     cols: u16,
     rows: u16,
@@ -119,10 +138,27 @@ pub fn spawn(
     drop(_spawn_guard);
 
     let killer = child.clone_killer();
-    let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
-    let writer: Arc<Mutex<Box<dyn Write + Send>>> = Arc::new(Mutex::new(
-        pair.master.take_writer().map_err(|e| e.to_string())?,
-    ));
+    let reader = match pair.master.try_clone_reader() {
+        Ok(r) => r,
+        Err(e) => {
+            // Spawn succeeded but the reader clone failed. `child` is a live
+            // shell and `pair.master` is a ConPTY whose Drop can block for
+            // hundreds of ms — clean both up on a background thread so this
+            // IPC call fails fast and doesn't leak a running shell.
+            let msg = e.to_string();
+            cleanup_failed_spawn(child, pair.master);
+            return Err(msg);
+        }
+    };
+    let writer = match pair.master.take_writer() {
+        Ok(w) => Arc::new(Mutex::new(w)),
+        Err(e) => {
+            let msg = e.to_string();
+            cleanup_failed_spawn(child, pair.master);
+            return Err(msg);
+        }
+    };
+    let mut reader = reader;
 
     #[cfg(windows)]
     let job = match child.process_id() {
@@ -143,6 +179,10 @@ pub fn spawn(
         writer: writer.clone(),
         master: Mutex::new(pair.master),
     });
+    // Clone for the thread-spawn failure paths below: they need to drop a
+    // session Arc off-thread (kill child + close the blocking ConPTY master)
+    // while the original is returned to the caller on success.
+    let session_fail = session.clone();
 
     let pending: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::with_capacity(READ_BUF)));
     let done = Arc::new(AtomicBool::new(false));
@@ -193,7 +233,17 @@ pub fn spawn(
                 log::warn!("pty backpressure: dropped {dropped_bytes} bytes (cap {MAX_PENDING})");
             }
         })
-        .map_err(|e| format!("spawn pty reader thread: {e}"))?;
+        .map_err(|e| {
+            // Thread spawn failed while this session Arc is still exclusively
+            // ours. Kill the child and close the (potentially blocking)
+            // ConPTY master off-thread instead of leaking a live shell.
+            let s = session_fail.clone();
+            thread::Builder::new()
+                .name("KAI-pty-spawn-fail".into())
+                .spawn(move || drop(s))
+                .ok();
+            format!("spawn pty reader thread: {e}")
+        })?;
 
     let on_data_flush = on_data.clone();
     let pending_f = pending.clone();
@@ -217,7 +267,17 @@ pub fn spawn(
                 break;
             }
         })
-        .map_err(|e| format!("spawn pty flusher thread: {e}"))?;
+        .map_err(|e| {
+            // Same leak class as the reader-thread failure above: kill the
+            // child + close the master off-thread. The already-running
+            // reader thread hits EOF after the kill and unwinds on its own.
+            let s = session_fail.clone();
+            thread::Builder::new()
+                .name("KAI-pty-spawn-fail".into())
+                .spawn(move || drop(s))
+                .ok();
+            format!("spawn pty flusher thread: {e}")
+        })?;
 
     let on_data_exit = on_data;
     let pending_e = pending;
@@ -280,7 +340,18 @@ pub fn spawn(
                 log::debug!("pty exit send failed (channel closed): {e}");
             }
         })
-        .map_err(|e| format!("spawn pty waiter thread: {e}"))?;
+        .map_err(|e| {
+            // The waiter closure (which owns `child`) is dropped when the
+            // thread fails to spawn — it closes handles without killing.
+            // `session.killer` still covers the kill: drop a session Arc
+            // off-thread so the child dies and the master closes async.
+            let s = session_fail;
+            thread::Builder::new()
+                .name("KAI-pty-spawn-fail".into())
+                .spawn(move || drop(s))
+                .ok();
+            format!("spawn pty waiter thread: {e}")
+        })?;
 
     Ok((session, size))
 }

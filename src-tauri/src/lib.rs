@@ -371,6 +371,13 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
+            // Kill-on-close backstop BEFORE any child processes exist. See
+            // modules/pty/job.rs — ConPTY's conhost is parented to THIS
+            // process, so without a process-wide job every abnormal exit
+            // (crash, dev Ctrl-C, taskkill) leaked one conhost per tab.
+            #[cfg(target_os = "windows")]
+            crate::modules::pty::job::install_process_wide_kill_on_close();
+
             // Build the main window manually so we control the WebView2 user-data
             // dir (per-instance, in setup where we can compute the instance id).
             // The app has no `create: true` windows — otherwise Tauri would have
