@@ -30,7 +30,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SandboxBadge } from "./SandboxBadge";
-import { ShadowStrip } from "./ShadowStrip";
+import { ShadowStrip, ShadowSessionMenuItem } from "./ShadowStrip";
 import { estimateCost, getModel, getModelContextLimit } from "../config";
 import { effectiveContextLimit, SYSTEM_OVERHEAD_TOKENS } from "../lib/compact";
 import { saveSessionsList, type SessionMeta } from "../lib/sessions";
@@ -503,9 +503,10 @@ function SessionPicker() {
   }, [sessions, workspaceRoot, activeId]);
 
   const sorted = [...filteredSessions].sort((a, b) => b.updatedAt - a.updatedAt);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   return (
-    <DropdownMenu>
+    <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
       <DropdownMenuTrigger asChild>
         <button
           type="button"
@@ -533,6 +534,7 @@ function SessionPicker() {
           <HugeiconsIcon icon={Add01Icon} size={12} strokeWidth={1.75} />
           New session
         </DropdownMenuItem>
+        <ShadowSessionMenuItem close={() => setMenuOpen(false)} />
         {sorted.length > 0 ? <DropdownMenuSeparator /> : null}
         {sorted.map((s) => (
           <SessionRow

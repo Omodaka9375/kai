@@ -35,6 +35,30 @@ function norm(p: string): string {
 /** Active shadows keyed by real project root. */
 const shadows = new Map<string, ShadowInfo>();
 
+/** Reactive notifications for shadow mutations (create/merge/discard).
+ *  The state is a module-resident map, not a store — UI surfaces
+ *  (ShadowStrip, the session dropdown) subscribe and re-resolve. */
+type ShadowListener = () => void;
+const listeners = new Set<ShadowListener>();
+
+/** Subscribe to shadow state changes. Returns the unsubscribe function. */
+export function onShadowChange(fn: ShadowListener): () => void {
+  listeners.add(fn);
+  return () => {
+    listeners.delete(fn);
+  };
+}
+
+function emitShadowChange(): void {
+  for (const fn of [...listeners]) {
+    try {
+      fn();
+    } catch {
+      // A broken listener must not fail the mutation.
+    }
+  }
+}
+
 /** Load the active shadow for a project (idempotent; null when none). */
 export async function loadShadow(
   projectRoot: string | null | undefined,
@@ -57,6 +81,7 @@ export async function createShadow(
 ): Promise<ShadowInfo> {
   const info = await native.shadowCreate(projectRoot);
   shadows.set(norm(projectRoot), info);
+  emitShadowChange();
   return info;
 }
 
@@ -125,7 +150,10 @@ export async function mergeShadow(
   dryRun: boolean,
 ): Promise<import("./native").ShadowMergeReport> {
   const report = await native.shadowMerge(projectRoot, dryRun);
-  if (!dryRun) shadows.delete(norm(projectRoot));
+  if (!dryRun) {
+    shadows.delete(norm(projectRoot));
+    emitShadowChange();
+  }
   return report;
 }
 
@@ -133,6 +161,7 @@ export async function mergeShadow(
 export async function discardShadow(projectRoot: string): Promise<void> {
   await native.shadowDiscard(projectRoot);
   shadows.delete(norm(projectRoot));
+  emitShadowChange();
 }
 
 export function shadowActiveFor(projectRoot: string | null | undefined): boolean {
