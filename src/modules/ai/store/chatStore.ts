@@ -1,23 +1,14 @@
 import { Chat, type UIMessage } from "@ai-sdk/react";
-import {
-  type ChatTransport,
-  lastAssistantMessageIsCompleteWithApprovalResponses,
-} from "ai";
 import { create } from "zustand";
 import {
   DEFAULT_MODEL_ID,
   getModel,
-  getModelContextLimit,
   providerNeedsKey,
   type ModelId,
   type ProviderId,
 } from "../config";
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import { BUILTIN_AGENTS } from "../lib/agents";
-import { useAgentsStore } from "./agentsStore";
-import { usePlanStore } from "./planStore";
 import { useTodosStore } from "./todoStore";
-import type { AgentUsage } from "../lib/agent";
 import { EMPTY_PROVIDER_KEYS, type ProviderKeys } from "../lib/keyring";
 import {
   deleteSessionData,
@@ -36,14 +27,20 @@ import {
 import { pushRecentModel, persistProjectModel } from "../lib/modelPrefs";
 import { normalizeWorkspacePath } from "../lib/workspacePath";
 import { cancelAllShellSessions } from "../tools/shell";
-import { createContextAwareTransport } from "../lib/transport";
-import { loadShadow, withShadowRedirect } from "../lib/shadow";
 import { clearFenceState } from "../lib/transport";
 import { reapSessionWatches, closeWatchSessionShell } from "../tools/watch";
-import type { ToolContext } from "../tools/tools";
-import { FileTracker } from "../lib/fileTracker";
 import { agentBus } from "../lib/eventBus";
-import { detectStack, type StackInfo } from "../lib/stackDetector";
+import {
+  IDLE_META,
+  makeChatSync as makeChatSyncRuntime,
+  type AgentMeta,
+  type AgentRunStatus,
+  type ChatRuntimeDeps,
+} from "../lib/chatRuntime";
+
+// Re-export for API compatibility — AgentStatusPill, eventBus, and the
+// module barrel import these types from chatStore (their original home).
+export type { AgentMeta, AgentRunStatus };
 
 type Live = {
   getCwd: () => string | null;
@@ -130,55 +127,6 @@ function resolveErrorDisplay(raw: unknown): string {
   if (providerMsg && providerMsg !== e.message) return providerMsg;
   return e.message ?? String(raw);
 }
-
-export type AgentRunStatus =
-  | "idle"
-  | "thinking"
-  | "streaming"
-  | "awaiting-approval"
-  | "error";
-
-export type AgentMeta = {
-  status: AgentRunStatus;
-  step: string | null;
-  approvalsPending: number;
-  error: string | null;
-  tokens: AgentUsage;
-  lastInputTokens: number;
-  lastCachedTokens: number;
-  hitStepCap: boolean;
-  /** Raw finish reason from the provider (stop, length, tool-calls, etc.). */
-  finishReason: string;
-  compactionNotice: { droppedCount: number; at: number } | null;
-  /** True while the model is generating a context summary. */
-  summarizing: boolean;
-  /** Shown after summarization completes. */
-  summaryNotice: { at: number } | null;
-  /** Rolling output tokens per second, updated during streaming. */
-  outputTps: number;
-};
-
-const ZERO_USAGE: AgentUsage = {
-  inputTokens: 0,
-  outputTokens: 0,
-  cachedInputTokens: 0,
-};
-
-const IDLE_META: AgentMeta = {
-  status: "idle",
-  step: null,
-  approvalsPending: 0,
-  error: null,
-  tokens: ZERO_USAGE,
-  lastInputTokens: 0,
-  lastCachedTokens: 0,
-  hitStepCap: false,
-  finishReason: "",
-  compactionNotice: null,
-  summarizing: false,
-  summaryNotice: null,
-  outputTps: 0,
-};
 
 export type MiniState = {
   open: boolean;
@@ -342,6 +290,7 @@ function touchChat(id: string, c: Chat<UIMessage>) {
     chats.delete(oldest);
   }
 }
+
 // Initial messages for a session, populated at hydration time and consumed
 // when the matching Chat is constructed.
 const seedMessages = new Map<string, UIMessage[]>();
@@ -376,273 +325,46 @@ export function flushPersist(id?: string): void {
  * Create a Chat instance synchronously. Stack detection happens in the
  * background and stackInfo will be updated via the getStackInfo callback.
  */
+/**
+ * Port object handed to the store-decoupled Chat runtime (`lib/chatRuntime`).
+ * The runtime has no zustand import — every store touch from stream
+ * callbacks is routed through these accessors, preserving the pre-
+ * extraction behavior (including the active-session guard).
+ */
+const runtimeDeps: ChatRuntimeDeps = {
+  getTokens: () => useChatStore.getState().agentMeta.tokens,
+  live: {
+    getCwd: () => useChatStore.getState().live.getCwd(),
+    getTerminalContext: () =>
+      useChatStore.getState().live.getTerminalContext(),
+    isActiveTerminalPrivate: () =>
+      useChatStore.getState().live.isActiveTerminalPrivate(),
+    injectIntoActivePty: (text) =>
+      useChatStore.getState().live.injectIntoActivePty(text),
+    getWorkspaceRoot: () => useChatStore.getState().live.getWorkspaceRoot(),
+    openPreview: (url) => useChatStore.getState().live.openPreview(url),
+  },
+  getKeys: () => useChatStore.getState().apiKeys,
+  getSelectedModelId: () => useChatStore.getState().selectedModelId,
+  isActiveSession: (sessionId) =>
+    useChatStore.getState().activeSessionId === sessionId,
+  patchAgentMeta: (patch) => useChatStore.getState().patchAgentMeta(patch),
+  abortRunController,
+};
+
+/**
+ * Create a Chat instance synchronously via the store-decoupled runtime.
+ * Stack detection happens in the background and stackInfo will be updated
+ * via the getStackInfo callback.
+ */
 function makeChatSync(sessionId: string): Chat<UIMessage> {
-  const readCache = new Map<string, { size: number; hash: number }>();
-
-  // The Chat outlives its owning session switch: switching to another
-  // session does NOT stop this chat, so its stream callbacks keep firing.
-  // Without a guard, a run started in session A would overwrite session B's
-  // `agentMeta` (status/step/tokens/error) after the user has switched away.
-  const isActive = () => useChatStore.getState().activeSessionId === sessionId;
-
-  // Start stack detection in the background - don't block chat creation
-  const workspaceRoot = useChatStore.getState().live.getWorkspaceRoot();
-  let stackInfo: StackInfo | null = null;
-  if (workspaceRoot) {
-    detectStack(workspaceRoot)
-      .then((detected) => {
-        stackInfo = detected;
-      })
-      .catch(() => {
-        // Stack detection failed silently - continue without it
-      });
-  }
-
-  const streamStartedAtRef = { current: null as number | null };
-  // Chunk-based tok/s for providers that never report `usage` (LM Studio,
-  // Ollama, openai-compatible). We accumulate streamed text chars and estimate
-  // tokens at ~4 chars/token; `sawUsageOutputTokens` switches off this fallback
-  // once the provider reports real usage so API models keep their exact count.
-  const chunkStreamStartedAtRef = { current: null as number | null };
-  const chunkCharsRef = { current: 0 };
-  const sawUsageOutputTokensRef = { current: false };
-  // The "context compacted" notice fires on every agent turn once stale reads
-  // and large tool results start getting elided — which is noise, not signal.
-  // Surface it once per session, then stay quiet.
-  const compactionNoticeShown = { current: false };
-  // Late-bound ref to the Chat instance so stream callbacks (which are built
-  // before the Chat exists) can stop it on loop detection. Assigned right
-  // after the Chat is constructed below.
-  const chatRef: { current: Chat<UIMessage> | null } = { current: null };
-
-  const toolContext: ToolContext = (() => {
-    // Base context from live state, with shadow-session redirection: while
-    // a shadow session is active for this project, tools see the shadow
-    // tree (cwd + workspace root translated). Real paths pass through when
-    // no shadow is active, so behavior is unchanged by default.
-    const base = {
-      getCwd: () => useChatStore.getState().live.getCwd(),
-      getWorkspaceRoot: () =>
-        useChatStore.getState().live.getWorkspaceRoot(),
-    };
-    const redirected = withShadowRedirect(base);
-    // Load (don't await) — a shadow created mid-session is picked up on the
-    // next tool call via getShadow, which reads the resident map lazily.
-    void loadShadow(base.getWorkspaceRoot()).catch(() => undefined);
-    return {
-      ...redirected,
-      getTerminalContext: () =>
-        useChatStore.getState().live.getTerminalContext(),
-      isActiveTerminalPrivate: () =>
-        useChatStore.getState().live.isActiveTerminalPrivate(),
-      injectIntoActivePty: (text) =>
-        useChatStore.getState().live.injectIntoActivePty(text),
-      openPreview: (url) => useChatStore.getState().live.openPreview(url),
-      readCache,
-      getSessionId: () => sessionId,
-      fileTracker: new FileTracker(),
-      getRemainingContextTokens: () => {
-        const tokens = useChatStore.getState().agentMeta.tokens;
-        const modelId = useChatStore.getState().selectedModelId;
-        const limit = getModelContextLimit(getModel(modelId).id);
-        const used = tokens.inputTokens + tokens.outputTokens;
-        return Math.max(0, limit - used);
-      },
-    };
-  })();
-
-  const transport = createContextAwareTransport({
-    getKeys: () => useChatStore.getState().apiKeys,
-    toolContext,
-    getModelId: () => useChatStore.getState().selectedModelId,
-    getCustomInstructions: () =>
-      usePreferencesStore.getState().customInstructions,
-    getAgentPersona: () => {
-      const { activeId, customAgents } = useAgentsStore.getState();
-      if (activeId === "__none__") return null;
-      const all = [...BUILTIN_AGENTS, ...customAgents];
-      const a = all.find((x) => x.id === activeId) ?? BUILTIN_AGENTS[0];
-      return { name: a.name, instructions: a.instructions };
-    },
-    getLive: () => {
-      const live = useChatStore.getState().live;
-      return {
-        cwd: live.getCwd(),
-        terminalPrivate: live.isActiveTerminalPrivate(),
-        workspaceRoot: live.getWorkspaceRoot(),
-        activeFile: live.getActiveFile(),
-      };
-    },
-    getPlanMode: () => usePlanStore.getState().active,
-    getLmstudioBaseURL: () => usePreferencesStore.getState().lmstudioBaseURL,
-    getLmstudioModelId: () => usePreferencesStore.getState().lmstudioModelId,
-    getOpenaiCompatibleBaseURL: () =>
-      usePreferencesStore.getState().openaiCompatibleBaseURL,
-    getOpenaiCompatibleModelId: () =>
-      usePreferencesStore.getState().openaiCompatibleModelId,
-    getSessionId: () => sessionId,
-    getStackInfo: () => stackInfo,
-    // Resolve the effective thinking mode for the *selected* model: a
-    // per-model override wins, otherwise the global default applies.
-    getThinkingMode: () => {
-      const prefs = usePreferencesStore.getState();
-      const { selectedModelId } = useChatStore.getState();
-      // The openai-compatible-custom model uses its own dedicated
-      // thinking mode so local endpoints (vLLM, Ollama, etc.) can
-      // control reasoning effort without a model-specific override.
-      if (selectedModelId === "openai-compatible-custom") {
-        return prefs.openaiCompatibleThinkingMode ?? "off";
-      }
-      return (
-        prefs.modelThinkingModes[selectedModelId] ??
-        prefs.thinkingMode ??
-        "off"
-      );
-    },
-    onStep: (step) => {
-      if (step === null) {
-        streamStartedAtRef.current = null;
-        chunkStreamStartedAtRef.current = null;
-        chunkCharsRef.current = 0;
-        sawUsageOutputTokensRef.current = false;
-      }
-      if (isActive()) useChatStore.getState().patchAgentMeta({ step });
-    },
-    onTextDelta: (text) => {
-      if (!isActive()) return;
-      const now = Date.now();
-      if (chunkStreamStartedAtRef.current === null) {
-        chunkStreamStartedAtRef.current = now;
-        chunkCharsRef.current = 0;
-      }
-      chunkCharsRef.current += text.length;
-      // Do not override the usage-based rate for providers that report usage.
-      if (sawUsageOutputTokensRef.current) return;
-      const elapsedMs = now - chunkStreamStartedAtRef.current;
-      const estTokens = chunkCharsRef.current / 4;
-      const tps =
-        estTokens > 0 && elapsedMs > 0
-          ? Math.round(estTokens / (elapsedMs / 1000))
-          : 0;
-      useChatStore.getState().patchAgentMeta({ outputTps: tps });
-    },
-    onCompact: (info) => {
-      if (!isActive()) return;
-      // Show once per session — elision recurs every turn once the history is
-      // large enough, and repeating the notice is just noise.
-      if (compactionNoticeShown.current) return;
-      compactionNoticeShown.current = true;
-      useChatStore.getState().patchAgentMeta({
-        compactionNotice: { droppedCount: info.droppedCount, at: Date.now() },
-      });
-    },
-    onLoopDetected: (info) => {
-      if (!isActive()) return;
-      // A model stuck repeating itself won't stop on its own — kill the run.
-      // The abort controller makes this reliable even when the SDK status has
-      // already left streaming/submitted.
-      abortRunController(sessionId);
-      void chatRef.current?.stop();
-      useChatStore.getState().patchAgentMeta({
-        status: "error",
-        error: info.suggestion ?? "Agent detected in a loop and was stopped.",
-      });
-    },
-    onFinishMeta: (info) => {
-      if (!isActive()) return;
-      useChatStore.getState().patchAgentMeta({
-        hitStepCap: info.hitStepCap,
-        finishReason: info.finishReason,
-      });
-    },
-    onUsage: (delta) => {
-      if (!isActive()) return;
-      const cur = useChatStore.getState().agentMeta.tokens;
-      const newOutputTokens = cur.outputTokens + delta.outputTokens;
-      const now = Date.now();
-      // Track stream start on first output tokens.
-      let streamStartedAt = streamStartedAtRef.current;
-      if (streamStartedAt === null && delta.outputTokens > 0) {
-        streamStartedAt = now;
-        streamStartedAtRef.current = streamStartedAt;
-      }
-      // Once the provider reports real usage, the chunk-based estimate is
-      // superseded — flip the flag so onTextDelta stops overwriting outputTps.
-      if (delta.outputTokens > 0) {
-        sawUsageOutputTokensRef.current = true;
-      }
-      const elapsedMs = streamStartedAt !== null ? now - streamStartedAt : 0;
-      const outputTps =
-        streamStartedAt !== null && newOutputTokens > 0 && elapsedMs > 0
-          ? Math.round(
-              (newOutputTokens / (elapsedMs / 1000)),
-            )
-          : 0;
-      useChatStore.getState().patchAgentMeta({
-        tokens: {
-          inputTokens: cur.inputTokens + delta.inputTokens,
-          outputTokens: newOutputTokens,
-          cachedInputTokens: cur.cachedInputTokens + delta.cachedInputTokens,
-        },
-        lastInputTokens: delta.lastInputTokens,
-        lastCachedTokens: delta.lastCachedTokens,
-        outputTps,
-      });
-    },
-  }) as unknown as ChatTransport<UIMessage>;
-
-  const initialMessages = seedMessages.get(sessionId);
-  seedMessages.delete(sessionId);
-
-  const chat = new Chat<UIMessage>({
-    id: sessionId,
-    transport,
-    messages: initialMessages,
-    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
-    onError: (e) => {
-      const msg = e instanceof Error ? e.message : String(e);
-      // Suppress stale approval errors — these fire when a tool call was
-      // cleaned up (stop/restart/steering) but the AI SDK's internal
-      // approval matching still references the old ID. Not actionable.
-      // Two variants:
-      //  - "Tool call X not found for approval request Y"
-      //  - "Tool approval response references unknown approvalId: Y"
-      if (
-        msg.includes("not found for approval request") ||
-        msg.includes("unknown approvalId") ||
-        msg.includes("No matching tool-approval-request")
-      ) {
-        console.debug("[kai] suppressed stale approval error:", msg);
-        return;
-      }
-      // Surface RetryError details. The AI SDK wraps provider errors in
-      // RetryError with an `errors` array. The top-level message is generic
-      // ("Failed after 3 attempts. Last error: Provider returned an error"),
-      // but the underlying APICallError has the actual status code, response
-      // body, and URL. Extract those so the user sees actionable info.
-      if (!isActive()) return;
-      // Log the raw error BEFORE reducing it to a display string. The stack
-      // (and, in dev builds, React's attached `componentStack`) is the only
-      // way to diagnose render-loop errors like React #185 ("Maximum update
-      // depth exceeded"), which surface here as a bare minified message.
-      // console.error is bridged into the on-disk log by lib/logging.ts, so
-      // the details survive even if the console is closed.
-      console.error(
-        "[kai] agent error:",
-        e,
-        (e as { componentStack?: unknown }).componentStack ?? "",
-      );
-      const display = resolveErrorDisplay(e);
-      useChatStore.getState().patchAgentMeta({
-        status: "error",
-        error: display,
-      });
-    },
-  });
-  chatRef.current = chat;
-  return chat;
+  return makeChatSyncRuntime(
+    sessionId,
+    runtimeDeps,
+    seedMessages,
+    resolveErrorDisplay,
+  );
 }
-
 export const useChatStore = create<StoreState>((set, get) => ({
   live: NOOP_LIVE,
   setLive: (live) => set({ live }),
