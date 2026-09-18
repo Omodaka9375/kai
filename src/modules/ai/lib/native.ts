@@ -115,6 +115,7 @@ export type SandboxStatus = {
   bwrap: boolean;
   sandboxExec: boolean;
   wsl: boolean;
+  wslDistro: boolean;
   docker: boolean;
   kernel: string | null;
 };

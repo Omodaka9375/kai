@@ -70,8 +70,13 @@ pub struct SandboxStatus {
     pub bwrap: bool,
     /// sandbox-exec present (macOS Seatbelt, deprecated-but-functional).
     pub sandbox_exec: bool,
-    /// WSL is installed with at least one distro (Windows L2 vehicle).
+    /// WSL platform installed (Windows L2 vehicle — wsl.exe present).
+    /// `wsl --status` exits 0 even with zero distros, so this alone does
+    /// NOT make L2 usable; it only means the install button can work
+    /// (`wsl --import` succeeds with no other distro present).
     pub wsl: bool,
+    /// At least one WSL distro is registered (`wsl -l` exits 0).
+    pub wsl_distro: bool,
     /// Docker present (L4 devcontainer vehicle).
     pub docker: bool,
     /// Kernel version string (Linux) for diagnostics.
@@ -120,8 +125,16 @@ pub fn sandbox_status() -> SandboxStatus {
 
     #[cfg(windows)]
     let wsl = probe("wsl.exe", "--status");
+    #[cfg(windows)]
+    // `--status` exits 0 even on a platform-only install with zero distros
+    // (observed: "Default Version: 2" + exit 0 on a distro-less machine).
+    // `wsl -l` exits 0 iff at least one distro is registered (exit -1 with
+    // "no installed distributions" otherwise).
+    let wsl_distro = wsl && probe("wsl.exe", "-l");
     #[cfg(not(windows))]
     let wsl = false;
+    #[cfg(not(windows))]
+    let wsl_distro = false;
 
     let docker = probe("docker", "--version");
 
@@ -130,6 +143,7 @@ pub fn sandbox_status() -> SandboxStatus {
         bwrap,
         sandbox_exec,
         wsl,
+        wsl_distro,
         docker,
         kernel,
     }

@@ -189,7 +189,11 @@ export function SandboxSection() {
               <CapabilityRow label="Landlock (Linux)" ok={status.landlock} note="kernel < 5.13" />
               <CapabilityRow label="bubblewrap (Linux)" ok={status.bwrap} note="not installed" />
               <CapabilityRow label="sandbox-exec (macOS)" ok={status.sandboxExec} note="not available" />
-              <CapabilityRow label="WSL (Windows)" ok={status.wsl} note="not installed" />
+              <CapabilityRow
+                label="WSL (Windows)"
+                ok={status.wslDistro}
+                note={status.wsl ? "platform installed — no distro" : "not installed"}
+              />
               <CapabilityRow label="Docker (containers)" ok={status.docker} note="not installed" />
               {status.kernel ? (
                 <span className="text-[11px] text-muted-foreground/70">kernel {status.kernel}</span>

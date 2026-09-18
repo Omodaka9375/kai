@@ -84,10 +84,10 @@ pub fn install_process_wide_kill_on_close() {
         unsafe { CloseHandle(job) };
         return;
     }
-    // Intentionally leak the handle: it must stay open for the entire
+    // Intentionally never closed: the handle must stay open for the entire
     // process lifetime. The OS closes it on process death, which is the
-    // exact trigger for KILL_ON_JOB_CLOSE.
-    std::mem::forget(job);
+    // exact trigger for KILL_ON_JOB_CLOSE. (HANDLE is a raw pointer — no
+    // Drop, so nothing to forget; it stays open by not closing it.)
     log::info!("process-wide kill-on-close job active (pid={})", std::process::id());
 }
 
