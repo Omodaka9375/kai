@@ -116,6 +116,7 @@ export type SandboxStatus = {
   sandboxExec: boolean;
   wsl: boolean;
   wslDistro: boolean;
+  kaiSandboxDistro: boolean;
   docker: boolean;
   kernel: string | null;
 };

@@ -77,6 +77,10 @@ pub struct SandboxStatus {
     pub wsl: bool,
     /// At least one WSL distro is registered (`wsl -l` exits 0).
     pub wsl_distro: bool,
+    /// The dedicated `kai-sandbox` distro is registered (Windows L2 actual
+    /// readiness — install button satisfied). Uncached probe: this command
+    /// is a fresh detection pass, unlike the exec hot path.
+    pub kai_sandbox_distro: bool,
     /// Docker present (L4 devcontainer vehicle).
     pub docker: bool,
     /// Kernel version string (Linux) for diagnostics.
@@ -131,10 +135,14 @@ pub fn sandbox_status() -> SandboxStatus {
     // `wsl -l` exits 0 iff at least one distro is registered (exit -1 with
     // "no installed distributions" otherwise).
     let wsl_distro = wsl && probe("wsl.exe", "-l");
+    #[cfg(windows)]
+    let kai_sandbox_distro = crate::modules::sandbox::wsl::distro_installed();
     #[cfg(not(windows))]
     let wsl = false;
     #[cfg(not(windows))]
     let wsl_distro = false;
+    #[cfg(not(windows))]
+    let kai_sandbox_distro = false;
 
     let docker = probe("docker", "--version");
 
@@ -144,6 +152,7 @@ pub fn sandbox_status() -> SandboxStatus {
         sandbox_exec,
         wsl,
         wsl_distro,
+        kai_sandbox_distro,
         docker,
         kernel,
     }

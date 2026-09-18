@@ -223,7 +223,7 @@ export function SandboxSection() {
                 type="button"
                 size="sm"
                 variant="ghost"
-                disabled={wslBusy}
+                disabled={wslBusy || !status?.kaiSandboxDistro}
                 onClick={() => void onRemoveWsl()}
               >
                 Remove
