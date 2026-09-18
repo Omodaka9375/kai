@@ -23,7 +23,7 @@ import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { IS_MAC } from "@/lib/platform";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ACCEPTED_FILES, useComposer, type FileAttachment } from "../lib/composer";
+import { ACCEPTED_FILES, useComposer, type FileAttachment } from "./composer";
 import { useWorkspaceFiles } from "../hooks/useWorkspaceFiles";
 import { SLASH_COMMANDS } from "../lib/slashCommands";
 import type { Snippet } from "../lib/snippets";

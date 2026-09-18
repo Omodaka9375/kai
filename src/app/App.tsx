@@ -27,7 +27,7 @@ import {
 import type { ModelId } from "@/modules/ai/config";
 import { CustomContextMenu } from "@/modules/ai/components/CustomContextMenu";
 import { ApiTesterPane } from "@/modules/api-tester/ApiTesterPane";
-import { AiComposerProvider } from "@/modules/ai/lib/composer";
+import { AiComposerProvider } from "@/modules/ai/components/composer";
 import { AiErrorBoundary } from "@/modules/ai/components/AiErrorBoundary";
 import { redactSensitive } from "@/modules/ai/lib/redact";
 import { setSandboxRoot } from "@/modules/ai/lib/sandbox";

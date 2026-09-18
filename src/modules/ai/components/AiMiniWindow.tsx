@@ -43,7 +43,7 @@ import { AiChatView } from "./AiChat";
 import { GoalPanel } from "./GoalPanel";
 import { PlanDiffReview } from "./PlanDiffReview";
 import { TodoStrip } from "./TodoStrip";
-import { useComposer } from "../lib/composer";
+import { useComposer } from "./composer";
 import { cancelAllShellSessions } from "../tools/shell";
 
 const SUGGESTIONS = [

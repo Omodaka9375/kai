@@ -1,0 +1,603 @@
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
+import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
+import {
+  AiBookIcon,
+  ArrowDown01Icon,
+  BrainIcon,
+  ChatGptIcon,
+  ClaudeIcon,
+  Clock01Icon,
+  CoinsDollarIcon,
+  ComputerIcon,
+  CpuIcon,
+  DeepseekIcon,
+  FavouriteIcon,
+  FlashIcon,
+  GlobeIcon,
+  GoogleGeminiIcon,
+  Grok02Icon,
+  Hexagon01Icon,
+  PlugIcon,
+  Search01Icon,
+  Settings01Icon,
+  StarIcon,
+  Tick01Icon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  getModel,
+  providerNeedsKey,
+  PROVIDERS,
+  type ModelCapabilities,
+  type ModelId,
+  type ModelInfo,
+  type ProviderId,
+  type ThinkingMode,
+} from "../config";
+import { useOpenRouterModelsStore } from "../store/openrouterModelsStore";
+import { toggleFavoriteModel } from "../lib/modelPrefs";
+import { useChatStore } from "../store/chatStore";
+import { usePreferencesStore } from "@/modules/settings/preferences";
+import { setModelThinkingMode } from "@/modules/settings/store";
+const PROVIDER_ICON = {
+  openai: ChatGptIcon,
+  anthropic: ClaudeIcon,
+  google: GoogleGeminiIcon,
+  xai: Grok02Icon,
+  cerebras: CpuIcon,
+  groq: FlashIcon,
+  deepseek: DeepseekIcon,
+  mistral: Hexagon01Icon,
+  openrouter: GlobeIcon,
+  "openai-compatible": PlugIcon,
+  lmstudio: ComputerIcon,
+  zai: CpuIcon,
+} as const satisfies Record<ProviderId, typeof ChatGptIcon>;
+
+type Tab = "all" | "favorites" | "recent";
+
+const THINKING_CYCLE: ThinkingMode[] = ["off", "low", "medium", "high"];
+const THINKING_ICON_LABEL: Record<ThinkingMode, string> = {
+  off: "off",
+  low: "low",
+  medium: "med",
+  high: "high",
+};
+
+function cycleThinkingMode(current: ThinkingMode): ThinkingMode {
+  const idx = THINKING_CYCLE.indexOf(current);
+  return THINKING_CYCLE[(idx + 1) % THINKING_CYCLE.length];
+}
+
+function ThinkingToggle({
+  active,
+  onClick,
+}: {
+  active: ThinkingMode;
+  onClick: (e: React.MouseEvent) => void;
+}) {
+  const label = THINKING_ICON_LABEL[active];
+  const on = active !== "off";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={`Thinking: ${active}. Click to cycle.`}
+      className={cn(
+        "ml-auto flex items-center gap-0.5 rounded-full px-1 py-0.5 text-[9px] font-medium tabular-nums transition-colors",
+        on
+          ? "text-muted-foreground hover:bg-accent hover:text-foreground"
+          : "text-muted-foreground/50 hover:bg-accent hover:text-muted-foreground",
+      )}
+    >
+      <HugeiconsIcon icon={BrainIcon} size={10} strokeWidth={1.75} />
+      <span>{label}</span>
+    </button>
+  );
+}
+
+function ModelDropdown() {
+  const selected = useChatStore((s) => s.selectedModelId);
+  const apiKeys = useChatStore((s) => s.apiKeys);
+  const setSelected = useChatStore((s) => s.setSelectedModelId);
+  const favoriteIds = usePreferencesStore((s) => s.favoriteModelIds);
+  const recentIds = usePreferencesStore((s) => s.recentModelIds);
+  const thinkingMode = usePreferencesStore((s) => s.thinkingMode);
+  const modelThinkingModes = usePreferencesStore((s) => s.modelThinkingModes);
+  const current = getModel(selected);
+  // For custom endpoints, show the actual model ID instead of generic label.
+  const lmModelId = usePreferencesStore((s) => s.lmstudioModelId);
+  const compatModelId = usePreferencesStore((s) => s.openaiCompatibleModelId);
+
+  // Auto-sync OpenRouter models so the dropdown stays current.
+  const orModels = useOpenRouterModelsStore((s) => s.models);
+  const orFetch = useOpenRouterModelsStore((s) => s.fetch);
+  const hasOpenRouterKey = !!apiKeys.openrouter;
+  useEffect(() => {
+    if (hasOpenRouterKey) void orFetch();
+  }, [hasOpenRouterKey, orFetch]);
+  const displayLabel =
+    current.id === "lmstudio-local" && lmModelId.trim()
+      ? lmModelId.trim()
+      : current.id === "openai-compatible-custom" && compatModelId.trim()
+        ? compatModelId.trim()
+        : current.label;
+  const [search, setSearch] = useState("");
+  const [activeProvider, setActiveProvider] = useState<ProviderId | null>(null);
+  const [tab, setTab] = useState<Tab>("all");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const currentProviderHasKey = providerNeedsKey(current.provider)
+    ? !!apiKeys[current.provider]
+    : true;
+
+  const hasKeyFor = (id: ProviderId) =>
+    providerNeedsKey(id) ? !!apiKeys[id] : true;
+
+  const sortedProviders = useMemo(() => {
+    const configured: (typeof PROVIDERS)[number][] = [];
+    const unconfigured: (typeof PROVIDERS)[number][] = [];
+    for (const p of PROVIDERS) {
+      (hasKeyFor(p.id) ? configured : unconfigured).push(p);
+    }
+    return { configured, unconfigured };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiKeys]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    let pool: readonly ModelInfo[] = orModels;
+    if (tab === "favorites") {
+      pool = pool.filter((m) => favoriteIds.includes(m.id));
+    } else if (tab === "recent") {
+      const order = new Map(recentIds.map((id, i) => [id, i]));
+      pool = pool
+        .filter((m) => order.has(m.id))
+        .slice()
+        .sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+    }
+    if (activeProvider !== null) {
+      pool = pool.filter((m) => m.provider === activeProvider);
+    }
+    if (q) {
+      pool = pool.filter(
+        (m) =>
+          m.label.toLowerCase().includes(q) ||
+          m.hint.toLowerCase().includes(q) ||
+          m.description.toLowerCase().includes(q) ||
+          m.provider.includes(q) ||
+          (m.tags?.some((t) => t.includes(q)) ?? false),
+      );
+    }
+    return pool;
+  }, [activeProvider, favoriteIds, recentIds, search, tab]);
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className={cn(
+            "h-5.5 gap-1 rounded-md px-1.5 my-1 text-xs hover:bg-accent hover:text-foreground",
+            currentProviderHasKey
+              ? "text-muted-foreground"
+              : "text-amber-600 dark:text-amber-400",
+          )}
+          title={
+            currentProviderHasKey
+              ? `Model: ${displayLabel}`
+              : `${displayLabel} — no key configured`
+          }
+        >
+          {displayLabel}
+          <HugeiconsIcon
+            icon={ArrowDown01Icon}
+            size={11}
+            strokeWidth={2}
+            className="opacity-70"
+          />
+        </Button>
+      </DropdownMenuTrigger>
+
+      <DropdownMenuContent
+        align="end"
+        className="w-[34rem] p-0 overflow-hidden rounded-xl border border-border/70 shadow-xl"
+        onFocusCapture={(e) => {
+          if (e.target !== inputRef.current) inputRef.current?.focus();
+        }}
+      >
+        {/* Search */}
+        <div className="flex items-center gap-2.5 border-b border-border/70 px-3 py-2.5">
+          <HugeiconsIcon
+            icon={Search01Icon}
+            size={16}
+            strokeWidth={1.75}
+            className="shrink-0 text-muted-foreground/70"
+          />
+          <input
+            ref={inputRef}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => e.stopPropagation()}
+            placeholder="Search models, providers, capabilities…"
+            className="w-full bg-transparent text-xs outline-none placeholder:text-muted-foreground/60"
+          />
+        </div>
+
+        {/* Tabs */}
+        <div className="flex items-center gap-0.5 border-b border-border/70 px-2 py-1.5">
+          <TabButton
+            label="All"
+            icon={AiBookIcon}
+            active={tab === "all"}
+            onClick={() => setTab("all")}
+          />
+          <TabButton
+            label="Favorites"
+            icon={FavouriteIcon}
+            active={tab === "favorites"}
+            onClick={() => setTab("favorites")}
+            count={favoriteIds.length || undefined}
+          />
+          <TabButton
+            label="Recent"
+            icon={Clock01Icon}
+            active={tab === "recent"}
+            onClick={() => setTab("recent")}
+            count={recentIds.length || undefined}
+          />
+        </div>
+
+        <div className="flex">
+          {/* Provider sidebar — configured first, unconfigured muted, no dividers. */}
+          <div className="flex w-11 flex-col gap-0.5 border-r border-border/70 bg-muted/20 py-1.5">
+            <ProviderPill
+              icon={AiBookIcon}
+              title="All providers"
+              active={activeProvider === null}
+              onClick={() => setActiveProvider(null)}
+            />
+            {[...sortedProviders.configured, ...sortedProviders.unconfigured].map(
+              (p) => (
+                <ProviderPill
+                  key={p.id}
+                  icon={PROVIDER_ICON[p.id]}
+                  title={
+                    hasKeyFor(p.id)
+                      ? p.label
+                      : `${p.label} — not configured`
+                  }
+                  active={activeProvider === p.id}
+                  muted={!hasKeyFor(p.id)}
+                  onClick={() => setActiveProvider(p.id)}
+                />
+              ),
+            )}
+          </div>
+
+          {/* Models list */}
+          <div className="flex-1 overflow-y-auto py-1 max-h-[26rem]">
+            {activeProvider !== null ? (
+              <ProviderHeader providerId={activeProvider} />
+            ) : null}
+            {activeProvider !== null && !hasKeyFor(activeProvider) ? (
+              <ProviderConfigureCTA providerId={activeProvider} />
+            ) : null}
+            {filtered.length === 0 ? (
+              <div className="flex items-center justify-center px-4 py-10 text-xs text-muted-foreground/70">
+                {tab === "favorites"
+                  ? "No favorites yet — star a model to pin it here."
+                  : tab === "recent"
+                    ? "No recently-used models."
+                    : "No models match."}
+              </div>
+            ) : (
+              filtered.map((m) => (
+                <ModelRow
+                  key={m.id}
+                  model={m}
+                  selected={m.id === selected}
+                  hasKey={hasKeyFor(m.provider)}
+                  favorite={favoriteIds.includes(m.id)}
+                  showProviderIcon={activeProvider === null}
+                  thinkingMode={thinkingMode}
+                  modelThinkingModes={modelThinkingModes}
+                  onPick={() => {
+                    if (!hasKeyFor(m.provider)) {
+                      void openSettingsWindow("models");
+                      return;
+                    }
+                    setSelected(m.id as ModelId);
+                  }}
+                  onToggleFavorite={() => void toggleFavoriteModel(m.id)}
+                  onToggleThinking={(modelId) =>
+                    void setModelThinkingMode(
+                      modelId,
+                      cycleThinkingMode(
+                        modelThinkingModes[modelId] ?? thinkingMode,
+                      ),
+                    )
+                  }
+                />
+              ))
+            )}
+          </div>
+        </div>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function TabButton({
+  label,
+  icon,
+  active,
+  count,
+  onClick,
+}: {
+  label: string;
+  icon: typeof AiBookIcon;
+  active: boolean;
+  count?: number;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-colors",
+        active
+          ? "bg-accent text-foreground"
+          : "text-muted-foreground hover:bg-accent/40 hover:text-foreground",
+      )}
+    >
+      <HugeiconsIcon icon={icon} size={12} strokeWidth={1.75} />
+      {label}
+      {count != null ? (
+        <span className="rounded-full bg-muted/60 px-1.5 text-[9.5px] tabular-nums text-muted-foreground">
+          {count}
+        </span>
+      ) : null}
+    </button>
+  );
+}
+
+function ProviderPill({
+  icon,
+  title,
+  active,
+  muted,
+  onClick,
+}: {
+  icon: typeof AiBookIcon;
+  title: string;
+  active: boolean;
+  muted?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      className={cn(
+        "relative mx-auto flex size-8 items-center justify-center rounded-md transition-colors",
+        active
+          ? "bg-accent text-foreground after:absolute after:right-0 after:top-1.5 after:bottom-1.5 after:w-[2px] after:rounded-full after:bg-primary after:content-['']"
+          : muted
+            ? "text-muted-foreground/50 hover:bg-accent/40 hover:text-foreground"
+            : "text-muted-foreground hover:bg-accent/40 hover:text-foreground",
+      )}
+    >
+      <HugeiconsIcon icon={icon} size={16} strokeWidth={1.5} />
+    </button>
+  );
+}
+
+function ProviderHeader({ providerId }: { providerId: ProviderId }) {
+  const p = PROVIDERS.find((x) => x.id === providerId);
+  if (!p) return null;
+  return (
+    <div className="flex items-center gap-1.5 px-3 pt-1 pb-1.5 text-[11px] font-medium tracking-tight text-muted-foreground/90">
+      <HugeiconsIcon
+        icon={PROVIDER_ICON[p.id]}
+        size={13}
+        strokeWidth={1.75}
+      />
+      <span>{p.label}</span>
+    </div>
+  );
+}
+
+function ProviderConfigureCTA({ providerId }: { providerId: ProviderId }) {
+  const p = PROVIDERS.find((x) => x.id === providerId);
+  if (!p) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => void openSettingsWindow("models")}
+      className="group mx-2 mb-1 flex w-[calc(100%-1rem)] items-center gap-2 rounded-md border border-dashed border-border/70 bg-muted/20 px-3 py-2 text-left text-[11px] text-muted-foreground transition-colors hover:border-border hover:bg-accent/40 hover:text-foreground"
+    >
+      <HugeiconsIcon icon={Settings01Icon} size={13} strokeWidth={1.75} />
+      <span className="flex-1 truncate">
+        Configure {p.label} to use these models.
+      </span>
+      <span className="shrink-0 text-[10px] underline-offset-2 group-hover:underline">
+        Open
+      </span>
+    </button>
+  );
+}
+
+function ModelRow({
+  model,
+  selected,
+  hasKey,
+  favorite,
+  showProviderIcon,
+  thinkingMode,
+  modelThinkingModes,
+  onPick,
+  onToggleFavorite,
+  onToggleThinking,
+}: {
+  model: ModelInfo;
+  selected: boolean;
+  hasKey: boolean;
+  favorite: boolean;
+  showProviderIcon: boolean;
+  thinkingMode: ThinkingMode;
+  modelThinkingModes: Record<string, ThinkingMode>;
+  onPick: () => void;
+  onToggleFavorite: () => void;
+  onToggleThinking: (modelId: string) => void;
+}) {
+  const isReasoning = model.tags?.includes("reasoning");
+  const hasOverride = isReasoning && model.id in modelThinkingModes;
+  const effective = hasOverride
+    ? modelThinkingModes[model.id]
+    : thinkingMode;
+
+  return (
+    <DropdownMenuItem
+      onSelect={(e) => {
+        e.preventDefault();
+        onPick();
+      }}
+      className={cn(
+        "group mx-1 my-0.5 flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5",
+        selected ? "bg-accent/60 text-foreground" : "text-foreground/85",
+        !hasKey && "opacity-60",
+      )}
+    >
+      <button
+        type="button"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onToggleFavorite();
+        }}
+        title={favorite ? "Unfavorite" : "Favorite"}
+        className={cn(
+          "shrink-0 rounded p-0.5 transition-colors",
+          favorite
+            ? "text-amber-500"
+            : "text-muted-foreground/40 hover:text-amber-500",
+        )}
+      >
+        <HugeiconsIcon
+          icon={StarIcon}
+          size={12}
+          strokeWidth={favorite ? 2 : 1.75}
+          className={favorite ? "fill-amber-500" : ""}
+        />
+      </button>
+
+      {showProviderIcon ? (
+        <HugeiconsIcon
+          icon={PROVIDER_ICON[model.provider]}
+          size={13}
+          strokeWidth={1.5}
+          className="shrink-0 text-muted-foreground/70"
+        />
+      ) : null}
+
+      <div className="flex min-w-0 flex-1 items-baseline gap-1.5">
+        <span className="shrink-0 text-[12px] font-medium leading-none">
+          {model.label}
+        </span>
+        {model.tags?.includes("free") ? (
+          <span className="shrink-0 rounded-sm border border-emerald-500/30 bg-emerald-500/10 px-1 text-[9px] font-semibold uppercase leading-none text-emerald-600 dark:text-emerald-400">
+            Free
+          </span>
+        ) : null}
+        <span className="truncate text-[10.5px] leading-none text-muted-foreground">
+          {model.description}
+        </span>
+      </div>
+
+      <CapabilityBars caps={model.capabilities} />
+
+      {isReasoning ? (
+        <ThinkingToggle
+          active={effective}
+          onClick={(e: React.MouseEvent) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onToggleThinking(model.id);
+          }}
+        />
+      ) : null}
+
+      {selected ? (
+        <HugeiconsIcon
+          icon={Tick01Icon}
+          size={13}
+          strokeWidth={2}
+          className="shrink-0 text-foreground"
+        />
+      ) : null}
+    </DropdownMenuItem>
+  );
+}
+
+function CapabilityBars({ caps }: { caps: ModelCapabilities }) {
+  return (
+    <div className="ml-auto flex items-center gap-1.5">
+      <CapBar icon={BrainIcon} value={caps.intelligence} label="Intelligence" />
+      <CapBar icon={FlashIcon} value={caps.speed} label="Speed" />
+      <CapBar
+        icon={CoinsDollarIcon}
+        value={caps.cost}
+        label="Affordability"
+      />
+    </div>
+  );
+}
+
+function CapBar({
+  icon,
+  value,
+  label,
+}: {
+  icon: typeof AiBookIcon;
+  value: number;
+  label: string;
+}) {
+  return (
+    <span
+      className="flex items-center gap-0.5"
+      title={`${label}: ${value}/5`}
+    >
+      <HugeiconsIcon
+        icon={icon}
+        size={10}
+        strokeWidth={1.75}
+        className="text-muted-foreground/60"
+      />
+      <span className="flex items-center gap-px">
+        {[1, 2, 3, 4, 5].map((i) => (
+          <span
+            key={i}
+            className={cn(
+              "h-2 w-[2px] rounded-full",
+              i <= value ? "bg-foreground/70" : "bg-foreground/15",
+            )}
+          />
+        ))}
+      </span>
+    </span>
+  );
+}
+
+export { ModelDropdown };

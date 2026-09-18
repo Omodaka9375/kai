@@ -8,7 +8,7 @@ import {
 } from "react";
 import { useWhisperRecording } from "../hooks/useWhisperRecording";
 import { expandSnippetTokens, type Snippet } from "../lib/snippets";
-import { tryRunSlashCommand, type SlashCommandMeta } from "./slashCommands";
+import { tryRunSlashCommand, type SlashCommandMeta } from "../lib/slashCommands";
 import {
   getOrCreateChat,
   stopSession,
