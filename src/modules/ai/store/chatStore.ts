@@ -621,6 +621,17 @@ function makeChatSync(sessionId: string): Chat<UIMessage> {
       // but the underlying APICallError has the actual status code, response
       // body, and URL. Extract those so the user sees actionable info.
       if (!isActive()) return;
+      // Log the raw error BEFORE reducing it to a display string. The stack
+      // (and, in dev builds, React's attached `componentStack`) is the only
+      // way to diagnose render-loop errors like React #185 ("Maximum update
+      // depth exceeded"), which surface here as a bare minified message.
+      // console.error is bridged into the on-disk log by lib/logging.ts, so
+      // the details survive even if the console is closed.
+      console.error(
+        "[kai] agent error:",
+        e,
+        (e as { componentStack?: unknown }).componentStack ?? "",
+      );
       const display = resolveErrorDisplay(e);
       useChatStore.getState().patchAgentMeta({
         status: "error",
