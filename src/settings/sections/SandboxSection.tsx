@@ -194,7 +194,6 @@ export function SandboxSection() {
                 ok={status.wslDistro}
                 note={status.wsl ? "platform installed — no distro" : "not installed"}
               />
-              <CapabilityRow label="Docker (containers)" ok={status.docker} note="not installed" />
               {status.kernel ? (
                 <span className="text-[11px] text-muted-foreground/70">kernel {status.kernel}</span>
               ) : null}

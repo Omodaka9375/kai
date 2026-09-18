@@ -5,7 +5,8 @@
 //!                    gate fs mutations and annotate shell approvals.
 //!   L2 OS-confinement — Landlock (Linux), sandbox-exec (macOS), WSL distro
 //!                    (Windows). Detected by `sandbox_status`, enforced later.
-//!   L3 shadow worktree, L4 devcontainer — future.
+//!   L3 shadow worktree — shadow.rs (isolated copy; user merges/discards).
+//!                    (No L4 devcontainer: Docker is too heavy a dependency.)
 //!
 //! Configuration lives in the project at `.kai/sandbox.json` (versioned,
 //! user-authored — same philosophy as `.kai/rules`).
@@ -81,8 +82,6 @@ pub struct SandboxStatus {
     /// readiness — install button satisfied). Uncached probe: this command
     /// is a fresh detection pass, unlike the exec hot path.
     pub kai_sandbox_distro: bool,
-    /// Docker present (L4 devcontainer vehicle).
-    pub docker: bool,
     /// Kernel version string (Linux) for diagnostics.
     pub kernel: Option<String>,
 }
@@ -144,8 +143,6 @@ pub fn sandbox_status() -> SandboxStatus {
     #[cfg(not(windows))]
     let kai_sandbox_distro = false;
 
-    let docker = probe("docker", "--version");
-
     SandboxStatus {
         landlock,
         bwrap,
@@ -153,7 +150,6 @@ pub fn sandbox_status() -> SandboxStatus {
         wsl,
         wsl_distro,
         kai_sandbox_distro,
-        docker,
         kernel,
     }
 }
