@@ -1,12 +1,11 @@
 import { Button } from "@/components/ui/button";
 import { native, type SandboxMode, type SandboxSetupEvent, type SandboxStatus } from "@/modules/ai/lib/native";
 import { invalidateSandboxCache } from "@/modules/ai/lib/sandbox";
-import { useChatStore } from "@/modules/ai/store/chatStore";
+import { usePreferencesStore } from "@/modules/settings/preferences";
 import { IS_WINDOWS } from "@/lib/platform";
 import { Channel } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { SectionHeader } from "../components/SectionHeader";
-import { SettingRow } from "../components/SettingRow";
 
 const MODES: { id: SandboxMode; label: string; description: string }[] = [
   {
@@ -39,14 +38,40 @@ function CapabilityRow({ label, ok, note }: { label: string; ok: boolean; note: 
   );
 }
 
+/** Vertical block row — for settings whose control is a stack of full-width
+ *  cards or lists, not a compact control in SettingRow's right column. */
+function SettingBlock({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-border/60 bg-card/60 px-3 py-2.5">
+      <div className="flex flex-col gap-0.5">
+        <span className="text-[12.5px] font-medium">{title}</span>
+        {description ? (
+          <span className="text-[10.5px] leading-relaxed text-muted-foreground">
+            {description}
+          </span>
+        ) : null}
+      </div>
+      {children}
+    </div>
+  );
+}
+
 export function SandboxSection() {
   const [status, setStatus] = useState<SandboxStatus | null>(null);
   const [mode, setMode] = useState<SandboxMode>("off");
   const [saving, setSaving] = useState(false);
-  // Same value `getLive().workspaceRoot` returns to the agent — what you
-  // configure here is exactly what gets enforced.
-  const root = useChatStore((s) => s.live.getWorkspaceRoot());
-  const [rootOnce, setRootOnce] = useState<string | null>(null);
+  // The main window persists its live workspace root; the settings webview
+  // (separate JS context, no setLive) rehydrates that value via its own
+  // preferences init(). This is the same source App.tsx uses.
+  const root = usePreferencesStore((s) => s.lastWorkspaceCwd) || null;
 
   useEffect(() => {
     let alive = true;
@@ -60,30 +85,23 @@ export function SandboxSection() {
     };
   }, []);
 
-  // Load the current project config once we have a root. Snapshot the root
-  // once (not on every live-context change) so switching terminals doesn't
-  // yank the picker mid-configuration.
-  useEffect(() => {
-    if (root && !rootOnce) setRootOnce(root);
-  }, [root, rootOnce]);
-
   useEffect(() => {
     let alive = true;
-    if (!rootOnce) return;
-    void native.sandboxLoadConfig(rootOnce).then((c) => {
+    if (!root) return;
+    void native.sandboxLoadConfig(root).then((c) => {
       if (alive) setMode(c.mode);
     }).catch(() => undefined);
     return () => {
       alive = false;
     };
-  }, [rootOnce]);
+  }, [root]);
 
   const onPick = async (next: SandboxMode) => {
-    if (!rootOnce || saving) return;
+    if (!root || saving) return;
     setSaving(true);
     setMode(next);
     try {
-      await native.sandboxSaveConfig(rootOnce, next);
+      await native.sandboxSaveConfig(root, next);
       invalidateSandboxCache();
     } catch (e) {
       console.error("sandbox: failed to save config", e);
@@ -135,28 +153,34 @@ export function SandboxSection() {
         description="Per-project execution policy for AI tools. Written to .kai/sandbox.json in the project."
       />
 
-      <SettingRow title="Mode" description={rootOnce ? `Applies to ${rootOnce}` : "No project open — open a workspace first."}>
-        <div className="flex flex-col gap-2">
+      <SettingBlock
+        title="Mode"
+        description={root ? `Applies to ${root}` : "No project open — open a workspace first."}
+      >
+        <div className="flex flex-col gap-1.5">
           {MODES.map((m) => (
             <button
               key={m.id}
               type="button"
-              disabled={!rootOnce || saving}
+              disabled={!root || saving}
               onClick={() => void onPick(m.id)}
               className={`flex flex-col items-start gap-0.5 rounded-lg border px-3 py-2 text-left transition-colors ${
                 mode === m.id
                   ? "border-primary bg-primary/10"
                   : "border-border hover:bg-accent"
-              } ${!rootOnce ? "opacity-60" : ""}`}
+              } ${!root ? "opacity-60" : ""}`}
             >
               <span className="text-[12.5px] font-medium">{m.label}</span>
               <span className="text-[11.5px] text-muted-foreground">{m.description}</span>
             </button>
           ))}
         </div>
-      </SettingRow>
+      </SettingBlock>
 
-      <SettingRow title="OS enforcement (Layer 2)" description="Detected sandboxing mechanisms for this machine. Layer 1 policy applies everywhere; these enable OS-level confinement for agent shells.">
+      <SettingBlock
+        title="OS enforcement (Layer 2)"
+        description="Detected sandboxing mechanisms for this machine. Layer 1 policy applies everywhere; these enable OS-level confinement for agent shells."
+      >
         <div className="flex flex-col gap-1.5">
           {status === null ? (
             <span className="text-[11.5px] text-muted-foreground">Detecting…</span>
@@ -173,10 +197,10 @@ export function SandboxSection() {
             </>
           )}
         </div>
-      </SettingRow>
+      </SettingBlock>
 
       {IS_WINDOWS && status?.wsl ? (
-        <SettingRow
+        <SettingBlock
           title="Windows sandbox distro"
           description="A dedicated minimal WSL distro (kai-sandbox) with host-drive automount disabled — agent shells see ONLY the project. Filesystem confinement; network isolation is not possible per-distro under WSL2."
         >
@@ -227,7 +251,7 @@ export function SandboxSection() {
               <span className="text-[11.5px] text-red-500">{wslError}</span>
             ) : null}
           </div>
-        </SettingRow>
+        </SettingBlock>
       ) : null}
     </div>
   );
