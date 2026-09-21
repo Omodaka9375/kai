@@ -1,7 +1,9 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
+import { LazyStore } from "@tauri-apps/plugin-store";
 import type { ModelInfo, ModelPricing, ModelTag } from "../config";
 import { MODELS, registerDynamicContextLimits, registerDynamicPricing, registerExternalModelLookup } from "../config";
+import { type PersistedCatalog, reviveCatalog } from "./catalog";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -22,9 +24,28 @@ type OpenRouterResponse = {
 // ── Store ───────────────────────────────────────────────────────────────────
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+/** Delay before retrying a failed catalog fetch. Static (no backoff): the
+ *  fetch is cheap and rate limits on this endpoint are generous. */
+const RETRY_DELAY_MS = 30_000;
+/** Retry a failed fetch up to 5 times before giving up until next launch. */
+const RETRY_MAX = 5;
+
+const CATALOG_STORE_PATH = "Kai-openrouter-models.json";
+const CATALOG_KEY = "catalog";
+const catalogStore = new LazyStore(CATALOG_STORE_PATH, { defaults: {}, autoSave: 100 });
+
+/** Retry timer so an in-flight retry can be identified/cancelled. */
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearRetry(): void {
+  if (retryTimer !== null) {
+    clearTimeout(retryTimer);
+    retryTimer = null;
+  }
+}
 
 type State = {
-  /** Merged ModelInfo list — hardcoded MODELS + fetched OpenRouter models, deduped. */
+  /** Merged ModelInfo list — hardcoded MODELS + persisted/fetched OpenRouter models, deduped. */
   models: ModelInfo[];
   lastFetched: number | null;
   loading: boolean;
@@ -48,10 +69,20 @@ export const useOpenRouterModelsStore = create<State>((set, get) => ({
     // Use cache if fresh.
     if (lastFetched && Date.now() - lastFetched < CACHE_TTL_MS) return;
 
+    // Seed from the last good catalog on disk before (or instead of) fetching,
+    // so a failed startup fetch doesn't drop dynamic models for the session.
+    if (lastFetched === null) {
+      await hydrateFromDisk(set);
+      const seeded = get().lastFetched;
+      if (seeded !== null && Date.now() - seeded < CACHE_TTL_MS) return;
+    }
+
     return get().refresh();
   },
 
   refresh: async () => {
+    if (get().loading) return;
+    clearRetry();
     set({ loading: true, error: null });
     try {
       const raw = await invoke<string>("openrouter_list_models");
@@ -63,13 +94,39 @@ export const useOpenRouterModelsStore = create<State>((set, get) => ({
       // models get accurate context windows and cost estimates.
       registerDynamicContextLimits(contextLimits);
       registerDynamicPricing(pricing);
-      set({ models: merged, lastFetched: Date.now(), loading: false });
+      const fetchedAt = Date.now();
+      set({ models: merged, lastFetched: fetchedAt, loading: false });
+      // Persist so every instance/process starts from the last good catalog.
+      void catalogStore
+        .set(CATALOG_KEY, {
+          fetchedAt,
+          models: parsed,
+          contextLimits,
+          pricing,
+        } satisfies PersistedCatalog)
+        .catch((e) => console.error("[openrouter-models] persist failed:", e));
     } catch (e) {
       set({ error: String(e), loading: false });
       // Keep the previous model list on error — never degrade.
+      console.error("[openrouter-models] fetch failed:", e);
+      scheduleRetry(get);
     }
   },
 }));
+
+/** Schedule up to `remaining` re-fetch attempts after a failure. The pending
+ *  timer is cancelled by any manual refresh(). */
+function scheduleRetry(get: () => State, remaining: number = RETRY_MAX): void {
+  clearRetry();
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    void get()
+      .refresh()
+      .then(() => {
+        if (get().error !== null && remaining > 1) scheduleRetry(get, remaining - 1);
+      });
+  }, RETRY_DELAY_MS);
+}
 
 // ── Parser ──────────────────────────────────────────────────────────────────
 
@@ -270,6 +327,25 @@ function parseOpenRouterModels(rawJson: string): { models: ModelInfo[]; contextL
   });
 
   return { models: out, contextLimits, pricing };
+}
+
+// ── Disk cache ──────────────────────────────────────────────────────────────
+
+/** Seed the store from the persisted catalog, if one exists and is fresh.
+ *  Called once from fetch() before any network attempt. */
+async function hydrateFromDisk(set: (partial: Partial<State>) => void): Promise<void> {
+  try {
+    const raw = await catalogStore.get<unknown>(CATALOG_KEY);
+    const catalog = reviveCatalog(raw);
+    if (!catalog) return;
+    const merged = mergeModels(catalog.models);
+    registerExternalModelLookup((id) => merged.find((m) => m.id === id));
+    registerDynamicContextLimits(catalog.contextLimits);
+    registerDynamicPricing(catalog.pricing);
+    set({ models: merged, lastFetched: catalog.fetchedAt, loading: false });
+  } catch (e) {
+    console.error("[openrouter-models] disk hydrate failed:", e);
+  }
 }
 
 // ── Merge ───────────────────────────────────────────────────────────────────
