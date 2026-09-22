@@ -96,6 +96,14 @@ pub struct HealthCounts {
 /// Process start time, used for the uptime in `health_counts`.
 static PROCESS_START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
 
+/// Capture the process start time as early as possible (called from
+/// `Builder::setup`) so `health_counts` uptime reflects true process uptime
+/// instead of time-since-first-About-visit (a lazy init on the first
+/// `health_counts` call always read 0h 0m).
+pub fn init_process_start() {
+    PROCESS_START.get_or_init(std::time::Instant::now);
+}
+
 #[tauri::command]
 pub fn health_counts(app: tauri::AppHandle) -> HealthCounts {
     let (rss, private) = process_memory_bytes();

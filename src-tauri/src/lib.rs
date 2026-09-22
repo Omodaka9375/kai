@@ -371,6 +371,11 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
+            // Capture process start for the About-page uptime counter BEFORE
+            // anything else (a lazy first-call init would start the clock at
+            // the first About visit, not process launch).
+            diagnostics::init_process_start();
+
             // Kill-on-close backstop BEFORE any child processes exist. See
             // modules/pty/job.rs — ConPTY's conhost is parented to THIS
             // process, so without a process-wide job every abnormal exit
