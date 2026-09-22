@@ -64,4 +64,25 @@ export function installConsoleLogBridge(): void {
       /* ignore */
     }
   };
+
+  // Global safety nets: uncaught exceptions and rejected promises otherwise
+  // vanish into the console (which this bridge alone does not see — the
+  // browser routes them around console.error) and never reach the log file.
+  window.addEventListener("error", (ev) => {
+    try {
+      void logError(
+        `[uncaught] ${ev.message ?? "unknown error"} ` +
+          `${ev.filename ?? ""}:${ev.lineno ?? 0}:${ev.colno ?? 0}`,
+      );
+    } catch {
+      /* ignore */
+    }
+  });
+  window.addEventListener("unhandledrejection", (ev) => {
+    try {
+      void logError(`[unhandledrejection] ${formatArg(ev.reason)}`);
+    } catch {
+      /* ignore */
+    }
+  });
 }

@@ -64,10 +64,71 @@ type ErrorLike = {
   isRetryable?: boolean;
 };
 
+/** Map raw provider/SDK error strings onto actionable display text.
+ *  Returns null when the message needs no rewrite. */
+function friendlyErrorText(msg: string): string | null {
+  if (!msg) return null;
+  // Minified production React errors: decode the ones we know, keep the rest
+  // searchable. #185 (maximum update depth) is a KAI render-loop bug — say so
+  // instead of showing a minified blob.
+  const reactCode = /Minified React error #(\d+)/.exec(msg);
+  if (reactCode) {
+    if (reactCode[1] === "185") {
+      return (
+        "UI render loop detected (React error #185 — maximum update depth " +
+        "exceeded). The conversation history is intact; press Retry. If it " +
+        "repeats, use Report an issue in Settings → About — this is a KAI " +
+        "bug, not a provider problem."
+      );
+    }
+    return (
+      `UI error (React #${reactCode[1]}) — details were written to the log. ` +
+      "Press Retry, or report an issue if it repeats."
+    );
+  }
+  if (
+    /network error|failed to fetch|fetch failed|networkerror|load failed|network request failed/i.test(
+      msg,
+    )
+  ) {
+    return (
+      "Network request failed — the endpoint could not be reached. Check " +
+      "your internet connection (VPN/proxy), or verify the provider is up. " +
+      "For a custom endpoint (Settings → Models), make sure its server is " +
+      "running and the URL is reachable."
+    );
+  }
+  if (/enginecore/i.test(msg)) {
+    return (
+      msg +
+      "\n\nEngineCore is a vLLM engine failure on the model provider, not " +
+      "your setup. On a routed model (e.g. OpenRouter) the failure is " +
+      "upstream — just Retry, or switch model/provider if it repeats. On " +
+      "your own endpoint, check its server log (usually VRAM OOM) and " +
+      "restart it."
+    );
+  }
+  if (/available credits|add credits/i.test(msg)) {
+    return (
+      msg +
+      "\n\nThe provider rejected the request for credit reasons: wait for " +
+      "in-flight requests to settle, add credits, or switch to another " +
+      "model or provider."
+    );
+  }
+  return null;
+}
+
 /** Extract actionable error details from an AI SDK RetryError chain. */
-function resolveErrorDisplay(raw: unknown): string {
+export function resolveErrorDisplay(raw: unknown): string {
   const e = raw as ErrorLike | null;
   if (!e) return "Unknown error";
+
+  // Known raw shapes (minified React errors, network failures, engine
+  // crashes, credit rejections) get actionable text before RetryError
+  // unwrapping — they arrive both bare and wrapped.
+  const friendly = friendlyErrorText(e.message ?? "");
+  if (friendly) return friendly;
 
   // Duck-typed RetryError: has an `errors` array of underlying errors.
   const errors = Array.isArray(e.errors) ? e.errors.filter(Boolean) : [];
@@ -124,7 +185,9 @@ function resolveErrorDisplay(raw: unknown): string {
   }
 
   // No status code — surface the underlying message if it's more specific.
-  if (providerMsg && providerMsg !== e.message) return providerMsg;
+  if (providerMsg && providerMsg !== e.message) {
+    return friendlyErrorText(providerMsg) ?? providerMsg;
+  }
   return e.message ?? String(raw);
 }
 

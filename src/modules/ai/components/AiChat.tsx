@@ -32,7 +32,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { SLASH_COMMANDS, Kai_CMD_RE } from "../lib/slashCommands";
 import { Spinner } from "@/components/ui/spinner";
-import { useChatStore, sendMessage, respondToApprovalStandalone } from "../store/chatStore";
+import { useChatStore, sendMessage, respondToApprovalStandalone, resolveErrorDisplay } from "../store/chatStore";
 import type {
   ChatStatus,
   DynamicToolUIPart,
@@ -279,6 +279,13 @@ export function AiChatView({
     );
   }, [patchAgentMeta]);
 
+  // Decode the raw error (minified React codes, bare network failures,)
+  // into actionable text — same resolver as the agent's onError path.
+  const errorDisplay = useMemo(
+    () => (error ? resolveErrorDisplay(error) : ""),
+    [error],
+  );
+
   const onApproval = useCallback(
     (id: string, approved: boolean) => respondToApprovalStandalone(id, approved),
     [],
@@ -366,16 +373,28 @@ export function AiChatView({
         {error && (
           <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
             <div className="font-medium">Something went wrong.</div>
-            <div className="mt-0.5 leading-relaxed opacity-90">
-              {error.message}
+            <div className="mt-0.5 whitespace-pre-wrap leading-relaxed opacity-90">
+              {errorDisplay}
             </div>
-            <button
-              type="button"
-              onClick={clearError}
-              className="mt-1 underline opacity-80 hover:opacity-100"
-            >
-              Dismiss
-            </button>
+            <div className="mt-1.5 flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  clearError();
+                  onContinue();
+                }}
+                className="rounded-md border border-destructive/50 px-2 py-0.5 font-medium transition-colors hover:bg-destructive/15"
+              >
+                Retry
+              </button>
+              <button
+                type="button"
+                onClick={clearError}
+                className="underline opacity-80 hover:opacity-100"
+              >
+                Dismiss
+              </button>
+            </div>
           </div>
         )}
       </ConversationContent>
