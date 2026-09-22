@@ -542,6 +542,7 @@ pub fn run() {
             diagnostics::health_counts,
             get_launch_dir,
             open_settings_window,
+            modules::updater::update_install,
             pick_project_folder,
             secrets::secrets_get,
             secrets::secrets_set,

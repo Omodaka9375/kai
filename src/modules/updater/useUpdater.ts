@@ -1,4 +1,5 @@
 import { getVersion } from "@tauri-apps/api/app";
+import { invoke, Channel } from "@tauri-apps/api/core";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { useCallback, useEffect, useState } from "react";
@@ -115,25 +116,30 @@ export function useUpdater({ autoCheck = true }: HookOptions = {}) {
 
   const install = useCallback(async () => {
     if (status.kind !== "available") return;
-    const { update } = status;
     let total: number | null = null;
     let downloaded = 0;
     setStatus({ kind: "downloading", downloaded: 0, contentLength: null });
     try {
-      await update.downloadAndInstall((event) => {
-        if (event.event === "Started") {
-          total = event.data.contentLength ?? null;
-          setStatus({
-            kind: "downloading",
-            downloaded: 0,
-            contentLength: total,
-          });
-        } else if (event.event === "Progress") {
-          downloaded += event.data.chunkLength;
-          setStatus({ kind: "downloading", downloaded, contentLength: total });
-        } else if (event.event === "Finished") {
-          setStatus({ kind: "ready" });
-        }
+      // Custom command (not update.downloadAndInstall): the Rust side
+      // attaches on_before_exit to disarm the process-wide kill-on-close
+      // job before the installer is spawned — without it, the app's exit
+      // kills the inherited-job installer and the update never lands
+      // (broke 1.3.6 → 1.3.7 in-app updates on Windows).
+      await invoke("update_install", {
+        onEvent: new Channel<{
+          event: "Started" | "Progress" | "Finished";
+          data: { contentLength?: number | null; chunkLength?: number };
+        }>((msg) => {
+          if (msg.event === "Started") {
+            total = msg.data.contentLength ?? null;
+            setStatus({ kind: "downloading", downloaded: 0, contentLength: total });
+          } else if (msg.event === "Progress") {
+            downloaded += msg.data.chunkLength ?? 0;
+            setStatus({ kind: "downloading", downloaded, contentLength: total });
+          } else if (msg.event === "Finished") {
+            setStatus({ kind: "ready" });
+          }
+        }),
       });
       await relaunch();
     } catch (err) {

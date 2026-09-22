@@ -9,5 +9,6 @@ pub mod pty;
 pub mod sandbox;
 pub mod secrets;
 pub mod shell;
+pub mod updater;
 pub mod whisper;
 pub mod workspace;

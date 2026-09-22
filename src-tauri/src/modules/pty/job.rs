@@ -68,6 +68,48 @@ fn assign_to_job(job: HANDLE, pid: u32) -> io::Result<()> {
 /// If this process was already assigned to a job by its launcher (some
 /// IDEs do), assignment fails — log and continue: the per-session jobs
 /// still cover the shell trees, only the conhost backstop is lost.
+/// The process-wide kill-on-close job, if installed. Held (never closed)
+/// for the process lifetime; addressable so the updater can disarm it right
+/// before an intentional exit. Raw HANDLE is not Send/Sync — wrap it.
+static PROCESS_WIDE_JOB: std::sync::OnceLock<ProcessWideJob> = std::sync::OnceLock::new();
+
+struct ProcessWideJob(HANDLE);
+unsafe impl Send for ProcessWideJob {}
+unsafe impl Sync for ProcessWideJob {}
+
+/// Disarm KILL_ON_JOB_CLOSE before an intentional update exit.
+///
+/// tauri-plugin-updater launches the NSIS installer with `ShellExecuteW`
+/// FROM THIS PROCESS and then calls `std::process::exit(0)`. The installer
+/// inherits this job's membership, so the exit would kill the installer
+/// mid-install (observed with 1.3.6→1.3.7: app closes, nothing happens, exe
+/// untouched). Clearing the flag lets the installer survive our exit.
+/// Per-session PtyJobs keep their own kill-on-close, so shell trees are still
+/// reaped; only the conhost backstop is lost for this one exit.
+pub fn clear_kill_on_close() {
+    let Some(&ProcessWideJob(job)) = PROCESS_WIDE_JOB.get() else {
+        return;
+    };
+    unsafe {
+        // LimitFlags = 0 clears kill-on-close — the only flag we ever set.
+        let info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = zeroed();
+        let ok = SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            &info as *const _ as *const _,
+            size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        );
+        if ok == 0 {
+            log::warn!(
+                "failed to clear kill-on-close before update: {}",
+                io::Error::last_os_error()
+            );
+        } else {
+            log::info!("kill-on-close disarmed for update exit");
+        }
+    }
+}
+
 pub fn install_process_wide_kill_on_close() {
     let job = match new_kill_on_close_job() {
         Ok(h) => h,
@@ -88,6 +130,7 @@ pub fn install_process_wide_kill_on_close() {
     // process lifetime. The OS closes it on process death, which is the
     // exact trigger for KILL_ON_JOB_CLOSE. (HANDLE is a raw pointer — no
     // Drop, so nothing to forget; it stays open by not closing it.)
+    let _ = PROCESS_WIDE_JOB.set(ProcessWideJob(job));
     log::info!("process-wide kill-on-close job active (pid={})", std::process::id());
 }
 
