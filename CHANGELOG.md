@@ -4,6 +4,15 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.3.7]
+
+- OpenRouter model list is persisted to disk and seeded at startup, so a failed startup sync no longer drops dynamic models (e.g. GLM 5.3) for that session; failed syncs retry and log. GLM 5.3 / Flash / FlashX added as built-in models (Z.ai + OpenRouter, verified context limits and pricing).
+- Error card now decodes raw errors (network failures, vLLM "EngineCore" provider crashes, minified React render-loop codes, credit rejections) into actionable text, with a Retry button; uncaught frontend errors are logged to the rotating log file.
+- About page uptime now measures real process lifetime (was time since first About visit).
+- Sandbox: dropped the detection-only Docker/devcontainer capability row.
+
+---
+
 ## [1.3.6]
 
 ### Added
