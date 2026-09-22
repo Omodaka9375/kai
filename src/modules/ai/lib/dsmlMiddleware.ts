@@ -23,6 +23,47 @@
 
 import { generateId, type LanguageModelMiddleware } from "ai";
 
+// ── Stream stall watchdog ──────────────────────────────────────────────
+// A provider stream that wedges without closing (engine died mid-stream,
+// proxy hung, connection half-open) leaves the agent "streaming" forever:
+// all visible text is complete but the stream never ends, so the run never
+// finishes and Stop is the only exit. Neither native fetch nor the Rust
+// proxy applies an idle timeout, so enforce one here — this pump wraps every
+// provider request for every provider. Tool execution happens BETWEEN
+// provider requests (after this stream closes), so slow tools are unaffected.
+//
+// First chunk gets a longer budget: reasoning models with buffered thinking
+// can legitimately emit nothing for minutes before the first token.
+const STALL_FIRST_CHUNK_MS = 300_000; // 5 min before any data
+const STALL_INTER_CHUNK_MS = 120_000; // 2 min between chunks once flowing
+const STALL_MESSAGE =
+  "Model stream stalled — the provider stopped sending data mid-response " +
+  "(no bytes for " +
+  `${Math.round(STALL_INTER_CHUNK_MS / 60_000)} min). ` +
+  "The engine or connection likely died without closing the stream. " +
+  "Try: Retry (re-opens a fresh connection), or switch model/provider.";
+
+async function readWithStallWatchdog(
+  reader: ReadableStreamDefaultReader<Part>,
+  sawAnyChunk: boolean,
+): Promise<ReadableStreamReadResult<Part>> {
+  const timeoutMs = sawAnyChunk ? STALL_INTER_CHUNK_MS : STALL_FIRST_CHUNK_MS;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(STALL_MESSAGE)),
+      timeoutMs,
+    );
+  });
+  try {
+    // Promise.race keeps a then-handler on `reader.read()`, so a late
+    // rejection after the race settles is handled (no unhandledrejection).
+    return await Promise.race([reader.read(), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ── Types ──────────────────────────────────────────────────────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -250,9 +291,13 @@ export function createDsmlMiddleware(): LanguageModelMiddleware {
       const transformed = new ReadableStream<Part>({
         async start(controller) {
           const reader = original.getReader();
+          let sawAnyChunk = false;
           try {
             while (true) {
-              const { done, value } = await reader.read();
+              const { done, value } = await readWithStallWatchdog(
+                reader,
+                sawAnyChunk,
+              );
               if (done) {
                 if (!sawToolCall) {
                   tryInjectDsml(controller, reasonBuf, textBuf, provider);
@@ -261,6 +306,7 @@ export function createDsmlMiddleware(): LanguageModelMiddleware {
                 controller.close();
                 return;
               }
+              sawAnyChunk = true;
 
               if (value?.type === "tool-call" || value?.type === "tool-input-start") {
                 sawToolCall = true;
@@ -300,8 +346,11 @@ export function createDsmlMiddleware(): LanguageModelMiddleware {
               controller.enqueue(value);
             }
           } catch (err) {
-            controller.error(err);
-          }
+              // Release the underlying HTTP stream so the socket doesn't
+              // linger (a wedged provider will never close it itself).
+              void reader.cancel().catch(() => undefined);
+              controller.error(err);
+            }
         },
       });
 
