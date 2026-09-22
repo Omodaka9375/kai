@@ -4,6 +4,12 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.3.8]
+
+- Fixed in-app updates on Windows: the kill-on-close Job Object killed the NSIS installer the moment the app exited for the update.
+
+---
+
 ## [1.3.7]
 
 - OpenRouter model list is persisted to disk and seeded at startup, so a failed startup sync no longer drops dynamic models (e.g. GLM 5.3) for that session; failed syncs retry and log. GLM 5.3 / Flash / FlashX added as built-in models (Z.ai + OpenRouter, verified context limits and pricing).
