@@ -199,7 +199,11 @@ function Body({
   const c = useComposer();
 
   const chat = useMemo(() => getOrCreateChat(sessionId), [sessionId]);
-  const helpers = useChat<UIMessage>({ chat });
+  // Same rationale as AgentRunBridge: the mini window is always mounted and
+  // shares the Chat with the main bridge — an unthrottled subscriber here
+  // would keep per-chunk setStates (and #185 re-entrancy) alive even with
+  // the bridge throttled.
+  const helpers = useChat<UIMessage>({ chat, experimental_throttle: 50 });
 
   return (
     <>

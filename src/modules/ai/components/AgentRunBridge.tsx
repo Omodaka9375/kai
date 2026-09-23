@@ -79,6 +79,14 @@ function Bridge({
   const chat = useMemo(() => getOrCreateChat(sessionId), [sessionId]);
   const { status, messages, addToolApprovalResponse } = useChat<UIMessage>({
     chat,
+    // Cap message-notification re-renders at ~20fps. During thinking bursts
+    // the SDK fires replaceMessage (with a structuredClone of the whole
+    // message) per chunk; unthrottled, several setStates land inside one
+    // commit window, chain as re-entrant sync flushes, and React throws
+    // "Maximum update depth exceeded" (#185) mid-stream. 50ms is
+    // imperceptible (text parts already batch at 12fps) and the trailing
+    // edge guarantees the final state lands.
+    experimental_throttle: 50,
   });
   const patch = useChatStore((s) => s.patchAgentMeta);
   const openMini = useChatStore((s) => s.openMini);
