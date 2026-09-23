@@ -4,6 +4,12 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.3.9]
+
+- Fixed React #185 render-loop error
+
+---
+
 ## [1.3.8]
 
 - Fixed in-app updates on Windows: the kill-on-close Job Object killed the NSIS installer the moment the app exited for the update.
