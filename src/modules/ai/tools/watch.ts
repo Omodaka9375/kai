@@ -155,9 +155,15 @@ async function poll(w: WatchState): Promise<void> {
         injectWatchResult(w, result);
       }
     }
-  } catch {
-    // Poll failed — log but don't kill the watch.
-    console.debug(`[kai] watch ${w.id} poll failed (command: ${w.command})`);
+  } catch (e) {
+    // Poll failed — log but don't kill the watch. `console.warn` (not debug)
+    // so it surfaces in the on-disk log via the console bridge: a watch that
+    // never fires because its shell session is dead / the command errored was
+    // previously invisible, leaving the user (and the model) with no signal.
+    console.warn(
+      `[kai] watch ${w.id} poll failed (command: ${w.command}):`,
+      e instanceof Error ? e.message : e,
+    );
   }
 }
 

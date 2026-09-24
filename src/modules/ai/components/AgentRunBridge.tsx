@@ -7,6 +7,7 @@ import { resolvePath } from "../tools/tools";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   FILE_MUTATION_TOOLS,
+  flushPendingWatchWakes,
   flushPersist,
   getOrCreateChat,
   useChatStore,
@@ -193,6 +194,16 @@ function Bridge({
   useEffect(() => {
     if (approvalsPending > 0) openMini();
   }, [approvalsPending, openMini]);
+
+  // ---- Watch wake-up flush --------------------------------------------------
+  // A watch that fired while the agent was streaming/submitted (or paused on an
+  // approval) couldn't wake the model inline — the in-flight run had already
+  // snapshotted its messages. Once this session settles back to idle, flush any
+  // queued watch wake so the model reacts to the change it was told to watch.
+  useEffect(() => {
+    if (status === "submitted" || status === "streaming") return;
+    flushPendingWatchWakes(sessionId);
+  }, [status, sessionId]);
 
   // ---- Auto-approve effect --------------------------------------------------
   const autoApprove = useChatStore((s) => s.autoApprove);
