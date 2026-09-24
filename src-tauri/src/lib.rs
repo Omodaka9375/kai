@@ -354,13 +354,25 @@ pub fn run() {
     // Distinguish concurrent instances so their mutable app-global artifacts
     // (log rotation, crash snapshots) never collide.
     let instance_id = format!("{}", std::process::id());
-    tauri::Builder::default()
-        // Single instance MUST be the first registered plugin: a second
-        // launch (e.g. "Open with KAI" from Explorer) is handed to the
-        // running instance instead of starting a whole new process — which
-        // would re-hydrate MCP servers and, for stdio OAuth servers like
-        // Linear, re-open the browser auth flow every time.
-        .plugin(tauri_plugin_single_instance::init(
+
+    // Multi-instance policy. KAI is multi-instance BY DESIGN for side-by-side
+    // projects: window geometry, AI sessions, and the taskbar title are all
+    // keyed per project. So:
+    //   - launched WITH a project dir (Explorer "Open with KAI", a shortcut
+    //     carrying a path) → this process becomes its own full instance;
+    //   - launched WITHOUT one (double-clicking the exe, a taskbar pin) →
+    //     just focus the already-running instance instead of stacking a
+    //     duplicate empty window.
+    // MCP supervisor safety comes from lib/windowRole (one owner per
+    // process), not from forcing a single process.
+    let launched_with_project = parse_launch_dir().is_some();
+    let builder = tauri::Builder::default();
+    let builder = if launched_with_project {
+        builder
+    } else {
+        // When registered, MUST stay the first plugin so a second no-arg
+        // launch is handed to us before anything else initializes.
+        builder.plugin(tauri_plugin_single_instance::init(
             |app, argv, _cwd| {
                 let dir = parse_launch_dir_from(argv.into_iter().skip(1));
                 if let Some(window) = app.get_webview_window("main") {
@@ -368,15 +380,20 @@ pub fn run() {
                     let _ = window.unminimize();
                     let _ = window.set_focus();
                     if let Some(dir) = dir {
-                        // Open the forwarded project in the running
-                        // instance (frontend listens and resets the
-                        // workspace, same path as File > Open Project).
+                        // Defensive: a dir arg can still reach the callback
+                        // when the second launch was flag-filtered to one.
+                        // Open it in the running instance (frontend listens,
+                        // same path as File > Open Project).
                         let _ = window.emit("Kai://open-project", &dir);
                         log::info!("single-instance: forwarded open-project {dir}");
+                    } else {
+                        log::info!("single-instance: focused existing window");
                     }
                 }
             },
         ))
+    };
+    builder
         .plugin(tauri_plugin_process::init())
         // Skip restoring VISIBLE — frontend calls window.show() after first
         // paint so the user never sees a transparent window-shadow flash on
