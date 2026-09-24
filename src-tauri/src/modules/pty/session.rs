@@ -1,5 +1,5 @@
 use std::io::{Read, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -21,8 +21,7 @@ const READ_BUF: usize = 16 * 1024;
 const MAX_PENDING: usize = 4 * 1024 * 1024;
 // Hard reset (ESC c) + dim notice. Written verbatim into the stream when
 // we're forced to discard backlog.
-const OVERFLOW_NOTICE: &[u8] =
-    b"\x1bc\x1b[2m[KAI: dropped output due to backpressure]\x1b[0m\r\n";
+const OVERFLOW_NOTICE: &[u8] = b"\x1bc\x1b[2m[KAI: dropped output due to backpressure]\x1b[0m\r\n";
 
 pub struct Session {
     // Field drop order is intentional. Rust drops fields top-to-bottom:
@@ -56,8 +55,43 @@ impl Drop for Session {
 }
 static SPAWN_LOCK: Mutex<()> = Mutex::new(());
 
+/// Number of PTY session teardowns currently in flight — i.e. threads running
+/// a full `Session` drop, whose `master` field calls `ClosePseudoConsole` on
+/// Windows (can block for hundreds of ms while conhost drains). `spawn` drains
+/// this before calling `openpty` so a fresh console can't be handed a stalled
+/// output pipe while old consoles are still tearing down — the classic
+/// project-reopen race (`pty_close` fires detached teardown threads and the
+/// new tab's `pty_open` lands microseconds later).
+static TEARDOWNS_IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
+
+/// RAII marker for an in-flight session teardown. Increment on create,
+/// decrement on drop — the decrement must happen AFTER the `Session` drop
+/// completes (including field teardown, where `ClosePseudoConsole` runs), so
+/// keep the guard alive for the whole drop, not just the `Drop::drop` body.
+pub(super) struct TeardownGuard;
+
+impl Drop for TeardownGuard {
+    fn drop(&mut self) {
+        TEARDOWNS_IN_FLIGHT.fetch_sub(1, Ordering::Release);
+    }
+}
+
+/// Mark the start of a PTY teardown on the calling thread. Hold the returned
+/// guard until the session is fully dropped.
+pub(super) fn begin_teardown() -> TeardownGuard {
+    TEARDOWNS_IN_FLIGHT.fetch_add(1, Ordering::AcqRel);
+    TeardownGuard
+}
+
 #[cfg(windows)]
 const CONPTY_SETTLE_MS: u64 = 50;
+
+/// How long `spawn` will wait for in-flight session teardowns to drain before
+/// creating a new ConPTY anyway. Bounded on purpose: a wedged teardown must
+/// only DELAY a spawn, never block it forever — an earlier fix held
+/// `SPAWN_LOCK` across the blocking close and deadlocked the whole app.
+#[cfg(windows)]
+const CONPTY_TEARDOWN_DRAIN_MS: u64 = 500;
 
 /// Tracks the last PTY spawn timestamp to avoid racing ConPTY.
 /// Used instead of holding SPAWN_LOCK during the settle sleep.
@@ -78,6 +112,7 @@ fn cleanup_failed_spawn(
     let _ = thread::Builder::new()
         .name("KAI-pty-spawn-fail".into())
         .spawn(move || {
+            let _t = begin_teardown();
             let _ = child.kill();
             drop(master);
         });
@@ -96,6 +131,31 @@ pub fn spawn(
     // ConPTY spawns can leave the second PTY's output pipe stalled (conhost
     // hasn't finished wiring the first session's pipes).
     let _spawn_guard = mutex_lock(&SPAWN_LOCK);
+
+    // Wait for in-flight session teardowns (detached `pty_close` drop threads)
+    // to finish before creating a new console. Overlapping `openpty` with a
+    // still-draining `ClosePseudoConsole` can wedge the new session's output
+    // pipe — the pane renders but never receives a byte (project reopen).
+    // The wait is bounded (see CONPTY_TEARDOWN_DRAIN_MS) and the teardown
+    // threads never touch `SPAWN_LOCK`, so this can block no longer than the
+    // deadline — no deadlock is possible in either direction.
+    #[cfg(windows)]
+    {
+        let deadline = Instant::now() + Duration::from_millis(CONPTY_TEARDOWN_DRAIN_MS);
+        loop {
+            let n = TEARDOWNS_IN_FLIGHT.load(Ordering::Acquire);
+            if n == 0 || Instant::now() >= deadline {
+                if n > 0 {
+                    log::warn!(
+                        "pty spawn proceeding with {n} teardown(s) still draining \
+                         after {CONPTY_TEARDOWN_DRAIN_MS}ms"
+                    );
+                }
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
 
     let pty_system = native_pty_system();
     let size = PtySize {
@@ -240,7 +300,10 @@ pub fn spawn(
             let s = session_fail.clone();
             thread::Builder::new()
                 .name("KAI-pty-spawn-fail".into())
-                .spawn(move || drop(s))
+                .spawn(move || {
+                    let _t = begin_teardown();
+                    drop(s);
+                })
                 .ok();
             format!("spawn pty reader thread: {e}")
         })?;
@@ -274,7 +337,10 @@ pub fn spawn(
             let s = session_fail.clone();
             thread::Builder::new()
                 .name("KAI-pty-spawn-fail".into())
-                .spawn(move || drop(s))
+                .spawn(move || {
+                    let _t = begin_teardown();
+                    drop(s);
+                })
                 .ok();
             format!("spawn pty flusher thread: {e}")
         })?;
@@ -288,7 +354,10 @@ pub fn spawn(
             let code = match child.wait() {
                 Ok(status) => {
                     let c = status.exit_code() as i32;
-                    log::info!("pty child exited with code={c} after {}ms", spawn_at.elapsed().as_millis());
+                    log::info!(
+                        "pty child exited with code={c} after {}ms",
+                        spawn_at.elapsed().as_millis()
+                    );
                     c
                 }
                 Err(e) => {
@@ -348,7 +417,10 @@ pub fn spawn(
             let s = session_fail;
             thread::Builder::new()
                 .name("KAI-pty-spawn-fail".into())
-                .spawn(move || drop(s))
+                .spawn(move || {
+                    let _t = begin_teardown();
+                    drop(s);
+                })
                 .ok();
             format!("spawn pty waiter thread: {e}")
         })?;

@@ -46,8 +46,7 @@ impl Drop for PtyState {
         // hundreds of ms. When the app shuts down and Tauri drops PtyState,
         // we'd otherwise block the main thread for every active PTY. Spawn each
         // session's drop on a background thread, matching what pty_close does.
-        let sessions =
-            std::mem::take(&mut *rwlock_write(&self.sessions));
+        let sessions = std::mem::take(&mut *rwlock_write(&self.sessions));
         if sessions.is_empty() {
             return;
         }
@@ -58,6 +57,10 @@ impl Drop for PtyState {
                 .name(name)
                 .spawn(move || {
                     let t0 = std::time::Instant::now();
+                    // Mark teardown in flight so a concurrent `pty_open` (new
+                    // project's first tab) waits for `ClosePseudoConsole` to
+                    // finish before creating the replacement console.
+                    let _t = session::begin_teardown();
                     drop(session);
                     log::info!(
                         "pty session id={id} dropped in {}ms (shutdown)",
@@ -85,8 +88,8 @@ pub fn pty_open(
     on_exit: Channel<i32>,
 ) -> Result<u32, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
-    let (session, _) =
-        session::spawn(cols, rows, cwd, workspace, shell, on_data, on_exit).map_err(|e| {
+    let (session, _) = session::spawn(cols, rows, cwd, workspace, shell, on_data, on_exit)
+        .map_err(|e| {
             log::error!("pty_open failed: {e}");
             e
         })?;
@@ -104,7 +107,9 @@ pub fn pty_open(
         }
     }
     let id = id.ok_or_else(|| {
-        format!("failed to allocate pty id after {ID_ALLOC_BOUND} attempts — too many live sessions?")
+        format!(
+            "failed to allocate pty id after {ID_ALLOC_BOUND} attempts — too many live sessions?"
+        )
     })?;
     rwlock_write(&state.sessions).insert(id, session);
     log::info!("pty opened id={id} cols={cols} rows={rows}");
@@ -180,6 +185,10 @@ pub fn pty_close(state: tauri::State<PtyState>, id: u32) -> Result<(), String> {
             .name(format!("KAI-pty-drop-{id}"))
             .spawn(move || {
                 let t0 = std::time::Instant::now();
+                // Mark teardown in flight so a concurrent `pty_open` (new
+                // project's first tab) waits for `ClosePseudoConsole` to
+                // finish before creating the replacement console.
+                let _t = session::begin_teardown();
                 drop(s);
                 log::info!(
                     "pty session id={id} dropped in {}ms",

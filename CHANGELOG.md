@@ -12,7 +12,7 @@ All notable changes to the KAI terminal emulator project are documented in this 
 - AI: merge any session (fork) into another; "shadow session" is now labeled "detached copy" in the UI.
 - AI: watch wake-ups are queued instead of dropped when the agent is mid-turn, so watches fire reliably.
 - Fixed stale/missing project memory (case-sensitive keying) and memory/checkpoints writing to the detached copy instead of the real root.
-- Fixed blank terminals on project open (serialized ConPTY teardown with spawn).
+- Fixed blank terminals on project open (new ConPTY now waits for old console teardowns to drain, bounded).
 
 ---
 
