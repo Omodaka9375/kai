@@ -228,7 +228,14 @@ fn get_launch_dir(state: State<'_, LaunchDir>) -> Option<String> {
 }
 
 fn parse_launch_dir() -> Option<String> {
-    for arg in std::env::args().skip(1) {
+    parse_launch_dir_from(std::env::args().skip(1))
+}
+
+/// Extract the first directory-looking argument (used both for this
+/// process's own argv and, via the single-instance callback, for the argv
+/// of a second instance that was forwarded here).
+fn parse_launch_dir_from<I: Iterator<Item = String>>(args: I) -> Option<String> {
+    for arg in args {
         if arg.starts_with('-') {
             continue;
         }
@@ -348,6 +355,28 @@ pub fn run() {
     // (log rotation, crash snapshots) never collide.
     let instance_id = format!("{}", std::process::id());
     tauri::Builder::default()
+        // Single instance MUST be the first registered plugin: a second
+        // launch (e.g. "Open with KAI" from Explorer) is handed to the
+        // running instance instead of starting a whole new process — which
+        // would re-hydrate MCP servers and, for stdio OAuth servers like
+        // Linear, re-open the browser auth flow every time.
+        .plugin(tauri_plugin_single_instance::init(
+            |app, argv, _cwd| {
+                let dir = parse_launch_dir_from(argv.into_iter().skip(1));
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                    if let Some(dir) = dir {
+                        // Open the forwarded project in the running
+                        // instance (frontend listens and resets the
+                        // workspace, same path as File > Open Project).
+                        let _ = window.emit("Kai://open-project", &dir);
+                        log::info!("single-instance: forwarded open-project {dir}");
+                    }
+                }
+            },
+        ))
         .plugin(tauri_plugin_process::init())
         // Skip restoring VISIBLE — frontend calls window.show() after first
         // paint so the user never sees a transparent window-shadow flash on

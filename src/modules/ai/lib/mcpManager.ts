@@ -1,7 +1,20 @@
 import { createMCPClient, type MCPClient } from "@ai-sdk/mcp";
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { emit, listen } from "@tauri-apps/api/event";
+import { isMainWindow } from "@/lib/windowRole";
 import type { McpServerConfig } from "./mcp";
 import { createProxyFetch } from "./proxyFetch";
+
+/** Global (cross-webview) MCP status broadcast, owner → mirrors. */
+export const MCP_STATUS_EVENT = "Kai://mcp-status";
+/** Global request from a mirror webview (Settings) to the owner window. */
+export const MCP_CONTROL_EVENT = "Kai://mcp-control";
+
+export type McpControlAction =
+  | { kind: "connect"; serverId: string }
+  | { kind: "disconnect"; serverId: string }
+  | { kind: "reconnect"; serverId: string }
+  | { kind: "connectAll" };
 
 // ── Tauri stdio transport ──────────────────────────────────────────────────
 
@@ -139,14 +152,78 @@ class McpClientManager {
 
   private notify(id: string, status: McpServerStatus) {
     for (const cb of this.statusListeners) cb(id, status);
+    this.broadcastGlobal(id, status);
+  }
+
+  /**
+   * Cross-window status sync. The main window owns every MCP process; the
+   * Settings webview shows a mirror. Only the owner broadcasts — a mirror
+   * re-emitting what it receives would loop.
+   */
+  private broadcastGlobal(id: string, status: McpServerStatus) {
+    if (!isMainWindow()) return;
+    void emit(MCP_STATUS_EVENT, { id, status }).catch(() => {});
   }
 
   /** Connection timeout (ms). MCP servers that don't respond within this
    *  window are marked as errored instead of hanging indefinitely. */
   static CONNECTION_TIMEOUT_MS = 30_000;
 
+  /**
+   * Wire cross-window plumbing once per realm:
+   * - Owner (main): execute control requests from Settings.
+   * - Mirror (settings): apply status broadcasts from the owner.
+   */
+  installCrossWindowSync(configLoader: () => Promise<McpServerConfig[]>): void {
+    if (this.syncInstalled) return;
+    this.syncInstalled = true;
+
+    if (isMainWindow()) {
+      // Owner: Settings asks us to act on servers it can't touch.
+      void listen<McpControlAction>(MCP_CONTROL_EVENT, async (event) => {
+        const action = event.payload;
+        const servers = await configLoader();
+        const cfg =
+          action.kind === "connectAll"
+            ? undefined
+            : servers.find((s) => s.id === action.serverId);
+        switch (action.kind) {
+          case "connect":
+          case "reconnect":
+            if (cfg) await this.connect(cfg);
+            break;
+          case "disconnect":
+            if (cfg) await this.disconnect(cfg.id);
+            break;
+          case "connectAll":
+            await this.connectAll(servers);
+            break;
+        }
+      });
+    } else {
+      // Mirror: apply owner status broadcasts into our listeners (store).
+      void listen<{ id: string; status: McpServerStatus }>(
+        MCP_STATUS_EVENT,
+        (event) => {
+          const { id, status } = event.payload;
+          for (const cb of this.statusListeners) cb(id, status);
+        },
+      );
+    }
+  }
+
+  private syncInstalled = false;
+
   /** Connect to a single MCP server. */
   async connect(config: McpServerConfig): Promise<void> {
+    // Only the main window owns MCP server processes. Other webviews
+    // (Settings) share this module graph but would spawn a SECOND stdio
+    // server — e.g. Linear's OAuth localhost callback port is held by the
+    // first instance, so the duplicate breaks the flow and the user gets
+    // re-authenticated on every Settings open. Never spawn from here.
+    if (!isMainWindow()) {
+      return;
+    }
     // Disconnect existing connection for this id first.
     await this.disconnect(config.id);
 
@@ -338,6 +415,18 @@ class McpClientManager {
       out.set(id, managed.status);
     }
     return out;
+  }
+
+  /**
+   * Push current statuses to all listeners WITHOUT touching any server
+   * process. Used by non-main webviews (Settings): their module graph holds
+   * no clients, so this surfaces "disconnected" honestly until the main
+   * window broadcasts — but it never spawns anything (see `connect`).
+   */
+  refreshAllStatuses(): void {
+    for (const [id, managed] of this.clients) {
+      this.notify(id, managed.status);
+    }
   }
 
   /** List connected server names (for system prompt). */

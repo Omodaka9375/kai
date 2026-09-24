@@ -1,5 +1,6 @@
 import { emit, listen } from "@tauri-apps/api/event";
 import { create } from "zustand";
+import { isMainWindow } from "@/lib/windowRole";
 import {
   loadMcpServers,
   newMcpServerId,
@@ -8,7 +9,9 @@ import {
 } from "../lib/mcp";
 import {
   mcpManager,
+  MCP_CONTROL_EVENT,
   type McpConnectionStatus,
+  type McpControlAction,
   type McpServerStatus,
 } from "../lib/mcpManager";
 
@@ -39,6 +42,17 @@ function broadcast(): void {
   void emit(CHANGED_EVENT);
 }
 
+/**
+ * Ask the main window to act on an MCP server. In the main window this is a
+ * direct call; in the Settings webview it's a global event the owner
+ * executes (the settings realm cannot spawn server processes — see
+ * lib/windowRole.ts).
+ */
+function requestControl(action: McpControlAction): void {
+  if (isMainWindow()) return; // direct calls are made by the callers below.
+  void emit(MCP_CONTROL_EVENT, action);
+}
+
 export const useMcpStore = create<McpState>((set, get) => {
   // Listen for status updates from the manager.
   mcpManager.onStatusChange((serverId, status) => {
@@ -58,8 +72,16 @@ export const useMcpStore = create<McpState>((set, get) => {
       const servers = await loadMcpServers();
       set({ servers, hydrated: true });
 
-      // Auto-connect enabled servers on startup.
-      void mcpManager.connectAll(servers);
+      // Cross-window sync: owner executes control requests / broadcasts
+      // statuses; mirrors (Settings) apply broadcasts. Safe to call in both
+      // realms — each installs only its own side.
+      mcpManager.installCrossWindowSync(loadMcpServers);
+
+      if (isMainWindow()) {
+        void mcpManager.connectAll(servers);
+      } else {
+        mcpManager.refreshAllStatuses();
+      }
 
       void listen(CHANGED_EVENT, async () => {
         const fresh = await loadMcpServers();
@@ -72,7 +94,8 @@ export const useMcpStore = create<McpState>((set, get) => {
       set({ servers: next });
       void saveMcpServers(next).then(broadcast);
       if (server.enabled) {
-        void mcpManager.connect(server);
+        if (isMainWindow()) void mcpManager.connect(server);
+        else requestControl({ kind: "connect", serverId: server.id });
       }
     },
 
@@ -84,9 +107,11 @@ export const useMcpStore = create<McpState>((set, get) => {
       void saveMcpServers(next).then(broadcast);
       // Reconnect if enabled, disconnect if disabled.
       if (server.enabled) {
-        void mcpManager.connect(server);
+        if (isMainWindow()) void mcpManager.connect(server);
+        else requestControl({ kind: "reconnect", serverId: server.id });
       } else {
-        void mcpManager.disconnect(server.id);
+        if (isMainWindow()) void mcpManager.disconnect(server.id);
+        else requestControl({ kind: "disconnect", serverId: server.id });
       }
     },
 
@@ -94,7 +119,8 @@ export const useMcpStore = create<McpState>((set, get) => {
       const next = get().servers.filter((s) => s.id !== id);
       set({ servers: next });
       void saveMcpServers(next).then(broadcast);
-      void mcpManager.disconnect(id);
+      if (isMainWindow()) void mcpManager.disconnect(id);
+      else requestControl({ kind: "disconnect", serverId: id });
     },
 
     toggleServer: (id) => {
@@ -105,17 +131,21 @@ export const useMcpStore = create<McpState>((set, get) => {
     },
 
     connectAll: async () => {
-      await mcpManager.connectAll(get().servers);
+      if (isMainWindow()) await mcpManager.connectAll(get().servers);
+      else requestControl({ kind: "connectAll" });
     },
 
     disconnectAll: async () => {
       await mcpManager.disconnectAll();
+      // Non-main realms hold no clients; ask the owner too.
+      if (!isMainWindow()) requestControl({ kind: "connectAll" });
     },
 
-    reconnect: async (id: string) => {
+    reconnect: async (id) => {
       const server = get().servers.find((s) => s.id === id);
       if (!server) return;
-      await mcpManager.connect(server);
+      if (isMainWindow()) await mcpManager.connect(server);
+      else requestControl({ kind: "reconnect", serverId: id });
     },
   };
 });

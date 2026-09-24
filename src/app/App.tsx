@@ -89,6 +89,7 @@ import {
   type WorkspaceEnv,
 } from "@/modules/workspace";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { listen } from "@tauri-apps/api/event";
 import { homeDir } from "@tauri-apps/api/path";
 import type { SearchAddon } from "@xterm/addon-search";
 import { AnimatePresence, motion } from "motion/react";
@@ -541,6 +542,23 @@ export default function App() {
     setRootRef.current(path);
     resetWorkspace(path);
   }, [resetWorkspace]);
+
+  // Single-instance forwarding: a second KAI launch (e.g. "Open with KAI" in
+  // Explorer, or a pinned shortcut with a path argument) no longer starts a
+  // second process — the Rust single-instance plugin hands its argv to THIS
+  // window. Open the forwarded project here, same as File > Open Project.
+  const onOpenProjectRef = useRef(onOpenProject);
+  onOpenProjectRef.current = onOpenProject;
+  useEffect(() => {
+    const promise = listen<string>("Kai://open-project", (event) => {
+      const path = event.payload;
+      if (!path) return;
+      onOpenProjectRef.current(path.replace(/\\/g, "/"));
+    });
+    return () => {
+      void promise.then((un) => un());
+    };
+  }, []);
 
   // Reflect the current project folder in the window title so the user can
   // distinguish multiple KAI instances in the taskbar / Alt+Tab. Show only

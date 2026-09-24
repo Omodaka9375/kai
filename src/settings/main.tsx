@@ -10,10 +10,14 @@ import { ThemeProvider } from "@/modules/theme";
 import { USE_CUSTOM_WINDOW_CONTROLS } from "@/lib/platform";
 import { installConsoleLogBridge } from "@/lib/logging";
 import { installFocusModalityGuard } from "@/lib/focusModality";
+import { setWindowRole } from "@/lib/windowRole";
 import { SettingsApp } from "./SettingsApp";
 
 installConsoleLogBridge();
 installFocusModalityGuard();
+// This webview is a control surface only — it must not own MCP server
+// processes (the main window does). See lib/windowRole.ts.
+setWindowRole("settings");
 
 if (USE_CUSTOM_WINDOW_CONTROLS) {
   document.documentElement.dataset.chrome = "borderless";
