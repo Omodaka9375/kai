@@ -130,10 +130,8 @@ fn run_child_with_timeout(
         thread::sleep(Duration::from_millis(50));
     };
 
-    let (stdout_bytes, stdout_truncated) =
-        stdout_handle.join().unwrap_or((Vec::new(), false));
-    let (stderr_bytes, stderr_truncated) =
-        stderr_handle.join().unwrap_or((Vec::new(), false));
+    let (stdout_bytes, stdout_truncated) = stdout_handle.join().unwrap_or((Vec::new(), false));
+    let (stderr_bytes, stderr_truncated) = stderr_handle.join().unwrap_or((Vec::new(), false));
 
     Ok(CommandOutput {
         stdout: String::from_utf8_lossy(&stdout_bytes).into_owned(),
@@ -263,7 +261,10 @@ mod platform {
         sei.lpVerb = verb.as_ptr();
         sei.lpFile = file.as_ptr();
         sei.lpParameters = params.as_ptr();
-        sei.lpDirectory = cwd_wide.as_ref().map(|w| w.as_ptr()).unwrap_or(std::ptr::null());
+        sei.lpDirectory = cwd_wide
+            .as_ref()
+            .map(|w| w.as_ptr())
+            .unwrap_or(std::ptr::null());
         sei.nShow = SW_HIDE;
 
         let ok = unsafe { ShellExecuteExW(&mut sei) };
@@ -404,7 +405,9 @@ mod platform {
         // the only way to honor the caller's cwd. polkit's auth prompt appears
         // on the desktop; cancel → non-zero exit.
         let mut pk = Command::new("pkexec");
-        pk.arg("sh").arg("-c").arg(&wrapped)
+        pk.arg("sh")
+            .arg("-c")
+            .arg(&wrapped)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -419,7 +422,10 @@ mod platform {
                 // Fall back to passwordless sudo. `-n` is essential: without it
                 // sudo would block on a password prompt against a null stdin.
                 let mut sd = Command::new("sudo");
-                sd.arg("-n").arg("sh").arg("-c").arg(&wrapped)
+                sd.arg("-n")
+                    .arg("sh")
+                    .arg("-c")
+                    .arg(&wrapped)
                     .stdin(Stdio::null())
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped());

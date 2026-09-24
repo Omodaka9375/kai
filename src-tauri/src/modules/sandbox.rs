@@ -164,7 +164,10 @@ fn parse_kernel_version(s: &str) -> Option<(u32, u32)> {
 }
 
 fn config_path(root: &str, workspace: &WorkspaceEnv) -> PathBuf {
-    resolve_path(&format!("{}/.kai/sandbox.json", root.trim_end_matches(['/','\\'])), workspace)
+    resolve_path(
+        &format!("{}/.kai/sandbox.json", root.trim_end_matches(['/', '\\'])),
+        workspace,
+    )
 }
 
 /// Load the project sandbox config. Missing file = Off. Malformed file = Off
@@ -173,7 +176,9 @@ fn config_path(root: &str, workspace: &WorkspaceEnv) -> PathBuf {
 pub fn sandbox_load_config(root: String, workspace: WorkspaceEnv) -> SandboxConfig {
     let path = config_path(&root, &workspace);
     let Ok(raw) = std::fs::read_to_string(&path) else {
-        return SandboxConfig { mode: SandboxMode::Off };
+        return SandboxConfig {
+            mode: SandboxMode::Off,
+        };
     };
     #[derive(Deserialize)]
     struct Raw {
@@ -184,19 +189,27 @@ pub fn sandbox_load_config(root: String, workspace: WorkspaceEnv) -> SandboxConf
             Some(mode) => SandboxConfig { mode },
             None => {
                 log::warn!("sandbox: unknown mode {:?} in {}", r.mode, path.display());
-                SandboxConfig { mode: SandboxMode::Off }
+                SandboxConfig {
+                    mode: SandboxMode::Off,
+                }
             }
         },
         Err(e) => {
             log::warn!("sandbox: malformed {} — {e}", path.display());
-            SandboxConfig { mode: SandboxMode::Off }
+            SandboxConfig {
+                mode: SandboxMode::Off,
+            }
         }
     }
 }
 
 /// Persist the project sandbox config. Creates `.kai/` as needed.
 #[tauri::command]
-pub fn sandbox_save_config(root: String, mode: SandboxMode, workspace: WorkspaceEnv) -> Result<(), String> {
+pub fn sandbox_save_config(
+    root: String,
+    mode: SandboxMode,
+    workspace: WorkspaceEnv,
+) -> Result<(), String> {
     let path = config_path(&root, &workspace);
     let parent = path
         .parent()

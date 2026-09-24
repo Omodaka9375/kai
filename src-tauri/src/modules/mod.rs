@@ -1,8 +1,8 @@
 pub mod diagnostics;
 pub mod fs;
-pub mod lock;
 pub mod git;
 pub mod gpg;
+pub mod lock;
 pub mod mcp;
 pub mod net;
 pub mod pty;

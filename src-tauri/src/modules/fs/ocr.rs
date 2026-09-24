@@ -40,8 +40,7 @@ pub fn get_ocr_text(bytes: &[u8]) -> Result<String, String> {
         if !output.status.success() {
             return Err("tesseract exited non-zero".to_string());
         }
-        std::fs::read_to_string(&text_path)
-            .map_err(|e| format!("failed to read OCR output: {e}"))
+        std::fs::read_to_string(&text_path).map_err(|e| format!("failed to read OCR output: {e}"))
     });
     std::fs::remove_file(&input).ok();
     std::fs::remove_file(&text_path).ok();
@@ -50,7 +49,10 @@ pub fn get_ocr_text(bytes: &[u8]) -> Result<String, String> {
 
 fn find_tesseract() -> Result<std::path::PathBuf, String> {
     #[cfg(target_os = "windows")]
-    let candidates = [r"C:\Program Files\Tesseract-OCR\tesseract.exe", r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe"];
+    let candidates = [
+        r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+        r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+    ];
     #[cfg(target_os = "macos")]
     let candidates = ["/opt/homebrew/bin/tesseract", "/usr/local/bin/tesseract"];
     #[cfg(target_os = "linux")]

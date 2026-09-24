@@ -150,7 +150,10 @@ fn gc_stale_webview_profiles(root: &std::path::Path) {
 /// touched).
 fn pid_from_filename(name: &str) -> Option<u32> {
     // Active log file: "kai-<pid>.log" — the whole stem must be a number.
-    if let Some(stem) = name.strip_prefix("kai-").and_then(|s| s.strip_suffix(".log")) {
+    if let Some(stem) = name
+        .strip_prefix("kai-")
+        .and_then(|s| s.strip_suffix(".log"))
+    {
         if let Ok(pid) = stem.parse() {
             return Some(pid);
         }
@@ -161,7 +164,10 @@ fn pid_from_filename(name: &str) -> Option<u32> {
         return None;
     }
     // Crash snapshot: "crash-<pid>-<ts>.log".
-    if let Some(stem) = name.strip_prefix("crash-").and_then(|s| s.strip_suffix(".log")) {
+    if let Some(stem) = name
+        .strip_prefix("crash-")
+        .and_then(|s| s.strip_suffix(".log"))
+    {
         return stem.split('-').next().and_then(|p| p.parse().ok());
     }
     // Whisper download temp: "<model-stem>.part.<pid>" (e.g.
@@ -188,7 +194,9 @@ fn gc_stale_logs_and_crashes(log_dir: &std::path::Path) {
     let current = std::process::id();
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
-        let Some(pid) = pid_from_filename(&name) else { continue };
+        let Some(pid) = pid_from_filename(&name) else {
+            continue;
+        };
         if pid == current || pid_alive(pid) {
             continue;
         }
@@ -204,7 +212,9 @@ fn gc_stale_whisper_parts(whisper_dir: &std::path::Path) {
     let current = std::process::id();
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
-        let Some(pid) = pid_from_filename(&name) else { continue };
+        let Some(pid) = pid_from_filename(&name) else {
+            continue;
+        };
         if pid == current || pid_alive(pid) {
             continue;
         }
@@ -222,7 +232,9 @@ fn parse_launch_dir() -> Option<String> {
         if arg.starts_with('-') {
             continue;
         }
-        let Ok(canon) = std::fs::canonicalize(&arg) else { continue };
+        let Ok(canon) = std::fs::canonicalize(&arg) else {
+            continue;
+        };
         if !canon.is_dir() {
             continue;
         }
@@ -324,11 +336,9 @@ async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Res
 async fn pick_project_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
     let (tx, rx) = tokio::sync::oneshot::channel();
-    app.dialog()
-        .file()
-        .pick_folder(move |p| {
-            let _ = tx.send(p.map(|pb| pb.to_string().replace("\\", "/")));
-        });
+    app.dialog().file().pick_folder(move |p| {
+        let _ = tx.send(p.map(|pb| pb.to_string().replace("\\", "/")));
+    });
     rx.await.map_err(|e| e.to_string())
 }
 
@@ -581,7 +591,10 @@ mod tests {
         // src/modules/ai/lib/sessions.ts (JS BigInt FNV-1a 64, base36, over
         // the lowercased path). The two implementations MUST stay in lockstep
         // or sessions and window-state would target different files.
-        assert_eq!(project_key("C:/Users/Valsinarb/dev/project-a"), "2tjl23iqw8hpi");
+        assert_eq!(
+            project_key("C:/Users/Valsinarb/dev/project-a"),
+            "2tjl23iqw8hpi"
+        );
         assert_eq!(project_key("D:/Code/2026/KAI"), "1jdnajs935bfk");
         assert_eq!(project_key("D:\\Code\\2026\\KAI"), "1jdnajs935bfk");
         assert_eq!(project_key("d:/code/2026/kai"), "1jdnajs935bfk");

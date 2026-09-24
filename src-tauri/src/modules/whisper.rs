@@ -156,7 +156,9 @@ pub async fn whisper_download_model(
     {
         return Err("download already in progress".into());
     }
-    app.state::<WhisperManager>().cancel.store(false, Ordering::SeqCst);
+    app.state::<WhisperManager>()
+        .cancel
+        .store(false, Ordering::SeqCst);
 
     let result = download_inner(&app, &on_event).await;
 
@@ -173,7 +175,9 @@ async fn download_inner(
     let path = whisper_model_path(app)?;
 
     // Already present at the expected size — nothing to do.
-    if path.exists() && std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0) == EXPECTED_WHISPER_SIZE {
+    if path.exists()
+        && std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0) == EXPECTED_WHISPER_SIZE
+    {
         let _ = on_event.send(WhisperDownloadEvent {
             phase: "done".into(),
             downloaded: EXPECTED_WHISPER_SIZE,
@@ -254,10 +258,7 @@ pub fn whisper_delete_model(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn whisper_transcribe(
-    app: AppHandle,
-    audio_base64: String,
-) -> Result<String, String> {
+pub async fn whisper_transcribe(app: AppHandle, audio_base64: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || transcribe_inner(&app, &audio_base64))
         .await
         .map_err(|e| e.to_string())?
@@ -287,9 +288,7 @@ fn transcribe_inner(app: &AppHandle, audio_base64: &str) -> Result<String, Strin
 
     let model_path = whisper_model_path(app)?;
     if !model_path.exists() {
-        return Err(
-            "Whisper model not downloaded. Download it in Settings → General.".into(),
-        );
+        return Err("Whisper model not downloaded. Download it in Settings → General.".into());
     }
 
     // Silero VAD: find speech windows, splice only those samples.

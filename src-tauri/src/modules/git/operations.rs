@@ -314,7 +314,10 @@ pub fn stash_push(
         DEFAULT_TIMEOUT_SECS,
     )?;
     if output.exit_code != Some(0) && nothing_to_stash(&output) {
-        return Err(GitError::command("git stash push", "no local changes to save"));
+        return Err(GitError::command(
+            "git stash push",
+            "no local changes to save",
+        ));
     }
     ensure_success(&output, "git stash push failed")
 }
@@ -445,7 +448,11 @@ pub fn create_branch(
     let output = run_git(
         &repo_root.workspace,
         Some(&repo_root.git_path),
-        [OsStr::new("checkout"), OsStr::new("-b"), OsStr::new(&branch)],
+        [
+            OsStr::new("checkout"),
+            OsStr::new("-b"),
+            OsStr::new(&branch),
+        ],
         DEFAULT_TIMEOUT_SECS,
     )?;
     ensure_success(&output, "git checkout -b failed")
@@ -1314,11 +1321,7 @@ pub fn pull_ff_only(
 /// Full merge pull (not ff-only). `git pull` handles its own fetch, so
 /// there's no need to run a separate fetch first. Uses `--no-rebase` to
 /// ensure a merge commit even if pull.rebase is configured globally.
-pub fn pull(
-    registry: &WorkspaceRegistry,
-    repo_root: &str,
-    workspace: &WorkspaceEnv,
-) -> Result<()> {
+pub fn pull(registry: &WorkspaceRegistry, repo_root: &str, workspace: &WorkspaceEnv) -> Result<()> {
     let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
     ensure_git_available(&repo_root.workspace)?;
     let mut args: Vec<OsString> = vec!["pull".into(), "--no-rebase".into()];
@@ -1339,9 +1342,7 @@ pub fn pull(
 ///
 /// Returns `Ok(None)` when the branch has no upstream (a normal, frequent
 /// state) so callers can fall back to bare commands.
-fn upstream_parts(
-    repo_root: &ResolvedGitDirectory,
-) -> Result<Option<(String, String)>> {
+fn upstream_parts(repo_root: &ResolvedGitDirectory) -> Result<Option<(String, String)>> {
     let Some(u) = resolve_upstream(repo_root)? else {
         return Ok(None);
     };

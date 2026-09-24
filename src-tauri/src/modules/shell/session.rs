@@ -141,9 +141,7 @@ impl ShellSession {
 }
 
 fn wrap_posix_with_sentinel(command: &str, sentinel: &str) -> String {
-    format!(
-        "{command}\n__KAI_rc=$?\nprintf '\\n%s%s\\n' '{sentinel}' \"$(pwd)\"\nexit $__KAI_rc\n",
-    )
+    format!("{command}\n__KAI_rc=$?\nprintf '\\n%s%s\\n' '{sentinel}' \"$(pwd)\"\nexit $__KAI_rc\n",)
 }
 
 fn wrap_with_sentinel(command: &str, workspace: &WorkspaceEnv, sentinel: &str) -> String {

@@ -11,16 +11,16 @@ use std::time::{Duration, Instant};
 use shared_child::SharedChild;
 
 use crate::modules::git::errors::{GitError, Result};
-use crate::modules::lock::mutex_lock;
 use crate::modules::git::types::{
     GitOutput, TextSource, DEFAULT_TIMEOUT_SECS, MAX_FILE_BYTES, MAX_OUTPUT_BYTES,
     MAX_TIMEOUT_SECS, MIN_GIT_VERSION,
 };
-use crate::modules::workspace::WorkspaceEnv;
-#[cfg(windows)]
-use crate::modules::workspace::validate_wsl_distro_name;
+use crate::modules::lock::mutex_lock;
 #[cfg(windows)]
 use crate::modules::shell::job::KillJob;
+#[cfg(windows)]
+use crate::modules::workspace::validate_wsl_distro_name;
+use crate::modules::workspace::WorkspaceEnv;
 
 #[derive(Clone)]
 enum Availability {
@@ -282,8 +282,7 @@ where
         cmd.process_group(0);
     }
 
-    let shared =
-        SharedChild::spawn(&mut cmd).map_err(|e| GitError::Spawn(e.to_string()))?;
+    let shared = SharedChild::spawn(&mut cmd).map_err(|e| GitError::Spawn(e.to_string()))?;
     // Assign to a KILL_ON_JOB_CLOSE Job immediately (before any grandchild
     // spawns) so a timed-out/killed push/pull/fetch reaps ssh, Git Credential
     // Manager, gpg, etc. Otherwise those grandchildren inherit the stdout/
@@ -396,7 +395,10 @@ pub fn ensure_success(output: &GitOutput, context: &'static str) -> Result<()> {
         return Err(err);
     }
     if let Some(summary) = summarize_git_failure(context, &stderr) {
-        return Err(GitError::CommandFailed { context, detail: summary });
+        return Err(GitError::CommandFailed {
+            context,
+            detail: summary,
+        });
     }
     let detail = if !stderr.is_empty() {
         stderr

@@ -352,8 +352,7 @@ fn build_safe_client(
     allow_private: bool,
     pinned: &[(String, Vec<IpAddr>)],
 ) -> Result<reqwest::Client, String> {
-    let mut builder = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(10));
+    let mut builder = reqwest::Client::builder().connect_timeout(Duration::from_secs(10));
     // SECURITY: accept self-signed TLS certs for private-network servers
     // (DGX, lab machines, Ollama, vLLM). Public endpoints always require
     // valid certs. See lm_ping comment for the trade-off rationale.
@@ -615,10 +614,7 @@ mod tests {
             IpKind::BlockedMetadata
         );
         // IPv6 link-local fe80::/10
-        assert_eq!(
-            ip_kind("fe80::1".parse().unwrap()),
-            IpKind::BlockedMetadata
-        );
+        assert_eq!(ip_kind("fe80::1".parse().unwrap()), IpKind::BlockedMetadata);
     }
 
     #[test]
@@ -750,7 +746,10 @@ mod tests {
         );
         // 10/8 mapped, and the loopback that originally motivated the recursion.
         assert_eq!(ip_kind("::ffff:10.0.0.1".parse().unwrap()), IpKind::Private);
-        assert_eq!(ip_kind("::ffff:127.0.0.1".parse().unwrap()), IpKind::Loopback);
+        assert_eq!(
+            ip_kind("::ffff:127.0.0.1".parse().unwrap()),
+            IpKind::Loopback
+        );
         // 0.0.0.0/8 mapped.
         assert_eq!(ip_kind("::ffff:0.1.1.1".parse().unwrap()), IpKind::Loopback);
     }

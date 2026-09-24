@@ -1,8 +1,8 @@
 pub mod extract;
 pub mod file;
-pub mod ocr;
 pub mod grep;
 pub mod mutate;
+pub mod ocr;
 pub mod search;
 pub mod tree;
 

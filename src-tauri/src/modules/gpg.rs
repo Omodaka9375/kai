@@ -13,9 +13,9 @@ use std::process::{Command, Output};
 
 use serde::Serialize;
 
-use crate::modules::workspace::WorkspaceEnv;
 #[cfg(windows)]
 use crate::modules::workspace::validate_wsl_distro_name;
+use crate::modules::workspace::WorkspaceEnv;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -234,9 +234,12 @@ pub async fn gpg_list_keys(workspace: Option<WorkspaceEnv>) -> Result<Vec<GpgKey
 }
 
 fn list_keys_inner(workspace: &WorkspaceEnv) -> Result<Vec<GpgKey>, String> {
-    let program = resolve_program(workspace)
-        .ok_or_else(|| "gpg not found".to_string())?;
-    let out = run_gpg(workspace, &program, &["--list-secret-keys", "--with-colons"])?;
+    let program = resolve_program(workspace).ok_or_else(|| "gpg not found".to_string())?;
+    let out = run_gpg(
+        workspace,
+        &program,
+        &["--list-secret-keys", "--with-colons"],
+    )?;
     if !out.status.success() {
         return Err(decode(out.stderr).trim().to_string());
     }
@@ -258,8 +261,7 @@ fn export_public_inner(fingerprint: &str, workspace: &WorkspaceEnv) -> Result<St
     if !is_fingerprint(fingerprint) {
         return Err("invalid fingerprint".to_string());
     }
-    let program = resolve_program(workspace)
-        .ok_or_else(|| "gpg not found".to_string())?;
+    let program = resolve_program(workspace).ok_or_else(|| "gpg not found".to_string())?;
     let out = run_gpg(workspace, &program, &["--armor", "--export", fingerprint])?;
     if !out.status.success() {
         return Err(decode(out.stderr).trim().to_string());
@@ -274,7 +276,9 @@ mod tests {
     #[test]
     fn validates_fingerprints() {
         assert!(is_fingerprint("0123456789ABCDEF0123456789ABCDEF01234567"));
-        assert!(is_fingerprint(" 0123 4567 89AB CDEF 0123 4567 89AB CDEF 0123 4567 "));
+        assert!(is_fingerprint(
+            " 0123 4567 89AB CDEF 0123 4567 89AB CDEF 0123 4567 "
+        ));
         assert!(!is_fingerprint("short"));
         assert!(!is_fingerprint("zzzz456789ABCDEF0123456789ABCDEF01234567"));
     }
@@ -282,7 +286,10 @@ mod tests {
     #[test]
     fn parses_version_line() {
         assert_eq!(parse_version("gpg (GnuPG) 2.4.5"), Some("2.4.5".into()));
-        assert_eq!(parse_version("gpg (GnuPG) 2.4.5\nlibgcrypt 1.10.3"), Some("2.4.5".into()));
+        assert_eq!(
+            parse_version("gpg (GnuPG) 2.4.5\nlibgcrypt 1.10.3"),
+            Some("2.4.5".into())
+        );
     }
 
     #[test]
@@ -303,7 +310,10 @@ mod tests {
         );
         let keys = parse_keys(stdout);
         assert_eq!(keys.len(), 1);
-        assert_eq!(keys[0].fingerprint, "0123456789ABCDEF0123456789ABCDEF01234567");
+        assert_eq!(
+            keys[0].fingerprint,
+            "0123456789ABCDEF0123456789ABCDEF01234567"
+        );
         assert_eq!(keys[0].key_id, "1A2B3C4D5E6F7081");
         assert_eq!(keys[0].name, "Alice");
         assert_eq!(keys[0].emails, vec!["alice@example.com".to_string()]);

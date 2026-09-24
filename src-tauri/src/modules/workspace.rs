@@ -183,7 +183,9 @@ pub fn decode_command_output(bytes: &[u8]) -> String {
             0
         };
         let units: Vec<u16> = bytes[start..]
-            .as_chunks::<2>().0.iter()
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|&c| u16::from_le_bytes(c))
             .collect();
         String::from_utf16_lossy(&units)

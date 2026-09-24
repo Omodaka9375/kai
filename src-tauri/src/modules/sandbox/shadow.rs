@@ -87,7 +87,10 @@ pub(crate) fn project_hash(root: &str) -> u32 {
 
 fn shadow_dir(project_root: &str) -> Result<PathBuf, String> {
     let home = dirs::home_dir().ok_or_else(|| "home dir unavailable".to_string())?;
-    Ok(home.join(".kai").join("shadow").join(format!("{:08x}", project_hash(project_root))))
+    Ok(home
+        .join(".kai")
+        .join("shadow")
+        .join(format!("{:08x}", project_hash(project_root))))
 }
 
 fn meta_path(dir: &Path) -> PathBuf {
@@ -139,9 +142,8 @@ fn copy_tree(src: &Path, dst: &Path) -> Result<(), String> {
 
         if ft.is_symlink() {
             let target = std::fs::read_link(&s).map_err(|e| e.to_string())?;
-            symlink_any(&target, &d).map_err(|e| {
-                format!("link {} -> {}: {e}", d.display(), target.display())
-            })?;
+            symlink_any(&target, &d)
+                .map_err(|e| format!("link {} -> {}: {e}", d.display(), target.display()))?;
             continue;
         }
         if ft.is_dir() {
@@ -190,7 +192,9 @@ fn walk_project_tree(root: &Path, out: &mut HashMap<String, FileStamp>) -> Resul
             Ok(e) => e,
             Err(_) => continue,
         };
-        let Some(ft) = entry.file_type() else { continue };
+        let Some(ft) = entry.file_type() else {
+            continue;
+        };
         if ft.is_symlink() {
             continue;
         }
@@ -316,7 +320,9 @@ fn info_of(meta: &ShadowMeta, dir: &Path) -> ShadowInfo {
 /// the on-disk meta), so an interrupted session resumes cleanly.
 #[tauri::command]
 pub fn shadow_status(project_root: String) -> Option<ShadowInfo> {
-    let Ok(dir) = shadow_dir(&project_root) else { return None };
+    let Ok(dir) = shadow_dir(&project_root) else {
+        return None;
+    };
     let meta = read_meta(&dir).ok()?;
     Some(info_of(&meta, &dir))
 }
@@ -331,7 +337,10 @@ pub async fn shadow_create(project_root: String) -> Result<ShadowInfo, String> {
     }
     let dir = shadow_dir(&project_root)?;
     if meta_path(&dir).exists() {
-        return Err("a shadow session is already active for this project — merge or discard it first".into());
+        return Err(
+            "a shadow session is already active for this project — merge or discard it first"
+                .into(),
+        );
     }
 
     tokio::task::spawn_blocking(move || create_inner(&root, &dir))
@@ -360,7 +369,8 @@ fn create_inner(root: &Path, dir: &Path) -> Result<ShadowInfo, String> {
         let entry = entry.map_err(|e| e.to_string())?;
         let ft = entry.file_type().map_err(|e| e.to_string())?;
         let name_str = entry.file_name().to_string_lossy().into_owned();
-        if ft.is_dir() && HEAVY_DIRS.contains(&name_str.as_str())
+        if ft.is_dir()
+            && HEAVY_DIRS.contains(&name_str.as_str())
             && symlink_any(&entry.path(), &dir.join(&name_str)).is_ok()
         {
             shared.push(name_str);
@@ -386,7 +396,9 @@ fn create_inner(root: &Path, dir: &Path) -> Result<ShadowInfo, String> {
         .build();
     for entry in walker {
         let entry = entry.map_err(|e| e.to_string())?;
-        let Some(ft) = entry.file_type() else { continue };
+        let Some(ft) = entry.file_type() else {
+            continue;
+        };
         let rel = entry
             .path()
             .strip_prefix(root)
@@ -399,8 +411,7 @@ fn create_inner(root: &Path, dir: &Path) -> Result<ShadowInfo, String> {
         let src = entry.path();
         let dst = dir.join(&rel);
         if ft.is_dir() {
-            std::fs::create_dir_all(&dst)
-                .map_err(|e| format!("mkdir {}: {e}", dst.display()))?;
+            std::fs::create_dir_all(&dst).map_err(|e| format!("mkdir {}: {e}", dst.display()))?;
             continue;
         }
         if ft.is_symlink() {
@@ -465,11 +476,7 @@ pub async fn shadow_merge(
         .map_err(|e| e.to_string())?
 }
 
-fn merge_inner(
-    root: &Path,
-    dir: &Path,
-    dry_run: bool,
-) -> Result<ShadowMergeReport, String> {
+fn merge_inner(root: &Path, dir: &Path, dry_run: bool) -> Result<ShadowMergeReport, String> {
     let meta = read_meta(dir)?;
     // Both walks use the project walker (gitignore-aware, .git + heavy dirs
     // + the meta file excluded). CRITICAL: shadow `.git` internals must never
@@ -491,9 +498,7 @@ fn merge_inner(
                 std::fs::create_dir_all(parent)
                     .map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
             }
-            std::fs::copy(&src, &dst).map_err(|e| {
-                format!("merge copy {rel}: {e}")
-            })?;
+            std::fs::copy(&src, &dst).map_err(|e| format!("merge copy {rel}: {e}"))?;
         }
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -526,7 +531,10 @@ mod tests {
     use super::*;
 
     fn stamp_of(size: u64, mtime: u64) -> FileStamp {
-        FileStamp { size, mtime_ms: mtime }
+        FileStamp {
+            size,
+            mtime_ms: mtime,
+        }
     }
 
     fn inv(entries: &[(&str, u64, u64)]) -> HashMap<String, FileStamp> {
@@ -539,10 +547,10 @@ mod tests {
     #[test]
     fn plan_new_modified_conflict_deleted() {
         let inventory = inv(&[
-            ("a.txt", 10, 100),   // unchanged everywhere
-            ("b.txt", 10, 100),   // agent modified
-            ("c.txt", 10, 100),   // agent + user modified → conflict
-            ("d.txt", 10, 100),   // agent deleted
+            ("a.txt", 10, 100),     // unchanged everywhere
+            ("b.txt", 10, 100),     // agent modified
+            ("c.txt", 10, 100),     // agent + user modified → conflict
+            ("d.txt", 10, 100),     // agent deleted
             ("src/e.txt", 10, 100), // unchanged
         ]);
         let shadow = inv(&[
@@ -560,7 +568,10 @@ mod tests {
             ("src/e.txt", 10, 100),
         ]);
         let plan = compute_merge_plan(&inventory, &shadow, &real);
-        assert_eq!(plan.copied, vec!["b.txt".to_string(), "new.txt".to_string()]);
+        assert_eq!(
+            plan.copied,
+            vec!["b.txt".to_string(), "new.txt".to_string()]
+        );
         assert_eq!(plan.conflicts, vec!["c.txt".to_string()]);
         assert_eq!(plan.deleted_in_shadow, vec!["d.txt".to_string()]);
     }

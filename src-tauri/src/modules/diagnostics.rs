@@ -25,7 +25,9 @@ const CRASH_BYTES: usize = 16 * 1024;
 fn process_memory_bytes() -> (u64, u64) {
     #[cfg(target_os = "windows")]
     {
-        use windows_sys::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
+        use windows_sys::Win32::System::ProcessStatus::{
+            GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
+        };
         use windows_sys::Win32::System::Threading::GetCurrentProcess;
         let mut pmc: PROCESS_MEMORY_COUNTERS = unsafe { std::mem::zeroed() };
         pmc.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
@@ -107,12 +109,8 @@ pub fn init_process_start() {
 #[tauri::command]
 pub fn health_counts(app: tauri::AppHandle) -> HealthCounts {
     let (rss, private) = process_memory_bytes();
-    let pty_sessions = app
-        .state::<crate::pty::PtyState>()
-        .count();
-    let (shell_sessions, bg_processes) = app
-        .state::<crate::shell::ShellState>()
-        .counts();
+    let pty_sessions = app.state::<crate::pty::PtyState>().count();
+    let (shell_sessions, bg_processes) = app.state::<crate::shell::ShellState>().counts();
     HealthCounts {
         pid: std::process::id(),
         uptime_secs: PROCESS_START
@@ -156,11 +154,7 @@ fn read_latest_log_tail(log_dir: &std::path::Path) -> String {
         }
         let Ok(meta) = entry.metadata() else { continue };
         let modified = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
-        if newest
-            .as_ref()
-            .map(|(t, _)| modified > *t)
-            .unwrap_or(true)
-        {
+        if newest.as_ref().map(|(t, _)| modified > *t).unwrap_or(true) {
             newest = Some((modified, path));
         }
     }
@@ -185,11 +179,7 @@ fn read_latest_crash(log_dir: &std::path::Path) -> Option<String> {
         }
         let Ok(meta) = entry.metadata() else { continue };
         let modified = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
-        if newest
-            .as_ref()
-            .map(|(t, _)| modified > *t)
-            .unwrap_or(true)
-        {
+        if newest.as_ref().map(|(t, _)| modified > *t).unwrap_or(true) {
             newest = Some((modified, entry.path()));
         }
     }
@@ -198,14 +188,8 @@ fn read_latest_crash(log_dir: &std::path::Path) -> Option<String> {
 }
 
 #[tauri::command]
-pub fn diagnostics_collect(
-    app: tauri::AppHandle,
-    state: State<'_, CrashDir>,
-) -> DiagnosticsBundle {
-    let version = app
-        .package_info()
-        .version
-        .to_string();
+pub fn diagnostics_collect(app: tauri::AppHandle, state: State<'_, CrashDir>) -> DiagnosticsBundle {
+    let version = app.package_info().version.to_string();
     let os = std::env::consts::OS.to_string();
     let arch = std::env::consts::ARCH.to_string();
 
@@ -254,9 +238,7 @@ pub fn install_panic_hook(log_dir: PathBuf, instance_id: String) {
             .unwrap_or_else(|| "unknown location".to_string());
 
         let backtrace = std::backtrace::Backtrace::force_capture();
-        let text = format!(
-            "panic at {location}\n{payload}\n\n--- backtrace ---\n{backtrace}"
-        );
+        let text = format!("panic at {location}\n{payload}\n\n--- backtrace ---\n{backtrace}");
 
         // Best-effort snapshot; a panic is already fatal, so never panic here.
         if let Ok(()) = fs::create_dir_all(&hook_dir) {

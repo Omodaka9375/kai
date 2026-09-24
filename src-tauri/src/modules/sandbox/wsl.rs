@@ -60,7 +60,8 @@ static INSTALLED: AtomicU8 = AtomicU8::new(0);
 static SETUP_RUNNING: AtomicBool = AtomicBool::new(false);
 
 #[cfg(windows)]
-fn wsl(args: &[&str]) -> Result<std::process::Output, String> {   let mut cmd = Command::new("wsl.exe");
+fn wsl(args: &[&str]) -> Result<std::process::Output, String> {
+    let mut cmd = Command::new("wsl.exe");
     {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
@@ -75,9 +76,7 @@ pub fn distro_installed() -> bool {
         return false;
     };
     let list = decode_command_output(&out.stdout);
-    list.lines()
-        .map(str::trim)
-        .any(|name| name == DISTRO_NAME)
+    list.lines().map(str::trim).any(|name| name == DISTRO_NAME)
 }
 
 /// Cached variant for the per-command hot path.
@@ -242,10 +241,7 @@ pub struct SandboxSetupEvent {
 
 #[cfg(windows)]
 fn distro_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
-        .app_local_data_dir()
-        .map_err(|e| e.to_string())?;
+    let dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
     Ok(dir.join("sandbox-distro"))
 }
 
@@ -294,7 +290,11 @@ async fn setup_inner(
 
     // ── 1. Download the minirootfs with progress.
     let client = reqwest::Client::new();
-    let resp = client.get(ALPINE_URL).send().await.map_err(|e| e.to_string())?;
+    let resp = client
+        .get(ALPINE_URL)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
         return Err(format!(
             "download failed: HTTP {} from {ALPINE_URL} (the pinned Alpine release may have been archived — this is a KAI bug to report)",
@@ -367,7 +367,8 @@ fn import_distro(dir: &std::path::Path, tar: &std::path::Path) -> Result<(), Str
         let stderr = decode_command_output(&out.stderr);
         return Err(format!(
             "wsl --import failed ({}): {}",
-            out.status, stderr.trim()
+            out.status,
+            stderr.trim()
         ));
     }
     // Write wsl.conf INSIDE the distro, then terminate so the conf applies
@@ -458,10 +459,7 @@ mod tests {
         );
         // Outside the project → the mountpoint (the cd target is the
         // project; L1 already refused anything outside).
-        assert_eq!(
-            translate_cwd(root, Some("E:\\Other")),
-            mountpoint_for(root),
-        );
+        assert_eq!(translate_cwd(root, Some("E:\\Other")), mountpoint_for(root),);
     }
 
     #[test]

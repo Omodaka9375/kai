@@ -22,10 +22,7 @@ use crate::modules::workspace::WorkspaceEnv;
 /// gated dead-code allowance keeps cross-platform construction compiling.
 #[derive(Debug, Clone)]
 pub struct SandboxSpec {
-    #[cfg_attr(
-        not(any(target_os = "linux", target_os = "macos")),
-        allow(dead_code)
-    )]
+    #[cfg_attr(not(any(target_os = "linux", target_os = "macos")), allow(dead_code))]
     pub root: PathBuf,
 }
 
@@ -80,13 +77,9 @@ pub fn try_wrap(
     #[cfg(windows)]
     {
         if let Some(root) = spec.root.to_str() {
-            if let Some(cmd) = crate::modules::sandbox::wsl::wrap_wsl(
-                command,
-                root,
-                cwd,
-                watchdog_secs,
-                pid_file,
-            ) {
+            if let Some(cmd) =
+                crate::modules::sandbox::wsl::wrap_wsl(command, root, cwd, watchdog_secs, pid_file)
+            {
                 return Ok(Some(cmd));
             }
         }
@@ -161,7 +154,7 @@ fn wrap_bwrap(
     {
         use std::os::unix::process::CommandExt;
         // New process group so kill_child_tree can reap bwrap AND children.
-            cmd.process_group(0);
+        cmd.process_group(0);
     }
     for arg in bwrap_args(&root) {
         cmd.arg(arg);
@@ -254,8 +247,12 @@ mod tests {
     #[test]
     fn try_wrap_wsl_repo_returns_none() {
         // WSL repos can't use host runners — plain fallback, not an error.
-        let spec = SandboxSpec { root: PathBuf::from("/mnt/x") };
-        let ws = WorkspaceEnv::Wsl { distro: "Ubuntu".into() };
+        let spec = SandboxSpec {
+            root: PathBuf::from("/mnt/x"),
+        };
+        let ws = WorkspaceEnv::Wsl {
+            distro: "Ubuntu".into(),
+        };
         let r = try_wrap("echo hi", &spec, &ws, None, None, None).unwrap();
         assert!(r.is_none());
     }

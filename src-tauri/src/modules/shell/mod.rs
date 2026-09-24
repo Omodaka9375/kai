@@ -1,19 +1,19 @@
 pub mod background;
-pub mod ringbuffer;
-pub mod session;
+mod elevate;
 #[cfg(windows)]
 pub mod job;
-mod elevate;
+pub mod ringbuffer;
+pub mod session;
 
 use std::collections::HashMap;
 use std::io::Read;
-use std::path::PathBuf;
 #[cfg(windows)]
 use std::path::Path;
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicU32, Ordering};
 #[cfg(windows)]
 use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{mpsc, Arc, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -23,9 +23,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 
 use crate::modules::lock::{rwlock_read, rwlock_write};
-use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 #[cfg(windows)]
 use crate::modules::workspace::validate_wsl_distro_name;
+use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 
 use background::{BackgroundLogResponse, BackgroundProc, BackgroundProcInfo};
 use session::{SessionRunOutput, ShellSession};
@@ -84,11 +84,7 @@ pub async fn shell_run_command(
     let sandbox = sandbox_root.filter(|s| !s.is_empty());
     thread::spawn(move || {
         let _ = tx.send(run_blocking_sandbox(
-            trimmed,
-            cwd_path,
-            workspace,
-            dur,
-            sandbox,
+            trimmed, cwd_path, workspace, dur, sandbox,
         ));
     });
 
@@ -139,14 +135,7 @@ fn run_blocking_sandbox(
     dur: Duration,
     sandbox_root: Option<String>,
 ) -> Result<CommandOutput, String> {
-    run_blocking_cancellable(
-        command,
-        cwd,
-        workspace,
-        dur,
-        None,
-        sandbox_root.as_deref(),
-    )
+    run_blocking_cancellable(command, cwd, workspace, dur, None, sandbox_root.as_deref())
 }
 
 /// Kill the process group led by `child` on Unix. The one-shot command is
@@ -294,7 +283,10 @@ impl ShellState {
     /// Live agent shell sessions + background processes (diagnostics —
     /// background processes should be reaped when their owner session ends).
     pub fn counts(&self) -> (usize, usize) {
-        (rwlock_read(&self.sessions).len(), rwlock_read(&self.bg).len())
+        (
+            rwlock_read(&self.sessions).len(),
+            rwlock_read(&self.bg).len(),
+        )
     }
 }
 
@@ -337,7 +329,9 @@ pub fn shell_session_open(
     let session = Arc::new(ShellSession::new(initial, workspace));
     let mut map = rwlock_write(&state.sessions);
     if map.len() >= MAX_SESSIONS {
-        return Err(format!("too many shell sessions (limit {MAX_SESSIONS}); close unused sessions first"));
+        return Err(format!(
+            "too many shell sessions (limit {MAX_SESSIONS}); close unused sessions first"
+        ));
     }
     const ID_ALLOC_BOUND: u32 = 128;
     let mut id = None;
@@ -377,13 +371,7 @@ pub async fn shell_session_run(
     let (tx, rx) = mpsc::channel();
     let sandbox = sandbox_root.filter(|s| !s.is_empty());
     thread::spawn(move || {
-        let _ = tx.send(session.run(
-            command,
-            cwd,
-            workspace,
-            dur,
-            sandbox.as_deref(),
-        ));
+        let _ = tx.send(session.run(command, cwd, workspace, dur, sandbox.as_deref()));
     });
     rx.recv().map_err(|e| e.to_string())?
 }
@@ -400,7 +388,9 @@ pub fn shell_session_close(state: tauri::State<ShellState>, id: u32) -> Result<(
 pub fn shell_session_cancel(state: tauri::State<ShellState>, id: u32) -> Result<(), String> {
     let sessions = rwlock_read(&state.sessions);
     if let Some(session) = sessions.get(&id) {
-        session.cancel.store(true, std::sync::atomic::Ordering::Release);
+        session
+            .cancel
+            .store(true, std::sync::atomic::Ordering::Release);
     }
     Ok(())
 }
@@ -420,7 +410,9 @@ pub fn shell_bg_spawn(
     let mut map = rwlock_write(&state.bg);
     map.retain(|_, p| !p.has_exited());
     if map.len() >= MAX_BG_PROCS {
-        return Err(format!("too many background processes (limit {MAX_BG_PROCS}); kill unused ones first"));
+        return Err(format!(
+            "too many background processes (limit {MAX_BG_PROCS}); kill unused ones first"
+        ));
     }
     // Drop the lock before spawning — spawn does I/O and we already know the
     // cap has room. If another caller slips in before we re-acquire, the cap
@@ -445,9 +437,8 @@ pub fn shell_bg_spawn(
             break;
         }
     }
-    let id = id.ok_or_else(|| {
-        format!("failed to allocate bg process id after {BG_ID_BOUND} attempts")
-    })?;
+    let id =
+        id.ok_or_else(|| format!("failed to allocate bg process id after {BG_ID_BOUND} attempts"))?;
     map.insert(id, proc);
     Ok(id)
 }
@@ -476,10 +467,7 @@ pub fn shell_bg_kill(state: tauri::State<ShellState>, handle: u32) -> Result<(),
 /// Reap (kill) all background processes owned by the given session ID.
 /// Called when a chat session closes so parallel agents don't cross-contaminate.
 #[tauri::command]
-pub fn shell_bg_reap(
-    state: tauri::State<ShellState>,
-    owner: String,
-) -> Result<u32, String> {
+pub fn shell_bg_reap(state: tauri::State<ShellState>, owner: String) -> Result<u32, String> {
     let mut map = rwlock_write(&state.bg);
     let mut killed = 0u32;
     for proc in map.values() {
@@ -556,11 +544,7 @@ pub fn sweep_stale_shell_scripts(dir: &Path) {
         let Ok(modified) = entry.metadata().and_then(|m| m.modified()) else {
             continue;
         };
-        if now
-            .duration_since(modified)
-            .unwrap_or(Duration::ZERO)
-            > SHELL_SCRIPT_TTL
-        {
+        if now.duration_since(modified).unwrap_or(Duration::ZERO) > SHELL_SCRIPT_TTL {
             let _ = std::fs::remove_file(&p);
         }
     }

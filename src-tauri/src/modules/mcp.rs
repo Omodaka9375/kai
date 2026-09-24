@@ -49,9 +49,8 @@ fn quote_cmd_arg(arg: &str) -> String {
     if arg.is_empty() {
         return "\"\"".to_string();
     }
-    let needs_quote = arg.contains(|c: char| {
-        c == ' ' || c == '\t' || c == ',' || c == ';' || c == '='
-    });
+    let needs_quote =
+        arg.contains(|c: char| c == ' ' || c == '\t' || c == ',' || c == ';' || c == '=');
     if !needs_quote {
         return arg.to_string();
     }
@@ -89,10 +88,10 @@ pub fn mcp_stdio_open(
         use std::os::windows::process::CommandExt;
         let mut c = Command::new("cmd.exe");
         c.creation_flags(0x08000000); // CREATE_NO_WINDOW
-        // Build a single command line with each component quoted for cmd.exe.
-        // The previous `command arg1 arg2` join misparsed paths with spaces
-        // (e.g. `C:\Program Files\nodejs\npx.cmd`) and let `&`/`|`/`>` in
-        // arguments act as cmd metacharacters.
+                                      // Build a single command line with each component quoted for cmd.exe.
+                                      // The previous `command arg1 arg2` join misparsed paths with spaces
+                                      // (e.g. `C:\Program Files\nodejs\npx.cmd`) and let `&`/`|`/`>` in
+                                      // arguments act as cmd metacharacters.
         let mut full = quote_cmd_arg(&command);
         for a in &args {
             full.push(' ');
@@ -189,7 +188,10 @@ pub fn mcp_stdio_open(
                         if trimmed.is_empty() {
                             continue;
                         }
-                        log::info!("mcp id={id} stderr: {}", truncate(&trimmed, MAX_STDERR_LINE));
+                        log::info!(
+                            "mcp id={id} stderr: {}",
+                            truncate(&trimmed, MAX_STDERR_LINE)
+                        );
                         let _ = stderr_ch.send(McpEvent::Stderr { data: trimmed });
                     }
                     Err(_) => break,
@@ -258,10 +260,7 @@ pub fn mcp_stdio_send(
 
 /// Close a stdio MCP session, killing the child process.
 #[tauri::command]
-pub fn mcp_stdio_close(
-    state: tauri::State<'_, McpState>,
-    id: u32,
-) -> Result<(), String> {
+pub fn mcp_stdio_close(state: tauri::State<'_, McpState>, id: u32) -> Result<(), String> {
     let mut sessions = rwlock_write(&state.sessions);
     if let Some(session) = sessions.remove(&id) {
         if let Ok(mut child) = session.child.lock() {
