@@ -109,6 +109,8 @@ export type AuthServerInfo = {
   tokenUrl: string;
   clientId: string;
   scopes?: string[];
+  /** RFC 7591 dynamic-client-registration endpoint, when advertised. */
+  registrationUrl?: string;
 };
 
 function parseWwwAuthenticate(header: string): Record<string, string> {
@@ -129,7 +131,125 @@ type AuthorizationServerMetadata = {
   authorization_endpoint?: string;
   token_endpoint?: string;
   scopes_supported?: string[];
+  /** RFC 7591: endpoint where we can dynamically register a client. */
+  registration_endpoint?: string;
 };
+
+// ── Dynamic Client Registration (RFC 7591) ────────────────────────────────────
+
+/** Persisted client registration for one authorization server. Keyed by the
+ * AS origin so two MCP servers sharing an AS reuse one registration — that
+ * is what the registration is actually issued to. */
+type StoredRegistration = {
+  clientId: string;
+  clientSecret: string | null;
+  registrationAccessToken?: string | null;
+  /** The exact redirect_uri we registered (port is pinned by RFC 7591). */
+  redirectUri: string;
+  /** ISO date when the registration was created. */
+  createdAt: string;
+};
+
+function registrationAccountFor(authServerOrigin: string): string {
+  // Keep it under keychain length limits; origins are already short.
+  return `mcp-dcr:${authServerOrigin.replace(/^https?:\/\//, "")}`;
+}
+
+async function loadRegistration(
+  authServerOrigin: string,
+): Promise<StoredRegistration | null> {
+  try {
+    const raw = await invoke<string | null>("secrets_get", {
+      service: KEYRING_SERVICE,
+      account: registrationAccountFor(authServerOrigin),
+    });
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as StoredRegistration;
+    if (!parsed.clientId || !parsed.redirectUri) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+async function saveRegistration(
+  authServerOrigin: string,
+  reg: StoredRegistration,
+): Promise<void> {
+  await invoke("secrets_set", {
+    service: KEYRING_SERVICE,
+    account: registrationAccountFor(authServerOrigin),
+    password: JSON.stringify(reg),
+  });
+}
+
+export async function clearMcpRegistration(authServerOrigin: string): Promise<void> {
+  try {
+    await invoke("secrets_delete", {
+      service: KEYRING_SERVICE,
+      account: registrationAccountFor(authServerOrigin),
+    });
+  } catch {
+    // already absent
+  }
+}
+
+type RegistrationResponse = {
+  client_id: string;
+  client_secret?: string;
+  client_secret_expires_at?: number;
+  registration_access_token?: string;
+};
+
+/**
+ * Dynamically register a public OAuth client (RFC 7591) with the
+ * authorization server. Only called when the AS has a
+ * `registration_endpoint` AND we have no usable stored registration (or the
+ * stored one was rejected). Falls back to the static client id on any
+ * failure — servers like Linear/GitHub accept static loopback ids, so DCR
+ * only ever improves compatibility, never breaks it.
+ */
+async function registerClient(
+  info: AuthServerInfo,
+  redirectUri: string,
+): Promise<StoredRegistration | null> {
+  const asOrigin = new URL(info.authorizationUrl).origin;
+
+  // Reuse a stored registration whose pinned port still matches — RFC 7591
+  // registrations bind the exact redirect_uri, so a port change means the
+  // old registration is useless for this flow.
+  const existing = await loadRegistration(asOrigin);
+  if (existing && existing.redirectUri === redirectUri) return existing;
+
+  const body = {
+    client_name: "KAI",
+    redirect_uris: [redirectUri],
+    grant_types: ["authorization_code", "refresh_token"],
+    response_types: ["code"],
+    token_endpoint_auth_method: existing?.clientSecret ? "client_secret_basic" : "none",
+  };
+  try {
+    const resp = await oauthFetch(info.registrationUrl!, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) return null;
+    const reg = (await resp.json()) as RegistrationResponse;
+    if (!reg.client_id) return null;
+    const stored: StoredRegistration = {
+      clientId: reg.client_id,
+      clientSecret: reg.client_secret ?? null,
+      registrationAccessToken: reg.registration_access_token ?? null,
+      redirectUri,
+      createdAt: new Date().toISOString(),
+    };
+    await saveRegistration(asOrigin, stored);
+    return stored;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Discover the authorization server for an MCP server that answered 401.
@@ -182,6 +302,7 @@ export async function discoverAuthServer(
             tokenUrl: meta.token_endpoint,
             clientId: clientIdFor(serverUrl),
             scopes: meta.scopes_supported,
+            registrationUrl: meta.registration_endpoint,
           };
         }
       } catch {
@@ -206,6 +327,7 @@ export async function discoverAuthServer(
       tokenUrl: meta.token_endpoint,
       clientId: clientIdFor(serverUrl),
       scopes: meta.scopes_supported,
+      registrationUrl: meta.registration_endpoint,
     };
   } catch {
     return null;
@@ -214,9 +336,10 @@ export async function discoverAuthServer(
 
 /**
  * Client identifier. As a PUBLIC client we register a stable per-server
- * identifier derived from the redirect URI — servers that require dynamic
- * client registration are not supported yet (rare; Linear/GitHub/etc. accept
- * static public clients for loopback redirects).
+ * identifier derived from the redirect URI. Used as the fallback when the
+ * authorization server accepts static loopback clients (Linear, GitHub,
+ * etc.); servers that require RFC 7591 dynamic registration go through
+ * `registerClient` instead.
  */
 function clientIdFor(serverUrl: string): string {
   // Loopback redirect per RFC 8252: the port may vary, so key on origin.
@@ -313,17 +436,28 @@ async function exchangeCode(
   code: string,
   codeVerifier: string,
   redirectUri: string,
+  clientId: string,
+  clientSecret: string | null,
 ): Promise<TokenResponse> {
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     code,
     code_verifier: codeVerifier,
-    client_id: info.clientId,
+    client_id: clientId,
     redirect_uri: redirectUri,
   });
+  const headers: Record<string, string> = {
+    "content-type": "application/x-www-form-urlencoded",
+  };
+  // Confidential clients (DCR issued a secret) authenticate per RFC 6749
+  // §2.3.1; public clients send no secret.
+  if (clientSecret) {
+    const basic = btoa(`${encodeURIComponent(clientId)}:${encodeURIComponent(clientSecret)}`);
+    headers.authorization = `Basic ${basic}`;
+  }
   const resp = await oauthFetch(info.tokenUrl, {
     method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
+    headers,
     body: body.toString(),
   });
   if (!resp.ok) {
@@ -333,11 +467,15 @@ async function exchangeCode(
   return (await resp.json()) as TokenResponse;
 }
 
-/** Full interactive flow: discover → browser → callback → exchange → persist. */
+/** Full interactive flow: discover → (DCR) → browser → callback → exchange → persist.
+ * `depth` bounds the invalid_client recovery — a dead stored registration is
+ * cleared and the flow restarts once with a fresh one (the authorization
+ * code is bound to the rejected client, so only a full re-auth works). */
 export async function runAuthorizationFlow(
   serverId: string,
   serverUrl: string,
   wwwAuthenticate: string,
+  depth = 0,
 ): Promise<StoredTokens | null> {
   const info = await discoverAuthServer(serverUrl, wwwAuthenticate);
   if (!info) {
@@ -346,11 +484,38 @@ export async function runAuthorizationFlow(
     );
   }
 
+  // Preferred port: RFC 7591 registrations pin the exact redirect_uri
+  // including the loopback port, so reuse the port of a stored registration
+  // for THIS authorization server when one exists. Otherwise bind any port.
+  const asOrigin = new URL(info.authorizationUrl).origin;
+  const existingReg = await loadRegistration(asOrigin);
+  const preferredPort = existingReg
+    ? Number(new URL(existingReg.redirectUri).port) || 0
+    : 0;
+
   const listener = await invoke<{ listenerId: number; port: number }>(
     "mcp_oauth_start",
-    { timeoutSecs: 300 },
+    { timeoutSecs: 300, port: preferredPort || null },
   );
   const redirectUri = `http://localhost:${listener.port}/callback`;
+
+  // Client id resolution:
+  //   1. stored registration that still matches the bound port → reuse it
+  //   2. AS advertises a registration_endpoint → register now (RFC 7591)
+  //   3. otherwise the static public loopback client id
+  let clientId = info.clientId;
+  let clientSecret: string | null = null;
+  if (existingReg && existingReg.redirectUri === redirectUri) {
+    clientId = existingReg.clientId;
+    clientSecret = existingReg.clientSecret;
+  } else if (info.registrationUrl) {
+    const reg = await registerClient(info, redirectUri);
+    if (reg) {
+      clientId = reg.clientId;
+      clientSecret = reg.clientSecret;
+    }
+    // Registration failed (or the port changed) → static fallback below.
+  }
 
   const state = randomToken();
   const codeVerifier = randomToken();
@@ -358,7 +523,7 @@ export async function runAuthorizationFlow(
 
   const authUrl = new URL(info.authorizationUrl);
   authUrl.searchParams.set("response_type", "code");
-  authUrl.searchParams.set("client_id", info.clientId);
+  authUrl.searchParams.set("client_id", clientId);
   authUrl.searchParams.set("redirect_uri", redirectUri);
   authUrl.searchParams.set("state", state);
   authUrl.searchParams.set("code_challenge", codeChallenge);
@@ -369,20 +534,41 @@ export async function runAuthorizationFlow(
 
   // Open the user's browser at the consent page — deferred until the
   // callback listener is live (see waitForCallback).
-  const params = await waitForCallback(
-    listener.listenerId,
-    state,
-    300_000,
-    () => openUrl(authUrl.toString()),
-  );
-  const tokens = await exchangeCode(info, params.code, codeVerifier, redirectUri);
+  let params: Record<string, string>;
+  let tokens: TokenResponse;
+  try {
+    params = await waitForCallback(
+      listener.listenerId,
+      state,
+      300_000,
+      () => openUrl(authUrl.toString()),
+    );
+    tokens = await exchangeCode(
+      info,
+      params.code,
+      codeVerifier,
+      redirectUri,
+      clientId,
+      clientSecret,
+    );
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    // The stored registration was revoked server-side (or never existed on
+    // this AS). Drop it and restart ONCE — with a fresh registration the
+    // authorization request and the exchange both use the new client id.
+    if (depth === 0 && /invalid_client/i.test(msg)) {
+      await clearMcpRegistration(asOrigin);
+      return runAuthorizationFlow(serverId, serverUrl, wwwAuthenticate, depth + 1);
+    }
+    throw e;
+  }
 
   const stored: StoredTokens = {
     accessToken: tokens.access_token,
     refreshToken: tokens.refresh_token ?? null,
     expiresAt: tokens.expires_in ? Date.now() + tokens.expires_in * 1000 : null,
     tokenUrl: info.tokenUrl,
-    clientId: info.clientId,
+    clientId,
   };
   await saveMcpTokens(serverId, stored);
   return stored;
@@ -404,10 +590,27 @@ export async function refreshAccessToken(
     refresh_token: stored.refreshToken,
     client_id: stored.clientId,
   });
+  const headers: Record<string, string> = {
+    "content-type": "application/x-www-form-urlencoded",
+  };
+  // If the client that issued this token was dynamically registered with a
+  // secret (RFC 7591 confidential client), authenticate the refresh too.
+  try {
+    const asOrigin = new URL(stored.tokenUrl).origin;
+    const reg = await loadRegistration(asOrigin);
+    if (reg && reg.clientId === stored.clientId && reg.clientSecret) {
+      const basic = btoa(
+        `${encodeURIComponent(reg.clientId)}:${encodeURIComponent(reg.clientSecret)}`,
+      );
+      headers.authorization = `Basic ${basic}`;
+    }
+  } catch {
+    // No registration / bad URL — proceed as a public client.
+  }
   try {
     const resp = await oauthFetch(stored.tokenUrl, {
       method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
+      headers,
       body: body.toString(),
     });
     if (!resp.ok) return null;

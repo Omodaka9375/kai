@@ -46,11 +46,21 @@ pub struct ListenerInfo {
 pub fn mcp_oauth_start(
     app: AppHandle,
     state: State<'_, McpOAuthState>,
+    // Preferred loopback port. RFC 7591 dynamic-client registrations pin
+    // the exact redirect_uri (including port), so a re-auth for a server
+    // whose registration we stored must try that port first. If it is
+    // already taken (concurrent flow), we fall back to a random port and
+    // the caller re-registers.
+    port: Option<u16>,
     timeout_secs: Option<u64>,
 ) -> Result<ListenerInfo, String> {
     // Loopback only — the callback must never be reachable off-machine.
-    let listener =
-        TcpListener::bind(("127.0.0.1", 0)).map_err(|e| format!("bind loopback: {e}"))?;
+    let listener = match port {
+        Some(p) => TcpListener::bind(("127.0.0.1", p))
+            .or_else(|_| TcpListener::bind(("127.0.0.1", 0)))
+            .map_err(|e| format!("bind loopback: {e}"))?,
+        None => TcpListener::bind(("127.0.0.1", 0)).map_err(|e| format!("bind loopback: {e}"))?,
+    };
     let port = listener
         .local_addr()
         .map_err(|e| format!("local_addr: {e}"))?
