@@ -4,6 +4,18 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.4.0]
+
+- Source-control panel: local branches are now listed with switch/create/delete (no terminal needed).
+- Source-control panel: merge-conflict banner shows conflict count and per-file line locations (GitHub Desktop style).
+- AI: "Ask KAI to resolve" action on the merge-conflict banner opens the composer preloaded with the conflict context.
+- AI: merge any session (fork) into another; "shadow session" is now labeled "detached copy" in the UI.
+- AI: watch wake-ups are queued instead of dropped when the agent is mid-turn, so watches fire reliably.
+- Fixed stale/missing project memory (case-sensitive keying) and memory/checkpoints writing to the detached copy instead of the real root.
+- Fixed blank terminals on project open (serialized ConPTY teardown with spawn).
+
+---
+
 ## [1.3.9]
 
 - Fixed React #185 render-loop error
