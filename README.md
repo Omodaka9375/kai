@@ -25,31 +25,68 @@ Kai is a fast, cross-platform terminal built on **Tauri 2 + Rust** and **React 1
 
 ## Features
 
-**Terminal** — xterm.js + WebGL, multi-tab, split panes, shell integration (bash/zsh/PowerShell/cmd), inline search, smart error detection with one-click AI fix, toroidal **Conway's Game of Life thinking spinner**, and **Escape-key streaming interrupt**.
+### Terminal
 
-**Editor** — CodeMirror 6 with 44 languages, find & replace, edit diffs with approval flow, 9 editor themes, Vim mode (with `:w`/`:q` Ex commands), image & PDF preview, and **Open in Live Preview** (right-click any HTML file to spawn a local background HTTP server and preview it instantly in-app).
+- xterm.js + WebGL rendering, multi-tab with split panes
+- Shell integration for bash, zsh, PowerShell, and cmd
+- Inline search, smart error detection, autocomplete
+- Escape-key streaming interrupt, and a toroidal Conway's Game of Life thinking spinner
 
-**AI Agent** — bring your own key. Supports OpenAI, Anthropic, Google, Groq, xAI, Cerebras, DeepSeek, Mistral, OpenRouter, and direct Z.ai (GLM) integration. Supports **Clipboard Image Pasting (`Ctrl+V`)** to attach screenshots instantly, **Universal File Extraction** (zip/audio/image/video locally extracted as text), and **Interactive Todo Toggling** with auto-closing completion lists. **Per-model thinking control** — a brain toggle on each reasoning model cycles thinking effort off/low/medium/high, mapping to provider-native reasoning budgets/efforts. Local models via LM Studio or Ollama.
+### Editor
 
-**Image & Video Generation** — generate images and videos directly from chat. Image: OpenAI GPT Image 2, Google Nano Banana 2, xAI Grok Imagine, ComfyUI (local). Video: Kling 3.0, Google Veo 3.1, ByteDance Seedance 2.0, ComfyUI. Inline rendering with lightbox and download.
+- CodeMirror 6 with 44 languages and find & replace
+- Side-by-side AI edit diffs with per-hunk approve/reject
+- 9 themes, Vim mode (`:w` / `:q` Ex commands, visual/insert/normal)
+- Image & PDF preview, plus **Open in Live Preview** — right-click an HTML file to serve and preview it in-app
 
-**MCP** — connect external tool servers via Model Context Protocol. Browse and install from the official registry.
+### AI Agent
 
-**Git** — stage, commit, push and review diffs from the source-control panel, with optional GPG commit signing (auto-sign or approval modes). Manage branches (list, switch, create, delete) without leaving the panel, and resolve merge conflicts with a GitHub Desktop–style view showing conflict counts and per-file line locations — plus one-click "Ask KAI to resolve".
+- **Bring your own key** — OpenAI, Anthropic, Google, Groq, xAI, Cerebras, DeepSeek, Mistral, OpenRouter, and direct Z.ai (GLM)
+- Local models via LM Studio or Ollama
+- Paste screenshots straight into chat with `Ctrl+V`
+- Universal file extraction — zip, audio, image, and video read locally as text
+- Interactive todo toggling with auto-closing completion lists
+- Per-model thinking control — a toggle on each reasoning model cycles effort off/low/medium/high
+- Multi-step goals with automation, plan mode (queue edits for review as one diff), and sub-agents (explore / code-review / security / research)
+- Conversation forking and merging — branch any message into a parallel thread, then merge it back or into another thread
 
-**More** — file explorer, built-in web preview (featuring a one-tap Stop button), REST API tester, 8 UI themes, local Whisper voice transcription (offline, bundled Silero VAD), PDF/DOCX reading, **Universal File Extraction** (ZIP/JAR listing, audio metadata, image OCR via tesseract), **Direct PDF Export (`convert_to_pdf`)** to convert Markdown/Word directly to styled PDFs, YouTube transcript summarization, `Kai.md` project memory, context summarization, auto-approve modes. Conversations support **forking and merging** (branch any message into a parallel thread, then merge it back or into another thread), **plan mode** (queue edits for review as a single diff), **multi-step goals with automation**, **sub-agents** (explore / code-review / security / research), and **skills & snippets**. Per-project **sandbox** confines file/shell tools (read-only or workspace-only) and supports a **detached-copy workflow** (work in an isolated copy, merge or discard later).
+### Image & Video Generation
+
+- Generate directly from chat, with inline rendering, lightbox, and download
+- **Image:** OpenAI GPT Image 2 · Google Nano Banana 2 · xAI Grok Imagine · ComfyUI
+- **Video:** Kling 3.0 · Google Veo 3.1 · ByteDance Seedance 2.0 · ComfyUI
+
+### Git
+
+- Stage, commit, push, and review diffs from the source-control panel
+- Manage branches (list, switch, create, delete) without leaving the panel
+- Resolve merge conflicts with conflict counts and per-file line locations, plus one-click "Ask KAI to resolve"
+- Optional GPG commit signing (auto-sign or approval modes)
+
+### Extensibility & Tooling
+
+- **MCP** — connect external tool servers and install from the official registry
+- File explorer and built-in web preview (with one-tap Stop)
+- REST API tester and 8 UI themes
+- Local Whisper voice transcription (offline, bundled Silero VAD)
+- PDF/DOCX reading, image OCR (tesseract), ZIP/JAR listing, and audio metadata
+- Direct PDF export (`convert_to_pdf`) from Markdown/Word
+- YouTube transcript summarization
+- `Kai.md` project memory, context summarization, and auto-approve modes
+- Skills & snippets
+- Per-project **sandbox** (read-only or workspace-only) and a **detached-copy** workflow — work in an isolated copy, then merge or discard
 
 ## Agent Personas
 
-KAI features highly specialized built-in agent personas designed to assist across every dimension of engineering. You can switch between them inside the chat pane, customize their prompts, and reset them to factory defaults at any time:
+KAI ships highly specialized built-in agent personas for different kinds of work. Switch between them in the chat pane, customize their prompts, and reset to factory defaults at any time.
 
-*   **Coder** 💻: General-purpose development. Resolves, refactors, and runs tests.
-*   **Architect** 📐: restful restatements, tradeoffs, scalability, and multi-option blueprints.
-*   **Code Reviewer** 🔍: Logic reviews, edge cases, race conditions, and performance cliffs.
-*   **Security** 🛡️: Threat-modeling, input validation, and secure cryptographic defaults.
-*   **Designer** 🎨: UI/UX critique, density, typography, spacing, and modern motion.
-*   **Researcher** 🛰️: Web search, page browsing, and structured source citations.
-*   **Assistant** ✍️: Creative brainstorming, copyediting, article summaries, and text tasks.
+- **Coder** 💻 — general-purpose development: resolves, refactors, and runs tests
+- **Architect** 📐 — tradeoffs, scalability, and multi-option blueprints
+- **Code Reviewer** 🔍 — logic, edge cases, race conditions, and performance cliffs
+- **Security** 🛡️ — threat modeling, input validation, and secure crypto defaults
+- **Designer** 🎨 — UI/UX critique, density, typography, spacing, and modern motion
+- **Researcher** 🛰️ — web search, page browsing, and structured citations
+- **Assistant** ✍️ — brainstorming, copyediting, summaries, and text tasks
 
 ## Install
 
@@ -70,35 +107,38 @@ Keys are stored in the OS keychain. No account required.
 ### 1. Offline Setup with LM Studio
 
 KAI has full support for local, offline-only development. To use a local GGUF model:
-1.  Open **LM Studio** and navigate to the **Developer** tab.
-2.  Start the local HTTP server. Note the base URL (usually `http://localhost:1234/v1`).
-3.  In KAI, open **Settings → Models** and enter the Base URL and the active **Model ID** (e.g. `qwen3.3-coder-instruct`). Click **Save**.
-4.  You can now select **LM Studio (Local)** in your chat for 100% private intelligence.
+
+1. Open **LM Studio** and go to the **Developer** tab.
+2. Start the local HTTP server and note the base URL (usually `http://localhost:1234/v1`).
+3. In KAI, open **Settings → Models** and enter the base URL and active **Model ID** (e.g. `qwen3.3-coder-instruct`). Click **Save**.
+4. Select **LM Studio (Local)** in chat for fully private intelligence.
 
 ### 2. One-Click MCP installations
 
 Extend your AI agent's capabilities with custom tools via the Model Context Protocol:
-1.  Open KAI's left sidebar and switch to the **Extensions** (puzzle icon) tab.
-2.  Browse or search for official MCP servers (such as `Filesystem`, `PostgreSQL`, or `GitHub`).
-3. Click **Install**. KAI will automatically download and connect the server in the background, making its tools immediately available to your active agent.
+
+1. Open the left sidebar and switch to the **Extensions** (puzzle icon) tab.
+2. Browse or search for official MCP servers (e.g. `Filesystem`, `PostgreSQL`, or `GitHub`).
+3. Click **Install** — KAI downloads and connects the server in the background, making its tools immediately available to the active agent.
 
 ### 3. Project Memory with Kai.md
-KAI allows you to define custom guidelines, development standards, architectural context, and preferred workflows for your AI agent on a per-project basis.
-To activate this, manually create a file named `Kai.md` at your project's root directory. KAI will automatically read and inject its contents (up to 32KB) directly into the agent's core instruction prompt on every message.
-*   **Case Sensitivity**: The filename must be exactly `Kai.md` on case-sensitive filesystems like Linux. On Windows/macOS, variations like `KAI.md` or `kai.md` are also recognized.
-*   **Zero-Write Safe**: KAI only reads from this file; it will never modify or write to your `Kai.md` file during a session, keeping you in full control of your guidelines.
-*   **What to Include**: Define your tech stack, formatting guidelines, database schemas, directory mappings, or preferred test commands.
+
+Define custom guidelines, development standards, architectural context, and preferred workflows on a per-project basis. Create a file named `Kai.md` at the project root and KAI automatically injects its contents (up to 32KB) into the agent's instruction prompt on every message.
+
+- **Case sensitivity** — the filename must be exactly `Kai.md` on case-sensitive filesystems (Linux). On Windows/macOS, `KAI.md` / `kai.md` are also recognized.
+- **Zero-write safe** — KAI only reads this file; it never writes to it.
+- **What to include** — tech stack, formatting guidelines, database schemas, directory mappings, or preferred test commands.
 
 ### 4. Anthropic models on a Claude subscription (in the terminal)
 
 KAI's built-in AI agent is BYOK — Anthropic models selected in **Settings → Models** use your Anthropic **API key** and bill at standard API rates. If you have a **Claude Pro/Max subscription** and want to use it instead, run Anthropic's official **Claude Code** CLI in a KAI terminal pane. KAI is a full terminal, so the CLI behaves exactly as it would anywhere else and authenticates against your subscription.
 
-1.  Install Claude Code: `npm install -g @anthropic-ai/claude-code` (or use the native installer), then verify in a KAI pane with `claude --version`.
-2.  `cd` into your project, run `claude`, and at the prompt choose to log in with your **Claude account (Pro/Max)** — not an API key. To switch later, run `/login` inside Claude Code and pick the subscription. Confirm with `/status`, which should show your plan.
-3.  Make sure `ANTHROPIC_API_KEY` is **not** set in your shell environment — if it is, Claude Code may use the key and bill the API instead of your subscription. Check with `echo $ANTHROPIC_API_KEY`.
-4.  Give Claude Code its own terminal tab. KAI keeps background PTYs alive across tab switches, so the session keeps running while you work in the editor, and edited files refresh on disk.
+1. Install Claude Code — `npm install -g @anthropic-ai/claude-code` (or the native installer) — then verify with `claude --version`.
+2. `cd` into your project, run `claude`, and log in with your **Claude account (Pro/Max)** — not an API key. Switch later with `/login`, and confirm with `/status`.
+3. Make sure `ANTHROPIC_API_KEY` is **not** set in the shell — if it is, Claude Code may bill the API instead of your subscription. Check with `echo $ANTHROPIC_API_KEY`.
+4. Give Claude Code its own terminal tab. KAI keeps background PTYs alive across tab switches, so the session keeps running while you work in the editor.
 
-*   **Why the terminal**: Per Anthropic's terms, Claude subscription auth is only for its official clients (Claude Code, claude.ai). Running the official CLI in a terminal is the supported way to use your subscription here; KAI's own AI agent remains API-key based and is unaffected.
+> **Why the terminal**: per Anthropic's terms, Claude subscription auth is only for its official clients (Claude Code, claude.ai). Running the official CLI in a terminal is the supported way to use your subscription; KAI's own AI agent remains API-key based and unaffected.
 
 ## Build from Source
 
