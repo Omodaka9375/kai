@@ -35,9 +35,9 @@ Kai is a fast, cross-platform terminal built on **Tauri 2 + Rust** and **React 1
 
 **MCP** — connect external tool servers via Model Context Protocol. Browse and install from the official registry.
 
-**Git** — stage, commit, push and review diffs from the source-control panel, with optional GPG commit signing (auto-sign or approval modes) so commits show GitHub's Verified badge.
+**Git** — stage, commit, push and review diffs from the source-control panel, with optional GPG commit signing (auto-sign or approval modes). Manage branches (list, switch, create, delete) without leaving the panel, and resolve merge conflicts with a GitHub Desktop–style view showing conflict counts and per-file line locations — plus one-click "Ask KAI to resolve".
 
-**More** — file explorer, built-in web preview (featuring a one-tap Stop button), REST API tester, 8 UI themes, local Whisper voice transcription (offline, bundled Silero VAD), PDF/DOCX reading, **Universal File Extraction** (ZIP/JAR listing, audio metadata, image OCR via tesseract), **Direct PDF Export (`convert_to_pdf`)** to convert Markdown/Word directly to styled PDFs, YouTube transcript summarization, `Kai.md` project memory, context summarization, auto-approve modes.
+**More** — file explorer, built-in web preview (featuring a one-tap Stop button), REST API tester, 8 UI themes, local Whisper voice transcription (offline, bundled Silero VAD), PDF/DOCX reading, **Universal File Extraction** (ZIP/JAR listing, audio metadata, image OCR via tesseract), **Direct PDF Export (`convert_to_pdf`)** to convert Markdown/Word directly to styled PDFs, YouTube transcript summarization, `Kai.md` project memory, context summarization, auto-approve modes. Conversations support **forking and merging** (branch any message into a parallel thread, then merge it back or into another thread), **plan mode** (queue edits for review as a single diff), **multi-step goals with automation**, **sub-agents** (explore / code-review / security / research), and **skills & snippets**. Per-project **sandbox** confines file/shell tools (read-only or workspace-only) and supports a **detached-copy workflow** (work in an isolated copy, merge or discard later).
 
 ## Agent Personas
 
