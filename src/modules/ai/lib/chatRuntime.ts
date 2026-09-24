@@ -169,6 +169,9 @@ export function makeChatSync(
     void loadShadow(base.getWorkspaceRoot()).catch(() => undefined);
     return {
       ...redirected,
+      // Real root — vs the shadow-redirected `getWorkspaceRoot` above.
+      // Memory/checkpoints key off this so knowledge survives merge/discard.
+      getRealWorkspaceRoot: () => deps.live.getWorkspaceRoot(),
       getTerminalContext: () => deps.live.getTerminalContext(),
       isActiveTerminalPrivate: () => deps.live.isActiveTerminalPrivate(),
       injectIntoActivePty: (text: string) => deps.live.injectIntoActivePty(text),

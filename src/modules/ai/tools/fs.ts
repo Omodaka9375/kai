@@ -222,7 +222,10 @@ export function buildFsTools(ctx: ToolContext) {
         return withFileMutationLock([abs], async () => {
           try {
             // Snapshot before mutation for checkpoint undo.
-            beginCheckpointBatch(ctx.getWorkspaceRoot(), ctx.getSessionId());
+            beginCheckpointBatch(
+              ctx.getRealWorkspaceRoot?.() ?? ctx.getWorkspaceRoot(),
+              ctx.getSessionId(),
+            );
             await snapshotFile(abs);
             // Auto-create parent directories so the agent never needs a
             // separate create_directory step (avoids approval-loop bugs).

@@ -32,7 +32,11 @@ export function buildMemoryTools(ctx: ToolContext) {
         if (!finalEntry) {
           return { error: "empty entry — nothing to save" };
         }
-        const root = ctx.getWorkspaceRoot();
+        // Memory keys off the REAL project root (not the detached copy's) so
+        // knowledge survives a merge/discard and stays consistent across a
+        // shadow session. See ToolContext.getRealWorkspaceRoot.
+        const root =
+          ctx.getRealWorkspaceRoot?.() ?? ctx.getWorkspaceRoot();
         if (!root) return { error: "no workspace root — cannot save memory" };
         const sessionId = ctx.getSessionId();
         try {

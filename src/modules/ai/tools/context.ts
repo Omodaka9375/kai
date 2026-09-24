@@ -5,6 +5,13 @@ export type ToolContext = {
   getCwd: () => string | null;
   /** Workspace root (explorer root). Used by tools that operate over the project. */
   getWorkspaceRoot: () => string | null;
+  /**
+   * The REAL project root, NOT shadow-redirected. File/shell tools use
+   * `getWorkspaceRoot` (which points into the detached copy while one is
+   * active); state that must survive merge/discard — memory, checkpoints,
+   * sessions — must key off this real root instead.
+   */
+  getRealWorkspaceRoot?: () => string | null;
   /** Last N lines of the active terminal buffer (or null if not a terminal tab). */
   getTerminalContext: () => string | null;
   isActiveTerminalPrivate: () => boolean;

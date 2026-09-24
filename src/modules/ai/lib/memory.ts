@@ -8,7 +8,7 @@
  * The agent uses `save_memory` to persist learnings and `read_file` to recall.
  */
 
-import { getKaiStateDir } from "./kaiPaths";
+import { getKaiStateDir, getLegacyKaiStateDir } from "./kaiPaths";
 import { native } from "./native";
 import { neutralizeFenceMarkers, neutralizeInjectionMarkers } from "./fence";
 
@@ -47,22 +47,33 @@ export async function loadProjectMemory(
 ): Promise<string | null> {
   const dir = await getProjectMemoryDir(workspaceRoot);
   const path = `${dir}/MEMORY.md`;
-  try {
-    const r = await native.readFile(path);
-    if (r.kind !== "text") return null;
-    const lines = r.content.split("\n");
-    const head = lines.slice(0, MAX_MEMORY_LOAD_LINES).join("\n");
-    const capped = head.length > MAX_MEMORY_LOAD_BYTES
-      ? head.slice(0, MAX_MEMORY_LOAD_BYTES)
-      : head;
-    // Memory is loaded into the trusted system prompt. Neutralize any fence /
-    // DSML markers an earlier poisoned tool result may have written, so a
-    // hostile MEMORY.md cannot forge a trust boundary or become a synthetic
-    // tool call.
-    return neutralizeInjectionMarkers(neutralizeFenceMarkers(capped));
-  } catch {
-    return null;
-  }
+  const read = async (p: string): Promise<string | null> => {
+    try {
+      const r = await native.readFile(p);
+      if (r.kind !== "text") return null;
+      const lines = r.content.split("\n");
+      const head = lines.slice(0, MAX_MEMORY_LOAD_LINES).join("\n");
+      const capped = head.length > MAX_MEMORY_LOAD_BYTES
+        ? head.slice(0, MAX_MEMORY_LOAD_BYTES)
+        : head;
+      // Memory is loaded into the trusted system prompt. Neutralize any fence /
+      // DSML markers an earlier poisoned tool result may have written, so a
+      // hostile MEMORY.md cannot forge a trust boundary or become a synthetic
+      // tool call.
+      return neutralizeInjectionMarkers(neutralizeFenceMarkers(capped));
+    } catch {
+      return null;
+    }
+  };
+
+  const primary = await read(path);
+  if (primary !== null) return primary;
+
+  // Fallback: memory written before case-insensitive keying lives under a
+  // case-preserving hash. Read it there so existing knowledge isn't orphaned.
+  const legacyDir = await getLegacyKaiStateDir(workspaceRoot, "memory");
+  if (legacyDir === dir) return null;
+  return read(`${legacyDir}/MEMORY.md`);
 }
 
 /**
@@ -94,14 +105,36 @@ export async function appendToMemory(
   try {
     // Read existing content or start fresh.
     let existing = "";
+    let read = false;
     try {
       const r = await native.readFile(path);
       if (r.kind === "text") {
         existing = r.content;
+        read = true;
       }
     } catch {
-      // File doesn't exist — start with a header.
-      existing = `# Kai Memory — auto-generated project knowledge\n\nThis file is written by the AI agent across sessions. Edit freely.\n`;
+      // Canonical file missing — fall through to a potential legacy file.
+    }
+
+    // Migrate: if the canonical (lowercased-key) file is absent but a legacy
+    // case-preserving one exists, adopt its content so recent + legacy entries
+    // continue under one key going forward.
+    if (!read) {
+      const legacyDir = await getLegacyKaiStateDir(workspaceRoot, "memory");
+      if (legacyDir !== dir) {
+        try {
+          const lr = await native.readFile(`${legacyDir}/MEMORY.md`);
+          if (lr.kind === "text") {
+            existing = lr.content;
+            read = true;
+          }
+        } catch {
+          // no legacy file either
+        }
+      }
+      if (!read) {
+        existing = `# Kai Memory — auto-generated project knowledge\n\nThis file is written by the AI agent across sessions. Edit freely.\n`;
+      }
     }
 
     const content = existing + block;

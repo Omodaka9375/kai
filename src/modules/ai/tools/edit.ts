@@ -365,7 +365,10 @@ export function buildEditTools(ctx: ToolContext) {
         // tool calls from one step don't clobber each other via stale reads.
         return withFileMutationLock([abs], async () => {
           // Snapshot before mutation for checkpoint undo.
-          beginCheckpointBatch(ctx.getWorkspaceRoot(), ctx.getSessionId());
+          beginCheckpointBatch(
+            ctx.getRealWorkspaceRoot?.() ?? ctx.getWorkspaceRoot(),
+            ctx.getSessionId(),
+          );
           await snapshotFile(abs);
           const edits = [{ old_string, new_string, replace_all, line_hint }];
           const result = await applyEdits(abs, edits, "edit", ctx.readCache);
@@ -443,7 +446,10 @@ export function buildEditTools(ctx: ToolContext) {
           };
         }
         return withFileMutationLock([abs], async () => {
-          beginCheckpointBatch(ctx.getWorkspaceRoot(), ctx.getSessionId());
+          beginCheckpointBatch(
+            ctx.getRealWorkspaceRoot?.() ?? ctx.getWorkspaceRoot(),
+            ctx.getSessionId(),
+          );
           await snapshotFile(abs);
           // Try batch first — fast path when all old_strings match.
           let result = await applyEdits(

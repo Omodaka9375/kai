@@ -141,7 +141,10 @@ export function buildBatchEditTools(ctx: ToolContext) {
           const written: string[] = [];
           let totalReplacements = 0;
           try {
-            beginCheckpointBatch(ctx.getWorkspaceRoot(), ctx.getSessionId());
+            beginCheckpointBatch(
+              ctx.getRealWorkspaceRoot?.() ?? ctx.getWorkspaceRoot(),
+              ctx.getSessionId(),
+            );
             for (const { path, newContent } of results) {
               // Snapshot before write for checkpoint undo.
               await snapshotFile(path);
