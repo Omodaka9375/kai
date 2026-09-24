@@ -58,6 +58,10 @@ impl Drop for PtyState {
                 .name(name)
                 .spawn(move || {
                     let t0 = std::time::Instant::now();
+                    // Serialize ClosePseudoConsole with any concurrent spawn so
+                    // a new openpty can't hand out a stalled output pipe while
+                    // conhost is still draining these teardowns.
+                    let _lock = crate::modules::lock::mutex_lock(&session::SPAWN_LOCK);
                     drop(session);
                     log::info!(
                         "pty session id={id} dropped in {}ms (shutdown)",
@@ -176,10 +180,19 @@ pub fn pty_close(state: tauri::State<PtyState>, id: u32) -> Result<(), String> {
         // worker thread that handled this command — and on Windows that
         // sometimes manifests as the closed pane refusing to disappear from
         // the React tree because subsequent IPC stalls behind it.
+        //
+        // CRITICAL: the drop (ClosePseudoConsole) is serialized with the next
+        // `pty_open` via `SPAWN_LOCK`. Opening a project tears down N old PTYs
+        // and spawns the new one in the same tick; if the old sessions'
+        // conhost teardown overlapped the new `openpty`, ConPTY would hand the
+        // new session a stalled output pipe — a blank pane with a blinking
+        // cursor (xterm bound, zero bytes delivered). Holding the spawn lock
+        // around ClosePseudoConsole guarantees teardown drains before creation.
         thread::Builder::new()
             .name(format!("KAI-pty-drop-{id}"))
             .spawn(move || {
                 let t0 = std::time::Instant::now();
+                let _lock = crate::modules::lock::mutex_lock(&session::SPAWN_LOCK);
                 drop(s);
                 log::info!(
                     "pty session id={id} dropped in {}ms",

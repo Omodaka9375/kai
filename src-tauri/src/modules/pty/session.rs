@@ -54,7 +54,11 @@ impl Drop for Session {
         }
     }
 }
-static SPAWN_LOCK: Mutex<()> = Mutex::new(());
+// Serializes ConPTY create (openpty+spawn) AND teardown (ClosePseudoConsole).
+// Exposed `pub(super)` so `pty::mod` can hold it around the detached drop of a
+// closed session, guaranteeing a new spawn never overlaps a still-draining
+// conhost teardown (the root cause of a blank pane with a stalled output pipe).
+pub(super) static SPAWN_LOCK: Mutex<()> = Mutex::new(());
 
 #[cfg(windows)]
 const CONPTY_SETTLE_MS: u64 = 50;
