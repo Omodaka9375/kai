@@ -8,9 +8,10 @@ use crate::modules::git::process::{
     read_text_file, run_git,
 };
 use crate::modules::git::types::{
-    DiscardEntry, GitBranch, GitCommitFileChange, GitCommitResult, GitDiffContentResult,
-    GitDiffResult, GitLogEntry, GitOutput, GitPanelSnapshot, GitPushResult, GitRepoInfo,
-    GitStashEntry, GitStatusSnapshot, TextSource, DEFAULT_TIMEOUT_SECS, NETWORK_TIMEOUT_SECS,
+    DiscardEntry, GitBranch, GitCommitFileChange, GitCommitResult, GitConflictFile,
+    GitConflictRegion, GitDiffContentResult, GitDiffResult, GitLogEntry, GitOutput,
+    GitPanelSnapshot, GitPushResult, GitRepoInfo, GitStashEntry, GitStatusSnapshot, TextSource,
+    DEFAULT_TIMEOUT_SECS, NETWORK_TIMEOUT_SECS,
 };
 use crate::modules::git::utils::{
     authorized_repo_root, canonical_dir, resolve_within_repo, split_upstream, ResolvedGitDirectory,
@@ -484,6 +485,62 @@ pub fn delete_branch(
         DEFAULT_TIMEOUT_SECS,
     )?;
     ensure_success(&output, "git branch -d failed")
+}
+
+/// Enumerate unresolved merge conflicts with the line location of each
+/// conflict region, so the source-control UI can show "how many conflicts and
+/// where" (GitHub Desktop style) instead of a single blanket banner.
+///
+/// Unmerged files come from `status_inner` (already porcelain-parsed); for each
+/// we read the worktree file and scan for `<<<<<<<` markers, recording their
+/// 1-based line numbers. Files that are binary / missing / too large are simply
+/// skipped — the conflict count reflects what we can actually locate.
+pub fn list_conflicts(
+    registry: &WorkspaceRegistry,
+    repo_root: &str,
+    workspace: &WorkspaceEnv,
+) -> Result<Vec<GitConflictFile>> {
+    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
+    ensure_git_available(&repo_root.workspace)?;
+    let status = status_inner(&repo_root)?;
+
+    let mut out: Vec<GitConflictFile> = Vec::new();
+    for file in status.changed_files {
+        if file.status_label != "Unmerged"
+            && file.index_status != "U"
+            && file.worktree_status != "U"
+        {
+            continue;
+        }
+        let worktree_path = resolve_within_repo(&repo_root.local_path, &file.path)?;
+        let text = match read_text_file(&worktree_path)? {
+            TextSource::Text(t) => t,
+            TextSource::Missing | TextSource::Binary => continue,
+        };
+        let regions = scan_conflict_regions(&text);
+        if !regions.is_empty() {
+            out.push(GitConflictFile {
+                path: file.path,
+                regions,
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// Scan a file's text for conflict markers, returning the 1-based line of each
+/// `<<<<<<<` region opener. A malformed file (a `<<<<<<<` with no `>>>>>>>`)
+/// still reports the opener so the UI surfaces that something is wrong.
+fn scan_conflict_regions(text: &str) -> Vec<GitConflictRegion> {
+    let mut regions = Vec::new();
+    for (idx, line) in text.lines().enumerate() {
+        if line.starts_with("<<<<<<<") {
+            regions.push(GitConflictRegion {
+                line: (idx + 1) as u32,
+            });
+        }
+    }
+    regions
 }
 
 /// Validate a branch argument before it reaches the shell. Branch names may
@@ -1355,4 +1412,35 @@ fn pathspec(repo_root: &Path, absolute: &Path) -> String {
         .strip_prefix(repo_root)
         .map(|rel| rel.to_string_lossy().replace('\\', "/"))
         .unwrap_or_else(|_| absolute.to_string_lossy().replace('\\', "/"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::scan_conflict_regions;
+
+    #[test]
+    fn conflict_regions_report_one_based_lines() {
+        let text = concat!(
+            "line one\n",
+            "<<<<<<< HEAD\n",
+            "ours\n",
+            "=======\n",
+            "theirs\n",
+            ">>>>>>> branch\n",
+            "line seven\n",
+            "<<<<<<< HEAD\n",
+            "more\n",
+            ">>>>>>> branch\n",
+        );
+        let regions = scan_conflict_regions(text);
+        assert_eq!(regions.len(), 2);
+        assert_eq!(regions[0].line, 2);
+        assert_eq!(regions[1].line, 8);
+    }
+
+    #[test]
+    fn conflict_regions_empty_when_no_markers() {
+        let text = "no conflicts here\n<<<< not-quite\n>>>> neither\n";
+        assert!(scan_conflict_regions(text).is_empty());
+    }
 }

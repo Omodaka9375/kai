@@ -2,9 +2,9 @@ use tauri::{AppHandle, Manager};
 
 use crate::modules::git::operations;
 use crate::modules::git::types::{
-    DiscardEntry, GitBranch, GitCommitFileChange, GitCommitResult, GitDiffContentResult,
-    GitDiffResult, GitLogEntry, GitPanelSnapshot, GitPushResult, GitRepoInfo, GitStashEntry,
-    GitStatusSnapshot,
+    DiscardEntry, GitBranch, GitCommitFileChange, GitCommitResult, GitConflictFile,
+    GitDiffContentResult, GitDiffResult, GitLogEntry, GitPanelSnapshot, GitPushResult, GitRepoInfo,
+    GitStashEntry, GitStatusSnapshot,
 };
 use crate::modules::workspace::{WorkspaceEnv, WorkspaceRegistry};
 
@@ -411,6 +411,19 @@ pub async fn git_delete_branch(
     let workspace = WorkspaceEnv::from_option(workspace);
     blocking(app, move |r| {
         operations::delete_branch(r, &repo_root, &name, &workspace).map_err(Into::into)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn git_list_conflicts(
+    repo_root: String,
+    workspace: Option<WorkspaceEnv>,
+    app: AppHandle,
+) -> Result<Vec<GitConflictFile>, String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    blocking(app, move |r| {
+        operations::list_conflicts(r, &repo_root, &workspace).map_err(Into::into)
     })
     .await
 }

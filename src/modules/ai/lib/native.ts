@@ -96,6 +96,15 @@ export type GitBranch = {
   upstream: string | null;
 };
 
+export type GitConflictRegion = {
+  line: number;
+};
+
+export type GitConflictFile = {
+  path: string;
+  regions: GitConflictRegion[];
+};
+
 export type GpgKey = {
   fingerprint: string;
   keyId: string;
@@ -565,6 +574,11 @@ export const native = {
     }),
   gitListBranches: (repoRoot: string) =>
     invoke<GitBranch[]>("git_list_branches", {
+      repoRoot,
+      workspace: currentWorkspaceEnv(),
+    }),
+  gitListConflicts: (repoRoot: string) =>
+    invoke<GitConflictFile[]>("git_list_conflicts", {
       repoRoot,
       workspace: currentWorkspaceEnv(),
     }),

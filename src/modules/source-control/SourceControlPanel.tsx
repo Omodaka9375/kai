@@ -9,6 +9,11 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -32,6 +37,7 @@ import {
   Delete01Icon,
   Download01Icon,
   FolderGitTwoIcon,
+  GitMergeIcon,
   MinusSignIcon,
   MinusSignSquareIcon,
   Refresh01Icon,
@@ -49,7 +55,12 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import { native, type GitStashEntry } from "@/modules/ai/lib/native";
+import {
+  native,
+  type GitConflictFile,
+  type GitStashEntry,
+} from "@/modules/ai/lib/native";
+import { useChatStore } from "@/modules/ai/store/chatStore";
 import type { SourceControlSummary } from "./useSourceControl";
 import {
   useSourceControlPanel,
@@ -182,6 +193,56 @@ export const SourceControlPanel = memo(function SourceControlPanel({
     if (!scm.status) return "Source Control";
     return scm.status.isDetached ? "detached" : scm.status.branch;
   }, [scm.status]);
+
+  // Conflict details (files + the line of each conflict region), fetched from
+  // the git backend so the banner can show a count and the popover can show
+  // exactly where each conflict is — GitHub Desktop style. Re-fetched whenever
+  // the conflict set may have changed (repo root / status change).
+  const [conflictFiles, setConflictFiles] = useState<GitConflictFile[]>([]);
+  useEffect(() => {
+    const repoRoot = scm.status?.repoRoot;
+    if (!repoRoot || !scm.hasConflicts) {
+      setConflictFiles([]);
+      return;
+    }
+    let cancelled = false;
+    native
+      .gitListConflicts(repoRoot)
+      .then((files) => {
+        if (!cancelled) setConflictFiles(files);
+      })
+      .catch(() => {
+        if (!cancelled) setConflictFiles([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [scm.status?.repoRoot, scm.hasConflicts]);
+
+  // Total number of conflict regions across all conflicted files (for the
+  // "N conflicts in M files" summary in the banner/popover).
+  const conflictCount = useMemo(
+    () => conflictFiles.reduce((n, f) => n + f.regions.length, 0),
+    [conflictFiles],
+  );
+
+  const askKaiToResolveConflicts = useCallback(() => {
+    const root = scm.status?.repoRoot;
+    const branch = scm.status?.branch ?? "(unknown)";
+    const context = [
+      `Merge conflicts to resolve (repo: ${root ?? "unknown"}, branch: ${branch}):`,
+      ...(conflictFiles.length > 0
+        ? conflictFiles.map((f) => `- ${f.path}`)
+        : ["(no specific files were reported)"]),
+      "",
+      "Resolve these merge conflicts so the working tree can be committed.",
+    ].join("\n");
+
+    const store = useChatStore.getState();
+    store.attachSelection(context, "terminal");
+    store.openPanel();
+    store.focusInput("Resolve the merge conflicts");
+  }, [scm.status, conflictFiles]);
   const [branchUrl, setBranchUrl] = useState<string | null>(null);
   useEffect(() => {
     const repoRoot = scm.status?.repoRoot;
@@ -854,6 +915,9 @@ export const SourceControlPanel = memo(function SourceControlPanel({
                           onPopStash={scm.popStash}
                           onApplyStash={scm.applyStash}
                           onDropStash={scm.requestDropStash}
+                          conflictFiles={conflictFiles}
+                          conflictCount={conflictCount}
+                          onAskKaiResolve={askKaiToResolveConflicts}
                         />
                       </div>
                     );
@@ -1017,13 +1081,22 @@ type RowRendererProps = {
   onPopStash: (entry: GitStashEntry) => Promise<void> | void;
   onApplyStash: (entry: GitStashEntry) => Promise<void> | void;
   onDropStash: (entry: GitStashEntry) => void;
+  conflictFiles: GitConflictFile[];
+  conflictCount: number;
+  onAskKaiResolve: () => void;
 };
 
 const RowRenderer = memo(function RowRenderer(props: RowRendererProps) {
   const { row } = props;
   switch (row.kind) {
     case "banner-conflicts":
-      return <ConflictsBanner />;
+      return (
+        <ConflictsBanner
+          conflictFiles={props.conflictFiles}
+          conflictCount={props.conflictCount}
+          onAskKaiResolve={props.onAskKaiResolve}
+        />
+      );
     case "group-header":
       return <GroupHeader {...props} row={row} />;
     case "entry":
@@ -1039,12 +1112,107 @@ const RowRenderer = memo(function RowRenderer(props: RowRendererProps) {
   }
 });
 
-function ConflictsBanner() {
+function ConflictsBanner({
+  conflictFiles,
+  conflictCount,
+  onAskKaiResolve,
+}: {
+  conflictFiles: GitConflictFile[];
+  conflictCount: number;
+  onAskKaiResolve: () => void;
+}) {
+  const fileCount = conflictFiles.length;
   return (
-    <div className="mx-2 mt-1 flex h-7 items-center gap-1.5 rounded-md border border-destructive/25 bg-destructive/[0.07] px-2 text-[10.5px] leading-none text-destructive dark:text-red-300">
-      <span className="size-1.5 shrink-0 rounded-full bg-destructive animate-pulse" />
-      <span className="font-medium">Unresolved Merge Conflicts — Resolve them before committing.</span>
-    </div>
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="mx-2 mt-1 flex h-7 w-[calc(100%-1rem)] cursor-pointer items-center gap-1.5 rounded-md border border-destructive/25 bg-destructive/[0.07] px-2 text-left text-[10.5px] leading-none text-destructive transition-colors hover:bg-destructive/[0.12] dark:text-red-300"
+        >
+          <HugeiconsIcon
+            icon={GitMergeIcon}
+            size={12}
+            strokeWidth={2}
+            className="shrink-0"
+          />
+          <span className="truncate font-medium">
+            {conflictCount > 0
+              ? `${conflictCount} conflict${conflictCount === 1 ? "" : "s"} in ${fileCount} file${fileCount === 1 ? "" : "s"}`
+              : "Unresolved Merge Conflicts"}
+          </span>
+          {conflictCount > 0 ? (
+            <span className="shrink-0 rounded bg-destructive/20 px-1.5 py-0.5 text-[9.5px] font-semibold tabular-nums">
+              {conflictCount}
+            </span>
+          ) : null}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        sideOffset={6}
+        className="z-50 w-80 gap-0 rounded-xl p-3 text-sm text-popover-foreground"
+      >
+        <div className="flex items-center gap-2">
+          <HugeiconsIcon
+            icon={GitMergeIcon}
+            size={15}
+            strokeWidth={1.9}
+            className="shrink-0 text-destructive"
+          />
+          <div className="text-[12.5px] font-medium">
+            {conflictCount > 0
+              ? `${conflictCount} conflict${conflictCount === 1 ? "" : "s"} in ${fileCount} file${fileCount === 1 ? "" : "s"}`
+              : "Resolve merge conflicts"}
+          </div>
+        </div>
+
+        {conflictFiles.length > 0 ? (
+          <div className="mt-2 flex max-h-48 flex-col gap-1 overflow-y-auto rounded-md border border-border/50 bg-muted/30 p-1.5">
+            {conflictFiles.map((f) => {
+              const lines = f.regions.map((r) => r.line);
+              const summary =
+                lines.length === 1
+                  ? `line ${lines[0]}`
+                  : `lines ${lines.join(", ")}`;
+              return (
+                <div key={f.path} className="px-1 py-0.5">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="min-w-0 truncate font-mono text-[10.5px] leading-relaxed text-foreground/90">
+                      {f.path}
+                    </span>
+                    <span className="shrink-0 text-[9.5px] font-medium tabular-nums text-destructive">
+                      {f.regions.length}
+                    </span>
+                  </div>
+                  <div className="truncate text-[9.5px] leading-relaxed text-muted-foreground">
+                    {summary}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
+
+        <p className="mt-2 text-[11px] leading-snug text-muted-foreground">
+          Ask KAI to read the conflict markers and resolve them so the working
+          tree can be committed.
+        </p>
+
+        <Button
+          size="xs"
+          className="mt-2.5 w-full cursor-pointer"
+          onClick={onAskKaiResolve}
+        >
+          <HugeiconsIcon
+            icon={AiContentGenerator02Icon}
+            size={13}
+            strokeWidth={1.9}
+            className="shrink-0"
+          />
+          Ask KAI to resolve
+        </Button>
+      </PopoverContent>
+    </Popover>
   );
 }
 

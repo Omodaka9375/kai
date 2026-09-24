@@ -92,6 +92,24 @@ pub struct GitCommitFileChange {
     pub is_binary: bool,
 }
 
+/// A single conflict region (one `<<<<<<<` … `>>>>>>>` block) in an unmerged
+/// file. `line` is the 1-based line in the worktree file where the `<<<<<<<`
+/// marker sits.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitConflictRegion {
+    pub line: u32,
+}
+
+/// A file with unresolved merge conflicts, plus the location of each conflict
+/// region so the UI can show "where and how many" (GitHub Desktop style).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitConflictFile {
+    pub path: String,
+    pub regions: Vec<GitConflictRegion>,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitBranch {

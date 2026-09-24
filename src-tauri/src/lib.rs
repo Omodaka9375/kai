@@ -511,6 +511,7 @@ pub fn run() {
             git::commands::git_switch_branch,
             git::commands::git_create_branch,
             git::commands::git_delete_branch,
+            git::commands::git_list_conflicts,
             git::commands::git_config_get,
             git::commands::git_config_set,
             git::commands::git_config_unset,
