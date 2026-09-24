@@ -2,15 +2,15 @@ use std::ffi::{OsStr, OsString};
 use std::path::Path;
 
 use crate::modules::git::errors::{GitError, Result};
-use crate::modules::git::parser::{parse_porcelain_v2, parse_stash_list};
+use crate::modules::git::parser::{parse_branches, parse_porcelain_v2, parse_stash_list};
 use crate::modules::git::process::{
     ensure_git_available, ensure_success, git_show_text, git_stdout_line_opt, git_stdout_lines,
     read_text_file, run_git,
 };
 use crate::modules::git::types::{
-    DiscardEntry, GitCommitFileChange, GitCommitResult, GitDiffContentResult, GitDiffResult,
-    GitLogEntry, GitOutput, GitPanelSnapshot, GitPushResult, GitRepoInfo, GitStashEntry,
-    GitStatusSnapshot, TextSource, DEFAULT_TIMEOUT_SECS, NETWORK_TIMEOUT_SECS,
+    DiscardEntry, GitBranch, GitCommitFileChange, GitCommitResult, GitDiffContentResult,
+    GitDiffResult, GitLogEntry, GitOutput, GitPanelSnapshot, GitPushResult, GitRepoInfo,
+    GitStashEntry, GitStatusSnapshot, TextSource, DEFAULT_TIMEOUT_SECS, NETWORK_TIMEOUT_SECS,
 };
 use crate::modules::git::utils::{
     authorized_repo_root, canonical_dir, resolve_within_repo, split_upstream, ResolvedGitDirectory,
@@ -382,6 +382,140 @@ fn stash_spec(index: u32) -> String {
 fn nothing_to_stash(output: &GitOutput) -> bool {
     let stderr = String::from_utf8_lossy(&output.stderr).to_ascii_lowercase();
     stderr.contains("no local changes to save")
+}
+
+/// List local branches (plus their upstream tracking branch), marking the one
+/// HEAD currently points to. Uses `git for-each-ref` with `%(HEAD)` so both
+/// normal and detached states are reported exactly as git sees them.
+pub fn list_branches(
+    registry: &WorkspaceRegistry,
+    repo_root: &str,
+    workspace: &WorkspaceEnv,
+) -> Result<Vec<GitBranch>> {
+    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
+    ensure_git_available(&repo_root.workspace)?;
+    let output = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        [
+            OsStr::new("for-each-ref"),
+            OsStr::new("--format=%(refname:short)%00%(HEAD)%00%(upstream:short)"),
+            OsStr::new("refs/heads"),
+        ],
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    ensure_success(&output, "git for-each-ref failed")?;
+    let stdout = std::str::from_utf8(&output.stdout).unwrap_or("");
+    Ok(parse_branches(stdout))
+}
+
+/// Check out an existing branch. A plain `git checkout <name>` matches the
+/// terminal behavior; git refuses the switch if it would clobber uncommitted
+/// changes (surfaced as a normal error to the user).
+pub fn switch_branch(
+    registry: &WorkspaceRegistry,
+    repo_root: &str,
+    name: &str,
+    workspace: &WorkspaceEnv,
+) -> Result<()> {
+    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
+    ensure_git_available(&repo_root.workspace)?;
+    let branch = validate_branch_name(name)?;
+    let output = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        [OsStr::new("checkout"), OsStr::new(&branch)],
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    ensure_success(&output, "git checkout failed")
+}
+
+/// Create a new branch and switch to it. `checkout -b` is atomic and leaves
+/// the worktree untouched when the branch already exists (git errors out).
+pub fn create_branch(
+    registry: &WorkspaceRegistry,
+    repo_root: &str,
+    name: &str,
+    workspace: &WorkspaceEnv,
+) -> Result<()> {
+    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
+    ensure_git_available(&repo_root.workspace)?;
+    let branch = validate_branch_name(name)?;
+    let output = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        [OsStr::new("checkout"), OsStr::new("-b"), OsStr::new(&branch)],
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    ensure_success(&output, "git checkout -b failed")
+}
+
+/// Delete a local branch. Refuses to delete the currently checked-out branch
+/// and the default branch (git would too, but we reject early with a clear
+/// message). Unmerged branches need `-D` to force; we surface git's own error
+/// rather than silently forcing.
+pub fn delete_branch(
+    registry: &WorkspaceRegistry,
+    repo_root: &str,
+    name: &str,
+    workspace: &WorkspaceEnv,
+) -> Result<()> {
+    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
+    ensure_git_available(&repo_root.workspace)?;
+    let branch = validate_branch_name(name)?;
+
+    let current = git_stdout_line_opt(
+        &repo_root.workspace,
+        &repo_root.git_path,
+        ["rev-parse", "--abbrev-ref", "HEAD"],
+    )?
+    .unwrap_or_default();
+    if current == branch {
+        return Err(GitError::command(
+            "delete branch",
+            "cannot delete the branch you are currently on",
+        ));
+    }
+
+    let output = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        [OsStr::new("branch"), OsStr::new("-d"), OsStr::new(&branch)],
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    ensure_success(&output, "git branch -d failed")
+}
+
+/// Validate a branch argument before it reaches the shell. Branch names may
+/// contain almost anything git allows, but we reject the two classes that
+/// matter for safety and correctness: empty strings and leading `-` (which
+/// would be parsed as a flag by `git checkout`). Full refs (`refs/heads/…`)
+/// are normalized to their short form.
+fn validate_branch_name(name: &str) -> Result<String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(GitError::InvalidPath("empty branch name".into()));
+    }
+    if name.starts_with('-') {
+        return Err(GitError::InvalidPath(
+            "branch name must not start with '-'".into(),
+        ));
+    }
+    // `refs/heads/foo` → `foo`; split on both separators for safety.
+    let short = name
+        .strip_prefix("refs/heads/")
+        .unwrap_or(name)
+        .trim_start_matches('/')
+        .to_string();
+    if short.is_empty() {
+        return Err(GitError::InvalidPath("empty branch name".into()));
+    }
+    if short.starts_with('-') {
+        return Err(GitError::InvalidPath(
+            "branch name must not start with '-'".into(),
+        ));
+    }
+    Ok(short)
 }
 
 pub fn unstage(

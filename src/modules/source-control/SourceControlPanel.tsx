@@ -55,6 +55,7 @@ import {
   useSourceControlPanel,
   type SourceControlEntry,
 } from "./useSourceControlPanel";
+import { BranchSwitcher } from "./BranchSwitcher";
 
 type Props = {
   open: boolean;
@@ -516,24 +517,15 @@ export const SourceControlPanel = memo(function SourceControlPanel({
       <aside className="flex h-full min-w-0 flex-col bg-card/80 backdrop-blur [contain:layout_style]">
         <header className="flex shrink-0 items-center justify-between gap-2 border-b border-border/50 px-3 pb-2.5 pt-3">
           <div className="flex min-w-0 items-center gap-1.5">
-            {branchUrl ? (
-              <a
-                href={branchUrl}
-                target="_blank"
-                rel="noreferrer"
-                title={`View ${scm.status?.branch ?? "branch"} on GitHub`}
-                className="inline-flex min-w-0 items-center gap-1.5 rounded-md bg-foreground/5 px-2 py-1 text-[11.5px] font-medium leading-none text-foreground transition-colors hover:bg-foreground/10"
-              >
-                <HugeiconsIcon
-                  icon={FolderGitTwoIcon}
-                  size={12}
-                  strokeWidth={1.9}
-                  className="shrink-0 text-muted-foreground"
-                />
-                <span className="max-w-[140px] truncate">{repoLabel}</span>
-              </a>
+            {scm.status ? (
+              <BranchSwitcher
+                repoRoot={scm.status.repoRoot}
+                currentBranch={scm.status.branch}
+                isDetached={scm.status.isDetached}
+                onChanged={() => scm.refresh()}
+              />
             ) : (
-              <div className="inline-flex min-w-0 items-center gap-1.5 rounded-md bg-foreground/5 px-2 py-1 text-[11.5px] font-medium leading-none text-foreground transition-colors hover:bg-foreground/10">
+              <div className="inline-flex min-w-0 items-center gap-1.5 rounded-md bg-foreground/5 px-2 py-1 text-[11.5px] font-medium leading-none text-foreground">
                 <HugeiconsIcon
                   icon={FolderGitTwoIcon}
                   size={12}
@@ -543,6 +535,21 @@ export const SourceControlPanel = memo(function SourceControlPanel({
                 <span className="max-w-[140px] truncate">{repoLabel}</span>
               </div>
             )}
+            {branchUrl ? (
+              <a
+                href={branchUrl}
+                target="_blank"
+                rel="noreferrer"
+                title={`View ${scm.status?.branch ?? "branch"} on GitHub`}
+                className="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
+              >
+                <HugeiconsIcon
+                  icon={FolderGitTwoIcon}
+                  size={13}
+                  strokeWidth={1.9}
+                />
+              </a>
+            ) : null}
             {scm.status && (scm.status.ahead > 0 || scm.status.behind > 0) ? (
               <div className="flex shrink-0 items-center gap-0.5 text-[10px] font-semibold tabular-nums leading-none">
                 {scm.status.ahead > 0 ? (

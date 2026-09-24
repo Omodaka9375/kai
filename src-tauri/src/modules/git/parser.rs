@@ -1,4 +1,4 @@
-use crate::modules::git::types::{GitChangedFile, GitStashEntry};
+use crate::modules::git::types::{GitBranch, GitChangedFile, GitStashEntry};
 
 #[derive(Default)]
 pub struct PorcelainV2 {
@@ -166,6 +166,41 @@ pub fn parse_stash_list(stdout: &str) -> Vec<GitStashEntry> {
     entries
 }
 
+/// Parse the output of
+/// `git for-each-ref --format=%(refname:short)%00%(HEAD)%00%(upstream:short) refs/heads`.
+///
+/// Each line is `name\0<HEAD>\0<upstream>`, where `<HEAD>` is `*` for the
+/// current branch (or ` ` otherwise) and `<upstream>` is the short tracking
+/// branch name (`origin/main`) or empty. Lines are `\n`-terminated; the NUL
+/// separators are unambiguous because short refnames can't contain NUL.
+pub fn parse_branches(stdout: &str) -> Vec<GitBranch> {
+    let mut branches: Vec<GitBranch> = Vec::new();
+    for line in stdout.lines() {
+        let line = line.trim_end_matches('\r');
+        if line.is_empty() {
+            continue;
+        }
+        let mut parts = line.splitn(3, '\0');
+        let name = parts.next().unwrap_or("").trim().to_string();
+        let head = parts.next().unwrap_or("").trim();
+        let upstream = parts.next().unwrap_or("").trim().to_string();
+
+        if name.is_empty() {
+            continue;
+        }
+        branches.push(GitBranch {
+            name,
+            current: head == "*",
+            upstream: if upstream.is_empty() {
+                None
+            } else {
+                Some(upstream)
+            },
+        });
+    }
+    branches
+}
+
 /// Extract the `n` from `stash@{n}`. Returns `None` for anything else.
 fn parse_stash_index(ref_name: &str) -> Option<u32> {
     let inner = ref_name.strip_prefix("stash@{")?.strip_suffix('}')?;
@@ -192,7 +227,7 @@ fn status_label(index_status: char, worktree_status: char) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_porcelain_v2, parse_stash_list};
+    use super::{parse_branches, parse_porcelain_v2, parse_stash_list};
 
     #[test]
     fn stash_list_parses_entries_in_order() {
@@ -273,5 +308,34 @@ mod tests {
         assert!(parsed.is_detached);
         assert_eq!(parsed.branch, "(detached)");
         assert!(parsed.upstream.is_none());
+    }
+
+    #[test]
+    fn branches_parse_marks_current_and_upstream() {
+        let stdout = concat!(
+            "main\0*\0origin/main\n",
+            "feature/foo\0 \0\n",
+            "release/1.0\0 \0origin/release/1.0\n",
+        );
+        let branches = parse_branches(stdout);
+        assert_eq!(branches.len(), 3);
+        assert_eq!(branches[0].name, "main");
+        assert!(branches[0].current);
+        assert_eq!(branches[0].upstream.as_deref(), Some("origin/main"));
+        assert_eq!(branches[1].name, "feature/foo");
+        assert!(!branches[1].current);
+        assert!(branches[1].upstream.is_none());
+        assert_eq!(branches[2].name, "release/1.0");
+        assert!(!branches[2].current);
+        assert_eq!(branches[2].upstream.as_deref(), Some("origin/release/1.0"));
+    }
+
+    #[test]
+    fn branches_parse_skips_empty_and_crlf() {
+        let stdout = "main\0*\0origin/main\r\n\r\nfeature\0 \0\r\n";
+        let branches = parse_branches(stdout);
+        assert_eq!(branches.len(), 2);
+        assert_eq!(branches[0].name, "main");
+        assert_eq!(branches[1].name, "feature");
     }
 }

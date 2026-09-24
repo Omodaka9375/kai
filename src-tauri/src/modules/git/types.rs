@@ -94,6 +94,17 @@ pub struct GitCommitFileChange {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct GitBranch {
+    /// Branch short name (e.g. `main`, `feature/foo`). Never a full ref.
+    pub name: String,
+    /// True when this is the branch HEAD currently points to.
+    pub current: bool,
+    /// Upstream tracking branch (`origin/main`) if configured, else `None`.
+    pub upstream: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GitStashEntry {
     /// Zero-based position in the stash stack (`stash@{0}` is newest).
     pub index: u32,

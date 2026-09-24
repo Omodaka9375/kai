@@ -90,6 +90,12 @@ export type GitPushResult = {
   pushed: boolean;
 };
 
+export type GitBranch = {
+  name: string;
+  current: boolean;
+  upstream: string | null;
+};
+
 export type GpgKey = {
   fingerprint: string;
   keyId: string;
@@ -555,6 +561,29 @@ export const native = {
     invoke<string | null>("git_remote_url", {
       repoRoot,
       name: name ?? null,
+      workspace: currentWorkspaceEnv(),
+    }),
+  gitListBranches: (repoRoot: string) =>
+    invoke<GitBranch[]>("git_list_branches", {
+      repoRoot,
+      workspace: currentWorkspaceEnv(),
+    }),
+  gitSwitchBranch: (repoRoot: string, name: string) =>
+    invoke<void>("git_switch_branch", {
+      repoRoot,
+      name,
+      workspace: currentWorkspaceEnv(),
+    }),
+  gitCreateBranch: (repoRoot: string, name: string) =>
+    invoke<void>("git_create_branch", {
+      repoRoot,
+      name,
+      workspace: currentWorkspaceEnv(),
+    }),
+  gitDeleteBranch: (repoRoot: string, name: string) =>
+    invoke<void>("git_delete_branch", {
+      repoRoot,
+      name,
       workspace: currentWorkspaceEnv(),
     }),
   whisperModelStatus: () => invoke<WhisperModelStatus>("whisper_model_status"),
