@@ -293,7 +293,7 @@ function formatEnvBlock(live: LiveSnapshot): string | null {
   // the real tree, and knows merge/discard is the user's call at the end.
   const shadow = getShadow(live.workspaceRoot);
   if (!shadow) return base;
-  const note = `\n<shadow-session>\nYou are working in a SHADOW COPY of the project. Your file/shell tools operate on the copy — edits are NOT in the real project until the user merges. Do not tell the user to check the real tree; the merge prompt appears automatically when they finish.\n</shadow-session>`;
+  const note = `\n<shadow-session>\nYou are working in a DETACHED COPY of the project. Your file/shell tools operate on the copy — edits are NOT in the real project until the user merges. Do not tell the user to check the real tree; the merge prompt appears automatically when they finish.\n</shadow-session>`;
   return base ? `${base}${note}` : note;
 }
 

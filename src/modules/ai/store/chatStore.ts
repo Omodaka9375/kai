@@ -296,6 +296,9 @@ type StoreState = {
   injectMessage: (id: string, text: string) => Promise<void>;
   /** Fork the current session at a message index, creating a new branch. */
   forkSession: (atMessageIndex: number) => Promise<string | null>;
+  /** Merge a session's messages into another (append source onto target), then
+   *  remove the source. Returns true on success. */
+  mergeSession: (sourceId: string, targetId: string) => Promise<boolean>;
   /** Steering message queued while agent is busy. */
   steeringMessage: string | null;
   setSteeringMessage: (msg: string | null) => void;
@@ -1013,6 +1016,89 @@ export const useChatStore = create<StoreState>((set, get) => ({
     } catch (err) {
       console.error("[forkSession] failed:", err);
       return null;
+    }
+  },
+
+  mergeSession: async (sourceId, targetId) => {
+    if (sourceId === targetId) return false;
+    if (!get().sessions.some((s) => s.id === sourceId)) return false;
+    if (!get().sessions.some((s) => s.id === targetId)) return false;
+
+    try {
+      // Prefer the resident (live) message arrays; fall back to persisted.
+      const sourceLive = chats.get(sourceId)?.messages;
+      const targetLive = chats.get(targetId)?.messages;
+
+      const [source, target] = await Promise.all([
+        sourceLive
+          ? Promise.resolve(sourceLive)
+          : loadMessages(sourceId).then((m) => m ?? []),
+        targetLive
+          ? Promise.resolve(targetLive)
+          : loadMessages(targetId).then((m) => m ?? []),
+      ]);
+
+      const sourceClean = stripIncompleteToolMessages(source);
+      if (sourceClean.length === 0) return false;
+
+      // A visible divider so the merged tail is clearly separable from the
+      // target's original history.
+      const divider: UIMessage = {
+        id: `merge-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        role: "assistant",
+        parts: [
+          {
+            type: "text",
+            text: "\n\n---\n\n*Merged conversation (continued from a branched thread)*\n",
+          },
+        ],
+      } as UIMessage;
+
+      const merged = [...target, divider, ...sourceClean];
+      await saveMessages(targetId, merged);
+
+      // Adopt the merged history into the target's resident chat (or seed it
+      // for a future open) so the UI reflects the merge immediately.
+      const resident = chats.get(targetId);
+      if (resident) {
+        resident.messages = merged;
+      } else {
+        seedMessages.set(targetId, merged);
+      }
+
+      // Drop the source; activate the target so the user lands on the merged
+      // result.
+      const remaining = get().sessions.filter((s) => s.id !== sourceId);
+      const next = remaining.map((s) =>
+        s.id === targetId
+          ? { ...s, updatedAt: Date.now(), parentId: undefined }
+          : s,
+      );
+      set({ sessions: next, activeSessionId: targetId });
+      void saveSessionsList(next);
+      void saveActiveId(targetId);
+
+      // Clean up the source's in-memory chat + any pending persistence.
+      abortRunController(sourceId);
+      chats.get(sourceId)?.stop();
+      chats.delete(sourceId);
+      seedMessages.delete(sourceId);
+      const pend = pendingPersist.get(sourceId);
+      if (pend) {
+        clearTimeout(pend.timer);
+        pendingPersist.delete(sourceId);
+      }
+      void deleteSessionData(sourceId);
+      void useTodosStore.getState().clearSession(sourceId);
+      reapSessionWatches(sourceId);
+      closeWatchSessionShell(sourceId);
+      clearFenceState(sourceId);
+      agentBus.emit("session:delete", { sessionId: sourceId });
+
+      return true;
+    } catch (err) {
+      console.error("[mergeSession] failed:", err);
+      return false;
     }
   },
 

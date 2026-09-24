@@ -127,7 +127,7 @@ export function ShadowStrip({ sessionId }: Props) {
         className="shrink-0 text-primary"
       />
       <span className="min-w-0 flex-1 truncate text-[11px]">
-        <span className="font-medium">Shadow session active</span>
+        <span className="font-medium">Detached copy active</span>
         <span className="text-muted-foreground">
           {" "}— edits go to an isolated copy{shadow.sharedDirs.length > 0 ? ` (${shadow.sharedDirs.join(", ")} shared)` : ""}
         </span>
@@ -139,7 +139,7 @@ export function ShadowStrip({ sessionId }: Props) {
         className="h-6 px-2 text-[11px]"
         disabled={busy}
         onClick={() => void onMerge()}
-        title="Copy the shadow's changes back into the real project"
+        title="Copy the detached copy's changes back into the real project"
       >
         <HugeiconsIcon icon={Copy02Icon} size={11} strokeWidth={1.75} />
         Merge
@@ -151,7 +151,7 @@ export function ShadowStrip({ sessionId }: Props) {
         className="h-6 px-2 text-[11px]"
         disabled={busy}
         onClick={() => void onDiscard()}
-        title="Delete the shadow copy — the real project keeps nothing from it"
+        title="Delete the detached copy — the real project keeps nothing from it"
       >
         <HugeiconsIcon icon={Delete02Icon} size={11} strokeWidth={1.75} />
         Discard
@@ -237,7 +237,7 @@ export function ShadowSessionMenuItem({ close }: { close: () => void }) {
         title="Work in an isolated copy; merge or discard at the end"
       >
         <HugeiconsIcon icon={Shield01Icon} size={12} strokeWidth={1.75} />
-        {busy ? "Creating shadow copy…" : "Start shadow session"}
+        {busy ? "Creating detached copy…" : "Start detached copy"}
       </DropdownMenuItem>
       {error ? (
         <div className="px-2 py-1 text-[10.5px] leading-snug text-red-500">

@@ -8,6 +8,11 @@ import {
 } from "@/components/ai-elements/context";
 import { Button } from "@/components/ui/button";
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -23,6 +28,7 @@ import {
   ArrowExpand01Icon,
   Delete02Icon,
   FilterIcon,
+  GitMergeIcon,
   PencilEdit01Icon,
   TerminalIcon,
 } from "@hugeicons/core-free-icons";
@@ -545,6 +551,7 @@ function SessionPicker() {
             key={s.id}
             session={s}
             active={s.id === activeId}
+            otherSessions={sorted.filter((o) => o.id !== s.id)}
             onSelect={() => switchSession(s.id)}
             onDelete={() => deleteSession(s.id)}
           />
@@ -557,17 +564,21 @@ function SessionPicker() {
 function SessionRow({
   session,
   active,
+  otherSessions,
   onSelect,
   onDelete,
 }: {
   session: SessionMeta;
   active: boolean;
+  otherSessions: SessionMeta[];
   onSelect: () => void;
   onDelete: () => void;
 }) {
   const renameSession = useChatStore((s) => s.renameSession);
+  const mergeSession = useChatStore((s) => s.mergeSession);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(session.title || "");
+  const [mergeOpen, setMergeOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const commit = () => {
@@ -594,6 +605,7 @@ function SessionRow({
         if (
           target?.closest("[data-session-delete]") ||
           target?.closest("[data-session-edit]") ||
+          target?.closest("[data-session-merge]") ||
           target?.tagName === "INPUT"
         ) {
           e.preventDefault();
@@ -630,6 +642,51 @@ function SessionRow({
       )}
       {editing ? null : (
         <>
+          {otherSessions.length > 0 ? (
+            <Popover open={mergeOpen} onOpenChange={setMergeOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  data-session-merge
+                  onClick={(e) => e.stopPropagation()}
+                  title="Merge into another session"
+                  className="rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100"
+                >
+                  <HugeiconsIcon icon={GitMergeIcon} size={11} strokeWidth={1.75} />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent
+                align="end"
+                sideOffset={4}
+                className="z-[60] w-60 gap-0 rounded-xl p-1.5 text-sm"
+              >
+                <div className="px-1.5 pb-1 pt-0.5 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                  Merge into…
+                </div>
+                {otherSessions.map((o) => (
+                  <button
+                    key={o.id}
+                    type="button"
+                    onClick={() => {
+                      setMergeOpen(false);
+                      void mergeSession(session.id, o.id);
+                    }}
+                    className="flex w-full cursor-pointer items-center gap-2 rounded-md px-1.5 py-1.5 text-left text-xs transition-colors hover:bg-accent"
+                  >
+                    <HugeiconsIcon
+                      icon={GitMergeIcon}
+                      size={11}
+                      strokeWidth={1.75}
+                      className="shrink-0 text-muted-foreground"
+                    />
+                    <span className="min-w-0 flex-1 truncate">
+                      {o.title || "New chat"}
+                    </span>
+                  </button>
+                ))}
+              </PopoverContent>
+            </Popover>
+          ) : null}
           <button
             type="button"
             data-session-edit
