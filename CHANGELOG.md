@@ -4,6 +4,12 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.4.1]
+
+- Fix: Enable running KAI in multi-instances
+  
+---
+
 ## [1.4.0]
 
 - Source-control panel: local branches are now listed with switch/create/delete (no terminal needed).
