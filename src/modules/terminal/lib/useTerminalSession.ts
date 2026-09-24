@@ -308,6 +308,16 @@ async function openPtyForSession(
 
 function bindLeafToSlot(leafId: number, s: Session): void {
   if (!s.container) return;
+  // Idempotency guard: the mount effect (`s.ready.then(bind)`) and the
+  // `visible`/`focused` effect both call this for the same leaf around the
+  // first paint, and React 19 strict mode double-mounts effects. Without this,
+  // two overlapping binds race: the first sets hasSlot=true and hands out a
+  // slot, the second calls acquireSlot → pickSlotFor again, which can evict a
+  // still-bound slot (destroySlot + createSlot) and leave the pane blank.
+  if (s.hasSlot) return;
+  // Mark as bound BEFORE acquiring, so a re-entrant/second caller can't
+  // interleave between acquireSlot and the flag write below.
+  s.hasSlot = true;
   logLeaf(leafId, `binding renderer slot (shellExited=${s.shellExited})`);
   const slot = acquireSlot({
     leafId,
@@ -343,7 +353,6 @@ function bindLeafToSlot(leafId: number, s: Session): void {
     onSearchReady: (addon) => s.callbacks.onSearchReady?.(addon),
   });
   s.snapshot = null;
-  s.hasSlot = true;
   logLeaf(
     leafId,
     `renderer slot #${slot.id} bound ` +
@@ -474,10 +483,16 @@ export function useTerminalSession({
 }: Options) {
   const cbRef = useRef({ onSearchReady, onExit, onCwd });
   cbRef.current = { onSearchReady, onExit, onCwd };
+  // `initialCwd` (== the leaf's live cwd via OSC 7) changes on every `cd`.
+  // It's only consumed once at spawn, so read it through a ref and keep it out
+  // of the mount-effect deps — otherwise every `cd` tears down and re-binds the
+  // renderer slot (a spurious double-fire that can leave the pane blank).
+  const initialCwdRef = useRef(initialCwd);
+  initialCwdRef.current = initialCwd;
 
   useEffect(() => {
     let cancelled = false;
-    const s = ensureSession(leafId, initialCwd);
+    const s = ensureSession(leafId, initialCwdRef.current);
     const callbacks: Callbacks = {
       onSearchReady: (a) => cbRef.current.onSearchReady?.(a),
       onExit: (c) => cbRef.current.onExit?.(c),
@@ -531,7 +546,8 @@ export function useTerminalSession({
       if (retryTimer !== null) clearTimeout(retryTimer);
       detachSession(leafId);
     };
-  }, [leafId, container, initialCwd]);
+    // `initialCwd` intentionally NOT in deps (see initialCwdRef above).
+  }, [leafId, container]);
 
   const fontSize = usePreferencesStore((p) => p.terminalFontSize);
   const zoomLevel = usePreferencesStore((p) => p.zoomLevel);
