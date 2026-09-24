@@ -4,6 +4,7 @@ pub mod git;
 pub mod gpg;
 pub mod lock;
 pub mod mcp;
+pub mod mcp_oauth;
 pub mod net;
 pub mod pty;
 pub mod sandbox;

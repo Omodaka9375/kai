@@ -3,8 +3,10 @@ import { newMcpServerId, type McpServerConfig } from "@/modules/ai/lib/mcp";
 import {
   fetchRegistryServers,
   type McpRegistryEntry,
+  type McpRegistryPackage,
 } from "@/modules/ai/lib/mcpRegistry";
 import { useMcpStore } from "@/modules/ai/store/mcpStore";
+import { McpInstallDialog } from "./McpInstallDialog";
 import {
   ArrowDown01Icon,
   CheckmarkCircle02Icon,
@@ -85,10 +87,25 @@ export function ExtensionsView() {
     );
   };
 
+  // Pending install: a registry entry whose package declares environment
+  // variables (API tokens etc.) — the dialog collects them before addServer.
+  const [pendingInstall, setPendingInstall] = useState<{
+    pkg: McpRegistryPackage | null;
+    config: McpServerConfig;
+  } | null>(null);
+
   const install = (entry: McpRegistryEntry) => {
     const config = registryEntryToConfig(entry.server);
     if (!config) return;
-    addServer(config);
+    const pkg = entry.server.packages?.find(
+      (p) => p.transport.type === config.transport || p.transport.type === "stdio",
+    );
+    const hasEnv = (pkg?.environmentVariables?.length ?? 0) > 0;
+    if (hasEnv) {
+      setPendingInstall({ pkg: pkg ?? null, config });
+    } else {
+      addServer(config);
+    }
   };
 
   return (
@@ -230,6 +247,19 @@ export function ExtensionsView() {
           </button>
         )}
       </div>
+
+      <McpInstallDialog
+        open={pendingInstall !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingInstall(null);
+        }}
+        pkg={pendingInstall?.pkg ?? null}
+        config={pendingInstall?.config ?? null}
+        onInstall={(config) => {
+          addServer(config);
+          setPendingInstall(null);
+        }}
+      />
     </div>
   );
 }

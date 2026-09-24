@@ -3,7 +3,11 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { isMainWindow } from "@/lib/windowRole";
 import type { McpServerConfig } from "./mcp";
+import { ensureAuthorization } from "./mcpOAuth";
 import { createProxyFetch } from "./proxyFetch";
+
+// Re-exported so consumers (Settings UI, store) can instanceof-check errors.
+export { AuthRequiredError } from "./mcpOAuth";
 
 /** Global (cross-webview) MCP status broadcast, owner → mirrors. */
 export const MCP_STATUS_EVENT = "Kai://mcp-status";
@@ -190,7 +194,9 @@ class McpClientManager {
         switch (action.kind) {
           case "connect":
           case "reconnect":
-            if (cfg) await this.connect(cfg);
+            // Requests from Settings are explicit user actions — allow the
+            // OAuth browser flow when the server needs sign-in.
+            if (cfg) await this.connect(cfg, true);
             break;
           case "disconnect":
             if (cfg) await this.disconnect(cfg.id);
@@ -214,8 +220,13 @@ class McpClientManager {
 
   private syncInstalled = false;
 
-  /** Connect to a single MCP server. */
-  async connect(config: McpServerConfig): Promise<void> {
+  /** Connect to a single MCP server.
+   * @param interactive When true (user clicked Connect/Reconnect or just
+   *  installed a server) a remote server that answers 401 runs the full
+   *  OAuth browser flow. Startup auto-connect passes false so the app never
+   *  opens a browser uninvited — the server shows an auth-required error
+   *  with a Reconnect path instead. */
+  async connect(config: McpServerConfig, interactive = false): Promise<void> {
     // Only the main window owns MCP server processes. Other webviews
     // (Settings) share this module graph but would spawn a SECOND stdio
     // server — e.g. Linear's OAuth localhost callback port is held by the
@@ -248,12 +259,24 @@ class McpClientManager {
         // SSE or HTTP — route through the Rust backend via proxyFetch to
         // bypass WebView2 fetch quirks, CORS, and private-network blocks.
         const mcpFetch = createProxyFetch({ allowPrivateNetwork: true });
+        // Remote servers may be OAuth-protected (Linear remote, GitHub
+        // remote, etc.). Resolve the Authorization header BEFORE the client
+        // handshake: valid stored token → pass through; 401 → refresh, and
+        // if interactive, run the full browser authorization-code flow.
+        const url = config.url ?? "";
+        const authHeaders = await ensureAuthorization(
+          config.id,
+          config.name,
+          url,
+          config.headers ?? {},
+          interactive,
+        );
         client = await withTimeout(
           createMCPClient({
             transport: {
               type: config.transport,
-              url: config.url ?? "",
-              headers: config.headers,
+              url,
+              headers: authHeaders,
               fetch: mcpFetch,
             },
           }),

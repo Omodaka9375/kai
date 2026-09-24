@@ -14,6 +14,7 @@ import {
   Add01Icon,
   Delete02Icon,
   Edit02Icon,
+  RefreshIcon,
   WifiConnected01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -35,6 +36,7 @@ export function McpSection() {
   const updateMcpServer = useMcpStore((s) => s.updateServer);
   const removeMcpServer = useMcpStore((s) => s.removeServer);
   const toggleMcpServer = useMcpStore((s) => s.toggleServer);
+  const reconnectMcpServer = useMcpStore((s) => s.reconnect);
   const hydrateMcp = useMcpStore((s) => s.hydrate);
 
   useEffect(() => {
@@ -128,6 +130,15 @@ export function McpSection() {
                         ? "border-foreground/60 bg-foreground/80"
                         : "border-muted-foreground/40",
                     )} />
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="size-7"
+                    onClick={() => void reconnectMcpServer(s.id)}
+                    title="Reconnect (sign in again if the server requires it)"
+                  >
+                    <HugeiconsIcon icon={RefreshIcon} size={12} strokeWidth={1.75} />
                   </Button>
                   <Button
                     size="icon"

@@ -94,7 +94,9 @@ export const useMcpStore = create<McpState>((set, get) => {
       set({ servers: next });
       void saveMcpServers(next).then(broadcast);
       if (server.enabled) {
-        if (isMainWindow()) void mcpManager.connect(server);
+        // Explicit add → interactive: remote OAuth servers may open the
+        // browser sign-in on this connect.
+        if (isMainWindow()) void mcpManager.connect(server, true);
         else requestControl({ kind: "connect", serverId: server.id });
       }
     },
@@ -105,9 +107,10 @@ export const useMcpStore = create<McpState>((set, get) => {
       );
       set({ servers: next });
       void saveMcpServers(next).then(broadcast);
-      // Reconnect if enabled, disconnect if disabled.
+      // Reconnect if enabled, disconnect if disabled. Explicit edit →
+      // interactive (OAuth browser flow allowed).
       if (server.enabled) {
-        if (isMainWindow()) void mcpManager.connect(server);
+        if (isMainWindow()) void mcpManager.connect(server, true);
         else requestControl({ kind: "reconnect", serverId: server.id });
       } else {
         if (isMainWindow()) void mcpManager.disconnect(server.id);
@@ -144,7 +147,8 @@ export const useMcpStore = create<McpState>((set, get) => {
     reconnect: async (id) => {
       const server = get().servers.find((s) => s.id === id);
       if (!server) return;
-      if (isMainWindow()) await mcpManager.connect(server);
+      // User-initiated reconnect → interactive (OAuth flow allowed).
+      if (isMainWindow()) await mcpManager.connect(server, true);
       else requestControl({ kind: "reconnect", serverId: id });
     },
   };

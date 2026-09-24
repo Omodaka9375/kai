@@ -1,7 +1,7 @@
 mod modules;
 
 use modules::lock::mutex_lock;
-use modules::{diagnostics, fs, git, gpg, mcp, net, pty, secrets, shell, whisper, workspace};
+use modules::{diagnostics, fs, git, gpg, mcp, mcp_oauth, net, pty, secrets, shell, whisper, workspace};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
@@ -493,6 +493,7 @@ pub fn run() {
         .manage(pty::PtyState::default())
         .manage(shell::ShellState::default())
         .manage(secrets::SecretsState::default())
+        .manage(mcp_oauth::McpOAuthState::default())
         .manage({
             let registry = workspace::WorkspaceRegistry::default();
             workspace::bootstrap_registry(&registry);
@@ -595,6 +596,8 @@ pub fn run() {
             mcp::mcp_stdio_open,
             mcp::mcp_stdio_send,
             mcp::mcp_stdio_close,
+            mcp_oauth::mcp_oauth_start,
+            mcp_oauth::mcp_oauth_cancel,
             net::lm_ping,
             net::lm_list_models,
             net::openrouter_list_models,
