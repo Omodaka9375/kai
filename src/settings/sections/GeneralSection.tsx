@@ -55,8 +55,11 @@ import {
   type GpgKey,
   type GpgStatus,
   type WhisperDownloadEvent,
+  type WhisperModelInfo,
   type WhisperModelStatus,
+  WHISPER_DEFAULT_MODEL_ID,
 } from "@/modules/ai/lib/native";
+import { setWhisperModelId } from "@/modules/settings/store";
 import { SectionHeader } from "../components/SectionHeader";
 import { SettingRow } from "../components/SettingRow";
 
@@ -701,14 +704,21 @@ function formatBytes(n: number): string {
 
 function LocalVoiceBlock() {
   const [status, setStatus] = useState<WhisperModelStatus | null>(null);
+  const [models, setModels] = useState<WhisperModelInfo[]>([]);
   const [downloaded, setDownloaded] = useState(0);
   const [total, setTotal] = useState(0);
-  const [downloading, setDownloading] = useState(false);
+  const [downloading, setDownloading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const selectedId = usePreferencesStore((s) => s.whisperModelId);
 
   const refresh = useCallback(async () => {
     try {
-      setStatus(await native.whisperModelStatus());
+      const [st, ms] = await Promise.all([
+        native.whisperModelStatus(),
+        native.whisperListModels(),
+      ]);
+      setStatus(st);
+      setModels(ms);
     } catch (e) {
       setError(String(e));
     }
@@ -718,80 +728,110 @@ function LocalVoiceBlock() {
     void refresh();
   }, [refresh]);
 
-  const download = useCallback(async () => {
-    setError(null);
-    setDownloaded(0);
-    setTotal(0);
-    setDownloading(true);
-    try {
-      const channel = new Channel<WhisperDownloadEvent>();
-      channel.onmessage = (ev) => {
-        if (ev.phase === "progress") {
-          setDownloaded(ev.downloaded);
-          setTotal(ev.total);
-        } else if (ev.phase === "done") {
-          setDownloading(false);
-          setStatus({ downloaded: true, downloading: false, path: ev.message, size: ev.total });
-        } else if (ev.phase === "error") {
-          setDownloading(false);
-          setError(ev.message ?? "Download failed.");
-        }
-      };
-      await native.whisperDownloadModel(channel);
-      await refresh();
-    } catch (e) {
-      setDownloading(false);
-      const msg = String(e);
-      // A cancel is a user action, not an error worth surfacing.
-      if (!/cancelled/i.test(msg)) setError(msg);
-    }
-  }, [refresh]);
+  const download = useCallback(
+    async (modelId: string) => {
+      setError(null);
+      setDownloaded(0);
+      setTotal(0);
+      setDownloading(modelId);
+      try {
+        const channel = new Channel<WhisperDownloadEvent>();
+        channel.onmessage = (ev) => {
+          if (ev.phase === "progress") {
+            setDownloaded(ev.downloaded);
+            setTotal(ev.total);
+          } else if (ev.phase === "done") {
+            setDownloading(null);
+            void refresh();
+          } else if (ev.phase === "error") {
+            setDownloading(null);
+            setError(ev.message ?? "Download failed.");
+          }
+        };
+        await native.whisperDownloadModel(modelId, channel);
+        await refresh();
+      } catch (e) {
+        const msg = String(e);
+        // A cancel is a user action, not an error worth surfacing.
+        if (!/cancelled/i.test(msg)) setError(msg);
+        setDownloading(null);
+        await refresh();
+      }
+    },
+    [refresh],
+  );
 
-  const remove = useCallback(async () => {
+  const remove = useCallback(
+    async (modelId: string) => {
+      setError(null);
+      try {
+        await native.whisperDeleteModel(modelId);
+        await refresh();
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [refresh],
+  );
+
+  const select = useCallback(async (modelId: string) => {
     setError(null);
     try {
-      await native.whisperDeleteModel();
-      await refresh();
+      await setWhisperModelId(modelId);
+      usePreferencesStore.setState({ whisperModelId: modelId });
     } catch (e) {
       setError(String(e));
     }
-  }, [refresh]);
+  }, []);
 
+  const effectiveId = selectedId ?? WHISPER_DEFAULT_MODEL_ID;
   const pct =
     total > 0 ? Math.min(100, Math.round((downloaded / total) * 100)) : 0;
-  const modelDownloaded = status?.downloaded ?? false;
+  const onDisk = new Set(status?.downloadedIds ?? []);
 
   return (
     <div className="flex flex-col gap-2">
       <Label>Local voice transcription</Label>
-      <SettingRow
-        title="Whisper model (large-v3-turbo q5_0)"
-        description={
-          modelDownloaded
-            ? `Downloaded (${formatBytes(status?.size ?? 0)}). Voice input runs fully offline and beats cloud APIs automatically.`
-            : "Download a pre-quantized Whisper model (~547 MB) from HuggingFace so voice transcription runs locally. Nothing is bundled by default."
-        }
-      >
-        <div className="flex items-center gap-1.5">
-          {modelDownloaded ? (
-            <Button size="xs" variant="outline" onClick={() => void remove()}>
-              Remove
-            </Button>
-          ) : downloading ? (
-            <Button
-              size="xs"
-              variant="outline"
-              onClick={() => void native.whisperCancelDownload()}
-            >
-              Cancel
-            </Button>
-          ) : (
-            <Button size="xs" onClick={() => void download()}>
-              Download
-            </Button>
-          )}
-        </div>
-      </SettingRow>
+      {models.map((m) => (
+        <SettingRow
+          key={m.id}
+          title={m.label}
+          description={
+            m.cpuFriendly
+              ? `${formatBytes(m.sizeBytes)} · fast enough for live dictation on CPU`
+              : `${formatBytes(m.sizeBytes)} · GPU strongly recommended — a CPU takes minutes per clip`
+          }
+        >
+          <div className="flex items-center gap-1.5">
+            {m.id === effectiveId ? (
+              <span className="text-[10.5px] font-medium text-muted-foreground">
+                {onDisk.has(m.id) ? "Active" : "Selected — not downloaded"}
+              </span>
+            ) : onDisk.has(m.id) ? (
+              <Button size="xs" variant="outline" onClick={() => void select(m.id)}>
+                Use
+              </Button>
+            ) : null}
+            {downloading === m.id ? (
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => void native.whisperCancelDownload()}
+              >
+                Cancel
+              </Button>
+            ) : onDisk.has(m.id) ? (
+              <Button size="xs" variant="outline" onClick={() => void remove(m.id)}>
+                Remove
+              </Button>
+            ) : (
+              <Button size="xs" onClick={() => void download(m.id)}>
+                Download
+              </Button>
+            )}
+          </div>
+        </SettingRow>
+      ))}
 
       {downloading && (
         <div className="flex flex-col gap-1 px-3 py-2">

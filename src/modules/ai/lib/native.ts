@@ -160,7 +160,26 @@ export type WhisperModelStatus = {
   downloading: boolean;
   path: string | null;
   size: number | null;
+  /** Model id the next transcription would use (null when nothing is downloaded). */
+  activeId: string | null;
+  /** Every catalog model present on disk. */
+  downloadedIds: string[];
 };
+
+export type WhisperModelInfo = {
+  id: string;
+  label: string;
+  /** "fast" | "balanced" | "accurate" | "gpu_only" — drives UI copy. */
+  tier: string;
+  sizeBytes: number;
+  url: string;
+  fileName: string;
+  /** Usable for live dictation on a typical CPU. */
+  cpuFriendly: boolean;
+};
+
+/** Must match DEFAULT_MODEL_ID in src-tauri/src/modules/whisper.rs. */
+export const WHISPER_DEFAULT_MODEL_ID = "base";
 
 export type WhisperDownloadEvent = {
   phase: "progress" | "done" | "error";
@@ -600,11 +619,16 @@ export const native = {
       name,
       workspace: currentWorkspaceEnv(),
     }),
+  whisperListModels: () => invoke<WhisperModelInfo[]>("whisper_list_models"),
   whisperModelStatus: () => invoke<WhisperModelStatus>("whisper_model_status"),
-  whisperDownloadModel: (onEvent: Channel<WhisperDownloadEvent>) =>
-    invoke<void>("whisper_download_model", { onEvent }),
+  whisperDownloadModel: (
+    modelId: string,
+    onEvent: Channel<WhisperDownloadEvent>,
+  ) => invoke<void>("whisper_download_model", { modelId, onEvent }),
   whisperCancelDownload: () => invoke<void>("whisper_cancel_download"),
-  whisperDeleteModel: () => invoke<void>("whisper_delete_model"),
-  whisperTranscribe: (audioBase64: string) =>
-    invoke<string>("whisper_transcribe", { audioBase64 }),
+  whisperDeleteModel: (modelId: string) =>
+    invoke<void>("whisper_delete_model", { modelId }),
+  whisperAbortTranscribe: () => invoke<void>("whisper_abort_transcribe"),
+  whisperTranscribe: (audioBase64: string, modelId: string | null) =>
+    invoke<string>("whisper_transcribe", { audioBase64, modelId }),
 };

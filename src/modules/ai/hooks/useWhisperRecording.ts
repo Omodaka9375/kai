@@ -1,8 +1,9 @@
 import { createOpenAI } from "@ai-sdk/openai";
 import { experimental_transcribe as transcribe } from "ai";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { native } from "../lib/native";
+import { native, WHISPER_DEFAULT_MODEL_ID } from "../lib/native";
 import { useChatStore } from "../store/chatStore";
+import { getWhisperModelId } from "@/modules/settings/store";
 
 const MIME_CANDIDATES = [
   "audio/webm;codecs=opus",
@@ -16,12 +17,21 @@ const MIME_CANDIDATES = [
  *  `getUserMedia` pending forever — without this cap the toggle hangs and the
  *  voice UI appears broken. */
 const GET_MEDIA_TIMEOUT_MS = 8_000;
-/** Cap on one whisper transcription round-trip, so `transcribing` can never
- *  stick (the mic button stays disabled while `transcribing`). */
-const TRANSCRIBE_TIMEOUT_MS = 45_000;
+/** Baseline cap on one whisper transcription round-trip for a short clip.
+ *  Scales with recording length (see `transcribeTimeoutFor`) so long clips
+ *  on slow hardware don't die while mid-inference. */
+const TRANSCRIBE_TIMEOUT_BASE_MS = 45_000;
 /** If the Speech API fires neither `onend` nor `onerror` after starting (e.g.
  *  a permission prompt is never answered), force a stop so the toggle resets. */
 const SPEECH_WATCHDOG_MS = 20_000;
+
+/** Timeout budget for one transcription: the 45s baseline plus the clip's own
+ *  duration scaled ×6 — measured worst case is ~11× real-time for a CPU-only
+ * large-v3-turbo (the reason this feature used to time out every time), so 6×
+ * covers slow hardware while still bounding a stuck pipeline. */
+function transcribeTimeoutFor(secondsOfAudio: number): number {
+  return TRANSCRIBE_TIMEOUT_BASE_MS + secondsOfAudio * 6_000;
+}
 
 function pickMime(): string | undefined {
   if (typeof MediaRecorder === "undefined") return undefined;
@@ -93,10 +103,18 @@ function f32ToBase64(samples: Float32Array): string {
 }
 
 /** Local whisper transcription: decode → 16k mono f32 → base64 → Rust. */
-async function transcribeBlobLocal(blob: Blob): Promise<string> {
+async function transcribeBlobLocal(
+  blob: Blob,
+  modelId: string | null,
+): Promise<string> {
   const samples = await decodeTo16kMonoF32(blob);
   if (samples.length === 0) return "";
-  return native.whisperTranscribe(f32ToBase64(samples));
+  const seconds = samples.length / 16_000;
+  return withTimeout(
+    native.whisperTranscribe(f32ToBase64(samples), modelId),
+    transcribeTimeoutFor(seconds),
+    "Speech transcription timed out",
+  );
 }
 
 /** Check if the Browser Speech Recognition API is available (WebView2/Chromium). */
@@ -297,15 +315,28 @@ export function useWhisperRecording({
             return;
           }
           setState("transcribing");
+          // Read the user's model pick lazily per transcription — the settings
+          // window can change it while a recording is in flight. Always pass an
+          // explicit id: Rust falls back to a downloaded CPU-friendly model
+          // when this one is missing, but a null would let it pick ANY
+          // downloaded model — including the CPU-hostile legacy turbo.
+          let modelId: string;
+          try {
+            modelId = (await getWhisperModelId()) ?? WHISPER_DEFAULT_MODEL_ID;
+          } catch {
+            modelId = WHISPER_DEFAULT_MODEL_ID;
+          }
           try {
             // Local Whisper auto-wins over the OpenAI API when downloaded.
-            const text = await withTimeout(
-              useLocal
-                ? transcribeBlobLocal(blob)
-                : transcribeBlob(blob, cloudKey),
-              TRANSCRIBE_TIMEOUT_MS,
-              "Speech transcription timed out",
-            );
+            // (transcribeBlobLocal derives its own duration-scaled timeout
+            // from the decoded samples; the cloud path keeps the baseline.)
+            const text = useLocal
+              ? await transcribeBlobLocal(blob, modelId)
+              : await withTimeout(
+                  transcribeBlob(blob, cloudKey),
+                  TRANSCRIBE_TIMEOUT_BASE_MS,
+                  "Speech transcription timed out",
+                );
             if (text.trim()) onResultRef.current(text.trim());
           } catch (e) {
             console.error("whisper.transcribe", e);

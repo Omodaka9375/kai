@@ -4,6 +4,17 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.4.2]
+
+- Local voice transcription: selectable Whisper models (tiny/base/small, English or multilingual, q5_1) in Settings → General. The previous single model (large-v3-turbo q5_0) needs a GPU — on CPU it ran ~11× slower than real-time, so every dictation hit the 45s "Speech transcription timed out" error.
+  - The catalog marks CPU-friendly models; the old turbo model is still offered but flagged "GPU strongly recommended".
+  - Inference now uses all physical cores (was hard-coded to 4), and each pipeline stage is logged with timings for diagnostics.
+  - The transcription timeout scales with the recording's length instead of a fixed 45s.
+  - A missing selected model falls back to any downloaded CPU-friendly model instead of silently re-picking the CPU-hostile one.
+  - Voice error chip in the input bar now has a dismiss button (previously only cleared by starting another recording).
+  
+---
+
 ## [1.4.1]
 
 - Fix: Enable running KAI in multi-instances

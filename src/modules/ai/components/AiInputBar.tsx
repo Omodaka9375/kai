@@ -462,6 +462,18 @@ export function AiInputBar() {
                 className="shrink-0"
               />
               <span className="truncate">{c.voice.error}</span>
+              <button
+                type="button"
+                title="Dismiss"
+                onClick={c.voice.clearError}
+                className="ml-auto shrink-0 rounded p-0.5 text-muted-foreground/70 hover:bg-accent hover:text-foreground"
+              >
+                <HugeiconsIcon
+                  icon={Cancel01Icon}
+                  size={11}
+                  strokeWidth={2}
+                />
+              </button>
             </motion.div>
           )}
         </AnimatePresence>

@@ -620,10 +620,12 @@ pub fn run() {
             net::openrouter_list_models,
             net::ai_http_request,
             net::ai_http_stream,
+            whisper::whisper_list_models,
             whisper::whisper_model_status,
             whisper::whisper_download_model,
             whisper::whisper_cancel_download,
             whisper::whisper_delete_model,
+            whisper::whisper_abort_transcribe,
             whisper::whisper_transcribe,
         ])
         .run(tauri::generate_context!())
