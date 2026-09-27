@@ -1,0 +1,21 @@
+fix(ai): display_image dumped megabytes of base64 in the UI and failed off-terminal
+
+Two symptoms, one root: the display_image tool card stringified its entire
+input (base64_data) and output as JSON, and injectIntoActivePty hard-failed
+when the active tab was not a terminal.
+
+- tool.tsx: display_image input preview renders "name - KB" instead of the
+  raw payload; output renders a one-line confirmation ("displayed in
+  terminal (N KB)") or the error; deriveSummary uses the image name.
+  Never stringify base64 payloads into the transcript.
+- App.tsx: injectIntoActivePty falls back to the most recently active
+  terminal tab (tracked via lastTerminalTabIdRef), then to any terminal
+  tab, instead of erroring "no active terminal tab to display into".
+- compact.ts: new always-on compaction phase elides bulky opaque strings
+  (base64-shaped) in tool-call inputs after the call completes - a single
+  display_image call was re-sent to the model on every agent step.
+  New tests cover elision + non-interference with write_file content.
+- sessions.ts: same elision applied to the persisted copy so one image
+  call does not blow the 512KB per-session store cap and trim history.
+
+All 254 vitest tests pass; tsc clean. Version 1.5.2

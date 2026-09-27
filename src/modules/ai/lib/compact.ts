@@ -187,6 +187,42 @@ export function effectiveContextLimit(contextLimit: number): number {
 /** Max characters to keep from a truncated tool result body. */
 const TOOL_RESULT_TRUNCATE_CHARS = 3_000;
 
+/** Max characters for a single string field inside a tool-call INPUT.
+ *  Large inputs (e.g. display_image's base64_data) are truncated after the
+ *  call completes — the model never needs the payload back, but the history
+ *  re-sends it on every step otherwise. */
+const TOOL_INPUT_FIELD_TRUNCATE_CHARS = 300;
+
+const BULKY_INPUT_TOOLS = new Set(["display_image"]);
+
+/** Truncate bulky string fields in tool-call inputs (base64 payloads).
+ *  Only applies to tools whose inputs are known to be huge and opaque. */
+function truncateBulkyToolInputs(part: ToolPart): { changed: boolean; part: ToolPart } {
+  if (part.type !== "tool-call") return { changed: false, part };
+  if (!BULKY_INPUT_TOOLS.has(String(part.toolName ?? ""))) return { changed: false, part };
+  const input = part.input;
+  if (!input || typeof input !== "object") return { changed: false, part };
+  const rec = input as Record<string, unknown>;
+  let touched = false;
+  const next: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(rec)) {
+    if (
+      typeof v === "string" &&
+      v.length > TOOL_INPUT_FIELD_TRUNCATE_CHARS &&
+      /^[A-Za-z0-9+/=\r\n]+$/.test(v.slice(0, 256))
+    ) {
+      next[k] =
+        v.slice(0, TOOL_INPUT_FIELD_TRUNCATE_CHARS) +
+        `[...${v.length - TOOL_INPUT_FIELD_TRUNCATE_CHARS} chars elided]`;
+      touched = true;
+    } else {
+      next[k] = v;
+    }
+  }
+  if (!touched) return { changed: false, part };
+  return { changed: true, part: { ...part, input: next } };
+}
+
 function truncateLargeToolResult(part: ToolPart): { changed: boolean; part: ToolPart } {
   if (part.type !== "tool-result") return { changed: false, part };
   const output = part.output;
@@ -226,6 +262,30 @@ export function compactModelMessagesDetailed(
     if (r.touched) {
       working = r.out;
       dropped++;
+      approxTokens = approxBytes(working) / 4;
+    }
+  }
+
+  // ── Phase 1.5: elide bulky tool-call inputs (base64 payloads) ──
+  // Always on — a single display_image call is hundreds of KB and every
+  // later step re-sends it; there is no scenario where the model needs the
+  // raw payload back after the call completed.
+  {
+    let localDropped = 0;
+    working = working.map((m): ModelMessage => {
+      if (!Array.isArray(m.content)) return m;
+      let touched = false;
+      const nextContent = (m.content as ToolPart[]).map((part) => {
+        const r = truncateBulkyToolInputs(part);
+        if (r.changed) touched = true;
+        return r.part;
+      });
+      if (!touched) return m;
+      localDropped++;
+      return { ...m, content: nextContent } as ModelMessage;
+    });
+    if (localDropped > 0) {
+      dropped += localDropped;
       approxTokens = approxBytes(working) / 4;
     }
   }

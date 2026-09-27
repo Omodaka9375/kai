@@ -260,6 +260,40 @@ function stripInlineImagesInPlace(items: unknown[]): void {
   }
 }
 
+/** Elide huge opaque tool-call payloads (e.g. display_image base64_data)
+ *  from the persisted copy. The tool already ran — the payload is dead
+ *  weight that would otherwise dominate the 512KB per-session store cap
+ *  and force history trimming. Keeps a short head for context. */
+const TOOL_INPUT_ELIDE_KEEP = 120;
+
+function elideBulkyToolInputsInPlace(items: unknown[]): void {
+  for (const m of items) {
+    if (m == null || typeof m !== "object") continue;
+    const msg = m as Record<string, unknown>;
+    if (msg.role !== "assistant" || !Array.isArray(msg.parts)) continue;
+    for (const p of msg.parts) {
+      if (p == null || typeof p !== "object") continue;
+      const part = p as Record<string, unknown>;
+      const type = typeof part.type === "string" ? part.type : "";
+      if (!type.startsWith("tool-")) continue;
+      const input = part.input;
+      if (!input || typeof input !== "object") continue;
+      const rec = input as Record<string, unknown>;
+      for (const [k, v] of Object.entries(rec)) {
+        if (
+          typeof v === "string" &&
+          v.length > 4_096 &&
+          /^[A-Za-z0-9+/=\r\n]+$/.test(v.slice(0, 256))
+        ) {
+          rec[k] =
+            v.slice(0, TOOL_INPUT_ELIDE_KEEP) +
+            ` [...elided ${v.length - TOOL_INPUT_ELIDE_KEEP} chars]`;
+        }
+      }
+    }
+  }
+}
+
 export async function saveMessages(
   id: string,
   messages: UIMessage[],
@@ -278,8 +312,9 @@ export async function saveMessages(
     return;
   }
 
-  // Strip image data-URLs to keep the store file compact.
+  // Strip image data-URLs and bulky tool payloads to keep the store file compact.
   stripInlineImagesInPlace(toStore);
+  elideBulkyToolInputsInPlace(toStore);
 
   // Guard against unbounded growth — if the serialized JSON exceeds
   // MAX_MESSAGES_JSON_BYTES, trim to the most recent messages. Without

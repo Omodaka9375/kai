@@ -99,6 +99,8 @@ function deriveSummary(toolName: string, input: unknown): string | null {
       return str("pattern");
     case "suggest_command":
       return str("intent") ?? str("description");
+    case "display_image":
+      return str("name");
     case "open_preview":
       return str("path") ?? str("url");
     case "run_subagent":
@@ -314,6 +316,23 @@ function renderInputPreview(
       </div>
     );
   }
+  if (toolName === "display_image") {
+    // NEVER stringify the base64 payload into the card — a screenshot can
+    // be megabytes, and rendering it freezes the transcript.
+    const name = str("name") ?? "image";
+    const data = str("base64_data");
+    const kb = data ? Math.ceil((data.length * 3) / 4 / 1024) : null;
+    return (
+      <div className="flex items-center gap-1.5 font-mono text-[11px]">
+        <span className="text-foreground">{name}</span>
+        {kb != null ? (
+          <span className="text-muted-foreground">
+            · {kb} KB{kb >= 1024 ? ` (${(kb / 1024).toFixed(1)} MB)` : ""}
+          </span>
+        ) : null}
+      </div>
+    );
+  }
   return null;
 }
 
@@ -381,6 +400,26 @@ function renderToolOutput(toolName: string, output: unknown): ReactNode | null {
             ({lines} line{lines === 1 ? "" : "s"}
             {size != null ? `, ${formatBytes(size)}` : ""})
           </span>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (toolName === "display_image") {
+    // Success: { ok, displayed_in, size_bytes } — a one-line confirmation,
+    // never the payload. Failure: { error }.
+    if (typeof o.error === "string") {
+      return (
+        <div className="font-mono text-[11px] text-destructive">{o.error}</div>
+      );
+    }
+    const size = typeof o.size_bytes === "number" ? o.size_bytes : null;
+    return (
+      <div className="flex items-center gap-1.5 font-mono text-[11px]">
+        <span className="text-emerald-600 dark:text-emerald-400">✓</span>
+        <span className="text-foreground">displayed in terminal</span>
+        {size != null ? (
+          <span className="text-muted-foreground">({formatBytes(size)})</span>
         ) : null}
       </div>
     );

@@ -1285,6 +1285,11 @@ export default function App() {
 
   const activeCwd = activeTerminalLeafCwd;
 
+  // Most recently active terminal tab — lets agent tools (display_image,
+  // "Run edited") target a terminal even when the user is on an editor or
+  // preview tab. Updated inside the live-bridge effect below.
+  const lastTerminalTabIdRef = useRef<number | null>(null);
+
   useEffect(() => {
     const findCwd = () => {
       const active = tabs.find((x) => x.id === activeId);
@@ -1305,6 +1310,13 @@ export default function App() {
     // fs tool call.
     setSandboxRoot(explorerRoot ?? launchCwd ?? home ?? null);
 
+    // Track the most recently active terminal tab for the fallback path in
+    // injectIntoActivePty above.
+    const activeTab = tabs.find((x) => x.id === activeId);
+    if (activeTab?.kind === "terminal") {
+      lastTerminalTabIdRef.current = activeTab.id;
+    }
+
     setLive({
       getCwd: findCwd,
       getTerminalContext: () => {
@@ -1319,8 +1331,24 @@ export default function App() {
         return t?.kind === "terminal" && t.private === true;
       },
       injectIntoActivePty: (text) => {
-        const t = tabs.find((x) => x.id === activeId);
-        if (t?.kind !== "terminal") return false;
+        const isTerminalLike = (
+          x: (typeof tabs)[number] | undefined,
+        ): x is (typeof tabs)[number] & { activeLeafId: number } =>
+          !!x && x.kind === "terminal";
+        const active = tabs.find((x) => x.id === activeId);
+        const last = tabs.find((x) => x.id === lastTerminalTabIdRef.current);
+        const newest = [...tabs].reverse().find((x) => x.kind === "terminal");
+        // Prefer the active tab when it's a terminal; otherwise fall back to
+        // the most recently active terminal tab (or any terminal) so agent
+        // images/commands still land somewhere instead of erroring out.
+        const t = isTerminalLike(active)
+          ? active
+          : isTerminalLike(last)
+            ? last
+            : isTerminalLike(newest)
+              ? newest
+              : null;
+        if (!t) return false;
         const term = terminalRefs.current.get(t.activeLeafId);
         if (!term) return false;
         term.write(text);

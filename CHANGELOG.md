@@ -4,6 +4,15 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.5.2]
+
+- AI: `display_image` no longer dumps megabytes of base64 into the tool card — inputs render as `name · KB` and outputs as a one-line "displayed in terminal" confirmation (or the error).
+- AI: `display_image` and injected commands now fall back to the most recently active terminal tab when the active tab isn't a terminal — previously they failed with "no active terminal tab to display into" while you were on an editor/preview tab.
+- AI: base64 tool-call payloads are elided from model context after the call completes (new always-on compaction phase) — a single image call used to be re-sent on every agent step, silently eating context.
+- AI: the same payloads are elided from session persistence so one image call no longer blows the 512KB per-session store cap and trims conversation history.
+
+---
+
 ## [1.5.1]
 
 - AI: image attachments no longer vanish from the conversation when the selected model can't see images.
