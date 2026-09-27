@@ -24,6 +24,7 @@ import { IS_MAC } from "@/lib/platform";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ACCEPTED_FILES, useComposer, type FileAttachment } from "./composer";
+import { modelTextOnly } from "../extraction";
 import { useWorkspaceFiles } from "../hooks/useWorkspaceFiles";
 import { SLASH_COMMANDS } from "../lib/slashCommands";
 import type { Snippet } from "../lib/snippets";
@@ -222,6 +223,11 @@ export function AiInputBar() {
       : null;
 
   const hasChips = c.files.length > 0 || c.pickedSnippets.length > 0 || c.pickedCommands.length > 0;
+  // Warn when an image is attached but the selected model can't see it —
+  // the agent will send extracted text instead of the picture itself.
+  const selectedModelId = useChatStore((s) => s.selectedModelId);
+  const hasImageAttachment = c.files.some((f) => f.kind === "image");
+  const imageBlindModel = hasImageAttachment && modelTextOnly(selectedModelId);
 
   return (
     <div
@@ -250,6 +256,21 @@ export function AiInputBar() {
           commands={c.pickedCommands}
           onRemoveCommand={(name) => c.removeCommand(name)}
         />
+
+        {imageBlindModel && (
+          <div className="flex items-center gap-1.5 px-1 text-[10.5px] text-amber-600 dark:text-amber-400">
+            <HugeiconsIcon
+              icon={UserWarning01Icon}
+              size={12}
+              strokeWidth={2}
+              className="shrink-0"
+            />
+            <span className="truncate">
+              {selectedModelId} can&apos;t see images — it will receive extracted
+              text (OCR) instead. Switch to a vision model to send the picture.
+            </span>
+          </div>
+        )}
 
         <Popover open={pickerOpen}>
           <PopoverAnchor asChild>

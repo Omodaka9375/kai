@@ -26,6 +26,10 @@ import {
 } from "../config";
 import { buildTools, type ToolContext } from "../tools/tools";
 import { compactModelMessagesDetailed } from "./compact";
+import {
+  attachmentFallbackText,
+  extractAttachmentText,
+} from "../extraction";
 import type { ProviderKeys } from "./keyring";
 import { createProxyFetch } from "./proxyFetch";
 import { normalizeForProvider } from "./providerNormalize";
@@ -470,6 +474,79 @@ function stripDataUrlPrefixes(messages: ModelMessage[]): ModelMessage[] {
 }
 
 /**
+ * Replace image `file` parts with extracted text (dimensions + OCR) when the
+ * selected model can't accept images. Runs on the converted model messages,
+ * AFTER `convertToModelMessages` — the UI message keeps the image part so the
+ * transcript still renders the thumbnail.
+ *
+ * A given image is only extracted once per session: the result is cached by
+ * its base64 payload (agent steps re-convert the whole history every step, so
+ * without the cache a multi-step run would re-OCR the same attachment on every
+ * request).
+ */
+const imageTextCache = new Map<string, string | null>();
+
+async function extractImagesForTextOnly(
+  messages: ModelMessage[],
+): Promise<ModelMessage[]> {
+  type AnyPart = {
+    type: string;
+    data?: unknown;
+    mediaType?: string;
+    [k: string]: unknown;
+  };
+  const out: ModelMessage[] = [];
+  for (const m of messages) {
+    if (!Array.isArray(m.content)) {
+      out.push(m);
+      continue;
+    }
+    let touched = false;
+    const content: AnyPart[] = [];
+    for (const part of m.content as AnyPart[]) {
+      if (
+        part.type === "file" &&
+        typeof part.mediaType === "string" &&
+        part.mediaType.startsWith("image/") &&
+        typeof part.data === "string" &&
+        part.data.length > 0
+      ) {
+        touched = true;
+        const text = await imageExtractedText(part.data);
+        content.push({ type: "text", text });
+      } else {
+        content.push(part);
+      }
+    }
+    out.push(touched ? ({ ...m, content } as ModelMessage) : m);
+  }
+  return out;
+}
+
+/** Cached extraction for one base64 image payload. */
+async function imageExtractedText(base64: string): Promise<string> {
+  if (imageTextCache.has(base64)) {
+    return imageTextCache.get(base64) ?? attachmentFallbackText("image");
+  }
+  const dataUrl = `data:image/png;base64,${base64}`;
+  let text: string | null = null;
+  try {
+    text = await extractAttachmentText({ url: dataUrl, mediaType: "image/png" });
+  } catch (e) {
+    console.warn("[kai] image extraction failed:", e);
+  }
+  const finalText = text ?? attachmentFallbackText("image");
+  // Bound the cache: a session rarely has more than a handful of images, but
+  // the payloads are large — cap at 16 entries.
+  if (imageTextCache.size >= 16) {
+    const first = imageTextCache.keys().next().value;
+    if (first !== undefined) imageTextCache.delete(first);
+  }
+  imageTextCache.set(base64, text);
+  return finalText;
+}
+
+/**
  * Post-conversion sanitizer: fix non-object tool-call inputs.
  * Anthropic rejects "Input should be an object" for null/undefined inputs.
  */
@@ -529,7 +606,15 @@ export async function runAgentStream(opts: RunAgentOptions) {
       }),
     ),
   );
-  const history = normalizeForProvider(rawHistory, provider);
+  // Text-only models (DeepSeek-class, GLM base, …) reject `file` parts.
+  // Swap image parts for extracted text (dimensions + OCR) AFTER conversion —
+  // the UI messages keep the image so the transcript still shows it.
+  const history = normalizeForProvider(
+    getModel(modelId).tags?.includes("vision")
+      ? rawHistory
+      : await extractImagesForTextOnly(rawHistory),
+    provider,
+  );
   const compact = compactModelMessagesDetailed(
     history,
     getModelContextLimit(getModel(modelId).id),

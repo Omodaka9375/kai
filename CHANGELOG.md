@@ -4,6 +4,16 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.5.1]
+
+- AI: image attachments no longer vanish from the conversation when the selected model can't see images.
+  - Text-only models (DeepSeek, GLM base, etc.) still receive text — but the swap now happens at request time in the agent transport, so the transcript keeps showing your image thumbnail.
+  - Fixed the extraction pipeline that made every image turn into `[attachment "…"] (failed extraction — model may reject it)`: attachments are `data:` URLs (the old code required `blob:`), the temp file path was relative (unwritable in packaged installs), and the `.dat` extension defeated image detection. Extraction (dimensions + OCR via tesseract) is now a Rust command over raw bytes, cached per image for multi-step runs.
+  - After a restart, previously-attached images (stripped from persistence to keep the store small) render as a placeholder chip instead of a broken image.
+  - The input bar shows an amber hint when you attach an image to a model without vision support, naming the model and suggesting a vision-capable one.
+
+---
+
 ## [1.5.0]
 
 - Editor: right-click "Format Document" / "Format Selection" with automatic language detection by file extension.

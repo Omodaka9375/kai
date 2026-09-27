@@ -26,6 +26,8 @@ pub struct ExtractMeta {
 
 /// Extract from a binary file path. Returns Ok(None) for kinds we don't handle.
 pub fn extract(path: &Path) -> Result<Option<ExtractMeta>, String> {
+
+
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
@@ -198,4 +200,94 @@ fn image(path: &Path, _ext: &str, size: u64) -> Result<Option<ExtractMeta>, Stri
         content,
         size,
     }))
+}
+
+/// Determine the image extension from magic bytes so temp files we hand to
+/// `extract` carry the right extension (some sniffers key off it).
+fn image_ext_from_magic(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.len() < 12 {
+        return None;
+    }
+    if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
+        return Some("png");
+    }
+    if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        return Some("jpg");
+    }
+    if bytes[..4] == *b"RIFF" && &bytes[8..12] == b"WEBP" {
+        return Some("webp");
+    }
+    if bytes.starts_with(b"GIF8") {
+        return Some("gif");
+    }
+    if bytes[..4] == *b"II*\x00" || bytes[..4] == *b"MM\x00*" {
+        return Some("tiff");
+    }
+    if &bytes[4..8] == b"ftyp" {
+        return Some("jpg"); // heic/mp4 container — best-effort
+    }
+    None
+}
+
+/// Extract metadata + OCR text for an in-memory image (composer attachments
+/// for text-only models). Writes the bytes to a uniquely-named temp file —
+/// tesseract and the image crate both need a real file/format to work with —
+/// and removes it afterwards.
+///
+/// Returns Ok(None) when the bytes aren't a recognized image so the caller
+/// can surface its fallback text.
+#[tauri::command]
+pub fn fs_extract_image_bytes(bytes: Vec<u8>) -> Result<Option<ExtractMeta>, String> {
+    let Some(ext) = image_ext_from_magic(&bytes) else {
+        return Ok(None);
+    };
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp = std::env::temp_dir().join(format!("kai-img-{}-{}.{}", std::process::id(), stamp, ext));
+    std::fs::write(&tmp, &bytes).map_err(|e| e.to_string())?;
+    let result = extract(&tmp);
+    std::fs::remove_file(&tmp).ok();
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::image_ext_from_magic;
+
+    fn pad(prefix: &[u8]) -> Vec<u8> {
+        let mut v = prefix.to_vec();
+        v.extend(std::iter::repeat_n(0u8, 16));
+        v
+    }
+
+    #[test]
+    fn sniffs_png_jpg_webp_gif() {
+        assert_eq!(
+            image_ext_from_magic(&pad(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A])),
+            Some("png")
+        );
+        assert_eq!(
+            image_ext_from_magic(&pad(&[0xFF, 0xD8, 0xFF, 0xE0])),
+            Some("jpg")
+        );
+        let mut webp = b"RIFF".to_vec();
+        webp.extend_from_slice(&[0; 4]);
+        webp.extend_from_slice(b"WEBP");
+        webp.extend(std::iter::repeat_n(0u8, 8));
+        assert_eq!(image_ext_from_magic(&webp), Some("webp"));
+        assert_eq!(image_ext_from_magic(&pad(b"GIF89a")), Some("gif"));
+    }
+
+    #[test]
+    fn rejects_short_and_unknown() {
+        assert_eq!(image_ext_from_magic(&[0x89, b'P', b'N', b'G']), None); // too short
+        assert_eq!(image_ext_from_magic(&pad(b"not an image!")), None);
+        // ftyp (mp4/heic) is treated as a best-effort image container.
+        let mut ftyp = vec![0; 4];
+        ftyp.extend_from_slice(b"ftyp");
+        ftyp.extend(std::iter::repeat_n(0u8, 8));
+        assert_eq!(image_ext_from_magic(&ftyp), Some("jpg"));
+    }
 }

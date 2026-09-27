@@ -28,6 +28,7 @@ import {
   CodeIcon,
   File01Icon,
   HashtagIcon,
+  Image01Icon,
   TerminalIcon,
 } from "@hugeicons/core-free-icons";
 import { SLASH_COMMANDS, Kai_CMD_RE } from "../lib/slashCommands";
@@ -541,15 +542,33 @@ const RenderedMessage = memo(function RenderedMessage({
             ) : null}
             {imageParts.length > 0 && (
               <div className="flex flex-col gap-1.5 mb-2 max-w-sm">
-                {imageParts.map((p, idx) => (
-                  <img
-                    key={idx}
-                    src={p.url}
-                    alt="User upload"
-                    className="rounded-lg max-h-48 object-contain"
-                    draggable={false}
-                  />
-                ))}
+                {imageParts.map((p, idx) =>
+                  // After a restart, persisted images are stripped to a bare
+                  // `data:...;base64,` prefix (no payload) to keep the store
+                  // compact — render a placeholder chip instead of a broken
+                  // zero-size image.
+                  p.url.split(",").length < 2 ? (
+                    <div
+                      key={idx}
+                      className="flex h-12 items-center gap-2 rounded-lg border border-border/60 bg-muted/40 px-3 text-[11px] text-muted-foreground"
+                    >
+                      <HugeiconsIcon
+                        icon={Image01Icon}
+                        size={14}
+                        strokeWidth={1.8}
+                      />
+                      Image attachment (not stored across restarts)
+                    </div>
+                  ) : (
+                    <img
+                      key={idx}
+                      src={p.url}
+                      alt="User upload"
+                      className="rounded-lg max-h-48 object-contain"
+                      draggable={false}
+                    />
+                  ),
+                )}
               </div>
             )}
             {stripped.text ? (

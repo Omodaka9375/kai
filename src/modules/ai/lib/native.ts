@@ -241,6 +241,15 @@ export const native = {
       workspace: currentWorkspaceEnv(),
       extract: extract ?? false,
     }),
+  /** Extract dimensions + OCR text from in-memory image bytes (no temp
+   *  file management on the JS side — Rust owns the temp file). */
+  extractImageBytes: (bytes: Uint8Array) =>
+    invoke<
+      | { format: string; meta: [string, string][]; content: string; size: number }
+      | null
+    >("fs_extract_image_bytes", {
+      bytes: bytes as unknown as number[],
+    }),
   writeFile: (path: string, content: string) =>
     invoke<void>("fs_write_file", {
       path,

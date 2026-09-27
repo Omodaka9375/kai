@@ -533,6 +533,7 @@ pub fn run() {
             fs::file::fs_read_file_bytes,
             fs::file::fs_write_file_bytes,
             fs::file::fs_canonicalize,
+            fs::extract::fs_extract_image_bytes,
             fs::mutate::fs_create_file,
             fs::mutate::fs_create_dir,
             fs::mutate::fs_rename,
