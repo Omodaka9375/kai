@@ -12,6 +12,7 @@ import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { EDITOR_THEME_EXT } from "./lib/themes";
 import {
   forwardRef,
+  useCallback,
   useEffect,
   useImperativeHandle,
   useMemo,
@@ -33,6 +34,13 @@ import { resolveLanguage } from "./lib/languageResolver";
 import { useDocument } from "./lib/useDocument";
 import { invoke } from "@tauri-apps/api/core";
 import { currentWorkspaceEnv } from "@/modules/workspace";
+import {
+  formatDocument,
+  formatSelection,
+  formatterLabelFor,
+  isFormattable,
+} from "./lib/formatter";
+import { EditorFormatMenu } from "./EditorFormatMenu";
 
 const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico", "avif"]);
 const VIDEO_EXTS = new Set(["mp4", "webm", "mov", "mkv", "avi"]);
@@ -113,6 +121,17 @@ function formatBytes(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
+/** Replace the whole document. Only dispatches when the text actually
+ *  changed (prettier can return an identical string) so we don't mark the
+ *  buffer dirty (and add an undo step) for a no-op format. */
+function applyFormattedDoc(view: EditorView, formatted: string) {
+  const current = view.state.doc.toString();
+  if (formatted === current) return;
+  view.dispatch({
+    changes: { from: 0, to: current.length, insert: formatted },
+  });
+}
+
 export const EditorPane = forwardRef<EditorPaneHandle, Props>(
   function EditorPane({ path, onDirtyChange, onSaved, onClose }, ref) {
     const { doc, onChange, save, reload } = useDocument({ path, onDirtyChange });
@@ -123,6 +142,52 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
     const vimMode = usePreferencesStore((s) => s.vimMode);
     const wordWrap = usePreferencesStore((s) => s.editorWordWrap);
     const themeExt = EDITOR_THEME_EXT[editorThemeId] ?? EDITOR_THEME_EXT.atomone;
+
+    // ── Right-click format menu ──────────────────────────────────────────
+    const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
+    const [formatBusy, setFormatBusy] = useState(false);
+    const [formatError, setFormatError] = useState<string | null>(null);
+
+    const doFormat = useCallback(async (selectionOnly: boolean) => {
+      const view = cmRef.current?.view;
+      if (!view || formatBusy) return;
+      setFormatError(null);
+      setFormatBusy(true);
+      try {
+        const source = view.state.doc.toString();
+        const range = view.state.selection.main;
+        const hasSelection = !range.empty;
+
+        if (selectionOnly && hasSelection) {
+          const fragment = view.state.sliceDoc(range.from, range.to);
+          const formatted = await formatSelection(path, fragment);
+          if (formatted === null) {
+            // Fragment can't be wrapped (e.g. json) — format the whole doc.
+            const whole = await formatDocument(path, source);
+            applyFormattedDoc(view, whole);
+          } else if (formatted !== fragment) {
+            view.dispatch({
+              changes: { from: range.from, to: range.to, insert: formatted },
+              // Keep the formatted text selected so the user sees what changed.
+              selection: { anchor: range.from, head: range.from + formatted.length },
+            });
+          }
+        } else {
+          const whole = await formatDocument(path, source);
+          applyFormattedDoc(view, whole);
+        }
+        view.focus();
+        // Success — close the menu. Errors keep it open to show the message.
+        setCtxMenu(null);
+      } catch (e) {
+        setFormatError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setFormatBusy(false);
+      }
+    }, [path, formatBusy]);
+
+    const doFormatRef = useRef(doFormat);
+    doFormatRef.current = doFormat;
 
     // Stabilize save + onSaved via refs
     // identity — a new identity makes @uiw/react-codemirror reconfigure the
@@ -349,7 +414,31 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
             highlightSelectionMatches: true,
             searchKeymap: true,
           }}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            setCtxMenu({ x: e.clientX, y: e.clientY });
+          }}
         />
+        {ctxMenu && (
+          <EditorFormatMenu
+            x={ctxMenu.x}
+            y={ctxMenu.y}
+            path={path}
+            formattable={isFormattable(path)}
+            formatterName={formatterLabelFor(path)}
+            hasSelection={
+              !!cmRef.current?.view &&
+              !cmRef.current.view.state.selection.main.empty
+            }
+            busy={formatBusy}
+            error={formatError}
+            onFormat={doFormat}
+            onDismiss={() => {
+              setCtxMenu(null);
+              setFormatError(null);
+            }}
+          />
+        )}
       </div>
     );
   },

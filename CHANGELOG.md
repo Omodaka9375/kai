@@ -4,6 +4,16 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.5.0]
+
+- Editor: right-click "Format Document" / "Format Selection" with automatic language detection by file extension.
+  - Formats via prettier (in-process): JavaScript/JSX, TypeScript/TSX, JSON/JSON5, HTML, CSS/SCSS/Less, Markdown/MDX, YAML, GraphQL.
+  - Python formats via `black` when it's on PATH (temp file round-trip in the file's directory so pyproject.toml config is respected).
+  - The menu names the formatter for the file type; unsupported extensions get a disabled "No formatter for .xxx" row instead of an error.
+  - Selection formatting replaces just the selected text (falling back to whole-document formatting when a fragment isn't parseable on its own, e.g. a JSON slice), restores the selection over the formatted text, and no-ops cleanly when the buffer is already formatted.
+
+---
+
 ## [1.4.2]
 
 - Local voice transcription: selectable Whisper models (tiny/base/small, English or multilingual, q5_1) in Settings → General. The previous single model (large-v3-turbo q5_0) needs a GPU — on CPU it ran ~11× slower than real-time, so every dictation hit the 45s "Speech transcription timed out" error.
