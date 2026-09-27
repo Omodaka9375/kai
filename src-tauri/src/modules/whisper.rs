@@ -451,7 +451,7 @@ fn inference_threads() -> i32 {
         .map(|n| n.get())
         .unwrap_or(4);
     let physical = (logical / 2).max(1);
-    physical.min(8).max(1) as i32
+    physical.clamp(1, 8) as i32
 }
 
 fn transcribe_inner(
