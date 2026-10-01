@@ -148,15 +148,16 @@ function Bridge({
   // non-error status — the run is paused for the user's click) and strips
   // everything else. Safe to call whenever approvals are pending but no run
   // is in flight; it's a no-op when the card is live.
+  //
+  // Deferred to its own macrotask: reassigning chat.messages notifies the
+  // SDK store synchronously, which is one more nested-update level when it
+  // fires inside an ongoing commit cascade (React #185 counts those).
   const releaseStaleApprovals = useChatStore((s) => s.releaseStaleApprovals);
   useEffect(() => {
-    if (
-      approvalsPending > 0 &&
-      status !== "submitted" &&
-      status !== "streaming"
-    ) {
-      releaseStaleApprovals(sessionId);
-    }
+    if (approvalsPending <= 0) return;
+    if (status === "submitted" || status === "streaming") return;
+    const t = setTimeout(() => releaseStaleApprovals(sessionId), 0);
+    return () => clearTimeout(t);
   }, [approvalsPending, status, sessionId, releaseStaleApprovals]);
   // ---- Steering message injection -------------------------------------------
   // When the user sends a message while the agent is busy, stop the current
@@ -271,11 +272,23 @@ function Bridge({
         if (!shouldApprove) continue;
         autoApprovedRef.current.add(id);
         markAutoApproved(id);
-        try {
-          addToolApprovalResponse({ id, approved: true });
-        } catch {
-          // Tool call may have been cleaned up already.
-        }
+        // Defer each response to its own macrotask. Approving N pending tool
+        // calls synchronously in one effect pass chains N SDK store
+        // notifications inside a single React commit cascade (approval write
+        // → commit → effect → next write → …); each approval adds ~2 nested
+        // levels (state write + tool-output write), so a multi-file batch
+        // step with ~25 tool calls exceeded React's 50-update depth and
+        // threw Minified error #185 mid-stream. One timer per response gives
+        // React a full commit between approvals — depth resets per task —
+        // while auto-approve still completes within milliseconds.
+        setTimeout(() => {
+          try {
+            addToolApprovalResponse({ id, approved: true });
+          } catch {
+            // Tool call may have been cleaned up already (stop/restart
+            // between scheduling and firing).
+          }
+        }, 0);
       }
     }
   }, [messages, autoApprove, addToolApprovalResponse, markAutoApproved, signingApprovalRequired]);
