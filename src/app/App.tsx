@@ -43,6 +43,10 @@ import {
   type EditorPaneHandle,
 } from "@/modules/editor";
 import { MarkdownPreviewPane } from "@/modules/editor/MarkdownPreviewPane";
+import {
+  isFormattable,
+  formatterLabelFor,
+} from "@/modules/editor/lib/formatter";
 import { GitHistoryStack } from "@/modules/git-history";
 import { normalizeWorkspacePath } from "@/modules/ai/lib/workspacePath";
 import { getLaunchDir } from "@/lib/launchDir";
@@ -747,8 +751,13 @@ export default function App() {
     y: number;
     selectionText: string | null;
     isTerminal: boolean;
+    /** Editor path when the menu targets a code editor (adds Format rows). */
+    editorPath: string | null;
   } | null>(null);
 
+  /** Format errors from the context menu's Format actions — shown inline in
+   *  the menu instead of a second overlapping menu. Cleared on dismiss. */
+  const [formatMenuError, setFormatMenuError] = useState<string | null>(null);
 
   const handleCopy = useCallback(() => {
     const text = contextMenu?.selectionText ?? captureActiveSelection();
@@ -800,6 +809,14 @@ export default function App() {
     }
   }, [activeId]);
 
+  // Editor path for the active tab — read inside the document-level
+  // contextmenu handler so format actions can be offered for editors.
+  const activeTabPathRef = useRef<string | null>(null);
+  useEffect(() => {
+    const t = tabsRef.current.find((x) => x.id === activeId);
+    activeTabPathRef.current = t?.kind === "editor" ? t.path : null;
+  }, [activeId, tabs]);
+
   useEffect(() => {
     const handleContextMenu = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
@@ -826,11 +843,13 @@ export default function App() {
       }
 
       const selectionText = captureActiveSelection();
+      setFormatMenuError(null);
       setContextMenu({
         x: e.clientX,
         y: e.clientY,
         selectionText,
         isTerminal,
+        editorPath: isEditor ? activeTabPathRef.current : null,
       });
     };
 
@@ -1708,6 +1727,27 @@ export default function App() {
                 y={contextMenu.y}
                 selectionText={contextMenu.selectionText}
                 isTerminal={contextMenu.isTerminal}
+                editorFormat={
+                  contextMenu.editorPath
+                    ? {
+                        path: contextMenu.editorPath,
+                        formattable: isFormattable(contextMenu.editorPath),
+                        formatterName: formatterLabelFor(contextMenu.editorPath),
+                        onFormat: (selectionOnly) => {
+                          const editor = editorRefs.current.get(activeId);
+                          if (!editor) return;
+                          editor
+                            .format(selectionOnly)
+                            .catch((err: unknown) => {
+                              setFormatMenuError(
+                                err instanceof Error ? err.message : String(err),
+                              );
+                            });
+                        },
+                      }
+                    : undefined
+                }
+                error={formatMenuError}
                 onCopy={handleCopy}
                 onPaste={handlePaste}
                 onSelectAll={handleSelectAll}

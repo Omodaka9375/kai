@@ -38,10 +38,7 @@ import { currentWorkspaceEnv } from "@/modules/workspace";
 import {
   formatDocument,
   formatSelection,
-  formatterLabelFor,
-  isFormattable,
 } from "./lib/formatter";
-import { EditorFormatMenu } from "./EditorFormatMenu";
 
 const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico", "avif"]);
 const VIDEO_EXTS = new Set(["mp4", "webm", "mov", "mkv", "avi"]);
@@ -107,6 +104,9 @@ export type EditorPaneHandle = {
   scrollToLine: (lineNum: number) => void;
   /** Save the buffer to disk. No-op if not dirty. */
   save: () => Promise<void>;
+  /** Format the document (or just the selection). Rejects on formatter
+   *  failure — the caller (App context menu) surfaces the error. */
+  format: (selectionOnly: boolean) => Promise<void>;
 };
 
 type Props = {
@@ -147,16 +147,12 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
     const wordWrap = usePreferencesStore((s) => s.editorWordWrap);
     const themeExt = EDITOR_THEME_EXT[editorThemeId] ?? EDITOR_THEME_EXT.atomone;
 
-    // ── Right-click format menu ──────────────────────────────────────────
-    const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
-    const [formatBusy, setFormatBusy] = useState(false);
-    const [formatError, setFormatError] = useState<string | null>(null);
-
-    const doFormat = useCallback(async (selectionOnly: boolean) => {
+    // ── Formatting (invoked from the App-level context menu) ────────────
+    const formatBusyRef = useRef(false);
+    const doFormat = useCallback(async (selectionOnly: boolean): Promise<void> => {
       const view = cmRef.current?.view;
-      if (!view || formatBusy) return;
-      setFormatError(null);
-      setFormatBusy(true);
+      if (!view || formatBusyRef.current) return;
+      formatBusyRef.current = true;
       try {
         const source = view.state.doc.toString();
         const range = view.state.selection.main;
@@ -181,14 +177,10 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
           applyFormattedDoc(view, whole);
         }
         view.focus();
-        // Success — close the menu. Errors keep it open to show the message.
-        setCtxMenu(null);
-      } catch (e) {
-        setFormatError(e instanceof Error ? e.message : String(e));
       } finally {
-        setFormatBusy(false);
+        formatBusyRef.current = false;
       }
-    }, [path, formatBusy]);
+    }, [path]);
 
     const doFormatRef = useRef(doFormat);
     doFormatRef.current = doFormat;
@@ -389,6 +381,9 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
         save: async () => {
           await saveAndReportRef.current();
         },
+        format: async (selectionOnly: boolean) => {
+          await doFormatRef.current(selectionOnly);
+        },
         scrollToLine: (lineNum: number) => {
           const view = cmRef.current?.view;
           if (!view) return;
@@ -501,31 +496,7 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
             highlightSelectionMatches: true,
             searchKeymap: true,
           }}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            setCtxMenu({ x: e.clientX, y: e.clientY });
-          }}
         />
-        {ctxMenu && (
-          <EditorFormatMenu
-            x={ctxMenu.x}
-            y={ctxMenu.y}
-            path={path}
-            formattable={isFormattable(path)}
-            formatterName={formatterLabelFor(path)}
-            hasSelection={
-              !!cmRef.current?.view &&
-              !cmRef.current.view.state.selection.main.empty
-            }
-            busy={formatBusy}
-            error={formatError}
-            onFormat={doFormat}
-            onDismiss={() => {
-              setCtxMenu(null);
-              setFormatError(null);
-            }}
-          />
-        )}
       </div>
     );
   },
