@@ -3,7 +3,10 @@
  *
  * Modeled after Claude Code's auto-memory: each project gets
  * `~/.kai/memory/<project-hash>/MEMORY.md` which the agent can read and write.
- * The first 200 lines (or 25KB) are loaded into every session's system prompt.
+ * The MOST RECENT 200 lines (or 25KB) are loaded into every session's system
+ * prompt — a TAIL window, because the file is append-only: head-loading would
+ * pin the agent's view to the OLDEST entries once the file outgrows the cap
+ * (new saves appended past the cap were silently invisible forever).
  *
  * The agent uses `save_memory` to persist learnings and `read_file` to recall.
  */
@@ -14,6 +17,60 @@ import { neutralizeFenceMarkers, neutralizeInjectionMarkers } from "./fence";
 
 const MAX_MEMORY_LOAD_BYTES = 25 * 1024;
 const MAX_MEMORY_LOAD_LINES = 200;
+
+/**
+ * Fit a memory file into the system-prompt window, keeping the NEWEST content
+ * (the file is append-only — recent entries are the valuable ones). Returns
+ * the content whole when it fits; otherwise the tail window with a truncation
+ * notice naming the on-disk path so the agent can read the full history.
+ *
+ * Exported for unit tests.
+ */
+export function capMemoryForPrompt(content: string, filePath: string): string {
+  // Cheap fits-first check: both the line count and byte budget satisfied.
+  if (
+    content.length <= MAX_MEMORY_LOAD_BYTES &&
+    (content.match(/\n/g)?.length ?? 0) + 1 <= MAX_MEMORY_LOAD_LINES
+  ) {
+    return content;
+  }
+
+  const lines = content.split("\n");
+  // Walk backwards accumulating lines under the BYTE budget only. The line
+  // count is a soft preference, not a hard cap: a memory file of many short
+  // entries would otherwise trip the line limit while the byte budget still
+  // has room — dropping the NEWEST entry, the exact head-loading bug this
+  // fixes. Bytes are the real prompt-window constraint.
+  let budget = MAX_MEMORY_LOAD_BYTES;
+  let start = lines.length;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const cost = lines[i].length + 1;
+    if (cost > budget) break;
+    budget -= cost;
+    start = i;
+  }
+  // Budget covered the whole file — nothing to truncate (line count alone is
+  // not a reason to cut; bytes are the real constraint).
+  if (start <= 0) return content;
+
+  // Snap forward to the next entry header so the window begins at an entry
+  // start rather than mid-entry (within a small scan distance).
+  for (
+    let j = start;
+    j < Math.min(start + 15, lines.length) && lines[j] !== undefined;
+    j++
+  ) {
+    if (lines[j].startsWith("## ")) {
+      start = j;
+      break;
+    }
+  }
+
+  const notice =
+    `[kai-memory] Older entries truncated (loaded newest window of ${lines.length - start} lines). ` +
+    `Full history: ${filePath} — read_file it when older context is needed.\n\n`;
+  return `${notice}${lines.slice(start).join("\n")}`.slice(0, MAX_MEMORY_LOAD_BYTES + notice.length);
+}
 
 /**
  * Resolve the memory directory path for a given workspace root.
@@ -40,7 +97,11 @@ async function ensureMemoryDir(workspaceRoot: string): Promise<string> {
 
 /**
  * Load the active memory file content for a workspace.
- * Returns the first MAX_MEMORY_LOAD_LINES lines (capped at MAX_MEMORY_LOAD_BYTES).
+ * Returns the most recent MAX_MEMORY_LOAD_LINES lines (capped at
+ * MAX_MEMORY_LOAD_BYTES). When the file fits, it loads whole; when it has
+ * outgrown the cap, the TAIL loads (newest entries first-class) with a
+ * truncation notice that names the full file path so the agent can read_file
+ * the older history when it matters.
  */
 export async function loadProjectMemory(
   workspaceRoot: string,
@@ -51,16 +112,11 @@ export async function loadProjectMemory(
     try {
       const r = await native.readFile(p);
       if (r.kind !== "text") return null;
-      const lines = r.content.split("\n");
-      const head = lines.slice(0, MAX_MEMORY_LOAD_LINES).join("\n");
-      const capped = head.length > MAX_MEMORY_LOAD_BYTES
-        ? head.slice(0, MAX_MEMORY_LOAD_BYTES)
-        : head;
       // Memory is loaded into the trusted system prompt. Neutralize any fence /
       // DSML markers an earlier poisoned tool result may have written, so a
       // hostile MEMORY.md cannot forge a trust boundary or become a synthetic
       // tool call.
-      return neutralizeInjectionMarkers(neutralizeFenceMarkers(capped));
+      return neutralizeInjectionMarkers(neutralizeFenceMarkers(capMemoryForPrompt(r.content, p)));
     } catch {
       return null;
     }
@@ -139,6 +195,9 @@ export async function appendToMemory(
 
     const content = existing + block;
     await native.writeFile(path, content);
+    // The transport caches memory per workspace for 60s — a fresh save must be
+    // visible to the very next request, not after TTL expiry.
+    invalidateMemoryCache();
   } catch (e) {
     console.debug("auto-memory: failed to write", path, e);
   }
