@@ -90,6 +90,13 @@ export type GitPushResult = {
   pushed: boolean;
 };
 
+/** What a pull actually did — so the UI can report counts. */
+export type GitPullResult = {
+  pulledCommits: number;
+  upToDate: boolean;
+  mergeCommit: string | null;
+};
+
 export type GitBranch = {
   name: string;
   current: boolean;
@@ -548,12 +555,12 @@ export const native = {
       workspace: currentWorkspaceEnv(),
     }),
   gitPullFfOnly: (repoRoot: string) =>
-    invoke<void>("git_pull_ff_only", {
+    invoke<GitPullResult>("git_pull_ff_only", {
       repoRoot,
       workspace: currentWorkspaceEnv(),
     }),
   gitPull: (repoRoot: string) =>
-    invoke<void>("git_pull", {
+    invoke<GitPullResult>("git_pull", {
       repoRoot,
       workspace: currentWorkspaceEnv(),
     }),

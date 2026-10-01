@@ -3,8 +3,8 @@ use tauri::{AppHandle, Manager};
 use crate::modules::git::operations;
 use crate::modules::git::types::{
     DiscardEntry, GitBranch, GitCommitFileChange, GitCommitResult, GitConflictFile,
-    GitDiffContentResult, GitDiffResult, GitLogEntry, GitPanelSnapshot, GitPushResult, GitRepoInfo,
-    GitStashEntry, GitStatusSnapshot,
+    GitDiffContentResult, GitDiffResult, GitLogEntry, GitPanelSnapshot, GitPullResult,
+    GitPushResult, GitRepoInfo, GitStashEntry, GitStatusSnapshot,
 };
 use crate::modules::workspace::{WorkspaceEnv, WorkspaceRegistry};
 
@@ -252,7 +252,7 @@ pub async fn git_pull_ff_only(
     repo_root: String,
     workspace: Option<WorkspaceEnv>,
     app: AppHandle,
-) -> Result<(), String> {
+) -> Result<GitPullResult, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     blocking(app, move |r| {
         operations::pull_ff_only(r, &repo_root, &workspace).map_err(Into::into)
@@ -265,7 +265,7 @@ pub async fn git_pull(
     repo_root: String,
     workspace: Option<WorkspaceEnv>,
     app: AppHandle,
-) -> Result<(), String> {
+) -> Result<GitPullResult, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     blocking(app, move |r| {
         operations::pull(r, &repo_root, &workspace).map_err(Into::into)

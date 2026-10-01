@@ -88,6 +88,8 @@ type SourceControlPanelState = {
   pendingDropStash: GitStashEntry | null;
   setCommitMessage: (value: string) => void;
   refresh: () => Promise<void>;
+  /** Contextual pull with footer feedback (commit count / up-to-date). */
+  pull: () => Promise<void>;
   selectEntry: (entry: SourceControlEntry) => Promise<void>;
   stageEntry: (entry: SourceControlEntry) => Promise<void>;
   unstageEntry: (entry: SourceControlEntry) => Promise<void>;
@@ -565,8 +567,25 @@ export function useSourceControlPanel(
       return;
     }
     if (summary.repo) invalidateRepoDiffs(summary.repo.repoRoot);
-    await summary.refresh({ remote: "never" });
+    await summary.fetchNow();
   }, [isOpen, summary]);
+
+  /** Contextual pull/push from the header buttons. Reports what the pull
+   *  actually brought in (count + fast-forward/merge/up-to-date) in the
+   *  footer — the old flow was silent about whether anything arrived. */
+  const pull = useCallback(async () => {
+    if (!repo) return;
+    setActionMessage(null);
+    setActionError(null);
+    const result = await summary.runRemoteAction("pull");
+    if (result.ok && result.message) {
+      setActionMessage(result.message);
+      return;
+    }
+    if (result.error) {
+      setActionError(result.error);
+    }
+  }, [repo, summary]);
 
   const loadStashes = useCallback(async () => {
     if (!isOpen) {
@@ -1102,6 +1121,7 @@ export function useSourceControlPanel(
     generateCommitMessage,
     commit,
     push,
+    pull,
     commitSigningEnabled,
     commitSigningMode,
     commitSigningKey,

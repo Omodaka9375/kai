@@ -10,8 +10,8 @@ use crate::modules::git::process::{
 use crate::modules::git::types::{
     DiscardEntry, GitBranch, GitCommitFileChange, GitCommitResult, GitConflictFile,
     GitConflictRegion, GitDiffContentResult, GitDiffResult, GitLogEntry, GitOutput,
-    GitPanelSnapshot, GitPushResult, GitRepoInfo, GitStashEntry, GitStatusSnapshot, TextSource,
-    DEFAULT_TIMEOUT_SECS, NETWORK_TIMEOUT_SECS,
+    GitPanelSnapshot, GitPullResult, GitPushResult, GitRepoInfo, GitStashEntry,
+    GitStatusSnapshot, TextSource, DEFAULT_TIMEOUT_SECS, NETWORK_TIMEOUT_SECS,
 };
 use crate::modules::git::utils::{
     authorized_repo_root, canonical_dir, resolve_within_repo, split_upstream, ResolvedGitDirectory,
@@ -1297,13 +1297,52 @@ pub fn fetch(
     ensure_success(&output, "git fetch failed")
 }
 
+/// Measure what a pull actually did. `HEAD@{1}` is the pre-pull HEAD (the
+/// reflog records it even across fast-forwards), so `rev-list --count
+/// HEAD@{1}..HEAD` is exactly the number of commits that arrived — excluding
+/// the merge commit itself. Returns (pulled, merge_sha).
+fn measure_pull(repo_root: &ResolvedGitDirectory) -> (u32, Option<String>) {
+    let count = git_stdout_line_opt(
+        &repo_root.workspace,
+        &repo_root.git_path,
+        ["rev-list", "--count", "HEAD@{1}..HEAD"],
+    )
+    .unwrap_or(None)
+    .and_then(|s| s.trim().parse::<u32>().ok())
+    .unwrap_or(0);
+    let merge_sha = if count == 0 {
+        None
+    } else {
+        git_stdout_line_opt(
+            &repo_root.workspace,
+            &repo_root.git_path,
+            ["rev-list", "--merges", "-n", "1", "HEAD@{1}..HEAD"],
+        )
+        .unwrap_or(None)
+        .map(|s| s.trim().chars().take(7).collect())
+        .filter(|s: &String| !s.is_empty())
+    };
+    (count, merge_sha)
+}
+
+/// Was the pull a no-op? "Already up to date." (merge) / "Fast-forward"
+/// semantics differ across git versions, so compare SHAs instead: the pull
+/// changed nothing when HEAD still points at the pre-pull commit.
+fn head_sha(repo_root: &ResolvedGitDirectory) -> Option<String> {
+    git_stdout_line_opt(&repo_root.workspace, &repo_root.git_path, ["rev-parse", "HEAD"])
+        .unwrap_or(None)
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
 pub fn pull_ff_only(
     registry: &WorkspaceRegistry,
     repo_root: &str,
     workspace: &WorkspaceEnv,
-) -> Result<()> {
+) -> Result<GitPullResult> {
     let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
     ensure_git_available(&repo_root.workspace)?;
+    let before = head_sha(&repo_root);
     let mut args: Vec<OsString> = vec!["pull".into(), "--ff-only".into()];
     if let Some((remote, branch)) = upstream_parts(&repo_root)? {
         args.push(remote.into());
@@ -1315,15 +1354,28 @@ pub fn pull_ff_only(
         args,
         NETWORK_TIMEOUT_SECS,
     )?;
-    ensure_success(&output, "git pull --ff-only failed")
+    ensure_success(&output, "git pull --ff-only failed")?;
+    let after = head_sha(&repo_root);
+    let up_to_date = before.is_some() && before == after;
+    let (pulled, merge) = if up_to_date {
+        (0, None)
+    } else {
+        measure_pull(&repo_root)
+    };
+    Ok(GitPullResult {
+        pulled_commits: pulled,
+        up_to_date,
+        merge_commit: merge,
+    })
 }
 
 /// Full merge pull (not ff-only). `git pull` handles its own fetch, so
 /// there's no need to run a separate fetch first. Uses `--no-rebase` to
 /// ensure a merge commit even if pull.rebase is configured globally.
-pub fn pull(registry: &WorkspaceRegistry, repo_root: &str, workspace: &WorkspaceEnv) -> Result<()> {
+pub fn pull(registry: &WorkspaceRegistry, repo_root: &str, workspace: &WorkspaceEnv) -> Result<GitPullResult> {
     let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
     ensure_git_available(&repo_root.workspace)?;
+    let before = head_sha(&repo_root);
     let mut args: Vec<OsString> = vec!["pull".into(), "--no-rebase".into()];
     if let Some((remote, branch)) = upstream_parts(&repo_root)? {
         args.push(remote.into());
@@ -1335,7 +1387,19 @@ pub fn pull(registry: &WorkspaceRegistry, repo_root: &str, workspace: &Workspace
         args,
         NETWORK_TIMEOUT_SECS,
     )?;
-    ensure_success(&output, "git pull failed")
+    ensure_success(&output, "git pull failed")?;
+    let after = head_sha(&repo_root);
+    let up_to_date = before.is_some() && before == after;
+    let (pulled, merge) = if up_to_date {
+        (0, None)
+    } else {
+        measure_pull(&repo_root)
+    };
+    Ok(GitPullResult {
+        pulled_commits: pulled,
+        up_to_date,
+        merge_commit: merge,
+    })
 }
 
 /// Resolve the tracked remote + branch from `@{u}` as `(remote, branch)`.

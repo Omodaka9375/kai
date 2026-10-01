@@ -49,6 +49,18 @@ pub struct GitPanelSnapshot {
     pub status: Option<GitStatusSnapshot>,
 }
 
+/// Outcome of a pull, so the UI can tell the user what actually arrived.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitPullResult {
+    /// Commits that landed on the current branch (excludes a merge commit).
+    pub pulled_commits: u32,
+    /// True when the branch was already up to date (nothing arrived).
+    pub up_to_date: bool,
+    /// Short SHA of the merge commit created by a diverged pull.
+    pub merge_commit: Option<String>,
+}
+
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiscardEntry {

@@ -338,8 +338,8 @@ export const SourceControlPanel = memo(function SourceControlPanel({
   }, [scm]);
 
   const handlePull = useCallback(() => {
-    void sourceControl.runRemoteAction("pull");
-  }, [sourceControl]);
+    void scm.pull();
+  }, [scm]);
 
   const rows = useMemo<RowDescriptor[]>(() => {
     const result: RowDescriptor[] = [];

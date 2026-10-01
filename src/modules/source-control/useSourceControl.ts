@@ -20,6 +20,9 @@ export type SourceControlRemoteActionResult = {
   action: SourceControlRemoteAction | null;
   error?: string;
   blocked?: "diverged" | "missing-upstream" | "no-repo";
+  /** Human-readable outcome for the panel footer (e.g. "Pulled 3 commits
+   *  (fast-forward)" or "Branch is up to date"). Null when blocked/errored. */
+  message?: string;
 };
 
 export type SourceControlSummary = {
@@ -41,6 +44,10 @@ export type SourceControlSummary = {
     remote?: SourceControlRefreshMode;
     mutation?: boolean;
   }) => Promise<void>;
+  /** Refresh + force a network fetch (bypasses the auto-fetch throttle).
+   *  This is the manual-refresh semantic: the user explicitly wants to know
+   *  what's upstream RIGHT NOW. Resolves when done. */
+  fetchNow: () => Promise<void>;
   runRemoteAction: (
     mode?: SourceControlRemoteActionMode,
   ) => Promise<SourceControlRemoteActionResult>;
@@ -369,6 +376,12 @@ export function useSourceControl(
     [doRefresh],
   );
 
+  const fetchNow = useCallback(async () => {
+    // Dedup: reuse an in-flight refresh unless it's already fetching — the
+    // upgrade rule in refresh() promotes never→always which covers this.
+    await refresh({ remote: "always" });
+  }, [refresh]);
+
   const runRemoteAction = useCallback(
     async (
       mode: SourceControlRemoteActionMode = "contextual",
@@ -389,24 +402,37 @@ export function useSourceControl(
       setState((current) => ({ ...current, busyAction: action }));
 
       try {
+        let message: string;
         if (action === "fetch") {
           await native.gitFetch(repo.repoRoot);
           touchAutoFetch(autoFetchByRepoRef.current, repo.repoRoot);
+          message = "Fetched remote updates";
         } else if (action === "pull") {
           // When behind but not diverged: fast-forward is safe and clean.
           // When diverged (ahead + behind): non-ff merge — `git pull` in
           // Rust handles fetch internally, so no separate fetch needed.
-          if (status.ahead > 0 && status.behind > 0) {
-            await native.gitPull(repo.repoRoot);
-          } else {
-            await native.gitPullFfOnly(repo.repoRoot);
-          }
+          const diverged = status.ahead > 0 && status.behind > 0;
+          const result = diverged
+            ? await native.gitPull(repo.repoRoot)
+            : await native.gitPullFfOnly(repo.repoRoot);
+          message = result.upToDate
+            ? "Branch is up to date — nothing to pull"
+            : result.mergeCommit
+              ? `Pulled ${result.pulledCommits} ${
+                  result.pulledCommits === 1 ? "commit" : "commits"
+                } (merged as ${result.mergeCommit})`
+              : `Pulled ${result.pulledCommits} ${
+                  result.pulledCommits === 1 ? "commit" : "commits"
+                } (fast-forward)`;
         } else {
-          await native.gitPush(repo.repoRoot);
+          const result = await native.gitPush(repo.repoRoot);
+          message = result.pushed
+            ? `Pushed to ${result.remote ?? "remote"}/${result.branch ?? ""}`
+            : "Push completed — nothing to push";
         }
         setState((current) => ({ ...current, lastRemoteError: null }));
         await refresh({ remote: "never", mutation: true });
-        return { ok: true, action };
+        return { ok: true, action, message };
       } catch (error) {
         const message = normalizeError(error);
         setState((current) => ({ ...current, lastRemoteError: message }));
@@ -435,7 +461,7 @@ export function useSourceControl(
     }
     setState((current) => ({ ...current, lastRemoteError: null }));
     const run = () => {
-      void refresh({ remote: "never" });
+      void refresh({ remote: "auto" });
     };
     const idle =
       typeof window.requestIdleCallback === "function"
@@ -461,7 +487,7 @@ export function useSourceControl(
       if (timer) window.clearTimeout(timer);
       timer = window.setTimeout(() => {
         timer = 0;
-        void refresh({ remote: "never" });
+        void refresh({ remote: "auto" });
       }, 400);
     };
     window.addEventListener("focus", onFocus);
@@ -486,8 +512,9 @@ export function useSourceControl(
       lastRemoteError: state.lastRemoteError,
       applyStatus,
       refresh,
+      fetchNow,
       runRemoteAction,
     }),
-    [state, applyStatus, refresh, runRemoteAction],
+    [state, applyStatus, refresh, fetchNow, runRemoteAction],
   );
 }
