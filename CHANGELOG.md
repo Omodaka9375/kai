@@ -4,6 +4,16 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.5.3]
+
+- Editor: right-click menus no longer stack — format entries merged into the single Ask Kai/Copy context menu instead of spawning a second menu behind it.
+- AI: fixed the zombie "agent running" state — stale approval cards no longer pin sessions busy forever, and image attachments now survive the redirect when you send while the agent is running.
+- Git: panel refresh now actually fetches from the remote (ahead/behind update immediately), and pull reports what arrived — "Pulled 3 commits (fast-forward)" / "Branch is up to date" — in the footer.
+- AI: project memory no longer freezes at old entries — the system prompt now loads the newest tail of MEMORY.md (append-only file) with a truncation notice, so recent saves are visible to the agent.
+- AI: fixed the mid-stream UI render-loop crash (Minified React error #185) — auto-approve no longer chains dozens of synchronous state updates inside one React commit; each approval defers one macrotask.
+
+---
+
 ## [1.5.2]
 
 - AI: `display_image` no longer dumps megabytes of base64 into the tool card — inputs render as `name · KB` and outputs as a one-line "displayed in terminal" confirmation (or the error).
