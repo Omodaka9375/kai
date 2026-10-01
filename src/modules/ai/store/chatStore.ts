@@ -1,5 +1,9 @@
 import { Chat, type UIMessage } from "@ai-sdk/react";
+import type { UIMessagePart } from "ai";
 import { create } from "zustand";
+
+/** Loose part type for steering-message payloads (text + image file parts). */
+type LoosePart = UIMessagePart<Record<string, never>, Record<string, never>>;
 import {
   DEFAULT_MODEL_ID,
   getModel,
@@ -299,9 +303,13 @@ type StoreState = {
   /** Merge a session's messages into another (append source onto target), then
    *  remove the source. Returns true on success. */
   mergeSession: (sourceId: string, targetId: string) => Promise<boolean>;
-  /** Steering message queued while agent is busy. */
-  steeringMessage: string | null;
-  setSteeringMessage: (msg: string | null) => void;
+  /** Steering message queued while agent is busy. Full parts (text +
+   *  image files) — attachments must survive the redirect, not just text. */
+  steeringMessage: LoosePart[] | null;
+  setSteeringMessage: (msg: LoosePart[] | null) => void;
+  /** Strip stale `approval-requested` tool parts left by aborted runs so a
+   *  dead approval can't pin the session in awaiting-approval forever. */
+  releaseStaleApprovals: (sessionId: string) => void;
 };
 
 const NOOP_LIVE: Live = {
@@ -1104,6 +1112,11 @@ export const useChatStore = create<StoreState>((set, get) => ({
 
   steeringMessage: null,
   setSteeringMessage: (msg) => set({ steeringMessage: msg }),
+  releaseStaleApprovals: (sessionId) => {
+    const chat = chats.get(sessionId);
+    if (!chat) return;
+    releaseStaleApprovalsOnly(chat);
+  },
 }));
 
 export function getAgentMeta(): AgentMeta {
@@ -1165,6 +1178,50 @@ function hasPendingApprovals(chat: Chat<UIMessage>): boolean {
     }
   }
   return false;
+}
+
+/**
+ * Strip only STALE pending approvals — never a live approval card.
+ *
+ * A pending (`approval-requested`) part is stale when:
+ *  - it sits on an assistant message that is NOT the last assistant message
+ *    (a later message exists, so the turn it belonged to is over), or
+ *  - the chat status is `error` (the run died; the card can never resolve).
+ *
+ * On the LAST assistant message with a non-error status the card is LIVE:
+ * the run is paused awaiting the user's click. Stripping it would yank an
+ * interactive approval away from the user.
+ *
+ * Stale parts otherwise pin the session in `awaiting-approval` forever
+ * (busy UI, blocked sends) because the pending-approvals counter in
+ * AgentRunBridge scans ALL history.
+ */
+function releaseStaleApprovalsOnly(chat: Chat<UIMessage>): void {
+  if (!hasPendingApprovals(chat)) return;
+  const stripAll = chat.status === "error";
+  let lastAssistantIdx = -1;
+  for (let i = chat.messages.length - 1; i >= 0; i--) {
+    if (chat.messages[i].role === "assistant") {
+      lastAssistantIdx = i;
+      break;
+    }
+  }
+  let changed = false;
+  const out = chat.messages.map((m, i) => {
+    if (m.role !== "assistant") return m;
+    if (!stripAll && i === lastAssistantIdx) return m; // live card — keep
+    const kept = m.parts.filter((p) => {
+      const ptype = (p as { type?: string }).type ?? "";
+      if (!ptype.startsWith("tool-") && ptype !== "dynamic-tool") return true;
+      return (p as { state?: string }).state !== "approval-requested";
+    });
+    if (kept.length === m.parts.length) return m;
+    changed = true;
+    if (kept.length > 0) return { ...m, parts: kept } as UIMessage;
+    return null;
+  });
+  if (!changed) return;
+  chat.messages = out.filter((m): m is UIMessage => m !== null);
 }
 
 /**

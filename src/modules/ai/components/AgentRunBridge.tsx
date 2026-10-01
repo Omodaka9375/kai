@@ -137,18 +137,38 @@ function Bridge({
     return n;
   }, [messages]);
 
-
-
+  // ── Stale-approval reaper ─────────────────────────────────────────────
+  // `approval-requested` parts can outlive their run: an aborted or errored
+  // turn may leave one behind, and the approvalsPending counter above scans
+  // ALL history — a single stale part pins the session in "awaiting-approval"
+  // forever (busy UI, blocked sends, spinning status pill). The user's only
+  // escape was the Stop button, which strips these parts manually.
+  // The store's releaseStaleApprovals decides which parts are stale: it
+  // spares a LIVE card (pending part on the LAST assistant message with a
+  // non-error status — the run is paused for the user's click) and strips
+  // everything else. Safe to call whenever approvals are pending but no run
+  // is in flight; it's a no-op when the card is live.
+  const releaseStaleApprovals = useChatStore((s) => s.releaseStaleApprovals);
+  useEffect(() => {
+    if (
+      approvalsPending > 0 &&
+      status !== "submitted" &&
+      status !== "streaming"
+    ) {
+      releaseStaleApprovals(sessionId);
+    }
+  }, [approvalsPending, status, sessionId, releaseStaleApprovals]);
   // ---- Steering message injection -------------------------------------------
   // When the user sends a message while the agent is busy, stop the current
   // run first (so incomplete tool_use parts get cleaned up by
   // stripIncompleteToolCalls in the transport), then inject the steering
-  // message once the status settles to idle.
+  // message once the status settles to idle. The queued payload is full
+  // message PARTS (text + image files) — attachments survive the redirect.
   const steeringMessage = useChatStore((s) => s.steeringMessage);
   const setSteeringMessage = useChatStore((s) => s.setSteeringMessage);
   // Keep a ref so the send callback always sees the latest value without
   // being a reactive dep (avoids the cleanup-cancels-timeout race).
-  const steeringRef = useRef<string | null>(null);
+  const steeringRef = useRef<AnyPart[] | null>(null);
   steeringRef.current = steeringMessage;
 
   useEffect(() => {
@@ -163,10 +183,10 @@ function Bridge({
     // and clearing the store second keeps the value stable across the
     // re-render that setSteeringMessage(null) triggers.
     setSteeringMessage(null);
-    const msg = steeringRef.current ?? steeringMessage;
+    const parts = steeringRef.current ?? steeringMessage;
     void chat.sendMessage({
       role: "user",
-      parts: [{ type: "text", text: msg }],
+      parts,
     });
   }, [steeringMessage, status, chat, setSteeringMessage]);
 

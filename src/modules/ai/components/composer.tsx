@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { UIMessagePart } from "ai";
 import {
   createContext,
   useContext,
@@ -6,6 +7,10 @@ import {
   useRef,
   useState,
 } from "react";
+
+/** Loose part type for steering-message payloads (text + image file parts). */
+type LoosePart = UIMessagePart<Record<string, never>, Record<string, never>>;
+
 import { useWhisperRecording } from "../hooks/useWhisperRecording";
 import { expandSnippetTokens, type Snippet } from "../lib/snippets";
 import { tryRunSlashCommand, type SlashCommandMeta } from "../lib/slashCommands";
@@ -238,22 +243,6 @@ export function AiComposerProvider({ children }: ProviderProps) {
   };
 
   const submit = async () => {
-    // When the agent is busy, redirect the message as a steering signal
-    // instead of queuing a normal send (which would be rejected).
-    if (isBusy) {
-      const trimmed = value.trim();
-      if (trimmed) {
-        // Append to a still-pending steering message instead of overwriting
-        // it — a second redirect queued before the run stops must not be
-        // silently dropped.
-        const pending = useChatStore.getState().steeringMessage;
-        useChatStore
-          .getState()
-          .setSteeringMessage(pending ? `${pending}\n\n${trimmed}` : trimmed);
-        setValue("");
-      }
-      return;
-    }
     const trimmed = value.trim();
     if (
       !trimmed &&
@@ -275,6 +264,9 @@ export function AiComposerProvider({ children }: ProviderProps) {
       const outcome = await tryRunSlashCommand(commandSource);
       if (outcome.kind === "handled") {
         setValue("");
+        setFiles([]);
+        setPickedSnippets([]);
+        setPickedCommands([]);
         if (outcome.toast) console.info(outcome.toast);
         return;
       }
@@ -344,6 +336,24 @@ export function AiComposerProvider({ children }: ProviderProps) {
     // (agent.ts swaps image file parts for extracted text at request time).
     // The message sent to the Chat — and therefore the transcript — keeps
     // the image part so the user sees their attachment.
+
+    // When the agent is busy, queue the FULL composed message (text blocks
+    // AND image file parts) as a steering signal — the bridge stops the
+    // current run and sends it as-is once idle. Anything sent here must
+    // match the normal path exactly: attachments included.
+    if (isBusy) {
+      const pending = useChatStore.getState().steeringMessage;
+      useChatStore
+        .getState()
+        .setSteeringMessage(
+          (pending ?? []).concat(parts as LoosePart[]),
+        );
+      setValue("");
+      setFiles([]);
+      setPickedSnippets([]);
+      setPickedCommands([]);
+      return;
+    }
 
     if (!sessionId) return;
     const chat = getOrCreateChat(sessionId);

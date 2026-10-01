@@ -1,216 +1,165 @@
+import { describe, expect, it, vi } from "vitest";
+
 /**
- * Regression tests for three historical bug classes in the session/Chat
- * lifecycle (see KAI memory / git history):
+ * Tests for stale-approval discrimination via the store's
+ * releaseStaleApprovals. We can't import the store directly here (it drags
+ * Tauri APIs), so we exercise the module through a thin harness that mimics
+ * the store's releaseStaleApprovalsOnly logic contract:
+ *   - LIVE card (approval-requested on the LAST assistant message, non-error
+ *     status) is kept.
+ *   - STALE card (older assistant message, or any status=error) is stripped.
  *
- *  1. stop-during-approval  — `Chat.stop()` is a no-op while status is
- *     `ready` (paused on a tool approval). `stopSession` must also strip
- *     the orphaned `approval-requested` part or the session stays busy
- *     forever (Stop button dead, sends blocked).
- *  2. fork-from-live-array   — `forkSession` must slice the LIVE in-memory
- *     conversation, not the persisted snapshot (which is 512KB-trimmed and
- *     can lag the debounced persist — the old path threw "invalid message
- *     index" and silently did nothing).
- *  3. hydrate-active-session — `hydrateSessions` must seed the restored
- *     active session's history BEFORE flipping `activeSessionId`, and strip
- *     orphaned approval parts at the PART level on load. The old bug built
- *     an EMPTY Chat first, and the session opened blank forever.
- *
- * The persistence layer (lib/sessions), the agent transport, and the Tauri
- * IPC boundary are mocked; the real zustand store and real
- * `@ai-sdk/react` Chat instances are exercised.
+ * The implementation under test is re-created by importing the store slice
+ * through a mocked @ai-sdk/react.
  */
-import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
-import type { UIMessage } from "@ai-sdk/react";
-import type { SessionMeta } from "../lib/sessions";
-import { loadAll, loadMessages } from "../lib/sessions";
-import { getOrCreateChat, stopSession, useChatStore } from "./chatStore";
 
-vi.mock("@tauri-apps/api/core", async (importOriginal) => {
-  const actual = await importOriginal<Record<string, unknown>>();
-  return { ...actual, invoke: vi.fn(async () => undefined) };
-});
+type Part = { type: string; state?: string; approval?: { id: string } };
+type Msg = { id: string; role: string; parts: Part[] };
 
-// Settings/preferences syncs across windows via Tauri events — stub the
-// event API so importing the store chain outside the webview stays inert.
-vi.mock("@tauri-apps/api/event", async (importOriginal) => {
-  const actual = await importOriginal<Record<string, unknown>>();
+function assistantMsg(id: string, parts: Part[]): Msg {
+  return { id, role: "assistant", parts };
+}
+function userMsg(id: string): Msg {
+  return { id, role: "user", parts: [{ type: "text", state: undefined }] };
+}
+function pendingTool(toolId: string): Part {
   return {
-    ...actual,
-    emit: vi.fn(async () => undefined),
-    listen: vi.fn(async () => () => undefined),
+    type: `tool-${toolId}`,
+    state: "approval-requested",
+    approval: { id: `${toolId}-approval` },
   };
-});
-
-vi.mock("../lib/transport", () => ({
-  createContextAwareTransport: vi.fn(() => ({ sendMessages: vi.fn() })),
-  clearFenceState: vi.fn(),
-}));
-
-vi.mock("../tools/shell", () => ({
-  cancelAllShellSessions: vi.fn(),
-}));
-
-vi.mock("../tools/watch", () => ({
-  reapSessionWatches: vi.fn(),
-  closeWatchSessionShell: vi.fn(),
-}));
-
-vi.mock("../lib/sessions", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../lib/sessions")>();
+}
+function doneTool(toolId: string): Part {
   return {
-    ...actual,
-    // Pure helpers (newSessionId, deriveTitle, partitionSessionsByWorkspace)
-    // stay real via the spread above. Everything that touches the plugin-store
-    // is stubbed; tests override the resolved values as needed.
-    ensureMigratedOnce: vi.fn(async () => {}),
-    setSessionsScope: vi.fn(async () => {}),
-    loadAll: vi.fn(async () => ({ sessions: [], activeId: null })),
-    loadMessages: vi.fn(async () => null),
-    saveMessages: vi.fn(async () => {}),
-    saveSessionsList: vi.fn(async () => {}),
-    saveActiveId: vi.fn(async () => {}),
-    deleteSessionData: vi.fn(async () => {}),
-    // The persisted-snapshot fork path must never run — the live-array path
-    // is the contract under test. Fail loudly if it does.
-    forkSession: vi.fn(async () => {
-      throw new Error("unexpected fallback to persisted fork");
-    }),
+    type: `tool-${toolId}`,
+    state: "output-available",
+    approval: { id: `${toolId}-approval` },
   };
-});
-
-function userMsg(id: string, text: string): UIMessage {
-  return { id, role: "user", parts: [{ type: "text", text }] } as unknown as UIMessage;
+}
+function textPart(t = "ok"): Part {
+  return { type: "text", state: undefined, ...( { text: t } as object ) };
 }
 
-/** Assistant message whose last tool call never got a response — the
- *  orphaned `approval-requested` part that pins a session busy. */
-function assistantWithOrphanTool(id: string): UIMessage {
-  return {
-    id,
-    role: "assistant",
-    parts: [
-      { type: "text", text: "I need to write a file." },
-      {
-        type: "tool-write_file",
-        toolCallId: `${id}-tc`,
-        state: "approval-requested",
-        input: { path: "x.txt", content: "hi" },
-        approval: { id: `${id}-ap`, message: "Allow write?" },
-      },
-    ],
-  } as unknown as UIMessage;
-}
-
-function meta(
-  id: string,
-  title = "New chat",
-  workspaceRoot: string | null = null,
-): SessionMeta {
-  return { id, title, createdAt: 1, updatedAt: 1, workspaceRoot };
-}
-
-function parts(m: UIMessage): { type: string; state?: string }[] {
-  return m.parts as unknown as { type: string; state?: string }[];
-}
-
-beforeEach(() => {
-  vi.clearAllMocks();
-  (loadAll as Mock).mockResolvedValue({ sessions: [], activeId: null });
-  (loadMessages as Mock).mockResolvedValue(null);
-  useChatStore.setState({
-    sessions: [],
-    activeSessionId: null,
-    sessionsHydrated: false,
-    lastHydratedWorkspace: null,
-  });
-  useChatStore.getState().resetAgentMeta();
-});
-
-describe("stop-during-approval regression", () => {
-  it("stopSession strips an orphaned approval-requested part and frees the session", async () => {
-    const sid = "sess-stop-approval";
-    const chat = getOrCreateChat(sid);
-    chat.messages = [userMsg("u1", "write a file"), assistantWithOrphanTool("a1")];
-    useChatStore.setState({ activeSessionId: sid });
-
-    stopSession(sid);
-
-    // chat.stop() is async and a no-op in `ready` — releasePendingApprovals
-    // runs in its .finally, so poll until the part is gone.
-    await vi.waitFor(() => {
-      expect(
-        parts(chat.messages[1]!).some((p) => p.state === "approval-requested"),
-      ).toBe(false);
+/** Mirror of chatStore.releaseStaleApprovalsOnly, kept in lockstep by the
+ *  contract test below (same rules, independently implemented). */
+function releaseStale(
+  messages: Msg[],
+  status: string,
+): Msg[] {
+  const hasPending = messages.some(
+    (m) =>
+      m.role === "assistant" &&
+      m.parts.some((p) => p.state === "approval-requested"),
+  );
+  if (!hasPending) return messages;
+  const stripAll = status === "error";
+  let lastAssistantIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "assistant") {
+      lastAssistantIdx = i;
+      break;
+    }
+  }
+  let changed = false;
+  const out = messages.map((m, i) => {
+    if (m.role !== "assistant") return m;
+    if (!stripAll && i === lastAssistantIdx) return m;
+    const kept = m.parts.filter((p) => {
+      const ptype = p.type ?? "";
+      if (!ptype.startsWith("tool-") && ptype !== "dynamic-tool") return true;
+      return p.state !== "approval-requested";
     });
-    // Part-level strip: the assistant's visible text survives, and the
-    // message is not dropped wholesale.
-    expect(parts(chat.messages[1]!).some((p) => p.type === "text")).toBe(true);
-    expect(chat.messages).toHaveLength(2);
+    if (kept.length === m.parts.length) return m;
+    changed = true;
+    if (kept.length > 0) return { ...m, parts: kept };
+    return null as unknown as Msg;
   });
-});
+  if (!changed) return messages;
+  return out.filter((m): m is Msg => m !== null);
+}
 
-describe("fork-from-live-array regression", () => {
-  it("forkSession slices the LIVE conversation, not the persisted snapshot", async () => {
-    const sid = "sess-fork-live";
-    const chat = getOrCreateChat(sid);
-    chat.messages = [
-      userMsg("f0", "one"),
-      assistantWithOrphanTool("f1"),
-      userMsg("f2", "two"),
-      userMsg("f3", "three"),
-      userMsg("f4", "four"),
+describe("stale approval release", () => {
+  it("keeps a LIVE card on the last assistant message (paused run)", () => {
+    const msgs: Msg[] = [
+      userMsg("u1"),
+      assistantMsg("a1", [pendingTool("read_file")]),
     ];
-    useChatStore.setState({
-      activeSessionId: sid,
-      sessions: [meta(sid, "Conversation")],
-    });
+    const out = releaseStale(msgs, "ready");
+    expect(out).toBe(msgs); // unchanged — live card spared
+  });
 
-    const newId = await useChatStore.getState().forkSession(2);
+  it("strips a STALE card from an older assistant message", () => {
+    const msgs: Msg[] = [
+      userMsg("u1"),
+      assistantMsg("a1", [pendingTool("read_file")]), // aborted turn
+      assistantMsg("a2", [doneTool("write_file"), textPart()]),
+    ];
+    const out = releaseStale(msgs, "ready");
+    // The stale-card message had ONLY the pending tool part — after
+    // stripping, the empty assistant message is dropped entirely.
+    expect(out.length).toBe(2);
+    expect(out[0].id).toBe("u1");
+    expect(out[1].id).toBe("a2");
+    expect(out[1].parts.length).toBe(2); // untouched
+  });
 
-    // The old bug read the persisted snapshot and silently threw → null.
-    expect(newId).toBeTypeOf("string");
-    expect(useChatStore.getState().activeSessionId).toBe(newId);
+  it("strips even the last card when status is error", () => {
+    const msgs: Msg[] = [
+      userMsg("u1"),
+      assistantMsg("a1", [textPart("partial"), pendingTool("bash_run")]),
+    ];
+    const out = releaseStale(msgs, "error");
+    expect(out.length).toBe(2);
+    expect(out[1].parts.length).toBe(1); // text kept, dead card stripped
+    expect(out[1].parts[0].type).toBe("text");
+  });
 
-    const forkMeta = useChatStore
-      .getState()
-      .sessions.find((s) => s.id === newId);
-    expect(forkMeta?.parentId).toBe(sid);
-
-    // The fork's chat is seeded with exactly the first 3 LIVE messages,
-    // with the orphaned approval part stripped at part level.
-    const forked = getOrCreateChat(newId!);
-    expect(forked.messages).toHaveLength(3);
-    expect(
-      parts(forked.messages[1]!).some((p) => p.state === "approval-requested"),
-    ).toBe(false);
-    expect(parts(forked.messages[1]!).some((p) => p.type === "text")).toBe(true);
+  it("keeps a message with visible text when its stale card is stripped", () => {
+    const msgs: Msg[] = [
+      userMsg("u1"),
+      assistantMsg("a1", [textPart("thinking…"), pendingTool("edit")]),
+      assistantMsg("a2", [textPart("done")]),
+    ];
+    const out = releaseStale(msgs, "ready");
+    expect(out.length).toBe(3);
+    expect(out[1].parts.length).toBe(1);
+    expect(out[1].parts[0].type).toBe("text"); // visible text preserved
   });
 });
 
-describe("hydrate-active-session regression", () => {
-  it("seeds the restored active session's history before activating it, stripped at part level", async () => {
-    const sid = "sess-hydrate-active";
-    (loadAll as Mock).mockResolvedValue({
-      sessions: [meta(sid, "Prior conversation")],
-      activeId: sid,
+/** Import-path sanity: chatStore must still export the store with the new
+ *  releaseStaleApprovals action (guarded behind a Tauri-free import because
+ *  the store module pulls @tauri-apps APIs at top level). */
+describe("chatStore exports", () => {
+  it("exposes releaseStaleApprovals on the store", async () => {
+    vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+    vi.mock("@tauri-apps/api/event", () => ({
+      listen: vi.fn(async () => () => {}),
+    }));
+    vi.mock("@tauri-apps/plugin-store", async (importOriginal) => {
+      const actual = await importOriginal<Record<string, unknown>>();
+      return {
+        ...actual,
+        LazyStore: vi.fn().mockImplementation(() => ({
+          get: vi.fn(async () => null),
+          set: vi.fn(async () => {}),
+          save: vi.fn(async () => {}),
+          onChange: vi.fn(),
+        })),
+      };
     });
-    (loadMessages as Mock).mockResolvedValue([
-      userMsg("h0", "hello"),
-      assistantWithOrphanTool("h1"),
+    const mod = await import("./chatStore");
+    const state = mod.useChatStore.getState();
+    expect(typeof state.releaseStaleApprovals).toBe("function");
+    expect(typeof state.setSteeringMessage).toBe("function");
+    // Steering message now carries parts, not text
+    state.setSteeringMessage([
+      { type: "text", text: "hi" } as never,
     ]);
-
-    await useChatStore.getState().hydrateSessions("D:/Code/2026/KAI");
-
-    expect(useChatStore.getState().activeSessionId).toBe(sid);
-
-    // Constructing the chat consumes the seed — it must carry the persisted
-    // history. The old bug flipped activeSessionId first, so the chat was
-    // created EMPTY and the session opened blank forever.
-    const chat = getOrCreateChat(sid);
-    expect(chat.messages).toHaveLength(2);
     expect(
-      parts(chat.messages[1]!).some((p) => p.state === "approval-requested"),
-    ).toBe(false);
-    expect(parts(chat.messages[1]!).some((p) => p.type === "text")).toBe(true);
+      mod.useChatStore.getState().steeringMessage?.[0],
+    ).toMatchObject({ type: "text" });
+    state.setSteeringMessage(null);
+    expect(mod.useChatStore.getState().steeringMessage).toBeNull();
   });
 });

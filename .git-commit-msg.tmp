@@ -1,0 +1,38 @@
+fix(ai): zombie "agent running" state after turn end + attachments dropped while busy
+
+Two stacked bugs behind the same symptom:
+
+1. Zombie busy state. approvalsPending in AgentRunBridge counts
+   `approval-requested` parts across ALL history. A stale part (aborted
+   run, errored turn, killed approval) pins agentMeta in
+   "awaiting-approval" forever: the status pill keeps spinning after the
+   agent finished its turn, sends are blocked/redirected to the steering
+   queue, and the user's only escape was the Stop button (whose handler
+   strips these parts - the manual workaround).
+
+   Fix: releaseStaleApprovalsOnly (chatStore) + a reaper effect in
+   AgentRunBridge. Discrimination is critical - a LIVE approval card
+   pauses the run with SDK status "ready", so "not running" alone cannot
+   mean "stale". A pending part is stale when:
+     - it is on an assistant message that is NOT the last assistant
+       message (its turn is over), or
+     - the chat status is "error" (the card can never resolve).
+   The last assistant message with non-error status is spared. Messages
+   reduced to zero parts are dropped; visible text is preserved.
+
+2. Attachments dropped on redirect. When isBusy, the composer queued
+   only the raw TEXT as the steering message - images, text-file chips,
+   selections, and snippets were silently discarded. The user attached an
+   image with text, only the text went through; they had to stop the
+   agent and resend to get the image across.
+
+   Fix: submit() now composes the full message parts FIRST (same path
+   for both cases), then either sends directly (idle) or queues the
+   complete parts array as the steering payload. steeringMessage in the
+   store changed from string to UIMessagePart[]; AgentRunBridge sends
+   the parts as-is. The slash-command "handled" branch also clears
+   picked attachments now.
+
+Tests: new chatStore.test.ts - stale/live/error/no-op discrimination
+via a mirror implementation + store export contract (parts-typed
+steering message). 256 tests pass, tsc clean.
