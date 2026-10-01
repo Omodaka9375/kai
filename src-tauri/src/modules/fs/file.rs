@@ -2,12 +2,39 @@ use std::io::Write;
 use std::time::UNIX_EPOCH;
 
 use serde::Serialize;
+use tauri::Emitter;
 
 use super::extract;
 use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 
 const MAX_READ_BYTES: u64 = 10 * 1024 * 1024; // 10 MB
 const BINARY_SNIFF_BYTES: usize = 8 * 1024;
+
+/// Emit `fs-changed` so open editor tabs can reload (or warn) when a file
+/// they display changed on disk. Fire-and-forget — listeners are best
+/// effort and must never fail the write itself. Path is normalized to
+/// forward slashes to match the frontend canonical form.
+fn emit_fs_changed(path: &std::path::Path) {
+    let Some(app) = fs_changed_app_handle() else {
+        return;
+    };
+    let _ = app.emit(
+        "fs-changed",
+        serde_json::json!({ "path": path.to_string_lossy().replace('\\', "/") }),
+    );
+}
+
+/// Process-global handle set once in `Builder::setup` — lets sync fs commands
+/// emit events without threading `AppHandle` through every signature.
+static APP_HANDLE: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
+
+pub fn set_fs_changed_app_handle(app: tauri::AppHandle) {
+    let _ = APP_HANDLE.set(app);
+}
+
+fn fs_changed_app_handle() -> Option<tauri::AppHandle> {
+    APP_HANDLE.get().cloned()
+}
 
 #[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
@@ -186,6 +213,8 @@ pub fn fs_write_file(
         e.to_string()
     })?;
 
+    emit_fs_changed(&target);
+
     Ok(())
 }
 
@@ -315,6 +344,8 @@ pub fn fs_write_file_bytes(
         let _ = std::fs::remove_file(&tmp);
         e.to_string()
     })?;
+
+    emit_fs_changed(&target);
 
     Ok(())
 }

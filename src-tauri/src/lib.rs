@@ -432,6 +432,9 @@ pub fn run() {
             // the first About visit, not process launch).
             diagnostics::init_process_start();
 
+            // Process-global handle for fs-changed events (editor reloads).
+            crate::modules::fs::file::set_fs_changed_app_handle(app.handle().clone());
+
             // Kill-on-close backstop BEFORE any child processes exist. See
             // modules/pty/job.rs — ConPTY's conhost is parented to THIS
             // process, so without a process-wide job every abnormal exit

@@ -491,24 +491,11 @@ export default function App() {
   const isGitHistoryTab = activeTab?.kind === "git-history";
   const isApiTesterTab = activeTab?.kind === "api-tester";
 
-  // When an AI diff is approved (write_file applied to disk), reload any
-  // open editor tabs for that path so the user sees the new content. We
-  // track which approvalIds we've already handled to fire the reload only
-  // once per applied diff.
-  const appliedDiffsRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    for (const t of tabs) {
-      if (t.kind !== "ai-diff") continue;
-      if (t.status !== "approved") continue;
-      if (appliedDiffsRef.current.has(t.approvalId)) continue;
-      appliedDiffsRef.current.add(t.approvalId);
-      for (const e of tabs) {
-        if (e.kind !== "editor") continue;
-        if (e.path !== t.path) continue;
-        editorRefs.current.get(e.id)?.reload();
-      }
-    }
-  }, [tabs]);
+  // NOTE: editor reloads after agent writes are no longer driven from here.
+  // Rust emits `fs-changed` on every fs_write_file/fs_write_file_bytes, and
+  // each open editor listens (useDocument): clean buffers auto-reload, dirty
+  // buffers show a conflict banner. That covers ai-diff approvals AND
+  // auto-approved writes, which the old per-approval effect missed.
 
   const { explorerRoot, inheritedCwdForNewTab, _setRoot } = useWorkspaceCwd(
     activeTab,

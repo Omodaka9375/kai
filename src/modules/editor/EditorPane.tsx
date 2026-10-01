@@ -32,6 +32,7 @@ import { initVimGlobals, vimHandlersExtension } from "./lib/vim";
 initVimGlobals();
 import { resolveLanguage } from "./lib/languageResolver";
 import { useDocument } from "./lib/useDocument";
+import type { SaveOutcome } from "./lib/useDocument";
 import { invoke } from "@tauri-apps/api/core";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import {
@@ -134,9 +135,12 @@ function applyFormattedDoc(view: EditorView, formatted: string) {
 
 export const EditorPane = forwardRef<EditorPaneHandle, Props>(
   function EditorPane({ path, onDirtyChange, onSaved, onClose }, ref) {
-    const { doc, onChange, save, reload } = useDocument({ path, onDirtyChange });
+    const { doc, dirty, conflict, onChange, save, overwriteDisk, reload, takeDiskVersion } =
+      useDocument({ path, onDirtyChange });
     const reloadRef = useRef(reload);
     reloadRef.current = reload;
+    const takeDiskRef = useRef(takeDiskVersion);
+    takeDiskRef.current = takeDiskVersion;
     const cmRef = useRef<ReactCodeMirrorRef>(null);
     const editorThemeId = usePreferencesStore((s) => s.editorTheme);
     const vimMode = usePreferencesStore((s) => s.vimMode);
@@ -194,10 +198,62 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
     // whole state, wiping the language compartment.
     const saveRef = useRef(save);
     saveRef.current = save;
+    const overwriteRef = useRef(overwriteDisk);
+    overwriteRef.current = overwriteDisk;
+    const conflictRef = useRef(conflict);
+    conflictRef.current = conflict;
     const onSavedRef = useRef(onSaved);
     onSavedRef.current = onSaved;
     const onCloseRef = useRef(onClose);
     onCloseRef.current = onClose;
+
+    /** Shared save path: refuses to clobber on conflict, reports outcome.
+     *  `onSaved` fires only on a successful write. */
+    const saveAndReport = useCallback(async (): Promise<SaveOutcome> => {
+      const outcome = conflictRef.current
+        ? { ok: false as const, conflict: true as const }
+        : await saveRef.current();
+      if (outcome.ok) onSavedRef.current?.();
+      return outcome;
+    }, []);
+    const saveAndReportRef = useRef(saveAndReport);
+    saveAndReportRef.current = saveAndReport;
+
+    const [overwriteBusy, setOverwriteBusy] = useState(false);
+    const [overwriteError, setOverwriteError] = useState<string | null>(null);
+    const doOverwrite = useCallback(async () => {
+      if (overwriteBusy) return;
+      setOverwriteBusy(true);
+      setOverwriteError(null);
+      try {
+        const outcome = await overwriteRef.current();
+        if (!outcome.ok) {
+          if (outcome.conflict) {
+            setOverwriteError("conflict");
+          } else {
+            setOverwriteError(outcome.error);
+          }
+        }
+      } catch (e) {
+        setOverwriteError(String(e));
+      } finally {
+        setOverwriteBusy(false);
+      }
+    }, [overwriteBusy]);
+    const doOverwriteRef = useRef(doOverwrite);
+    doOverwriteRef.current = doOverwrite;
+    const [takeDiskBusy, setTakeDiskBusy] = useState(false);
+    const doTakeDisk = useCallback(async () => {
+      if (takeDiskBusy) return;
+      setTakeDiskBusy(true);
+      try {
+        await takeDiskRef.current();
+      } catch {
+        // ignore
+      } finally {
+        setTakeDiskBusy(false);
+      }
+    }, [takeDiskBusy]);
 
     const extensions = useMemo(
       () => [
@@ -209,8 +265,7 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
         vimHandlersExtension(() => ({
           save: () => {
             void (async () => {
-              await saveRef.current();
-              onSavedRef.current?.();
+              await saveAndReportRef.current();
             })();
           },
           close: () => onCloseRef.current?.(),
@@ -228,8 +283,7 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
             preventDefault: true,
             run: () => {
               void (async () => {
-                await saveRef.current();
-                onSavedRef.current?.();
+                await saveAndReportRef.current();
               })();
               return true;
             },
@@ -333,8 +387,7 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
         getPath: () => path,
         reload: () => reloadRef.current(),
         save: async () => {
-          await saveRef.current();
-          onSavedRef.current?.();
+          await saveAndReportRef.current();
         },
         scrollToLine: (lineNum: number) => {
           const view = cmRef.current?.view;
@@ -395,6 +448,40 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
 
     return (
       <div className="flex h-full min-h-0 flex-col">
+        {conflict && (
+          <div
+            className="flex shrink-0 flex-wrap items-center gap-2 border-b border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-400"
+            role="alert"
+          >
+            <span className="min-w-0 flex-1">
+              <span className="font-medium">File changed on disk.</span>{" "}
+              {dirty
+                ? "Your unsaved edits conflict with the external change (e.g. the AI agent). Reload to take the new version — your edits are discarded — or overwrite to keep your buffer."
+                : "The file changed outside the editor while you had it open. Your buffer is now out of date."}
+            </span>
+            <button
+              type="button"
+              disabled={takeDiskBusy}
+              onClick={() => void doTakeDisk()}
+              className="rounded border border-amber-600/50 bg-amber-500/15 px-2 py-0.5 font-medium text-amber-800 hover:bg-amber-500/25 disabled:opacity-50 dark:text-amber-300"
+            >
+              {takeDiskBusy ? "Reloading…" : dirty ? "Reload (discard my edits)" : "Reload"}
+            </button>
+            {dirty && (
+              <button
+                type="button"
+                disabled={overwriteBusy}
+                onClick={() => void doOverwrite()}
+                className="rounded border border-amber-600/50 bg-amber-500/15 px-2 py-0.5 font-medium text-amber-800 hover:bg-amber-500/25 disabled:opacity-50 dark:text-amber-300"
+              >
+                {overwriteBusy ? "Writing…" : "Overwrite with my edits"}
+              </button>
+            )}
+            {overwriteError && (
+              <span className="w-full text-destructive">{overwriteError}</span>
+            )}
+          </div>
+        )}
         <CodeMirror
           ref={cmRef}
           value={doc.content}
