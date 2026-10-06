@@ -4,5 +4,7 @@
 <dict>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>KAI uses your microphone for AI voice input.</string>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>KAI captures your screen when you ask the AI agent to look at your display.</string>
 </dict>
 </plist>

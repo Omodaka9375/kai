@@ -47,3 +47,6 @@ Desktop.ini
 # Per-user AI agent state — never committed (memory, rules, edit-undo checkpoints)
 .kai/
 ~
+
+# Commit message scratch file used by the agent's `git commit -F` flow
+.git-commit-msg.tmp

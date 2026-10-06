@@ -46,10 +46,28 @@
     "linux": {
       "deb": {
         "section": "utils",
-        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"]
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0",
+          "libxcb1",
+          "libxrandr2",
+          "libdbus-1-3",
+          "libpipewire-0.3-0",
+          "libwayland-client0",
+          "libegl1"
+        ]
       },
       "rpm": {
-        "depends": ["webkit2gtk4.1", "gtk3"]
+        "depends": [
+          "webkit2gtk4.1",
+          "gtk3",
+          "libxcb",
+          "libXrandr",
+          "dbus-libs",
+          "pipewire-libs",
+          "libwayland-client",
+          "libEGL"
+        ]
       },
       "appimage": {
         "bundleMediaFramework": true

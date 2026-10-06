@@ -28,6 +28,7 @@ KAI loads `KAI.md` from the workspace root as agent memory (similar to AGENTS.md
 - `git::*` — git operations for the source-control panel and git-history views (own process runner with availability caching, WSL-aware).
 - `net::ai_http_request` / `net::ai_http_stream` — SSRF-hardened HTTP proxy for AI tools and cloud provider calls. Blocks loopback/private/metadata IPs (DNS-pinned via `resolve_to_addrs`, redirect policy re-checks every hop) unless the caller passes `allowPrivateNetwork: true` (reserved for user-configured local endpoints like LM Studio / ComfyUI — never for model-callable browse tools).
 - `mcp::*` — MCP server sessions (stdio/SSE) bridging external tool servers into the agent.
+- `screen::screen_list_monitors` / `screen::screen_capture` — multi-display screenshots for the `look_at_screen` agent tool (xcap). Monitors are x-ordered (left→right = id 0,1,…); captures flatten RGBA→RGB8 before JPEG encode (the encoder rejects Rgba8); all-black frames surface a TCC/locked-session error instead of a silently-black analysis. `%TEMP%/kai-screens/` temps sweep at startup (>1h). macOS needs the Screen Recording TCC permission (usage key in `src-tauri/Info.plist`); Linux links xcb/xrandr/pipewire/wayland/EGL (bundle deps in `tauri.conf.json` + CI apt lists).
 - `workspace::*` — workspace environments: local vs WSL roots, `resolve_path` funnels every fs/git command through env-aware path resolution.
 - `open_settings_window` — separate webview window for Settings.
 

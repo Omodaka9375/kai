@@ -169,14 +169,26 @@ pub fn screen_capture(selector: Option<String>) -> Result<ScreenCapture, String>
     let bytes = buf.into_inner();
 
     // All-black frame heuristic: macOS TCC denial (or a locked session)
-    // produces a valid but empty capture — surface it instead of letting the
-    // model analyze a black rectangle.
-    let black = bytes
-        .windows(64)
-        .step_by(1024)
-        .take(32)
-        .all(|w| w.iter().all(|&b| b < 8));
-    if black {
+    // produces a valid but EMPTY capture — pure 0,0,0 across the whole
+    // frame. A real dark-themed desktop virtually never hits exact zero
+    // everywhere (text antialiasing, window borders), so sampling a spread
+    // of raw RGB pixels (pre-JPEG, no compression artifacts) is a safe
+    // discriminator. Surface it as an error instead of letting the model
+    // analyze a black rectangle.
+    let raw = rgb.as_raw();
+    let mut black_samples = 0usize;
+    let mut total_samples = 0usize;
+    let stride = 4096 * 3; // ~4k pixels between samples, 3 bytes each (RGB)
+    let mut i = 0;
+    while i + 2 < raw.len() {
+        total_samples += 1;
+        if raw[i] < 8 && raw[i + 1] < 8 && raw[i + 2] < 8 {
+            black_samples += 1;
+        }
+        i += stride;
+    }
+    let all_black = total_samples > 0 && black_samples == total_samples;
+    if all_black {
         return Err(
             "capture looks empty (all black). If on macOS: grant Screen \
              Recording permission to this app in System Settings → Privacy & \
