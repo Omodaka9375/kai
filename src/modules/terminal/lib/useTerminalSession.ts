@@ -55,6 +55,8 @@ type Session = {
   spawnEpoch: number;
   /** Pending nudge setTimeout handles — cleared on dispose. */
   nudgeTimers: ReturnType<typeof setTimeout>[];
+  /** Renderer-bind watchdog timer — cleared on dispose. */
+  watchdogTimer: ReturnType<typeof setTimeout> | null;
 };
 
 const sessions = new Map<number, Session>();
@@ -134,6 +136,7 @@ function ensureSession(leafId: number, initialCwd?: string): Session {
     receivedOutput: false,
     spawnEpoch: 0,
     nudgeTimers: [],
+    watchdogTimer: null,
   };
   sessions.set(leafId, session);
 
@@ -378,6 +381,15 @@ function unbindLeafFromSlot(leafId: number, s: Session): void {
   s.hasSlot = false;
 }
 
+// Renderer-bind watchdog. The PTY spawn already has a 20s retry ladder for a
+// hung IPC; this is the same idea for the RENDER side. If a session is live
+// (PTY opened, container attached, tab visible) but its slot never bound —
+// output is piling into the dormant ring while the pane stays blank — force a
+// bind. Covers every unbind/bind ordering race we haven't individually fixed:
+// pool eviction mid-remount, a bind retry ladder that exhausted while the
+// container was transiently null, hasSlot desync after an exception, etc.
+const RENDER_WATCHDOG_MS = 1_500;
+
 function attachSession(
   leafId: number,
   container: HTMLDivElement,
@@ -391,6 +403,22 @@ function attachSession(
   if (s.visibleNow && !s.hasSlot) bindLeafToSlot(leafId, s);
 
   startPtyIfNeeded(leafId, s);
+
+  // Watchdog: visible + attached but no slot → try again (idempotent guard in
+  // bindLeafToSlot makes repeated attempts safe). Cleared on dispose so a
+  // closed tab never fires a zombie bind.
+  if (!s.watchdogTimer) {
+    s.watchdogTimer = setTimeout(() => {
+      s.watchdogTimer = null;
+      if (s.disposed || !s.visibleNow || s.hasSlot || !s.container) return;
+      logLeaf(leafId, "renderer watchdog: slot still unbound — forcing bind");
+      bindLeafToSlot(leafId, s);
+      if (!s.hasSlot) return; // container vanished again — next attach retries
+      // Slot bound late: dormant-ring content is drained by acquireSlot; give
+      // the PTY a resize nudge so a prompt that rendered pre-bind repaints.
+      s.pty?.resize(s.cols || 80, s.rows || 24);
+    }, RENDER_WATCHDOG_MS);
+  }
 }
 
 function detachSession(leafId: number): void {
@@ -452,6 +480,10 @@ export function disposeSession(leafId: number): void {
   s.disposed = true;
   for (const t of s.nudgeTimers) clearTimeout(t);
   s.nudgeTimers = [];
+  if (s.watchdogTimer) {
+    clearTimeout(s.watchdogTimer);
+    s.watchdogTimer = null;
+  }
   resetDetector();
   unbindLeafFromSlot(leafId, s);
   s.snapshot = null;
@@ -527,8 +559,27 @@ export function useTerminalSession({
         }
         return;
       }
-      attachSession(leafId, node, callbacks);
-      if (s.visibleNow && s.focusedNow) focusSlot(leafId);
+      // attachSession → bindLeafToSlot → acquireSlot can THROW on transient
+      // DOM state during a remount (bindSlot fit/resize races, a disposed
+      // observer). An escaping throw would both skip the focus line AND
+      // surface as an unhandled promise rejection (s.ready.then has no
+      // catch) — a permanently blank pane with no log line. Route a throw
+      // back through the same retry ladder; the attachSession watchdog is
+      // the final safety net.
+      try {
+        attachSession(leafId, node, callbacks);
+        if (s.visibleNow && s.focusedNow) focusSlot(leafId);
+      } catch (e) {
+        console.error(
+          `[Kai-term leaf=${leafId}] bind attempt ${attempt} threw — retrying:`,
+          e,
+        );
+        // Roll back any half-bound state so the retry starts clean.
+        if (s.hasSlot) unbindLeafFromSlot(leafId, s);
+        if (attempt < ATTACH_RETRY_BOUND) {
+          retryTimer = setTimeout(() => bind(attempt + 1), ATTACH_RETRY_MS);
+        }
+      }
     };
     s.ready.then(
       () => bind(0),
@@ -541,6 +592,13 @@ export function useTerminalSession({
         bind(0);
       },
     );
+    // The bind itself (acquireSlot → bindSlot → fit/resize/osc re-register)
+    // can throw on transient DOM state during a remount (a disposed
+    // ResizeObserver, a detached container). Without this catch the rejection
+    // is unhandled and the pane stays blank with NOTHING in any log — the
+    // exact "renders nothing, shell works" signature. Route it through the
+    // same retry loop as a missing container so the next attempt (and the
+    // watchdog in attachSession) recover.
     return () => {
       cancelled = true;
       if (retryTimer !== null) clearTimeout(retryTimer);

@@ -259,66 +259,88 @@ function bindSlot(slot: Slot, p: AcquireParams): void {
   cancelPendingUnhide(slot);
   slot.host.style.visibility = "hidden";
 
-  if (slot.host.parentNode !== p.container) {
-    p.container.appendChild(slot.host);
-  }
-
-  slot.term.options.disableStdin = p.shellExited;
-  slot.term.clear();
-  slot.term.reset();
-
-  if (
-    p.cols > 0 &&
-    p.rows > 0 &&
-    (slot.term.cols !== p.cols || slot.term.rows !== p.rows)
-  ) {
-    slot.term.resize(p.cols, p.rows);
-  }
-
-  if (p.snapshot) {
-    try {
-      slot.term.write(p.snapshot);
-    } catch (e) {
-      console.warn("[Kai] snapshot replay failed:", e);
-    }
-  }
-  p.drainRing((bytes) => slot.term.write(bytes));
   try {
-    slot.term.write("\x1b[?25h");
-  } catch (e) { console.debug("[Kai-pool] cursor-show write failed:", e); }
+    if (slot.host.parentNode !== p.container) {
+      p.container.appendChild(slot.host);
+    }
 
-  for (const d of slot.oscDisposers) {
+    slot.term.options.disableStdin = p.shellExited;
+    slot.term.clear();
+    slot.term.reset();
+
+    if (
+      p.cols > 0 &&
+      p.rows > 0 &&
+      (slot.term.cols !== p.cols || slot.term.rows !== p.rows)
+    ) {
+      slot.term.resize(p.cols, p.rows);
+    }
+
+    if (p.snapshot) {
+      try {
+        slot.term.write(p.snapshot);
+      } catch (e) {
+        console.warn("[Kai] snapshot replay failed:", e);
+      }
+    }
+    p.drainRing((bytes) => slot.term.write(bytes));
     try {
-      d();
-    } catch (e) { console.debug("[Kai-pool] osc disposer failed:", e); }
+      slot.term.write("\x1b[?25h");
+    } catch (e) {
+      console.debug("[Kai-pool] cursor-show write failed:", e);
+    }
+
+    for (const d of slot.oscDisposers) {
+      try {
+        d();
+      } catch (e) {
+        console.debug("[Kai-pool] osc disposer failed:", e);
+      }
+    }
+    slot.oscDisposers = p.registerOsc(slot.term);
+
+    setupResizeObserver(slot, p);
+    slot.fitAddon.fit();
+    slot.lastCols = slot.term.cols;
+    slot.lastRows = slot.term.rows;
+    slot.lastW = p.container.clientWidth;
+    slot.lastH = p.container.clientHeight;
+    if (slot.lastCols !== p.cols || slot.lastRows !== p.rows) {
+      p.onScopeChange(slot.lastCols, slot.lastRows);
+      // Keep ConPTY in sync with the fitted viewport immediately. The PTY is
+      // spawned at a default size (80x24); if we only update the session cache
+      // here and wait for a later ResizeObserver change, ConPTY keeps rendering
+      // at the wrong dimensions — its repaints and `clear` then target the wrong
+      // row range, which shows up as artifacts overwriting past lines and a
+      // `clear` that doesn't clear the bottom of the pane.
+      adapter?.resolveLeaf(p.leafId)?.resizePty(slot.lastCols, slot.lastRows);
+    }
+
+    if (p.searchQuery) {
+      try {
+        slot.searchAddon.findNext(p.searchQuery);
+      } catch (e) {
+        console.debug("[Kai-pool] search replay failed:", e);
+      }
+    }
+
+    applyCursorBlinkOnSlot(slot, adapter?.isLeafFocused(p.leafId) ?? false);
+  } catch (e) {
+    // A throw anywhere between the visibility:hidden above and the unhide
+    // below used to leave the host permanently hidden: a slot that still
+    // streamed output and accepted typing, but rendered NOTHING (blank
+    // pane, live shell — seen on project reopen). Worse, the throw escaped
+    // as an unhandled promise rejection (the font-gate `.then(bind)` had no
+    // catch), so it never appeared in any log. Roll the slot back to a
+    // clean detached state and rethrow — the session bind-retry loop and
+    // watchdog handle recovery.
+    console.error("[Kai-pool] bindSlot failed — rolling back slot:", e);
+    detachSlotFromLeaf(slot);
+    throw e;
   }
-  slot.oscDisposers = p.registerOsc(slot.term);
 
-  setupResizeObserver(slot, p);
-  slot.fitAddon.fit();
-  slot.lastCols = slot.term.cols;
-  slot.lastRows = slot.term.rows;
-  slot.lastW = p.container.clientWidth;
-  slot.lastH = p.container.clientHeight;
-  if (slot.lastCols !== p.cols || slot.lastRows !== p.rows) {
-    p.onScopeChange(slot.lastCols, slot.lastRows);
-    // Keep ConPTY in sync with the fitted viewport immediately. The PTY is
-    // spawned at a default size (80x24); if we only update the session cache
-    // here and wait for a later ResizeObserver change, ConPTY keeps rendering
-    // at the wrong dimensions — its repaints and `clear` then target the wrong
-    // row range, which shows up as artifacts overwriting past lines and a
-    // `clear` that doesn't clear the bottom of the pane.
-    adapter?.resolveLeaf(p.leafId)?.resizePty(slot.lastCols, slot.lastRows);
-  }
-
-  if (p.searchQuery) {
-    try {
-      slot.searchAddon.findNext(p.searchQuery);
-    } catch (e) { console.debug("[Kai-pool] search replay failed:", e); }
-  }
-
-  applyCursorBlinkOnSlot(slot, adapter?.isLeafFocused(p.leafId) ?? false);
-
+  // Reached on every success path (the catch path restored visibility via
+  // detachSlotFromLeaf) — the unhide can no longer be skipped.
   scheduleUnhide(slot);
 
   p.onSearchReady(slot.searchAddon);
