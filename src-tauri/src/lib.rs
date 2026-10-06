@@ -456,6 +456,21 @@ pub fn run() {
             // behind by dead processes before starting
             // this one — without this they accumulate unboundedly.
             gc_stale_logs_and_crashes(&log_dir);
+            // The local Whisper engine is gone (voice input now uses the
+            // OpenAI API / browser Speech API). The model directory holds
+            // only orphaned GGUF downloads (~150 MB each) — sweep it once.
+            // Idempotent: a no-op after the first success; retries on the
+            // next launch if a file was locked (AV scan) this time.
+            if let Some(dir) = app
+                .path()
+                .app_local_data_dir()
+                .ok()
+                .map(|d| d.join("whisper"))
+            {
+                if dir.is_dir() {
+                    let _ = std::fs::remove_dir_all(&dir);
+                }
+            }
             // One-shot shell commands run via script files (not
             // -EncodedCommand — AV flags that as dropper behavior). Point
             // them at app data and sweep anything a crash left behind.
