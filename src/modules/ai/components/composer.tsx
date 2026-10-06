@@ -12,6 +12,10 @@ import {
 type LoosePart = UIMessagePart<Record<string, never>, Record<string, never>>;
 
 import { useWhisperRecording } from "../hooks/useWhisperRecording";
+import {
+  EMPTY_DOCUMENT_TEXT,
+  pdfTextFromBytes,
+} from "../lib/documentParser";
 import { expandSnippetTokens, type Snippet } from "../lib/snippets";
 import { tryRunSlashCommand, type SlashCommandMeta } from "../lib/slashCommands";
 import {
@@ -40,7 +44,7 @@ type MessagePart =
 
 export const MAX_TEXT_INLINE = 200_000;
 export const ACCEPTED_FILES =
-  "image/*,.txt,.md,.json,.yaml,.yml,.toml,.sh,.zsh,.bash,.py,.js,.jsx,.ts,.tsx,.rs,.go,.java,.c,.cpp,.h,.hpp,.html,.css,.csv,.log,.env,.config,.conf,.ini,Dockerfile,.dockerfile";
+  "image/*,.pdf,.txt,.md,.json,.yaml,.yml,.toml,.sh,.zsh,.bash,.py,.js,.jsx,.ts,.tsx,.rs,.go,.java,.c,.cpp,.h,.hpp,.html,.css,.csv,.log,.env,.config,.conf,.ini,Dockerfile,.dockerfile,.docx";
 
 type Voice = ReturnType<typeof useWhisperRecording>;
 
@@ -420,6 +424,36 @@ async function readAttachment(file: File): Promise<FileAttachment | null> {
       kind: "image",
       mediaType: file.type || "image/png",
       url,
+      size: file.size,
+    };
+  }
+  // Structured documents (PDF/DOCX) — extract the text layer with the same
+  // pdfjs/mammoth parsers the read_file tool uses. Works for every model; no
+  // provider PDF support needed.
+  const lower = file.name.toLowerCase();
+  if (lower.endsWith(".pdf")) {
+    const text = await pdfTextFromBytes(new Uint8Array(await file.arrayBuffer()));
+    return {
+      id,
+      name: file.name,
+      kind: "text",
+      mediaType: "text/plain",
+      text: text.trim() ? text : EMPTY_DOCUMENT_TEXT,
+      size: file.size,
+    };
+  }
+  if (lower.endsWith(".docx")) {
+    const mammoth = await import("mammoth");
+    const result = await mammoth.extractRawText({
+      arrayBuffer: await file.arrayBuffer(),
+    });
+    const text = result.value;
+    return {
+      id,
+      name: file.name,
+      kind: "text",
+      mediaType: "text/plain",
+      text: text.trim() ? text : EMPTY_DOCUMENT_TEXT,
       size: file.size,
     };
   }
