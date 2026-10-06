@@ -125,7 +125,7 @@ export function ExtensionsView() {
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search MCP servers\u2026"
+          placeholder="Search MCP servers…"
           spellCheck={false}
           className="w-full bg-transparent text-[12px] outline-none placeholder:text-muted-foreground/50"
         />
@@ -147,7 +147,7 @@ export function ExtensionsView() {
               className="text-muted-foreground/60"
             />
             <span className="text-[11px] text-muted-foreground">
-              {search ? "No servers found." : "Loading registry\u2026"}
+              {search ? "No servers found." : "Loading registry…"}
             </span>
           </div>
         )}
@@ -228,7 +228,7 @@ export function ExtensionsView() {
 
         {loading && (
           <div className="px-3 py-3 text-center text-[11px] text-muted-foreground">
-            Loading\u2026
+            Loading…
           </div>
         )}
 
