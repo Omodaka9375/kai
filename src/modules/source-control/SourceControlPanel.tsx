@@ -834,7 +834,11 @@ export const SourceControlPanel = memo(function SourceControlPanel({
                       disabled={!scm.canPush || !!scm.actionBusy}
                       onClick={() => void scm.push()}
                     >
-                      {scm.actionBusy === "push" ? "Pushing…" : "Push"}
+                      {scm.actionBusy === "push"
+                        ? "Pushing…"
+                        : !hasUpstream && (scm.status?.ahead ?? 0) > 0
+                          ? "Publish"
+                          : "Push"}
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent
@@ -845,6 +849,31 @@ export const SourceControlPanel = memo(function SourceControlPanel({
                     )}
                   >
                     {pushDisabledReason}
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+
+              <div className="grid w-full grid-cols-1 gap-1.5">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      className="h-7 cursor-pointer text-[11px] font-medium disabled:cursor-not-allowed"
+                      disabled={!scm.canOpenPr || !!scm.actionBusy}
+                      onClick={() => void scm.openPr()}
+                    >
+                      Open pull request…
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent
+                    side="bottom"
+                    className={cn(
+                      SOURCE_CONTROL_TOOLTIP_CLASS,
+                      "max-w-64 text-[10.5px]",
+                    )}
+                  >
+                    Push the branch first — opens the repo host's create-PR page (GitHub, GitLab, Bitbucket).
                   </TooltipContent>
                 </Tooltip>
               </div>

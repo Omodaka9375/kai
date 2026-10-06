@@ -70,6 +70,40 @@ export function commitWebUrl(info: RemoteWebInfo, sha: string): string {
   }
 }
 
+/** New-PR / merge-request URL for a pushed branch. Pre-fills title + body
+ *  via query params where the host supports it (GitHub, GitLab; Bitbucket
+ *  has no title/body pre-fill). */
+export function createPullRequestUrl(
+  info: RemoteWebInfo,
+  branch: string,
+  base?: string | null,
+  title?: string,
+  body?: string,
+): string {
+  const enc = encodeURIComponent;
+  switch (info.host) {
+    case "github": {
+      const params = new URLSearchParams({ expand: "1" });
+      if (title) params.set("title", title);
+      if (body) params.set("body", body);
+      return `${info.baseUrl}/compare/${enc(base ?? "main")}...${enc(branch)}?${params.toString()}`;
+    }
+    case "gitlab": {
+      const params = new URLSearchParams();
+      params.set("merge_request[source_branch]", branch);
+      if (base) params.set("merge_request[target_branch]", base);
+      if (title) params.set("merge_request[title]", title);
+      return `${info.baseUrl}/-/merge_requests/new?${params.toString()}`;
+    }
+    case "bitbucket": {
+      const params = new URLSearchParams();
+      params.set("source", branch);
+      if (base) params.set("dest", base);
+      return `${info.baseUrl}/branch/pull-request/new?${params.toString()}`;
+    }
+  }
+}
+
 export function hostLabel(info: RemoteWebInfo): string {
   switch (info.host) {
     case "github":

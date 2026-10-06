@@ -83,7 +83,10 @@ function normalizeError(error: unknown): string {
 function getContextualAction(
   status: GitStatusSnapshot | null,
 ): SourceControlRemoteAction | null {
-  if (!status?.upstream) return null;
+  // No upstream + local commits ahead → publish the branch (push -u via Rust).
+  // With no upstream and nothing to publish, fetch keeps the pill useful.
+  if (!status) return null;
+  if (!status.upstream) return status.ahead > 0 ? "push" : "fetch";
   // When diverged, the user should pull (which will merge) to resolve.
   if (status.ahead > 0 && status.behind > 0) return "pull";
   if (status.behind > 0) return "pull";
@@ -97,7 +100,22 @@ export function getSourceControlRemoteIndicator(
     "hasRepo" | "upstream" | "ahead" | "behind" | "busyAction"
   >,
 ): SourceControlRemoteIndicator {
-  if (!summary.hasRepo || !summary.upstream) {
+  if (!summary.hasRepo) {
+    return { visible: false, label: "", title: "", disabled: true, action: null };
+  }
+  // No upstream yet: offer Publish when there are local commits to push
+  // (Rust publishes via `git push -u`); otherwise hide — nothing to do.
+  if (!summary.upstream) {
+    if (summary.ahead > 0) {
+      return {
+        visible: true,
+        label: "Publish branch",
+        title:
+          "This branch has no upstream. Pushing will create it on the remote and set up tracking (git push -u).",
+        disabled: summary.busyAction !== null,
+        action: "push",
+      };
+    }
     return { visible: false, label: "", title: "", disabled: true, action: null };
   }
   if (summary.ahead > 0 && summary.behind > 0) {
@@ -390,9 +408,10 @@ export function useSourceControl(
       if (!repo || !status) {
         return { ok: false, action: null, blocked: "no-repo" };
       }
-      if (!status.upstream) {
-        return { ok: false, action: null, blocked: "missing-upstream" };
-      }
+      // NOTE: no-upstream is no longer a blocker — Rust push() publishes the
+      // branch (`git push -u <remote> <branch>`) when the current branch has
+      // no upstream. That is the "Publish branch" flow for freshly created
+      // branches, so push must go through even without an upstream.
 
       const action = mode === "contextual" ? getContextualAction(status) : mode;
       if (!action) {
@@ -426,8 +445,11 @@ export function useSourceControl(
                 } (fast-forward)`;
         } else {
           const result = await native.gitPush(repo.repoRoot);
+          const published = !status.upstream;
           message = result.pushed
-            ? `Pushed to ${result.remote ?? "remote"}/${result.branch ?? ""}`
+            ? published
+              ? `Published ${result.branch ?? "branch"} to ${result.remote ?? "remote"} — upstream set, future pushes are one click`
+              : `Pushed to ${result.remote ?? "remote"}/${result.branch ?? ""}`
             : "Push completed — nothing to push";
         }
         setState((current) => ({ ...current, lastRemoteError: null }));

@@ -738,17 +738,32 @@ pub fn push(
     let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
     ensure_git_available(&repo_root.workspace)?;
 
-    let upstream = upstream_parts(&repo_root)?;
-    let Some((remote, branch)) = upstream else {
-        return Err(GitError::NoUpstream);
+    // No upstream configured (fresh branch — e.g. created via the panel's
+    // `checkout -b`, which never sets one): publish it instead of failing.
+    // Resolve remote + branch explicitly, push with `-u` so the branch is
+    // both pushed AND marked as tracking — the panel works from then on.
+    let (remote, branch, publish) = match upstream_parts(&repo_root)? {
+        Some((remote, branch)) => (remote, branch, false),
+        None => {
+            let remote = default_remote(&repo_root)?;
+            let branch = current_branch_name(&repo_root)?;
+            (remote, branch, true)
+        }
     };
 
     // Explicit refspec — never rely on `push.default` / branch config, which
     // silently pushes to the wrong target (or nothing) when misconfigured.
+    // `-u` only on publish (first push of a new branch); plain push after.
+    let mut args: Vec<&OsStr> = vec![OsStr::new("push")];
+    if publish {
+        args.push(OsStr::new("-u"));
+    }
+    args.push(OsStr::new(&remote));
+    args.push(OsStr::new(&branch));
     let output = run_git(
         &repo_root.workspace,
         Some(&repo_root.git_path),
-        [OsStr::new("push"), OsStr::new(&remote), OsStr::new(&branch)],
+        args,
         NETWORK_TIMEOUT_SECS,
     )?;
     ensure_success(&output, "git push failed")?;
@@ -758,6 +773,47 @@ pub fn push(
         branch: Some(branch),
         pushed: true,
     })
+}
+
+/// First remote (prefers `origin`), used when a branch has no upstream yet.
+fn default_remote(repo_root: &ResolvedGitDirectory) -> Result<String> {
+    let output = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        ["remote"],
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    ensure_success(&output, "git remote failed")?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let names: Vec<String> = text
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect();
+    if names.is_empty() {
+        return Err(GitError::NoUpstream);
+    }
+    Ok(names
+        .iter()
+        .find(|n| n.as_str() == "origin")
+        .cloned()
+        .unwrap_or_else(|| names[0].clone()))
+}
+
+/// Current branch short name; errors on detached HEAD (nothing to publish).
+fn current_branch_name(repo_root: &ResolvedGitDirectory) -> Result<String> {
+    let output = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        ["rev-parse", "--abbrev-ref", "HEAD"],
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    ensure_success(&output, "git rev-parse HEAD failed")?;
+    let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if branch.is_empty() || branch == "HEAD" {
+        return Err(GitError::DetachedHead);
+    }
+    Ok(branch)
 }
 
 const LOG_FORMAT: &str = "%H%x1f%an%x1f%ae%x1f%at%x1f%P%x1f%s";

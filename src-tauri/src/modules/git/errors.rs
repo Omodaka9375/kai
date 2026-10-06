@@ -18,6 +18,7 @@ pub enum GitError {
     },
     SymlinkRejected(PathBuf),
     NoUpstream,
+    DetachedHead,
     AuthRequired(String),
     HostKeyUnverified,
     TimedOut(&'static str),
@@ -68,6 +69,10 @@ impl Display for GitError {
             GitError::NoUpstream => write!(
                 f,
                 "no upstream configured. Run `git push -u <remote> <branch>` in the terminal first."
+            ),
+            GitError::DetachedHead => write!(
+                f,
+                "detached HEAD — check out a branch before publishing."
             ),
             GitError::AuthRequired(detail) => write!(
                 f,

@@ -9,6 +9,11 @@ import {
 import { useChatStore } from "@/modules/ai/store/chatStore";
 import { getModel, providerNeedsKey } from "@/modules/ai/config";
 import {
+  createPullRequestUrl,
+  parseRemoteWebUrl,
+} from "@/modules/git-history/lib/remoteWebUrl";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import {
   invalidateDiff,
   invalidateRepoDiffs,
   workingDiffKey,
@@ -69,6 +74,10 @@ type SourceControlPanelState = {
   unstagedEntries: SourceControlEntry[];
   allClean: boolean;
   canPush: boolean;
+  /** PR page can be built: repo + a real branch checked out. */
+  canOpenPr: boolean;
+  /** Open the repo host's create-PR page for the current branch. */
+  openPr: () => Promise<void>;
   pushHint: string | null;
   hasConflicts: boolean;
   canGenerateCommitMessage: boolean;
@@ -466,7 +475,12 @@ export function useSourceControlPanel(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stagedEntries, commitMessage]);
 
-  const canPush = !!status?.upstream && status.behind === 0;
+  // Push is allowed when tracking an upstream that we're not behind of, OR
+  // when there is no upstream yet but local commits exist — that is the
+  // "Publish branch" case (Rust pushes with -u, creating the remote branch).
+  const canPush =
+    (!!status?.upstream && status.behind === 0) ||
+    (!status?.upstream && (status?.ahead ?? 0) > 0);
   const selectedModel = getModel(selectedModelId);
   const aiBusy = agentStatus !== "idle" && agentStatus !== "error";
   const anyActionBusy = localActionBusy !== null || summary.busyAction !== null;
@@ -518,7 +532,9 @@ export function useSourceControlPanel(
   const pushHint = useMemo(() => {
     if (!status) return null;
     if (!status.upstream) {
-      return "Configure or publish this branch in the terminal to enable push in this iteration.";
+      return status.ahead > 0
+        ? "Publish this branch to the remote (git push -u) — it will be created and start tracking."
+        : "Commit something first — this branch has no upstream yet; the first push publishes it.";
     }
     if (status.behind > 0) {
       return "Pull remote changes before pushing local commits.";
@@ -1057,6 +1073,39 @@ export function useSourceControlPanel(
     }
   }, [repo, status?.upstream, summary]);
 
+  /** Open the repo host's create-PR page for the current branch. Best-effort:
+   *  only GitHub/GitLab/Bitbucket remotes produce a URL (others surface a
+   *  hint). The branch must be pushed first — the provider needs it. */
+  const openPr = useCallback(async () => {
+    if (!repo) return;
+    setActionMessage(null);
+    setActionError(null);
+    try {
+      const remoteUrl = await native.gitRemoteUrl(repo.repoRoot);
+      const info = parseRemoteWebUrl(remoteUrl);
+      if (!info) {
+        setActionError(
+          "Cannot build a PR URL for this remote — it is not GitHub, GitLab, or Bitbucket. Create the PR on the host manually.",
+        );
+        return;
+      }
+      const branch = status?.branch;
+      if (!branch) {
+        setActionError("No current branch to open a PR for.");
+        return;
+      }
+      // Default-branch guess: the provider's compare page fills the rest;
+      // upstream like origin/main wins when present.
+      const base = status.upstream?.split("/").slice(1).join("/") || null;
+      await openUrl(
+        createPullRequestUrl(info, branch, base ?? undefined),
+      );
+      setActionMessage(`Opened new-PR page for ${branch}`);
+    } catch (error) {
+      setActionError(normalizeError(error));
+    }
+  }, [repo, status?.branch, status?.upstream]);
+
   const pendingDiscardView = useMemo<PendingDiscard | null>(() => {
     if (!pendingDiscard) return null;
     if (pendingDiscard.scope === "single") {
@@ -1090,6 +1139,8 @@ export function useSourceControlPanel(
     unstagedEntries,
     allClean,
     canPush,
+    canOpenPr: !!repo && !!(status?.branch && status.branch !== "HEAD"),
+    openPr,
     pushHint,
     hasConflicts,
     canGenerateCommitMessage,
