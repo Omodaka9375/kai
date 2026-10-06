@@ -4,6 +4,18 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.5.4]
+
+- AI: `look_at_screen` — the agent can now see your displays; say "look at my screen" / "my left monitor" and the selected vision model analyzes the screenshot (no extra model needed; OCR fallback for text-only models, transcript shows the thumbnail, every capture needs your approval).
+- AI: local vision models (LM Studio / OpenAI-compatible) no longer get OCR text instead of the image — vision capability is detected from the runtime model name (qwen2-vl, llava, …).
+- AI: Settings → Models gained a Vision override (Auto/On/Off) for both local endpoint blocks, for models whose name gives no vision hint.
+- AI: fixed the mid-stream UI render-loop crash (Minified React error #185) during multi-tool auto-approve.
+- AI: `look_at_screen` works cross-platform — macOS Screen Recording permission string, Linux bundle deps (xcb/xrandr/pipewire/wayland/EGL) and CI build lists.
+- Terminal: fixed the blank pane on project reopen — renderer bind failures now roll back, retry, and self-heal via a render-side watchdog.
+- Voice: removed the bundled local Whisper engine — voice input now uses the OpenAI API (whisper-1) with the browser Speech API fallback; orphaned model downloads are swept at startup.
+
+---
+
 ## [1.5.3]
 
 - Editor: right-click menus no longer stack — format entries merged into the single Ask Kai/Copy context menu instead of spawning a second menu behind it.
