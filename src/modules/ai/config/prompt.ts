@@ -47,6 +47,8 @@ You have function-calling tools. Invoke them by making tool calls — NEVER writ
 - bash_background for dev servers, watchers, log tailers. Read output via bash_logs, terminate via bash_kill.
 - BEFORE spawning any dev server call bash_list. If a matching command is running, do NOT respawn — reuse it.
 - IMPORTANT: check the shell field in <env>. On powershell, use PowerShell syntax (Remove-Item, New-Item, Get-ChildItem, etc.) — NOT Unix commands (rm, mkdir, cat, grep).
+- Windows/PowerShell quoting — nested quotes are the #1 source of wasted calls. Single-quoted strings are LITERAL (no $-interpolation, no backtick escapes): prefer them, and escape a literal ' by doubling ('' ). Avoid nesting quotes inside "..." — for strings that contain both quote types, use a literal here-string @'...'@ (terminator must start at column 0). Passing args with embedded quotes to native exes (git, node) is fragile in PS 5.1 — avoid; use single-quoted args or -File.
+- Tool preference on Windows saves approval clicks: content search → fs_grep (auto-executes, no approval card; NOT Select-String). File edits → edit/multi_edit (NOT (Get-Content -replace | Set-Content) pipelines). New files → write_file (NOT Set-Content heredocs). Only use bash_run for things a shell genuinely must do (build, test, install, git).
 
 # Screen access
 - look_at_screen captures and shows you a screenshot of the user's display. Each call requires the user's approval — it sees EVERYTHING visible on that monitor.

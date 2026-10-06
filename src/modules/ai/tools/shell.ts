@@ -150,11 +150,24 @@ function stripAnsi(s: string): string {
   return s.replace(ANSI_RE, "");
 }
 
+/** pwsh/powershell quote-nesting parse errors — the classic LLM failure mode on
+ *  Windows. Appended to stderr so the model self-corrects in one retry
+ *  instead of burning approval-gated attempts. Patterns cover both PS 5.1
+ *  ("The string is missing the terminator") and PS 7 ("Missing closing '"' in
+ *  string literal", ParserError). */
+const PWSH_QUOTE_ERR_RE =
+  /missing closing ['"`] in string literal|missing the terminator|ParserError|Unexpected token/i;
+
+export function pwshQuotingHint(stderr: string): string {
+  if (!PWSH_QUOTE_ERR_RE.test(stderr)) return stderr;
+  return `${stderr}\n[Kai hint: PowerShell quote-nesting error. Use single-quoted strings (literal; escape ' as ''), a here-string @'...'@ for mixed quotes, or switch to the edit/multi_edit tool for file changes — do NOT retry the same quoting approach.]`;
+}
+
 export function buildShellTools(ctx: ToolContext) {
   return {
     bash_run: tool({
       description:
-        "Run a foreground shell command in this session's persistent agent shell. cwd persists across calls (so `cd foo` then `bash_run pwd` works). Use for short-lived commands (lint, test, search, build). For long-running or daemon processes (dev servers, watch tasks), use `bash_background`. NEVER invoke interactive tools (vim, less, top) — they will hang. Asks for user approval. Set `elevated: true` ONLY when the command genuinely needs administrator/root privileges (installing system packages, writing to protected dirs, `net start`) — this triggers an OS privilege prompt and a stronger confirmation.",
+        "Run a foreground shell command in this session's persistent agent shell. cwd persists across calls (so `cd foo` then `bash_run pwd` works). Use for short-lived commands (lint, test, search, build). For long-running or daemon processes (dev servers, watch tasks), use `bash_background`. NEVER invoke interactive tools (vim, less, top) — they will hang. Asks for user approval. PowerShell quoting: single quotes are literal — prefer '...' over \"...\" (escape ' as ''); for mixed-quote content use a here-string @'...'@; NEVER nest quotes inside double quotes. Prefer purpose-built tools over shell text-wrangling: fs_grep instead of Select-String, edit/multi_edit instead of -replace pipelines. Set `elevated: true` ONLY when the command genuinely needs administrator/root privileges (installing system packages, writing to protected dirs, `net start`) — this triggers an OS privilege prompt and a stronger confirmation.",
       inputSchema: z.object({
         command: z.string(),
         timeout_secs: z.number().min(1).max(300).optional(),
@@ -240,7 +253,7 @@ export function buildShellTools(ctx: ToolContext) {
               command,
               elevated: true,
               stdout: stripAnsi(r.stdout),
-              stderr: stripAnsi(r.stderr),
+              stderr: pwshQuotingHint(stripAnsi(r.stderr)),
               exit_code: r.exit_code,
               timed_out: r.timed_out,
               truncated: r.truncated,
@@ -258,7 +271,7 @@ export function buildShellTools(ctx: ToolContext) {
             command,
             elevated: false,
             stdout: stripAnsi(r.stdout),
-            stderr: stripAnsi(r.stderr),
+            stderr: pwshQuotingHint(stripAnsi(r.stderr)),
             exit_code: r.exit_code,
             timed_out: r.timed_out,
             truncated: r.truncated,
