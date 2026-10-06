@@ -14,6 +14,7 @@ import { buildBatchEditTools } from "./batchEdit";
 import { buildTerminalImageTools } from "./terminalImage";
 import { buildWatchTools } from "./watch";
 import { buildScreenTools } from "./screen";
+import { buildMcpTools } from "./mcpTools";
 
 export { resolvePath, type ToolContext } from "./context";
 
@@ -29,6 +30,7 @@ export function buildCoreTools(ctx: import("./context").ToolContext) {
     ...buildTerminalImageTools(ctx),
     ...buildWatchTools(ctx),
     ...buildScreenTools(ctx),
+    ...buildMcpTools(ctx),
   } as const;
 }
 

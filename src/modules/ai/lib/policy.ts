@@ -111,6 +111,20 @@ export const TOOL_ACTION_CLASSIFIER: Record<string, ToolActionInfo> = {
     description: "Spawn background process",
   },
 
+  // MCP management - registering a server extends the agent's own toolset
+  mcp_add_server: {
+    category: "system",
+    riskLevel: "critical",
+    requiresApproval: true,
+    description: "Register an MCP server (persisted, connected, visible in the MCP Servers UI)",
+  },
+  mcp_list_servers: {
+    category: "system",
+    riskLevel: "low",
+    requiresApproval: false,
+    description: "List registered MCP servers and their status",
+  },
+
   // Network operations - medium risk
   web_fetch: {
     category: "network",

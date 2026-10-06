@@ -481,6 +481,31 @@ function PreviewBlock({
       </div>
     );
   }
+  if (toolName === "mcp_add_server") {
+    const transport = String(input.transport ?? "stdio");
+    const env = (input.env ?? {}) as Record<string, string>;
+    const envKeys = Object.keys(env);
+    return (
+      <div className="space-y-1 font-mono text-[11px]">
+        <div className="text-foreground">
+          {String(input.name ?? "")}{" "}
+          <span className="text-muted-foreground">· {transport}</span>
+        </div>
+        <div className="break-all text-muted-foreground">
+          {transport === "stdio"
+            ? [input.command, ...(Array.isArray(input.args) ? input.args : [])]
+                .filter(Boolean)
+                .join(" ")
+            : String(input.url ?? "")}
+        </div>
+        {envKeys.length > 0 && (
+          <div className="text-[10.5px] text-muted-foreground/80">
+            env: {envKeys.join(", ")}
+          </div>
+        )}
+      </div>
+    );
+  }
   return (
     <pre className="overflow-auto rounded-md bg-muted/60 p-2 font-mono text-[11px] leading-relaxed">
       {JSON.stringify(input, null, 2)}
