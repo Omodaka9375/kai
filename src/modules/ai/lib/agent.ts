@@ -385,6 +385,9 @@ export type RunAgentOptions = {
   lmstudioModelId?: string;
   openaiCompatibleBaseURL?: string;
   openaiCompatibleModelId?: string;
+  /** User-set vision override for custom endpoints (Settings → Models).
+   *  "on"/"off" beat the model-name heuristic; "auto" (default) uses it. */
+  customVisionOverride?: import("../config").VisionOverride | null;
   planMode?: boolean;
   projectMemory?: string | null;
   goalContext?: string | null;
@@ -612,7 +615,8 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // the UI messages keep the image so the transcript still shows it.
   // For custom endpoints the registry entry is a placeholder — consult the
   // RUNTIME model name (opts.lmstudioModelId / opts.openaiCompatibleModelId)
-  // so a locally-hosted vision model actually receives the image.
+  // so a locally-hosted vision model actually receives the image. A
+  // user-set override (Settings → Models → Vision) wins over both.
   const runtimeModelName =
     modelId === "lmstudio-local"
       ? opts.lmstudioModelId
@@ -620,7 +624,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
         ? opts.openaiCompatibleModelId
         : null;
   const history = normalizeForProvider(
-    !modelTextOnly(modelId, runtimeModelName)
+    !modelTextOnly(modelId, runtimeModelName, opts.customVisionOverride)
       ? rawHistory
       : await extractImagesForTextOnly(rawHistory),
     provider,

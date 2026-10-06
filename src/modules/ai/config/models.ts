@@ -11,6 +11,12 @@ export type ModelCapabilities = {
 
 export type ModelTag = "vision" | "reasoning" | "tools" | "coding" | "free";
 
+/** Vision capability for user-configured endpoints (LM Studio /
+ *  OpenAI-compatible) whose registry entry is a placeholder. "auto" detects
+ *  from the runtime model name (vl / vision / llava / …); "on" / "off"
+ *  override the detection — for models whose name gives no hint. */
+export type VisionOverride = "auto" | "on" | "off";
+
 /** Thinking / extended reasoning mode. Off = no thinking. Low/Med/High map to
  *  provider-specific budget tokens or effort levels. Only applies to models
  *  tagged "reasoning". */

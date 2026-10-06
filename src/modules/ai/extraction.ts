@@ -6,7 +6,7 @@
 //! text (dimensions + OCR when tesseract is available). The UI keeps the
 //! image part untouched — the transcript still shows the thumbnail.
 
-import { getModel } from "./config";
+import { getModel, type VisionOverride } from "./config";
 import { native } from "./lib/native";
 
 export type FileAttachment = {
@@ -25,24 +25,26 @@ export type FileAttachment = {
  * For cloud models the registry knows the answer. For custom endpoints
  * (LM Studio / OpenAI-compatible) the REGISTRY entry is a placeholder — the
  * real model is user-supplied at runtime (`lmstudioModelId` etc.), so the
- * catalog can't know its capabilities. Guess from the runtime model NAME
- * (vision families are recognizable: qwen2-vl, llava, minicpm-v, …) so a
- * locally-hosted vision model actually receives the image instead of being
- * silently OCR'd. Wrong guesses fall back to text-only — harmless, the
- * request still succeeds, the user just doesn't get image input.
+ * catalog can't know its capabilities. Resolution order:
+ *   1. A user-set override (`lmstudioVision` / `openaiCompatibleVision`
+ *      prefs, "on"/"off") wins — for models whose name gives no hint.
+ *   2. Otherwise ("auto") guess from the runtime model NAME (vision
+ *      families are recognizable: qwen2-vl, llava, minicpm-v, …) so a
+ *      locally-hosted vision model actually receives the image instead of
+ *      being silently OCR'd.
  */
 export function modelTextOnly(
   modelId: string,
   runtimeModelName?: string | null,
+  visionOverride?: VisionOverride | null,
 ): boolean {
   const m = getModel(modelId as never);
   if (m.tags?.includes("vision")) return false;
-  // Registry says text-only — but a custom endpoint's REAL model may differ.
-  if (
-    (m.id === "openai-compatible-custom" || m.id === "lmstudio-local") &&
-    looksLikeVisionModel(runtimeModelName)
-  ) {
-    return false;
+  if (m.id === "openai-compatible-custom" || m.id === "lmstudio-local") {
+    // Explicit user override beats both the registry and the name guess.
+    if (visionOverride === "on") return false;
+    if (visionOverride === "off") return true;
+    return !looksLikeVisionModel(runtimeModelName);
   }
   return true;
 }

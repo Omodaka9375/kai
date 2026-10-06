@@ -217,6 +217,17 @@ export function makeChatSync(
       usePreferencesStore.getState().openaiCompatibleBaseURL,
     getOpenaiCompatibleModelId: () =>
       usePreferencesStore.getState().openaiCompatibleModelId,
+    // Vision capability for custom endpoints: explicit user override wins,
+    // else the name heuristic runs (both resolved inside modelTextOnly).
+    getCustomVisionOverride: () => {
+      const prefs = usePreferencesStore.getState();
+      const selectedModelId = deps.getSelectedModelId();
+      if (selectedModelId === "lmstudio-local")
+        return prefs.lmstudioVision ?? "auto";
+      if (selectedModelId === "openai-compatible-custom")
+        return prefs.openaiCompatibleVision ?? "auto";
+      return null;
+    },
     getSessionId: () => sessionId,
     getStackInfo: () => stackInfo,
     // Resolve the effective thinking mode for the *selected* model: a

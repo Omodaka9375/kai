@@ -4,6 +4,7 @@ import {
   OPENAI_COMPATIBLE_DEFAULT_BASE_URL,
   type ModelId,
   type ThinkingMode,
+  type VisionOverride,
 } from "@/modules/ai/config";
 import type { KeyBinding, ShortcutId } from "@/modules/shortcuts/shortcuts";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -71,6 +72,12 @@ export type Preferences = {
   openaiCompatibleContextSize: number;
   /** Thinking mode for the OpenAI-compatible endpoint model. off/low/medium/high. */
   openaiCompatibleThinkingMode: ThinkingMode;
+  /** Vision capability for the LM Studio model. "auto" = detect from the
+   *  model name (vl/vision/llava/…); "on"/"off" override the detection. */
+  lmstudioVision: VisionOverride;
+  /** Vision capability for the OpenAI-compatible endpoint model. Same
+   *  semantics as lmstudioVision. */
+  openaiCompatibleVision: VisionOverride;
   /** Active UI color theme. "default" uses the built-in Kai palette. */
   uiThemeId: string;
   /** ComfyUI local server URL. */
@@ -134,6 +141,8 @@ const KEY_LAST_WORKSPACE_CWD = "lastWorkspaceCwd";
 const KEY_LMSTUDIO_CTX_SIZE = "lmstudioContextSize";
 const KEY_COMPAT_CTX_SIZE = "openaiCompatibleContextSize";
 const KEY_COMPAT_THINKING = "openaiCompatibleThinkingMode";
+const KEY_LMSTUDIO_VISION = "lmstudioVision";
+const KEY_COMPAT_VISION = "openaiCompatibleVision";
 const KEY_UI_THEME = "uiThemeId";
 const KEY_COMFYUI_BASE_URL = "comfyuiBaseURL";
 const KEY_COMFYUI_WORKFLOW = "comfyuiWorkflow";
@@ -191,6 +200,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
   lmstudioContextSize: 0,
   openaiCompatibleContextSize: 0,
   openaiCompatibleThinkingMode: "off" as ThinkingMode,
+  lmstudioVision: "auto" as VisionOverride,
+  openaiCompatibleVision: "auto" as VisionOverride,
   uiThemeId: "default",
   comfyuiBaseURL: "http://*********:8188",
   comfyuiWorkflow: "",
@@ -298,6 +309,12 @@ export async function loadPreferences(): Promise<Preferences> {
     openaiCompatibleThinkingMode:
       get<ThinkingMode>(KEY_COMPAT_THINKING) ??
       DEFAULT_PREFERENCES.openaiCompatibleThinkingMode,
+    lmstudioVision:
+      get<VisionOverride>(KEY_LMSTUDIO_VISION) ??
+      DEFAULT_PREFERENCES.lmstudioVision,
+    openaiCompatibleVision:
+      get<VisionOverride>(KEY_COMPAT_VISION) ??
+      DEFAULT_PREFERENCES.openaiCompatibleVision,
     uiThemeId:
       get<string>(KEY_UI_THEME) ?? DEFAULT_PREFERENCES.uiThemeId,
     comfyuiBaseURL:
@@ -496,6 +513,14 @@ export async function setOpenaiCompatibleThinkingMode(value: ThinkingMode): Prom
   await writePref(KEY_COMPAT_THINKING, value);
 }
 
+export async function setLmstudioVision(value: VisionOverride): Promise<void> {
+  await writePref(KEY_LMSTUDIO_VISION, value);
+}
+
+export async function setOpenaiCompatibleVision(value: VisionOverride): Promise<void> {
+  await writePref(KEY_COMPAT_VISION, value);
+}
+
 export async function setUiThemeId(value: string): Promise<void> {
   await writePref(KEY_UI_THEME, value);
 }
@@ -635,6 +660,8 @@ export async function onPreferencesChange(
     [KEY_LMSTUDIO_CTX_SIZE]: "lmstudioContextSize",
     [KEY_COMPAT_CTX_SIZE]: "openaiCompatibleContextSize",
     [KEY_COMPAT_THINKING]: "openaiCompatibleThinkingMode",
+    [KEY_LMSTUDIO_VISION]: "lmstudioVision",
+    [KEY_COMPAT_VISION]: "openaiCompatibleVision",
     [KEY_UI_THEME]: "uiThemeId",
     [KEY_COMFYUI_BASE_URL]: "comfyuiBaseURL",
     [KEY_COMFYUI_WORKFLOW]: "comfyuiWorkflow",

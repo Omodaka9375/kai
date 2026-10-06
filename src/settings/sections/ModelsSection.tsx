@@ -15,6 +15,7 @@ import {
   type ModelId,
   type ProviderId,
   type ThinkingMode,
+  type VisionOverride,
 } from "@/modules/ai/config";
 import { clearKey, getAllKeys, setKey } from "@/modules/ai/lib/keyring";
 import { usePreferencesStore } from "@/modules/settings/preferences";
@@ -26,10 +27,12 @@ import {
   setLmstudioBaseURL,
   setLmstudioContextSize,
   setLmstudioModelId,
+  setLmstudioVision,
   setOpenaiCompatibleBaseURL,
   setOpenaiCompatibleContextSize,
   setOpenaiCompatibleModelId,
   setOpenaiCompatibleThinkingMode,
+  setOpenaiCompatibleVision,
 } from "@/modules/settings/store";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -430,6 +433,11 @@ function LocalModelsBlock() {
           />
         </FieldRow>
 
+        <VisionRow
+          value={usePreferencesStore((s) => s.lmstudioVision)}
+          onChange={(v) => void setLmstudioVision(v)}
+        />
+
         <StatusLine status={testStatus} />
 
         {!modelId.trim() ? (
@@ -620,6 +628,11 @@ function OpenAICompatibleBlock({
           </span>
         </FieldRow>
 
+        <VisionRow
+          value={usePreferencesStore((s) => s.openaiCompatibleVision)}
+          onChange={(v) => void setOpenaiCompatibleVision(v)}
+        />
+
         <StatusLine status={testStatus} />
       </div>
     </div>
@@ -640,6 +653,39 @@ function FieldRow({
       </span>
       <div className="flex flex-1 items-center">{children}</div>
     </div>
+  );
+}
+
+/** Vision capability selector for user-configured endpoints. "auto" detects
+ *  from the model name (vl / vision / llava / …); "on"/"off" override the
+ *  detection — for models whose name gives no hint either way. */
+function VisionRow({
+  value,
+  onChange,
+}: {
+  value: VisionOverride;
+  onChange: (v: VisionOverride) => void;
+}) {
+  return (
+    <FieldRow label="Vision">
+      <div className="flex items-center gap-0.5">
+        {(["auto", "on", "off"] as VisionOverride[]).map((mode) => (
+          <Button
+            key={mode}
+            size="sm"
+            variant={value === mode ? "default" : "outline"}
+            onClick={() => onChange(mode)}
+            className="h-7 px-2 text-[11px]"
+          >
+            {mode}
+          </Button>
+        ))}
+      </div>
+      <span className="text-[10px] text-muted-foreground mt-1">
+        Auto detects from the model name — set On/Off when the name has no
+        &quot;vl&quot;/&quot;vision&quot; hint. On sends image attachments directly.
+      </span>
+    </FieldRow>
   );
 }
 

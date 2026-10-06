@@ -59,6 +59,7 @@ type Deps = {
   getLmstudioModelId?: () => string | undefined;
   getOpenaiCompatibleBaseURL?: () => string | undefined;
   getOpenaiCompatibleModelId?: () => string | undefined;
+  getCustomVisionOverride?: () => import("@/modules/ai/config").VisionOverride | null;
   onStep?: (step: string | null) => void;
   onUsage?: (delta: AgentUsageDelta) => void;
   onTextDelta?: (text: string) => void;
@@ -196,6 +197,7 @@ export function createContextAwareTransport(deps: Deps) {
       lmstudioModelId: deps.getLmstudioModelId?.(),
       openaiCompatibleBaseURL: deps.getOpenaiCompatibleBaseURL?.(),
       openaiCompatibleModelId: deps.getOpenaiCompatibleModelId?.(),
+      customVisionOverride: deps.getCustomVisionOverride?.() ?? null,
       planMode: deps.getPlanMode?.(),
       projectMemory: effectiveMemory,
       goalContext: useGoalsStore.getState().activeGoalId ?? undefined,

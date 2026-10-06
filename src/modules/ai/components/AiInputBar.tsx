@@ -231,16 +231,28 @@ export function AiInputBar() {
   // Custom endpoints (LM Studio / OpenAI-compatible) run a user-supplied
   // model — the registry entry is a placeholder with no vision tag, so consult
   // the RUNTIME model name: a local qwen2-vl / llava actually sees images.
+  // The Settings → Models → Vision override (on/off) wins over the name guess.
   const lmModelId = usePreferencesStore((s) => s.lmstudioModelId);
   const compatModelId = usePreferencesStore((s) => s.openaiCompatibleModelId);
+  const lmVision = usePreferencesStore((s) => s.lmstudioVision);
+  const compatVision = usePreferencesStore((s) => s.openaiCompatibleVision);
+  const isCustom =
+    selectedModelId === "lmstudio-local" ||
+    selectedModelId === "openai-compatible-custom";
   const runtimeModelName =
     selectedModelId === "lmstudio-local"
       ? lmModelId
       : selectedModelId === "openai-compatible-custom"
         ? compatModelId
         : null;
+  const visionOverride = isCustom
+    ? selectedModelId === "lmstudio-local"
+      ? lmVision
+      : compatVision
+    : null;
   const imageBlindModel =
-    hasImageAttachment && modelTextOnly(selectedModelId, runtimeModelName);
+    hasImageAttachment &&
+    modelTextOnly(selectedModelId, runtimeModelName, visionOverride);
 
   return (
     <div
@@ -279,9 +291,8 @@ export function AiInputBar() {
               className="shrink-0"
             />
             <span className="truncate">
-              {selectedModelId === "lmstudio-local" ||
-              selectedModelId === "openai-compatible-custom"
-                ? `${runtimeModelName || selectedModelId} doesn't look like a vision model — it will receive extracted text (OCR). Rename the model to include "vl"/"vision" if it can see images.`
+              {isCustom
+                ? `${runtimeModelName || selectedModelId} doesn't look like a vision model — it will receive extracted text (OCR). Set Settings → Models → Vision to On, or rename the model to include "vl"/"vision".`
                 : `${selectedModelId} can&apos;t see images — it will receive extracted
               text (OCR) instead. Switch to a vision model to send the picture.`}
             </span>

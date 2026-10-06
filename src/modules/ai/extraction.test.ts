@@ -54,3 +54,32 @@ describe("modelTextOnly (custom endpoints resolve the runtime name)", () => {
     expect(modelTextOnly("openai-compatible-custom", null)).toBe(true);
   });
 });
+
+describe("modelTextOnly (vision override beats name detection)", () => {
+  it('override "on" forces vision even without a vision name', () => {
+    expect(modelTextOnly("lmstudio-local", "my-plain-model", "on")).toBe(false);
+    expect(
+      modelTextOnly("openai-compatible-custom", "some-model", "on"),
+    ).toBe(false);
+  });
+
+  it('override "off" forces text-only even with a vision name', () => {
+    expect(modelTextOnly("lmstudio-local", "qwen2-vl-7b", "off")).toBe(true);
+    expect(modelTextOnly("openai-compatible-custom", "llava-1.6", "off")).toBe(
+      true,
+    );
+  });
+
+  it('override "auto" keeps the name heuristic', () => {
+    expect(modelTextOnly("lmstudio-local", "qwen2-vl-7b", "auto")).toBe(false);
+    expect(modelTextOnly("lmstudio-local", "qwen2.5-coder-7b", "auto")).toBe(
+      true,
+    );
+  });
+
+  it("override does not apply to registry models (they have known tags)", () => {
+    // "on" cannot grant vision to a registry text-only model — the override
+    // only exists because custom endpoints' registry entries are placeholders.
+    expect(modelTextOnly("deepseek-chat", "qwen2-vl", "on")).toBe(true);
+  });
+});
