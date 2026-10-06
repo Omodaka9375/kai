@@ -13,6 +13,7 @@ import { buildMemoryTools } from "./memory";
 import { buildBatchEditTools } from "./batchEdit";
 import { buildTerminalImageTools } from "./terminalImage";
 import { buildWatchTools } from "./watch";
+import { buildScreenTools } from "./screen";
 
 export { resolvePath, type ToolContext } from "./context";
 
@@ -27,6 +28,7 @@ export function buildCoreTools(ctx: import("./context").ToolContext) {
     ...buildBatchEditTools(ctx),
     ...buildTerminalImageTools(ctx),
     ...buildWatchTools(ctx),
+    ...buildScreenTools(ctx),
   } as const;
 }
 

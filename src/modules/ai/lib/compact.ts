@@ -227,6 +227,28 @@ function truncateLargeToolResult(part: ToolPart): { changed: boolean; part: Tool
   if (part.type !== "tool-result") return { changed: false, part };
   const output = part.output;
   if (output == null) return { changed: false, part };
+  // look_at_screen: the dataUrl is UI-only (the model got the image as a
+  // tool-result part once, via toModelOutput; re-sends don't need it and
+  // stringifying megabytes of base64 on every step is exactly what this
+  // pass exists to prevent). Strip it, keep the metadata.
+  if (
+    part.toolName === "look_at_screen" &&
+    typeof output === "object" &&
+    output !== null &&
+    typeof (output as { image?: { dataUrl?: unknown } }).image?.dataUrl === "string"
+  ) {
+    const rec = output as { image: { dataUrl?: string } };
+    return {
+      changed: true,
+      part: {
+        ...part,
+        output: {
+          ...rec,
+          image: { dataUrlRemoved: true },
+        },
+      },
+    };
+  }
   const str = typeof output === "string" ? output : JSON.stringify(output);
   if (str.length <= TOOL_RESULT_TRUNCATE_CHARS) return { changed: false, part };
   return {

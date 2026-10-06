@@ -162,6 +162,26 @@ export type ShadowMergeReport = {
   conflicts: string[];
 };
 
+export type MonitorInfo = {
+  /** "0"-based index in left-to-right order — the tool's stable selector. */
+  id: string;
+  name: string;
+  isPrimary: boolean;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+export type ScreenCapture = {
+  /** Temp JPEG path (forward slashes). Reader must delete it after use. */
+  path: string;
+  monitor: MonitorInfo;
+  width: number;
+  height: number;
+  sizeBytes: number;
+};
+
 export type GitLogEntry = {
   sha: string;
   shortSha: string;
@@ -584,6 +604,9 @@ export const native = {
       repoRoot,
       workspace: currentWorkspaceEnv(),
     }),
+  screenListMonitors: () => invoke<MonitorInfo[]>("screen_list_monitors"),
+  screenCapture: (selector?: string | null) =>
+    invoke<ScreenCapture>("screen_capture", { selector: selector ?? null }),
   gitSwitchBranch: (repoRoot: string, name: string) =>
     invoke<void>("git_switch_branch", {
       repoRoot,

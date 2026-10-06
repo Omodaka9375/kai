@@ -1,0 +1,47 @@
+feat(ai): look_at_screen — agent can see the user's displays
+
+When the user says "look at my screen" / "check my left monitor", the
+agent captures that display and analyzes the screenshot itself.
+
+Design (no extra vision model needed): the v1.5.3 vision resolution
+(registry tags -> name heuristic -> Vision override) already knows
+whether the SELECTED model sees images, and detects moondream-class
+local models served via LM Studio / OpenAI-compatible endpoints. So:
+
+- Vision-capable model: the screenshot rides the tool result back to
+  the model as a file-data image part (AI SDK v6 toModelOutput
+  multi-content tool results) — the model itself analyzes it.
+- Text-only model: the existing transport extraction pass OCRs it.
+No Moondream/Python/extra download — the feature rides the model the
+user already selected.
+
+Rust (modules/screen.rs, xcap 0.9):
+- screen_list_monitors: inventory with stable ids, sorted by virtual
+  desktop x (left-to-right) — this IS the left/right semantic.
+- screen_capture(selector): primary/left/right/index/name substring;
+  RGBA->RGB8 flatten (JPEG has no alpha — the encoder rejects Rgba8);
+  JPEG to %TEMP%/kai-screens; all-black-frame heuristic surfaces macOS
+  TCC denials and locked sessions instead of analyzing a black rect.
+- sweep_stale_screens: startup GC of capture temps >1h old.
+
+Frontend:
+- look_at_screen tool (needsApproval: true — a screen capture reads
+  everything visible, passwords included; the approval card is the
+  privacy boundary). No-arg call = discovery: single monitor captures
+  immediately, multi-monitor returns the inventory so the model picks
+  the selector.
+- toModelOutput returns the image as file-data for vision models;
+  text-only models get OCR via the existing extraction pass.
+- Transcript card renders the screenshot thumbnail (user sees exactly
+  what the agent saw); input preview + summary rows.
+- compact.ts strips the dataUrl from re-sent tool results (a 4K JPEG is
+  ~300KB base64 — it was about to be re-sent on EVERY agent step);
+  sessions.ts strips it from the persisted copy (512KB store cap).
+- System prompt: screen-access block (trigger phrases, left/right
+  ordering, discovery-first guidance, "describe what you actually
+  see").
+
+Verified live on this machine: 2 monitors (DELL S2721HN left at
+x=-1920, primary at x=0), 1920x1080 capture, 168KB JPEG, <1s.
+cargo check + clippy clean (pre-existing mcp.rs warning only), tsc
+clean, 286 tests pass.

@@ -1,7 +1,7 @@
 mod modules;
 
 use modules::lock::mutex_lock;
-use modules::{diagnostics, fs, git, gpg, mcp, mcp_oauth, net, pty, secrets, shell, workspace};
+use modules::{diagnostics, fs, git, gpg, mcp, mcp_oauth, net, pty, screen, secrets, shell, workspace};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
@@ -471,6 +471,7 @@ pub fn run() {
                     let _ = std::fs::remove_dir_all(&dir);
                 }
             }
+            screen::sweep_stale_screens();
             // One-shot shell commands run via script files (not
             // -EncodedCommand — AV flags that as dropper behavior). Point
             // them at app data and sweep anything a crash left behind.
@@ -603,6 +604,8 @@ pub fn run() {
             net::openrouter_list_models,
             net::ai_http_request,
             net::ai_http_stream,
+            screen::screen_list_monitors,
+            screen::screen_capture,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

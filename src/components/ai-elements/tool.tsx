@@ -101,6 +101,8 @@ function deriveSummary(toolName: string, input: unknown): string | null {
       return str("intent") ?? str("description");
     case "display_image":
       return str("name");
+    case "look_at_screen":
+      return str("display") ?? "screen";
     case "open_preview":
       return str("path") ?? str("url");
     case "run_subagent":
@@ -333,6 +335,19 @@ function renderInputPreview(
       </div>
     );
   }
+  if (toolName === "look_at_screen") {
+    const display = str("display");
+    return (
+      <div className="flex items-center gap-1.5 font-mono text-[11px]">
+        <span className="text-foreground">{display ?? "primary"}</span>
+        {str("focus") ? (
+          <span className="truncate text-muted-foreground">
+            · {str("focus")}
+          </span>
+        ) : null}
+      </div>
+    );
+  }
   return null;
 }
 
@@ -420,6 +435,41 @@ function renderToolOutput(toolName: string, output: unknown): ReactNode | null {
         <span className="text-foreground">displayed in terminal</span>
         {size != null ? (
           <span className="text-muted-foreground">({formatBytes(size)})</span>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (toolName === "look_at_screen") {
+    // The dataUrl is for THIS card only — the model received the image as a
+    // tool-result part, and compaction elides it from later re-sends.
+    const dataUrl =
+      typeof o.image === "object" && o.image !== null
+        ? String((o.image as { dataUrl?: unknown }).dataUrl ?? "")
+        : "";
+    const monitor =
+      typeof o.monitor === "object" && o.monitor !== null
+        ? (o.monitor as { name?: string; resolution?: string })
+        : null;
+    return (
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-1.5 font-mono text-[11px]">
+          <span className="text-emerald-600 dark:text-emerald-400">✓</span>
+          <span className="text-foreground">
+            {monitor?.name ?? "monitor"}
+          </span>
+          {monitor?.resolution ? (
+            <span className="text-muted-foreground">
+              · {monitor.resolution}
+            </span>
+          ) : null}
+        </div>
+        {dataUrl ? (
+          <img
+            src={dataUrl}
+            alt="screen capture"
+            className="max-h-56 rounded-md border border-border/60"
+          />
         ) : null}
       </div>
     );

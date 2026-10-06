@@ -8,6 +8,7 @@ pub mod mcp_oauth;
 pub mod net;
 pub mod pty;
 pub mod sandbox;
+pub mod screen;
 pub mod secrets;
 pub mod shell;
 pub mod updater;
