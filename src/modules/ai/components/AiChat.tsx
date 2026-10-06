@@ -339,6 +339,7 @@ export function AiChatView({
         )}
         {summaryNotice && (
           <SummaryNotice
+            text={summaryNotice.text}
             onDismiss={() => patchAgentMeta({ summaryNotice: null })}
           />
         )}
@@ -431,14 +432,16 @@ const CompactionNotice = memo(function CompactionNotice({
 
 const SummaryNotice = memo(function SummaryNotice({
   onDismiss,
+  text,
 }: {
   onDismiss: () => void;
+  text?: string;
 }) {
   return (
     <div className="flex items-center gap-2 rounded-md border border-border/40 bg-muted/30 px-2.5 py-1.5 text-[11px] text-muted-foreground">
       <span className="size-1.5 shrink-0 rounded-full bg-blue-500/80" />
       <span className="flex-1 truncate">
-        Context summarized — earlier messages compressed.
+        {text ?? "Context summarized — earlier messages compressed."}
       </span>
       <button
         type="button"

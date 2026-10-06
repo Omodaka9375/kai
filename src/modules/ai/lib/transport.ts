@@ -10,6 +10,7 @@ import { compactModelMessagesDetailed } from "./compact";
 import type { ProviderKeys } from "./keyring";
 import { mcpManager } from "./mcpManager";
 import { buildSessionState } from "./sessionState";
+import type { FileSnapshot } from "./fileTracker";
 import type { ToolContext } from "../tools/tools";
 import { useChatStore, registerRunController } from "../store/chatStore";
 import { useGoalsStore } from "../store/goalsStore";
@@ -323,6 +324,48 @@ const SUMMARY_KEEP_TAIL_PAIRS = 6;
  *  overhead would be larger than the savings. */
 const MIN_TOKEN_ESTIMATE_FOR_SUMMARY = 16_000;
 
+/**
+ * Build the compacted form of a conversation: a deterministic
+ * `<session_state>` snapshot (task, files touched, plan, error hints)
+ * followed by the last SUMMARY_KEEP_TAIL_PAIRS message pairs. Shared by
+ * the automatic threshold path (`maybeSummarize`) and the user-driven
+ * `/compact` command — no model call, fully deterministic.
+ *
+ * Returns null when there is nothing worth compacting (too few pairs or
+ * too little content — replacing a short history with a snapshot would
+ * LOSE context instead of saving it).
+ */
+export function summarizeMessagesNow(
+  messages: UIMessage[],
+  fileSnapshot: FileSnapshot[],
+  sessionId: string | null,
+): UIMessage[] | null {
+  // Nothing to compact if the tail already covers the whole conversation.
+  const cutoff = findUIMessageTailCutoff(messages, SUMMARY_KEEP_TAIL_PAIRS);
+  if (cutoff <= 0) return null;
+
+  // Trivially small conversations gain nothing — the snapshot block would
+  // cost nearly as much as the history it replaces. (The automatic path
+  // has its own token threshold; this is the manual floor.)
+  let chars = 0;
+  for (const m of messages) {
+    for (const p of m.parts) {
+      if (p.type === "text") chars += (p as { text?: string }).text?.length ?? 0;
+    }
+  }
+  if (chars / 4 < 2_000) return null;
+
+  const stateBlock = buildSessionState({ messages, fileSnapshot, sessionId });
+  const tail = messages.slice(cutoff);
+
+  const summaryMessage: UIMessage = {
+    id: `summary-${Date.now()}`,
+    role: "assistant",
+    parts: [{ type: "text", text: stateBlock }],
+  };
+  return [summaryMessage, ...tail];
+}
+
 async function maybeSummarize(
   messages: UIMessage[],
   deps: Deps,
@@ -342,27 +385,17 @@ async function maybeSummarize(
   const tokenEstimate = JSON.stringify(modelMsgs).length / 4;
   if (tokenEstimate < MIN_TOKEN_ESTIMATE_FOR_SUMMARY) return messages;
 
+
   // Surface the compressing state in the chat UI (spinner + notice).
   useChatStore.getState().patchAgentMeta({ summarizing: true });
   try {
     const fileSnapshot = deps.toolContext.fileTracker.getSnapshot();
-    const stateBlock = buildSessionState({
-      messages,
-      fileSnapshot,
-      sessionId: deps.getSessionId?.() ?? null,
-    });
-
-    // Trim to the last N message pairs, prepend the session state snapshot.
-    const cutoff = findUIMessageTailCutoff(messages, SUMMARY_KEEP_TAIL_PAIRS);
-    const tail = messages.slice(cutoff);
-
-    const summaryMessage: UIMessage = {
-      id: `summary-${Date.now()}`,
-      role: "assistant",
-      parts: [{ type: "text", text: stateBlock }],
-    };
-
-    const trimmed = [summaryMessage, ...tail];
+    const sessionId = deps.getSessionId?.() ?? null;
+    const trimmed = summarizeMessagesNow(messages, fileSnapshot, sessionId);
+    // summarizeMessagesNow returns null below its floor — but this path
+    // only runs past the token gates above, so null would mean the tail
+    // already covers everything. Keep the original in that case.
+    const out = trimmed ?? messages;
 
     useChatStore.getState().patchAgentMeta({
       summarizing: false,
@@ -371,7 +404,7 @@ async function maybeSummarize(
 
     // Persistence is handled by AgentRunBridge which fires on every
     // messages change, including after summarization replaces history.
-    return trimmed;
+    return out;
   } catch (err) {
     useChatStore.getState().patchAgentMeta({ summarizing: false });
     throw err;

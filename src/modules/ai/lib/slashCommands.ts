@@ -1,4 +1,4 @@
-import { CheckListIcon, SparklesIcon } from "@hugeicons/core-free-icons";
+import { CheckListIcon, SparklesIcon, ArrowShrink01Icon } from "@hugeicons/core-free-icons";
 import { usePlanStore } from "../store/planStore";
 import { handleGoalCommand } from "./goalHandler";
 
@@ -44,6 +44,12 @@ export const SLASH_COMMANDS: Record<string, SlashCommandMeta> = {
     label: "Plan mode",
     icon: CheckListIcon,
   },
+  compact: {
+    name: "compact",
+    invocation: "/compact",
+    label: "Compress context in place",
+    icon: ArrowShrink01Icon,
+  },
 };
 
 export const Kai_CMD_RE =
@@ -81,6 +87,14 @@ export async function tryRunSlashCommand(input: string): Promise<SlashOutcome> {
         prompt: INIT_PROMPT,
         commandName: "init",
       };
+    }
+    case "compact": {
+      // In-place context compaction — same chat continues with a
+      // <session_state> snapshot + recent tail instead of the full history.
+      // Refuses while busy; the toast carries the outcome either way.
+      const { useChatStore } = await import("../store/chatStore");
+      const result = useChatStore.getState().compactActiveSession();
+      return { kind: "handled", toast: result };
     }
     case "goal": {
       // Delegate to goal handler

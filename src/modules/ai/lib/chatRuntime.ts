@@ -78,8 +78,9 @@ export type AgentMeta = {
   compactionNotice: { droppedCount: number; at: number } | null;
   /** True while the model is generating a context summary. */
   summarizing: boolean;
-  /** Shown after summarization completes. */
-  summaryNotice: { at: number } | null;
+  /** Shown after summarization completes. `text` overrides the default
+   *  notice wording (used by the user-driven /compact path). */
+  summaryNotice: { at: number; text?: string } | null;
   /** Rolling output tokens per second, updated during streaming. */
   outputTps: number;
 };
@@ -110,6 +111,24 @@ export const IDLE_META: AgentMeta = {
  * Create a Chat instance synchronously. Stack detection happens in the
  * background and stackInfo will be updated via the getStackInfo callback.
  */
+
+// Per-session toolContext registry. Each Chat owns a private FileTracker;
+// user-driven compaction (`/compact`) needs the CURRENT session's snapshot
+// to build `<session_state>`, and it must work from outside this module.
+// Sessions are bounded (LRU cap 8), so the registry cannot grow unbounded;
+// entries are deleted on session delete via `disposeSessionToolContext`.
+const sessionToolContexts = new Map<string, ToolContext>();
+
+/** ToolContext of a live session (for cross-module reads like /compact). */
+export function getSessionToolContext(sessionId: string): ToolContext | null {
+  return sessionToolContexts.get(sessionId) ?? null;
+}
+
+/** Drop a session's toolContext entry (called from chatStore.deleteSession). */
+export function disposeSessionToolContext(sessionId: string): void {
+  sessionToolContexts.delete(sessionId);
+}
+
 export function makeChatSync(
   sessionId: string,
   deps: ChatRuntimeDeps,
@@ -394,5 +413,6 @@ export function makeChatSync(
     },
   });
   chatRef.current = chat;
+  sessionToolContexts.set(sessionId, toolContext);
   return chat;
 }

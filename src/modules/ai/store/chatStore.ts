@@ -31,10 +31,12 @@ import {
 import { pushRecentModel, persistProjectModel } from "../lib/modelPrefs";
 import { normalizeWorkspacePath } from "../lib/workspacePath";
 import { cancelAllShellSessions } from "../tools/shell";
-import { clearFenceState } from "../lib/transport";
+import { clearFenceState, summarizeMessagesNow } from "../lib/transport";
 import { reapSessionWatches, closeWatchSessionShell } from "../tools/watch";
 import { agentBus } from "../lib/eventBus";
 import {
+  disposeSessionToolContext,
+  getSessionToolContext,
   IDLE_META,
   makeChatSync as makeChatSyncRuntime,
   type AgentMeta,
@@ -296,6 +298,11 @@ type StoreState = {
   renameSession: (id: string, title: string) => void;
   /** Persist messages of a session and bump its updatedAt + auto-title. */
   persistMessages: (id: string, messages: UIMessage[]) => void;
+  /** User-driven compaction of the ACTIVE session (the /compact command):
+   *  replaces the in-chat history with the <session_state> snapshot + tail,
+   *  in place — same chat, no new session. Returns a human-readable result
+   *  for the toast. */
+  compactActiveSession: () => string;
   /** Inject a system-originated user message (e.g. watch result) without triggering a new agent run. */
   injectMessage: (id: string, text: string) => Promise<void>;
   /** Fork the current session at a message index, creating a new branch. */
@@ -828,6 +835,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
     chats.get(id)?.stop();
     chats.delete(id);
     seedMessages.delete(id);
+    disposeSessionToolContext(id);
     agentBus.emit("session:delete", { sessionId: id });
     const pend = pendingPersist.get(id);
     if (pend) {
@@ -885,6 +893,49 @@ export const useChatStore = create<StoreState>((set, get) => ({
     );
     set({ sessions: next });
     void saveSessionsList(next);
+  },
+
+  // ── User-driven compaction (/compact) ─────────────────────────────
+  // In-place history replacement: same Chat, same session, no agent run.
+  // Guards: refuses while a run is streaming/thinking or a pending approval
+  // exists — replacing history mid-run would desync the SDK's in-flight
+  // snapshot from the UI. Idle only.
+  compactActiveSession: () => {
+    const id = get().activeSessionId;
+    if (!id) return "No active chat to compact.";
+    const chat = chats.get(id);
+    if (!chat) return "No active chat to compact.";
+    const status = chat.status;
+    if (
+      status === "streaming" ||
+      status === "submitted" ||
+      hasPendingApprovals(chat)
+    ) {
+      return "Wait for the current run to finish before compacting.";
+    }
+    const toolContext = getSessionToolContext(id);
+    const fileSnapshot = toolContext?.fileTracker.getSnapshot() ?? [];
+    const next = summarizeMessagesNow(chat.messages, fileSnapshot, id);
+    if (!next) {
+      return "Context is already minimal — nothing worth compacting.";
+    }
+    // Replace in place. The SDK adopts the new array; AgentRunBridge
+    // persists it on the next messages-change effect, the same path the
+    // automatic summarizer uses.
+    chat.messages = next;
+    set({ _tick: Date.now() });
+    // lastInputTokens reflected the pre-compact request size; the next run
+    // will re-report. Zero it so the context indicator doesn't show stale
+    // pressure against the freshly trimmed history.
+    get().patchAgentMeta({
+      lastInputTokens: 0,
+      summaryNotice: { at: Date.now(), text: "Context compacted by /compact." },
+    });
+    const n = next.length;
+    const dropped = chat.messages.length - n;
+    return `Context compacted — ${Math.max(0, dropped)} older message${
+      Math.max(0, dropped) === 1 ? "" : "s"
+    } summarized, kept the last ${n - 1}.`;
   },
 
   persistMessages: (id, messages) => {
