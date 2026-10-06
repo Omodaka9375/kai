@@ -4,6 +4,17 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.5.5]
+
+- AI: `/compact` — reset the context in place in the same chat (session-state snapshot + recent tail, no new session needed); LM Studio's default context budget raised 32k → 128k so long sessions use the real window.
+- AI: agents can now register MCP servers (`mcp_add_server` / `mcp_list_servers`) — they persist, connect, and appear live in the MCP Servers UI instead of invisible manual edits.
+- SCM: new branches can be published (push -u sets up tracking) and a PR page opened for GitHub/GitLab/Bitbucket — the panel no longer strands UI-created branches.
+- AI: PDF/DOCX attach via the + button now extracts real text (pdfjs/mammoth) — the picker used to hide them.
+- AI: fewer wasted PowerShell quoting attempts — quoting guidance in the prompt/tool schema plus a recovery hint appended to parse errors.
+- Fixed: MCP Extensions panel showed a literal `Loading\u2026` label (and the search placeholder) while the registry loaded.
+
+---
+
 ## [1.5.4]
 
 - AI: `look_at_screen` — the agent can now see your displays; say "look at my screen" / "my left monitor" and the selected vision model analyzes the screenshot (no extra model needed; OCR fallback for text-only models, transcript shows the thumbnail, every capture needs your approval).
