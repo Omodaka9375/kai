@@ -48,12 +48,34 @@ jobs:
             libssl-dev \
             pkg-config \
             libclang-dev \
+            ninja-build \
             libxcb1-dev \
             libxrandr-dev \
             libdbus-1-dev \
-            libpipewire-0.3-dev \
             libwayland-dev \
             libegl-dev
+
+      # xcap → pipewire-rs → libspa generates bindings from the SYSTEM PipeWire
+      # headers (bindgen + pkg-config). ubuntu-22.04 ships PipeWire 0.3.48
+      # (2022), which predates the API libspa 0.10 expects (spa_meta_first,
+      # spa_meta_region_is_valid, spa_video_info_raw.flags, u64 modifier) —
+      # libspa fails to compile. Build PipeWire 1.2 from source into /usr/local
+      # so bindgen sees the newer headers while keeping the glibc floor of
+      # 22.04 (the deb/rpm still targets Debian 12 / Ubuntu 22.04 users).
+      # Sonames are unchanged (libpipewire-0.3.so.0), so the produced binary
+      # also links against distro PipeWire at runtime.
+      # Bump the tag if libspa ever needs newer APIs — but avoid 1.6+
+      # (spa_pod_builder ABI churn, see scap#185).
+      - name: Install PipeWire 1.2 headers (libspa 0.10 requirement)
+        run: |
+          sudo apt-get install -y meson
+          git clone --depth 1 --branch 1.2.7 \
+            https://github.com/PipeWire/pipewire.git /tmp/pw
+          meson setup /tmp/pw-build /tmp/pw --auto-features=disabled \
+            -Dsession-managers=[]
+          sudo ninja -C /tmp/pw-build install
+          sudo ldconfig
+          echo "PKG_CONFIG_PATH=/usr/local/lib/x86_64-linux-gnu/pkgconfig:/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig" >> "$GITHUB_ENV"
 
       - uses: dtolnay/rust-toolchain@stable
         with:

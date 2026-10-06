@@ -116,12 +116,30 @@ jobs:
             patchelf \
             pkg-config \
             libclang-dev \
+            ninja-build \
             libxcb1-dev \
             libxrandr-dev \
             libdbus-1-dev \
-            libpipewire-0.3-dev \
             libwayland-dev \
             libegl-dev
+
+      # xcap → pipewire-rs → libspa builds bindings from the SYSTEM PipeWire
+      # headers. ubuntu-22.04's PipeWire 0.3.48 is too old for libspa 0.10
+      # (missing spa_meta_first / spa_meta_region_is_valid / video flags) —
+      # compile PipeWire 1.2 into /usr/local instead. Keeps the 22.04 glibc
+      # floor; sonames unchanged so the binary also runs against distro
+      # PipeWire. See ci.yml for the full rationale.
+      - name: Install PipeWire 1.2 headers (libspa 0.10 requirement)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get install -y meson
+          git clone --depth 1 --branch 1.2.7 \
+            https://github.com/PipeWire/pipewire.git /tmp/pw
+          meson setup /tmp/pw-build /tmp/pw --auto-features=disabled \
+            -Dsession-managers=[]
+          sudo ninja -C /tmp/pw-build install
+          sudo ldconfig
+          echo "PKG_CONFIG_PATH=/usr/local/lib/x86_64-linux-gnu/pkgconfig:/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig" >> "$GITHUB_ENV"
 
       - uses: pnpm/action-setup@v6
         with:
