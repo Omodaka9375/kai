@@ -29,6 +29,7 @@ import { compactModelMessagesDetailed } from "./compact";
 import {
   attachmentFallbackText,
   extractAttachmentText,
+  modelTextOnly,
 } from "../extraction";
 import type { ProviderKeys } from "./keyring";
 import { createProxyFetch } from "./proxyFetch";
@@ -609,8 +610,17 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // Text-only models (DeepSeek-class, GLM base, …) reject `file` parts.
   // Swap image parts for extracted text (dimensions + OCR) AFTER conversion —
   // the UI messages keep the image so the transcript still shows it.
+  // For custom endpoints the registry entry is a placeholder — consult the
+  // RUNTIME model name (opts.lmstudioModelId / opts.openaiCompatibleModelId)
+  // so a locally-hosted vision model actually receives the image.
+  const runtimeModelName =
+    modelId === "lmstudio-local"
+      ? opts.lmstudioModelId
+      : modelId === "openai-compatible-custom"
+        ? opts.openaiCompatibleModelId
+        : null;
   const history = normalizeForProvider(
-    getModel(modelId).tags?.includes("vision")
+    !modelTextOnly(modelId, runtimeModelName)
       ? rawHistory
       : await extractImagesForTextOnly(rawHistory),
     provider,

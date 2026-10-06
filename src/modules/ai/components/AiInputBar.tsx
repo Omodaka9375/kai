@@ -26,6 +26,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ACCEPTED_FILES, useComposer, type FileAttachment } from "./composer";
 import { modelTextOnly } from "../extraction";
 import { useWorkspaceFiles } from "../hooks/useWorkspaceFiles";
+import { usePreferencesStore } from "@/modules/settings/preferences";
 import { SLASH_COMMANDS } from "../lib/slashCommands";
 import type { Snippet } from "../lib/snippets";
 import { useChatStore } from "../store/chatStore";
@@ -227,7 +228,19 @@ export function AiInputBar() {
   // the agent will send extracted text instead of the picture itself.
   const selectedModelId = useChatStore((s) => s.selectedModelId);
   const hasImageAttachment = c.files.some((f) => f.kind === "image");
-  const imageBlindModel = hasImageAttachment && modelTextOnly(selectedModelId);
+  // Custom endpoints (LM Studio / OpenAI-compatible) run a user-supplied
+  // model — the registry entry is a placeholder with no vision tag, so consult
+  // the RUNTIME model name: a local qwen2-vl / llava actually sees images.
+  const lmModelId = usePreferencesStore((s) => s.lmstudioModelId);
+  const compatModelId = usePreferencesStore((s) => s.openaiCompatibleModelId);
+  const runtimeModelName =
+    selectedModelId === "lmstudio-local"
+      ? lmModelId
+      : selectedModelId === "openai-compatible-custom"
+        ? compatModelId
+        : null;
+  const imageBlindModel =
+    hasImageAttachment && modelTextOnly(selectedModelId, runtimeModelName);
 
   return (
     <div
@@ -266,8 +279,11 @@ export function AiInputBar() {
               className="shrink-0"
             />
             <span className="truncate">
-              {selectedModelId} can&apos;t see images — it will receive extracted
-              text (OCR) instead. Switch to a vision model to send the picture.
+              {selectedModelId === "lmstudio-local" ||
+              selectedModelId === "openai-compatible-custom"
+                ? `${runtimeModelName || selectedModelId} doesn't look like a vision model — it will receive extracted text (OCR). Rename the model to include "vl"/"vision" if it can see images.`
+                : `${selectedModelId} can&apos;t see images — it will receive extracted
+              text (OCR) instead. Switch to a vision model to send the picture.`}
             </span>
           </div>
         )}

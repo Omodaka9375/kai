@@ -19,10 +19,59 @@ export type FileAttachment = {
   size: number;
 };
 
-/** True when the model can't accept multimodal messages (no `vision` tag). */
-export function modelTextOnly(modelId: string): boolean {
+/**
+ * True when the model can't accept multimodal messages (no `vision` tag).
+ *
+ * For cloud models the registry knows the answer. For custom endpoints
+ * (LM Studio / OpenAI-compatible) the REGISTRY entry is a placeholder — the
+ * real model is user-supplied at runtime (`lmstudioModelId` etc.), so the
+ * catalog can't know its capabilities. Guess from the runtime model NAME
+ * (vision families are recognizable: qwen2-vl, llava, minicpm-v, …) so a
+ * locally-hosted vision model actually receives the image instead of being
+ * silently OCR'd. Wrong guesses fall back to text-only — harmless, the
+ * request still succeeds, the user just doesn't get image input.
+ */
+export function modelTextOnly(
+  modelId: string,
+  runtimeModelName?: string | null,
+): boolean {
   const m = getModel(modelId as never);
-  return !m.tags?.includes("vision");
+  if (m.tags?.includes("vision")) return false;
+  // Registry says text-only — but a custom endpoint's REAL model may differ.
+  if (
+    (m.id === "openai-compatible-custom" || m.id === "lmstudio-local") &&
+    looksLikeVisionModel(runtimeModelName)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/** Heuristic: does the runtime model name look like a vision-capable family?
+ *  Deliberately permissive — false positives (claiming vision on a text model)
+ *  only surface as a provider error on that one request; false negatives
+ *  silently downgrade the user's image to OCR text. Covers the common local
+ *  GGUF vision families (LM Studio / Ollama / vLLM names). */
+export function looksLikeVisionModel(name?: string | null): boolean {
+  if (!name) return false;
+  const n = name.toLowerCase();
+  // "vl" as a token (qwen2-vl-7b, internvl2, smolvlm-instruct) — not a
+  // mid-word accident ("evolved" has no vl boundary).
+  if (/(^|[^a-z])vl([^a-z]|$)/.test(n)) return true;
+  const families = [
+    "vision",
+    "llava",
+    "moondream",
+    "minicpm-v",
+    "cogvlm",
+    "cogagent",
+    "idefics",
+    "paligemma",
+    "florence",
+    "pixtral",
+    "internvl",
+  ];
+  return families.some((f) => n.includes(f));
 }
 
 const DATA_URL_RE = /^data:([^;]+);base64,(.*)$/s;
