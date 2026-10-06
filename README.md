@@ -42,8 +42,10 @@ Kai is a fast, cross-platform terminal built on **Tauri 2 + Rust** and **React 1
 ### AI Agent
 
 - **Bring your own key** — OpenAI, Anthropic, Google, Groq, xAI, Cerebras, DeepSeek, Mistral, OpenRouter, and direct Z.ai (GLM)
-- Local models via LM Studio or Ollama
-- Paste screenshots straight into chat with `Ctrl+V`
+- Local models via LM Studio or Ollama — vision models receive images automatically (runtime-name detection + a manual Vision override in Settings)
+- Paste screenshots straight into chat with `Ctrl+V`; attach PDF/DOCX via the + button (text extracted, works on every model)
+- `/compact` — reset the context in place in the same chat when a session runs long; no new chat needed
+- Screen access — `look_at_screen` shows your displays to the agent (multi-monitor aware, every capture needs your approval)
 - Universal file extraction — zip, audio, image, and video read locally as text
 - Interactive todo toggling with auto-closing completion lists
 - Per-model thinking control — a toggle on each reasoning model cycles effort off/low/medium/high
@@ -59,20 +61,21 @@ Kai is a fast, cross-platform terminal built on **Tauri 2 + Rust** and **React 1
 ### Git
 
 - Stage, commit, push, and review diffs from the source-control panel
-- Manage branches (list, switch, create, delete) without leaving the panel
+- Manage branches (list, switch, create, delete) without leaving the panel — new branches publish with one click (`push -u` sets up tracking)
+- Open the GitHub/GitLab/Bitbucket pull-request page for the current branch, straight from the panel
 - Resolve merge conflicts with conflict counts and per-file line locations, plus one-click "Ask KAI to resolve"
 - Optional GPG commit signing (auto-sign or approval modes)
 
 ### Extensibility & Tooling
 
-- **MCP** — connect external tool servers and install from the official registry
+- **MCP** — connect external tool servers and install from the official registry, or hand the agent a setup URL: `mcp_add_server` registers it so it shows up live in the MCP Servers UI
 - File explorer and built-in web preview (with one-tap Stop)
 - REST API tester and 8 UI themes
-- Local Whisper voice transcription (offline, bundled Silero VAD)
+- Voice input — OpenAI whisper-1 transcription with a no-key browser SpeechRecognition fallback
 - PDF/DOCX reading, image OCR (tesseract), ZIP/JAR listing, and audio metadata
 - Direct PDF export (`convert_to_pdf`) from Markdown/Word
 - YouTube transcript summarization
-- `Kai.md` project memory, context summarization, and auto-approve modes
+- `Kai.md` project memory, context summarization, and auto-approve modes — plus save/red persistent memory tools the agent can use mid-session
 - Skills & snippets
 - Per-project **sandbox** (read-only or workspace-only) and a **detached-copy** workflow — work in an isolated copy, then merge or discard
 
