@@ -1,0 +1,29 @@
+refactor(voice): remove local Whisper (whisper.cpp) — API + browser paths only
+
+Drops the bundled local transcription engine entirely; voice input now
+resolves: OpenAI whisper-1 (when an OpenAI key is set) → browser Speech
+API fallback.
+
+Removed:
+- Rust: modules/whisper.rs (584 lines — model catalog, download manager,
+  transcribe worker, abort plumbing), whisper-rs dependency (whisper.cpp
+  bindings), the 7 whisper_* command registrations, WhisperManager state,
+  and the .part.<pid> download-temp GC block in lib.rs.
+- Frontend: whisper native bindings + types in native.ts, the local
+  transcription path in useWhisperRecording (decode-to-16k-f32 pipeline,
+  base64 bridge, duration-scaled timeouts), the "Local voice
+  transcription" settings block (model list, download/remove/select,
+  progress bar) from General → Settings, and the whisperModelId
+  preference with its accessors.
+
+Kept: cloud transcribeBlob (whisper-1 via the OpenAI key), the browser
+SpeechRecognition fallback (no key needed), mic watchdogs and
+permission-denied handling — unchanged behavior for both remaining
+routes.
+
+Rationale: local CPU whisper was slow (minutes/clip on the larger
+models), shipped a heavy native dep, and the cloud path is the primary
+UX anyway.
+
+cargo check clean (clippy warning in mcp.rs pre-existing), tsc clean,
+286 tests pass.

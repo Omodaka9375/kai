@@ -1,7 +1,7 @@
 mod modules;
 
 use modules::lock::mutex_lock;
-use modules::{diagnostics, fs, git, gpg, mcp, mcp_oauth, net, pty, secrets, shell, whisper, workspace};
+use modules::{diagnostics, fs, git, gpg, mcp, mcp_oauth, net, pty, secrets, shell, workspace};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
@@ -170,15 +170,6 @@ fn pid_from_filename(name: &str) -> Option<u32> {
     {
         return stem.split('-').next().and_then(|p| p.parse().ok());
     }
-    // Whisper download temp: "<model-stem>.part.<pid>" (e.g.
-    // "ggml-large-v3-turbo-q5_0.part.12345"). The PID is the segment
-    // immediately after a "part" segment.
-    let segments: Vec<&str> = name.split('.').collect();
-    if let Some(i) = segments.iter().position(|s| *s == "part") {
-        if let Some(pid) = segments.get(i + 1).and_then(|p| p.parse().ok()) {
-            return Some(pid);
-        }
-    }
     None
 }
 
@@ -189,24 +180,6 @@ fn pid_from_filename(name: &str) -> Option<u32> {
 /// prefix.
 fn gc_stale_logs_and_crashes(log_dir: &std::path::Path) {
     let Ok(entries) = std::fs::read_dir(log_dir) else {
-        return;
-    };
-    let current = std::process::id();
-    for entry in entries.flatten() {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        let Some(pid) = pid_from_filename(&name) else {
-            continue;
-        };
-        if pid == current || pid_alive(pid) {
-            continue;
-        }
-        let _ = std::fs::remove_file(entry.path());
-    }
-}
-
-/// GC orphaned Whisper download temps (`*.part.<pid>`) left by dead processes.
-fn gc_stale_whisper_parts(whisper_dir: &std::path::Path) {
-    let Ok(entries) = std::fs::read_dir(whisper_dir) else {
         return;
     };
     let current = std::process::id();
@@ -479,18 +452,10 @@ pub fn run() {
                 .app_log_dir()
                 .unwrap_or_else(|_| std::env::temp_dir());
             let _ = std::fs::create_dir_all(&log_dir);
-            // Reap per-instance artifacts (logs, crash snapshots, whisper
-            // download temps) left behind by dead processes before starting
+            // Reap per-instance artifacts (logs, crash snapshots) left
+            // behind by dead processes before starting
             // this one — without this they accumulate unboundedly.
             gc_stale_logs_and_crashes(&log_dir);
-            if let Some(dir) = app
-                .path()
-                .app_local_data_dir()
-                .ok()
-                .map(|d| d.join("whisper"))
-            {
-                gc_stale_whisper_parts(&dir);
-            }
             // One-shot shell commands run via script files (not
             // -EncodedCommand — AV flags that as dropper behavior). Point
             // them at app data and sweep anything a crash left behind.
@@ -520,7 +485,6 @@ pub fn run() {
             registry
         })
         .manage(mcp::McpState::default())
-        .manage(whisper::WhisperManager::default())
         .manage(LaunchDir(Mutex::new(parse_launch_dir())))
         .invoke_handler(tauri::generate_handler![
             pty::pty_open,
@@ -624,13 +588,6 @@ pub fn run() {
             net::openrouter_list_models,
             net::ai_http_request,
             net::ai_http_stream,
-            whisper::whisper_list_models,
-            whisper::whisper_model_status,
-            whisper::whisper_download_model,
-            whisper::whisper_cancel_download,
-            whisper::whisper_delete_model,
-            whisper::whisper_abort_transcribe,
-            whisper::whisper_transcribe,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

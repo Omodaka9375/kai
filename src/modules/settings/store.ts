@@ -106,8 +106,6 @@ export type Preferences = {
   sidebarWidth: number;
   /** Active sidebar panel view. */
   sidebarView: "explorer" | "source-control" | "extensions";
-  /** Selected local-whisper model id (Settings → General → voice). */
-  whisperModelId: string | null;
   /** Timestamp (ms) of the last automatic update check. */
   updaterLastCheck: number;
 };
@@ -154,7 +152,7 @@ const KEY_COMMIT_SIGNING_MODE = "commitSigningMode";
 const KEY_COMMIT_SIGNING_KEY = "commitSigningKey";
 const KEY_SIDEBAR_WIDTH = "sidebarWidth";
 const KEY_SIDEBAR_VIEW = "sidebarView";
-const KEY_WHISPER_MODEL_ID = "whisperModelId";
+
 const KEY_UPDATER_LAST_CHECK = "updaterLastCheck";
 
 export const TERMINAL_FONT_SIZE_DEFAULT = 14;
@@ -215,7 +213,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   commitSigningKey: "",
   sidebarWidth: 200,
   sidebarView: "explorer",
-  whisperModelId: null,
+
   updaterLastCheck: 0,
 };
 
@@ -345,9 +343,7 @@ export async function loadPreferences(): Promise<Preferences> {
       get<number>(KEY_SIDEBAR_WIDTH) ?? DEFAULT_PREFERENCES.sidebarWidth,
     ),
     sidebarView: validSidebarView(get(KEY_SIDEBAR_VIEW)),
-    whisperModelId:
-      (get<string | null>(KEY_WHISPER_MODEL_ID) as string | null) ??
-      DEFAULT_PREFERENCES.whisperModelId,
+
     updaterLastCheck:
       get<number>(KEY_UPDATER_LAST_CHECK) ??
       DEFAULT_PREFERENCES.updaterLastCheck,
@@ -593,17 +589,6 @@ export async function setSidebarView(
   // No event emit — sidebar layout is main-window-only.
 }
 
-export async function getWhisperModelId(): Promise<string | null> {
-  const value = await store.get<string | null>(KEY_WHISPER_MODEL_ID);
-  return typeof value === "string" && value.length > 0 ? value : null;
-}
-
-export async function setWhisperModelId(value: string | null): Promise<void> {
-  await store.set(KEY_WHISPER_MODEL_ID, value);
-  await store.save();
-  // No event emit — the hook reads this lazily per transcription.
-}
-
 export async function getUpdaterLastCheck(): Promise<number> {
   const value = await store.get<number>(KEY_UPDATER_LAST_CHECK);
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
@@ -674,7 +659,6 @@ export async function onPreferencesChange(
     [KEY_COMMIT_SIGNING_KEY]: "commitSigningKey",
     [KEY_SIDEBAR_WIDTH]: "sidebarWidth",
     [KEY_SIDEBAR_VIEW]: "sidebarView",
-    [KEY_WHISPER_MODEL_ID]: "whisperModelId",
     [KEY_UPDATER_LAST_CHECK]: "updaterLastCheck",
   };
   // Same-process writes still fire onChange immediately; cross-window writes
