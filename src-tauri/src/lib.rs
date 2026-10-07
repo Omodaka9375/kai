@@ -9,15 +9,17 @@ use tauri_plugin_window_state::StateFlags;
 
 /// Grant MICROPHONE (and CAMERA) permissions on a WebView2 webview.
 ///
-/// wry's built-in `PermissionRequested` handler only auto-approves
-/// `CLIPBOARD_READ`; every other permission (including microphone, which
-/// `navigator.mediaDevices.getUserMedia` needs for voice dictation) is left
-/// denied. Register an additional handler here that explicitly allows
-/// MICROPHONE / CAMERA so in-app dictation works on the packaged app.
+/// wry's built-in `PermissionRequested` handler leaves permissions denied;
+/// this handler explicitly allows MICROPHONE / CAMERA (needed for voice
+/// dictation via `navigator.mediaDevices.getUserMedia`) and CLIPBOARD_READ
+/// (the composer's context-menu Paste uses `navigator.clipboard.readText`;
+/// without an allow, WebView2 shows its native permission flyout — which
+/// renders stuck at the top-left corner of frameless windows).
 #[cfg(target_os = "windows")]
 fn grant_media_permissions(window: &tauri::WebviewWindow) {
     use webview2_com::Microsoft::Web::WebView2::Win32::{
         COREWEBVIEW2_PERMISSION_KIND, COREWEBVIEW2_PERMISSION_KIND_CAMERA,
+        COREWEBVIEW2_PERMISSION_KIND_CLIPBOARD_READ,
         COREWEBVIEW2_PERMISSION_KIND_MICROPHONE, COREWEBVIEW2_PERMISSION_STATE_ALLOW,
     };
     use webview2_com::PermissionRequestedEventHandler;
@@ -41,6 +43,7 @@ fn grant_media_permissions(window: &tauri::WebviewWindow) {
                         let _ = args.PermissionKind(&mut kind);
                         if kind == COREWEBVIEW2_PERMISSION_KIND_MICROPHONE
                             || kind == COREWEBVIEW2_PERMISSION_KIND_CAMERA
+                            || kind == COREWEBVIEW2_PERMISSION_KIND_CLIPBOARD_READ
                         {
                             let _ = args.SetState(COREWEBVIEW2_PERMISSION_STATE_ALLOW);
                         }
