@@ -38,6 +38,11 @@ pub struct GitStatusSnapshot {
     pub ahead: u32,
     pub behind: u32,
     pub is_detached: bool,
+    /// Short name of the remote's default branch (e.g. "main" from
+    /// refs/remotes/origin/HEAD). None when no remote / no remote HEAD.
+    /// Drives the panel's PR affordances: hide the Open-PR button on the
+    /// default branch and use it as the PR base.
+    pub default_branch: Option<String>,
     pub truncated: bool,
     pub changed_files: Vec<GitChangedFile>,
 }

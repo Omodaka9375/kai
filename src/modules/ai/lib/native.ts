@@ -62,6 +62,8 @@ export type GitStatusSnapshot = {
   ahead: number;
   behind: number;
   isDetached: boolean;
+  /** Remote's default branch (e.g. "main"); null when no remote HEAD. */
+  defaultBranch: string | null;
   truncated: boolean;
   changedFiles: GitChangedFile[];
 };

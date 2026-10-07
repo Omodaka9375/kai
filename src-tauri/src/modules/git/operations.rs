@@ -131,6 +131,12 @@ fn status_inner(repo_root: &ResolvedGitDirectory) -> Result<GitStatusSnapshot> {
     let stdout = std::str::from_utf8(&output.stdout).unwrap_or("");
     let mut parsed = parse_porcelain_v2(stdout);
 
+    // Remote default branch (e.g. "main" from refs/remotes/origin/HEAD):
+    // drives the PR affordances — hide the Open-PR button on the default
+    // branch, and use it as the PR base. Best-effort: None when no remote
+    // or no remote HEAD (panel falls back to hiding the button).
+    let default_branch = remote_default_branch(repo_root);
+
     // A branch with no upstream gets NO `# branch.ab` line from git, so
     // `ahead` parses as 0 even when local commits exist — which grayed out
     // the panel's Publish button (canPush requires ahead > 0 when there is
@@ -139,21 +145,13 @@ fn status_inner(repo_root: &ResolvedGitDirectory) -> Result<GitStatusSnapshot> {
     // commits the publish push would actually send. Best-effort — a repo
     // with no remotes keeps ahead=0 and the button stays correctly disabled.
     if parsed.upstream.is_none() && !parsed.is_detached {
-        // Ok(...) / Ok(Some(...)) patterns — matching on `.ok()` trips
-        // clippy::match_result_ok under CI's `-D warnings`.
-        if let Ok(remote) = default_remote(repo_root) {
-            if let Ok(Some(base)) = git_stdout_line_opt(
+        if let Some(base) = remote_default_branch_ref(repo_root) {
+            if let Ok(Some(count)) = git_stdout_line_opt(
                 &repo_root.workspace,
                 &repo_root.git_path,
-                ["rev-parse", "--symbolic-full-name", &format!("{remote}/HEAD")],
+                ["rev-list", "--count", &format!("{base}..HEAD")],
             ) {
-                if let Ok(Some(count)) = git_stdout_line_opt(
-                    &repo_root.workspace,
-                    &repo_root.git_path,
-                    ["rev-list", "--count", &format!("{base}..HEAD")],
-                ) {
-                    parsed.ahead = count.trim().parse().unwrap_or(0);
-                }
+                parsed.ahead = count.trim().parse().unwrap_or(0);
             }
         }
     }
@@ -165,9 +163,39 @@ fn status_inner(repo_root: &ResolvedGitDirectory) -> Result<GitStatusSnapshot> {
         ahead: parsed.ahead,
         behind: parsed.behind,
         is_detached: parsed.is_detached,
+        default_branch,
         truncated: output.truncated,
         changed_files: parsed.files,
     })
+}
+
+/// Short branch name of the remote's HEAD (e.g. "main"), or None when no
+/// remote / no remote HEAD exists. Shared by the panel's PR affordances.
+fn remote_default_branch(repo_root: &ResolvedGitDirectory) -> Option<String> {
+    let full = remote_default_branch_ref(repo_root)?;
+    let rest = full.strip_prefix("refs/remotes/")?;
+    let branch = rest.split_once('/').map(|(_, b)| b)?;
+    Some(branch.to_string())
+}
+
+/// Fully-qualified ref of the default remote's HEAD (e.g.
+/// "refs/remotes/origin/main"), or None. Callers that need the ref for
+/// rev-list use this; display/persistence uses remote_default_branch.
+fn remote_default_branch_ref(repo_root: &ResolvedGitDirectory) -> Option<String> {
+    let remote = default_remote(repo_root).ok()?;
+    let full = git_stdout_line_opt(
+        &repo_root.workspace,
+        &repo_root.git_path,
+        ["rev-parse", "--symbolic-full-name", &format!("{remote}/HEAD")],
+    )
+    .ok()
+    .flatten()?;
+    let trimmed = full.trim();
+    if trimmed.starts_with("refs/remotes/") {
+        Some(trimmed.to_string())
+    } else {
+        None
+    }
 }
 
 pub fn diff(

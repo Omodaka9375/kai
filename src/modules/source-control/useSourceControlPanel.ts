@@ -1075,7 +1075,10 @@ export function useSourceControlPanel(
 
   /** Open the repo host's create-PR page for the current branch. Best-effort:
    *  only GitHub/GitLab/Bitbucket remotes produce a URL (others surface a
-   *  hint). The branch must be pushed first — the provider needs it. */
+   *  hint). The branch must be pushed first — the provider needs it.
+   *  PR base: the remote's default branch — NEVER the branch's own
+   *  upstream (a published feature branch tracks itself, which produced a
+   *  broken compare/feature...feature self-compare). */
   const openPr = useCallback(async () => {
     if (!repo) return;
     setActionMessage(null);
@@ -1094,17 +1097,14 @@ export function useSourceControlPanel(
         setActionError("No current branch to open a PR for.");
         return;
       }
-      // Default-branch guess: the provider's compare page fills the rest;
-      // upstream like origin/main wins when present.
-      const base = status.upstream?.split("/").slice(1).join("/") || null;
       await openUrl(
-        createPullRequestUrl(info, branch, base ?? undefined),
+        createPullRequestUrl(info, branch, status?.defaultBranch ?? undefined),
       );
       setActionMessage(`Opened new-PR page for ${branch}`);
     } catch (error) {
       setActionError(normalizeError(error));
     }
-  }, [repo, status?.branch, status?.upstream]);
+  }, [repo, status?.branch, status?.defaultBranch]);
 
   const pendingDiscardView = useMemo<PendingDiscard | null>(() => {
     if (!pendingDiscard) return null;
@@ -1139,7 +1139,18 @@ export function useSourceControlPanel(
     unstagedEntries,
     allClean,
     canPush,
-    canOpenPr: !!repo && !!(status?.branch && status.branch !== "HEAD"),
+    // Open-PR is a feature-branch affordance. Gated on:
+    //  - a repo + a real (non-detached) branch;
+    //  - NOT the remote's default branch (PRs go FROM a feature branch —
+    //    on main there is nothing to propose);
+    //  - a known remote default branch (the PR base) — without it the
+    //    button can't build a meaningful compare URL.
+    canOpenPr:
+      !!repo &&
+      !!status?.branch &&
+      status.branch !== "HEAD" &&
+      !!status.defaultBranch &&
+      status.branch !== status.defaultBranch,
     openPr,
     pushHint,
     hasConflicts,
