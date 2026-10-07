@@ -4,6 +4,16 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.5.7]
+
+- AI: local models that stall at high context now recover seamlessly — endpoint-aware watchdog budgets (10/4 min local vs 5/2 cloud), auto-compact, and an automatic retry in the same session; the error card stays reserved for genuinely dead engines.
+- Voice: hands-free mode — with auto-approve on, stopping voice capture submits the transcription to the agent automatically (a true Enter-equivalent: busy agent → steering queue).
+- Voice: the listening/transcribing status moved into the input placeholder ("Listening…" / "Transcribing…"); the duplicate expanding row below the input is gone.
+- AI: `/compact` and other slash commands now show their outcome under the input bar — previously refusals ("wait for the run", "already minimal") were invisible and the input just cleared.
+- AI: `/goal` (Goal loop) is now discoverable in the `#` command picker and works from both `/` and `#` invocations — the picker path previously fell through to a plain chat message.
+
+---
+
 ## [1.5.6]
 
 - Fixed: the updater popup showed no release notes since 1.5.3 — the CHANGELOG moved to flat bullets under each version and the parser only collected `###`-sectioned bullets; both parsers now accept the flat format (locked by a regression test against the real 1.5.5 layout).

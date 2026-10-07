@@ -1,4 +1,9 @@
-import { CheckListIcon, SparklesIcon, ArrowShrink01Icon } from "@hugeicons/core-free-icons";
+import {
+  CheckListIcon,
+  SparklesIcon,
+  ArrowShrink01Icon,
+  Target01Icon,
+} from "@hugeicons/core-free-icons";
 import { usePlanStore } from "../store/planStore";
 import { handleGoalCommand } from "./goalHandler";
 
@@ -49,6 +54,12 @@ export const SLASH_COMMANDS: Record<string, SlashCommandMeta> = {
     invocation: "/compact",
     label: "Compress context in place",
     icon: ArrowShrink01Icon,
+  },
+  goal: {
+    name: "goal",
+    invocation: "/goal",
+    label: "Goal loop",
+    icon: Target01Icon,
   },
 };
 

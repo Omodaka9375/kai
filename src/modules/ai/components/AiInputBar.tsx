@@ -29,65 +29,24 @@ import { useWorkspaceFiles } from "../hooks/useWorkspaceFiles";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { SLASH_COMMANDS } from "../lib/slashCommands";
 import type { Snippet } from "../lib/snippets";
+import {
+  detectSnippetTrigger,
+  detectFileTrigger,
+  type SnippetTrigger,
+  type FileTrigger,
+} from "../lib/inputTriggers";
 import { useChatStore } from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
 import { AutoApproveToggle } from "./AutoApproveToggle";
 import { FilePickerContent } from "./FilePicker";
 import { SnippetPickerContent, type PickerItem } from "./SnippetPicker";
 
-type SnippetTrigger = {
-  start: number;
-  end: number;
-  query: string;
-};
-
-type FileTrigger = {
-  start: number;
-  end: number;
-  query: string;
-};
-
-function detectSnippetTrigger(
-  value: string,
-  caret: number,
-): SnippetTrigger | null {
-  for (let i = caret - 1; i >= 0; i--) {
-    const ch = value[i];
-    if (ch === "#") {
-      const prev = i === 0 ? " " : value[i - 1];
-      if (!/\s/.test(prev)) return null;
-      const slice = value.slice(i + 1, caret);
-      if (!/^[a-z0-9-]*$/i.test(slice)) return null;
-      return { start: i, end: caret, query: slice.toLowerCase() };
-    }
-    if (/\s/.test(ch)) return null;
-    if (!/[a-z0-9-]/i.test(ch)) return null;
-  }
-  return null;
-}
-
-function detectFileTrigger(
-  value: string,
-  caret: number,
-): FileTrigger | null {
-  for (let i = caret - 1; i >= 0; i--) {
-    const ch = value[i];
-    if (ch === "@") {
-      const prev = i === 0 ? " " : value[i - 1];
-      if (!/\s/.test(prev)) return null;
-      const slice = value.slice(i + 1, caret);
-      return { start: i, end: caret, query: slice };
-    }
-    if (/\s/.test(ch)) return null;
-  }
-  return null;
-}
-
 export function AiInputBar() {
   const c = useComposer();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const snippets = useSnippetsStore((s) => s.snippets);
   const workspaceRoot = useChatStore((s) => s.live.getWorkspaceRoot());
+  const slashCommands = useMemo(() => Object.values(SLASH_COMMANDS), []);
 
   const [trigger, setTrigger] = useState<SnippetTrigger | null>(null);
   const [fileTrigger, setFileTrigger] = useState<FileTrigger | null>(null);
@@ -127,22 +86,27 @@ export function AiInputBar() {
   const filteredItems = useMemo<PickerItem[]>(() => {
     if (!trigger) return [];
     const q = trigger.query;
-    const cmdItems: PickerItem[] = Object.values(SLASH_COMMANDS)
+    const cmdItems: PickerItem[] = slashCommands
       .filter(
         (c) => !q || c.name.includes(q) || c.label.toLowerCase().includes(q),
       )
       .map((command) => ({ kind: "command", command }));
-    const snipItems: PickerItem[] = snippets
-      .filter(
-        (s) =>
-          !q ||
-          s.handle.includes(q) ||
-          s.name.toLowerCase().includes(q) ||
-          s.description.toLowerCase().includes(q),
-      )
-      .map((snippet) => ({ kind: "snippet", snippet }));
+    // `/` is the canonical command prefix — showing snippets there is noise.
+    // Snippets stay on `#` where they have always lived.
+    const snipItems: PickerItem[] =
+      trigger.char === "/"
+        ? []
+        : snippets
+            .filter(
+              (s) =>
+                !q ||
+                s.handle.includes(q) ||
+                s.name.toLowerCase().includes(q) ||
+                s.description.toLowerCase().includes(q),
+            )
+            .map((snippet) => ({ kind: "snippet", snippet }));
     return [...cmdItems, ...snipItems];
-  }, [trigger, snippets]);
+  }, [trigger, snippets, slashCommands]);
 
   const FILE_PICKER_CAP = 30;
   const filteredFiles = useMemo<string[]>(() => {
@@ -444,7 +408,7 @@ export function AiInputBar() {
                       : "Transcribing…"
                     : c.isBusy
                       ? "Redirect agent…"
-                      : "Ask anything # for snippets, @ for files"
+                      : "Ask anything / for commands, # for snippets, @ for files"
                 }
                 rows={1}
                 disabled={false}

@@ -2,7 +2,7 @@ import { useGoalsStore } from "../store/goalsStore";
 import { parseGoalContract } from "./goals";
 
 /**
- * Handle /goal slash commands.
+ * Handle /goal and #goal slash commands.
  * Returns true if the command was handled (should not be sent as normal message).
  */
 export async function handleGoalCommand(text: string): Promise<{
@@ -11,9 +11,13 @@ export async function handleGoalCommand(text: string): Promise<{
   error?: string;
 }> {
   const trimmed = text.trim();
+  // Accept both the `/goal` and `#goal` invocations — the `#` form is what
+  // the composer's picked-command chip path generates (`#goal <text>`),
+  // while users typing manually usually reach for `/`.
+  const body = trimmed.replace(/^#goal\b/, "/goal");
 
   // /goal (status) - show current goal status
-  if (trimmed === "/goal") {
+  if (body === "/goal") {
     const activeGoalId = useGoalsStore.getState().activeGoalId;
     if (!activeGoalId) {
       return { handled: true, error: "No active goal. Use `/goal <contract>` to start one." };
@@ -29,7 +33,7 @@ export async function handleGoalCommand(text: string): Promise<{
   }
 
   // /goal pause
-  if (trimmed === "/goal pause") {
+  if (body === "/goal pause") {
     const activeGoalId = useGoalsStore.getState().activeGoalId;
     if (!activeGoalId) {
       return { handled: true, error: "No active goal to pause." };
@@ -39,7 +43,7 @@ export async function handleGoalCommand(text: string): Promise<{
   }
 
   // /goal resume
-  if (trimmed === "/goal resume") {
+  if (body === "/goal resume") {
     const activeGoalId = useGoalsStore.getState().activeGoalId;
     if (!activeGoalId) {
       // Try to find a paused goal
@@ -57,7 +61,7 @@ export async function handleGoalCommand(text: string): Promise<{
   }
 
   // /goal clear
-  if (trimmed === "/goal clear") {
+  if (body === "/goal clear") {
     const activeGoalId = useGoalsStore.getState().activeGoalId;
     if (!activeGoalId) {
       return { handled: true, error: "No active goal to clear." };
@@ -67,8 +71,8 @@ export async function handleGoalCommand(text: string): Promise<{
   }
 
   // /goal <contract> - create new goal
-  if (trimmed.startsWith("/goal ")) {
-    const contract = trimmed.slice(6).trim();
+  if (body.startsWith("/goal ")) {
+    const contract = body.slice(6).trim();
     if (!contract) {
       return {
         handled: true,
