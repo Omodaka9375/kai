@@ -468,6 +468,8 @@ const runtimeDeps: ChatRuntimeDeps = {
     useChatStore.getState().activeSessionId === sessionId,
   patchAgentMeta: (patch) => useChatStore.getState().patchAgentMeta(patch),
   abortRunController,
+  compactActiveSession: () =>
+    useChatStore.getState().compactActiveSession(),
 };
 
 /**

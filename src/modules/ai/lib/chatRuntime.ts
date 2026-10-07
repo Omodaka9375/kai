@@ -26,6 +26,7 @@ import type { AgentUsage } from "../lib/agent";
 import type { StackInfo } from "../lib/stackDetector";
 import { detectStack } from "../lib/stackDetector";
 import { createContextAwareTransport } from "../lib/transport";
+import { isStallError } from "../lib/dsmlMiddleware";
 import { loadShadow, withShadowRedirect } from "../lib/shadow";
 import { FileTracker } from "../lib/fileTracker";
 import { type ProviderKeys } from "../lib/keyring";
@@ -55,6 +56,10 @@ export type ChatRuntimeDeps = {
   patchAgentMeta: (patch: Partial<AgentMeta>) => void;
   /** Abort the app-owned run controller for a session (loop detection). */
   abortRunController: (sessionId: string) => void;
+  /** Compact the ACTIVE session's history in place. Returns a human
+   *  outcome string; "Context compacted…" prefix means it succeeded.
+   *  Injected (not imported) so the runtime stays store-cycle-free. */
+  compactActiveSession: () => string;
 };
 
 export type AgentRunStatus =
@@ -406,6 +411,48 @@ export function makeChatSync(
         (e as { componentStack?: unknown }).componentStack ?? "",
       );
       const display = resolveErrorDisplay(e);
+
+      // ── Seamless stall recovery ─────────────────────────────────────
+      // Stalls concentrate at high context: the local engine chews on a
+      // huge prompt for minutes with zero bytes on the wire, the watchdog
+      // fires, and a plain error card forces a manual Retry that re-sends
+      // the same giant prompt into the same slow prefill. Instead: compact
+      // the history (same session, `/compact` core) and regenerate over
+      // the trimmed set — the user just sees the ring drop and the run go
+      // on. The compaction floor is the loop-breaker: after one auto-compact
+      // the history is minimal, so a second stall finds nothing to compact
+      // and falls through to the manual error card. One attempt, no state.
+      if (isStallError(e) && isActive()) {
+        const outcome = deps.compactActiveSession();
+        if (outcome.startsWith("Context compacted")) {
+          console.info("[kai] stream stall — auto-compacted, retrying:", outcome);
+          deps.patchAgentMeta({
+            status: "streaming",
+            error: null,
+            // Visible breadcrumb so the pause reads as recovery, not silence:
+            // "Compacting context…"-style notice with the compaction stats.
+            summaryNotice: {
+              at: Date.now(),
+              text: `${outcome} Retrying automatically.`,
+            },
+          });
+          // regenerate() drops the partial assistant message the dead
+          // stream left, then re-runs over the compacted history. Async +
+          // deferred: the SDK's onError is sync — a direct await here would
+          // run the retry before the error status is even committed.
+          setTimeout(() => {
+            void chatRef.current?.regenerate().catch((retryErr) => {
+              console.error("[kai] auto-retry failed:", retryErr);
+              deps.patchAgentMeta({
+                status: "error",
+                error: resolveErrorDisplay(retryErr),
+              });
+            });
+          }, 0);
+          return;
+        }
+      }
+
       deps.patchAgentMeta({
         status: "error",
         error: display,

@@ -34,24 +34,63 @@ import { generateId, type LanguageModelMiddleware } from "ai";
 //
 // First chunk gets a longer budget: reasoning models with buffered thinking
 // can legitimately emit nothing for minutes before the first token.
-const STALL_FIRST_CHUNK_MS = 300_000; // 5 min before any data
-const STALL_INTER_CHUNK_MS = 120_000; // 2 min between chunks once flowing
-const STALL_MESSAGE =
-  "Model stream stalled — the provider stopped sending data mid-response " +
-  "(no bytes for " +
-  `${Math.round(STALL_INTER_CHUNK_MS / 60_000)} min). ` +
-  "The engine or connection likely died without closing the stream. " +
-  "Try: Retry (re-opens a fresh connection), or switch model/provider.";
+//
+// LOCAL endpoints get double budgets: engines like LM Studio / llama.cpp
+// prefill the ENTIRE prompt before the first token — at high context on
+// consumer hardware that alone can take many minutes — and MoE layer
+// offloading can pause mid-decode too. A shared budget killed working
+// engines as "stalled".
+const STALL_FIRST_CHUNK_MS = 300_000; // 5 min before any data (cloud)
+const STALL_INTER_CHUNK_MS = 120_000; // 2 min between chunks once flowing (cloud)
+const STALL_FIRST_CHUNK_LOCAL_MS = 600_000; // 10 min — local prefill headroom
+const STALL_INTER_CHUNK_LOCAL_MS = 240_000; // 4 min — local offload pauses
+
+const STALL_SIGNATURE = "Model stream stalled";
+
+type StallBudgets = { first: number; inter: number };
+
+function stallBudgetsFor(provider: string): StallBudgets {
+  const local =
+    provider === "lmstudio" || provider === "openai-compatible";
+  return local
+    ? { first: STALL_FIRST_CHUNK_LOCAL_MS, inter: STALL_INTER_CHUNK_LOCAL_MS }
+    : { first: STALL_FIRST_CHUNK_MS, inter: STALL_INTER_CHUNK_MS };
+}
+
+/** Human-readable stall error. Reports the budget that actually fired so
+ *  the text never claims "2 min" when a longer budget was in effect. */
+function stallMessage(timeoutMs: number): string {
+  return (
+    STALL_SIGNATURE +
+    " — no data for " +
+    `${Math.round(timeoutMs / 60_000)} min. ` +
+    "The engine or connection likely died without closing the stream. " +
+    "If context is high, Compact &amp; continue compacts the history and retries in this session; " +
+    "otherwise Retry re-opens a fresh connection."
+  );
+}
+
+/** True when an error (possibly wrapped/re-displayed) is a watchdog stall. */
+export function isStallError(err: unknown): boolean {
+  const msg =
+    err instanceof Error
+      ? err.message
+      : typeof err === "string"
+        ? err
+        : String((err as { message?: unknown })?.message ?? "");
+  return msg.includes(STALL_SIGNATURE);
+}
 
 async function readWithStallWatchdog(
   reader: ReadableStreamDefaultReader<Part>,
   sawAnyChunk: boolean,
+  budgets: StallBudgets,
 ): Promise<ReadableStreamReadResult<Part>> {
-  const timeoutMs = sawAnyChunk ? STALL_INTER_CHUNK_MS : STALL_FIRST_CHUNK_MS;
+  const timeoutMs = sawAnyChunk ? budgets.inter : budgets.first;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(
-      () => reject(new Error(STALL_MESSAGE)),
+      () => reject(new Error(stallMessage(timeoutMs))),
       timeoutMs,
     );
   });
@@ -291,12 +330,14 @@ export function createDsmlMiddleware(): LanguageModelMiddleware {
       const transformed = new ReadableStream<Part>({
         async start(controller) {
           const reader = original.getReader();
+          const budgets = stallBudgetsFor(provider);
           let sawAnyChunk = false;
           try {
             while (true) {
               const { done, value } = await readWithStallWatchdog(
                 reader,
                 sawAnyChunk,
+                budgets,
               );
               if (done) {
                 if (!sawToolCall) {
