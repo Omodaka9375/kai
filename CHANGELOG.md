@@ -12,6 +12,8 @@ All notable changes to the KAI terminal emulator project are documented in this 
 - AI: `/compact` and other slash commands now show their outcome under the input bar — previously refusals ("wait for the run", "already minimal") were invisible and the input just cleared.
 - AI: `/goal` (Goal loop) is now discoverable in the `#` command picker and works from both `/` and `#` invocations — the picker path previously fell through to a plain chat message.
 - AI: PowerShell quote-mangling recovery — the stderr hint now also fires when the child interpreter (Python/Node) gets a truncated argument from `\"`-escaped quotes and dies with its own SyntaxError, with concrete recovery paths instead of a blind retry.
+- AI: commit messages via `-F` — a prompt rule sends multi-line or nested-quote messages through write_file → `git commit -F` on the first try instead of after 2-3 mangled `-m` attempts.
+- SCM: the Publish button was permanently grayed out on unpublished branches — git emits no ahead-count without an upstream, so the panel's enablement condition was structurally unreachable; the status now counts ahead against the default remote's HEAD, so publish → PR works end-to-end from the panel.
 
 ---
 

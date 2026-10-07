@@ -129,7 +129,38 @@ fn status_inner(repo_root: &ResolvedGitDirectory) -> Result<GitStatusSnapshot> {
     ensure_success(&output, "git status failed")?;
 
     let stdout = std::str::from_utf8(&output.stdout).unwrap_or("");
-    let parsed = parse_porcelain_v2(stdout);
+    let mut parsed = parse_porcelain_v2(stdout);
+
+    // A branch with no upstream gets NO `# branch.ab` line from git, so
+    // `ahead` parses as 0 even when local commits exist — which grayed out
+    // the panel's Publish button (canPush requires ahead > 0 when there is
+    // no upstream). Publish (`push -u <default-remote> <branch>`) compares
+    // against the default remote's HEAD, so count exactly that here: the
+    // commits the publish push would actually send. Best-effort — a repo
+    // with no remotes keeps ahead=0 and the button stays correctly disabled.
+    if parsed.upstream.is_none() && !parsed.is_detached {
+        if let Some(remote) = default_remote(repo_root).ok() {
+            if let Some(base) = git_stdout_line_opt(
+                &repo_root.workspace,
+                &repo_root.git_path,
+                ["rev-parse", "--symbolic-full-name", &format!("{remote}/HEAD")],
+            )
+            .ok()
+            .flatten()
+            {
+                if let Some(count) = git_stdout_line_opt(
+                    &repo_root.workspace,
+                    &repo_root.git_path,
+                    ["rev-list", "--count", &format!("{base}..HEAD")],
+                )
+                .ok()
+                .flatten()
+                {
+                    parsed.ahead = count.trim().parse().unwrap_or(0);
+                }
+            }
+        }
+    }
 
     Ok(GitStatusSnapshot {
         repo_root: repo_root.git_path.clone(),
