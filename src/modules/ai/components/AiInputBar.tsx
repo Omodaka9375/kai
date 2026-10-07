@@ -217,12 +217,6 @@ export function AiInputBar() {
     if (it) onPickItem(it);
   };
 
-  const voiceLabel = c.voice.recording
-    ? "Listening…"
-    : c.voice.transcribing
-      ? "Transcribing…"
-      : null;
-
   const hasChips = c.files.length > 0 || c.pickedSnippets.length > 0 || c.pickedCommands.length > 0;
   // Warn when an image is attached but the selected model can't see it —
   // the agent will send extracted text instead of the picture itself.
@@ -443,7 +437,15 @@ export function AiInputBar() {
                     c.submit();
                   }
                 }}
-                placeholder={c.isBusy ? "Redirect agent…" : "Ask anything # for snippets, @ for files"}
+                placeholder={
+                  c.voiceBusy
+                    ? c.voice.recording
+                      ? "Listening…"
+                      : "Transcribing…"
+                    : c.isBusy
+                      ? "Redirect agent…"
+                      : "Ask anything # for snippets, @ for files"
+                }
                 rows={1}
                 disabled={false}
                 wrap="soft"
@@ -488,23 +490,6 @@ export function AiInputBar() {
             >
               <span className="size-1.5 shrink-0 rounded-full bg-blue-500/80" />
               <span className="min-w-0 flex-1 truncate">{c.notice}</span>
-            </motion.div>
-          )}
-          {voiceLabel && (
-            <motion.div
-              key={voiceLabel}
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.12 }}
-              className="flex items-center gap-1.5 px-1 text-[11px] text-muted-foreground"
-            >
-              {c.voice.recording ? (
-                <span className="size-1.5 animate-pulse rounded-full bg-destructive" />
-              ) : (
-                <Spinner className="size-3" />
-              )}
-              <span className="truncate">{voiceLabel}</span>
             </motion.div>
           )}
           {c.voice.error && (

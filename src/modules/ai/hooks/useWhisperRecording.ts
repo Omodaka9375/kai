@@ -82,8 +82,17 @@ function looksLikeDenied(msg: string): boolean {
 
 export function useWhisperRecording({
   onResult,
+  autoSubmit,
+  onAutoSubmit,
 }: {
   onResult: (text: string) => void;
+  /** When true, a finished transcription also fires `onAutoSubmit` —
+   *  hands-free voice: the transcript is sent to the agent without a
+   *  manual Enter. The composer keeps this fresh per render. */
+  autoSubmit?: boolean;
+  /** Fired with the final transcript after `onResult` when `autoSubmit`
+   *  is on. The composer composes it with any pre-typed input and submits. */
+  onAutoSubmit?: (transcript: string) => void;
 }) {
   const apiKey = useChatStore((s) => s.apiKeys.openai);
   const [state, setState] = useState<State>("idle");
@@ -98,6 +107,17 @@ export function useWhisperRecording({
   /** Keep the latest transcript callback without re-creating closures. */
   const onResultRef = useRef(onResult);
   onResultRef.current = onResult;
+  /** Latest auto-submit flag + callback — same freshness pattern. */
+  const autoSubmitRef = useRef(!!autoSubmit);
+  autoSubmitRef.current = !!autoSubmit;
+  const onAutoSubmitRef = useRef(onAutoSubmit);
+  onAutoSubmitRef.current = onAutoSubmit;
+
+  /** Deliver a final transcript: always populate, then auto-submit if on. */
+  const deliver = useCallback((text: string) => {
+    onResultRef.current(text);
+    if (autoSubmitRef.current) onAutoSubmitRef.current?.(text);
+  }, []);
 
   const useWhisper = !!apiKey;
   const supported =
@@ -187,7 +207,7 @@ export function useWhisperRecording({
     sr.onend = () => {
       const text = transcript.trim();
       reset();
-      if (text) onResultRef.current(text);
+      if (text) deliver(text);
     };
     sr.onerror = (e: any) => {
       const code = String((e as any)?.error ?? "");
@@ -199,7 +219,7 @@ export function useWhisperRecording({
       }
       const text = transcript.trim();
       reset();
-      if (text) onResultRef.current(text);
+      if (text) deliver(text);
     };
     try {
       sr.start();
@@ -219,7 +239,7 @@ export function useWhisperRecording({
       reset();
       setError(looksLikeDenied(String(e)) ? "Microphone permission denied." : "Could not start speech recognition.");
     }
-  }, [fail]);
+  }, [fail, deliver]);
 
   const startWhisper = useCallback(
     async () => {
@@ -258,7 +278,7 @@ export function useWhisperRecording({
               TRANSCRIBE_TIMEOUT_BASE_MS,
               "Speech transcription timed out",
             );
-            if (text.trim()) onResultRef.current(text.trim());
+            if (text.trim()) deliver(text.trim());
           } catch (e) {
             console.error("whisper.transcribe", e);
             setError(
@@ -290,7 +310,7 @@ export function useWhisperRecording({
         setState("idle");
       }
     },
-    [apiKey, fail, teardownStream],
+    [apiKey, fail, teardownStream, deliver],
   );
 
   const start = useCallback(() => {

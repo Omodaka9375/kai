@@ -67,12 +67,15 @@ type ComposerCtx = {
   addCommand: (c: SlashCommandMeta) => void;
   removeCommand: (name: string) => void;
   isBusy: boolean;
-  submit: () => void;
+  submit: (options?: { text?: string }) => void;
   stop: () => void;
   voice: Voice;
   canSend: boolean;
   /** Transient slash-command outcome (e.g. "/compact" result), shown under the input. */
   notice: string | null;
+  /** True while voice capture is active or transcribing — the input
+   *  placeholder switches to "Listening…"/"Transcribing…". */
+  voiceBusy: boolean;
 };
 
 const Ctx = createContext<ComposerCtx | null>(null);
@@ -176,10 +179,24 @@ export function AiComposerProvider({ children }: ProviderProps) {
     });
   }, [pendingSelections, consumeSelections]);
 
+  // Hands-free voice: with auto-approve active, a finished transcription
+  // submits immediately — a true Enter-equivalent (busy agent → steering,
+  // same as pressing Enter manually). With approvals on (Ask mode), the
+  // transcript lands in the field for review as before.
+  const autoApprove = useChatStore((s) => s.autoApprove);
   const voice = useWhisperRecording({
     onResult: (transcript: string) => {
       setValue((v) => (v ? `${v} ${transcript}` : transcript));
       requestAnimationFrame(() => textareaRef.current?.focus());
+    },
+    autoSubmit: autoApprove !== "off",
+    onAutoSubmit: (transcript: string) => {
+      // Merge with pre-typed text: `value` in this closure is fresh as of
+      // the last render (the hook keeps the callback current via ref), so
+      // it holds whatever the user typed BEFORE capture started — the
+      // transcript itself has not flushed into state yet.
+      const pre = value.trim();
+      void submit({ text: pre ? `${pre} ${transcript}` : transcript });
     },
   });
 
@@ -267,8 +284,11 @@ export function AiComposerProvider({ children }: ProviderProps) {
     }
   };
 
-  const submit = async () => {
-    const trimmed = value.trim();
+  const submit = async (options?: { text?: string }) => {
+    // `text` overrides the field value — used by hands-free voice: the
+    // transcript arrives via callback before the field's setState flushes,
+    // so reading `value` there would miss it.
+    const trimmed = (options?.text ?? value).trim();
     if (
       !trimmed &&
       files.length === 0 &&
@@ -366,6 +386,9 @@ export function AiComposerProvider({ children }: ProviderProps) {
     // AND image file parts) as a steering signal — the bridge stops the
     // current run and sends it as-is once idle. Anything sent here must
     // match the normal path exactly: attachments included.
+    // AND image file parts) as a steering signal — the bridge stops the
+    // current run and sends it as-is once idle. Anything sent here must
+    // match the normal path exactly: attachments included.
     if (isBusy) {
       const pending = useChatStore.getState().steeringMessage;
       useChatStore
@@ -431,6 +454,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
     voice,
     canSend,
     notice,
+    voiceBusy: voice.recording || voice.transcribing,
   };
 
   return <Ctx.Provider value={ctx}>{children}</Ctx.Provider>;
