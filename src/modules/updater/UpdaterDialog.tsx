@@ -175,7 +175,7 @@ export function UpdaterDialog() {
               {changelog.sections
                 .map(
                   (sec) =>
-                    `### ${sec.title}\n${sec.body
+                    `${sec.title ? `### ${sec.title}\n` : ""}${sec.body
                       .map((b) => `- ${b}`)
                       .join("\n")}`,
                 )

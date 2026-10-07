@@ -51,6 +51,41 @@ describe("parseChangelogSection", () => {
   it("returns empty for a missing version", () => {
     expect(parseChangelogSection(changelog, "9.9.9")).toEqual([]);
   });
+
+  it("collects flat bullets with no ### subheading into one untitled section (current CHANGELOG format)", () => {
+    // The 1.5.x entries are flat `-` bullet lists directly under the
+    // version heading — no `### Added` subheadings. Regression: these were
+    // silently dropped, leaving the updater popup empty.
+    const flat = [
+      "# Changelog",
+      "",
+      "## [1.5.5]",
+      "",
+      "- AI: `/compact` — reset the context in place in the same chat.",
+      "- AI: agents can now register MCP servers.",
+      "",
+      "---",
+      "",
+      "## [1.5.4]",
+      "",
+      "- AI: `look_at_screen` — the agent can now see your displays.",
+      "",
+    ].join("\n");
+
+    const sections = parseChangelogSection(flat, "1.5.5");
+    expect(sections).toEqual([
+      {
+        title: "",
+        body: [
+          "AI: `/compact` — reset the context in place in the same chat.",
+          "AI: agents can now register MCP servers.",
+        ],
+      },
+    ]);
+    // Must not bleed into 1.5.4.
+    const flatBodies = sections.flatMap((s) => s.body).join("\n");
+    expect(flatBodies).not.toContain("look_at_screen");
+  });
 });
 
 describe("parseReleaseNotes", () => {
@@ -80,8 +115,11 @@ describe("parseReleaseNotes", () => {
   });
 
   it("handles a flat bullet-only body (no section headings)", () => {
-    // Some release bodies skip `###` headers entirely.
-    const body = "- Fixed a crash\n- Added a feature\n";
-    expect(parseReleaseNotes(body)).toEqual([]);
+    // Some release bodies skip `###` headers entirely — collect them into
+    // one untitled section instead of dropping everything.
+    const body = "- Fixed a crash\r\n- Added a feature\n";
+    expect(parseReleaseNotes(body)).toEqual([
+      { title: "", body: ["Fixed a crash", "Added a feature"] },
+    ]);
   });
 });

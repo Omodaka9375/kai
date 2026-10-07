@@ -509,7 +509,10 @@ export function AiInputBar() {
                 strokeWidth={2}
                 className="shrink-0"
               />
-              <span className="truncate">{c.voice.error}</span>
+              {/* min-w-0 lets the long provider error text truncate inside
+                  its own box — without it the flex item refuses to shrink,
+                  overflows the row, and clips the Dismiss button out of view. */}
+              <span className="min-w-0 flex-1 truncate">{c.voice.error}</span>
               <button
                 type="button"
                 title="Dismiss"

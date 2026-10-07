@@ -51,20 +51,28 @@ export function parseChangelogSection(
       continue;
     }
 
-    if (section && (trimmed.startsWith("- ") || trimmed.startsWith("* "))) {
+    if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
       const body = trimmed.slice(2).trim();
-      if (body) section.body.push(body);
+      if (!body) continue;
+      // Newer entries are flat bullet lists with no `###` subheadings.
+      // Collect them into one untitled section instead of dropping them.
+      if (!section) {
+        section = { title: "", body: [] };
+        out.push(section);
+      }
+      section.body.push(body);
     }
   }
 
-  if (section) out.push(section);
+  if (section && !out.includes(section)) out.push(section);
   return out;
 }
 
 /**
  * Parse a GitHub release body / `latest.json` notes field — markdown with
  * `###`-headed sections and `-` bullets, no version marker. Every `###`
- * heading begins a section; bullets outside a section are ignored.
+ * heading begins a section; bullets outside a section land in one
+ * untitled section (flat bullet-only release notes are common).
  */
 export function parseReleaseNotes(text: string): ChangelogSection[] {
   const lines = text.split(/\r?\n/);
@@ -80,12 +88,17 @@ export function parseReleaseNotes(text: string): ChangelogSection[] {
       continue;
     }
 
-    if (section && (trimmed.startsWith("- ") || trimmed.startsWith("* "))) {
+    if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
       const body = trimmed.slice(2).trim();
-      if (body) section.body.push(body);
+      if (!body) continue;
+      if (!section) {
+        section = { title: "", body: [] };
+        out.push(section);
+      }
+      section.body.push(body);
     }
   }
 
-  if (section) out.push(section);
+  if (section && !out.includes(section)) out.push(section);
   return out;
 }
