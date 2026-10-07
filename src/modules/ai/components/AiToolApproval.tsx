@@ -4,7 +4,6 @@ import { cn } from "@/lib/utils";
 import {
   AiBrain03Icon,
   Cancel01Icon,
-  CheckmarkCircle02Icon,
   Edit02Icon,
   FileEditIcon,
   FilePlusIcon,
@@ -136,12 +135,10 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue }: Props) {
     return (
       <div className="rounded-lg border border-border/40 bg-card/60">
         <div className="flex items-center gap-2 px-3 py-2">
-          <HugeiconsIcon
-            icon={CheckmarkCircle02Icon}
-            size={13}
-            strokeWidth={1.75}
-            className="shrink-0 text-emerald-500"
-          />
+          {/* Dot language, matching the tool cards — a green check-circle
+              icon here flashed between the approval and execution states
+              and read as a glitch. */}
+          <span className="size-1.5 shrink-0 rounded-full bg-emerald-500" />
           <HugeiconsIcon
             icon={Icon}
             size={13}
