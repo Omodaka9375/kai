@@ -922,6 +922,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
     // Replace in place. The SDK adopts the new array; AgentRunBridge
     // persists it on the next messages-change effect, the same path the
     // automatic summarizer uses.
+    const dropped = chat.messages.length - next.length;
     chat.messages = next;
     set({ _tick: Date.now() });
     // lastInputTokens reflected the pre-compact request size; the next run
@@ -932,7 +933,6 @@ export const useChatStore = create<StoreState>((set, get) => ({
       summaryNotice: { at: Date.now(), text: "Context compacted by /compact." },
     });
     const n = next.length;
-    const dropped = chat.messages.length - n;
     return `Context compacted — ${Math.max(0, dropped)} older message${
       Math.max(0, dropped) === 1 ? "" : "s"
     } summarized, kept the last ${n - 1}.`;

@@ -477,6 +477,19 @@ export function AiInputBar() {
         </Popover>
 
         <AnimatePresence initial={false}>
+          {c.notice && (
+            <motion.div
+              key="slash-notice"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.12 }}
+              className="flex items-center gap-1.5 px-1 text-[11px] text-muted-foreground"
+            >
+              <span className="size-1.5 shrink-0 rounded-full bg-blue-500/80" />
+              <span className="min-w-0 flex-1 truncate">{c.notice}</span>
+            </motion.div>
+          )}
           {voiceLabel && (
             <motion.div
               key={voiceLabel}

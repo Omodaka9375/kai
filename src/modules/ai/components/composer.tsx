@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { UIMessagePart } from "ai";
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useRef,
@@ -70,6 +71,8 @@ type ComposerCtx = {
   stop: () => void;
   voice: Voice;
   canSend: boolean;
+  /** Transient slash-command outcome (e.g. "/compact" result), shown under the input. */
+  notice: string | null;
 };
 
 const Ctx = createContext<ComposerCtx | null>(null);
@@ -98,6 +101,24 @@ export function AiComposerProvider({ children }: ProviderProps) {
   const [pickedSnippets, setPickedSnippets] = useState<Snippet[]>([]);
   const [pickedCommands, setPickedCommands] = useState<SlashCommandMeta[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Transient slash-command outcome. The main window has no transcript
+  // (AgentRunBridge is headless; the transcript lives in the mini window),
+  // so without this a refused /compact ("wait for the run…", "already
+  // minimal") was completely invisible — the input just cleared.
+  const [notice, setNotice] = useState<string | null>(null);
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showNotice = useCallback((text: string) => {
+    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    setNotice(text);
+    noticeTimer.current = setTimeout(() => setNotice(null), 4_000);
+  }, []);
+  useEffect(
+    () => () => {
+      if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    },
+    [],
+  );
 
   const focusSignal = useChatStore((s) => s.focusSignal);
   const pendingPrefill = useChatStore((s) => s.pendingPrefill);
@@ -271,7 +292,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
         setFiles([]);
         setPickedSnippets([]);
         setPickedCommands([]);
-        if (outcome.toast) console.info(outcome.toast);
+        if (outcome.toast) showNotice(outcome.toast);
         return;
       }
       if (outcome.kind === "send-prompt") {
@@ -409,6 +430,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
     stop,
     voice,
     canSend,
+    notice,
   };
 
   return <Ctx.Provider value={ctx}>{children}</Ctx.Provider>;
