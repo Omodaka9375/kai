@@ -154,13 +154,29 @@ function stripAnsi(s: string): string {
  *  Windows. Appended to stderr so the model self-corrects in one retry
  *  instead of burning approval-gated attempts. Patterns cover both PS 5.1
  *  ("The string is missing the terminator") and PS 7 ("Missing closing '"' in
- *  string literal", ParserError). */
+ *  string literal", ParserError).
+ *
+ *  The second pattern class is the MANGLED-ARGUMENT case: PowerShell itself
+ *  parses fine (`\"` is NOT a PS escape — the first one CLOSES the PS string),
+ *  but the child interpreter receives a truncated program and throws its own
+ *  syntax error. A `python -c "...\"...\"..."` gets cut at the first `\"`,
+ *  producing Python's "'(' was never closed" / "unterminated string literal" —
+ *  without this pattern the agent retried blind because PS never errored. */
 const PWSH_QUOTE_ERR_RE =
-  /missing closing ['"`] in string literal|missing the terminator|ParserError|Unexpected token/i;
+  /missing closing ['"`] in string literal|missing the terminator|ParserError|Unexpected token|never closed|unterminated string literal|EOL while scanning/i;
 
 export function pwshQuotingHint(stderr: string): string {
   if (!PWSH_QUOTE_ERR_RE.test(stderr)) return stderr;
-  return `${stderr}\n[Kai hint: PowerShell quote-nesting error. Use single-quoted strings (literal; escape ' as ''), a here-string @'...'@ for mixed quotes, or switch to the edit/multi_edit tool for file changes — do NOT retry the same quoting approach.]`;
+  // Plain string concat (no template literal) - the message contains
+  // backticks and nested quotes, which a template literal cannot carry.
+  const hint =
+    "[Kai hint: PowerShell mangled this command's quotes - backslash-doublequote is NOT a PowerShell escape; " +
+    "the first one closes the PS string, so the child process got a truncated argument. " +
+    "Do NOT retry with the same quoting. For inline code use single-quoted PS strings with the " +
+    "interpreter's own quotes inside (python -c 'print(\"x\")'), or write the script to a " +
+    "temp file and run it (python file.py), or use a here-string @'...'@ piped via Set-Content. " +
+    "For file edits prefer the edit/multi_edit tools.]";
+  return `${stderr}\n${hint}`;
 }
 
 export function buildShellTools(ctx: ToolContext) {

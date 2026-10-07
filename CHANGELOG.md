@@ -11,6 +11,7 @@ All notable changes to the KAI terminal emulator project are documented in this 
 - Voice: the listening/transcribing status moved into the input placeholder ("Listening…" / "Transcribing…"); the duplicate expanding row below the input is gone.
 - AI: `/compact` and other slash commands now show their outcome under the input bar — previously refusals ("wait for the run", "already minimal") were invisible and the input just cleared.
 - AI: `/goal` (Goal loop) is now discoverable in the `#` command picker and works from both `/` and `#` invocations — the picker path previously fell through to a plain chat message.
+- AI: PowerShell quote-mangling recovery — the stderr hint now also fires when the child interpreter (Python/Node) gets a truncated argument from `\"`-escaped quotes and dies with its own SyntaxError, with concrete recovery paths instead of a blind retry.
 
 ---
 
