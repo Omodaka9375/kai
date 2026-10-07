@@ -4,6 +4,14 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.5.6]
+
+- Fixed: the updater popup showed no release notes since 1.5.3 — the CHANGELOG moved to flat bullets under each version and the parser only collected `###`-sectioned bullets; both parsers now accept the flat format (locked by a regression test against the real 1.5.5 layout).
+- Fixed: the voice transcription-error banner pushed its Dismiss button off-screen on long provider errors — the error text now truncates within its own box.
+- AI: `bash_run` timeout ceiling raised 300s → 1000s and the build/cargo/tsc auto-timeout to 600s — agents no longer hit a validation wall requesting sane timeouts for heavy builds.
+
+---
+
 ## [1.5.5]
 
 - AI: `/compact` — reset the context in place in the same chat (session-state snapshot + recent tail, no new session needed); LM Studio's default context budget raised 32k → 128k so long sessions use the real window.
