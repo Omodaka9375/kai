@@ -92,8 +92,8 @@ function slowCommandTimeout(cmd: string): number | undefined {
   // Package install commands — network I/O, can take 2+ minutes.
   if (/\b(npm|pnpm|yarn|bun)\s+(add|install|i|ci|update|upgrade)\b/.test(lower)) return 120;
   // Build commands — Rust/TS compilation can take 5+ minutes.
-  if (/\b(npm|pnpm|yarn|bun)\s+(run\s+)?build\b/.test(lower)) return 300;
-  if (/\b(cargo\s+build|cargo\s+test|tsc)\b/.test(lower)) return 300;
+  if (/\b(npm|pnpm|yarn|bun)\s+(run\s+)?build\b/.test(lower)) return 600;
+  if (/\b(cargo\s+build|cargo\s+test|tsc)\b/.test(lower)) return 600;
   // Test/lint — usually under 2 minutes but give headroom.
   if (/\b(npm|pnpm|yarn|bun)\s+(run\s+)?(test|lint|typecheck|check)\b/.test(lower)) return 120;
   return undefined;
@@ -170,7 +170,7 @@ export function buildShellTools(ctx: ToolContext) {
         "Run a foreground shell command in this session's persistent agent shell. cwd persists across calls (so `cd foo` then `bash_run pwd` works). Use for short-lived commands (lint, test, search, build). For long-running or daemon processes (dev servers, watch tasks), use `bash_background`. NEVER invoke interactive tools (vim, less, top) — they will hang. Asks for user approval. PowerShell quoting: single quotes are literal — prefer '...' over \"...\" (escape ' as ''); for mixed-quote content use a here-string @'...'@; NEVER nest quotes inside double quotes. Prefer purpose-built tools over shell text-wrangling: fs_grep instead of Select-String, edit/multi_edit instead of -replace pipelines. Set `elevated: true` ONLY when the command genuinely needs administrator/root privileges (installing system packages, writing to protected dirs, `net start`) — this triggers an OS privilege prompt and a stronger confirmation.",
       inputSchema: z.object({
         command: z.string(),
-        timeout_secs: z.number().min(1).max(300).optional(),
+        timeout_secs: z.number().min(1).max(1000).optional(),
         elevated: z.boolean().optional().describe(
           "Run with administrator/root privileges. Triggers a UAC / auth dialog. Only for commands that cannot run unprivileged.",
         ),
