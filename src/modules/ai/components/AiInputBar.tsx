@@ -292,7 +292,7 @@ export function AiInputBar() {
                       void c.voice.start();
                     }
                   }}
-                  disabled={c.isBusy || c.voice.transcribing}
+                  disabled={c.voice.transcribing}
                   className={cn(
                     "shrink-0 size-6 flex items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50",
                     c.voice.recording &&
