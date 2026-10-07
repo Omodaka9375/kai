@@ -106,7 +106,7 @@ function deriveSummary(toolName: string, input: unknown): string | null {
     case "open_preview":
       return str("path") ?? str("url");
     case "run_subagent":
-      return str("agent") ?? str("task");
+      return str("description") ?? str("type");
     case "todo_write": {
       const items = Array.isArray(i.todos) ? i.todos : null;
       return items
