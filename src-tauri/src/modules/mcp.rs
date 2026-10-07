@@ -49,8 +49,7 @@ fn quote_cmd_arg(arg: &str) -> String {
     if arg.is_empty() {
         return "\"\"".to_string();
     }
-    let needs_quote =
-        arg.contains(|c: char| c == ' ' || c == '\t' || c == ',' || c == ';' || c == '=');
+    let needs_quote = arg.contains([' ', '\t', ',', ';', '=']);
     if !needs_quote {
         return arg.to_string();
     }

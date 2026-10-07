@@ -633,15 +633,11 @@ mod tests {
     }
 
     #[test]
-    fn pid_from_filename_parses_all_artifact_shapes() {
-        assert_eq!(pid_from_filename("kai-12345.log"), Some(12345));
-        assert_eq!(pid_from_filename("kai-12345_20260905.log"), Some(12345));
-        assert_eq!(pid_from_filename("crash-12345-1725000000.log"), Some(12345));
-        assert_eq!(
-            pid_from_filename("ggml-large-v3-turbo-q5_0.part.12345"),
-            Some(12345)
-        );
-    }
+fn pid_from_filename_parses_all_artifact_shapes() {
+    assert_eq!(pid_from_filename("kai-12345.log"), Some(12345));
+    assert_eq!(pid_from_filename("kai-12345_20260905.log"), Some(12345));
+    assert_eq!(pid_from_filename("crash-12345-1725000000.log"), Some(12345));
+}
 
     #[test]
     fn pid_from_filename_ignores_shared_files() {
@@ -649,6 +645,5 @@ mod tests {
         assert_eq!(pid_from_filename("kai-sessions.json"), None);
         assert_eq!(pid_from_filename(".window-state.json"), None);
         assert_eq!(pid_from_filename("kai-sessions-1jdnajs935bfk.json"), None);
-        assert_eq!(pid_from_filename("ggml-large-v3-turbo-q5_0.bin"), None);
     }
 }

@@ -139,23 +139,19 @@ fn status_inner(repo_root: &ResolvedGitDirectory) -> Result<GitStatusSnapshot> {
     // commits the publish push would actually send. Best-effort — a repo
     // with no remotes keeps ahead=0 and the button stays correctly disabled.
     if parsed.upstream.is_none() && !parsed.is_detached {
-        if let Some(remote) = default_remote(repo_root).ok() {
-            if let Some(base) = git_stdout_line_opt(
+        // Ok(...) / Ok(Some(...)) patterns — matching on `.ok()` trips
+        // clippy::match_result_ok under CI's `-D warnings`.
+        if let Ok(remote) = default_remote(repo_root) {
+            if let Ok(Some(base)) = git_stdout_line_opt(
                 &repo_root.workspace,
                 &repo_root.git_path,
                 ["rev-parse", "--symbolic-full-name", &format!("{remote}/HEAD")],
-            )
-            .ok()
-            .flatten()
-            {
-                if let Some(count) = git_stdout_line_opt(
+            ) {
+                if let Ok(Some(count)) = git_stdout_line_opt(
                     &repo_root.workspace,
                     &repo_root.git_path,
                     ["rev-list", "--count", &format!("{base}..HEAD")],
-                )
-                .ok()
-                .flatten()
-                {
+                ) {
                     parsed.ahead = count.trim().parse().unwrap_or(0);
                 }
             }
