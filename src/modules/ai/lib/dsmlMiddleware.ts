@@ -65,9 +65,16 @@ function stallMessage(timeoutMs: number): string {
     " — no data for " +
     `${Math.round(timeoutMs / 60_000)} min. ` +
     "The engine or connection likely died without closing the stream. " +
-    "If context is high, Compact &amp; continue compacts the history and retries in this session; " +
-    "otherwise Retry re-opens a fresh connection."
+    "Automatic recovery (compact and/or fresh-connection retry) was attempted " +
+    "and did not help — the provider is likely down or rate-limiting. " +
+    "Retry re-opens the connection; check the provider status page if it persists."
   );
+}
+
+/** Test/export surface for stallMessage — the budget that fired is the
+ *  only variable, so a budget-keyed wrapper keeps the test direct. */
+export function stallMessageForBudgetMs(timeoutMs: number): string {
+  return stallMessage(timeoutMs);
 }
 
 /** True when an error (possibly wrapped/re-displayed) is a watchdog stall. */

@@ -3,6 +3,7 @@ import {
   createDsmlMiddleware,
   isStallError,
   parseDsmlToolCalls,
+  stallMessageForBudgetMs,
 } from "./dsmlMiddleware";
 
 describe("stall watchdog", () => {
@@ -36,6 +37,19 @@ describe("dsml middleware wiring", () => {
   it("middleware object exposes wrapStream without throwing", () => {
     const mw = createDsmlMiddleware();
     expect(typeof mw.wrapStream).toBe("function");
+  });
+});
+
+describe("stall message content", () => {
+  it("no longer references the removed Compact-and-continue button", () => {
+    // The button was removed the same session the auto-recovery shipped;
+    // the message must describe the CURRENT behavior (auto-recovery,
+    // then manual retry) or the user hunts for a control that isn't there.
+    const msg = stallMessageForBudgetMs(120_000);
+    expect(msg).toContain("Model stream stalled");
+    expect(msg).toContain("2 min");
+    expect(msg).not.toContain("Compact &");
+    expect(msg).toContain("Automatic recovery");
   });
 });
 

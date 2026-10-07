@@ -177,6 +177,10 @@ export function makeChatSync(
   // before the Chat exists) can stop it on loop detection. Assigned right
   // after the Chat is constructed below.
   const chatRef: { current: Chat<UIMessage> | null } = { current: null };
+  // Consecutive stall auto-retries for THIS runtime. Reset on any successful
+  // finish; capped so a truly dead provider/engine surfaces the manual error
+  // card instead of an infinite retry loop.
+  const stallRetriesRef = { current: 0 };
 
   const toolContext: ToolContext = (() => {
     // Base context from live state, with shadow-session redirection: while
@@ -322,6 +326,9 @@ export function makeChatSync(
     },
     onFinishMeta: (info: { hitStepCap: boolean; finishReason: string }) => {
       if (!isActive()) return;
+      // A completed run proves the stream is healthy again — any stall
+      // retry budget this run consumed is forgiven.
+      stallRetriesRef.current = 0;
       deps.patchAgentMeta({
         hitStepCap: info.hitStepCap,
         finishReason: info.finishReason,
@@ -413,43 +420,61 @@ export function makeChatSync(
       const display = resolveErrorDisplay(e);
 
       // ── Seamless stall recovery ─────────────────────────────────────
-      // Stalls concentrate at high context: the local engine chews on a
-      // huge prompt for minutes with zero bytes on the wire, the watchdog
-      // fires, and a plain error card forces a manual Retry that re-sends
-      // the same giant prompt into the same slow prefill. Instead: compact
-      // the history (same session, `/compact` core) and regenerate over
-      // the trimmed set — the user just sees the ring drop and the run go
-      // on. The compaction floor is the loop-breaker: after one auto-compact
-      // the history is minimal, so a second stall finds nothing to compact
-      // and falls through to the manual error card. One attempt, no state.
+      // Stalls have two shapes and the recovery is per-shape:
+      //
+      // HIGH-CONTEXT (local prefill, huge prompts): compact the history
+      // (same session, `/compact` core) and regenerate over the trimmed
+      // set — the user sees the ring drop and the run go on.
+      //
+      // ALREADY-MINIMAL (cloud stalls: transient network/provider hiccups
+      // at ANY context): there is nothing worth compacting, so the right
+      // recovery is a plain retry — regenerate re-opens a fresh
+      // connection over the same history.
+      //
+      // The consecutive-retry cap (stallRetriesRef, reset on any
+      // successful finish) is the loop-breaker for both: a truly dead
+      // provider surfaces the manual error card after MAX attempts.
       if (isStallError(e) && isActive()) {
-        const outcome = deps.compactActiveSession();
-        if (outcome.startsWith("Context compacted")) {
-          console.info("[kai] stream stall — auto-compacted, retrying:", outcome);
-          deps.patchAgentMeta({
-            status: "streaming",
-            error: null,
-            // Visible breadcrumb so the pause reads as recovery, not silence:
-            // "Compacting context…"-style notice with the compaction stats.
-            summaryNotice: {
-              at: Date.now(),
-              text: `${outcome} Retrying automatically.`,
-            },
-          });
-          // regenerate() drops the partial assistant message the dead
-          // stream left, then re-runs over the compacted history. Async +
-          // deferred: the SDK's onError is sync — a direct await here would
-          // run the retry before the error status is even committed.
-          setTimeout(() => {
-            void chatRef.current?.regenerate().catch((retryErr) => {
-              console.error("[kai] auto-retry failed:", retryErr);
-              deps.patchAgentMeta({
-                status: "error",
-                error: resolveErrorDisplay(retryErr),
-              });
+        const MAX_STALL_RETRIES = 2;
+        if (stallRetriesRef.current < MAX_STALL_RETRIES) {
+          const outcome = deps.compactActiveSession();
+          const compacted = outcome.startsWith("Context compacted");
+          const minimal = outcome.includes("already minimal");
+          if (compacted || minimal) {
+            stallRetriesRef.current += 1;
+            const notice = compacted
+              ? `${outcome} Retrying automatically.`
+              : "Stream stalled — history is already minimal. Retrying with a fresh connection.";
+            console.info(
+              "[kai] stream stall — auto-recovering (retry " +
+                `${stallRetriesRef.current}/${MAX_STALL_RETRIES}):`,
+              outcome,
+            );
+            deps.patchAgentMeta({
+              status: "streaming",
+              error: null,
+              // Visible breadcrumb so the pause reads as recovery, not silence.
+              summaryNotice: {
+                at: Date.now(),
+                text: notice,
+              },
             });
-          }, 0);
-          return;
+            // regenerate() drops the partial assistant message the dead
+            // stream left, then re-runs over the (possibly compacted)
+            // history. Async + deferred: the SDK's onError is sync — a
+            // direct await here would run the retry before the error
+            // status is even committed.
+            setTimeout(() => {
+              void chatRef.current?.regenerate().catch((retryErr) => {
+                console.error("[kai] auto-retry failed:", retryErr);
+                deps.patchAgentMeta({
+                  status: "error",
+                  error: resolveErrorDisplay(retryErr),
+                });
+              });
+            }, 0);
+            return;
+          }
         }
       }
 
