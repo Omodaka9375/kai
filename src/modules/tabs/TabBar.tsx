@@ -184,9 +184,7 @@ export function TabBar({
                         "group h-7 shrink-0 gap-1.5 rounded-md border-0 shadow-none ring-0 text-xs text-muted-foreground transition-colors data-[state=active]:bg-accent data-[state=active]:text-foreground hover:text-foreground/80 justify-between select-none",
                         compact
                           ? "px-1.5!"
-                          : tabs.length === 1
-                            ? "px-2!"
-                            : "ps-2! pe-1!",
+                          : "ps-2! pe-1!",
                         isSplit && "ring-1 ring-inset ring-foreground/20",
                         isDragging && "cursor-grabbing opacity-90 shadow-lg scale-105 z-10",
                         !isDragging && draggingId !== null && "cursor-grabbing opacity-70",
@@ -212,23 +210,23 @@ export function TabBar({
                           />
                         ) : null}
                       </span>
-                      {tabs.length > 1 && (
-                        <span
-                          role="button"
-                          aria-label="Close tab"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onClose(t.id);
-                          }}
-                          className="rounded p-0.5 opacity-0 transition-opacity hover:bg-accent hover:opacity-100 group-hover:opacity-60"
-                        >
-                          <HugeiconsIcon
-                            icon={Cancel01Icon}
-                            size={11}
-                            strokeWidth={2}
-                          />
-                        </span>
-                      )}
+                      {/* Closing the last tab is legal — the StartPage takes
+                          over the zero-tab state, so the X is always shown. */}
+                      <span
+                        role="button"
+                        aria-label="Close tab"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onClose(t.id);
+                        }}
+                        className="rounded p-0.5 opacity-0 transition-opacity hover:bg-accent hover:opacity-100 group-hover:opacity-60"
+                      >
+                        <HugeiconsIcon
+                          icon={Cancel01Icon}
+                          size={11}
+                          strokeWidth={2}
+                        />
+                      </span>
                     </TabsTrigger>
                   </ContextMenuTrigger>
                   {/* Drop indicator between tabs when dragging */}
@@ -261,19 +259,15 @@ export function TabBar({
                         </ContextMenuItem>
                       </>
                     )}
-                    {tabs.length > 1 && (
-                      <>
-                        <ContextMenuSeparator />
-                        <ContextMenuItem
-                          className="gap-2 text-[12px]"
-                          variant="destructive"
-                          onSelect={() => onClose(t.id)}
-                        >
-                          <HugeiconsIcon icon={Cancel01Icon} size={13} strokeWidth={1.75} />
-                          Close tab
-                        </ContextMenuItem>
-                      </>
-                    )}
+                    <ContextMenuSeparator />
+                    <ContextMenuItem
+                      className="gap-2 text-[12px]"
+                      variant="destructive"
+                      onSelect={() => onClose(t.id)}
+                    >
+                      <HugeiconsIcon icon={Cancel01Icon} size={13} strokeWidth={1.75} />
+                      Close tab
+                    </ContextMenuItem>
                   </ContextMenuContent>
                 </ContextMenu>
               );
