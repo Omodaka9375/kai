@@ -1,4 +1,5 @@
 export { TabBar } from "./TabBar";
+export { StartPage } from "./StartPage";
 export {
   MAX_PANES_PER_TAB,
   useTabs,

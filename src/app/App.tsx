@@ -73,7 +73,7 @@ import {
   useSourceControl,
 } from "@/modules/source-control";
 import { StatusBar } from "@/modules/statusbar";
-import { MAX_PANES_PER_TAB, useTabs, useWorkspaceCwd, type EditorTab } from "@/modules/tabs";
+import { MAX_PANES_PER_TAB, StartPage, useTabs, useWorkspaceCwd, type EditorTab } from "@/modules/tabs";
 import {
   disposeSession,
   findLeafCwd,
@@ -140,6 +140,7 @@ export default function App() {
     closeActivePane,
     closePaneByLeaf,
     resetWorkspace,
+    switchProject,
     moveTab,
   } = useTabs({ defer: true });
 
@@ -320,15 +321,18 @@ export default function App() {
     },
     [workspaceEnv, setWorkspaceEnv, resetWorkspace],
   );
+  // On launch, resolve the workspace root ONLY — no auto-spawned terminal.
+  // A mount-time PTY raced the first paint / window-state restore / the
+  // renderer font-gate (the renderer-bind race class); the StartPage now
+  // fills the zero-tab state and terminals spawn on demand.
+  // We intentionally skip `workspaceCurrentDir()` as the Tauri process cwd
+  // is the app data directory on Windows, which is not a useful default.
   useEffect(() => {
-    // On launch, prefer: CLI launch dir > saved last workspace > home.
-    // We intentionally skip `workspaceCurrentDir()` as the Tauri process cwd
-    // is the app data directory on Windows, which is not a useful default.
     const resolveCwd = async (): Promise<string | null> => {
       const launch = getLaunchDir();
       if (launch) return launch;
       // A prefs-init failure (corrupt/locked store under a second concurrent
-      // instance) must not block the launch tab — fall through to home.
+      // instance) must not block root resolution — fall through to home.
       try {
         await usePreferencesStore.getState().init();
       } catch (e) {
@@ -343,30 +347,15 @@ export default function App() {
       }
     };
 
-    // Exactly one launch tab, ever. Reading the mount-time `tabs` closure was
-    // stale (always []) — a late resolution could stack a duplicate tab on
-    // top of one the user already opened with Ctrl+T while we were waiting.
-    let launchTabCreated = false;
-    const ensureLaunchTab = (cwd: string | null | undefined) => {
-      if (launchTabCreated) return;
-      if (tabsRef.current.length > 0) {
-        launchTabCreated = true;
-        return;
-      }
-      launchTabCreated = true;
-      newTab(cwd ?? undefined);
-    };
-
     // Watchdog: prefs hydration / the store plugin can wedge (seen in the
-    // wild — an instance whose entire session logged zero pty spawns because
-    // resolveCwd never settled, leaving the app with no terminal at all).
-    // 5s is far beyond a healthy resolve; create the tab anyway.
+    // wild). 5s is far beyond a healthy resolve; pin the root anyway so the
+    // explorer/sessions/AI have a workspace even though no tab spawns.
     const watchdog = setTimeout(() => {
-      if (launchTabCreated) return;
       console.error(
-        "[Kai] launch: cwd resolution did not settle in 5s — creating fallback terminal tab",
+        "[Kai] launch: cwd resolution did not settle in 5s — pinning fallback workspace root",
       );
-      ensureLaunchTab(home);
+      setLaunchCwdResolved(true);
+      setRootRef.current(home ?? "");
     }, 5000);
 
     resolveCwd()
@@ -374,17 +363,16 @@ export default function App() {
         clearTimeout(watchdog);
         setLaunchCwd(cwd);
         setLaunchCwdResolved(true);
-        // Pin the workspace root to the launch directory so `cd`-ing in
-        // the terminal doesn't cause the explorer / AI sessions to reset.
+        // Pin the workspace root to the launch directory so the explorer /
+        // AI sessions resolve against the right project. NO terminal tab —
+        // the StartPage renders for the zero-tab state.
         if (cwd) setRootRef.current(cwd);
-        // Create the initial tab now that we know the cwd.
-        ensureLaunchTab(cwd);
       })
       .catch((e) => {
         clearTimeout(watchdog);
         console.error("[Kai] launch: cwd resolution failed:", e);
         setLaunchCwdResolved(true);
-        ensureLaunchTab(home);
+        setRootRef.current(home ?? "");
       });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -531,8 +519,8 @@ export default function App() {
 
   const onOpenProject = useCallback((path: string) => {
     setRootRef.current(path);
-    resetWorkspace(path);
-  }, [resetWorkspace]);
+    switchProject(path);
+  }, [switchProject]);
 
   // Single-instance forwarding: a second KAI launch (e.g. "Open with KAI" in
   // Explorer, or a pinned shortcut with a path argument) no longer starts a
@@ -1375,6 +1363,12 @@ export default function App() {
 
   const workspaceSurface = (
     <div className="relative h-full min-h-0">
+      {tabs.length === 0 && (
+        <StartPage
+          onNewTerminal={() => newTab(inheritedCwdForNewTab())}
+          onOpenProject={onOpenProject}
+        />
+      )}
       <div
         className={cn(
           "absolute inset-0 px-1 pt-1",
