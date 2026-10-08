@@ -26,6 +26,7 @@ export type ShortcutId =
   | "view.zoomOut"
   | "view.zoomReset"
   | "ai.toggle"
+  | "ai.voice"
   | "ai.askSelection"
   | "editor.saveAll"
   | "shortcuts.open"
@@ -182,6 +183,12 @@ export const SHORTCUTS: Shortcut[] = [
     label: "Ask AI about selection",
     group: "AI",
     defaultBindings: [{ [MOD_PROP]: true, key: "l" }],
+  },
+  {
+    id: "ai.voice",
+    label: "Toggle voice input",
+    group: "AI",
+    defaultBindings: [{ [MOD_PROP]: true, key: "m" }],
   },
   {
     id: "sidebar.toggle",

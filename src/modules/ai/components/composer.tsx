@@ -200,6 +200,24 @@ export function AiComposerProvider({ children }: ProviderProps) {
     },
   });
 
+  // Global shortcut (ai.voice, Cmd/Ctrl+M) dispatches this event — the
+  // composer owns the recording state, so the toggle logic lives here.
+  // Same decoupling pattern as the Kai:ai-attach-file listener above.
+  useEffect(() => {
+    const onVoiceToggle = () => {
+      if (voice.transcribing) return; // a click now would abandon the transcript
+      if (voice.recording) {
+        voice.stop();
+      } else {
+        if (voice.error) voice.clearError();
+        void voice.start();
+      }
+    };
+    window.addEventListener("Kai:ai-voice-toggle", onVoiceToggle);
+    return () =>
+      window.removeEventListener("Kai:ai-voice-toggle", onVoiceToggle);
+  }, [voice]);
+
   const addFiles = async (list: FileList | null) => {
     if (!list) return;
     const next: FileAttachment[] = [];

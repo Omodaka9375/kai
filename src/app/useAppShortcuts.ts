@@ -109,6 +109,12 @@ export function useAppShortcuts(deps: AppShortcutDeps): {
       "search.focus": () => searchInlineRef.current?.focus(),
       "search.replace": () => searchInlineRef.current?.focusReplace(),
       "ai.toggle": togglePanelAndFocus,
+      "ai.voice": () => {
+        // The composer owns the recording state and lives under
+        // AiComposerProvider — a window event decouples the keymap from it
+        // (same pattern as the explorer's Kai:ai-attach-file dispatch).
+        window.dispatchEvent(new Event("Kai:ai-voice-toggle"));
+      },
       "ai.askSelection": askFromSelection,
       "editor.saveAll": handleSaveAll,
       "shortcuts.open": () => setShortcutsOpen((v) => !v),
