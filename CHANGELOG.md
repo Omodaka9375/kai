@@ -4,6 +4,17 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.5.9]
+
+- Tabs: opening a project always lands you in it — hamburger > Recent and "Open with KAI" previously did nothing visible (the switch re-rooted silently) or left the project behind the start page; now every project-open surface spawns a terminal tab in the project, keeping existing terminals alive.
+- Terminal: the blank pane after "+" > New Terminal can no longer wedge forever — a stale hasSlot flag (set before the renderer bind, never rolled back on throw) disabled every recovery path; the flag now rolls back and the render watchdog trusts the pool, retries, and logs every intervention.
+- Tabs: the close button is back on the last tab — a pre-start-page leftover hid the X and the context-menu item when only one tab was open.
+- UI: "Format Document" in the right-click menu renders on one row again — the inline formatter name ("Prettier") wrapped the entry onto two lines; it lives in the tooltip now.
+- Tabs: "Close others" in the tab context menu — closes every tab except the right-clicked one, with one batched confirmation when other tabs have unsaved editor changes.
+- Editor: the alien CodeMirror search bar no longer appears on Ctrl+F — CM's find/replace commands open their built-in panel when the editor has no query, and the header search input survived tab switches while the editor's query did not; the query is now re-synced before every navigation.
+
+---
+
 ## [1.5.8]
 
 - Tabs: the StartPage replaces the launch auto-spawn — the mount-time PTY raced the first paint / window restore / font-gate and left blank panes; a neutral start page (quick actions + recent projects) removes the race by construction, terminals spawn on demand, and closing the last tab is now a legal state.
