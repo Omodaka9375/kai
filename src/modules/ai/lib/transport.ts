@@ -356,7 +356,7 @@ export function summarizeMessagesNow(
   if (chars / 4 < 2_000) return null;
 
   const stateBlock = buildSessionState({ messages, fileSnapshot, sessionId });
-  const tail = messages.slice(cutoff);
+  const tail = trimTailToolResults(messages.slice(cutoff));
 
   const summaryMessage: UIMessage = {
     id: `summary-${Date.now()}`,
@@ -364,6 +364,53 @@ export function summarizeMessagesNow(
     parts: [{ type: "text", text: stateBlock }],
   };
   return [summaryMessage, ...tail];
+}
+
+/**
+ * The kept tail is what made /compact fail to shrink the ring for local
+ * models: the last N pairs hold the conversation's LARGEST payloads —
+ * fresh shell output, file reads, screen captures — and keeping them
+ * verbatim leaves the history over-budget even after the older messages
+ * are summarized away. The tool-result outputs in the tail have already
+ * served their purpose (the model acted on them); what still matters is
+ * the call's existence and shape, not the full body. Truncate their
+ * output objects to a compact placeholder, mirroring what auto-elision
+ * does to older tool results. Text and other parts pass through
+ * untouched. Returns a new array/message objects only when something
+ * actually changed (id-stable copies otherwise).
+ */
+const TAIL_TOOL_OUTPUT_MAX_CHARS = 500;
+
+function trimTailToolResults(tail: UIMessage[]): UIMessage[] {
+  let anyChanged = false;
+  const out = tail.map((m) => {
+    if (
+      !m.parts.some(
+        (p) => typeof p.type === "string" && p.type.startsWith("tool-"),
+      )
+    ) {
+      return m;
+    }
+    let msgChanged = false;
+    const parts = m.parts.map((p) => {
+      if (typeof p.type !== "string" || !p.type.startsWith("tool-")) return p;
+      const tp = p as unknown as { output?: unknown };
+      if (tp.output == null || typeof tp.output !== "object") return p;
+      const serialized = JSON.stringify(tp.output);
+      if (serialized.length <= TAIL_TOOL_OUTPUT_MAX_CHARS) return p;
+      msgChanged = true;
+      return {
+        ...p,
+        output: {
+          note: "[output elided by /compact — already shown in full above]",
+        },
+      } as typeof p;
+    });
+    if (!msgChanged) return m;
+    anyChanged = true;
+    return { ...m, parts };
+  });
+  return anyChanged ? out : tail;
 }
 
 async function maybeSummarize(

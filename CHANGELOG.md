@@ -15,6 +15,7 @@ All notable changes to the KAI terminal emulator project are documented in this 
 - UI: auto-approved tools show the same dot indicator as every other tool state — the green check-circle icon that flashed between approval and execution read as a glitch.
 - AI: subagents batch — independent run_subagent calls in one step run concurrently (the SDK already parallelizes them); the model just needed the prompt rule. Spawn cards show their description again (dead input fields left them summary-less).
 - Voice: ⌘/Ctrl+M toggles voice input from anywhere — the first keyboard access to the mic (start/stop mirrors the button, ignored mid-transcription); remappable in the Shortcuts dialog.
+- AI: /compact actually shrinks oversized sessions now — the kept tail pairs held the conversation's largest tool outputs verbatim (fresh shell results, file reads), so the context ring stayed >100% even after compacting; tail tool outputs over 500 chars are elided like older ones already were. Applies to cloud and local, manual and automatic compaction — and saves re-sent tokens on every step.
 
 ---
 

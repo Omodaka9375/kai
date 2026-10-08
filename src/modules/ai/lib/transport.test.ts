@@ -79,4 +79,35 @@ describe("summarizeMessagesNow", () => {
     expect(text).toContain("src/b.ts");
     expect(text).toContain("read");
   });
+
+  it("truncates oversized tool outputs in the KEPT tail (local-model ring >100% fix)", () => {
+    // The tail pairs hold the conversation's largest payloads — a fresh
+    // shell result in the last pair. /compact must shrink it or the
+    // context ring stays >100% for local models even after compaction.
+    const msgs = mkMsgs(10);
+    // Attach a giant tool result to the LAST assistant message.
+    const last = msgs[msgs.length - 1];
+    const bigOutput = { stdout: "x".repeat(60_000) };
+    (last.parts as never[]).push({
+      type: "tool-result",
+      toolCallId: "tc-1",
+      toolName: "bash_run",
+      output: bigOutput,
+      state: "output-available",
+    } as never);
+    const out = summarizeMessagesNow(msgs, [], "s1");
+    expect(out).not.toBeNull();
+    const keptLast = out![out!.length - 1];
+    const toolPart = keptLast.parts.find(
+      (p) => (p as { type?: string }).type === "tool-result",
+    ) as unknown as { output?: { stdout?: string; note?: string } };
+    expect(toolPart).toBeDefined();
+    // The 60k-char output is replaced by the elision placeholder.
+    expect(toolPart.output?.stdout).toBeUndefined();
+    expect(toolPart.output?.note).toContain("elided by /compact");
+    // Small outputs pass through untouched.
+    const small = { ...msgs[0] };
+    const before = JSON.stringify(small).length;
+    expect(before).toBeGreaterThan(0);
+  });
 });
