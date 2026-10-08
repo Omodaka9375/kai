@@ -57,6 +57,8 @@ type Session = {
   nudgeTimers: ReturnType<typeof setTimeout>[];
   /** Renderer-bind watchdog timer — cleared on dispose. */
   watchdogTimer: ReturnType<typeof setTimeout> | null;
+  /** Renderer-bind watchdog attempts so far (capped). */
+  watchdogAttempts: number;
 };
 
 const sessions = new Map<number, Session>();
@@ -137,6 +139,7 @@ function ensureSession(leafId: number, initialCwd?: string): Session {
     spawnEpoch: 0,
     nudgeTimers: [],
     watchdogTimer: null,
+    watchdogAttempts: 0,
   };
   sessions.set(leafId, session);
 
@@ -322,39 +325,54 @@ function bindLeafToSlot(leafId: number, s: Session): void {
   // interleave between acquireSlot and the flag write below.
   s.hasSlot = true;
   logLeaf(leafId, `binding renderer slot (shellExited=${s.shellExited})`);
-  const slot = acquireSlot({
-    leafId,
-    container: s.container,
-    snapshot: s.snapshot,
-    drainRing: (write) => s.dormantRing.drain(write),
-    shellExited: s.shellExited,
-    searchQuery: s.searchQuery,
-    cols: s.cols,
-    rows: s.rows,
-    onScopeChange: (cols, rows) => {
-      s.cols = cols;
-      s.rows = rows;
-    },
-    registerOsc: (term) => {
-      // Shared in-command flag — see osc-handlers.ts. The prompt tracker
-      // flips it on OSC 133 B/C/D/A; the cwd handler reads it to ignore OSC
-      // 7 emitted by untrusted command output (remote SSH, `cat` of an
-      // attacker file, etc.).
-      const shellState = createShellIntegrationState();
-      const prompt = registerPromptTracker(term, shellState);
-      const cwd = registerCwdHandler(
-        term,
-        (next) => {
-          if (s.lastCwd === next) return;
-          s.lastCwd = next;
-          s.callbacks.onCwd?.(next);
-        },
-        shellState,
-      );
-      return [prompt.dispose, cwd];
-    },
-    onSearchReady: (addon) => s.callbacks.onSearchReady?.(addon),
-  });
+  let slot;
+  try {
+    slot = acquireSlot({
+      leafId,
+      container: s.container,
+      snapshot: s.snapshot,
+      drainRing: (write) => s.dormantRing.drain(write),
+      shellExited: s.shellExited,
+      searchQuery: s.searchQuery,
+      cols: s.cols,
+      rows: s.rows,
+      onScopeChange: (cols, rows) => {
+        s.cols = cols;
+        s.rows = rows;
+      },
+      registerOsc: (term) => {
+        // Shared in-command flag — see osc-handlers.ts. The prompt tracker
+        // flips it on OSC 133 B/C/D/A; the cwd handler reads it to ignore OSC
+        // 7 emitted by untrusted command output (remote SSH, `cat` of an
+        // attacker file, etc.).
+        const shellState = createShellIntegrationState();
+        const prompt = registerPromptTracker(term, shellState);
+        const cwd = registerCwdHandler(
+          term,
+          (next) => {
+            if (s.lastCwd === next) return;
+            s.lastCwd = next;
+            s.callbacks.onCwd?.(next);
+          },
+          shellState,
+        );
+        return [prompt.dispose, cwd];
+      },
+      onSearchReady: (addon) => s.callbacks.onSearchReady?.(addon),
+    });
+  } catch (e) {
+    // acquireSlot threw (bindSlot rolls its own slot state back and
+    // rethrows). hasSlot must NOT stay true: every recovery path — the
+    // bind() retry ladder's guard, the visible/focused effect, and the
+    // render watchdog — checks hasSlot, and a stale true disables ALL of
+    // them while no slot is actually bound: a live PTY streaming into the
+    // dormant ring behind a permanently blank pane. Roll the flag back
+    // here (the single owner of the invariant) and rethrow — callers that
+    // can retry do, and the watchdog re-arms on the next attach.
+    s.hasSlot = false;
+    logLeaf(leafId, `acquireSlot threw — hasSlot rolled back: ${String(e)}`);
+    throw e;
+  }
   s.snapshot = null;
   logLeaf(
     leafId,
@@ -389,6 +407,7 @@ function unbindLeafFromSlot(leafId: number, s: Session): void {
 // pool eviction mid-remount, a bind retry ladder that exhausted while the
 // container was transiently null, hasSlot desync after an exception, etc.
 const RENDER_WATCHDOG_MS = 1_500;
+const RENDER_WATCHDOG_MAX_ATTEMPTS = 5;
 
 function attachSession(
   leafId: number,
@@ -407,16 +426,53 @@ function attachSession(
   // Watchdog: visible + attached but no slot → try again (idempotent guard in
   // bindLeafToSlot makes repeated attempts safe). Cleared on dispose so a
   // closed tab never fires a zombie bind.
+  //
+  // Trust the POOL, not hasSlot: getSlotForLeaf is ground truth (the flag has
+  // desynced from reality before — set before acquireSlot with no rollback on
+  // throw — and a stale true disabled this very watchdog while the pane sat
+  // blank forever). If hasSlot claims bound but the pool has no slot for this
+  // leaf, reset the flag and force a re-bind.
+  //
+  // Retrying, not one-shot: a single attempt right after a transient bind
+  // failure can lose the race again (dropdown portal teardown, remount
+  // churn). Back off progressively; cap so a genuinely wedged session
+  // (container removed but not disposed, etc.) doesn't retry forever.
   if (!s.watchdogTimer) {
     s.watchdogTimer = setTimeout(() => {
       s.watchdogTimer = null;
-      if (s.disposed || !s.visibleNow || s.hasSlot || !s.container) return;
-      logLeaf(leafId, "renderer watchdog: slot still unbound — forcing bind");
-      bindLeafToSlot(leafId, s);
+      if (s.disposed || !s.visibleNow || !s.container) return;
+      const slotExists = getSlotForLeaf(leafId) !== null;
+      if (slotExists && s.hasSlot) return; // healthy — nothing to do
+      if (s.hasSlot && !slotExists) {
+        logLeaf(
+          leafId,
+          "renderer watchdog: hasSlot=true but no slot in pool — resetting flag",
+        );
+        s.hasSlot = false;
+      }
+      if (s.watchdogAttempts >= RENDER_WATCHDOG_MAX_ATTEMPTS) {
+        logLeaf(
+          leafId,
+          `renderer watchdog: giving up after ${s.watchdogAttempts} attempts — pane will stay unbound until the tab is switched or reopened`,
+        );
+        return;
+      }
+      s.watchdogAttempts += 1;
+      logLeaf(
+        leafId,
+        `renderer watchdog: slot unbound — forcing bind (attempt ${s.watchdogAttempts})`,
+      );
+      try {
+        bindLeafToSlot(leafId, s);
+      } catch {
+        // bindLeafToSlot rolls hasSlot back on throw; the next tick retries.
+      }
       if (!s.hasSlot) return; // container vanished again — next attach retries
       // Slot bound late: dormant-ring content is drained by acquireSlot; give
       // the PTY a resize nudge so a prompt that rendered pre-bind repaints.
       s.pty?.resize(s.cols || 80, s.rows || 24);
+      // Bound now — reset the attempt counter for any future unbind cycle.
+      s.watchdogAttempts = 0;
     }, RENDER_WATCHDOG_MS);
   }
 }
