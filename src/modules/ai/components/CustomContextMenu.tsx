@@ -116,11 +116,6 @@ export function CustomContextMenu({
         />
         <span className="flex-1 text-left">
           {fmt.formattable ? "Format Document" : "No formatter"}
-          {fmt.formattable && fmt.formatterName && (
-            <span className="ml-1.5 text-[10px] text-muted-foreground">
-              {fmt.formatterName}
-            </span>
-          )}
         </span>
       </button>
       {fmt.formattable && hasSelection && (
