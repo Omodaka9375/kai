@@ -140,6 +140,7 @@ export default function App() {
     closeActivePane,
     closePaneByLeaf,
     resetWorkspace,
+    closeOthers,
     moveTab,
   } = useTabs({ defer: true });
 
@@ -256,6 +257,13 @@ export default function App() {
 
   const [home, setHome] = useState<string | null>(null);
   const [pendingCloseTab, setPendingCloseTab] = useState<number | null>(null);
+  // Dirty-editor tabs awaiting "Close others" confirmation. Null when the
+  // dialog is closed; the kept tab id is stored alongside so the handler can
+  // resume after the dialog resolves.
+  const [pendingCloseOthers, setPendingCloseOthers] = useState<{
+    keepId: number;
+    dirtyIds: number[];
+  } | null>(null);
   const workspaceEnv = useWorkspaceEnvStore((s) => s.env);
   const setWorkspaceEnv = useWorkspaceEnvStore((s) => s.setEnv);
   const [launchCwd, setLaunchCwd] = useState<string | null>(null);
@@ -665,6 +673,45 @@ export default function App() {
 
   const cancelClose = useCallback(() => {
     setPendingCloseTab(null);
+  }, []);
+
+  /**
+   * "Close others" from a tab's context menu. Mirrors handleClose's
+   * dirty-editor policy for every OTHER tab: dirty editors get the
+   * confirmation dialog (batched), everything else closes immediately.
+   */
+  const handleCloseOthers = useCallback(
+    (keepId: number) => {
+      const others = tabs.filter((t) => t.id !== keepId);
+      const dirtyIds = others
+        .filter((t) => t.kind === "editor" && t.dirty)
+        .map((t) => t.id);
+      if (dirtyIds.length > 0) {
+        setPendingCloseOthers({ keepId, dirtyIds });
+        return;
+      }
+      const closed = closeOthers(keepId);
+      for (const id of closed) {
+        editorRefs.current.delete(id);
+        previewRefs.current.delete(id);
+      }
+    },
+    [tabs, closeOthers],
+  );
+
+  const confirmCloseOthers = useCallback(() => {
+    if (pendingCloseOthers === null) return;
+    const { keepId } = pendingCloseOthers;
+    setPendingCloseOthers(null);
+    const closed = closeOthers(keepId);
+    for (const id of closed) {
+      editorRefs.current.delete(id);
+      previewRefs.current.delete(id);
+    }
+  }, [pendingCloseOthers, closeOthers]);
+
+  const cancelCloseOthers = useCallback(() => {
+    setPendingCloseOthers(null);
   }, []);
 
   const cycleTab = useCallback(
@@ -1508,6 +1555,7 @@ export default function App() {
             onNewApiTester={newApiTesterTab}
             onNewPrivate={openNewPrivateTab}
             onClose={handleClose}
+            onCloseOthers={handleCloseOthers}
             onPin={pinTab}
             onMove={moveTab}
             onSplitTab={toggleSplitTab}
@@ -1798,6 +1846,33 @@ export default function App() {
                 </AlertDialogCancel>
                 <AlertDialogAction onClick={confirmClose}>
                   Close Anyway
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+
+          <AlertDialog
+            open={pendingCloseOthers !== null}
+            onOpenChange={(open) => !open && cancelCloseOthers()}
+          >
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Unsaved Changes</AlertDialogTitle>
+                <AlertDialogDescription>
+                  {pendingCloseOthers?.dirtyIds.length === 1
+                    ? `"${
+                        tabs.find((t) => t.id === pendingCloseOthers.dirtyIds[0])
+                          ?.title ?? "This file"
+                      }" has unsaved changes. Close others anyway?`
+                    : `${pendingCloseOthers?.dirtyIds.length ?? 0} files have unsaved changes. Close others anyway?`}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel onClick={cancelCloseOthers}>
+                  Cancel
+                </AlertDialogCancel>
+                <AlertDialogAction onClick={confirmCloseOthers}>
+                  Close Others Anyway
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>

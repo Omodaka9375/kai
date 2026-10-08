@@ -584,6 +584,31 @@ export function useTabs(initial?: Partial<TerminalTab> & { defer?: boolean }) {
     for (const lid of toDispose) disposeSession(lid);
   }, []);
 
+  /**
+   * Close every tab except `keepId` (tab context menu → "Close others").
+   * The kept tab becomes active. Terminal sessions of the closed tabs are
+   * disposed here; tab-id-keyed handles (editor/preview refs) are cleaned by
+   * the App-level wrapper, same as closeTab.
+   */
+  const closeOthers = useCallback((keepId: number): number[] => {
+    let toDispose: number[] = [];
+    const closedIds: number[] = [];
+    setTabs((curr) => {
+      const kept = curr.find((t) => t.id === keepId);
+      // Nothing to do when the keep target is gone or already alone.
+      if (!kept || curr.length <= 1) return curr;
+      for (const t of curr) {
+        if (t.id === keepId) continue;
+        closedIds.push(t.id);
+        if (t.kind === "terminal") toDispose.push(...leafIds(t.paneTree));
+      }
+      setActiveId(keepId);
+      return [kept];
+    });
+    for (const lid of toDispose) disposeSession(lid);
+    return closedIds;
+  }, []);
+
   const updateTab = useCallback((id: number, patch: TabPatch) => {
     setTabs((t) =>
       t.map((x) => {
@@ -839,6 +864,7 @@ export function useTabs(initial?: Partial<TerminalTab> & { defer?: boolean }) {
     closeActivePane,
     closePaneByLeaf,
     resetWorkspace,
+    closeOthers,
     moveTab,
   };
 }

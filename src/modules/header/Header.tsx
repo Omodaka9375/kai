@@ -46,6 +46,8 @@ type Props = {
   onNewApiTester: () => void;
   onNewPrivate: () => void;
   onClose: (id: number) => void;
+  /** Close every other tab, keeping this one. */
+  onCloseOthers: (id: number) => void;
   /** Promote a preview (transient) tab to persistent. */
   onPin: (id: number) => void;
   onMove: (dragId: number, hoverId: number) => void;
@@ -76,6 +78,7 @@ export function Header({
   onNewApiTester,
   onNewPrivate,
   onClose,
+  onCloseOthers,
   onPin,
   onMove,
   onSplitTab,
@@ -392,6 +395,7 @@ export function Header({
           onNewApiTester={onNewApiTester}
           onNewPrivate={onNewPrivate}
           onClose={onClose}
+          onCloseOthers={onCloseOthers}
           onPin={onPin}
           onMove={onMove}
           onSplitTab={onSplitTab}

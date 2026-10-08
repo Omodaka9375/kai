@@ -21,6 +21,7 @@ import {
   Cancel01Icon,
   Clock01Icon,
   ComputerTerminal02Icon,
+  Delete02Icon,
   GitCompareIcon,
   Globe02Icon,
   IncognitoIcon,
@@ -43,6 +44,8 @@ type Props = {
   onNewApiTester: () => void;
   onNewPrivate: () => void;
   onClose: (id: number) => void;
+  /** Close every other tab, keeping this one. */
+  onCloseOthers: (id: number) => void;
   /** Pin (promote) a preview tab to persistent on double-click. */
   onPin: (id: number) => void;
   /** Reorder: move tab dragId to the position of tab hoverId. */
@@ -65,6 +68,7 @@ export function TabBar({
   onNewApiTester,
   onNewPrivate,
   onClose,
+  onCloseOthers,
   onPin,
   onMove,
   onSplitTab,
@@ -260,6 +264,15 @@ export function TabBar({
                       </>
                     )}
                     <ContextMenuSeparator />
+                    {tabs.length > 1 && (
+                      <ContextMenuItem
+                        className="gap-2 text-[12px]"
+                        onSelect={() => onCloseOthers(t.id)}
+                      >
+                        <HugeiconsIcon icon={Delete02Icon} size={13} strokeWidth={1.75} />
+                        Close others
+                      </ContextMenuItem>
+                    )}
                     <ContextMenuItem
                       className="gap-2 text-[12px]"
                       variant="destructive"
