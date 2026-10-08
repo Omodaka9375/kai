@@ -346,7 +346,13 @@ function bindLeafToSlot(leafId: number, s: Session): void {
         // 7 emitted by untrusted command output (remote SSH, `cat` of an
         // attacker file, etc.).
         const shellState = createShellIntegrationState();
-        const prompt = registerPromptTracker(term, shellState);
+        // OSC 133 D (command finished) → notify the host. A command may have
+        // touched the worktree (git, build, codegen); App listens and
+        // refreshes file-derived UI (source control). Window event keeps
+        // this module decoupled — same pattern as Kai:ai-attach-file.
+        const prompt = registerPromptTracker(term, shellState, () => {
+          window.dispatchEvent(new Event("Kai:term-command-end"));
+        });
         const cwd = registerCwdHandler(
           term,
           (next) => {

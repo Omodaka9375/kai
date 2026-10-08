@@ -12,6 +12,7 @@ All notable changes to the KAI terminal emulator project are documented in this 
 - UI: "Format Document" in the right-click menu renders on one row again — the inline formatter name ("Prettier") wrapped the entry onto two lines; it lives in the tooltip now.
 - Tabs: "Close others" in the tab context menu — closes every tab except the right-clicked one, with one batched confirmation when other tabs have unsaved editor changes.
 - Editor: the alien CodeMirror search bar no longer appears on Ctrl+F — CM's find/replace commands open their built-in panel when the editor has no query, and the header search input survived tab switches while the editor's query did not; the query is now re-synced before every navigation.
+- SCM: the git panel updates as you work instead of waiting for a window focus — editor saves and finished terminal commands (OSC 133) now trigger a debounced local refresh; previously the panel only refreshed on mount, alt-tab, or the manual button, so changes made inside KAI stayed invisible until you tabbed away.
 
 ---
 

@@ -7,6 +7,8 @@ type Props = {
   tabs: Tab[];
   activeId: number;
   onDirtyChange: (id: number, dirty: boolean) => void;
+  /** Fires when an editor successfully writes its file to disk. */
+  onSaved: () => void;
   registerHandle: (id: number, handle: EditorPaneHandle | null) => void;
   onCloseTab: (id: number) => void;
 };
@@ -15,6 +17,7 @@ export function EditorStack({
   tabs,
   activeId,
   onDirtyChange,
+  onSaved,
   registerHandle,
   onCloseTab,
 }: Props) {
@@ -26,6 +29,7 @@ export function EditorStack({
   // the parent. Memoizing per id keeps each callback's identity stable.
   const registerRef = useRef(registerHandle);
   const dirtyRef = useRef(onDirtyChange);
+  const savedRef = useRef(onSaved);
   const closeRef = useRef(onCloseTab);
   useEffect(() => {
     registerRef.current = registerHandle;
@@ -33,6 +37,9 @@ export function EditorStack({
   useEffect(() => {
     dirtyRef.current = onDirtyChange;
   }, [onDirtyChange]);
+  useEffect(() => {
+    savedRef.current = onSaved;
+  }, [onSaved]);
   useEffect(() => {
     closeRef.current = onCloseTab;
   }, [onCloseTab]);
@@ -97,12 +104,13 @@ export function EditorStack({
             aria-hidden={!visible}
           >
             <div className="h-full overflow-hidden rounded-md bg-background">
-              <EditorPane
-                ref={getRefCallback(t.id)}
-                path={t.path}
-                onDirtyChange={getDirtyCallback(t.id)}
-                onClose={getCloseCallback(t.id)}
-              />
+          <EditorPane
+            ref={getRefCallback(t.id)}
+            path={t.path}
+            onDirtyChange={getDirtyCallback(t.id)}
+            onSaved={savedRef.current}
+            onClose={getCloseCallback(t.id)}
+          />
             </div>
           </div>
         );

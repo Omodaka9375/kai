@@ -42,6 +42,10 @@ export type PromptTracker = {
 export function registerPromptTracker(
   term: Terminal,
   state?: ShellIntegrationState,
+  /** Fires on OSC 133 D — a command finished in this shell. Used by the
+   *  host to refresh file-derived UI (source control) since a command
+   * may have touched the worktree. */
+  onCommandEnd?: () => void,
 ): PromptTracker {
   let marker: IMarker | null = null;
   // Soft cap on markers: older ones are disposed but xterm may retain
@@ -73,6 +77,7 @@ export function registerPromptTracker(
     } else if (data.startsWith("D")) {
       // OSC 133 D — command ends.
       if (state) state.inCommand = false;
+      onCommandEnd?.();
     }
     return true;
   });

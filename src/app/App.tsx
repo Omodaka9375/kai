@@ -1088,6 +1088,32 @@ export default function App() {
 
   const sourceControl = useSourceControl(sourceControlPath, true);
 
+  // File-change-driven SCM refresh. The panel previously refreshed only on
+  // mount and window FOCUS — editing inside KAI keeps the window focused,
+  // so the git panel stayed stale until an alt-tab happened to fire. Two
+  // targeted hooks: editor save (file written by KAI itself) and OSC 133 D
+  // (a terminal command finished — git/build/codegen may have touched the
+  // worktree). Debounced so a save+command burst fires one refresh.
+  const scRefreshRef = useRef(sourceControl.refresh);
+  scRefreshRef.current = sourceControl.refresh;
+  useEffect(() => {
+    let timer = 0;
+    const schedule = () => {
+      if (timer) window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        timer = 0;
+        void scRefreshRef.current({ remote: "never" });
+      }, 300);
+    };
+    window.addEventListener("Kai:sc-file-change", schedule);
+    window.addEventListener("Kai:term-command-end", schedule);
+    return () => {
+      window.removeEventListener("Kai:sc-file-change", schedule);
+      window.removeEventListener("Kai:term-command-end", schedule);
+      if (timer) window.clearTimeout(timer);
+    };
+  }, []);
+
   const toggleSourceControl = useCallback(() => {
     cycleSidebarView("source-control");
   }, [cycleSidebarView]);
@@ -1450,13 +1476,16 @@ export default function App() {
         )}
         aria-hidden={!isEditorTab}
       >
-        <EditorStack
-          tabs={tabs}
-          activeId={activeId}
-          registerHandle={registerEditorHandle}
-          onDirtyChange={handleEditorDirty}
-          onCloseTab={disposeTab}
-        />
+                <EditorStack
+                  tabs={tabs}
+                  activeId={activeId}
+                  registerHandle={registerEditorHandle}
+                  onDirtyChange={handleEditorDirty}
+                  onSaved={() =>
+                    window.dispatchEvent(new Event("Kai:sc-file-change"))
+                  }
+                  onCloseTab={disposeTab}
+                />
       </div>
       <div
         className={cn(
@@ -1660,6 +1689,9 @@ export default function App() {
                                   activeId={splitTab.id}
                                   registerHandle={registerEditorHandle}
                                   onDirtyChange={handleEditorDirty}
+                                  onSaved={() =>
+                                    window.dispatchEvent(new Event("Kai:sc-file-change"))
+                                  }
                                   onCloseTab={disposeTab}
                                 />
                               </div>
