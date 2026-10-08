@@ -4,6 +4,19 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.5.8]
+
+- Tabs: the StartPage replaces the launch auto-spawn — the mount-time PTY raced the first paint / window restore / font-gate and left blank panes; a neutral start page (quick actions + recent projects) removes the race by construction, terminals spawn on demand, and closing the last tab is now a legal state.
+- Tabs: opening a project keeps every open terminal alive — the old switch path killed all sessions; only the local ↔ WSL env switch still resets (those sessions cannot survive the boundary).
+- AI: cloud stalls recover automatically even when there is nothing to compact — the old gate required compaction to succeed, so low-context stalls always hit the manual error card; now a plain retry with a fresh connection, capped at 2 consecutive attempts.
+- Voice: the mic stays usable while the agent runs — mid-run recordings land in the steering queue, same as typed text.
+- SCM: the Open-PR button is gated to feature branches (hidden on the default branch / detached HEAD / remotes without a HEAD) and the PR base is the remote's default branch — the old code derived it from the branch's own upstream, producing a broken compare/feature...feature self-compare.
+- Windows: paste no longer triggers a native permission prompt stuck in the top-left corner — CLIPBOARD_READ is now allowed in the webview permission handler alongside mic/camera.
+- UI: auto-approved tools show the same dot indicator as every other tool state — the green check-circle icon that flashed between approval and execution read as a glitch.
+- AI: subagents batch — independent run_subagent calls in one step run concurrently (the SDK already parallelizes them); the model just needed the prompt rule. Spawn cards show their description again (dead input fields left them summary-less).
+
+---
+
 ## [1.5.7]
 
 - AI: local models that stall at high context now recover seamlessly — endpoint-aware watchdog budgets (10/4 min local vs 5/2 cloud), auto-compact, and an automatic retry in the same session; the error card stays reserved for genuinely dead engines.
