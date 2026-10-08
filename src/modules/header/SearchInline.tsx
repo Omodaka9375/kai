@@ -150,18 +150,28 @@ export const SearchInline = forwardRef<SearchInlineHandle, Props>(
         if (forward) target.addon.findNext(q, opts);
         else target.addon.findPrevious(q, opts);
       } else {
+        // The input's text can be stale relative to the editor's search
+        // state (it survives target switches; the editor's query does
+        // not). Re-sync first — CM's find commands open the STOCK panel
+        // when no valid query exists, which showed as a second, alien
+        // search bar on top of the document.
+        target.handle.syncQuery(q, replaceText, caseSensitive, useRegexp);
         if (forward) target.handle.findNext();
         else target.handle.findPrevious();
       }
     };
 
     const handleReplaceNext = useCallback(() => {
-      if (target?.kind === "editor") target.handle.replaceNext();
-    }, [target]);
+      if (target?.kind !== "editor") return;
+      target.handle.syncQuery(q, replaceText, caseSensitive, useRegexp);
+      target.handle.replaceNext();
+    }, [target, q, replaceText, caseSensitive, useRegexp]);
 
     const handleReplaceAll = useCallback(() => {
-      if (target?.kind === "editor") target.handle.replaceAll();
-    }, [target]);
+      if (target?.kind !== "editor") return;
+      target.handle.syncQuery(q, replaceText, caseSensitive, useRegexp);
+      target.handle.replaceAll();
+    }, [target, q, replaceText, caseSensitive, useRegexp]);
 
     // Re-sync search config when toggles change.
     useEffect(() => {

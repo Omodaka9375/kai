@@ -91,6 +91,15 @@ function useBlobUrl(path: string, mime: string, enabled: boolean): string | null
 export type EditorPaneHandle = {
   setQuery: (q: string) => void;
   setSearchReplace: (search: string, replace: string, caseSensitive: boolean, regexp: boolean) => void;
+  /**
+   * Sync the query into the editor's search state WITHOUT navigating.
+   * The header search input survives tab/target switches while the
+   * editor's query does not (clearQuery on switch; each editor tab has
+   * its own CM state) — CM's find/replace commands fall back to OPENING
+   * THE STOCK SEARCH PANEL when no valid query exists, so every navigate
+   * must re-sync first.
+   */
+  syncQuery: (search: string, replace: string, caseSensitive: boolean, regexp: boolean) => void;
   findNext: () => void;
   findPrevious: () => void;
   replaceNext: () => void;
@@ -342,6 +351,20 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
             ),
           });
           if (search) findNext(view);
+        },
+        syncQuery: (
+          search: string,
+          replace: string,
+          caseSensitive: boolean,
+          regexp: boolean,
+        ) => {
+          const view = cmRef.current?.view;
+          if (!view) return;
+          view.dispatch({
+            effects: setSearchQuery.of(
+              new SearchQuery({ search, replace, caseSensitive, regexp }),
+            ),
+          });
         },
         findNext: () => {
           const view = cmRef.current?.view;
