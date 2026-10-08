@@ -140,7 +140,6 @@ export default function App() {
     closeActivePane,
     closePaneByLeaf,
     resetWorkspace,
-    switchProject,
     moveTab,
   } = useTabs({ defer: true });
 
@@ -148,6 +147,11 @@ export default function App() {
   // (e.g. cdInNewTab) read the latest pane state instead of a stale closure.
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
+
+  // Mount-effect-safe access to newTab: the launch effect runs once with a
+  // mount-time closure; the ref always points at the latest callback.
+  const newTabRef = useRef(newTab);
+  newTabRef.current = newTab;
 
   const activeTerminalTab = useMemo(() => {
     const t = tabs.find((x) => x.id === activeId);
@@ -364,9 +368,14 @@ export default function App() {
         setLaunchCwd(cwd);
         setLaunchCwdResolved(true);
         // Pin the workspace root to the launch directory so the explorer /
-        // AI sessions resolve against the right project. NO terminal tab —
-        // the StartPage renders for the zero-tab state.
+        // AI sessions resolve against the right project. A plain launch
+        // stays on the StartPage (zero-tab state — no auto-spawned PTY
+        // racing the first paint). An ARGV launch ("Open with KAI", a
+        // pinned shortcut with a path) is an explicit "open this project"
+        // intent — land the user in it with a terminal tab.
         if (cwd) setRootRef.current(cwd);
+        const launch = getLaunchDir();
+        if (launch) newTabRef.current(launch);
       })
       .catch((e) => {
         clearTimeout(watchdog);
@@ -519,8 +528,8 @@ export default function App() {
 
   const onOpenProject = useCallback((path: string) => {
     setRootRef.current(path);
-    switchProject(path);
-  }, [switchProject]);
+    newTab(path);
+  }, [newTab]);
 
   // Single-instance forwarding: a second KAI launch (e.g. "Open with KAI" in
   // Explorer, or a pinned shortcut with a path argument) no longer starts a

@@ -812,35 +812,6 @@ export function useTabs(initial?: Partial<TerminalTab> & { defer?: boolean }) {
     }, 120);
   }, []);
 
-  /**
-   * Project switch (File > Open Project, StartPage, single-instance
-   * forwarding): re-roots the workspace but KEEPS every open tab and its
-   * live PTY sessions. Terminals keep streaming; new terminals spawn via
-   * newTab(cwd), which inherits the new root. The env-switch path
-   * (local ↔ WSL) keeps using resetWorkspace — those sessions cannot
-   * survive a host/distro change.
-   */
-  const switchProject = useCallback((cwd: string) => {
-    // No tab surgery — the workspace re-root happens via _setRoot in
-    // App.tsx (explorer/sessions/AI follow explorerRoot). If no tab is
-    // open (start page showing), spawn the project's first terminal so
-    // the user lands in the project they just chose.
-    if (tabsRef.current.length > 0) return;
-    const tabId = nextIdRef.current++;
-    const leafId = nextIdRef.current++;
-    setTabs(() => [
-      {
-        id: tabId,
-        kind: "terminal",
-        title: "shell",
-        cwd,
-        paneTree: { kind: "leaf", id: leafId, cwd },
-        activeLeafId: leafId,
-      },
-    ]);
-    setActiveId(tabId);
-  }, []);
-
   return {
     tabs,
     activeId,
@@ -868,7 +839,6 @@ export function useTabs(initial?: Partial<TerminalTab> & { defer?: boolean }) {
     closeActivePane,
     closePaneByLeaf,
     resetWorkspace,
-    switchProject,
     moveTab,
   };
 }
