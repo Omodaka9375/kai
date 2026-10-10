@@ -223,32 +223,52 @@ function truncateBulkyToolInputs(part: ToolPart): { changed: boolean; part: Tool
   return { changed: true, part: { ...part, input: next } };
 }
 
+/**
+ * Strip screenshot dataUrls from look_at_screen tool results — ALWAYS ON.
+ *
+ * The image reaches the model ONCE via toModelOutput (an image-data part in
+ * the tool-result content). Later turns rebuild history through
+ * convertToModelMessages WITHOUT a tools map, so toModelOutput does NOT run
+ * again: the output lands as {type:"json", value:{image:{dataUrl}}} and gets
+ * stringified — megabytes of base64 as raw text on every subsequent request,
+ * which models report as "raw data I can't interpret". Strip the payload,
+ * keep the metadata (monitor/resolution).
+ *
+ * Tolerates BOTH shapes: the converted {type:"json", value:{...}} (what this
+ * pipeline actually sees) and a raw {image:{dataUrl}} output (defensive for
+ * any future direct caller).
+ */
+function stripScreenshotDataUrl(part: ToolPart): { changed: boolean; part: ToolPart } {
+  if (part.type !== "tool-result" || part.toolName !== "look_at_screen") {
+    return { changed: false, part };
+  }
+  const output = part.output;
+  if (!output || typeof output !== "object") return { changed: false, part };
+  const rec = output as {
+    type?: string;
+    value?: { image?: { dataUrl?: unknown } };
+    image?: { dataUrl?: unknown };
+  };
+  const converted = rec.type === "json" && rec.value && typeof rec.value === "object";
+  const src = converted ? rec.value! : rec;
+  if (!src.image || typeof src.image.dataUrl !== "string") {
+    return { changed: false, part };
+  }
+  return {
+    changed: true,
+    part: {
+      ...part,
+      output: converted
+        ? { ...rec, value: { ...rec.value!, image: { dataUrlRemoved: true } } }
+        : { ...rec, image: { dataUrlRemoved: true } },
+    },
+  };
+}
+
 function truncateLargeToolResult(part: ToolPart): { changed: boolean; part: ToolPart } {
   if (part.type !== "tool-result") return { changed: false, part };
   const output = part.output;
   if (output == null) return { changed: false, part };
-  // look_at_screen: the dataUrl is UI-only (the model got the image as a
-  // tool-result part once, via toModelOutput; re-sends don't need it and
-  // stringifying megabytes of base64 on every step is exactly what this
-  // pass exists to prevent). Strip it, keep the metadata.
-  if (
-    part.toolName === "look_at_screen" &&
-    typeof output === "object" &&
-    output !== null &&
-    typeof (output as { image?: { dataUrl?: unknown } }).image?.dataUrl === "string"
-  ) {
-    const rec = output as { image: { dataUrl?: string } };
-    return {
-      changed: true,
-      part: {
-        ...part,
-        output: {
-          ...rec,
-          image: { dataUrlRemoved: true },
-        },
-      },
-    };
-  }
   const str = typeof output === "string" ? output : JSON.stringify(output);
   if (str.length <= TOOL_RESULT_TRUNCATE_CHARS) return { changed: false, part };
   return {
@@ -288,19 +308,23 @@ export function compactModelMessagesDetailed(
     }
   }
 
-  // ── Phase 1.5: elide bulky tool-call inputs (base64 payloads) ──
-  // Always on — a single display_image call is hundreds of KB and every
-  // later step re-sends it; there is no scenario where the model needs the
-  // raw payload back after the call completed.
+  // ── Phase 1.5: elide bulky tool-call inputs (base64 payloads) and strip
+  // screenshot dataUrls from look_at_screen results — both ALWAYS ON. A
+  // single display_image call is hundreds of KB and every later step
+  // re-sends it; there is no scenario where the model needs the raw payload
+  // back after the call completed. The screenshot dataUrl is UI-only (the
+  // model received the image as an image-data part when the call ran).
   {
     let localDropped = 0;
     working = working.map((m): ModelMessage => {
       if (!Array.isArray(m.content)) return m;
       let touched = false;
       const nextContent = (m.content as ToolPart[]).map((part) => {
-        const r = truncateBulkyToolInputs(part);
-        if (r.changed) touched = true;
-        return r.part;
+        const a = truncateBulkyToolInputs(part);
+        if (a.changed) touched = true;
+        const b = stripScreenshotDataUrl(a.part);
+        if (b.changed) touched = true;
+        return b.part;
       });
       if (!touched) return m;
       localDropped++;

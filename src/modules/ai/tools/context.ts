@@ -32,7 +32,29 @@ export type ToolContext = {
    * Tools can use this to auto-truncate responses when context is tight.
    * Returns 0 if unknown (never used as a negative). */
   getRemainingContextTokens?: () => number;
+  /**
+   * Whether the CURRENT model's provider can receive IMAGES in tool-result
+   * content (image-data parts). The openai-compatible family (DeepSeek,
+   * Mistral, OpenRouter, z.ai, Groq, xAI, Cerebras, LM Studio, custom)
+   * stringify tool-result content parts — an image part becomes megabytes
+   * of base64 text the model cannot read. When false, image-returning tools
+   * fall back to OCR text. Absent = true (first-party providers).
+   */
+  supportsToolResultImages?: () => boolean;
 };
+
+/**
+ * Providers whose tool-result content parts can carry images. Verified
+ * against the installed SDK dists: anthropic renders image-data as a base64
+ * image block inside tool_result, openai as input_image, google as
+ * inlineData. Everything else in the PROVIDERS list rides
+ * openai-compatible-style stringification.
+ */
+export const TOOL_RESULT_IMAGE_PROVIDERS: ReadonlySet<string> = new Set([
+  "openai",
+  "anthropic",
+  "google",
+]);
 
 export function resolvePath(rawPath: string, cwd: string | null): string {
   if (rawPath.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(rawPath))

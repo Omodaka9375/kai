@@ -21,6 +21,7 @@
 
 import { tool } from "ai";
 import { z } from "zod";
+import { attachmentFallbackText, extractAttachmentText } from "../extraction";
 import { native } from "../lib/native";
 import type { ToolContext } from "./context";
 
@@ -35,7 +36,7 @@ async function readJpegAsDataUrl(path: string): Promise<string> {
   return `data:image/jpeg;base64,${btoa(binary)}`;
 }
 
-export function buildScreenTools(_ctx: ToolContext) {
+export function buildScreenTools(ctx: ToolContext) {
   return {
     look_at_screen: tool({
       description:
@@ -85,24 +86,38 @@ export function buildScreenTools(_ctx: ToolContext) {
         return capture(display, focus);
       },
       // Vision models receive the screenshot as a tool-result image part.
-      toModelOutput: ({ output }) => {
+      // The openai-compatible family (DeepSeek, Mistral, OpenRouter, z.ai,
+      // Groq, xAI, Cerebras, LM Studio, custom endpoints) cannot: their
+      // converters stringify tool-result content parts, so an image part
+      // would become megabytes of unreadable base64 text. There we fall back
+      // to OCR text (same path as text-only model attachments).
+      toModelOutput: async ({ output }) => {
         const o = output as { image?: { dataUrl?: string } } | undefined;
         const dataUrl = o?.image?.dataUrl;
         if (!dataUrl) return { type: "content", value: [] };
         const [meta, b64] = dataUrl.split(",");
         const mediaType = /data:([^;]+)/.exec(meta)?.[1] ?? "image/jpeg";
-        return {
-          type: "content",
-          value: [
-            { type: "text", text: "Screenshot captured. Analyze it to answer the user." },
-            {
-              type: "file-data",
-              data: b64,
-              mediaType,
-              filename: "screenshot.jpg",
-            } as never,
-          ],
-        };
+        if (ctx.supportsToolResultImages?.()) {
+          return {
+            type: "content",
+            value: [
+              { type: "text", text: "Screenshot captured. Analyze it to answer the user." },
+              {
+                // image-data, NOT file-data. file-data is the DOCUMENT part:
+                // Anthropic accepts only application/pdf there and silently
+                // drops images (warning + filtered), OpenAI maps it to
+                // input_file. image-data is the image part for tool results —
+                // Anthropic renders a base64 image block inside tool_result
+                // (the computer-use pattern), OpenAI input_image, Google
+                // inlineData.
+                type: "image-data",
+                data: b64,
+                mediaType,
+              } as never,
+            ],
+          };
+        }
+        return { type: "text", value: await ocrText(dataUrl) };
       },
     }),
   } as const;
@@ -134,4 +149,18 @@ async function capture(display: string, focus?: string) {
     },
     ...(focus ? { focus } : {}),
   };
+}
+
+/** OCR text for providers that cannot receive tool-result images. */
+async function ocrText(dataUrl: string): Promise<string> {
+  try {
+    const text = await extractAttachmentText({
+      url: dataUrl,
+      mediaType: "image/jpeg",
+    });
+    if (text) return `[screenshot — OCR text, provider cannot receive images]\n${text}`;
+  } catch (e) {
+    console.warn("[kai] screenshot OCR failed:", e);
+  }
+  return attachmentFallbackText("screenshot");
 }

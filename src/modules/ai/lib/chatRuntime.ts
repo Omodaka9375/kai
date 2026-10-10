@@ -32,6 +32,7 @@ import { FileTracker } from "../lib/fileTracker";
 import { type ProviderKeys } from "../lib/keyring";
 import type { LoopDetectionResult } from "../lib/streamGuard";
 import type { ToolContext } from "../tools/tools";
+import { TOOL_RESULT_IMAGE_PROVIDERS } from "../tools/context";
 
 /** Store/ambient state the runtime reads or writes, injected by chatStore. */
 export type ChatRuntimeDeps = {
@@ -214,6 +215,14 @@ export function makeChatSync(
         const used = tokens.inputTokens + tokens.outputTokens;
         return Math.max(0, limit - used);
       },
+      // Provider-dependent image delivery for tool results (look_at_screen):
+      // the openai-compatible family stringifies content parts — those get
+      // OCR text instead of an image part. Read lazily so mid-session model
+      // switches are honored.
+      supportsToolResultImages: () =>
+        TOOL_RESULT_IMAGE_PROVIDERS.has(
+          getModel(deps.getSelectedModelId()).provider,
+        ),
     };
   })();
 

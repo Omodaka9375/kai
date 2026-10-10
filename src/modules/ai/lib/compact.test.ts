@@ -64,3 +64,87 @@ describe("compactModelMessagesDetailed — bulky tool inputs", () => {
     expect(r.compacted).toBe(false);
   });
 });
+
+describe("compactModelMessagesDetailed — screenshot dataUrl strip", () => {
+  const historyWithScreenshot = (output: unknown): ModelMessage[] =>
+    [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "call-s",
+            toolName: "look_at_screen",
+            input: { display: "primary" },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        content: [
+          // convertToModelMessages copies toolName onto tool-result parts
+          // (UI ToolUIPart carries it) — this is the real wire shape.
+          {
+            type: "tool-result",
+            toolCallId: "call-s",
+            toolName: "look_at_screen",
+            output,
+          },
+        ],
+      },
+    ] as unknown as ModelMessage[];
+
+  // The shape convertToModelMessages produces (no tools map → toModelOutput
+  // skipped → {type:"json", value:{...}} stringified by providers).
+  const convertedOutput = {
+    type: "json",
+    value: {
+      monitor: { id: 0, resolution: "1920x1080" },
+      image: { dataUrl: `data:image/jpeg;base64,${b64(20_000)}` },
+    },
+  };
+  // The raw execute() return shape (defensive).
+  const rawOutput = {
+    monitor: { id: 0, resolution: "1920x1080" },
+    image: { dataUrl: `data:image/jpeg;base64,${b64(20_000)}` },
+  };
+
+  it("strips the dataUrl from the converted json shape — ALWAYS ON", () => {
+    const r = compactModelMessagesDetailed(historyWithScreenshot(convertedOutput), 1_000_000);
+    const result = (r.messages[1].content as { type: string; output: Record<string, unknown> }[])
+      .find((p) => p.type === "tool-result")!;
+    const value = result.output.value as {
+      image?: { dataUrlRemoved?: boolean; dataUrl?: string };
+      monitor?: { resolution?: string };
+    };
+    expect(value.image?.dataUrl).toBeUndefined();
+    expect(value.image?.dataUrlRemoved).toBe(true);
+    // metadata survives
+    expect(value.monitor?.resolution).toBe("1920x1080");
+    expect(r.compacted).toBe(true);
+  });
+
+  it("strips the dataUrl from the raw output shape", () => {
+    const r = compactModelMessagesDetailed(historyWithScreenshot(rawOutput), 1_000_000);
+    const result = (r.messages[1].content as { type: string; output: Record<string, unknown> }[])
+      .find((p) => p.type === "tool-result")!;
+    expect(result.output.image).toEqual({ dataUrlRemoved: true });
+    expect(r.compacted).toBe(true);
+  });
+
+  it("leaves other tools' image-bearing outputs alone", () => {
+    const r = compactModelMessagesDetailed(
+      historyWithScreenshot({ image: { dataUrl: "data:image/jpeg;base64,AAAA" } })
+        .map((m) => ({
+          ...m,
+          content: (m.content as { toolName: string }[]).map((p) =>
+            p.toolName === "look_at_screen" ? { ...p, toolName: "some_other_tool" } : p,
+          ),
+        })) as unknown as ModelMessage[],
+      1_000_000,
+    );
+    const result = (r.messages[1].content as { type: string; output: { image?: { dataUrl?: string } } }[])
+      .find((p) => p.type === "tool-result")!;
+    expect(result.output.image?.dataUrl).toBe("data:image/jpeg;base64,AAAA");
+  });
+});
