@@ -271,6 +271,14 @@ export default function App() {
   const [pendingDeleteTabs, setPendingDeleteTabs] = useState<number[] | null>(
     null,
   );
+  // Project switch awaiting dirty-editor confirmation. Opening a project
+  // while another one is open SWITCHES the workspace (previous project's
+  // tabs close); dirty editors from the outgoing project get one batched
+  // confirmation first. Null when the dialog is closed.
+  const [pendingProjectOpen, setPendingProjectOpen] = useState<{
+    path: string;
+    dirtyIds: number[];
+  } | null>(null);
   useEffect(() => {
     homeDir()
       .then(async (p) => {
@@ -534,10 +542,32 @@ export default function App() {
     return () => ro.disconnect();
   }, [keysLoaded]);
 
-  const onOpenProject = useCallback((path: string) => {
-    setRootRef.current(path);
-    newTab(path);
-  }, [newTab]);
+  const onOpenProject = useCallback(
+    (path: string) => {
+      // Opening a project SWITCHES the workspace: the previous project's
+      // tabs close and you land in the new one (same reset as the local ↔
+      // WSL env switch — terminals of the old project cannot follow). A
+      // same-project click is a no-op when tabs are open — no surprise
+      // terminal massacre on a Recent-click of the project you are already
+      // in — but still lands you in the project when you are on the
+      // StartPage with zero tabs.
+      const norm = (p: string) => p.replace(/\\/g, "/");
+      if (explorerRoot && norm(explorerRoot) === norm(path)) {
+        if (tabs.length === 0) newTab(path);
+        return;
+      }
+      const dirtyIds = tabs
+        .filter((t) => t.kind === "editor" && t.dirty)
+        .map((t) => t.id);
+      if (dirtyIds.length > 0) {
+        setPendingProjectOpen({ path, dirtyIds });
+        return;
+      }
+      setRootRef.current(path);
+      resetWorkspace(path);
+    },
+    [tabs, explorerRoot, resetWorkspace, newTab],
+  );
 
   // Single-instance forwarding: a second KAI launch (e.g. "Open with KAI" in
   // Explorer, or a pinned shortcut with a path argument) no longer starts a
@@ -714,6 +744,26 @@ export default function App() {
     setPendingCloseOthers(null);
   }, []);
 
+  const confirmProjectOpen = useCallback(() => {
+    if (pendingProjectOpen === null) return;
+    const { path } = pendingProjectOpen;
+    setPendingProjectOpen(null);
+    // Mirror the env-switch cleanup: the unmount ref callbacks do NOT
+    // null the ACTIVE editor/search handles once activeId has already
+    // moved to the new terminal tab — clear them explicitly.
+    searchAddons.current.clear();
+    terminalRefs.current.clear();
+    editorRefs.current.clear();
+    previewRefs.current.clear();
+    setActiveSearchAddon(null);
+    setActiveEditorHandle(null);
+    setRootRef.current(path);
+    resetWorkspace(path);
+  }, [pendingProjectOpen, resetWorkspace]);
+
+  const cancelProjectOpen = useCallback(() => {
+    setPendingProjectOpen(null);
+  }, []);
   const cycleTab = useCallback(
     (delta: 1 | -1) => {
       if (tabs.length < 2) return;
@@ -1905,6 +1955,33 @@ export default function App() {
                 </AlertDialogCancel>
                 <AlertDialogAction onClick={confirmCloseOthers}>
                   Close Others Anyway
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+
+          <AlertDialog
+            open={pendingProjectOpen !== null}
+            onOpenChange={(open) => !open && cancelProjectOpen()}
+          >
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Unsaved Changes</AlertDialogTitle>
+                <AlertDialogDescription>
+                  {pendingProjectOpen?.dirtyIds.length === 1
+                    ? `"${
+                        tabs.find((t) => t.id === pendingProjectOpen.dirtyIds[0])
+                          ?.title ?? "This file"
+                      }" has unsaved changes. Open the new project anyway?`
+                    : `${pendingProjectOpen?.dirtyIds.length ?? 0} files have unsaved changes. Open the new project anyway?`}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel onClick={cancelProjectOpen}>
+                  Cancel
+                </AlertDialogCancel>
+                <AlertDialogAction onClick={confirmProjectOpen}>
+                  Open Project Anyway
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
