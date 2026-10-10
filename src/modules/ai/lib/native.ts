@@ -175,6 +175,19 @@ export type MonitorInfo = {
   height: number;
 };
 
+export type SpreadsheetSheet = {
+  name: string;
+  rows: string[][];
+  startRow: number;
+  startCol: number;
+};
+
+export type SpreadsheetData = {
+  sheetNames: string[];
+  activeSheet: number;
+  sheets: SpreadsheetSheet[];
+};
+
 export type ScreenCapture = {
   /** Temp JPEG path (forward slashes). Reader must delete it after use. */
   path: string;
@@ -258,12 +271,16 @@ export const native = {
       bytes,
       workspace: currentWorkspaceEnv(),
     }),
-  readFileBytes: (path: string) =>
+    readFileBytes: (path: string) =>
     invoke<number[]>("fs_read_file_bytes", {
       path,
       workspace: currentWorkspaceEnv(),
     }),
-  canonicalize: (path: string) =>
+  parseSpreadsheet: (path: string) =>
+    invoke<SpreadsheetData>("fs_parse_spreadsheet", {
+      path,
+      workspace: currentWorkspaceEnv(),
+    }), canonicalize: (path: string) =>
     invoke<string>("fs_canonicalize", {
       path,
       workspace: currentWorkspaceEnv(),

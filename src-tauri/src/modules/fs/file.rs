@@ -349,3 +349,193 @@ pub fn fs_write_file_bytes(
 
     Ok(())
 }
+
+// ── Spreadsheet parsing (calamine) ─────────────────────────────────────
+
+use calamine::Reader;
+
+/// One worksheet: name + rows of cell values (strings; empty cells are
+/// empty strings) + used dimensions. Cell coordinates are 0-based.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpreadsheetSheet {
+    pub name: String,
+    pub rows: Vec<Vec<String>>,
+    /// 0-based index of the first used row / column in the sheet.
+    pub start_row: u32,
+    pub start_col: u32,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpreadsheetData {
+    pub sheet_names: Vec<String>,
+    pub active_sheet: usize,
+    pub sheets: Vec<SpreadsheetSheet>,
+}
+
+fn data_to_string(v: calamine::Data) -> String {
+    use calamine::Data;
+    match v {
+        Data::Empty => String::new(),
+        Data::String(s) => s,
+        Data::Float(f) => {
+            // Render integral values without a trailing .0 (Excel parity).
+            if f.fract() == 0.0 && f.is_finite() && f.abs() < 1e15 {
+                format!("{}", f as i64)
+            } else {
+                format!("{f}")
+            }
+        }
+        Data::Int(i) => format!("{i}"),
+        Data::Bool(b) => if b { "TRUE".into() } else { "FALSE".into() },
+        Data::DateTime(dt) => dt.to_string(),
+        Data::DateTimeIso(s) => s,
+        Data::DurationIso(s) => s,
+        Data::Error(e) => format!("#{e:?}#"),
+    }
+}
+
+/// Hard cap on cells returned per sheet — a misbehaving spreadsheet must not
+/// wedge the IPC bridge with a multi-million-cell payload.
+const MAX_CELLS_PER_SHEET: usize = 200_000;
+
+fn sheet_to_struct(name: String, range: &calamine::Range<calamine::Data>) -> SpreadsheetSheet {
+    let (start_row, start_col) = range.start().unwrap_or((0, 0));
+    let mut rows: Vec<Vec<String>> = Vec::with_capacity(range.height());
+    for row in range.rows() {
+        let out: Vec<String> = row.iter().map(|c| data_to_string(c.clone())).collect();
+        rows.push(out);
+    }
+    // Enforce the cell cap by truncating trailing rows (keeps the header
+    // region, which is what both the model and a human scan first).
+    let mut cells = rows.iter().map(|r| r.len()).sum::<usize>();
+    while cells > MAX_CELLS_PER_SHEET {
+        let dropped = rows.pop().map(|r| r.len()).unwrap_or(0);
+        cells -= dropped;
+    }
+    SpreadsheetSheet {
+        name,
+        rows,
+        start_row,
+        start_col,
+    }
+}
+
+/// Parse a spreadsheet (xlsx/xlsm/xlsb/xls/ods) into plain cell strings.
+/// Used by the editor preview and the AI read_file tool. Read-only.
+#[tauri::command]
+pub fn fs_parse_spreadsheet(
+    path: String,
+    workspace: Option<WorkspaceEnv>,
+) -> Result<SpreadsheetData, String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    let p = resolve_path(&path, &workspace);
+    let meta = std::fs::metadata(&p).map_err(|e| e.to_string())?;
+    if meta.len() > MAX_READ_BYTES {
+        return Err(format!(
+            "file too large ({} bytes, limit {})",
+            meta.len(),
+            MAX_READ_BYTES
+        ));
+    }
+    // Sheets auto-detects the reader from the file content (xlsx/xls/xlsb/ods).
+    let mut workbook: calamine::Sheets<_> =
+        calamine::open_workbook_auto(&p).map_err(|e| format!("cannot open spreadsheet: {e}"))?;
+    let names: Vec<String> = workbook.sheet_names().to_vec();
+    let mut sheets = Vec::with_capacity(names.len());
+    for name in &names {
+        match workbook.worksheet_range(name) {
+            Ok(range) => sheets.push(sheet_to_struct(name.clone(), &range)),
+            Err(e) => {
+                return Err(format!("failed to read sheet '{name}': {e}"));
+            }
+        }
+    }
+    Ok(SpreadsheetData {
+        sheet_names: names.clone(),
+        active_sheet: 0,
+        sheets,
+    })
+}
+
+/// Bytes-in variant for attachments (the composer only has a File, no path).
+/// Parses from an in-memory cursor — no temp file, no fs write.
+#[tauri::command]
+pub fn fs_parse_spreadsheet_bytes(bytes: Vec<u8>) -> Result<SpreadsheetData, String> {
+    if bytes.len() as u64 > MAX_READ_BYTES {
+        return Err(format!(
+            "file too large ({} bytes, limit {})",
+            bytes.len(),
+            MAX_READ_BYTES
+        ));
+    }
+    let cursor = std::io::Cursor::new(bytes);
+    let mut workbook: calamine::Sheets<_> = calamine::open_workbook_auto_from_rs(cursor)
+        .map_err(|e| format!("cannot open spreadsheet: {e}"))?;
+    let names: Vec<String> = workbook.sheet_names().to_vec();
+    let mut sheets = Vec::with_capacity(names.len());
+    for name in &names {
+        match workbook.worksheet_range(name) {
+            Ok(range) => sheets.push(sheet_to_struct(name.clone(), &range)),
+            Err(e) => {
+                return Err(format!("failed to read sheet '{name}': {e}"));
+            }
+        }
+    }
+    Ok(SpreadsheetData {
+        sheet_names: names.clone(),
+        active_sheet: 0,
+        sheets,
+    })
+}
+
+#[cfg(test)]
+mod spreadsheet_tests {
+    use super::*;
+
+    /// Minimal-but-valid OOXML workbook (inline strings + one numeric cell),
+    /// built as a ZIP in memory. Exercises the same code path as the
+    /// fs_parse_spreadsheet* commands (open_workbook_auto_from_rs).
+    #[test]
+    fn parses_xlsx_from_bytes() {
+        let ct = br#"<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>"#;
+        let rels = br#"<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>"#;
+        let wb = br#"<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Data" sheetId="1" r:id="rId1"/></sheets></workbook>"#;
+        let wbrels = br#"<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>"#;
+        let s1 = br#"<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Name</t></is></c><c r="B1" t="inlineStr"><is><t>Score</t></is></c></row><row r="2"><c r="A2" t="inlineStr"><is><t>alice</t></is></c><c r="B2"><v>42</v></c></row><row r="3"><c r="A3" t="inlineStr"><is><t>bob</t></is></c><c r="B3"><v>3.5</v></c></row></sheetData></worksheet>"#;
+
+        let mut zip_bytes: Vec<u8> = Vec::new();
+        {
+            let mut zip = zip::ZipWriter::new(std::io::Cursor::new(&mut zip_bytes));
+            let opts: zip::write::SimpleFileOptions = Default::default();
+            zip.start_file("[Content_Types].xml", opts).unwrap();
+            zip.write_all(ct).unwrap();
+            zip.start_file("_rels/.rels", opts).unwrap();
+            zip.write_all(rels).unwrap();
+            zip.start_file("xl/workbook.xml", opts).unwrap();
+            zip.write_all(wb).unwrap();
+            zip.start_file("xl/_rels/workbook.xml.rels", opts).unwrap();
+            zip.write_all(wbrels).unwrap();
+            zip.start_file("xl/worksheets/sheet1.xml", opts).unwrap();
+            zip.write_all(s1).unwrap();
+            zip.finish().unwrap();
+        }
+
+        let cursor = std::io::Cursor::new(zip_bytes);
+        let mut workbook: calamine::Sheets<_> =
+            calamine::open_workbook_auto_from_rs(cursor).expect("workbook should parse");
+        assert_eq!(workbook.sheet_names(), &["Data".to_string()]);
+        let range = workbook
+            .worksheet_range("Data")
+            .expect("sheet range should read");
+        let sheet = sheet_to_struct("Data".into(), &range);
+        assert_eq!(sheet.rows.len(), 3);
+        assert_eq!(sheet.rows[0][0], "Name");
+        assert_eq!(sheet.rows[0][1], "Score");
+        assert_eq!(sheet.rows[1][0], "alice");
+        assert_eq!(sheet.rows[1][1], "42"); // integral float renders without .0
+        assert_eq!(sheet.rows[2][0], "bob");
+        assert_eq!(sheet.rows[2][1], "3.5");
+    }
+}

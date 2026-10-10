@@ -4,6 +4,19 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.6.0]
+
+- AI: `look_at_screen` actually delivers the screenshot to the model — the tool emitted its image as a `file-data` (document) part, which Anthropic only accepts for PDFs and silently drops and OpenAI treats as a file upload; it now emits `image-data`, and providers that can't carry images in tool results at all (the openai-compatible family — DeepSeek, Mistral, OpenRouter, z.ai, Groq, xAI, Cerebras, LM Studio) get OCR text instead of an unreadable base64 wall.
+- Tabs: opening a project switches the workspace — the previous project's terminals and tabs close (one batched confirmation if editors are dirty), superseding the 1.5.9 keep-alive behavior that left project A's shells running next to project B; a same-project click stays a no-op.
+- Voice: the no-key browser SpeechRecognition fallback works again on current WebView2 runtimes — Runtime 153+ routes the Web Speech API through the "Ceto" STT service which 403s inside WebView2 (the recognizer died with a `network` error); KAI now launches the webview with the Ceto feature disabled, falling back to the legacy speech endpoint (WebView2Feedback #5724; drop the flag when Microsoft ships the fix).
+- AI: `generate_image` results no longer re-send megabytes of base64 to the model — the generated image was patched into the tool result for the UI, but every later turn stringified that payload into the request as text the model can't read; the payload is now stripped from model-bound history (metadata survives).
+- Editor: word wrap is on by default — the machinery existed (compartment + live reconfigure + the Settings toggle) but shipped off, so long lines in markdown/text/code got a horizontal scrollbar; explicit off-choices persist.
+- Settings: the dialog spawns centered on the monitor — the builder set no position (OS top-left default) and the window-state plugin then saved and faithfully restored that corner forever; the dialog is centered every open and excluded from geometry save/restore.
+- Explorer: hidden files are visible by default — dotfiles and `.git` show in the file tree without hunting for the toggle; explicit off-choices persist.
+- Office files: full read support for documents and spreadsheets — DOCX gets a rich editor preview (headings, lists, tables via mammoth, sanitized), XLSX/XLSM/XLSB/XLS/ODS get a grid view with sheet tabs, sticky Excel-style headers, and numeric right-alignment, and the AI `read_file` tool plus composer attachments parse spreadsheets into per-sheet TSV text (new Rust `fs_parse_spreadsheet`/`fs_parse_spreadsheet_bytes` commands, calamine); PDFs were already covered on all three surfaces. Read-only by design — write-back is a separate feature.
+
+---
+
 ## [1.5.9]
 
 - Tabs: opening a project always lands you in it — hamburger > Recent and "Open with KAI" previously did nothing visible (the switch re-rooted silently) or left the project behind the start page; now every project-open surface spawns a terminal tab in the project, keeping existing terminals alive.

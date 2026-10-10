@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { currentWorkspaceEnv } from "@/modules/workspace";
+import type { SpreadsheetData } from "@/modules/ai/lib/native";
 
 /**
  * Extract text from raw PDF bytes.
@@ -75,11 +76,20 @@ export async function parseDocx(path: string): Promise<string> {
 }
 
 /** Detect if a file path is a supported document format. */
-export function isDocumentFile(path: string): "pdf" | "docx" | "doc" | null {
+export function isDocumentFile(path: string): "pdf" | "docx" | "doc" | "spreadsheet" | null {
   const lower = path.toLowerCase();
   if (lower.endsWith(".pdf")) return "pdf";
   if (lower.endsWith(".docx")) return "docx";
   if (lower.endsWith(".doc")) return "doc";
+  if (
+    lower.endsWith(".xlsx") ||
+    lower.endsWith(".xlsm") ||
+    lower.endsWith(".xlsb") ||
+    lower.endsWith(".xls") ||
+    lower.endsWith(".ods")
+  ) {
+    return "spreadsheet";
+  }
   return null;
 }
 
@@ -93,10 +103,38 @@ export async function parseDocument(path: string): Promise<string> {
   const type = isDocumentFile(path);
   if (type === "pdf") return parsePdf(path);
   if (type === "docx") return parseDocx(path);
+  if (type === "spreadsheet") return parseSpreadsheet(path);
   if (type === "doc") {
     throw new Error(
       "Legacy .doc format is not supported. Please convert to .docx first.",
     );
   }
   throw new Error(`Unsupported document format: ${path}`);
+}
+
+/**
+ * Parse a spreadsheet into model-friendly text: TSV per sheet with a header
+ * line naming the sheet, so the model can reference "Sheet2!B4"-style cells
+ * unambiguously. Cell coordinates are 0-based row/col offsets from the sheet
+ * origin, matching the grid the editor preview renders.
+ */
+export function spreadsheetToText(data: SpreadsheetData): string {
+  const parts: string[] = [];
+  for (const sheet of data.sheets) {
+    const lines = [`[sheet: ${sheet.name}] (${sheet.rows.length} rows)`];
+    for (const row of sheet.rows) {
+      // Tabs keep cells aligned for the model; trailing empties trimmed.
+      lines.push(row.join("\t").replace(/\t+$/, ""));
+    }
+    parts.push(lines.join("\n"));
+  }
+  return parts.join("\n\n");
+}
+
+export async function parseSpreadsheet(path: string): Promise<string> {
+  const data = await invoke<SpreadsheetData>("fs_parse_spreadsheet", {
+    path,
+    workspace: currentWorkspaceEnv(),
+  });
+  return spreadsheetToText(data);
 }

@@ -16,7 +16,9 @@ import { useWhisperRecording } from "../hooks/useWhisperRecording";
 import {
   EMPTY_DOCUMENT_TEXT,
   pdfTextFromBytes,
+  spreadsheetToText,
 } from "../lib/documentParser";
+import type { SpreadsheetData } from "../lib/native";
 import { expandSnippetTokens, type Snippet } from "../lib/snippets";
 import { tryRunSlashCommand, type SlashCommandMeta } from "../lib/slashCommands";
 import {
@@ -45,7 +47,7 @@ type MessagePart =
 
 export const MAX_TEXT_INLINE = 200_000;
 export const ACCEPTED_FILES =
-  "image/*,.pdf,.txt,.md,.json,.yaml,.yml,.toml,.sh,.zsh,.bash,.py,.js,.jsx,.ts,.tsx,.rs,.go,.java,.c,.cpp,.h,.hpp,.html,.css,.csv,.log,.env,.config,.conf,.ini,Dockerfile,.dockerfile,.docx";
+  "image/*,.pdf,.txt,.md,.json,.yaml,.yml,.toml,.sh,.zsh,.bash,.py,.js,.jsx,.ts,.tsx,.rs,.go,.java,.c,.cpp,.h,.hpp,.html,.css,.csv,.log,.env,.config,.conf,.ini,Dockerfile,.dockerfile,.xlsx,.xlsm,.xlsb,.xls,.ods,.docx";
 
 type Voice = ReturnType<typeof useWhisperRecording>;
 
@@ -512,6 +514,30 @@ async function readAttachment(file: File): Promise<FileAttachment | null> {
       arrayBuffer: await file.arrayBuffer(),
     });
     const text = result.value;
+    return {
+      id,
+      name: file.name,
+      kind: "text",
+      mediaType: "text/plain",
+      text: text.trim() ? text : EMPTY_DOCUMENT_TEXT,
+      size: file.size,
+    };
+  }
+  // Spreadsheets: the parser lives in Rust (calamine). The picker only
+  // hands us a File, so use the bytes-in command — no temp file needed.
+  if (
+    lower.endsWith(".xlsx") ||
+    lower.endsWith(".xlsm") ||
+    lower.endsWith(".xlsb") ||
+    lower.endsWith(".xls") ||
+    lower.endsWith(".ods")
+  ) {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const data = await invoke<SpreadsheetData>(
+      "fs_parse_spreadsheet_bytes",
+      { bytes: Array.from(bytes) },
+    );
+    const text = spreadsheetToText(data);
     return {
       id,
       name: file.name,

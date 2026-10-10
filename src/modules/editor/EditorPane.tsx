@@ -33,6 +33,8 @@ initVimGlobals();
 import { resolveLanguage } from "./lib/languageResolver";
 import { useDocument } from "./lib/useDocument";
 import type { SaveOutcome } from "./lib/useDocument";
+import { DocxPreview } from "./DocxPreview";
+import { SpreadsheetView } from "./SpreadsheetView";
 import { invoke } from "@tauri-apps/api/core";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import {
@@ -43,6 +45,8 @@ import {
 const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico", "avif"]);
 const VIDEO_EXTS = new Set(["mp4", "webm", "mov", "mkv", "avi"]);
 const PDF_EXT = "pdf";
+const DOCX_EXT = "docx";
+const SPREADSHEET_EXTS = new Set(["xlsx", "xlsm", "xlsb", "xls", "ods"]);
 
 const MIME_MAP: Record<string, string> = {
   png: "image/png",
@@ -443,6 +447,12 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
       const ext = fileExt(path);
       if (IMAGE_EXTS.has(ext) || VIDEO_EXTS.has(ext) || ext === PDF_EXT) {
         return <BinaryPreview path={path} ext={ext} />;
+      }
+      if (ext === DOCX_EXT) {
+        return <DocxPreview path={path} />;
+      }
+      if (SPREADSHEET_EXTS.has(ext)) {
+        return <SpreadsheetView path={path} />;
       }
       return (
         <div className="flex h-full flex-col items-center justify-center gap-1 px-6 text-center">
