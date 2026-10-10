@@ -184,7 +184,10 @@ export const DEFAULT_PREFERENCES: Preferences = {
   favoriteModelIds: [],
   recentModelIds: [],
   vimMode: false,
-  editorWordWrap: false,
+  // Wrap by default: long lines in markdown/text/code fold at the pane edge
+  // instead of a horizontal scrollbar. Users who turn it off persist `false`
+  // (get(KEY) ?? DEFAULT keeps their explicit choice).
+  editorWordWrap: true,
   showHidden: false,
   terminalWebglEnabled: true,
   terminalFontSize: TERMINAL_FONT_SIZE_DEFAULT,
