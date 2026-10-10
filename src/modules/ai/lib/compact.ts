@@ -187,6 +187,10 @@ export function effectiveContextLimit(contextLimit: number): number {
 /** Max characters to keep from a truncated tool result body. */
 const TOOL_RESULT_TRUNCATE_CHARS = 3_000;
 
+/** Base64 payloads above this are UI-only media (image generation output) —
+ *  stripped from model-bound history. Below it, leave alone. */
+const BASE64_STRIP_MIN_CHARS = 1_024;
+
 /** Max characters for a single string field inside a tool-call INPUT.
  *  Large inputs (e.g. display_image's base64_data) are truncated after the
  *  call completes — the model never needs the payload back, but the history
@@ -221,6 +225,65 @@ function truncateBulkyToolInputs(part: ToolPart): { changed: boolean; part: Tool
   }
   if (!touched) return { changed: false, part };
   return { changed: true, part: { ...part, input: next } };
+}
+
+/**
+ * Strip large base64 payloads from tool results — ALWAYS ON.
+ *
+ * Media-task tools (generate_image / generate_video) return a small
+ * {status:"generating"} placeholder to the model at call time, then
+ * spawnMediaTask patches the REAL payload (megabytes of image base64)
+ * into the UI tool part via resolveMedia (chatStore). The payload is
+ * UI-only — MediaMessage renders the image from it — but on every later
+ * turn the history rebuild stringifies it into the tool message: the model
+ * can't read base64-as-text, it just burns context. Same bug class as the
+ * look_at_screen dataUrl below. Threshold-gated so small payloads (icons,
+ * short fields) stay untouched.
+ *
+ * Tolerates BOTH shapes: the converted {type:"json", value:{...}} and a
+ * raw output object (defensive for direct callers).
+ */
+function stripLargeToolResultBase64(part: ToolPart): {
+  changed: boolean;
+  part: ToolPart;
+} {
+  if (part.type !== "tool-result") return { changed: false, part };
+  const output = part.output;
+  if (!output || typeof output !== "object") return { changed: false, part };
+  const rec = output as {
+    type?: string;
+    value?: { base64?: unknown } & Record<string, unknown>;
+    base64?: unknown;
+  };
+  const valueIsObj =
+    rec.type === "json" && rec.value !== null && typeof rec.value === "object";
+  const src: Record<string, unknown> = valueIsObj
+    ? (rec.value as Record<string, unknown>)
+    : (rec as Record<string, unknown>);
+  const converted = valueIsObj;
+  if (
+    typeof src.base64 !== "string" ||
+    src.base64.length <= BASE64_STRIP_MIN_CHARS
+  ) {
+    return { changed: false, part };
+  }
+  const { base64, ...rest } = src as { base64: string } & Record<string, unknown>;
+  return {
+    changed: true,
+    part: {
+      ...part,
+      output: converted
+        ? {
+            ...rec,
+            value: {
+              ...rest,
+              base64Removed: true,
+              base64Chars: base64.length,
+            },
+          }
+        : { ...rest, base64Removed: true, base64Chars: base64.length },
+    },
+  };
 }
 
 /**
@@ -309,11 +372,12 @@ export function compactModelMessagesDetailed(
   }
 
   // ── Phase 1.5: elide bulky tool-call inputs (base64 payloads) and strip
-  // screenshot dataUrls from look_at_screen results — both ALWAYS ON. A
-  // single display_image call is hundreds of KB and every later step
+  // screenshot dataUrls / media-task base64 from tool results — all ALWAYS
+  // ON. A single display_image call is hundreds of KB and every later step
   // re-sends it; there is no scenario where the model needs the raw payload
-  // back after the call completed. The screenshot dataUrl is UI-only (the
-  // model received the image as an image-data part when the call ran).
+  // back after the call completed. The screenshot dataUrl and the patched
+  // generate_image base64 are UI-only (the model received the image via a
+  // tool-result part at call time, or never — the media path is UI-only).
   {
     let localDropped = 0;
     working = working.map((m): ModelMessage => {
@@ -324,7 +388,9 @@ export function compactModelMessagesDetailed(
         if (a.changed) touched = true;
         const b = stripScreenshotDataUrl(a.part);
         if (b.changed) touched = true;
-        return b.part;
+        const c = stripLargeToolResultBase64(b.part);
+        if (c.changed) touched = true;
+        return c.part;
       });
       if (!touched) return m;
       localDropped++;

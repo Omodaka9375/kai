@@ -132,6 +132,64 @@ describe("compactModelMessagesDetailed — screenshot dataUrl strip", () => {
     expect(r.compacted).toBe(true);
   });
 
+  it("strips patched generate_image base64 from the converted json shape", () => {
+    const r = compactModelMessagesDetailed(
+      historyWithScreenshot({
+        type: "json",
+        value: {
+          type: "image",
+          provider: "openai",
+          mimeType: "image/png",
+          base64: b64(80_000),
+          prompt: "a cat",
+        },
+      })
+        .map((m) => ({
+          ...m,
+          content: (m.content as { toolName: string }[]).map((p) =>
+            p.toolName === "look_at_screen" ? { ...p, toolName: "generate_image" } : p,
+          ),
+        })) as unknown as ModelMessage[],
+      1_000_000,
+    );
+    const result = (r.messages[1].content as { type: string; output: Record<string, unknown> }[])
+      .find((p) => p.type === "tool-result")!;
+    const value = result.output.value as {
+      base64?: string;
+      base64Removed?: boolean;
+      base64Chars?: number;
+      prompt?: string;
+      provider?: string;
+    };
+    expect(value.base64).toBeUndefined();
+    expect(value.base64Removed).toBe(true);
+    expect(value.base64Chars).toBe(80_000);
+    // metadata survives
+    expect(value.prompt).toBe("a cat");
+    expect(value.provider).toBe("openai");
+    expect(r.compacted).toBe(true);
+  });
+
+  it("leaves short base64 fields alone (threshold)", () => {
+    const r = compactModelMessagesDetailed(
+      historyWithScreenshot({
+        type: "json",
+        value: { type: "image", base64: b64(500), prompt: "icon" },
+      })
+        .map((m) => ({
+          ...m,
+          content: (m.content as { toolName: string }[]).map((p) =>
+            p.toolName === "look_at_screen" ? { ...p, toolName: "generate_image" } : p,
+          ),
+        })) as unknown as ModelMessage[],
+      1_000_000,
+    );
+    const result = (
+      r.messages[1].content as { type: string; output: { value?: { base64?: string } } }[]
+    ).find((p) => p.type === "tool-result")!;
+    expect(result.output.value?.base64).toBe(b64(500));
+  });
+
   it("leaves other tools' image-bearing outputs alone", () => {
     const r = compactModelMessagesDetailed(
       historyWithScreenshot({ image: { dataUrl: "data:image/jpeg;base64,AAAA" } })
