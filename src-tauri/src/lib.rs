@@ -447,7 +447,7 @@ pub fn run() {
             gc_stale_webview_profiles(&webview_data_root(&handle));
             let window = WebviewWindowBuilder::from_config(&handle, &main_config)
                 .and_then(|b| {
-                    let mut b = b.data_directory(data_dir);
+                    let b = b.data_directory(data_dir);
                     // WebView2 Runtime 153+ routes the Web Speech API through
                     // the "Ceto" STT service (api.msedgeservices.com), which
                     // 403s inside WebView2 — the recognizer dies with a JS
@@ -457,12 +457,15 @@ pub fn run() {
                     // speech endpoint, which still works. Inert on runtimes
                     // that predate the feature (152 and older). Remove when
                     // WebView2Feedback #5724 is fixed upstream.
+                    //
+                    // Shadowing (not `mut`) so the non-Windows build — where
+                    // this cfg block is compiled out — has no unused `mut`
+                    // (CI runs clippy -D warnings on Linux, where the arm is
+                    // stripped before the lint runs).
                     #[cfg(target_os = "windows")]
-                    {
-                        b = b.additional_browser_args(
-                            "--disable-features=msSpeechRecognitionServiceUseCetoService",
-                        );
-                    }
+                    let b = b.additional_browser_args(
+                        "--disable-features=msSpeechRecognitionServiceUseCetoService",
+                    );
                     b.build()
                 })
                 .map_err(|e| format!("failed to build main window: {e}"))?;

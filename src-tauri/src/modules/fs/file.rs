@@ -807,7 +807,7 @@ mod spreadsheet_tests {
     #[test]
     fn applies_operation_pipeline() {
         use serde_json::json;
-        let img = image::RgbaImage::from_fn(64, 32, |x, y| {
+        let img = image::RgbaImage::from_fn(64, 32, |_x, _y| {
             image::Rgba([128, 64, 32, 255])
         });
         let mut png = Vec::new();
