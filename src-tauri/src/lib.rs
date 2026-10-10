@@ -436,7 +436,25 @@ pub fn run() {
             // one (skips live sibling processes).
             gc_stale_webview_profiles(&webview_data_root(&handle));
             let window = WebviewWindowBuilder::from_config(&handle, &main_config)
-                .and_then(|b| b.data_directory(data_dir).build())
+                .and_then(|b| {
+                    let mut b = b.data_directory(data_dir);
+                    // WebView2 Runtime 153+ routes the Web Speech API through
+                    // the "Ceto" STT service (api.msedgeservices.com), which
+                    // 403s inside WebView2 — the recognizer dies with a JS
+                    // "network" error and KAI's no-key voice input (browser
+                    // SpeechRecognition fallback) is dead. Disabling the
+                    // feature makes the recognizer fall back to the legacy
+                    // speech endpoint, which still works. Inert on runtimes
+                    // that predate the feature (152 and older). Remove when
+                    // WebView2Feedback #5724 is fixed upstream.
+                    #[cfg(target_os = "windows")]
+                    {
+                        b = b.additional_browser_args(
+                            "--disable-features=msSpeechRecognitionServiceUseCetoService",
+                        );
+                    }
+                    b.build()
+                })
                 .map_err(|e| format!("failed to build main window: {e}"))?;
 
             // Grant microphone/camera access on WebView2 (media is denied by
