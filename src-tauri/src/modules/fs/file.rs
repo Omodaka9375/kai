@@ -490,9 +490,192 @@ pub fn fs_parse_spreadsheet_bytes(bytes: Vec<u8>) -> Result<SpreadsheetData, Str
     })
 }
 
+// ── Image conversion (image crate) ─────────────────────────────────────
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConvertImageResult {
+    pub path: String,
+    pub format: String,
+    pub width: u32,
+    pub height: u32,
+    pub size_bytes: u64,
+}
+
+/// Composite an RGBA image onto a white background — JPEG (and BMP) have no
+/// alpha channel; a plain channel-drop would render transparent pixels black.
+fn flatten_onto_white(img: image::DynamicImage) -> image::DynamicImage {
+    use image::{DynamicImage, GenericImageView, ImageBuffer, Rgb, Rgba};
+    if !img.color().has_alpha() {
+        return img;
+    }
+    let (w, h) = img.dimensions();
+    let rgba = img.to_rgba8();
+    let mut out = ImageBuffer::<Rgb<u8>, Vec<u8>>::new(w, h);
+    for (x, y, px) in rgba.enumerate_pixels() {
+        let Rgba([r, g, b, a]) = *px;
+        let blend = |c: u8| -> u8 {
+            ((u16::from(c) * u16::from(a) + 255 * (255 - u16::from(a))) / 255) as u8
+        };
+        out.put_pixel(x, y, Rgb([blend(r), blend(g), blend(b)]));
+    }
+    DynamicImage::ImageRgb8(out)
+}
+
+/// Pure bytes→bytes conversion used by `fs_convert_image`. Kept separate from
+/// the command wrapper so tests can exercise it without touching the fs.
+fn convert_image_bytes(
+    bytes: &[u8],
+    format: image::ImageFormat,
+    quality: Option<u8>,
+    max_width: Option<u32>,
+    max_height: Option<u32>,
+) -> Result<Vec<u8>, String> {
+    let mut img = image::load_from_memory(bytes)
+        .map_err(|e| format!("cannot decode source image: {e}"))?;
+
+    // Optional downscale — fits within the bounding box, aspect preserved.
+    if let (Some(mw), Some(mh)) = (max_width, max_height) {
+        if mw > 0 && mh > 0 && (img.width() > mw || img.height() > mh) {
+            img = img.thumbnail(mw, mh);
+        }
+    }
+
+    // Alpha-carrying pixels must not turn black when the target has no alpha.
+    if matches!(
+        format,
+        image::ImageFormat::Jpeg | image::ImageFormat::Bmp
+    ) {
+        img = flatten_onto_white(img);
+    }
+
+    let mut buf: Vec<u8> = Vec::new();
+    if format == image::ImageFormat::Jpeg {
+        let q = quality.unwrap_or(90).clamp(1, 100);
+        let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, q);
+        img.write_with_encoder(encoder)
+            .map_err(|e| format!("jpeg encoding failed: {e}"))?;
+    } else {
+        img.write_to(&mut std::io::Cursor::new(&mut buf), format)
+            .map_err(|e| format!("{format:?} encoding failed: {e}"))?;
+    }
+    Ok(buf)
+}
+
+/// Convert an image between formats (png/jpg/jpeg/bmp/gif/webp). The output
+/// format is inferred from the TARGET extension. Read → decode → encode →
+/// write; overwriting the source is safe (input is fully in memory first).
+#[tauri::command]
+pub fn fs_convert_image(
+    src: String,
+    dst: String,
+    quality: Option<u8>,
+    max_width: Option<u32>,
+    max_height: Option<u32>,
+    workspace: Option<WorkspaceEnv>,
+) -> Result<ConvertImageResult, String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    let src_path = resolve_path(&src, &workspace);
+    let dst_path = resolve_path(&dst, &workspace);
+
+    let format = image::ImageFormat::from_path(&dst_path)
+        .map_err(|_| format!("unsupported target image format: {dst}"))?;
+    if !matches!(
+        format,
+        image::ImageFormat::Png
+            | image::ImageFormat::Jpeg
+            | image::ImageFormat::Bmp
+            | image::ImageFormat::Gif
+            | image::ImageFormat::WebP
+    ) {
+        return Err(format!("target format {format:?} is not supported for conversion"));
+    }
+
+    let meta = std::fs::metadata(&src_path).map_err(|e| e.to_string())?;
+    if meta.len() > MAX_READ_BYTES {
+        return Err(format!(
+            "source image too large ({} bytes, limit {})",
+            meta.len(),
+            MAX_READ_BYTES
+        ));
+    }
+    let bytes = std::fs::read(&src_path).map_err(|e| e.to_string())?;
+
+    let out = convert_image_bytes(&bytes, format, quality, max_width, max_height)?;
+    let (w, h) = {
+        use image::GenericImageView;
+        image::load_from_memory(&bytes)
+            .map_err(|e| e.to_string())?
+            .dimensions()
+    };
+
+    if let Some(parent) = dst_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&dst_path, &out).map_err(|e| e.to_string())?;
+    emit_fs_changed(&dst_path);
+
+    Ok(ConvertImageResult {
+        path: dst_path.to_string_lossy().into_owned(),
+        format: format!("{format:?}").to_lowercase(),
+        width: w,
+        height: h,
+        size_bytes: out.len() as u64,
+    })
+}
+
 #[cfg(test)]
 mod spreadsheet_tests {
     use super::*;
+
+    #[test]
+    fn converts_png_rgba_to_jpeg_flattened() {
+        // 8x8 RGBA: fully-transparent corners, opaque red center-ish pixel.
+        // After flattening onto white, the center stays red and a formerly
+        // transparent pixel must be WHITE (not black — the bug this guards).
+        let img = image::RgbaImage::from_fn(8, 8, |x, y| {
+            if (3..5).contains(&x) && (3..5).contains(&y) {
+                image::Rgba([255, 0, 0, 255])
+            } else {
+                image::Rgba([0, 0, 0, 0])
+            }
+        });
+        let mut png = Vec::new();
+        image::DynamicImage::ImageRgba8(img)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+
+        let jpeg =
+            convert_image_bytes(&png, image::ImageFormat::Jpeg, Some(95), None, None)
+                .expect("png→jpeg conversion");
+        assert!(jpeg.starts_with(&[0xFF, 0xD8, 0xFF]), "JPEG magic bytes");
+        // Decode back and verify the flatten: the formerly-transparent pixel
+        // is light (white-ish), never black.
+        let back = image::load_from_memory(&jpeg).unwrap().to_rgb8();
+        let corner = back.get_pixel(0, 0);
+        assert!(
+            u16::from(corner[0]) + u16::from(corner[1]) + u16::from(corner[2]) > 600,
+            "transparent pixel must flatten to white, got {corner:?}"
+        );
+        let center = back.get_pixel(4, 4);
+        assert!(center[0] > 180 && center[1] < 80, "red pixel survives, got {center:?}");
+    }
+
+    #[test]
+    fn converts_png_to_webp_and_back() {
+        let img = image::GrayImage::from_fn(16, 16, |x, _| {
+            image::Luma([(x * 16) as u8])
+        });
+        let mut png = Vec::new();
+        image::DynamicImage::ImageLuma8(img)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        let webp =
+            convert_image_bytes(&png, image::ImageFormat::WebP, None, None, None)
+                .expect("png→webp conversion");
+        let back = image::load_from_memory(&webp).expect("webp decodes");
+        assert_eq!((back.width(), back.height()), (16, 16));
+    }
 
     /// Minimal-but-valid OOXML workbook (inline strings + one numeric cell),
     /// built as a ZIP in memory. Exercises the same code path as the

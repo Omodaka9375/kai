@@ -1,5 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
+import { invoke } from "@tauri-apps/api/core";
 import { isDocumentFile, parseDocument, parseDocx } from "../lib/documentParser";
 import { djb2 } from "../lib/hash";
 import { native } from "../lib/native";
@@ -482,6 +483,96 @@ export function buildFsTools(ctx: ToolContext) {
             bytesWritten: bytes.length,
             ok: true,
             message: `Successfully converted and saved PDF to ${resolvedTarget}`,
+          };
+        } catch (e) {
+          return { error: String(e), sourcePath: resolvedSource, targetPath: resolvedTarget };
+        }
+      },
+    }),
+
+    convert_image: tool({
+      description:
+        "Convert an image file between formats (png, jpg/jpeg, webp, bmp, gif). " +
+        "The output format is inferred from the target file extension. " +
+        "Optional quality (1-100, JPEG only) and max dimensions (downscale, aspect preserved). " +
+        "Transparency is flattened onto white when converting to JPEG/BMP. " +
+        "Parent directories for the target path are created automatically. Always asks the user before running.",
+      inputSchema: z.object({
+        sourcePath: z
+          .string()
+          .describe("Absolute path to the source image, or relative to the active terminal cwd."),
+        targetPath: z
+          .string()
+          .optional()
+          .describe(
+            "Optional target path — the extension determines the output format. " +
+              "Defaults to the same directory and base name with a .jpg extension.",
+          ),
+        quality: z
+          .number()
+          .int()
+          .min(1)
+          .max(100)
+          .optional()
+          .describe("JPEG quality 1-100. Default 90. Ignored for other formats."),
+        maxWidth: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe("Downscale so the width fits within this many pixels (aspect preserved)."),
+        maxHeight: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe("Downscale so the height fits within this many pixels (aspect preserved)."),
+      }),
+      needsApproval: true,
+      execute: async ({ sourcePath, targetPath, quality, maxWidth, maxHeight }) => {
+        const absSource = resolvePath(sourcePath, ctx.getCwd());
+        const safetySource = await checkReadableCanonical(absSource, native.canonicalize);
+        if (!safetySource.ok) return { error: safetySource.reason, path: absSource };
+        const resolvedSource = safetySource.canonical;
+
+        let resolvedTarget = "";
+        if (targetPath) {
+          const absTarget = resolvePath(targetPath, ctx.getCwd());
+          const safetyTarget = await checkWritableCanonical(absTarget, native.canonicalize);
+          if (!safetyTarget.ok) return { error: safetyTarget.reason, path: absTarget };
+          resolvedTarget = safetyTarget.canonical;
+        } else {
+          const lastDot = resolvedSource.lastIndexOf(".");
+          const base = lastDot !== -1 ? resolvedSource.slice(0, lastDot) : resolvedSource;
+          resolvedTarget = `${base}.jpg`;
+          const safetyTarget = await checkWritableCanonical(resolvedTarget, native.canonicalize);
+          if (!safetyTarget.ok) return { error: safetyTarget.reason, path: resolvedTarget };
+          resolvedTarget = safetyTarget.canonical;
+        }
+
+        try {
+          const result = await invoke<{
+            path: string;
+            format: string;
+            width: number;
+            height: number;
+            sizeBytes: number;
+          }>("fs_convert_image", {
+            src: resolvedSource,
+            dst: resolvedTarget,
+            quality: quality ?? null,
+            maxWidth: maxWidth ?? null,
+            maxHeight: maxHeight ?? null,
+          });
+          return {
+            ok: true,
+            sourcePath: resolvedSource,
+            targetPath: result.path,
+            format: result.format,
+            width: result.width,
+            height: result.height,
+            sizeBytes: result.sizeBytes,
+            message: `Converted to ${result.format.toUpperCase()} (${result.width}x${result.height}, ${result.sizeBytes} bytes): ${result.path}`,
           };
         } catch (e) {
           return { error: String(e), sourcePath: resolvedSource, targetPath: resolvedTarget };

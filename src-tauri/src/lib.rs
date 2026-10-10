@@ -545,6 +545,7 @@ pub fn run() {
     fs::file::fs_write_file,
     fs::file::fs_parse_spreadsheet,
     fs::file::fs_parse_spreadsheet_bytes,
+    fs::file::fs_convert_image,
             fs::file::fs_stat,
             fs::file::fs_read_file_bytes,
             fs::file::fs_write_file_bytes,

@@ -14,6 +14,7 @@ All notable changes to the KAI terminal emulator project are documented in this 
 - Settings: the dialog spawns centered on the monitor — the builder set no position (OS top-left default) and the window-state plugin then saved and faithfully restored that corner forever; the dialog is centered every open and excluded from geometry save/restore.
 - Explorer: hidden files are visible by default — dotfiles and `.git` show in the file tree without hunting for the toggle; explicit off-choices persist.
 - Office files: full read support for documents and spreadsheets — DOCX gets a rich editor preview (headings, lists, tables via mammoth, sanitized), XLSX/XLSM/XLSB/XLS/ODS get a grid view with sheet tabs, sticky Excel-style headers, and numeric right-alignment, and the AI `read_file` tool plus composer attachments parse spreadsheets into per-sheet TSV text (new Rust `fs_parse_spreadsheet`/`fs_parse_spreadsheet_bytes` commands, calamine); PDFs were already covered on all three surfaces. Read-only by design — write-back is a separate feature.
+- Images: new `convert_image` tool — the agent can convert PNG⇄JPEG⇄WebP⇄BMP⇄GIF (format inferred from the target extension) with optional JPEG quality and aspect-preserving downscale; transparency is flattened onto white for JPEG/BMP targets instead of rendering black, and the conversion runs in-process via the existing `image` crate — no shelling out to ImageMagick. Approval-gated like every file-writing tool.
 
 ---
 
