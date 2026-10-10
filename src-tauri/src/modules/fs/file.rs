@@ -502,6 +502,123 @@ pub struct ConvertImageResult {
     pub size_bytes: u64,
 }
 
+/// One image transformation, deserialized from the tool's `operations`
+/// array (serde internally tagged on `type`, camelCase). Applied in order.
+#[derive(serde::Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+enum ImageOp {
+    /// Exact resize — width/height are honored as given (aspect NOT
+    /// preserved; pass aspect-correct values for that).
+    Resize {
+        width: u32,
+        height: u32,
+        #[serde(default)]
+        filter: Option<String>,
+    },
+    Crop {
+        x: u32,
+        y: u32,
+        width: u32,
+        height: u32,
+    },
+    /// Quarter turns only: 90, 180, or 270 (clockwise).
+    Rotate { degrees: u32 },
+    /// "h" mirrors left-right, "v" flips top-bottom.
+    Flip { axis: String },
+    /// Gaussian blur; sigma is the radius in pixels.
+    Blur { sigma: f32 },
+    /// Unsharp mask (sharpen): sigma radius + threshold below which
+    /// differences are ignored (0 = sharpen everything).
+    Sharpen { sigma: f32, threshold: i32 },
+    /// -255..=255; negative darkens.
+    Brighten { amount: i32 },
+    /// 1.0 = unchanged, <1 reduces, >1 increases.
+    Contrast { factor: f32 },
+    /// Hue shift in degrees.
+    HueRotate { degrees: i32 },
+    Grayscale,
+    Invert,
+}
+
+fn parse_filter(name: &Option<String>) -> image::imageops::FilterType {
+    match name.as_deref().map(str::to_ascii_lowercase).as_deref() {
+        Some("nearest") => image::imageops::FilterType::Nearest,
+        Some("triangle") | Some("bilinear") => image::imageops::FilterType::Triangle,
+        Some("catmullrom") | Some("catmull-rom") => image::imageops::FilterType::CatmullRom,
+        Some("gaussian") => image::imageops::FilterType::Gaussian,
+        // Default and "lanczos3" — the high-quality choice.
+        _ => image::imageops::FilterType::Lanczos3,
+    }
+}
+
+fn apply_image_ops(
+    mut img: image::DynamicImage,
+    ops: &[ImageOp],
+) -> Result<image::DynamicImage, String> {
+    use image::GenericImageView;
+    for op in ops {
+        match op {
+            ImageOp::Resize {
+                width,
+                height,
+                filter,
+            } => {
+                if *width == 0 || *height == 0 {
+                    return Err("resize: width and height must be >= 1".into());
+                }
+                img = img.resize_exact(*width, *height, parse_filter(filter));
+            }
+            ImageOp::Crop {
+                x,
+                y,
+                width,
+                height,
+            } => {
+                let (w, h) = img.dimensions();
+                if x.saturating_add(*width) > w || y.saturating_add(*height) > h {
+                    return Err(format!(
+                        "crop {x},{y} {width}x{height} is out of bounds for {w}x{h}"
+                    ));
+                }
+                img = img.crop_imm(*x, *y, *width, *height);
+            }
+            ImageOp::Rotate { degrees } => {
+                img = match degrees {
+                    90 => img.rotate90(),
+                    180 => img.rotate180(),
+                    270 => img.rotate270(),
+                    d => return Err(format!("rotate: degrees must be 90, 180, or 270, got {d}")),
+                };
+            }
+            ImageOp::Flip { axis } => {
+                img = match axis.to_ascii_lowercase().as_str() {
+                    "h" | "horizontal" => img.fliph(),
+                    "v" | "vertical" => img.flipv(),
+                    a => return Err(format!("flip: axis must be \"h\" or \"v\", got {a:?}")),
+                };
+            }
+            ImageOp::Blur { sigma } => {
+                if *sigma < 0.0 {
+                    return Err("blur: sigma must be >= 0".into());
+                }
+                img = img.blur(*sigma);
+            }
+            ImageOp::Sharpen { sigma, threshold } => {
+                if *sigma < 0.0 {
+                    return Err("sharpen: sigma must be >= 0".into());
+                }
+                img = img.unsharpen(*sigma, *threshold);
+            }
+            ImageOp::Brighten { amount } => img = img.brighten(*amount),
+            ImageOp::Contrast { factor } => img = img.adjust_contrast(*factor),
+            ImageOp::HueRotate { degrees } => img = img.huerotate(*degrees),
+            ImageOp::Grayscale => img = img.grayscale(),
+            ImageOp::Invert => img.invert(),
+        }
+    }
+    Ok(img)
+}
+
 /// Composite an RGBA image onto a white background — JPEG (and BMP) have no
 /// alpha channel; a plain channel-drop would render transparent pixels black.
 fn flatten_onto_white(img: image::DynamicImage) -> image::DynamicImage {
@@ -530,15 +647,22 @@ fn convert_image_bytes(
     quality: Option<u8>,
     max_width: Option<u32>,
     max_height: Option<u32>,
+    operations: &[ImageOp],
 ) -> Result<Vec<u8>, String> {
     let mut img = image::load_from_memory(bytes)
         .map_err(|e| format!("cannot decode source image: {e}"))?;
 
-    // Optional downscale — fits within the bounding box, aspect preserved.
-    if let (Some(mw), Some(mh)) = (max_width, max_height) {
-        if mw > 0 && mh > 0 && (img.width() > mw || img.height() > mh) {
-            img = img.thumbnail(mw, mh);
+    if operations.is_empty() {
+        // Legacy downscale — fits within the bounding box, aspect preserved.
+        if let (Some(mw), Some(mh)) = (max_width, max_height) {
+            if mw > 0 && mh > 0 && (img.width() > mw || img.height() > mh) {
+                img = img.thumbnail(mw, mh);
+            }
         }
+    } else {
+        // Explicit operations own the geometry: apply in order. (When both
+        // are given, operations win — maxWidth/maxHeight are ignored.)
+        img = apply_image_ops(img, operations)?;
     }
 
     // Alpha-carrying pixels must not turn black when the target has no alpha.
@@ -562,9 +686,11 @@ fn convert_image_bytes(
     Ok(buf)
 }
 
-/// Convert an image between formats (png/jpg/jpeg/bmp/gif/webp). The output
-/// format is inferred from the TARGET extension. Read → decode → encode →
-/// write; overwriting the source is safe (input is fully in memory first).
+/// Convert an image between formats (png/jpg/jpeg/bmp/gif/webp) with an
+/// optional ordered pipeline of resize/crop/rotate/effect operations.
+/// The output format is inferred from the TARGET extension. Read → decode →
+/// [ops] → encode → write; overwriting the source is safe (input is fully
+/// in memory first).
 #[tauri::command]
 pub fn fs_convert_image(
     src: String,
@@ -572,6 +698,7 @@ pub fn fs_convert_image(
     quality: Option<u8>,
     max_width: Option<u32>,
     max_height: Option<u32>,
+    operations: Option<Vec<serde_json::Value>>,
     workspace: Option<WorkspaceEnv>,
 ) -> Result<ConvertImageResult, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
@@ -591,6 +718,15 @@ pub fn fs_convert_image(
         return Err(format!("target format {format:?} is not supported for conversion"));
     }
 
+    let ops: Vec<ImageOp> = operations
+        .unwrap_or_default()
+        .iter()
+        .map(|v| {
+            serde_json::from_value(v.clone())
+                .map_err(|e| format!("invalid image operation: {e}"))
+        })
+        .collect::<Result<_, _>>()?;
+
     let meta = std::fs::metadata(&src_path).map_err(|e| e.to_string())?;
     if meta.len() > MAX_READ_BYTES {
         return Err(format!(
@@ -601,12 +737,19 @@ pub fn fs_convert_image(
     }
     let bytes = std::fs::read(&src_path).map_err(|e| e.to_string())?;
 
-    let out = convert_image_bytes(&bytes, format, quality, max_width, max_height)?;
+    let out = convert_image_bytes(&bytes, format, quality, max_width, max_height, &ops)?;
+    // Report the FINAL dimensions — after ops, before encoding.
     let (w, h) = {
         use image::GenericImageView;
-        image::load_from_memory(&bytes)
-            .map_err(|e| e.to_string())?
-            .dimensions()
+        let mut img = image::load_from_memory(&bytes).map_err(|e| e.to_string())?;
+        if !ops.is_empty() {
+            img = apply_image_ops(img, &ops)?;
+        } else if let (Some(mw), Some(mh)) = (max_width, max_height) {
+            if mw > 0 && mh > 0 && (img.width() > mw || img.height() > mh) {
+                img = img.thumbnail(mw, mh);
+            }
+        }
+        img.dimensions()
     };
 
     if let Some(parent) = dst_path.parent() {
@@ -646,7 +789,7 @@ mod spreadsheet_tests {
             .unwrap();
 
         let jpeg =
-            convert_image_bytes(&png, image::ImageFormat::Jpeg, Some(95), None, None)
+            convert_image_bytes(&png, image::ImageFormat::Jpeg, Some(95), None, None, &[])
                 .expect("png→jpeg conversion");
         assert!(jpeg.starts_with(&[0xFF, 0xD8, 0xFF]), "JPEG magic bytes");
         // Decode back and verify the flatten: the formerly-transparent pixel
@@ -662,6 +805,51 @@ mod spreadsheet_tests {
     }
 
     #[test]
+    fn applies_operation_pipeline() {
+        use serde_json::json;
+        let img = image::RgbaImage::from_fn(64, 32, |x, y| {
+            image::Rgba([128, 64, 32, 255])
+        });
+        let mut png = Vec::new();
+        image::DynamicImage::ImageRgba8(img)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+
+        // resize (exact, non-square) -> rotate 90 -> grayscale
+        let ops: Vec<ImageOp> = vec![
+            serde_json::from_value(json!({"type": "resize", "width": 32, "height": 16})).unwrap(),
+            serde_json::from_value(json!({"type": "rotate", "degrees": 90})).unwrap(),
+            serde_json::from_value(json!({"type": "grayscale"})).unwrap(),
+        ];
+        let out =
+            convert_image_bytes(&png, image::ImageFormat::Png, None, None, None, &ops)
+                .expect("pipeline converts");
+        let back = image::load_from_memory(&out).unwrap();
+        // 32x16 rotated 90° -> 16x32.
+        assert_eq!((back.width(), back.height()), (16, 32));
+        // Grayscale: R == G == B on every pixel.
+        let rgb = back.to_rgb8();
+        for p in rgb.pixels() {
+            assert_eq!(p[0], p[1]);
+            assert_eq!(p[1], p[2]);
+        }
+
+        // Out-of-bounds crop is a hard error, not a panic.
+        let bad: ImageOp =
+            serde_json::from_value(json!({"type": "crop", "x": 10, "y": 10, "width": 100, "height": 100})).unwrap();
+        let err = convert_image_bytes(&png, image::ImageFormat::Png, None, None, None, &[bad]);
+        assert!(err.is_err());
+
+        // Unknown rotate degrees rejected.
+        let bad2: ImageOp =
+            serde_json::from_value(json!({"type": "rotate", "degrees": 45})).unwrap();
+        assert!(convert_image_bytes(&png, image::ImageFormat::Png, None, None, None, &[bad2]).is_err());
+
+        // Malformed op JSON is rejected at deserialization.
+        assert!(serde_json::from_value::<ImageOp>(json!({"type": "teleport"})).is_err());
+    }
+
+    #[test]
     fn converts_png_to_webp_and_back() {
         let img = image::GrayImage::from_fn(16, 16, |x, _| {
             image::Luma([(x * 16) as u8])
@@ -671,7 +859,7 @@ mod spreadsheet_tests {
             .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
             .unwrap();
         let webp =
-            convert_image_bytes(&png, image::ImageFormat::WebP, None, None, None)
+            convert_image_bytes(&png, image::ImageFormat::WebP, None, None, None, &[])
                 .expect("png→webp conversion");
         let back = image::load_from_memory(&webp).expect("webp decodes");
         assert_eq!((back.width(), back.height()), (16, 16));

@@ -492,9 +492,9 @@ export function buildFsTools(ctx: ToolContext) {
 
     convert_image: tool({
       description:
-        "Convert an image file between formats (png, jpg/jpeg, webp, bmp, gif). " +
+        "Convert an image file between formats (png, jpg/jpeg, webp, bmp, gif), optionally " +
+        "applying an ordered pipeline of resize/crop/rotate/effect operations first. " +
         "The output format is inferred from the target file extension. " +
-        "Optional quality (1-100, JPEG only) and max dimensions (downscale, aspect preserved). " +
         "Transparency is flattened onto white when converting to JPEG/BMP. " +
         "Parent directories for the target path are created automatically. Always asks the user before running.",
       inputSchema: z.object({
@@ -506,7 +506,7 @@ export function buildFsTools(ctx: ToolContext) {
           .optional()
           .describe(
             "Optional target path — the extension determines the output format. " +
-              "Defaults to the same directory and base name with a .jpg extension.",
+              "Defaults to the same directory and base name with the SOURCE extension (format-only conversion) or .jpg.",
           ),
         quality: z
           .number()
@@ -515,6 +515,63 @@ export function buildFsTools(ctx: ToolContext) {
           .max(100)
           .optional()
           .describe("JPEG quality 1-100. Default 90. Ignored for other formats."),
+        operations: z
+          .array(
+            z.discriminatedUnion("type", [
+              z.object({
+                type: z.literal("resize"),
+                width: z.number().int().positive(),
+                height: z.number().int().positive(),
+                filter: z
+                  .enum(["nearest", "triangle", "catmullrom", "gaussian", "lanczos3"])
+                  .optional()
+                  .describe("Resampling filter. Default lanczos3 (highest quality)."),
+              }),
+              z.object({
+                type: z.literal("crop"),
+                x: z.number().int().nonnegative(),
+                y: z.number().int().nonnegative(),
+                width: z.number().int().positive(),
+                height: z.number().int().positive(),
+              }),
+              z.object({
+                type: z.literal("rotate"),
+                degrees: z.union([z.literal(90), z.literal(180), z.literal(270)]),
+              }),
+              z.object({
+                type: z.literal("flip"),
+                axis: z.enum(["h", "v"]),
+              }),
+              z.object({
+                type: z.literal("blur"),
+                sigma: z.number().nonnegative(),
+              }),
+              z.object({
+                type: z.literal("sharpen"),
+                sigma: z.number().nonnegative(),
+                threshold: z.number().int().nonnegative().optional(),
+              }),
+              z.object({
+                type: z.literal("brighten"),
+                amount: z.number().int().min(-255).max(255),
+              }),
+              z.object({
+                type: z.literal("contrast"),
+                factor: z.number().positive(),
+              }),
+              z.object({
+                type: z.literal("huerotate"),
+                degrees: z.number().int(),
+              }),
+              z.object({ type: z.literal("grayscale") }),
+              z.object({ type: z.literal("invert") }),
+            ]),
+          )
+          .optional()
+          .describe(
+            "Ordered pipeline applied BEFORE format conversion. Later ops see earlier " +
+              "ops' output (e.g. crop, then resize). When present, maxWidth/maxHeight are ignored.",
+          ),
         maxWidth: z
           .number()
           .int()
@@ -529,7 +586,7 @@ export function buildFsTools(ctx: ToolContext) {
           .describe("Downscale so the height fits within this many pixels (aspect preserved)."),
       }),
       needsApproval: true,
-      execute: async ({ sourcePath, targetPath, quality, maxWidth, maxHeight }) => {
+      execute: async ({ sourcePath, targetPath, quality, operations, maxWidth, maxHeight }) => {
         const absSource = resolvePath(sourcePath, ctx.getCwd());
         const safetySource = await checkReadableCanonical(absSource, native.canonicalize);
         if (!safetySource.ok) return { error: safetySource.reason, path: absSource };
@@ -542,9 +599,14 @@ export function buildFsTools(ctx: ToolContext) {
           if (!safetyTarget.ok) return { error: safetyTarget.reason, path: absTarget };
           resolvedTarget = safetyTarget.canonical;
         } else {
+          // Effect-only pipelines (no format change intent implied) keep the
+          // source extension when the source is already a supported format;
+          // otherwise default to .jpg like a plain conversion.
           const lastDot = resolvedSource.lastIndexOf(".");
           const base = lastDot !== -1 ? resolvedSource.slice(0, lastDot) : resolvedSource;
-          resolvedTarget = `${base}.jpg`;
+          const srcExt = lastDot !== -1 ? resolvedSource.slice(lastDot + 1).toLowerCase() : "";
+          const keepExt = ["png", "jpg", "jpeg", "webp", "bmp", "gif"].includes(srcExt);
+          resolvedTarget = `${base}.${keepExt ? srcExt : "jpg"}`;
           const safetyTarget = await checkWritableCanonical(resolvedTarget, native.canonicalize);
           if (!safetyTarget.ok) return { error: safetyTarget.reason, path: resolvedTarget };
           resolvedTarget = safetyTarget.canonical;
@@ -563,6 +625,7 @@ export function buildFsTools(ctx: ToolContext) {
             quality: quality ?? null,
             maxWidth: maxWidth ?? null,
             maxHeight: maxHeight ?? null,
+            operations: operations ?? null,
           });
           return {
             ok: true,
