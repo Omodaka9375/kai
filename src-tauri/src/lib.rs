@@ -281,6 +281,11 @@ async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Res
         .resizable(true)
         .visible(false)
         .shadow(false)
+        // No position in the chain → the OS default (top-left cascade) was
+        // used, the window-state plugin then SAVED that on close and restored
+        // it on every later open — the settings dialog permanently spawned in
+        // the top-left corner. Center it, every time.
+        .center()
         .data_directory(webview_data_dir(&app, &instance_id));
 
     // Tie lifecycle to the main window so settings minimizes/closes with it.
@@ -377,6 +382,11 @@ pub fn run() {
         .plugin(
             tauri_plugin_window_state::Builder::new()
                 .with_state_flags(StateFlags::all() & !StateFlags::VISIBLE)
+                // The settings dialog is a transient modal — always centered
+                // by open_settings_window. Exclude it from geometry save/
+                // restore entirely, or the first top-left spawn would be
+                // saved and then faithfully restored forever after.
+                .with_denylist(&["settings"])
                 // Key window geometry per project so two instances on different
                 // projects don't fight over one last-closer-wins state file.
                 // Same keyspace as the frontend sessions scoping.
