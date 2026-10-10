@@ -188,7 +188,10 @@ export const DEFAULT_PREFERENCES: Preferences = {
   // instead of a horizontal scrollbar. Users who turn it off persist `false`
   // (get(KEY) ?? DEFAULT keeps their explicit choice).
   editorWordWrap: true,
-  showHidden: false,
+  // Show dotfiles/.git in the explorer by default — developers expect them.
+  // Users who turn it off persist `false` (get(KEY) ?? DEFAULT keeps their
+  // explicit choice).
+  showHidden: true,
   terminalWebglEnabled: true,
   terminalFontSize: TERMINAL_FONT_SIZE_DEFAULT,
   terminalScrollback: TERMINAL_SCROLLBACK_DEFAULT,
