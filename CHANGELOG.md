@@ -4,6 +4,15 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.6.5]
+
+- Radio: fixed "Playback rejected (NotSupportedError)" on every station - the CSP media-src allowed SomaFM hosts but not the local icecast proxy URL (http://127.0.0.1) that the audio element actually loads; media-src now allows the proxy, localhost, and SomaFM.
+- Build: restored `http://127.0.0.1:*` in the CSP connect-src - it was silently corrupted to a literal `http://*********:*` (dead entry, matches nothing) by an earlier commit.
+- Terminal: fixed the blank first terminal when opening one from the StartPage on a cold start (close+reopen used to fix it) - pwsh's DSR cursor query lands in the dormant ring while the renderer slot is still waiting on the font gate, which disarmed the 1.5s CPR reply; first-output classification now runs on both delivery paths and the CPR reply falls back to a truthful 1;1 position when no term buffer exists yet.
+- Tests: radio stop teardown no longer triggers an unhandled promise rejection outside Tauri.
+
+---
+
 ## [1.6.4]
 
 - Terminal: fixed the intermittent blank first pane — pwsh/PSReadLine blocks on a DSR cursor query (`\x1b[6n`) whose reply intermittently never lands; nudges are no longer disarmed by control-only output and a truthful synthetic CPR reply unblocks the shell (1.5s for the exact signature, 6s last resort).
