@@ -941,6 +941,16 @@ export const useChatStore = create<StoreState>((set, get) => ({
   },
 
   persistMessages: (id, messages) => {
+    // Stamp createdAt on NEW messages (metadata) so the transcript can render
+    // day separators + hover times. Mutates the LIVE array's message objects —
+    // deliberate: the same objects render in AiChat and persist via the
+    // debounced save below. Legacy messages (pre-feature) are marked
+    // `legacyNoTs` at hydration (loadMessages) and skipped — no fake times.
+    for (const m of messages) {
+      const meta = m.metadata as { createdAt?: number; legacyNoTs?: boolean } | undefined;
+      if (meta?.createdAt || meta?.legacyNoTs) continue;
+      m.metadata = { ...(m.metadata as object | undefined), createdAt: Date.now() };
+    }
     // Debounce the message-blob write so streaming doesn't pound the store.
     const existing = pendingPersist.get(id);
     if (existing) clearTimeout(existing.timer);

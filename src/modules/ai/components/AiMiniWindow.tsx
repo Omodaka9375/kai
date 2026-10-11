@@ -40,6 +40,7 @@ import { ShadowStrip, ShadowSessionMenuItem } from "./ShadowStrip";
 import { estimateCost, getModel, getModelContextLimit } from "../config";
 import { effectiveContextLimit, SYSTEM_OVERHEAD_TOKENS } from "../lib/compact";
 import { saveSessionsList, type SessionMeta } from "../lib/sessions";
+import { absoluteTime, relativeTime } from "../lib/relativeTime";
 import { normalizeWorkspacePath } from "../lib/workspacePath";
 import { getOrCreateChat, useChatStore } from "../store/chatStore";
 import { Input } from "@/components/ui/input";
@@ -638,6 +639,17 @@ function SessionRow({
       ) : (
         <span className="min-w-0 flex-1 truncate">
           {session.title || "New chat"}
+          {relativeTime(session.updatedAt ?? session.createdAt) ? (
+            <span
+              className={cn(
+                "ml-1.5 whitespace-nowrap text-[10px] text-muted-foreground/70",
+                active && "text-muted-foreground",
+              )}
+              title={absoluteTime(session.updatedAt ?? session.createdAt) || undefined}
+            >
+              {relativeTime(session.updatedAt ?? session.createdAt)}
+            </span>
+          ) : null}
         </span>
       )}
       {editing ? null : (

@@ -20,6 +20,19 @@ export default defineConfig(async ({ mode }) => ({
         ? ["console.debug", "console.info", "console.trace"]
         : [],
   },
+  // Keep vitest OFF .kai/ (agent working dirs — training clones, scratch
+  // scripts) — cloned public repos ship their own test suites expecting
+  // THEIR deps (js-yaml etc), which explode at import time here.
+  test: {
+    exclude: [
+      "**/node_modules/**",
+      "**/dist/**",
+      "**/cypress/**",
+      "**/.{idea,git,cache,output,temp}/**",
+      "**/{karma,rollup,webpack,vite,vitest,jest,ava,babel,nyc,cypress,typescript}.config.*",
+      "**/.kai/**",
+    ],
+  },
   build: {
     target:
       process.env.TAURI_ENV_PLATFORM === "windows" ? "chrome120" : "es2022",

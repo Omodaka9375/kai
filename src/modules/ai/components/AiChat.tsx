@@ -21,6 +21,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
+import { absoluteTime } from "../lib/relativeTime";
 import { motion } from "motion/react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -42,6 +43,7 @@ import type {
   UIMessagePart,
 } from "ai";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment } from "react";
 import type { StickToBottomContext } from "use-stick-to-bottom";
 import { AiToolApproval } from "./AiToolApproval";
 import { MediaMessage, isMediaOutput, isGeneratingMedia } from "./MediaMessage";
@@ -320,17 +322,36 @@ export function AiChatView({
   return (
     <Conversation contextRef={scrollCtx}>
         <ConversationContent className="gap-5 p-3 pb-6">
-        {messages.map((m, idx) => (
-          <div key={m.id} className="group/msg relative">
-            <RenderedMessage
-              message={m}
-              onApproval={onApproval}
-              streaming={m.id === streamingMessageId}
-              forkable={!isBusy && m.role === "user" && idx > 0}
-              messageIndex={idx}
-            />
-          </div>
-        ))}
+        {messages.map((m, idx) => {
+          // Day separator: rendered whenever the calendar day changes
+          // between consecutive timestamped messages. Messages without a
+          // timestamp (legacy, pre-feature) never trigger a separator —
+          // their real day is unknown, showing one would be a guess.
+          const ts = (m.metadata as { createdAt?: number } | undefined)?.createdAt;
+          const prevTs =
+            idx > 0
+              ? (messages[idx - 1].metadata as { createdAt?: number } | undefined)
+                  ?.createdAt
+              : undefined;
+          const dayKey = ts ? new Date(ts).toDateString() : null;
+          const prevDayKey = prevTs ? new Date(prevTs).toDateString() : null;
+          const showDay = dayKey != null && dayKey !== prevDayKey;
+          return (
+            <Fragment key={m.id}>
+              {showDay && <DaySeparator ts={ts as number} />}
+              <div className="group/msg relative">
+                <RenderedMessage
+                  message={m}
+                  onApproval={onApproval}
+                  streaming={m.id === streamingMessageId}
+                  forkable={!isBusy && m.role === "user" && idx > 0}
+                  messageIndex={idx}
+                  timestamp={ts}
+                />
+              </div>
+            </Fragment>
+          );
+        })}
         {compactionNotice && compactionNotice.droppedCount >= 3 && (
           <CompactionNotice
             droppedCount={compactionNotice.droppedCount}
@@ -481,13 +502,17 @@ const RenderedMessage = memo(function RenderedMessage({
   streaming,
   forkable,
   messageIndex,
+  timestamp,
 }: {
   message: UIMessage;
   onApproval: (id: string, approved: boolean) => void;
   streaming: boolean;
   forkable?: boolean;
   messageIndex?: number;
+  /** Per-message createdAt for hover tooltips; undefined = legacy/unknown. */
+  timestamp?: number;
 }) {
+  const timeTitle = timestamp ? absoluteTime(timestamp) : undefined;
   // Index of the trailing text part — only that one is \"live\" mid-stream.
   // Earlier text parts (separated by tool calls) are already finalized.
   let lastTextIdx = -1;
@@ -533,7 +558,7 @@ const RenderedMessage = memo(function RenderedMessage({
     );
 
     return (
-      <Message from="user">
+      <Message from="user" title={timeTitle}>
         <div className="flex items-center gap-1.5">
           {forkable && messageIndex !== undefined && (
             <ForkButton messageIndex={messageIndex} />
@@ -627,7 +652,7 @@ const RenderedMessage = memo(function RenderedMessage({
   );
 
   return (
-    <Message from={message.role}>
+    <Message from={message.role} title={timeTitle}>
       <div className="flex items-start gap-3 w-full">
         <div className="flex-1 min-w-0">
           <MessageContent>
@@ -1164,3 +1189,37 @@ const RenderedTool = memo(function RenderedTool({
     />
   );
 });
+
+/**
+ * iMessage-style day separator between message groups. Rendered by the
+ * transcript map whenever the calendar day changes between consecutive
+ * timestamped messages; legacy (pre-feature) messages carry no timestamp
+ * and never trigger one — their day is unknown.
+ */
+function DaySeparator({ ts }: { ts: number }) {
+  const d = new Date(ts);
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  const label =
+    d.toDateString() === today.toDateString()
+      ? "Today"
+      : d.toDateString() === yesterday.toDateString()
+        ? "Yesterday"
+        : d.toLocaleDateString(undefined, {
+            month: "short",
+            day: "numeric",
+            year: d.getFullYear() === today.getFullYear() ? undefined : "numeric",
+          });
+  return (
+    <div
+      className="flex select-none items-center gap-2 py-1 text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground/70"
+      role="separator"
+      aria-label={label}
+    >
+      <span className="h-px flex-1 bg-border/60" />
+      <span>{label}</span>
+      <span className="h-px flex-1 bg-border/60" />
+    </div>
+  );
+}

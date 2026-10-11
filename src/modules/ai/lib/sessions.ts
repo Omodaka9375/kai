@@ -224,6 +224,15 @@ export async function loadMessages(id: string): Promise<UIMessage[] | null> {
       console.warn("[loadMessages] Corrupted — items are not objects:", id);
       return null;
     }
+    // Mark messages that predate per-message timestamps (metadata.createdAt)
+    // so the stamping pass in persistMessages never back-stamps them with
+    // fake "now" times. legacyNoTs rides along in metadata harmlessly.
+    for (const m of raw) {
+      if (m == null || typeof m !== "object") continue;
+      const msg = m as { metadata?: { createdAt?: unknown; legacyNoTs?: boolean } };
+      if (msg.metadata?.createdAt != null) continue;
+      msg.metadata = { ...(msg.metadata as object | undefined), legacyNoTs: true };
+    }
     return raw as UIMessage[];
   } catch (err) {
     console.error("[loadMessages] Failed to load — resetting:", id, err);
