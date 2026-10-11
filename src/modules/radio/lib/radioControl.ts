@@ -105,6 +105,34 @@ function getAudioEl(): HTMLAudioElement | null {
       const station = findStation(stationIdRef);
       const mediaErr = (sharedAudio as HTMLAudioElement | null)?.error;
       console.warn("[radio] element error event:", mediaErr?.code, mediaErr?.message);
+      // One-shot diagnostics: they localize a synchronous load refusal
+      // (code 4 NotSupported) into network vs codec vs CSP.
+      if (!(sharedAudio as unknown as { __diag?: boolean })?.__diag) {
+        try {
+          (sharedAudio as unknown as { __diag?: boolean }).__diag = true;
+          const el = sharedAudio;
+          if (!el) return;
+          console.warn(
+            "[radio] diag —",
+            "canPlayType(mpeg):", el.canPlayType("audio/mpeg"),
+            "| networkState:", el.networkState,
+            "| currentSrc:", el.currentSrc || "(empty)",
+            "| cspMeta:",
+            document
+              .querySelector('meta[http-equiv="Content-Security-Policy"]')
+              ?.getAttribute("content") ?? "(none in document)",
+          );
+          // Opaque no-cors fetch: resolves if the network path to SomaFM
+                   // works from the webview at all (readable CORS not needed).
+          fetch(el.currentSrc || "https://ice2.somafm.com/groovesalad-128-mp3", {
+            mode: "no-cors",
+          })
+            .then(() => console.warn("[radio] diag — no-cors fetch: OK (network reachable)"))
+            .catch((e) => console.warn("[radio] diag — no-cors fetch FAILED:", String(e)));
+        } catch {
+          // diagnostics must never break the error path
+        }
+      }
       const why =
         mediaErr?.code === 2
           ? "network error — SomaFM may be blocked or offline"

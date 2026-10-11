@@ -6,7 +6,7 @@ import {
   subscribeRadio,
   type RadioSnapshot,
 } from "./radioControl";
-import { findStation, type RadioStatus } from "./stations";
+import type { RadioStatus } from "./stations";
 
 /**
  * React binding over the module-level radio controller (radioControl.ts).
@@ -23,7 +23,7 @@ export type UseRadioPlayer = {
   stop: () => void;
 };
 
-export function useRadioPlayer(initialStationId: string | null = null): UseRadioPlayer {
+export function useRadioPlayer(): UseRadioPlayer {
   const [snap, setSnap] = useState<RadioSnapshot>(() => ({
     status: { state: "stopped" },
     stationId: null,
@@ -36,25 +36,10 @@ export function useRadioPlayer(initialStationId: string | null = null): UseRadio
     };
   }, []);
 
-  // Restore persisted station once on mount — auto-resume only when the
-  // feature is enabled (the widget isn't mounted otherwise). Fail-safe.
-  useEffect(() => {
-    let cancelled = false;
-    if (initialStationId && findStation(initialStationId)) {
-      // Defer so the subscriber effect above is attached first.
-      const t = setTimeout(() => {
-        if (!cancelled) radioPlay(initialStationId);
-      }, 0);
-      return () => {
-        cancelled = true;
-        clearTimeout(t);
-      };
-    }
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // NOTE: no auto-resume on mount — starting the app must never blast
+  // audio. Playback begins ONLY on an explicit user action (station pick,
+  // pill click) or the agent tools. The persisted station id is a selection,
+  // restored by the widget, not a playback state.
 
   // App close: pause. Wrapped (embedded contexts may lack the API).
   useEffect(() => {

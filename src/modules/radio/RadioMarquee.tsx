@@ -37,21 +37,23 @@ import { setRadioStationId } from "./radioPrefs";
 const MARQUEE_MAX_WIDTH = "max-w-[420px]";
 
 export function RadioMarquee() {
-  const player = useRadioPlayer(null);
+  const player = useRadioPlayer();
   const [muted, setMuted] = useState(radioGetMuted());
   const [volume, setVolume] = useState(radioGetVolume());
-  // Derive from the shared controller via the hook — agent-driven station
-  // changes (play_radio tool) and UI clicks highlight identically.
-  const stationId = player.stationId;
+  // The persisted station id is the *selection* (picker highlight) only —
+  // NO auto-resume on launch. Starting the app must never blast audio;
+  // the user starts playback per session (click or agent tool).
+  const [stationId, setStationIdLocal] = useState<string | null>(null);
 
-  // Restore persisted station once on mount (fail-safe in the prefs lib).
+  // Restore the persisted station SELECTION once on mount (fail-safe in the
+  // prefs lib). Deliberately does not play — see above.
   useEffect(() => {
     let cancelled = false;
     import("./radioPrefs")
       .then(({ getRadioStationId }) => getRadioStationId())
       .then((id) => {
         if (!cancelled && id) {
-          player.play(id);
+          setStationIdLocal(id);
         }
       })
       .catch(() => {
@@ -74,6 +76,7 @@ export function RadioMarquee() {
   }, [player.status]);
 
   const handleStationPick = (id: string) => {
+    setStationIdLocal(id);
     player.play(id);
     void setRadioStationId(id);
   };
