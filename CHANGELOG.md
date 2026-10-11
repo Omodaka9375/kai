@@ -8,6 +8,7 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 - Radio: fix statio picker fail
 - Radio: the marquee is now centered in the status bar; the pill opens the station picker, and the speaker icon is a mute toggle with a volume slider.
+- Header: removed the split-terminal button — splitting lives in the tab context menu and keyboard shortcuts.
 
 ---
 

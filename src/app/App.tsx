@@ -73,7 +73,7 @@ import {
   useSourceControl,
 } from "@/modules/source-control";
 import { StatusBar } from "@/modules/statusbar";
-import { MAX_PANES_PER_TAB, StartPage, useTabs, useWorkspaceCwd, type EditorTab } from "@/modules/tabs";
+import { StartPage, useTabs, useWorkspaceCwd, type EditorTab } from "@/modules/tabs";
 import {
   disposeSession,
   findLeafCwd,
@@ -1639,10 +1639,6 @@ export default function App() {
             splitTabId={splitTabId}
             onToggleSidebar={toggleSidebar}
             onSplit={handleSplitPane}
-            canSplit={
-              activeTerminalTab !== null &&
-              leafIds(activeTerminalTab.paneTree).length < MAX_PANES_PER_TAB
-            }
             onOpenShortcuts={() => setShortcutsOpen(true)}
             searchTarget={searchTarget}
             searchRef={searchInlineRef}

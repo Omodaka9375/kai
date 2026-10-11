@@ -23,10 +23,7 @@ import type { Tab } from "@/modules/tabs";
 import { TabBar } from "@/modules/tabs";
 import {
   FloppyDiskIcon,
-  GridViewIcon,
   KeyboardIcon,
-  LayoutTwoColumnIcon,
-  LayoutTwoRowIcon,
   SidebarLeftIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -54,9 +51,8 @@ type Props = {
   onSplitTab: (id: number) => void;
   splitTabId: number | null;
   onToggleSidebar: () => void;
+  /** Split active terminal pane (terminals only) — via the tab context menu. */
   onSplit: (dir: "row" | "col") => void;
-  /** Active tab is a terminal and below the per-tab pane cap. */
-  canSplit: boolean;
   onOpenShortcuts: () => void;
   searchTarget: SearchTarget;
   searchRef: RefObject<SearchInlineHandle | null>;
@@ -85,7 +81,6 @@ export function Header({
   splitTabId,
   onToggleSidebar,
   onSplit,
-  canSplit,
   onOpenShortcuts,
   searchTarget,
   searchRef,
@@ -144,9 +139,6 @@ export function Header({
     return tokens ? `Keyboard shortcuts (${tokens})` : "Keyboard shortcuts";
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userShortcuts]);
-
-  const splitRightTokens = tokensFor("pane.splitRight");
-  const splitDownTokens = tokensFor("pane.splitDown");
 
   useEffect(() => {
     const el = rootRef.current;
@@ -333,48 +325,6 @@ export function Header({
         >
           <HugeiconsIcon icon={SidebarLeftIcon} size={18} strokeWidth={1.75} />
         </Button>
-
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="shrink-0 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50 focus-visible:ring-0 focus-visible:border-transparent focus:outline-none"
-              title="Split terminal"
-              disabled={!canSplit}
-            >
-              <HugeiconsIcon icon={GridViewIcon} size={16} strokeWidth={1.75} />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="min-w-44">
-            <DropdownMenuItem onSelect={() => onSplit("row")}>
-              <HugeiconsIcon
-                icon={LayoutTwoColumnIcon}
-                size={14}
-                strokeWidth={1.75}
-              />
-              <span className="flex-1">Split right</span>
-              {splitRightTokens && (
-                <span className="text-xs text-muted-foreground">
-                  {splitRightTokens}
-                </span>
-              )}
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => onSplit("col")}>
-              <HugeiconsIcon
-                icon={LayoutTwoRowIcon}
-                size={14}
-                strokeWidth={1.75}
-              />
-              <span className="flex-1">Split down</span>
-              {splitDownTokens && (
-                <span className="text-xs text-muted-foreground">
-                  {splitDownTokens}
-                </span>
-              )}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
 
       </div>
 
