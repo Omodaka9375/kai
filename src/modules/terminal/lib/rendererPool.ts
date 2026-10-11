@@ -97,7 +97,12 @@ function startFocusedPaneDomWatch(): void {
       if (leafId === null) continue;
       if (!adapter?.isLeafFocused(leafId)) continue;
       try {
-        const problem = domTruthOfSlot(slot.host, slot.webglAddon !== null);
+        const { summary, hasVisibleText } = bufferSummaryOfSlot(slot);
+        const problem =
+          domTruthOfSlot(slot) ??
+          (hasVisibleText
+            ? null
+            : "pane visible but EMPTY — shell has emitted no visible text (prompt never printed?)");
         if (!problem) continue;
         const key = `${slot.id}:${problem.slice(0, 80)}`;
         const now = Date.now();
@@ -105,7 +110,7 @@ function startFocusedPaneDomWatch(): void {
         if (now - last < DOM_WATCH_DEDUP_MS) continue;
         domWatchLastWarn.set(key, now);
         console.warn(
-          `[Kai-term leaf=${leafId}] FOCUSED pane not visible (watchdog) — ${problem}`,
+          `[Kai-term leaf=${leafId}] FOCUSED pane not visible (watchdog) — ${problem} | ${summary}`,
         );
       } catch {
         // diagnostics must never throw from an interval
@@ -401,7 +406,37 @@ const UNHIDE_FALLBACK_MS = 400;
  * blanks the pane without any pool log noticing. This walks the ancestor
  * chain and reports the first thing that would make the host invisible.
  */
-function domTruthOfSlot(host: HTMLElement, webglAttached: boolean): string | null {
+/** Buffer truth: does the terminal have anything VISIBLE to paint? A pane
+ * can be geometrically perfect (rect/canvas/stacking all green) while the
+ * buffer holds only invisible control bytes — OSC 7/133 sequences — and
+ * no prompt text: the "every log green, pane blank" case when a shell
+ * hangs mid-profile before printing its first prompt. */
+function bufferSummaryOfSlot(slot: Slot): {
+  summary: string;
+  hasVisibleText: boolean;
+} {
+  try {
+    const buf = slot.term.buffer.active;
+    const lines = buf.length;
+    let firstText = "";
+    for (let i = 0; i < Math.min(lines, 6); i++) {
+      const t = buf.getLine(i)?.translateToString(true) ?? "";
+      if (t.trim()) {
+        firstText = t.trim().slice(0, 50);
+        break;
+      }
+    }
+    return {
+      summary: `buffer=${lines}line(s) firstText=${JSON.stringify(firstText)}`,
+      hasVisibleText: firstText !== "",
+    };
+  } catch {
+    return { summary: "buffer=?(unavailable)", hasVisibleText: true };
+  }
+}
+
+function domTruthOfSlot(slot: Slot): string | null {
+  const host = slot.host;
   // Recycler check FIRST: the recycler is offscreen-positioned
   // (left:-99999px) — NOT display:none/visibility:hidden — so the
   // ancestor walk below passes clean through it and the host still
@@ -423,6 +458,12 @@ function domTruthOfSlot(host: HTMLElement, webglAttached: boolean): string | nul
     const tag = `<${node.tagName.toLowerCase()}${cls}>`;
     if (cs.visibility === "hidden") offenders.push(`${tag} visibility:hidden`);
     else if (cs.display === "none") offenders.push(`${tag} display:none`);
+    else if (parseFloat(cs.opacity) < 0.05) {
+      // opacity:0 evades EVERY other check — elementFromPoint still hits
+      // hit-testable transparent elements, rects stay full-size. A motion
+      // fade stuck at 0 (AnimatePresence exit) blanks the pane silently.
+      offenders.push(`${tag} opacity:${cs.opacity}`);
+    }
     node = node.parentElement;
     depth++;
   }
@@ -432,13 +473,13 @@ function domTruthOfSlot(host: HTMLElement, webglAttached: boolean): string | nul
   // canvases xterm rendered is the only DOM-visible signal.
   const canvases = host.querySelectorAll("canvas");
   if (canvases.length === 0) {
-    return `no canvas in host (renderer never painted; webgl=${webglAttached ? "on" : "off"})`;
+    return `no canvas in host (renderer never painted; webgl=${slot.webglAddon !== null ? "on" : "off"})`;
   }
   const deadCanvas = Array.from(canvases).find(
     (c) => c.width === 0 || c.height === 0,
   );
   if (deadCanvas) {
-    return `zero-size canvas ${deadCanvas.width}x${deadCanvas.height} (webgl=${webglAttached ? "on" : "off"})`;
+    return `zero-size canvas ${deadCanvas.width}x${deadCanvas.height} (webgl=${slot.webglAddon !== null ? "on" : "off"})`;
   }
   // Topmost-element check: what is ACTUALLY at the pane's center on
   // screen? Catches opaque overlays ABOVE the pane (siblings — invisible
@@ -487,15 +528,26 @@ function scheduleUnhide(slot: Slot): void {
     const leafAtBind = slot.currentLeafId;
     const audit = (phase: string) => {
       try {
-        const problem = domTruthOfSlot(slot.host, slot.webglAddon !== null);
+        const { summary, hasVisibleText } = bufferSummaryOfSlot(slot);
+        const problem = domTruthOfSlot(slot);
         if (problem) {
           console.warn(
             `[Kai-term leaf=${slot.currentLeafId ?? "?"}] ` +
-              `slot unhidden but NOT VISIBLE (${phase}) — ${problem}`,
+              `slot unhidden but NOT VISIBLE (${phase}) — ${problem} | ${summary}`,
+          );
+        } else if (phase === "post-settle" && !hasVisibleText) {
+          // Geometry + stacking + canvas are all fine — but nothing has
+          // been PRINTED: the shell emitted only invisible control
+          // sequences (OSC 7/133) or nothing at all. This is the
+          // "every log green, pane blank" case when a shell hangs
+          // mid-profile before printing its first prompt.
+          console.warn(
+            `[Kai-term leaf=${slot.currentLeafId ?? "?"}] pane visible but EMPTY ` +
+              `(post-settle) — no visible text in buffer (prompt never printed) | ${summary}`,
           );
         } else {
           console.info(
-            `[Kai-term leaf=${slot.currentLeafId ?? "?"}] dom audit clean (${phase})`,
+            `[Kai-term leaf=${slot.currentLeafId ?? "?"}] dom audit clean (${phase}) | ${summary}`,
           );
         }
       } catch {

@@ -168,7 +168,22 @@ function deliverPtyBytes(leafId: number, bytes: Uint8Array): void {
   // bound. Marking the flag here would silence it and leave a blank pane
   // permanently (seen on project reopen, where the tab subtree is remounted).
   if (slot) {
-    if (!s.receivedOutput) logLeaf(leafId, "first output delivered to renderer");
+    if (!s.receivedOutput) {
+      // Byte-level preview: control sequences (OSC 7/133) are invisible,
+      // so "output delivered" can be true while the pane shows nothing.
+      // The preview distinguishes prompt text from OSC-only output (the
+      // signature of a shell hung mid-profile before its first prompt).
+      let preview = "";
+      try {
+        preview = new TextDecoder().decode(bytes.slice(0, 48));
+      } catch {
+        // preview is best-effort
+      }
+      logLeaf(
+        leafId,
+        `first output delivered to renderer — ${JSON.stringify(preview)}`,
+      );
+    }
     s.receivedOutput = true;
     slot.term.write(bytes);
   } else s.dormantRing.push(bytes);
