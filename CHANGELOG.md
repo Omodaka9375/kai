@@ -4,6 +4,12 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.6.1]
+
+- Tabs: opening a project is now a clean reset — every terminal of the previous workspace is killed and you land on the StartPage, never on a broken auto-spawned terminal; the reset no longer spawns a fresh terminal itself (a spawn-time PTY raced the first paint and produced the blank/wedged pane), and an "Open with KAI" argv launch now just pins the workspace root. Clicking the project you're already in stays a no-op, and the unsaved-edit confirmation before switching is unchanged.
+
+---
+
 ## [1.6.0]
 
 - AI: `look_at_screen` actually delivers the screenshot to the model — the tool emitted its image as a `file-data` (document) part, which Anthropic only accepts for PDFs and silently drops and OpenAI treats as a file upload; it now emits `image-data`, and providers that can't carry images in tool results at all (the openai-compatible family — DeepSeek, Mistral, OpenRouter, z.ai, Groq, xAI, Cerebras, LM Studio) get OCR text instead of an unreadable base64 wall.
