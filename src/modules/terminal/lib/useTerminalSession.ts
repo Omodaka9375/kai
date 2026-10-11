@@ -291,32 +291,37 @@ function openPtySession(
       nudge(3000, () => {
         void pty.write("\r");
       });
-      // Last-resort DSR reply: pwsh/PSReadLine issues a cursor-position
-      // query (`\x1b[6n`) at startup and BLOCKS on the response — no
-      // prompt until it arrives. xterm.js normally answers it itself, but
-      // that reply path is where this intermittently breaks (verified:
-      // first output was exactly `\x1b[6n`, pane blank, every DOM audit
-      // green). A synthetic CPR with the REAL current cursor position is
-      // a truthful response; unsolicited it is inert to PSReadLine and
-      // only fires in the already-broken case (no visible output after
-      // 6s), followed by a CR to trigger a fresh prompt render.
+      // DSR reply path: pwsh/PSReadLine issues a cursor-position query
+      // (`\x1b[6n`) at startup and BLOCKS on the response — no prompt
+      // until it arrives. xterm.js normally answers it itself, but that
+      // reply path is where this intermittently breaks (verified: first
+      // output was exactly `\x1b[6n`, pane blank, every DOM audit green).
+      // A synthetic CPR with the REAL current cursor position is a
+      // truthful response. It must NOT carry a trailing CR: once
+      // unblocked, PSReadLine prints the prompt, and a stray CR lands
+      // as Enter on the fresh empty prompt → the prompt renders TWICE
+      // (user-observed). CPR only; the CR nudge stays a separate rung.
       const sendCpr = (why: string) => {
         const slot = getSlotForLeaf(leafId);
         const buf = slot?.term.buffer.active;
         if (!buf) return;
         const r = buf.cursorY + 1;
         const c = buf.cursorX + 1;
-        logLeaf(
-          leafId,
-          `${why} — sending synthetic CPR (row ${r}, col ${c}) + CR`,
-        );
-        void pty.write(`\x1b[${r};${c}R\r`);
+        logLeaf(leafId, `${why} — sending synthetic CPR (row ${r}, col ${c})`);
+        void pty.write(`\x1b[${r};${c}R`);
       };
       nudge(6000, () => {
-        // Generic last resort (kept): a shell that has emitted NOTHING
-        // visible after 6s may be blocked on something the early path
-        // didn't cover (not a clean 6n signature).
-        sendCpr("no visible output after 6s");
+        // Last resort. For the known 6n signature, retry the CPR — the
+        // 1.5s one may have arrived BEFORE PSReadLine reached its
+        // blocking read (eaten as unsolicited input). For anything else,
+        // the established generic nudge is CR (the 3s rung already sent
+        // one; a second covers shells that were still mid-init then).
+        if (s.firstOutputWasDsrQuery) {
+          sendCpr("still DSR-blocked after 6s — retrying CPR");
+        } else {
+          logLeaf(leafId, "no visible output after 6s — sending CR");
+          void pty.write("\r");
+        }
       });
       nudge(1500, () => {
         // Early path for the EXACT known signature: first output was
