@@ -103,13 +103,12 @@ function getAudioEl(): HTMLAudioElement | null {
     // in some embedded engine must not throw from an event handler.
     const toError = () => {
       const station = findStation(stationIdRef);
-      // Surface WHY when the element can say (code 4 = generic decode/network,
-      // 1 = aborted, 2 = network). Autoplay-policy rejections land here too.
-      const code = (sharedAudio as HTMLAudioElement | null)?.error?.code;
+      const mediaErr = (sharedAudio as HTMLAudioElement | null)?.error;
+      console.warn("[radio] element error event:", mediaErr?.code, mediaErr?.message);
       const why =
-        code === 2
+        mediaErr?.code === 2
           ? "network error — SomaFM may be blocked or offline"
-          : code === 4
+          : mediaErr?.code === 4
             ? "stream format/decode error"
             : "stream failed";
       publish({
@@ -179,25 +178,29 @@ export function radioPlay(id: string): RadioSnapshot {
             stationId: station.id,
           });
         }
-      }).catch(() => {
+      }).catch((err: unknown) => {
+        console.warn("[radio] play() rejected:", err);
         if (stationIdRef === station.id) {
+          const name =
+            err instanceof Error ? `${err.name}: ${err.message}` : String(err);
           publish({
             status: {
               state: "error",
               station,
-              message: "Stream failed — try another station.",
+              message: `Playback rejected (${name})`,
             },
             stationId: station.id,
           });
         }
       });
     }
-  } catch {
+  } catch (err) {
+    console.warn("[radio] play() sync error:", err);
     publish({
       status: {
         state: "error",
         station,
-        message: "Stream failed — try another station.",
+        message: `Playback error (${String(err)})`,
       },
       stationId: station.id,
     });
