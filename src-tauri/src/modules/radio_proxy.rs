@@ -162,3 +162,31 @@ pub async fn radio_proxy_start(url: String) -> Result<u16, String> {
 pub fn radio_proxy_stop() {
     stop();
 }
+
+/// Now-playing track info for a station, from SomaFM's public song history
+/// endpoint (`https://somafm.com/songs/<id>.json`). The id is sanitized to
+/// `[a-z0-9]` — it indexes a fixed public host, same posture as the proxy
+/// destination check.
+#[tauri::command]
+pub async fn radio_now_playing(station_id: String) -> Result<serde_json::Value, String> {
+    if station_id.is_empty()
+        || !station_id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+    {
+        return Err("radio now-playing: invalid station id".into());
+    }
+    let url = format!("https://somafm.com/songs/{station_id}.json");
+    let resp = reqwest::get(&url)
+        .await
+        .map_err(|e| format!("radio now-playing: request failed: {e}"))?;
+    let status = resp.status();
+    if !status.is_success() {
+        return Err(format!("radio now-playing: somafm returned {status}"));
+    }
+    let v: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("radio now-playing: bad json: {e}"))?;
+    Ok(v)
+}

@@ -9,6 +9,7 @@
 
 import { tool } from "ai";
 import { z } from "zod";
+import { invoke } from "@tauri-apps/api/core";
 import {
   getRadioSnapshot,
   radioPlay,
@@ -125,6 +126,73 @@ export function buildRadioTools(_ctx: ToolContext) {
           // persistence is best-effort
         }
         return { ok: true, now: describeSnapshot() };
+      },
+    }),
+
+    radio_now_playing: tool({
+      description:
+        "Get the currently-playing track (artist, title, album) and recent history for a SomaFM station — SomaFM's public song data. Use when the user asks what song is playing, what track this is, or for recent songs on a station.",
+      inputSchema: z.object({
+        station: z
+          .string()
+          .optional()
+          .describe(
+            "Station id or name. Defaults to the currently-selected station.",
+          ),
+      }),
+      execute: async ({ station }) => {
+        // Resolve: explicit arg > current selection > currently playing.
+        const snap = getRadioSnapshot();
+        const currentId = snap.stationId;
+        const resolved =
+          (station ? findStation(station) : null) ??
+          (currentId ? findStation(currentId) : null) ??
+          (snap.status.state === "playing" || snap.status.state === "connecting"
+            ? snap.status.station
+            : null) ??
+          null;
+        if (!resolved) {
+          return {
+            error:
+              "No station selected — pass a station (see radio_list_stations).",
+            now: describeSnapshot(),
+          };
+        }
+        try {
+          const data = await invoke<{
+            songs?: Array<{
+              date?: number;
+              artist?: string;
+              title?: string;
+              album?: string;
+            }>;
+          }>("radio_now_playing", { stationId: resolved.id });
+          const songs = data.songs ?? [];
+          // songs[0] is the CURRENT track (newest first by date).
+          const current = songs[0] ?? null;
+          return {
+            station: resolved.name,
+            current: current
+              ? {
+                  artist: current.artist ?? null,
+                  title: current.title ?? null,
+                  album: current.album ?? null,
+                }
+              : null,
+            recent: songs.slice(1, 6).map((s) => ({
+              artist: s.artist ?? null,
+              title: s.title ?? null,
+              album: s.album ?? null,
+            })),
+            now: describeSnapshot(),
+          };
+        } catch (e) {
+          return {
+            station: resolved.name,
+            error: `Could not fetch song data: ${String(e)}`,
+            now: describeSnapshot(),
+          };
+        }
       },
     }),
   } as const;

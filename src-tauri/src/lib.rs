@@ -675,6 +675,7 @@ app.manage(Mutex::new(None::<fs::env_probe::EnvInventory>));
             net::ai_http_stream,
             modules::radio_proxy::radio_proxy_start,
             modules::radio_proxy::radio_proxy_stop,
+            modules::radio_proxy::radio_now_playing,
             screen::screen_list_monitors,
             screen::screen_capture,
         ])
