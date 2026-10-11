@@ -8,6 +8,7 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 - Tabs: project open closes all tabs, kills all terminal sessions, and shows the StartPage. No terminal is auto-spawned on project open or launch.
 - AI: fixed incorrect tool name in the Windows instructions; added multi-edit usage rules and reduced to-do update frequency in agent guidance.
+- UI: slash commands show the `/` prefix in the command picker, chips, and submit path; `#` is reserved for snippets.
 
 ---
 
