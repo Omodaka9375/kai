@@ -4,6 +4,16 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.6.4]
+
+- Tabs: ai-diff tab closes on approve/reject (no more lingering tabs).
+- Radio: no auto-resume on launch — playback only on explicit action; live ice6 stream URLs.
+- Radio: CSP media-src allows SomaFM stream hosts.
+- Build: esbuild postinstall approval via package.json.
+- Build: removed placeholder pnpm-workspace.yaml that broke every pnpm command.
+
+---
+
 ## [1.6.3]
 
 - Radio: fix statio picker fail
