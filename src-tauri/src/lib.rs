@@ -256,6 +256,19 @@ fn project_key(root: &str) -> String {
     String::from_utf8(out).expect("base36 of ASCII digits is valid UTF-8")
 }
 
+// WebView2 (Windows): every webview sharing one user-data folder MUST be
+// created with IDENTICAL environment options. The main window and the
+// settings window share KAI's per-instance data dir, so both must pass the
+// same additional_browser_args — a mismatch makes the second environment
+// creation fail with ERROR_INVALID_STATE (0x8007139F, "group or resource is
+// not in the correct state") and the settings window silently never appears.
+//
+// The flag disables the "Ceto" speech service that 403s in WebView2 Runtime
+// 153+ (the recognizer dies with a JS network error). REMOVE the flag here
+// AND in both builders when WebView2Feedback #5724 is fixed upstream.
+#[cfg(target_os = "windows")]
+const WINDOWS_BROWSER_ARGS: &str = "--disable-features=msSpeechRecognitionServiceUseCetoService";
+
 #[tauri::command]
 async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Result<(), String> {
     let url_path = match tab.as_deref() {
@@ -264,13 +277,23 @@ async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Res
     };
 
     if let Some(window) = app.get_webview_window("settings") {
-        let _ = window.set_focus();
-        if let Some(t) = tab.as_deref().filter(|s| !s.is_empty()) {
-            // emit() serializes via JSON — no string-escape footgun, unlike
-            // eval() with format!(). Frontend listens via Tauri event API.
-            let _ = window.emit("KAI:settings-tab", t);
+        // SELF-HEAL: if a previous settings-window creation failed partway
+        // (e.g. the WebView2 environment mismatch bug this command once had),
+        // a hidden husk window can linger — every later click would just
+        // focus an invisible window and the dialog never appears. If the
+        // window is hidden, recreate it cleanly instead of focusing the husk.
+        let visible = window.is_visible().unwrap_or(true);
+        if visible {
+            let _ = window.set_focus();
+            if let Some(t) = tab.as_deref().filter(|s| !s.is_empty()) {
+                // emit() serializes via JSON — no string-escape footgun, unlike
+                // eval() with format!(). Frontend listens via Tauri event API.
+                let _ = window.emit("KAI:settings-tab", t);
+            }
+            return Ok(());
+        } else {
+            let _ = window.destroy();
         }
-        return Ok(());
     }
 
     let instance_id = app.state::<InstanceId>().0.clone();
@@ -302,6 +325,13 @@ async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Res
     // and make the window transparent.
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     let builder = builder.decorations(false).transparent(true);
+
+    // MUST match the main window's browser args exactly (see const above):
+    // both webviews share the user-data folder; mismatched environment
+    // options make WebView2 reject the second environment (0x8007139F) and
+    // the settings window never appears.
+    #[cfg(target_os = "windows")]
+    let builder = builder.additional_browser_args(WINDOWS_BROWSER_ARGS);
 
     let window = builder.build().map_err(|e| e.to_string())?;
 
@@ -461,11 +491,10 @@ pub fn run() {
                     // Shadowing (not `mut`) so the non-Windows build — where
                     // this cfg block is compiled out — has no unused `mut`
                     // (CI runs clippy -D warnings on Linux, where the arm is
-                    // stripped before the lint runs).
+                    // stripped before the lint runs). The constant's doc
+                    // comment explains the shared-UDF invariant.
                     #[cfg(target_os = "windows")]
-                    let b = b.additional_browser_args(
-                        "--disable-features=msSpeechRecognitionServiceUseCetoService",
-                    );
+                    let b = b.additional_browser_args(WINDOWS_BROWSER_ARGS);
                     b.build()
                 })
                 .map_err(|e| format!("failed to build main window: {e}"))?;

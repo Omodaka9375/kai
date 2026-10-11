@@ -13,6 +13,7 @@ All notable changes to the KAI terminal emulator project are documented in this 
 - Tools: todo_write normalizes shape mistakes (duplicate ids, multiple in-progress items, empty titles) and reports repairs instead of failing the call.
 - AI: the `<env>` block carries a verified environment inventory — real agent shell + version and installed/absent tool lists, probed once per launch on the Rust side (new `fs_env_inventory` command). Replaces the hardcoded `shell: powershell` assumption.
 - AI: write tools mark the project for verification; when a run settles, KAI runs the project's verify command once (`package.json` verify script, `tsc --noEmit`, or `cargo check`) and a failed check wakes the agent with the exact errors as a new message. No per-write latency; no checks on half-edited states.
+- Windows: Settings (and any section — General, Sandbox, MCP) opens again — the WebView2 Ceto voice fix was applied to the main window only; a second webview on the same user-data folder with mismatched browser arguments fails with ERROR_INVALID_STATE (0x8007139F), leaving an invisible window that every later click only focused. Both webview builders now share one `WINDOWS_BROWSER_ARGS` constant, and a hidden leftover settings window is destroyed and recreated on open instead of focused.
 
 ---
 
