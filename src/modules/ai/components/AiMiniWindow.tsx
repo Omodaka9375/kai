@@ -615,7 +615,7 @@ function SessionRow({
         onSelect();
       }}
       className={cn(
-        "group flex items-center justify-between gap-2 text-xs",
+        "group relative flex items-center justify-between gap-2 text-xs",
         active && "bg-accent/40",
       )}
     >
@@ -637,7 +637,15 @@ function SessionRow({
           className="h-6 min-w-0 flex-1 px-1.5 py-0 font-sans text-[11px]"
         />
       ) : (
-        <span className="min-w-0 flex-1 truncate">
+        <span
+          className={cn(
+            "min-w-0 flex-1 truncate",
+            // Idle: full row width — the action icons take NO layout space.
+            // Hover/focus-within: reserve room on the right for them so the
+            // title never runs under the floated icon cluster.
+            "transition-[padding] duration-150 group-hover:pr-14 group-focus-within:pr-14",
+          )}
+        >
           {session.title || "New chat"}
           {relativeTime(session.updatedAt ?? session.createdAt) ? (
             <span
@@ -653,7 +661,17 @@ function SessionRow({
         </span>
       )}
       {editing ? null : (
-        <>
+        <div
+          className={cn(
+            // Floated above the row's right edge — takes NO layout space, so
+            // the title spans the full row width when idle; it yields (via
+            // the title's group-hover padding) once the icons fade in.
+            "absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center gap-1",
+            "pointer-events-none opacity-0 transition-opacity",
+            "group-hover:pointer-events-auto group-hover:opacity-100",
+            "group-focus-within:pointer-events-auto group-focus-within:opacity-100",
+          )}
+        >
           {otherSessions.length > 0 ? (
             <Popover open={mergeOpen} onOpenChange={setMergeOpen}>
               <PopoverTrigger asChild>
@@ -662,7 +680,7 @@ function SessionRow({
                   data-session-merge
                   onClick={(e) => e.stopPropagation()}
                   title="Merge into another session"
-                  className="rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100"
+                  className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
                 >
                   <HugeiconsIcon icon={GitMergeIcon} size={11} strokeWidth={1.75} />
                 </button>
@@ -707,7 +725,7 @@ function SessionRow({
               setEditing(true);
             }}
             title="Rename session"
-            className="rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100"
+            className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
           >
             <HugeiconsIcon icon={PencilEdit01Icon} size={11} strokeWidth={1.75} />
           </button>
@@ -719,11 +737,11 @@ function SessionRow({
               onDelete();
             }}
             title="Delete session"
-            className="rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
+            className="rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
           >
             <HugeiconsIcon icon={Delete02Icon} size={11} strokeWidth={1.75} />
           </button>
-        </>
+        </div>
       )}
     </DropdownMenuItem>
   );
