@@ -7,6 +7,7 @@ All notable changes to the KAI terminal emulator project are documented in this 
 ## [1.6.1]
 
 - Tabs: opening a project is now a clean reset — every terminal of the previous workspace is killed and you land on the StartPage, never on a broken auto-spawned terminal; the reset no longer spawns a fresh terminal itself (a spawn-time PTY raced the first paint and produced the blank/wedged pane), and an "Open with KAI" argv launch now just pins the workspace root. Clicking the project you're already in stays a no-op, and the unsaved-edit confirmation before switching is unchanged.
+- AI: agents burn far fewer tool-call failures — the Windows tool-preference instruction named `fs_grep`, a tool that does not exist (models following it called a ghost tool); the multi_edit guidance now covers the four real failure classes (stale-read old_strings, identical old/new edits rejecting the whole batch, edits authored against the pre-batch file instead of the running buffer, skipping the post-batch typecheck/seam read); and the to-do tool stopped demanding an update after literally every step — lists now reuse ids/titles and update only at real transitions, ending the churn of schema-failed to-do writes.
 
 ---
 
