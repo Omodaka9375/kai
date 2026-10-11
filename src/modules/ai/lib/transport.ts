@@ -1,5 +1,6 @@
 import type { UIMessage } from "@ai-sdk/react";
 import { convertToModelMessages } from "ai";
+import { invoke } from "@tauri-apps/api/core";
 import { getModel, getModelContextLimit, type ModelId } from "../config";
 import {
   runAgentStream,
@@ -48,6 +49,42 @@ type LiveSnapshot = {
   workspaceRoot: string | null;
   activeFile: string | null;
 };
+
+// ── Verified environment inventory (agent <env> block) ──────────────────
+// Probed once per process by the Rust side (fs_env_inventory) and cached in
+// Tauri state. Replaces the hardcoded `shell: powershell` — the agent shell
+// may be pwsh 7, and the wrong shell assumption poisons every downstream
+// quoting/syntax decision. Also kills the 3-6 "what's installed?" probe
+// calls each session used to burn.
+export type EnvInventory = {
+  shell: string;
+  shellVersion: string | null;
+  tools: Array<{
+    name: string;
+    present: boolean;
+    version: string | null;
+    path: string | null;
+  }>;
+  probeMs: number;
+};
+
+let envInventoryCache: EnvInventory | null = null;
+
+export function getCachedEnvInventory(): EnvInventory | null {
+  return envInventoryCache;
+}
+
+export async function fetchEnvInventory(): Promise<EnvInventory | null> {
+  if (envInventoryCache) return envInventoryCache;
+  try {
+    const inv = await invoke<EnvInventory>("fs_env_inventory");
+    envInventoryCache = inv;
+    return inv;
+  } catch (e) {
+    console.warn("[Kai] env inventory probe failed:", e);
+    return null;
+  }
+}
 
 type Deps = {
   getKeys: () => ProviderKeys;
@@ -303,9 +340,28 @@ function formatEnvBlock(live: LiveSnapshot): string | null {
 function formatEnvBlockInner(live: LiveSnapshot): string | null {
   const lines: string[] = [];
   const os = IS_WINDOWS ? "windows" : IS_MAC ? "macos" : IS_LINUX ? "linux" : "unknown";
-  const shell = IS_WINDOWS ? "powershell" : "bash";
+  // Verified shell from the Rust probe when available — falls back to the
+  // old static guess only if the probe never ran.
+  const inv = envInventoryCache;
+  const shell = inv?.shell ?? (IS_WINDOWS ? "powershell" : "bash");
   lines.push(`os: ${os}`);
-  lines.push(`shell: ${shell}`);
+  lines.push(`shell: ${shell}${inv?.shellVersion ? ` (${inv.shellVersion})` : ""}`);
+  if (inv) {
+    const present = inv.tools.filter((t) => t.present);
+    const absent = inv.tools.filter((t) => !t.present);
+    if (present.length > 0) {
+      lines.push(
+        `installed: ${present
+          .map((t) => (t.version ? `${t.name} ${t.version.split(" ").slice(-1)[0]}` : t.name))
+          .join(", ")}`,
+      );
+    }
+    if (absent.length > 0) {
+      lines.push(
+        `absent: ${absent.map((t) => t.name).join(", ")} (do not probe for these; offer the install instead)`,
+      );
+    }
+  }
   if (live.workspaceRoot) lines.push(`workspace_root: ${live.workspaceRoot}`);
   if (live.cwd) lines.push(`active_terminal_cwd: ${live.cwd}`);
   if (live.activeFile) lines.push(`active_file: ${live.activeFile}`);

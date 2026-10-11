@@ -9,6 +9,10 @@ All notable changes to the KAI terminal emulator project are documented in this 
 - Tabs: project open closes all tabs, kills all terminal sessions, and shows the StartPage. No terminal is auto-spawned on project open or launch.
 - AI: fixed incorrect tool name in the Windows instructions; added multi-edit usage rules and reduced to-do update frequency in agent guidance.
 - UI: slash commands show the `/` prefix in the command picker, chips, and submit path; `#` is reserved for snippets.
+- Tools: multi_edit skips identical old/new edits instead of rejecting the batch; all-no-op batches error without touching the file; a stale-read guard bounces the call when the file changed since the model's last read.
+- Tools: todo_write normalizes shape mistakes (duplicate ids, multiple in-progress items, empty titles) and reports repairs instead of failing the call.
+- AI: the `<env>` block carries a verified environment inventory — real agent shell + version and installed/absent tool lists, probed once per launch on the Rust side (new `fs_env_inventory` command). Replaces the hardcoded `shell: powershell` assumption.
+- AI: write tools auto-run the project's verify command (`package.json` verify script, `tsc --noEmit`, or `cargo check`) after each change; a failed check is appended to the tool result as `_verify` so the model must fix it before continuing. Debounced per project, silent on pass.
 
 ---
 

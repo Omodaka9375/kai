@@ -627,6 +627,10 @@ export default function App() {
     void useAgentsStore.getState().hydrate();
     void useSnippetsStore.getState().hydrate();
     void useMcpStore.getState().hydrate();
+    // Fire the env probe in the background — the first agent turn's <env>
+    // block reads it from cache (verified shell + installed tool list,
+    // replacing hardcoded assumptions).
+    void import("@/modules/ai/lib/transport").then((m) => m.fetchEnvInventory());
   }, [hydrateSessions, launchCwdResolved, explorerRoot, launchCwd, home]);
 
   useEffect(() => {

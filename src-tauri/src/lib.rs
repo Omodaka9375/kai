@@ -521,8 +521,10 @@ pub fn run() {
                 shell::sweep_stale_shell_scripts(&cmd_dir);
             }
             diagnostics::install_panic_hook(log_dir.clone(), instance_id.clone());
-            app.manage(diagnostics::CrashDir(Mutex::new(Some(log_dir))));
-            app.manage(InstanceId(instance_id.clone()));
+app.manage(diagnostics::CrashDir(Mutex::new(Some(log_dir))));
+app.manage(InstanceId(instance_id.clone()));
+// Verified environment inventory cache (agent <env> block) — probed once.
+app.manage(Mutex::new(None::<fs::env_probe::EnvInventory>));
             Ok(())
         })
         .manage(pty::PtyState::default())
@@ -549,6 +551,7 @@ pub fn run() {
     fs::file::fs_parse_spreadsheet,
     fs::file::fs_parse_spreadsheet_bytes,
     fs::file::fs_convert_image,
+    fs::env_probe::fs_env_inventory,
             fs::file::fs_stat,
             fs::file::fs_read_file_bytes,
             fs::file::fs_write_file_bytes,

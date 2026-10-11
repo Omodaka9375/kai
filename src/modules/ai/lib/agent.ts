@@ -729,8 +729,16 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // credentials never leave the machine. Order: redact → annotate → fence.
   const tools = buildTools(opts.toolContext, opts.mcpTools);
   const redactedTools = withToolRedaction(tools as Record<string, unknown>);
+  // Auto-verify uses getWorkspaceRoot (NOT getRealWorkspaceRoot): in a shadow
+  // session the agent's edits land in the detached copy, and verification
+  // must run against what the agent actually wrote — not the real tree it
+  // hasn't touched yet.
   const fencedTools = opts.fenceState
-    ? withToolGuard(redactedTools, opts.fenceState)
+    ? withToolGuard(
+        redactedTools,
+        opts.fenceState,
+        opts.toolContext.getWorkspaceRoot,
+      )
     : redactedTools;
 
   return streamText({
