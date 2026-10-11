@@ -4,6 +4,14 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.6.2]
+
+- AI: message timestamps — messages are stamped with `createdAt` at first persist; the transcript renders iMessage-style day separators (Today / Yesterday / Oct 3) at calendar-day boundaries, and hovering any message shows its full local time. Legacy messages are marked and never back-stamped — they render no separators rather than fake ones.
+- AI: session list rows show compact relative ages (just now / 5m ago / yesterday / Oct 3) with the full local time on hover.
+- Tests: vitest no longer scans `.kai/` (agent scratch + training clones) — cloned repos ship their own suites expecting their own deps.
+
+---
+
 ## [1.6.1]
 
 - Tabs: project open closes all tabs, kills all terminal sessions, and shows the StartPage. No terminal is auto-spawned on project open or launch.
