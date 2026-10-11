@@ -537,7 +537,7 @@ function SessionPicker() {
           />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-56 max-w-64">
+      <DropdownMenuContent align="start" className="max-h-[60vh] min-w-56 max-w-72 overflow-y-auto">
         <DropdownMenuItem
           onSelect={() => newSession()}
           className="gap-2 text-xs"
@@ -642,7 +642,7 @@ function SessionRow({
           {relativeTime(session.updatedAt ?? session.createdAt) ? (
             <span
               className={cn(
-                "ml-1.5 whitespace-nowrap text-[10px] text-muted-foreground/70",
+                "block truncate text-[10px] leading-tight text-muted-foreground/70",
                 active && "text-muted-foreground",
               )}
               title={absoluteTime(session.updatedAt ?? session.createdAt) || undefined}
