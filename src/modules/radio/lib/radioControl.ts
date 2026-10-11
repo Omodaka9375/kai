@@ -302,7 +302,11 @@ export function radioStop(): RadioSnapshot {
   stationIdRef = null;
   // Tear down the Rust-side proxy too (kills the upstream connection).
   try {
-    void invoke("radio_proxy_stop");
+    // .catch, not try/catch: invoke() is async — a rejection (tests, plain
+    // web) would escape the try as an unhandled rejection.
+    invoke("radio_proxy_stop").catch(() => {
+      // not under Tauri — fine
+    });
   } catch {
     // not under Tauri — fine
   }

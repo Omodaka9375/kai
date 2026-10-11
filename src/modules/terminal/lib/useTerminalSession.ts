@@ -172,38 +172,44 @@ function deliverPtyBytes(leafId: number, bytes: Uint8Array): void {
   // the nudge timers below are the recovery path for a session whose slot never
   // bound. Marking the flag here would silence it and leave a blank pane
   // permanently (seen on project reopen, where the tab subtree is remounted).
-  if (slot) {
-    if (!s.receivedOutput) logLeaf(leafId, "first output delivered to renderer");
-    // Control-only output (OSC/DSR bytes — including a DSR cursor query)
-    // must not count as "received": the flag gates the recovery nudges
-    // below, and invisible bytes would disarm them while the pane stays
-    // blank. Only bytes with VISIBLE text count.
-    if (!s.receivedOutput) {
-      let preview = "";
-      try {
-        preview = new TextDecoder().decode(bytes.slice(0, 48));
-      } catch {
-        // preview is best-effort
-      }
-      // receivedOutput gates the prompt nudges (resize at 500ms, CR at 3s).
-      // The nudges must NOT be silenced by invisible control bytes: a shell
-      // blocked on a DSR response (`\x1b[6n` — pwsh/PSReadLine cursor query
-      // at startup) delivers 11 bytes of OSC/DSR with no prompt text, then
-      // hangs waiting for the reply. Counting that as "output received"
-      // disabled every recovery nudge → the intermittent blank first
-      // terminal. Only bytes with VISIBLE content count.
-      const hasVisible = /[\x20-\x7e]/.test(preview);
-      if (hasVisible) {
-        s.receivedOutput = true;
-      } else {
-        // Exact-match the known block signature: first output is ONLY a
-        // cursor-position query. Broad matches risk CPR-ing into a shell
-        // that sent 6n alongside real prompt bytes and already got its reply.
-        s.firstOutputWasDsrQuery = preview === "\x1b[6n";
-      }
+  // First-bytes classification must run on BOTH delivery paths — the live
+  // renderer AND the dormant ring. On a cold production start the first
+  // pane's bind waits on the font gate (up to FONT_READY_TIMEOUT_MS), so
+  // pwsh's DSR query (`\x1b[6n`) can land in the RING before any slot
+  // exists. Classifying only in the slot path left firstOutputWasDsrQuery
+  // false there → the 1.5s CPR rung never fired and the only armed nudges
+  // (CR at 3s/6s) cannot unblock a DSR-blocked PSReadLine — the first
+  // terminal from the StartPage stayed blank until closed and reopened
+  // (second spawn binds instantly, fonts warm, 6n goes straight to the
+  // term and the flag gets set). Bug was invisible in dev because the
+  // dev webview's fonts are already warm.
+  if (!s.receivedOutput) {
+    if (slot) logLeaf(leafId, "first output delivered to renderer");
+    let preview = "";
+    try {
+      preview = new TextDecoder().decode(bytes.slice(0, 48));
+    } catch {
+      // preview is best-effort
     }
-    slot.term.write(bytes);
-  } else s.dormantRing.push(bytes);
+    // receivedOutput gates the prompt nudges (resize at 500ms, CR at 3s).
+    // The nudges must NOT be silenced by invisible control bytes: a shell
+    // blocked on a DSR response delivers OSC/DSR bytes with no prompt text,
+    // then hangs waiting for the reply. Counting that as "output received"
+    // would disable every recovery nudge → the intermittent blank first
+    // terminal. Only bytes with VISIBLE content count.
+    const hasVisible = /[\x20-\x7e]/.test(preview);
+    if (hasVisible) {
+      s.receivedOutput = true;
+    } else if (!s.firstOutputWasDsrQuery) {
+      // Exact-match the known block signature: first output is ONLY a
+      // cursor-position query. Broad matches risk CPR-ing into a shell
+      // that sent 6n alongside real prompt bytes and already got its reply.
+      // Sticky: a later control-only chunk must not clear the signature.
+      s.firstOutputWasDsrQuery = preview === "\x1b[6n";
+    }
+  }
+  if (slot) slot.term.write(bytes);
+  else s.dormantRing.push(bytes);
   // Feed to error detector (skip private terminals).
   if (!s.disposed) feedErrorDetector(textDecoder.decode(bytes, { stream: true }));
 }
@@ -294,7 +300,15 @@ function openPtySession(
       const sendCpr = () => {
         const slot = getSlotForLeaf(leafId);
         const buf = slot?.term.buffer.active;
-        if (!buf) return;
+        // Fresh shell + 6n in the dormant ring: the query arrived before
+        // the font gate released the renderer bind, so no term buffer
+        // exists yet. A fresh PTY's cursor is deterministically at 1;1 —
+        // a truthful reply for this exact case (nothing written yet, no
+        // prompt rendered). Real position is read whenever the term lives.
+        if (!buf) {
+          void pty.write("\x1b[1;1R");
+          return;
+        }
         const r = buf.cursorY + 1;
         const c = buf.cursorX + 1;
         void pty.write(`\x1b[${r};${c}R`);
