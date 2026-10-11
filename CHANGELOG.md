@@ -6,6 +6,8 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ## [1.6.4]
 
+- Terminal: fixed the intermittent blank first pane — pwsh/PSReadLine blocks on a DSR cursor query (`\x1b[6n`) whose reply intermittently never lands; nudges are no longer disarmed by control-only output and a truthful synthetic CPR reply unblocks the shell (1.5s for the exact signature, 6s last resort).
+- Terminal: DOM-truth diagnostics — renderer-slot audits name the hiding layer (recycler/ancestors/canvas/overlay/opacity/buffer) when a pane is blank.
 - Git Graph: commit popover shows the full commit message body (Description section).
 - Tabs: ai-diff tab closes on approve/reject (no more lingering tabs).
 - Radio: no auto-resume on launch — playback only on explicit action; live ice6 stream URLs.

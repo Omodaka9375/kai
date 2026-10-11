@@ -51,6 +51,10 @@ type Session = {
   hasSlot: boolean;
   /** Set to true once the PTY has delivered at least one byte of output. */
   receivedOutput: boolean;
+  /** First output was EXACTLY a DSR cursor query (`\x1b[6n`) with no
+   *  visible text — the known pwsh/PSReadLine startup-block signature.
+   *  Gates the early (1.5s) synthetic CPR reply. */
+  firstOutputWasDsrQuery: boolean;
   /** Bumped when a spawn is superseded by a watchdog retry — late PTYs close. */
   spawnEpoch: number;
   /** Pending nudge setTimeout handles — cleared on dispose. */
@@ -136,6 +140,7 @@ function ensureSession(leafId: number, initialCwd?: string): Session {
     dormantRing: new DormantRing(),
     hasSlot: false,
     receivedOutput: false,
+    firstOutputWasDsrQuery: false,
     spawnEpoch: 0,
     nudgeTimers: [],
     watchdogTimer: null,
@@ -193,6 +198,12 @@ function deliverPtyBytes(leafId: number, bytes: Uint8Array): void {
     // terminal. Only bytes with VISIBLE content count.
     const hasVisible =
       typeof preview === "string" && /[\x20-\x7e]/.test(preview);
+    if (!s.receivedOutput) {
+      // Exact-match the known block signature: first output is ONLY a
+      // cursor-position query. Broad matches risk CPR-ing into a shell
+      // that sent 6n alongside real prompt bytes and already got its reply.
+      s.firstOutputWasDsrQuery = preview === "\x1b[6n";
+    }
     if (!hasVisible && !s.receivedOutput) {
       logLeaf(
         leafId,
@@ -289,7 +300,7 @@ function openPtySession(
       // a truthful response; unsolicited it is inert to PSReadLine and
       // only fires in the already-broken case (no visible output after
       // 6s), followed by a CR to trigger a fresh prompt render.
-      nudge(6000, () => {
+      const sendCpr = (why: string) => {
         const slot = getSlotForLeaf(leafId);
         const buf = slot?.term.buffer.active;
         if (!buf) return;
@@ -297,9 +308,26 @@ function openPtySession(
         const c = buf.cursorX + 1;
         logLeaf(
           leafId,
-          `no visible output after 6s — sending synthetic CPR (row ${r}, col ${c}) + CR`,
+          `${why} — sending synthetic CPR (row ${r}, col ${c}) + CR`,
         );
         void pty.write(`\x1b[${r};${c}R\r`);
+      };
+      nudge(6000, () => {
+        // Generic last resort (kept): a shell that has emitted NOTHING
+        // visible after 6s may be blocked on something the early path
+        // didn't cover (not a clean 6n signature).
+        sendCpr("no visible output after 6s");
+      });
+      nudge(1500, () => {
+        // Early path for the EXACT known signature: first output was
+        // only `\x1b[6n` and nothing visible has arrived since — the
+        // shell is blocked on the DSR reply right now. Answer it at
+        // 1.5s instead of blanking the pane for 6. Exact-match gate
+        // (broad `includes("6n")` would CPR into shells that already
+        // got their reply alongside real prompt bytes).
+        if (s.firstOutputWasDsrQuery) {
+          sendCpr("DSR-blocked shell (first output was \\x1b[6n)");
+        }
       });
     })
     .catch((e) => {
