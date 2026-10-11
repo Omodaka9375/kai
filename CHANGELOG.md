@@ -4,6 +4,13 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.6.3]
+
+- Radio: fix statio picker fail
+- Radio: the marquee is now centered in the status bar; the pill opens the station picker, and the speaker icon is a mute toggle with a volume slider.
+
+---
+
 ## [1.6.2]
 
 - AI: message timestamps — messages are stamped with `createdAt` at first persist; 
