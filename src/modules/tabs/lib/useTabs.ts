@@ -354,18 +354,16 @@ export function useTabs(initial?: Partial<TerminalTab> & { defer?: boolean }) {
       const target = curr.find(
         (t) => t.kind === "ai-diff" && t.approvalId === approvalId,
       );
-      if (!target || curr.length <= 1) {
-        if (!target) return curr;
-        return curr.map((t) =>
-          t.kind === "ai-diff" && t.approvalId === approvalId
-            ? { ...t, status: "approved" as AiDiffStatus }
-            : t,
-        );
-      }
+      // Not open (or already responded+closed by the bridge) — nothing to do.
+      if (!target) return curr;
+      // NO last-tab guard: closing the only tab shows the StartPage (same
+      // as closeTab). The old guard re-marked the status and left the tab
+      // open forever after an approve/reject — the "diff tab never goes
+      // away" bug. Approve/reject means the review is over: close it.
       const idx = curr.findIndex((t) => t.id === target.id);
       const next = curr.filter((t) => t.id !== target.id);
       setActiveId((active) =>
-        target.id === active ? next[Math.max(0, idx - 1)].id : active,
+        target.id === active ? (next[Math.max(0, idx - 1)]?.id ?? 0) : active,
       );
       return next;
     });
