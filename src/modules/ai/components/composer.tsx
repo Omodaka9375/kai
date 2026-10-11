@@ -323,7 +323,10 @@ export function AiComposerProvider({ children }: ProviderProps) {
     let commandMarker: string | null = null;
     let commandSource = trimmed;
     if (pickedCommands.length > 0 && !trimmed.startsWith("/") && !trimmed.startsWith("#")) {
-      commandSource = `#${pickedCommands[0].name} ${trimmed}`.trim();
+      // Commands are slash-invoked (`/plan`, `/compact`) — the `#` form is
+      // reserved for snippets. tryRunSlashCommand accepts both, but the
+      // canonical prefix here is `/`.
+      commandSource = `/${pickedCommands[0].name} ${trimmed}`.trim();
     }
     if (commandSource.startsWith("/") || commandSource.startsWith("#")) {
       const outcome = await tryRunSlashCommand(commandSource);

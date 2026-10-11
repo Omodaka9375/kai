@@ -708,7 +708,7 @@ function ChipsRow({
               strokeWidth={1.75}
               className="text-muted-foreground"
             />
-            <span className="font-medium">#{cmd.name}</span>
+            <span className="font-medium">/{cmd.name}</span>
             <button
               type="button"
               onClick={() => onRemoveCommand(cmd.name)}

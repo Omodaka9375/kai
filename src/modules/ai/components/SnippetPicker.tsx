@@ -85,7 +85,7 @@ export function SnippetPickerContent({
                         <span className="flex min-w-0 flex-1 flex-col">
                           <span className="flex items-center gap-1.5">
                             <span className="font-mono text-muted-foreground">
-                              #{c.name}
+                              /{c.name}
                             </span>
                             <span className="font-medium">{c.label}</span>
                           </span>
