@@ -46,6 +46,45 @@ export function getRadioSnapshot(): RadioSnapshot {
   return snapshot;
 }
 
+/** Mute/unmute the shared element. Fail-safe: never throws. */
+export function radioSetMuted(muted: boolean): void {
+  const el = sharedAudio;
+  if (!el) return;
+  try {
+    el.muted = muted;
+  } catch {
+    // ignore — broken element must not throw to callers
+  }
+}
+
+export function radioGetMuted(): boolean {
+  try {
+    return sharedAudio?.muted ?? false;
+  } catch {
+    return false;
+  }
+}
+
+/** Set volume 0..1 on the shared element. Fail-safe: never throws. */
+export function radioSetVolume(v: number): void {
+  const el = sharedAudio;
+  if (!el) return;
+  try {
+    el.volume = Math.min(1, Math.max(0, Number.isFinite(v) ? v : 1));
+  } catch {
+    // ignore
+  }
+}
+
+export function radioGetVolume(): number {
+  try {
+    const v = sharedAudio?.volume;
+    return typeof v === "number" && Number.isFinite(v) ? v : 1;
+  } catch {
+    return 1;
+  }
+}
+
 function getAudioEl(): HTMLAudioElement | null {
   if (typeof window === "undefined") return null; // tests / SSR
   if (!sharedAudio) {

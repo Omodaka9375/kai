@@ -55,12 +55,11 @@ export function StatusBar({
   }, [panelOpen, togglePanel, openMini, closeMini]);
 
   return (
-    <footer className="flex h-9 shrink-0 items-center justify-between gap-3 overflow-hidden border-t border-border/60 bg-card/60 px-3 pb-0.5 text-[11px]">
-      <div className="flex min-w-0 flex-1 items-center gap-2">
+    <footer className="grid h-9 shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 overflow-hidden border-t border-border/60 bg-card/60 px-3 pb-0.5 text-[11px]">
+      <div className="flex min-w-0 items-center gap-2">
         <WorkspaceEnvSelector onSelect={onWorkspaceChange} />
         <CwdBreadcrumb cwd={cwd} filePath={filePath} home={home} onCd={onCd} />
         <GoalStatusPill />
-        {radioEnabled ? <RadioMarquee /> : null}
         {privateActive ? (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -76,7 +75,11 @@ export function StatusBar({
           </Tooltip>
         ) : null}
       </div>
-      <div className="flex shrink-0 items-center gap-1.5">
+      {/* Center column — the radio marquee lives here, truly centered. */}
+      <div className="flex min-w-0 items-center justify-center">
+        {radioEnabled ? <RadioMarquee /> : null}
+      </div>
+      <div className="flex min-w-0 items-center justify-end gap-1.5">
         {panelOpen && hasComposer ? (
           <AiStatusBarControls />
         ) : (
