@@ -673,6 +673,8 @@ app.manage(Mutex::new(None::<fs::env_probe::EnvInventory>));
             net::openrouter_list_models,
             net::ai_http_request,
             net::ai_http_stream,
+            modules::radio_proxy::radio_proxy_start,
+            modules::radio_proxy::radio_proxy_stop,
             screen::screen_list_monitors,
             screen::screen_capture,
         ])

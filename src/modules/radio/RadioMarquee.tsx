@@ -3,6 +3,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import {
   MusicNote01Icon,
   PlayIcon,
+  StopIcon,
   VolumeHighIcon,
   VolumeOffIcon,
 } from "@hugeicons/core-free-icons";
@@ -10,6 +11,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Slider } from "@/components/ui/slider";
@@ -96,8 +98,15 @@ export function RadioMarquee() {
     }
   };
 
+  // Stop WITHOUT clearing the selection — the picker highlight survives so
+  // the next open offers the same station first.
+  const handleStop = () => {
+    player.stop();
+  };
+
   const playing = player.status.state === "playing";
   const connecting = player.status.state === "connecting";
+  const active = playing || connecting;
   const station = stationId ? findStation(stationId) : null;
 
   return (
@@ -135,6 +144,23 @@ export function RadioMarquee() {
           <div className="px-1.5 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
             SomaFM stations
           </div>
+          {active && (
+            <>
+              <DropdownMenuItem
+                onSelect={handleStop}
+                className="gap-2 text-xs"
+              >
+                <HugeiconsIcon
+                  icon={StopIcon}
+                  size={11}
+                  strokeWidth={1.75}
+                  className="shrink-0"
+                />
+                <span className="min-w-0 flex-1 truncate">Stop playback</span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+            </>
+          )}
           {RADIO_STATIONS.map((s) => (
             <DropdownMenuItem
               key={s.id}

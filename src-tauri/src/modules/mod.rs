@@ -7,6 +7,7 @@ pub mod mcp;
 pub mod mcp_oauth;
 pub mod net;
 pub mod pty;
+pub mod radio_proxy;
 pub mod sandbox;
 pub mod screen;
 pub mod secrets;

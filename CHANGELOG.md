@@ -9,6 +9,8 @@ All notable changes to the KAI terminal emulator project are documented in this 
 - Tabs: ai-diff tab closes on approve/reject (no more lingering tabs).
 - Radio: no auto-resume on launch — playback only on explicit action; live ice6 stream URLs.
 - Radio: CSP media-src allows SomaFM stream hosts.
+- Radio: WebView2 refused live Icecast streams — added a Rust-side local proxy that re-frames the stream as clean chunked HTTP/1.1.
+- Radio: Stop playback item in the station picker (keeps the selection).
 - Build: esbuild postinstall approval via package.json.
 - Build: removed placeholder pnpm-workspace.yaml that broke every pnpm command.
 
