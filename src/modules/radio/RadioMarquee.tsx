@@ -32,7 +32,8 @@ import { setRadioStationId } from "./radioPrefs";
 /**
  * Status-bar radio widget. Controls:
  *  - The pill (station name) opens the STATION PICKER.
- *  - The speaker icon is MUTE + a volume slider (popover), not a picker.
+ *  - The speaker icon toggles MUTE directly; a thin inline volume slider
+ *    sits in the same row (no popover).
  * Mounted ONLY when the feature is enabled (General settings).
  */
 
@@ -187,54 +188,42 @@ export function RadioMarquee() {
           ))}
         </DropdownMenuContent>
       </DropdownMenu>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            title={muted ? "Unmute" : "Mute"}
-            data-testid="radio-volume-trigger"
-            className="shrink-0 rounded-full p-1 text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground"
-          >
-            <HugeiconsIcon
-              icon={muted ? VolumeOffIcon : VolumeHighIcon}
-              size={11}
-              strokeWidth={2}
-            />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
-          align="end"
-          side="top"
-          className="min-w-40 gap-2 rounded-xl p-2"
-        >
-          <button
-            type="button"
-            onClick={handleMuteToggle}
-            className="flex w-full cursor-default items-center gap-2 rounded-md px-1.5 py-1 text-left text-xs hover:bg-accent"
-          >
-            <HugeiconsIcon
-              icon={muted ? VolumeOffIcon : VolumeHighIcon}
-              size={11}
-              strokeWidth={1.75}
-              className="shrink-0 text-muted-foreground"
-            />
-            <span className="flex-1">{muted ? "Unmute" : "Mute"}</span>
-          </button>
-          <div className="flex items-center gap-2 px-1.5 pb-1">
-            <span className="shrink-0 text-[10px] text-muted-foreground/70">
-              Vol
-            </span>
-            <Slider
-              value={[volume]}
-              min={0}
-              max={1}
-              step={0.05}
-              onValueChange={(v) => handleVolume(v[0] ?? 1)}
-              className="w-full"
-            />
-          </div>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      {/* Mute toggle + volume in ONE row: the speaker icon toggles mute
+          directly, and a thin inline slider extends to the right — no
+          popover, no second mute button. */}
+      <button
+        type="button"
+        title={muted ? "Unmute" : "Mute"}
+        aria-label={muted ? "Unmute radio" : "Mute radio"}
+        aria-pressed={muted}
+        onClick={handleMuteToggle}
+        data-testid="radio-mute-toggle"
+        className="shrink-0 rounded-full p-1 text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground"
+      >
+        <HugeiconsIcon
+          icon={muted ? VolumeOffIcon : VolumeHighIcon}
+          size={11}
+          strokeWidth={2}
+        />
+      </button>
+      <Slider
+        value={[volume]}
+        min={0}
+        max={1}
+        step={0.05}
+        onValueChange={(v) => handleVolume(v[0] ?? 1)}
+        aria-label="Radio volume"
+        className={cn(
+          "w-14 shrink-0",
+          // Thin-inline overrides of the chunky default slider: 4px track,
+          // 8px thumb (the primitive ships h-2 track / h-4 w-6 thumb).
+          "[&_[data-slot=slider-track]]:h-1",
+          "[&_[data-slot=slider-thumb]]:size-2",
+          "[&_[data-slot=slider-thumb]]:w-2",
+          "[&_[data-slot=slider-thumb]]:ring-0",
+          "[&_[data-slot=slider-thumb]]:shadow-none",
+        )}
+      />
       {/* Screen-reader/live region only — the visual status is in the pill. */}
       <span className="sr-only">{station ? station.name : "SomaFM radio"}</span>
     </div>
