@@ -168,12 +168,12 @@ function deliverPtyBytes(leafId: number, bytes: Uint8Array): void {
   // bound. Marking the flag here would silence it and leave a blank pane
   // permanently (seen on project reopen, where the tab subtree is remounted).
   if (slot) {
+    let preview = "";
     if (!s.receivedOutput) {
       // Byte-level preview: control sequences (OSC 7/133) are invisible,
       // so "output delivered" can be true while the pane shows nothing.
       // The preview distinguishes prompt text from OSC-only output (the
       // signature of a shell hung mid-profile before its first prompt).
-      let preview = "";
       try {
         preview = new TextDecoder().decode(bytes.slice(0, 48));
       } catch {
@@ -184,7 +184,23 @@ function deliverPtyBytes(leafId: number, bytes: Uint8Array): void {
         `first output delivered to renderer — ${JSON.stringify(preview)}`,
       );
     }
-    s.receivedOutput = true;
+    // receivedOutput gates the prompt nudges (resize at 500ms, CR at 3s).
+    // The nudges must NOT be silenced by invisible control bytes: a shell
+    // blocked on a DSR response (`\\x1b[6n` — pwsh/PSReadLine cursor query
+    // at startup) delivers 11 bytes of OSC/DSR with no prompt text, then
+    // hangs waiting for the reply. Counting that as "output received"
+    // disabled every recovery nudge → the intermittent blank first
+    // terminal. Only bytes with VISIBLE content count.
+    const hasVisible =
+      typeof preview === "string" && /[\x20-\x7e]/.test(preview);
+    if (!hasVisible && !s.receivedOutput) {
+      logLeaf(
+        leafId,
+        "first output was control-only (no visible text) — nudges stay armed",
+      );
+    } else {
+      s.receivedOutput = true;
+    }
     slot.term.write(bytes);
   } else s.dormantRing.push(bytes);
   // Feed to error detector (skip private terminals).
@@ -263,6 +279,27 @@ function openPtySession(
       });
       nudge(3000, () => {
         void pty.write("\r");
+      });
+      // Last-resort DSR reply: pwsh/PSReadLine issues a cursor-position
+      // query (`\x1b[6n`) at startup and BLOCKS on the response — no
+      // prompt until it arrives. xterm.js normally answers it itself, but
+      // that reply path is where this intermittently breaks (verified:
+      // first output was exactly `\x1b[6n`, pane blank, every DOM audit
+      // green). A synthetic CPR with the REAL current cursor position is
+      // a truthful response; unsolicited it is inert to PSReadLine and
+      // only fires in the already-broken case (no visible output after
+      // 6s), followed by a CR to trigger a fresh prompt render.
+      nudge(6000, () => {
+        const slot = getSlotForLeaf(leafId);
+        const buf = slot?.term.buffer.active;
+        if (!buf) return;
+        const r = buf.cursorY + 1;
+        const c = buf.cursorX + 1;
+        logLeaf(
+          leafId,
+          `no visible output after 6s — sending synthetic CPR (row ${r}, col ${c}) + CR`,
+        );
+        void pty.write(`\x1b[${r};${c}R\r`);
       });
     })
     .catch((e) => {
