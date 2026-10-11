@@ -52,7 +52,11 @@ function getAudioEl(): HTMLAudioElement | null {
     try {
       sharedAudio = new window.Audio();
       sharedAudio.preload = "none";
-      sharedAudio.crossOrigin = "anonymous";
+      // NOTE: no crossOrigin. SomaFM's Icecast sends no CORS headers, and a
+      // crossOrigin="anonymous" <audio> element makes every stream request
+      // a CORS request → instant MEDIA_ERR on EVERY station (the "all streams
+      // fail" bug). Plain media requests need no CORS. Nothing reads pixels
+      // from this element, so there is nothing to taint anyway.
     } catch {
       return null;
     }
@@ -60,11 +64,20 @@ function getAudioEl(): HTMLAudioElement | null {
     // in some embedded engine must not throw from an event handler.
     const toError = () => {
       const station = findStation(stationIdRef);
+      // Surface WHY when the element can say (code 4 = generic decode/network,
+      // 1 = aborted, 2 = network). Autoplay-policy rejections land here too.
+      const code = (sharedAudio as HTMLAudioElement | null)?.error?.code;
+      const why =
+        code === 2
+          ? "network error — SomaFM may be blocked or offline"
+          : code === 4
+            ? "stream format/decode error"
+            : "stream failed";
       publish({
         status: {
           state: "error",
           station,
-          message: "Stream failed — try another station.",
+          message: `${why} — try another station.`,
         },
         stationId: stationIdRef,
       });
