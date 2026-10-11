@@ -1,6 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { newTodoId, validateTodos, type Todo } from "../lib/todos";
+import { newTodoId, normalizeTodos, type Todo } from "../lib/todos";
 import { useTodosStore } from "../store/todoStore";
 import type { ToolContext } from "./context";
 
@@ -33,15 +33,24 @@ export function buildTodoTools(ctx: ToolContext) {
         if (!sessionId)
           return { error: "no active session; cannot persist todos" };
 
-        const normalized: Todo[] = todos.map((t) => ({
+        const withIds: Todo[] = todos.map((t) => ({
           id: t.id ?? newTodoId(),
           title: t.title,
           description: t.description,
           status: t.status,
         }));
 
-        const err = validateTodos(normalized);
-        if (err) return { error: err };
+        // Normalize instead of reject: shape mistakes (duplicate ids, two
+        // in_progress items, empty titles) are repaired and reported — the
+        // list lands on the first call instead of burning a retry turn.
+        const { todos: normalized, repairs } = normalizeTodos(withIds);
+
+        if (normalized.length === 0 && todos.length > 0) {
+          return {
+            error:
+              "every todo had an empty title — nothing to save. Pass titles as non-empty strings.",
+          };
+        }
 
         useTodosStore.getState().setTodos(sessionId, normalized);
 
@@ -50,6 +59,7 @@ export function buildTodoTools(ctx: ToolContext) {
           count: normalized.length,
           inProgress:
             normalized.find((t) => t.status === "in_progress")?.title ?? null,
+          ...(repairs.length > 0 ? { repairs } : {}),
         };
       },
     }),

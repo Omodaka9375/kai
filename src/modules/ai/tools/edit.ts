@@ -155,6 +155,7 @@ async function applyEdits(
   const useCrlf = original.includes("\r\n");
   let content = normEol(original);
   let totalReplacements = 0;
+  let skippedIdentical = 0;
 
   for (const rawEdit of edits) {
     const oldNorm = normEol(rawEdit.old_string);
@@ -163,11 +164,13 @@ async function applyEdits(
     const newNorm = stripTrailingWs(normEol(rawEdit.new_string), abs);
 
     if (oldNorm === newNorm) {
-      return {
-        ok: false,
-        error: "old_string and new_string are identical",
-        path: abs,
-      };
+      // Identical old/new is a no-op. Poisoning the WHOLE batch with an
+      // error here (the old behavior) forced the caller into the slow
+      // per-edit retry path — one write per edit, the known corruption
+      // class. Skip the no-op instead; only error when the batch is
+      // ENTIRELY no-ops (nothing was asked for).
+      skippedIdentical++;
+      continue;
     }
     if (oldNorm.length === 0) {
       return { ok: false, error: "old_string cannot be empty", path: abs };
@@ -243,6 +246,18 @@ async function applyEdits(
         content.slice(chosenIdx + oldNorm.length);
       totalReplacements += 1;
     }
+  }
+
+  // The batch was ENTIRELY identical old/new no-ops — nothing was asked
+  // for. Report it as an error so the model notices, instead of silently
+  // writing an unchanged file (which would also refresh the read cache for
+  // no reason and trigger fs-changed noise).
+  if (totalReplacements === 0 && skippedIdentical > 0 && edits.length > 0) {
+    return {
+      ok: false,
+      error: `all ${skippedIdentical} edit(s) are no-ops (old_string === new_string). Nothing to change — if you intended an edit, correct the strings.`,
+      path: abs,
+    };
   }
 
   // Restore original line-ending style after all edits are applied.
@@ -437,6 +452,24 @@ export function buildEditTools(ctx: ToolContext) {
         const abs = safety.canonical;
         const guard = await ensureReadCache(abs, ctx);
         if (guard) return guard;
+        // STALE-READ GUARD: the model authors all old_strings against the
+        // content it last READ. If anything changed the file since (another
+        // agent edit, a background process, a formatter), the batch fails
+        // edit-by-edit with confusing not-found errors — or worse, partially
+        // applies against content the model never saw. Compare the cached
+        // read hash against disk up front and bounce with a single clear
+        // instruction instead.
+        const cachedBefore = ctx.readCache.get(abs);
+        if (cachedBefore) {
+          const r = await native.readFile(abs);
+          if (r.kind === "text" && (r.size !== cachedBefore.size || djb2(r.content) !== cachedBefore.hash)) {
+            return {
+              error:
+                "file changed since your last read (it was edited by something else). Read it again with force: true and re-author the edits against the current content before submitting.",
+              path: abs,
+            };
+          }
+        }
         const failures = getEditFailures(ctx).get(abs) ?? 0;
         if (failures >= MAX_EDIT_RETRIES) {
           getEditFailures(ctx).delete(abs);
