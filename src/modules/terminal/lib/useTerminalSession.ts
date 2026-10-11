@@ -173,44 +173,34 @@ function deliverPtyBytes(leafId: number, bytes: Uint8Array): void {
   // bound. Marking the flag here would silence it and leave a blank pane
   // permanently (seen on project reopen, where the tab subtree is remounted).
   if (slot) {
-    let preview = "";
+    if (!s.receivedOutput) logLeaf(leafId, "first output delivered to renderer");
+    // Control-only output (OSC/DSR bytes — including a DSR cursor query)
+    // must not count as "received": the flag gates the recovery nudges
+    // below, and invisible bytes would disarm them while the pane stays
+    // blank. Only bytes with VISIBLE text count.
     if (!s.receivedOutput) {
-      // Byte-level preview: control sequences (OSC 7/133) are invisible,
-      // so "output delivered" can be true while the pane shows nothing.
-      // The preview distinguishes prompt text from OSC-only output (the
-      // signature of a shell hung mid-profile before its first prompt).
+      let preview = "";
       try {
         preview = new TextDecoder().decode(bytes.slice(0, 48));
       } catch {
         // preview is best-effort
       }
-      logLeaf(
-        leafId,
-        `first output delivered to renderer — ${JSON.stringify(preview)}`,
-      );
-    }
-    // receivedOutput gates the prompt nudges (resize at 500ms, CR at 3s).
-    // The nudges must NOT be silenced by invisible control bytes: a shell
-    // blocked on a DSR response (`\\x1b[6n` — pwsh/PSReadLine cursor query
-    // at startup) delivers 11 bytes of OSC/DSR with no prompt text, then
-    // hangs waiting for the reply. Counting that as "output received"
-    // disabled every recovery nudge → the intermittent blank first
-    // terminal. Only bytes with VISIBLE content count.
-    const hasVisible =
-      typeof preview === "string" && /[\x20-\x7e]/.test(preview);
-    if (!s.receivedOutput) {
-      // Exact-match the known block signature: first output is ONLY a
-      // cursor-position query. Broad matches risk CPR-ing into a shell
-      // that sent 6n alongside real prompt bytes and already got its reply.
-      s.firstOutputWasDsrQuery = preview === "\x1b[6n";
-    }
-    if (!hasVisible && !s.receivedOutput) {
-      logLeaf(
-        leafId,
-        "first output was control-only (no visible text) — nudges stay armed",
-      );
-    } else {
-      s.receivedOutput = true;
+      // receivedOutput gates the prompt nudges (resize at 500ms, CR at 3s).
+      // The nudges must NOT be silenced by invisible control bytes: a shell
+      // blocked on a DSR response (`\x1b[6n` — pwsh/PSReadLine cursor query
+      // at startup) delivers 11 bytes of OSC/DSR with no prompt text, then
+      // hangs waiting for the reply. Counting that as "output received"
+      // disabled every recovery nudge → the intermittent blank first
+      // terminal. Only bytes with VISIBLE content count.
+      const hasVisible = /[\x20-\x7e]/.test(preview);
+      if (hasVisible) {
+        s.receivedOutput = true;
+      } else {
+        // Exact-match the known block signature: first output is ONLY a
+        // cursor-position query. Broad matches risk CPR-ing into a shell
+        // that sent 6n alongside real prompt bytes and already got its reply.
+        s.firstOutputWasDsrQuery = preview === "\x1b[6n";
+      }
     }
     slot.term.write(bytes);
   } else s.dormantRing.push(bytes);
@@ -301,13 +291,12 @@ function openPtySession(
       // unblocked, PSReadLine prints the prompt, and a stray CR lands
       // as Enter on the fresh empty prompt → the prompt renders TWICE
       // (user-observed). CPR only; the CR nudge stays a separate rung.
-      const sendCpr = (why: string) => {
+      const sendCpr = () => {
         const slot = getSlotForLeaf(leafId);
         const buf = slot?.term.buffer.active;
         if (!buf) return;
         const r = buf.cursorY + 1;
         const c = buf.cursorX + 1;
-        logLeaf(leafId, `${why} — sending synthetic CPR (row ${r}, col ${c})`);
         void pty.write(`\x1b[${r};${c}R`);
       };
       nudge(6000, () => {
@@ -317,9 +306,8 @@ function openPtySession(
         // the established generic nudge is CR (the 3s rung already sent
         // one; a second covers shells that were still mid-init then).
         if (s.firstOutputWasDsrQuery) {
-          sendCpr("still DSR-blocked after 6s — retrying CPR");
+          sendCpr();
         } else {
-          logLeaf(leafId, "no visible output after 6s — sending CR");
           void pty.write("\r");
         }
       });
@@ -331,7 +319,7 @@ function openPtySession(
         // (broad `includes("6n")` would CPR into shells that already
         // got their reply alongside real prompt bytes).
         if (s.firstOutputWasDsrQuery) {
-          sendCpr("DSR-blocked shell (first output was \\x1b[6n)");
+          sendCpr();
         }
       });
     })
