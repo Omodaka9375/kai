@@ -9,6 +9,7 @@ All notable changes to the KAI terminal emulator project are documented in this 
 - AI: message timestamps — messages are stamped with `createdAt` at first persist; 
 - AI: session list rows show compact relative ages (just now / 5m ago / yesterday / Oct 3) with the full local time on hover
 - Session picker: bounded, scrollable menu fix
+- Tabs: fixed new terminals spawning in the previous project after switching projects — the remembered terminal cwd outlived the project switch; a new terminal on a fresh project's StartPage now inherits the current project root.
 
 ---
 

@@ -54,8 +54,11 @@ export function useWorkspaceCwd(
 
   const inheritedCwdForNewTab = useCallback((): string | undefined => {
     if (activeTab?.kind === "terminal" && activeTab.cwd) return activeTab.cwd;
-    return lastTerminalCwd.current ?? home ?? undefined;
-  }, [activeTab, home]);
+    // No live terminal context: prefer the current project root (a new
+    // terminal on the StartPage of a just-opened project belongs there),
+    // then home.
+    return explicitRoot ?? lastTerminalCwd.current ?? home ?? undefined;
+  }, [activeTab, explicitRoot, home]);
 
   // Export the setter so App.tsx's resetWorkspace handlers can call it.
   const setRootRef = useRef(setExplicitRoot);
@@ -65,6 +68,14 @@ export function useWorkspaceCwd(
     explorerRoot,
     inheritedCwdForNewTab,
     /** Called by resetWorkspace to lock the root. Not part of Result type — side-channel. */
-    _setRoot: (cwd: string) => setRootRef.current(cwd),
+    _setRoot: (cwd: string) => {
+      setRootRef.current(cwd);
+      // A root re-lock is a PROJECT SWITCH (File > Open Project / StartPage
+      // Recent / local ↔ WSL env change): every terminal from the old
+      // project is closed right after, so the last remembered terminal cwd
+      // belongs to a project we just left. Clear it or the next
+      // "New terminal" inherits the PREVIOUS project's cwd and spawns there.
+      lastTerminalCwd.current = null;
+    },
   } as Result & { _setRoot: (cwd: string) => void };
 }
