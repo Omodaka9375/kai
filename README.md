@@ -15,13 +15,19 @@
 Kai is a fast, cross-platform terminal built on **Tauri 2 + Rust** and **React 19**. Terminal, code editor, file explorer, web preview, and AI agent — in one app, lightweight, zero telemetry.
 
 <p align="center">
-  <img src="docs/terminal.png" width="48%" alt="Terminal" />
-  <img src="docs/split-panes.png" width="48%" alt="AI agent" />
+  <picture>
+    <source srcset="docs/terminal.webp" type="image/webp" />
+    <img src="docs/terminal.png" width="48%" alt="Kai terminal" />
+  </picture>
+  <picture>
+    <source srcset="docs/ai-workflow.webp" type="image/webp" />
+    <img src="docs/ai-workflow.png" width="48%" alt="Kai AI agent editing code" />
+  </picture>
 </p>
 
 ## Contents
 
-- [Features](#features) · [Agent Personas](#agent-personas) · [Install](#install) · [Quick Start](#quick-start) · [Configuration Guides](#configuration-guides) · [Build from Source](#build-from-source) · [Tech Stack](#tech-stack)
+- [Features](#features) · [Agent Personas](#agent-personas) · [Install](#install) · [Quick Start](#quick-start) · [Keyboard Shortcuts](#keyboard-shortcuts) · [Configuration Guides](#configuration-guides) · [Build from Source](#build-from-source) · [Tech Stack](#tech-stack)
 
 ## Features
 
@@ -36,12 +42,12 @@ Kai is a fast, cross-platform terminal built on **Tauri 2 + Rust** and **React 1
 
 - CodeMirror 6 with 44 languages and find & replace
 - Side-by-side AI edit diffs with per-hunk approve/reject
-- 9 themes, Vim mode (`:w` / `:q` Ex commands, visual/insert/normal)
+- 9 editor themes, Vim mode (`:w` / `:q` Ex commands, visual/insert/normal)
 - Image & PDF preview, plus **Open in Live Preview** — right-click an HTML file to serve and preview it in-app
 
 ### AI Agent
 
-- **Bring your own key** — OpenAI, Anthropic, Google, Groq, xAI, Cerebras, DeepSeek, Mistral, OpenRouter, and direct Z.ai (GLM)
+- **Bring your own key** — 12 providers: OpenAI, Anthropic, Google, Groq, xAI, Cerebras, DeepSeek, Mistral, OpenRouter, and direct Z.ai (GLM), plus any OpenAI-compatible endpoint
 - Local models via LM Studio or Ollama — vision models receive images automatically (runtime-name detection + a manual Vision override in Settings)
 - Paste screenshots straight into chat with `Ctrl+V`; attach PDF/DOCX via the + button (text extracted, works on every model)
 - `/compact` — reset the context in place in the same chat when a session runs long; no new chat needed
@@ -104,6 +110,27 @@ Auto-update is built in.
 3. Press `Ctrl+I` to open the AI agent
 
 Keys are stored in the OS keychain. No account required.
+
+## Keyboard Shortcuts
+
+Shortcuts use **⌘** on macOS and **Ctrl** on Windows/Linux.
+
+| Action | Shortcut |
+| --- | --- |
+| Toggle AI agent | `⌘ I` |
+| Ask AI about selection | `⌘ L` |
+| Toggle voice input | `⌘ M` |
+| New tab · private terminal | `⌘ T` · `⌘ R` |
+| New editor · preview tab | `⌘ E` · `⌘ P` |
+| Close tab / pane | `⌘ W` |
+| Split pane right · down | `⌘ D` · `⌘ ⇧ D` |
+| Next · previous pane | `⌘ ]` · `⌘ [` |
+| Search files | `⌘ ⇧ F` |
+| Find · find & replace | `⌘ F` · `⌘ H` |
+| Toggle file explorer | `⌘ B` |
+| Toggle source panel | `⌘ G` |
+| Show shortcuts · settings | `⌘ K` · `⌘ ,` |
+| Zoom in · out · reset | `⌘ =` · `⌘ -` · `⌘ 0` |
 
 ## Configuration Guides
 
