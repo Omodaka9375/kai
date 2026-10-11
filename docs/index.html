@@ -1,398 +1,350 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="kai">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Kai Terminal</title>
-  <meta name="description" content="Fast, cross-platform terminal with built-in AI agent, code editor, and file explorer and much more. Open source, zero telemetry." />
-  <meta property="og:title" content="Kai - Minimal, Private AI-Native Terminal Emulator" />
-  <meta property="og:description" content="Terminal + AI agents + code editor in one app. Lightweight, zero telemetry." />
+  <title>Kai — AI-native terminal emulator</title>
+  <meta name="description" content="Fast, cross-platform terminal with a built-in AI agent, code editor, and file explorer. Open source, BYOK, zero telemetry." />
+  <meta name="theme-color" content="#09090b" />
+
+  <!-- Open Graph / Twitter -->
+  <meta property="og:title" content="Kai — Minimal, private AI-native terminal emulator" />
+  <meta property="og:description" content="Terminal + AI agents + code editor in one app. Lightweight, BYOK, zero telemetry." />
   <meta property="og:type" content="website" />
   <meta property="og:image" content="https://omodaka9375.github.io/kai/kai.png" />
+  <meta property="og:image:width" content="968" />
+  <meta property="og:image:height" content="466" />
   <meta property="og:url" content="https://omodaka9375.github.io/kai/" />
-  <link rel="icon" href="../public/logo.png" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Kai — AI-native terminal emulator" />
+  <meta name="twitter:description" content="Terminal + AI agents + code editor in one app. Open source, BYOK, zero telemetry." />
+  <meta name="twitter:image" content="https://omodaka9375.github.io/kai/kai.png" />
+
+  <link rel="icon" type="image/png" href="logo.png" />
+  <link rel="apple-touch-icon" href="logo.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
   <style>
-    /* ── Config ── */
+    /* ── Theme tokens (default: Kai). JS swaps these on <html>. ── */
     :root {
       --bg: #09090b;
       --bg-card: #111113;
       --bg-subtle: #19191c;
-      --border: rgba(255,255,255,0.06);
+      --border: rgba(255,255,255,0.08);
+      --border-strong: rgba(255,255,255,0.14);
       --text: #ececf0;
       --text-muted: #8a8a98;
       --accent: #d4a43c;
-      --accent-glow: rgba(212,164,60,0.12);
+      --accent-ink: #09090b;
+      --accent-glow: rgba(212,164,60,0.14);
       --green: #4ade80;
-      --amber: #facc15;
+      --red: #f87171;
       --purple: #c4b5fd;
       --rose: #fb7185;
       --cyan: #22d3ee;
-      --font-sans: 'Instrument Sans', system-ui, sans-serif;
-      --font-mono: 'JetBrains Mono', monospace;
+      --amber: #facc15;
+      --shadow: 0 16px 48px rgba(0,0,0,0.45);
+      --font-sans: 'Instrument Sans', system-ui, -apple-system, sans-serif;
+      --font-mono: 'JetBrains Mono', ui-monospace, monospace;
       --max-w: 1080px;
       --ease: cubic-bezier(0.16, 1, 0.3, 1);
     }
 
-    /* ── Reset ── */
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-    html { scroll-behavior: smooth; -webkit-font-smoothing: antialiased; }
+    html { scroll-behavior: smooth; -webkit-font-smoothing: antialiased; scroll-padding-top: 72px; }
     body {
       font-family: var(--font-sans);
       background: var(--bg);
       color: var(--text);
       line-height: 1.6;
       overflow-x: hidden;
+      transition: background 0.4s var(--ease), color 0.4s var(--ease);
     }
     a { color: var(--accent); text-decoration: none; }
     a:hover { text-decoration: underline; }
+    img { display: block; max-width: 100%; height: auto; }
+    picture { display: block; }
 
-    /* ── Grain overlay ── */
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+
+    .skip {
+      position: absolute; left: -9999px; top: 0; z-index: 200;
+      background: var(--accent); color: var(--accent-ink);
+      padding: 10px 16px; border-radius: 0 0 8px 0; font-weight: 600;
+    }
+    .skip:focus { left: 0; }
+
+    /* ── Grain ── */
     body::after {
-      content: '';
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      opacity: 0.025;
+      content: ''; position: fixed; inset: 0; pointer-events: none;
+      opacity: 0.025; z-index: 9999;
       background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-      z-index: 9999;
     }
 
-    /* ── Layout ── */
     .container { max-width: var(--max-w); margin: 0 auto; padding: 0 24px; }
-    section { padding: 100px 0; }
+    section { padding: 96px 0; }
+    .center { text-align: center; }
 
     /* ── Nav ── */
     nav {
       position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-      background: rgba(9,9,11,0.85);
-      backdrop-filter: blur(16px);
+      background: var(--bg); /* fallback where color-mix is unsupported */
+      background: color-mix(in srgb, var(--bg) 82%, transparent);
+      backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
       border-bottom: 1px solid var(--border);
     }
-    nav .container {
-      display: flex; align-items: center; justify-content: space-between;
-      height: 56px;
-    }
-    .nav-brand {
-      display: flex; align-items: center; gap: 10px;
-      font-weight: 700; font-size: 18px; color: var(--text);
-    }
-    .nav-brand img { width: 38px; height: 38px; border-radius: 6px; }
-    .nav-links { display: flex; gap: 28px; align-items: center; }
-    .nav-links a {
-      font-size: 13px; font-weight: 500; color: var(--text-muted);
-      transition: color 0.2s;
-    }
+    nav .container { display: flex; align-items: center; justify-content: space-between; height: 56px; }
+    .nav-brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; color: var(--text); }
+    .nav-brand img { width: 34px; height: 34px; border-radius: 8px; }
+    .nav-links { display: flex; gap: 26px; align-items: center; }
+    .nav-links a { font-size: 13px; font-weight: 500; color: var(--text-muted); transition: color 0.2s; }
     .nav-links a:hover { color: var(--text); text-decoration: none; }
     .btn-nav {
-      background: var(--accent);
-      color: var(--bg) !important;
-      padding: 7px 16px;
-      border-radius: 8px;
-      font-size: 13px;
-      font-weight: 600;
-      transition: opacity 0.2s;
+      background: var(--accent); color: var(--accent-ink) !important;
+      padding: 7px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; transition: opacity 0.2s;
     }
     .btn-nav:hover { opacity: 0.85; text-decoration: none; }
 
-    /* ── Hero ── */
-    .hero {
-      padding-top: 160px;
-      padding-bottom: 80px;
-      text-align: center;
-      position: relative;
-    }
-    .hero::before {
-      content: '';
-      position: absolute;
-      top: 60px; left: 50%; transform: translateX(-50%);
-      width: 600px; height: 600px;
-      background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
-      pointer-events: none;
-    }
-    .hero h1 {
-      font-size: clamp(40px, 6vw, 72px);
-      font-weight: 700;
-      letter-spacing: -0.03em;
-      line-height: 1.1;
-      margin-bottom: 20px;
-      position: relative;
-    }
-    .hero h1 span { color: var(--accent); }
-    .hero p {
-      font-size: 18px;
-      color: var(--text-muted);
-      max-width: 540px;
-      margin: 0 auto 36px;
-      line-height: 1.7;
-    }
-    .hero-actions {
-      display: flex;
-      gap: 12px;
-      justify-content: center;
-      flex-wrap: wrap;
-    }
+    /* ── Buttons ── */
     .btn-primary {
-      background: var(--accent);
-      color: var(--bg);
-      padding: 12px 28px;
-      border-radius: 10px;
-      font-size: 15px;
-      font-weight: 600;
+      background: var(--accent); color: var(--accent-ink);
+      padding: 13px 26px; border-radius: 10px; font-size: 15px; font-weight: 600;
+      display: inline-flex; align-items: center; gap: 8px;
       transition: transform 0.2s var(--ease), box-shadow 0.2s;
-      display: inline-flex; align-items: center; gap: 8px;
+      border: none; cursor: pointer;
     }
-    .btn-primary:hover {
-      transform: translateY(-1px);
-      box-shadow: 0 8px 24px var(--accent-glow);
-      text-decoration: none;
-    }
+    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 10px 28px var(--accent-glow); text-decoration: none; }
     .btn-secondary {
-      background: var(--bg-subtle);
-      color: var(--text);
-      padding: 12px 28px;
-      border-radius: 10px;
-      font-size: 15px;
-      font-weight: 500;
-      border: 1px solid var(--border);
+      background: var(--bg-subtle); color: var(--text);
+      padding: 13px 26px; border-radius: 10px; font-size: 15px; font-weight: 500;
+      border: 1px solid var(--border); display: inline-flex; align-items: center; gap: 8px;
       transition: border-color 0.2s;
-      display: inline-flex; align-items: center; gap: 8px;
     }
     .btn-secondary:hover { border-color: var(--accent); text-decoration: none; }
 
-    .hero-badges {
-      display: flex;
-      gap: 24px;
-      justify-content: center;
-      margin-top: 40px;
-      color: var(--text-muted);
-      font-size: 13px;
-      font-weight: 500;
+    /* ── Hero ── */
+    .hero { padding-top: 150px; padding-bottom: 60px; text-align: center; position: relative; }
+    .hero::before {
+      content: ''; position: absolute; top: 40px; left: 50%; transform: translateX(-50%);
+      width: 640px; height: 640px; pointer-events: none;
+      background: radial-gradient(circle, var(--accent-glow) 0%, transparent 68%);
     }
-    .hero-badges span { display: flex; align-items: center; gap: 6px; }
-    .dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+    .eyebrow {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-size: 12px; font-weight: 600; letter-spacing: 0.02em;
+      color: var(--text-muted); background: var(--bg-card);
+      border: 1px solid var(--border); border-radius: 999px;
+      padding: 6px 14px; margin-bottom: 22px; position: relative;
+    }
+    .eyebrow b { color: var(--text); font-weight: 600; }
+    .hero h1 {
+      font-size: clamp(40px, 6vw, 72px); font-weight: 700; letter-spacing: -0.03em;
+      line-height: 1.08; margin-bottom: 20px; position: relative;
+    }
+    .hero h1 span { color: var(--accent); }
+    .hero .sub { font-size: 18px; color: var(--text-muted); max-width: 560px; margin: 0 auto 34px; line-height: 1.7; position: relative; }
+    .hero-actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; position: relative; }
+
+    .hero-badges {
+      display: flex; gap: 22px; justify-content: center; margin-top: 30px;
+      color: var(--text-muted); font-size: 13px; font-weight: 500; flex-wrap: wrap;
+    }
+    .hero-badges span { display: flex; align-items: center; gap: 7px; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
     .dot-green { background: var(--green); }
     .dot-amber { background: var(--amber); }
     .dot-purple { background: var(--purple); }
 
+    /* ── Terminal mock / animation ── */
+    .term {
+      background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px;
+      overflow: hidden; max-width: 680px; margin: 52px auto 0; box-shadow: var(--shadow);
+      text-align: left; position: relative;
+      transition: background 0.4s var(--ease), border-color 0.4s var(--ease);
+    }
+    .term-bar {
+      display: flex; align-items: center; gap: 7px; padding: 12px 16px;
+      background: var(--bg-subtle); border-bottom: 1px solid var(--border);
+    }
+    .term-dot { width: 11px; height: 11px; border-radius: 50%; }
+    .term-title { margin-left: 10px; font-family: var(--font-mono); font-size: 11.5px; color: var(--text-muted); }
+    .term-body {
+      padding: 20px 22px; font-family: var(--font-mono); font-size: 13px; line-height: 1.75;
+      min-height: 268px; color: var(--text-muted);
+    }
+    .t-line { white-space: pre-wrap; word-break: break-word; }
+    .t-prompt { color: var(--green); }
+    .t-cmd { color: var(--text); }
+    .t-out { color: var(--text-muted); }
+    .t-accent { color: var(--accent); }
+    .t-ok { color: var(--green); }
+    .caret {
+      display: inline-block; width: 7px; height: 15px; vertical-align: -2px;
+      background: var(--text); animation: blink 1.1s steps(1) infinite;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
+    .t-tool {
+      opacity: 0; transform: translateY(4px);
+      transition: opacity 0.35s var(--ease), transform 0.35s var(--ease);
+    }
+    .t-tool.in { opacity: 1; transform: none; }
+    .t-row { display: flex; align-items: center; gap: 9px; }
+    .t-chip {
+      flex: none; width: 20px; height: 20px; border-radius: 6px; display: grid; place-items: center;
+      font-size: 11px; background: var(--bg-subtle); border: 1px solid var(--border);
+    }
+    .t-name { color: var(--text); }
+    .t-arg { color: var(--text-muted); }
+    .t-diff { margin: 2px 0 6px 29px; border-left: 2px solid var(--border); padding-left: 12px; font-size: 12.5px; }
+    .t-add { color: var(--green); }
+    .t-del { color: var(--red); }
+    .thinking-dots::after { content: '…'; animation: dots 1.2s steps(4) infinite; }
+    @keyframes dots { 0% { content: ''; } 25% { content: '.'; } 50% { content: '..'; } 75% { content: '…'; } }
+
+    /* ── Theme switcher ── */
+    .themebar { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 22px; flex-wrap: wrap; position: relative; }
+    .themebar span { font-size: 12px; color: var(--text-muted); font-weight: 500; }
+    .swatches { display: flex; gap: 8px; }
+    .swatch {
+      width: 22px; height: 22px; border-radius: 50%; cursor: pointer; border: 2px solid transparent;
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,0.25); transition: transform 0.15s var(--ease), border-color 0.15s;
+      padding: 0; background: var(--bg-subtle);
+    }
+    .swatch:hover { transform: scale(1.14); }
+    .swatch[aria-pressed="true"] { border-color: var(--text); transform: scale(1.14); }
+
     /* ── Screenshots ── */
-    .screenshots {
-      padding: 20px 0 50px 0;
-    }
-    .screenshots .container {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 16px;
-    }
-    .screenshots img {
-      width: 100%;
-      border-radius: 12px;
-      border: 1px solid var(--border);
-      box-shadow: 0 16px 48px rgba(0,0,0,0.4);
-    }
+    .shots { padding: 12px 0 58px; }
+    .shots .container { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .shots img { width: 100%; border-radius: 12px; border: 1px solid var(--border); box-shadow: var(--shadow); }
+    .shot-wide { padding: 0 0 58px; }
+    .shot-wide img { width: 100%; border-radius: 14px; border: 1px solid var(--border); box-shadow: var(--shadow); }
 
-    /* ── Features grid ── */
-    .features-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 16px;
-    }
+    /* ── Section headers ── */
+    .section-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--accent); margin-bottom: 12px; }
+    .section-title { font-size: clamp(27px, 4vw, 40px); font-weight: 700; letter-spacing: -0.02em; margin-bottom: 16px; }
+    .section-desc { font-size: 16px; color: var(--text-muted); max-width: 620px; margin-bottom: 46px; }
+    .center .section-desc { margin-left: auto; margin-right: auto; }
+
+    /* ── Feature cards ── */
+    .features-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
     .feature-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      padding: 28px;
-      transition: border-color 0.25s, transform 0.25s var(--ease);
+      background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; padding: 26px;
+      transition: border-color 0.25s, transform 0.25s var(--ease), background 0.4s var(--ease);
     }
-    .feature-card:hover {
-      border-color: rgba(255,255,255,0.1);
-      transform: translateY(-2px);
-    }
+    .feature-card:hover { border-color: var(--border-strong); transform: translateY(-2px); }
     .feature-icon {
-      width: 36px; height: 36px;
-      border-radius: 9px;
-      display: grid; place-items: center;
-      margin-bottom: 16px;
-      font-size: 18px;
+      width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center;
+      margin-bottom: 15px; background: var(--bg-subtle); border: 1px solid var(--border);
     }
-    .feature-card h3 {
-      font-size: 16px;
-      font-weight: 600;
-      margin-bottom: 8px;
-    }
-    .feature-card p {
-      font-size: 13.5px;
-      color: var(--text-muted);
-      line-height: 1.65;
-    }
-    .section-label {
-      font-size: 12px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-      color: var(--accent);
-      margin-bottom: 12px;
-    }
-    .section-title {
-      font-size: clamp(28px, 4vw, 40px);
-      font-weight: 700;
-      letter-spacing: -0.02em;
-      margin-bottom: 16px;
-    }
-    .section-desc {
-      font-size: 16px;
-      color: var(--text-muted);
-      max-width: 600px;
-      margin-bottom: 48px;
-    }
+    .feature-icon svg { width: 19px; height: 19px; stroke: var(--accent); stroke-width: 1.9; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .feature-card h3 { font-size: 15.5px; font-weight: 600; margin-bottom: 7px; }
+    .feature-card p { font-size: 13.5px; color: var(--text-muted); line-height: 1.65; }
 
-    /* ── Providers ── */
-    .providers {
-      text-align: center;
-    }
-    .provider-logos {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 12px;
-      justify-content: center;
-      margin-top: 32px;
-      padding-left: 150px;
-      padding-right: 150px;
-    }
-    .provider-chip {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 10px 18px;
-      font-size: 13px;
-      font-weight: 500;
-      color: var(--text-muted);
-      transition: border-color 0.2s, color 0.2s;
-    }
-    .provider-chip:hover {
-      border-color: var(--accent);
-      color: var(--text);
+    /* ── Keycaps ── */
+    .keys { display: flex; flex-wrap: wrap; gap: 14px 18px; justify-content: center; margin-top: 6px; }
+    .key-row { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text-muted); }
+    .key {
+      font-family: var(--font-mono); font-size: 12px; font-weight: 500; color: var(--text);
+      background: var(--bg-subtle); border: 1px solid var(--border-strong);
+      border-radius: 7px; padding: 5px 10px; box-shadow: 0 2px 0 var(--border-strong);
+      min-width: 30px; text-align: center;
     }
 
     /* ── Stats ── */
     .stats {
-      display: flex;
-      gap: 48px;
-      justify-content: center;
-      padding: 60px 0;
-      border-top: 1px solid var(--border);
-      border-bottom: 1px solid var(--border);
+      display: flex; gap: 44px; justify-content: center; flex-wrap: wrap;
+      padding: 56px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
     }
     .stat { text-align: center; }
-    .stat-value {
-      font-family: var(--font-mono);
-      font-size: 32px;
-      font-weight: 600;
-      color: var(--text);
+    .stat-value { font-family: var(--font-mono); font-size: 30px; font-weight: 600; color: var(--text); }
+    .stat-label { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+
+    /* ── Providers marquee ── */
+    .providers { text-align: center; }
+    .marquee {
+      overflow: hidden; margin-top: 34px; position: relative;
+      mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+      -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
     }
-    .stat-label {
-      font-size: 13px;
-      color: var(--text-muted);
-      margin-top: 4px;
+    .marquee-track { display: flex; gap: 12px; width: max-content; animation: scroll 34s linear infinite; }
+    .marquee:hover .marquee-track { animation-play-state: paused; }
+    @keyframes scroll { to { transform: translateX(-50%); } }
+    .chip {
+      background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px;
+      padding: 10px 18px; font-size: 13px; font-weight: 500; color: var(--text-muted); white-space: nowrap;
+      transition: border-color 0.2s, color 0.2s;
     }
+    .chip:hover { border-color: var(--accent); color: var(--text); }
+
+    /* ── Install ── */
+    .os-tabs { display: flex; gap: 8px; justify-content: center; margin-bottom: 26px; flex-wrap: wrap; }
+    .os-tab {
+      font-size: 13px; font-weight: 600; color: var(--text-muted); cursor: pointer;
+      background: var(--bg-card); border: 1px solid var(--border); border-radius: 9px; padding: 9px 20px;
+      transition: color 0.2s, border-color 0.2s, background 0.2s;
+    }
+    .os-tab:hover { color: var(--text); }
+    .os-tab[aria-selected="true"] { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); }
+    .os-panel { display: none; max-width: 620px; margin: 0 auto; }
+    .os-panel.active { display: block; }
+    .os-card {
+      background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; padding: 26px;
+      text-align: left;
+    }
+    .os-card h4 { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+    .os-card p { font-size: 14px; color: var(--text-muted); margin-bottom: 18px; }
+    .os-meta { display: flex; gap: 18px; flex-wrap: wrap; font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); margin-top: 16px; }
+    .os-meta b { color: var(--text); font-weight: 500; }
 
     /* ── CTA ── */
-    .cta {
-      text-align: center;
-      padding-top: 0px;
-    }
-    .cta h2 {
-      font-size: clamp(28px, 4vw, 40px);
-      font-weight: 700;
-      letter-spacing: -0.02em;
-      margin-bottom: 16px;
-    }
-    .cta p {
-      color: var(--text-muted);
-      font-size: 16px;
-      margin-bottom: 32px;
-    }
+    .cta { text-align: center; padding-top: 0; }
+    .cta h2 { font-size: clamp(28px, 4vw, 40px); font-weight: 700; letter-spacing: -0.02em; margin-bottom: 16px; }
+    .cta p { color: var(--text-muted); font-size: 16px; margin-bottom: 30px; }
 
     /* ── Footer ── */
-    footer {
-      border-top: 1px solid var(--border);
-      padding: 32px 0;
-      text-align: center;
-      font-size: 13px;
-      color: var(--text-muted);
-    }
+    footer { border-top: 1px solid var(--border); padding: 34px 0; text-align: center; font-size: 13px; color: var(--text-muted); }
     footer a { color: var(--text-muted); }
     footer a:hover { color: var(--text); }
-
-    /* ── Terminal mockup ── */
-    .terminal-mock {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      overflow: hidden;
-      max-width: 640px;
-      margin: 48px auto 0;
-      box-shadow: 0 24px 64px rgba(0,0,0,0.5);
-    }
-    .terminal-titlebar {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 12px 16px;
-      background: var(--bg-subtle);
-      border-bottom: 1px solid var(--border);
-    }
-    .terminal-dot { width: 10px; height: 10px; border-radius: 50%; }
-    .terminal-body {
-      padding: 20px;
-      font-family: var(--font-mono);
-      font-size: 13px;
-      line-height: 1.8;
-      color: var(--text-muted);
-    }
-    .terminal-body .prompt { color: var(--green); }
-    .terminal-body .cmd { color: var(--text); }
-    .terminal-body .output { color: var(--text-muted); }
-    .terminal-body .accent { color: var(--accent); }
+    .foot-links { display: flex; gap: 20px; justify-content: center; margin-top: 12px; flex-wrap: wrap; }
 
     /* ── Responsive ── */
-    @media (max-width: 768px) {
-      .features-grid { grid-template-columns: 1fr; }
-      .screenshots .container { grid-template-columns: 1fr; }
-      .stats { flex-direction: column; gap: 24px; }
-      .nav-links a:not(.btn-nav) { display: none; }
-      .hero-badges { flex-direction: column; align-items: center; }
+    @media (max-width: 800px) {
+      .features-grid { grid-template-columns: 1fr 1fr; }
     }
-    @media (max-width: 480px) {
-      section { padding: 60px 0; }
-      .hero { padding-top: 120px; }
+    @media (max-width: 720px) {
+      section { padding: 64px 0; }
+      .hero { padding-top: 118px; }
+      .features-grid { grid-template-columns: 1fr; }
+      .shots .container { grid-template-columns: 1fr; }
+      .stats { gap: 28px; }
+      .nav-links a:not(.btn-nav) { display: none; }
+      .term-body { font-size: 12px; min-height: 240px; }
     }
 
-    /* ── Animations ── */
-    .fade-in {
-      opacity: 0;
-      transform: translateY(20px);
-      transition: opacity 0.6s var(--ease), transform 0.6s var(--ease);
-    }
-    .fade-in.visible {
-      opacity: 1;
-      transform: translateY(0);
+    /* ── Motion ── */
+    .fade-in { opacity: 0; transform: translateY(20px); transition: opacity 0.6s var(--ease), transform 0.6s var(--ease); }
+    .fade-in.visible { opacity: 1; transform: none; }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+      .fade-in { opacity: 1; transform: none; }
+      html { scroll-behavior: auto; }
     }
   </style>
 </head>
 <body>
+  <a class="skip" href="#features">Skip to content</a>
 
   <!-- Nav -->
   <nav>
     <div class="container">
-      <a href="#" class="nav-brand">
-        <img src="logo.png" alt="Kai" />
-      </a>
+      <a href="#" class="nav-brand"><img src="logo.png" alt="Kai" width="34" height="34" />Kai</a>
       <div class="nav-links">
         <a href="#features">Features</a>
         <a href="#providers">Providers</a>
+        <a href="#install">Install</a>
         <a href="https://github.com/Omodaka9375/kai">GitHub</a>
         <a href="https://github.com/Omodaka9375/kai/releases/latest" class="btn-nav">Download</a>
       </div>
@@ -400,47 +352,51 @@
   </nav>
 
   <!-- Hero -->
-  <section class="hero">
+  <header class="hero">
     <div class="container">
-      <h1>Minimal, private <br /><span>AI terminal emulator</span></h1>
-      <p>Fast, cross-platform, open-source</p>
+      <div class="eyebrow"><span id="heroVersion">v1.6.5</span> · <b id="heroStars">★ open source</b></div>
+      <h1>Minimal, private<br /><span>AI terminal emulator</span></h1>
+      <p class="sub">A fast, cross-platform terminal with an AI agent that actually reads, edits, and runs your code — in the same window.</p>
       <div class="hero-actions">
-        <a href="https://github.com/Omodaka9375/kai/releases/latest" class="btn-primary">
-          ↓ Download Kai
-        </a>
-        <a href="https://github.com/Omodaka9375/kai" class="btn-secondary">
-          View on GitHub
-        </a>
+        <a href="https://github.com/Omodaka9375/kai/releases/latest" class="btn-primary">↓ Download Kai</a>
+        <a href="https://github.com/Omodaka9375/kai" class="btn-secondary">View on GitHub</a>
       </div>
       <div class="hero-badges">
         <span><span class="dot dot-green"></span> Zero telemetry</span>
-        <span><span class="dot dot-amber"></span> Lightweight</span>
-        <span><span class="dot dot-purple"></span> Cross-platform</span>
+        <span><span class="dot dot-amber"></span> BYOK, 12 providers</span>
+        <span><span class="dot dot-purple"></span> macOS · Linux · Windows</span>
       </div>
 
-      <!-- Terminal mockup -->
-      <div class="terminal-mock fade-in">
-        <div class="terminal-titlebar">
-          <span class="terminal-dot" style="background:#ff5f57"></span>
-          <span class="terminal-dot" style="background:#febc2e"></span>
-          <span class="terminal-dot" style="background:#28c840"></span>
+      <!-- Animated agent session -->
+      <div class="term" role="img" aria-label="Kai AI agent fixing a failing test in the terminal">
+        <div class="term-bar">
+          <span class="term-dot" style="background:#ff5f57"></span>
+          <span class="term-dot" style="background:#febc2e"></span>
+          <span class="term-dot" style="background:#28c840"></span>
+          <span class="term-title">~/project — kai</span>
         </div>
-        <div class="terminal-body">
-          <div><span class="prompt">~/project $</span> <span class="cmd">kai</span></div>
-          <div class="output">✓ Terminal ready</div>
-          <div class="output">✓ AI agent connected <span class="accent">(Claude 4.6 Sonnet)</span></div>
-          <div class="output">✓ MCP server: filesystem, git</div>
-          <div><span class="prompt">~/project $</span> <span class="cmd">_</span></div>
-        </div>
+        <div class="term-body" id="termBody"></div>
+      </div>
+
+      <!-- Theme switcher -->
+      <div class="themebar">
+        <span>UI theme</span>
+        <div class="swatches" id="swatches" role="group" aria-label="Preview UI themes"></div>
       </div>
     </div>
-  </section>
+  </header>
 
   <!-- Screenshots -->
-  <section class="screenshots" id="screenshots">
+  <section class="shots">
     <div class="container">
-      <img src="terminal.png" alt="Kai terminal with split panes" class="fade-in" />
-      <img src="split-panes.png" alt="Kai terminal with split panes" class="fade-in" />
+      <picture class="fade-in">
+        <source srcset="terminal.webp" type="image/webp" />
+        <img src="terminal.png" alt="Kai terminal with an AI agent session" width="1907" height="1200" loading="lazy" decoding="async" />
+      </picture>
+      <picture class="fade-in">
+        <source srcset="editor.webp" type="image/webp" />
+        <img src="editor.png" alt="Kai's CodeMirror code editor open beside the terminal" width="1920" height="1042" loading="lazy" decoding="async" />
+      </picture>
     </div>
   </section>
 
@@ -449,88 +405,106 @@
     <div class="container">
       <div class="section-label">Features</div>
       <h2 class="section-title">Everything in one window.</h2>
-      <p class="section-desc">No browser tabs, no context switching. Terminal, editor, AI, and tools — unified.</p>
+      <p class="section-desc">No browser tabs, no context switching. Terminal, editor, AI, and dev tools — unified.</p>
       <div class="features-grid">
         <div class="feature-card fade-in">
-          <div class="feature-icon" style="background:rgba(74,222,128,0.1);color:var(--green)">⌘</div>
+          <div class="feature-icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><polyline points="7 9 10 12 7 15"/><line x1="12" y1="15" x2="16" y2="15"/></svg></div>
           <h3>Terminal</h3>
-          <p>xterm.js with WebGL rendering. Multi-tab, split panes, shell integration for bash, zsh, PowerShell, and cmd.</p>
+          <p>xterm.js with WebGL rendering. Multi-tab, split panes, and shell integration for bash, zsh, PowerShell, and cmd.</p>
         </div>
         <div class="feature-card fade-in">
-          <div class="feature-icon" style="background:rgba(212,164,60,0.1);color:var(--accent)">✎</div>
+          <div class="feature-icon"><svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></div>
           <h3>Code Editor</h3>
-          <p>CodeMirror 6 with 44 languages, find & replace, Vim mode, and 9 themes.</p>
+          <p>CodeMirror 6 with 44 languages, find &amp; replace, Vim mode, and 9 color themes.</p>
         </div>
         <div class="feature-card fade-in">
-          <div class="feature-icon" style="background:rgba(196,181,253,0.1);color:var(--purple)">◆</div>
+          <div class="feature-icon"><svg viewBox="0 0 24 24"><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><circle cx="12" cy="12" r="4"/></svg></div>
           <h3>AI Agent</h3>
-          <p>Reads, writes, and runs code. Edit diffs with approval flow, auto-approve modes, context summarization, and local Whisper voice dictation.</p>
+          <p>Reads, writes, and runs code with an edit-diff approval flow, auto-approve modes, context summarization, and local voice dictation.</p>
         </div>
         <div class="feature-card fade-in">
-          <div class="feature-icon" style="background:rgba(250,204,21,0.1);color:var(--amber)">⚡</div>
+          <div class="feature-icon"><svg viewBox="0 0 24 24"><path d="M9 3H5a2 2 0 0 0-2 2v4M15 3h4a2 2 0 0 1 2 2v4M9 21H5a2 2 0 0 1-2-2v-4M15 21h4a2 2 0 0 0 2-2v-4"/></svg></div>
           <h3>MCP Support</h3>
-          <p>Connect external tool servers via Model Context Protocol. Browse and install from the official registry.</p>
+          <p>Connect external tool servers via the Model Context Protocol. Browse and install from the official registry.</p>
         </div>
         <div class="feature-card fade-in">
-          <div class="feature-icon" style="background:rgba(251,113,133,0.1);color:var(--rose)">🎨</div>
-          <h3>Image & Video Gen</h3>
-          <p>Generate images (GPT Image 2, Nano Banana 2, Grok Imagine, ComfyUI) and videos (Kling 3.0, Veo 3.1, Seedance 2.0, ComfyUI) from chat. Inline preview with lightbox.</p>
+          <div class="feature-icon"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg></div>
+          <h3>Image &amp; Video Gen</h3>
+          <p>Generate images (GPT Image 2, Nano Banana 2, Grok Imagine, ComfyUI) and videos (Kling 3.0, Veo 3.1, Seedance 2.0) from chat, with inline preview.</p>
         </div>
         <div class="feature-card fade-in">
-          <div class="feature-icon" style="background:rgba(74,222,128,0.1);color:var(--green)">◫</div>
+          <div class="feature-icon"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg></div>
           <h3>File Explorer</h3>
-          <p>Catppuccin icon theme, fuzzy search, inline rename, multi-select with batch actions, drag files into the terminal, image & PDF preview.</p>
+          <p>Catppuccin icon theme, fuzzy search, inline rename, multi-select batch actions, drag-to-terminal, and image &amp; PDF preview.</p>
         </div>
         <div class="feature-card fade-in">
-          <div class="feature-icon" style="background:rgba(34,211,238,0.1);color:var(--cyan)">⊞</div>
+          <div class="feature-icon"><svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="14" rx="2"/><line x1="2" y1="9" x2="22" y2="9"/><line x1="6" y1="6.5" x2="6" y2="6.5"/></svg></div>
           <h3>Web Preview</h3>
-          <p>Built-in browser for local dev servers. Live-reload previews right next to your terminal — no alt-tabbing to a browser.</p>
+          <p>A built-in browser for local dev servers — live-reload previews right next to your terminal, no alt-tabbing.</p>
         </div>
         <div class="feature-card fade-in">
-          <div class="feature-icon" style="background:rgba(212,164,60,0.1);color:var(--accent)">⇄</div>
+          <div class="feature-icon"><svg viewBox="0 0 24 24"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg></div>
           <h3>API Tester</h3>
-          <p>REST client with method selector, headers, body editor, and JSON pretty-print. Test endpoints without leaving the terminal.</p>
+          <p>A REST client with method selector, headers, body editor, and JSON pretty-print — test endpoints without leaving the terminal.</p>
         </div>
         <div class="feature-card fade-in">
-          <div class="feature-icon" style="background:rgba(196,181,253,0.1);color:var(--purple)">⎇</div>
-          <h3>Git CI Integrated</h3>
-          <p>Stage, commit, push, and review diffs from the sidebar — with optional GPG commit signing (auto or approval) for GitHub's Verified badge.</p>
+          <div class="feature-icon"><svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M8.5 6H15a3 3 0 0 1 3 3v0"/></svg></div>
+          <h3>Git Integration</h3>
+          <p>Stage, commit, push, and review diffs from the sidebar — with optional GPG signing for GitHub's Verified badge.</p>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- Screenshots -->
-  <section class="screenshots" id="screenshots">
+  <!-- Keycaps -->
+  <section style="padding-top:0">
+    <div class="container center">
+      <div class="section-label">Keyboard-first</div>
+      <h2 class="section-title">Built by people who live in a shell.</h2>
+      <div class="keys">
+        <div class="key-row"><span class="key">⌘K</span> Search</div>
+        <div class="key-row"><span class="key">⌘T</span> New terminal</div>
+        <div class="key-row"><span class="key">⌘J</span> Toggle AI</div>
+        <div class="key-row"><span class="key">⌘⇧E</span> Explorer</div>
+        <div class="key-row"><span class="key">⌘W</span> Close tab</div>
+        <div class="key-row"><span class="key">⌘,</span> Settings</div>
+      </div>
+      <p class="section-desc" style="margin:22px auto 0; font-size:13px">Use <b style="color:var(--text)">Ctrl</b> on Windows &amp; Linux.</p>
+    </div>
+  </section>
+
+  <!-- Wide showcase -->
+  <section class="shot-wide" style="padding-top:0">
     <div class="container">
-      <img src="ai-workflow.png" alt="AI agent editing code" class="fade-in" />
-      <img src="web-preview.png" alt="Kai web preview" class="fade-in" />
+      <picture class="fade-in">
+        <source srcset="split-panes.webp" type="image/webp" />
+        <img src="split-panes.png" alt="Kai with multiple split terminal panes and the AI agent running" width="3164" height="2062" loading="lazy" decoding="async" />
+      </picture>
+    </div>
+  </section>
+
+  <!-- Screenshots 2 -->
+  <section class="shots" style="padding-top:0">
+    <div class="container">
+      <picture class="fade-in">
+        <source srcset="ai-workflow.webp" type="image/webp" />
+        <img src="ai-workflow.png" alt="The Kai AI agent proposing an edit diff for approval" width="1920" height="1042" loading="lazy" decoding="async" />
+      </picture>
+      <picture class="fade-in">
+        <source srcset="web-preview.webp" type="image/webp" />
+        <img src="web-preview.png" alt="Kai showing a live web preview beside the terminal" width="1919" height="1042" loading="lazy" decoding="async" />
+      </picture>
     </div>
   </section>
 
   <!-- Stats -->
   <div class="container">
     <div class="stats fade-in">
-      <div class="stat">
-        <div class="stat-value">Lightweight</div>
-        <div class="stat-label">App size</div>
-      </div>
-      <div class="stat">
-        <div class="stat-value">44</div>
-        <div class="stat-label">Languages</div>
-      </div>
-      <div class="stat">
-        <div class="stat-value">10+</div>
-        <div class="stat-label">AI providers</div>
-      </div>
-      <div class="stat">
-        <div class="stat-value">8</div>
-        <div class="stat-label">UI themes</div>
-      </div>
-      <div class="stat">
-        <div class="stat-value">0</div>
-        <div class="stat-label">Telemetry</div>
-      </div>
+      <div class="stat"><div class="stat-value">&lt;10 MB</div><div class="stat-label">Installer</div></div>
+      <div class="stat"><div class="stat-value">44</div><div class="stat-label">Languages</div></div>
+      <div class="stat"><div class="stat-value">12</div><div class="stat-label">AI providers</div></div>
+      <div class="stat"><div class="stat-value">9</div><div class="stat-label">Themes</div></div>
+      <div class="stat"><div class="stat-value">0</div><div class="stat-label">Telemetry</div></div>
     </div>
   </div>
 
@@ -539,31 +513,50 @@
     <div class="container">
       <div class="section-label">Bring Your Own Key</div>
       <h2 class="section-title">Works with every provider.</h2>
-      <p class="section-desc" style="margin: 0 auto 0;">Cloud APIs, local models, or your own endpoint. No lock-in.</p>
-      <div class="provider-logos">
-        <span class="provider-chip">OpenAI</span>
-        <span class="provider-chip">Anthropic</span>
-        <span class="provider-chip">Google</span>
-        <span class="provider-chip">Groq</span>
-        <span class="provider-chip">xAI</span>
-        <span class="provider-chip">Cerebras</span>
-        <span class="provider-chip">DeepSeek</span>
-        <span class="provider-chip">Mistral</span>
-        <span class="provider-chip">OpenRouter</span>
-        <span class="provider-chip">LM Studio</span>
-        <span class="provider-chip">Ollama</span>
-        <span class="provider-chip">Any OpenAI-compatible</span>
-      </div>
+      <p class="section-desc center">Cloud APIs, local models, or your own endpoint. No lock-in.</p>
+    </div>
+    <div class="marquee">
+      <div class="marquee-track" id="marqueeTrack"></div>
+    </div>
+    <div class="container" style="margin-top:30px">
+      <p class="section-desc center" style="margin-bottom:0; font-size:13px">Also: GPT Image 2 · Nano Banana 2 · Grok Imagine · Kling 3.0 · Veo 3.1 · Seedance 2.0 · ComfyUI (local)</p>
+    </div>
+  </section>
 
-      <h3 class="section-title" style="margin-top:48px">Image & video providers.</h3>
-      <div class="provider-logos" style="margin-top:16px">
-        <span class="provider-chip">GPT Image 2</span>
-        <span class="provider-chip">Nano Banana 2</span>
-        <span class="provider-chip">Grok Imagine</span>
-        <span class="provider-chip">Kling 3.0</span>
-        <span class="provider-chip">Veo 3.1</span>
-        <span class="provider-chip">Seedance 2.0</span>
-        <span class="provider-chip">ComfyUI (local)</span>
+  <!-- Install -->
+  <section id="install">
+    <div class="container center">
+      <div class="section-label">Install</div>
+      <h2 class="section-title">Get Kai in seconds.</h2>
+      <p class="section-desc center">Native installers for every desktop OS. No account, no telemetry.</p>
+      <div class="os-tabs" role="tablist" id="osTabs">
+        <button class="os-tab" role="tab" data-os="macos">macOS</button>
+        <button class="os-tab" role="tab" data-os="windows">Windows</button>
+        <button class="os-tab" role="tab" data-os="linux">Linux</button>
+      </div>
+      <div class="os-panel" data-os="macos">
+        <div class="os-card">
+          <h4>macOS</h4>
+          <p>Apple silicon &amp; Intel. Download the disk image, drag Kai to Applications.</p>
+          <a href="https://github.com/Omodaka9375/kai/releases/latest" class="btn-primary">↓ Download for macOS</a>
+          <div class="os-meta"><span>Format <b>.dmg</b></span><span>Min <b>macOS 10.15</b></span><span>Signed &amp; notarized</span></div>
+        </div>
+      </div>
+      <div class="os-panel" data-os="windows">
+        <div class="os-card">
+          <h4>Windows</h4>
+          <p>Self-contained installer (no admin required). WebView2 is bundled for offline setup.</p>
+          <a href="https://github.com/Omodaka9375/kai/releases/latest" class="btn-primary">↓ Download for Windows</a>
+          <div class="os-meta"><span>Format <b>.exe (NSIS)</b></span><span>Per-user, no admin</span><span>WebView2 bundled</span></div>
+        </div>
+      </div>
+      <div class="os-panel" data-os="linux">
+        <div class="os-card">
+          <h4>Linux</h4>
+          <p>AppImage, Debian, and RPM packages. The AppImage bundles its own media framework.</p>
+          <a href="https://github.com/Omodaka9375/kai/releases/latest" class="btn-primary">↓ Download for Linux</a>
+          <div class="os-meta"><span>Formats <b>.AppImage · .deb · .rpm</b></span><span>GTK 3</span><span>WebKitGTK 4.1</span></div>
+        </div>
       </div>
     </div>
   </section>
@@ -574,37 +567,227 @@
       <h2>Start building with Kai.</h2>
       <p>Free, open source, no account required.</p>
       <div class="hero-actions">
-        <a href="https://github.com/Omodaka9375/kai/releases/latest" class="btn-primary">
-          ↓ Download for free
-        </a>
-        <a href="https://github.com/Omodaka9375/kai" class="btn-secondary">
-          Star on GitHub
-        </a>
+        <a href="https://github.com/Omodaka9375/kai/releases/latest" class="btn-primary">↓ Download for free</a>
+        <a href="https://github.com/Omodaka9375/kai" class="btn-secondary">Star on GitHub</a>
       </div>
     </div>
   </section>
 
-  <!-- Footer -->
   <footer>
     <div class="container">
       <p>Kai is open source under <a href="https://github.com/Omodaka9375/kai/blob/main/LICENSE">Apache-2.0</a></p>
+      <div class="foot-links">
+        <a href="https://github.com/Omodaka9375/kai">GitHub</a>
+        <a href="https://github.com/Omodaka9375/kai/releases">Releases</a>
+        <a href="https://github.com/Omodaka9375/kai/issues">Issues</a>
+      </div>
     </div>
   </footer>
 
   <script>
-    // Intersection Observer for fade-in animations
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            entry.target.classList.add('visible');
-            observer.unobserve(entry.target);
-          }
+    /* ─────────────────────────────  Themes  ───────────────────────────── */
+    const THEMES = {
+      kai:         { bg:'#09090b', card:'#111113', subtle:'#19191c', border:'rgba(255,255,255,0.08)', borderStrong:'rgba(255,255,255,0.14)', text:'#ececf0', muted:'#8a8a98', accent:'#d4a43c', ink:'#09090b', glow:'rgba(212,164,60,0.14)', green:'#4ade80', red:'#f87171' },
+      tokyonight:  { bg:'#1a1b26', card:'#1f2233', subtle:'#24283b', border:'rgba(192,202,245,0.10)', borderStrong:'rgba(192,202,245,0.20)', text:'#c0caf5', muted:'#7f87b3', accent:'#7aa2f7', ink:'#16161e', glow:'rgba(122,162,247,0.16)', green:'#9ece6a', red:'#f7768e' },
+      nord:        { bg:'#2e3440', card:'#3b4252', subtle:'#434c5e', border:'rgba(216,222,233,0.10)', borderStrong:'rgba(216,222,233,0.22)', text:'#eceff4', muted:'#9aa5b5', accent:'#88c0d0', ink:'#2e3440', glow:'rgba(136,192,208,0.16)', green:'#a3be8c', red:'#bf616a' },
+      github:      { bg:'#ffffff', card:'#f6f8fa', subtle:'#eaeef2', border:'rgba(31,35,40,0.12)', borderStrong:'rgba(31,35,40,0.22)', text:'#1f2328', muted:'#656d76', accent:'#0969da', ink:'#ffffff', glow:'rgba(9,105,218,0.12)', green:'#1a7f37', red:'#cf222e' },
+      atoone:      { bg:'#282c34', card:'#2f343d', subtle:'#3a3f4b', border:'rgba(171,178,191,0.12)', borderStrong:'rgba(171,178,191,0.24)', text:'#abb2bf', muted:'#828a99', accent:'#61afef', ink:'#282c34', glow:'rgba(97,175,239,0.16)', green:'#98c379', red:'#e06c75' },
+      aura:        { bg:'#15141b', card:'#1b1a23', subtle:'#23222c', border:'rgba(237,236,238,0.09)', borderStrong:'rgba(237,236,238,0.18)', text:'#edecee', muted:'#8f8c9e', accent:'#a277ff', ink:'#15141b', glow:'rgba(162,119,255,0.18)', green:'#61ffca', red:'#ff6767' },
+      copilot:     { bg:'#0d1117', card:'#161b22', subtle:'#21262d', border:'rgba(230,237,243,0.10)', borderStrong:'rgba(230,237,243,0.20)', text:'#e6edf3', muted:'#7d8590', accent:'#2f81f7', ink:'#0d1117', glow:'rgba(47,129,247,0.16)', green:'#3fb950', red:'#f85149' },
+      xcode:       { bg:'#292a30', card:'#33343a', subtle:'#3d3f45', border:'rgba(223,223,224,0.12)', borderStrong:'rgba(223,223,224,0.24)', text:'#dfdfe0', muted:'#9a9ca3', accent:'#4eb0de', ink:'#292a30', glow:'rgba(78,176,222,0.16)', green:'#67c98a', red:'#e06c75' },
+    };
+    const ORDER = ['kai','tokyonight','nord','github','atoone','aura','copilot','xcode'];
+    const metaTheme = document.querySelector('meta[name="theme-color"]');
+
+    function applyTheme(id) {
+      const t = THEMES[id] || THEMES.kai;
+      const r = document.documentElement.style;
+      r.setProperty('--bg', t.bg);
+      r.setProperty('--bg-card', t.card);
+      r.setProperty('--bg-subtle', t.subtle);
+      r.setProperty('--border', t.border);
+      r.setProperty('--border-strong', t.borderStrong);
+      r.setProperty('--text', t.text);
+      r.setProperty('--text-muted', t.muted);
+      r.setProperty('--accent', t.accent);
+      r.setProperty('--accent-ink', t.ink);
+      r.setProperty('--accent-glow', t.glow);
+      r.setProperty('--green', t.green);
+      r.setProperty('--red', t.red);
+      document.documentElement.setAttribute('data-theme', id);
+      if (metaTheme) metaTheme.setAttribute('content', t.bg);
+      for (const b of document.querySelectorAll('.swatch')) {
+        b.setAttribute('aria-pressed', b.dataset.theme === id ? 'true' : 'false');
+      }
+    }
+
+    const swatchWrap = document.getElementById('swatches');
+    if (swatchWrap) {
+      for (const id of ORDER) {
+        const t = THEMES[id];
+        const s = document.createElement('button');
+        s.className = 'swatch';
+        s.dataset.theme = id;
+        s.type = 'button';
+        s.title = id;
+        s.setAttribute('aria-label', 'Preview ' + id + ' theme');
+        s.style.background = 'linear-gradient(135deg, ' + t.accent + ' 0 50%, ' + t.card + ' 50% 100%)';
+        s.addEventListener('click', () => applyTheme(id));
+        swatchWrap.appendChild(s);
+      }
+      applyTheme('kai');
+    }
+
+    /* ───────────────────────────  Providers  ──────────────────────────── */
+    const PROVIDERS = ['OpenAI','Anthropic','Google','Groq','xAI','Cerebras','DeepSeek','Mistral','OpenRouter','z.ai','LM Studio','Ollama','Any OpenAI-compatible'];
+    const track = document.getElementById('marqueeTrack');
+    if (track) {
+      const chips = PROVIDERS.map((p) => '<span class="chip">' + p + '</span>').join('');
+      // Duplicate for a seamless -50% loop.
+      track.innerHTML = chips + chips;
+    }
+
+    /* ─────────────────────────  Live GitHub info  ─────────────────────── */
+    (async () => {
+      const REPO = 'Omodaka9375/kai';
+      try {
+        const r = await fetch('https://api.github.com/repos/' + REPO, { headers: { Accept: 'application/vnd.github+json' } });
+        if (!r.ok) throw new Error(String(r.status));
+        const j = await r.json();
+        const stars = document.getElementById('heroStars');
+        if (stars && typeof j.stargazers_count === 'number') {
+          stars.textContent = '★ ' + j.stargazers_count.toLocaleString() + ' stars';
         }
-      },
-      { threshold: 0.1, rootMargin: '0px 0px -40px 0px' }
-    );
-    document.querySelectorAll('.fade-in').forEach((el) => observer.observe(el));
+      } catch (e) { /* offline / rate-limited — keep fallback text */ }
+      try {
+        const r = await fetch('https://api.github.com/repos/' + REPO + '/releases/latest', { headers: { Accept: 'application/vnd.github+json' } });
+        if (!r.ok) throw new Error(String(r.status));
+        const j = await r.json();
+        const v = document.getElementById('heroVersion');
+        if (v && j.tag_name) v.textContent = j.tag_name;
+      } catch (e) { /* keep static fallback */ }
+    })();
+
+    /* ───────────────────────────  OS tabs  ────────────────────────────── */
+    const osTabs = document.getElementById('osTabs');
+    if (osTabs) {
+      const panels = document.querySelectorAll('.os-panel');
+      function selectOs(os) {
+        for (const t of osTabs.querySelectorAll('.os-tab')) t.setAttribute('aria-selected', t.dataset.os === os ? 'true' : 'false');
+        for (const p of panels) p.classList.toggle('active', p.dataset.os === os);
+      }
+      for (const t of osTabs.querySelectorAll('.os-tab')) t.addEventListener('click', () => selectOs(t.dataset.os));
+      const ua = navigator.userAgent;
+      const guess = /Mac/i.test(ua) ? 'macos' : /Win/i.test(ua) ? 'windows' : /Linux|X11/i.test(ua) ? 'linux' : 'macos';
+      selectOs(guess);
+    }
+
+    /* ──────────────────────  Animated agent session  ──────────────────── */
+    const body = document.getElementById('termBody');
+    const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    if (body) {
+      const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+      function frame() {
+        body.innerHTML = '';
+        const frag = document.createDocumentFragment();
+        // 1. prompt (typed char by char)
+        const prompt = document.createElement('div');
+        prompt.className = 't-line';
+        prompt.innerHTML = '<span class="t-prompt">~/project $ </span><span class="t-cmd"></span><span class="caret"></span>';
+        frag.appendChild(prompt);
+        // 2. thinking
+        const thinking = document.createElement('div');
+        thinking.className = 't-line t-out thinking-dots';
+        thinking.style.display = 'none';
+        thinking.textContent = '● thinking';
+        frag.appendChild(thinking);
+        // 3-6. tool + result lines (revealed one by one)
+        const lines = [
+          { icon: '⚙', name: 'read_file', arg: 'auth.spec.ts' },
+          { icon: '✎', name: 'edit', arg: 'auth.spec.ts  +4 −2', diff: true },
+          { icon: '⚙', name: 'bash_run', arg: 'pnpm vitest auth' },
+        ];
+        const toolEls = lines.map((l) => {
+          const row = document.createElement('div');
+          row.className = 't-line t-tool';
+          row.innerHTML =
+            '<div class="t-row"><span class="t-chip">' + l.icon + '</span>' +
+            '<span><span class="t-name">' + l.name + '</span> <span class="t-arg">' + esc(l.arg) + '</span></span></div>' +
+            (l.diff
+              ? '<div class="t-diff"><div class="t-del">- expect(status).toBe(200)</div><div class="t-add">+ await waitForReady()</div></div>'
+              : '');
+          frag.appendChild(row);
+          return row;
+        });
+        const result = document.createElement('div');
+        result.className = 't-line t-ok';
+        result.style.display = 'none';
+        result.textContent = '✓ 6 passed (1.2s)';
+        frag.appendChild(result);
+
+        const end = document.createElement('div');
+        end.className = 't-line';
+        end.innerHTML = '<span class="t-prompt">~/project $ </span><span class="caret"></span>';
+        end.style.display = 'none';
+        frag.appendChild(end);
+
+        body.appendChild(frag);
+        return { prompt: prompt.querySelector('.t-cmd'), thinking, toolEls, result, end };
+      }
+
+      async function run() {
+        const el = frame();
+        // type the request
+        const text = 'fix the flaky test in auth.spec.ts';
+        for (let i = 1; i <= text.length; i++) {
+          el.prompt.textContent = text.slice(0, i);
+          await sleep(26);
+        }
+        await sleep(220);
+        el.thinking.style.display = '';
+        await sleep(900);
+        el.thinking.style.display = 'none';
+        for (const t of el.toolEls) { t.classList.add('in'); await sleep(520); }
+        el.result.style.display = '';
+        await sleep(300);
+        el.end.style.display = '';
+        await sleep(2600);
+      }
+
+      async function loop() {
+        // eslint-disable-next-line no-constant-condition
+        while (true) { await run(); }
+      }
+
+      if (REDUCED) {
+        // Static, complete frame — no motion.
+        const el = frame();
+        el.prompt.textContent = 'fix the flaky test in auth.spec.ts';
+        for (const t of el.toolEls) t.classList.add('in');
+        el.result.style.display = '';
+        el.end.style.display = '';
+        el.thinking.style.display = 'none';
+      } else {
+        // Pause the animation while the tab is hidden; restart cleanly.
+        let running = false;
+        const start = () => { if (!running) { running = true; loop(); } };
+        document.addEventListener('visibilitychange', () => {
+          if (document.hidden) { running = false; } else { start(); }
+        });
+        if (!document.hidden) { start(); }
+      }
+    }
+
+    /* ──────────────────────  Scroll fade-ins  ─────────────────────────── */
+    const io = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        if (e.isIntersecting) { e.target.classList.add('visible'); io.unobserve(e.target); }
+      }
+    }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+    document.querySelectorAll('.fade-in').forEach((el) => io.observe(el));
   </script>
 </body>
 </html>
