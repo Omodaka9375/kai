@@ -6,8 +6,9 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ## [1.6.2]
 
-- AI: message timestamps — messages are stamped with `createdAt` at first persist; the transcript renders iMessage-style day separators (Today / Yesterday / Oct 3) at calendar-day boundaries, and hovering any message shows its full local time. Legacy messages are marked and never back-stamped — they render no separators rather than fake ones.
-- AI: session list rows show compact relative ages (just now / 5m ago / yesterday / Oct 3) with the full local time on hover; the age sits on its own line under the title so it never competes with the title for width, and the picker menu is bounded at 60% viewport height and scrolls — previously an unbounded menu rendered off-screen with many sessions and could not be scrolled.
+- AI: message timestamps — messages are stamped with `createdAt` at first persist; 
+- AI: session list rows show compact relative ages (just now / 5m ago / yesterday / Oct 3) with the full local time on hover
+- Session picker: bounded, scrollable menu fix
 
 ---
 
