@@ -472,6 +472,26 @@ export function GitHistoryPane({ repoRoot, branch, onOpenCommitFile }: Props) {
     return filesCacheRef.current.get(openAnchor.sha) ?? null;
   }, [openAnchor, filesTick]);
 
+  // Full commit message (subject + description) for the open commit.
+  // Bodies can be large, so fetch per-open (like fetchFiles), not per-log.
+  const [message, setMessage] = useState<string | null>(null);
+  useEffect(() => {
+    if (!openAnchor) return;
+    let cancelled = false;
+    setMessage(null);
+    native
+      .gitCommitMessage(repoRoot, openAnchor.sha)
+      .then((m) => {
+        if (!cancelled) setMessage(m);
+      })
+      .catch(() => {
+        if (!cancelled) setMessage(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [openAnchor?.sha, repoRoot]);
+
   const handleFileOpen = useCallback(
     (commit: GitLogEntry, file: GitCommitFileChange) => {
       onOpenCommitFile({
@@ -737,6 +757,7 @@ export function GitHistoryPane({ repoRoot, branch, onOpenCommitFile }: Props) {
                   return (
                     <CommitDetail
                       commit={commit}
+                      messageBody={message}
                       filesEntry={openFilesEntry}
                       remoteWeb={remoteWeb}
                       onCopySha={copyToClipboard}
@@ -884,6 +905,8 @@ const CommitRow = memo(function CommitRow({
 
 type CommitDetailProps = {
   commit: GitLogEntry;
+  /** Full raw commit message (%B). null while loading; "" = no description. */
+  messageBody: string | null;
   filesEntry: FilesEntry | null;
   remoteWeb: RemoteWebInfo | null;
   onCopySha: (value: string) => Promise<void> | void;
@@ -896,6 +919,7 @@ type CommitDetailProps = {
 
 function CommitDetail({
   commit,
+  messageBody,
   filesEntry,
   remoteWeb,
   onCopySha,
@@ -911,6 +935,15 @@ function CommitDetail({
     const t = window.setTimeout(() => setCopied(false), 1100);
     return () => window.clearTimeout(t);
   }, [copied]);
+
+  // Description = the full message minus the subject line (the first line).
+  // %B already included the subject, so strip it + the separating blank line.
+  const description =
+    messageBody === null
+      ? null
+      : messageBody.startsWith(commit.subject)
+        ? messageBody.slice(commit.subject.length).replace(/^\s*\n/, "").trim()
+        : messageBody.trim();
 
   return (
     <div className="flex max-h-[60vh] min-h-0 flex-col">
@@ -969,6 +1002,17 @@ function CommitDetail({
           ) : null}
         </div>
       </div>
+
+      {description ? (
+        <div className="shrink-0 border-b border-border/45 bg-muted/25 px-3 py-2">
+          <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground/80">
+            Description
+          </div>
+          <div className="max-h-[28vh] overflow-y-auto whitespace-pre-wrap break-words text-[11.5px] leading-relaxed text-foreground/90">
+            {description}
+          </div>
+        </div>
+      ) : null}
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <CommitFiles

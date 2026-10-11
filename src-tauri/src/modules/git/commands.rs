@@ -337,6 +337,20 @@ pub async fn git_commit_files(
 }
 
 #[tauri::command]
+pub async fn git_commit_message(
+    repo_root: String,
+    sha: String,
+    workspace: Option<WorkspaceEnv>,
+    app: AppHandle,
+) -> Result<String, String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    blocking(app, move |r| {
+        operations::commit_message(r, &repo_root, &sha, &workspace).map_err(Into::into)
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn git_commit_file_diff(
     repo_root: String,
     sha: String,

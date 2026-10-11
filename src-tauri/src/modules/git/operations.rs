@@ -1081,6 +1081,37 @@ pub fn commit_files(
     Ok(files)
 }
 
+/// Full raw commit message (`%B`: subject + body) for a single commit.
+/// The line-based log parser can't carry multi-line bodies, so the
+/// Git Graph popover fetches this per commit on open.
+pub fn commit_message(
+    registry: &WorkspaceRegistry,
+    repo_root: &str,
+    sha: &str,
+    workspace: &WorkspaceEnv,
+) -> Result<String> {
+    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
+    ensure_git_available(&repo_root.workspace)?;
+    if !sha_is_safe(sha) {
+        return Err(GitError::command("git show", "invalid commit sha"));
+    }
+    let output = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        [
+            OsStr::new("show"),
+            OsStr::new("-s"),
+            // %B = raw body (subject + description), no color, no decoration.
+            // 8-bit clean so non-ASCII commit messages survive.
+            OsStr::new("--format=%B"),
+            OsStr::new(sha),
+        ],
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    ensure_success(&output, "git show failed")?;
+    Ok(String::from_utf8_lossy(&output.stdout).trim_end().to_string())
+}
+
 fn split_name_status_numstat(bytes: &[u8]) -> (&[u8], &[u8]) {
     let s = std::str::from_utf8(bytes).unwrap_or("");
     let tokens: Vec<(usize, &str)> = s

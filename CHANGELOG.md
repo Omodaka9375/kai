@@ -6,6 +6,7 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ## [1.6.4]
 
+- Git Graph: commit popover shows the full commit message body (Description section).
 - Tabs: ai-diff tab closes on approve/reject (no more lingering tabs).
 - Radio: no auto-resume on launch — playback only on explicit action; live ice6 stream URLs.
 - Radio: CSP media-src allows SomaFM stream hosts.

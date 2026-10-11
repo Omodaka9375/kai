@@ -594,6 +594,12 @@ export const native = {
       sha,
       workspace: currentWorkspaceEnv(),
     }),
+  gitCommitMessage: (repoRoot: string, sha: string) =>
+    invoke<string>("git_commit_message", {
+      repoRoot,
+      sha,
+      workspace: currentWorkspaceEnv(),
+    }),
   gitCommitFileDiff: (
     repoRoot: string,
     sha: string,
