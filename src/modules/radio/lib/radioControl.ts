@@ -23,6 +23,9 @@ let sharedAudio: HTMLAudioElement | null = null;
 let snapshot: RadioSnapshot = { status: { state: "stopped" }, stationId: null };
 let stationIdRef: string | null = null;
 
+/** Fresh sessions start at a comfortable level — 100% is blaringly loud. */
+const DEFAULT_VOLUME = 0.4;
+
 const listeners = new Set<(s: RadioSnapshot) => void>();
 
 function publish(next: RadioSnapshot) {
@@ -80,9 +83,9 @@ export function radioSetVolume(v: number): void {
 export function radioGetVolume(): number {
   try {
     const v = sharedAudio?.volume;
-    return typeof v === "number" && Number.isFinite(v) ? v : 1;
+    return typeof v === "number" && Number.isFinite(v) ? v : DEFAULT_VOLUME;
   } catch {
-    return 1;
+    return DEFAULT_VOLUME;
   }
 }
 
@@ -92,6 +95,7 @@ function getAudioEl(): HTMLAudioElement | null {
     try {
       sharedAudio = new window.Audio();
       sharedAudio.preload = "none";
+      sharedAudio.volume = DEFAULT_VOLUME;
       // NOTE: no crossOrigin. SomaFM's Icecast sends no CORS headers, and a
       // crossOrigin="anonymous" <audio> element makes every stream request
       // a CORS request → instant MEDIA_ERR on EVERY station (the "all streams

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   MusicNote01Icon,
@@ -11,7 +11,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Slider } from "@/components/ui/slider";
@@ -31,9 +30,10 @@ import { setRadioStationId } from "./radioPrefs";
 
 /**
  * Status-bar radio widget. Controls:
- *  - The pill (station name) opens the STATION PICKER.
- *  - The speaker icon toggles MUTE directly; a thin inline volume slider
- *    sits in the same row (no popover).
+ *  - The pill (station name) opens the STATION PICKER (stations only).
+ *  - A stop button sits inline after the pill while playing.
+ *  - The speaker icon toggles MUTE directly; hovering the icon reveals a
+ *    thin inline volume slider that extends to the right (no popover).
  * Mounted ONLY when the feature is enabled (General settings).
  */
 
@@ -109,6 +109,11 @@ export function RadioMarquee() {
   const connecting = player.status.state === "connecting";
   const active = playing || connecting;
   const station = stationId ? findStation(stationId) : null;
+  // Volume slider is hidden until the group (icon + slider) is hovered or
+  // the thumb is being dragged — collapsed to zero width, not display:none,
+  // so the reveal can transition smoothly and the status bar never janks.
+  const [volOpen, setVolOpen] = useState(false);
+  const volGroupRef = useRef<HTMLDivElement | null>(null);
 
   return (
     <div
@@ -145,23 +150,6 @@ export function RadioMarquee() {
           <div className="px-1.5 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
             SomaFM stations
           </div>
-          {active && (
-            <>
-              <DropdownMenuItem
-                onSelect={handleStop}
-                className="gap-2 text-xs"
-              >
-                <HugeiconsIcon
-                  icon={StopIcon}
-                  size={11}
-                  strokeWidth={1.75}
-                  className="shrink-0"
-                />
-                <span className="min-w-0 flex-1 truncate">Stop playback</span>
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-            </>
-          )}
           {RADIO_STATIONS.map((s) => (
             <DropdownMenuItem
               key={s.id}
@@ -188,42 +176,81 @@ export function RadioMarquee() {
           ))}
         </DropdownMenuContent>
       </DropdownMenu>
+      {/* Stop button — inline, only while a station is active. Replaces the
+          old Stop item inside the picker (one less menu walk to stop). */}
+      {active && (
+        <button
+          type="button"
+          title="Stop playback"
+          aria-label="Stop radio"
+          onClick={handleStop}
+          data-testid="radio-stop"
+          className="shrink-0 rounded-full p-1 text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground"
+        >
+          <HugeiconsIcon icon={StopIcon} size={11} strokeWidth={2} />
+        </button>
+      )}
       {/* Mute toggle + volume in ONE row: the speaker icon toggles mute
-          directly, and a thin inline slider extends to the right — no
-          popover, no second mute button. */}
-      <button
-        type="button"
-        title={muted ? "Unmute" : "Mute"}
-        aria-label={muted ? "Unmute radio" : "Mute radio"}
-        aria-pressed={muted}
-        onClick={handleMuteToggle}
-        data-testid="radio-mute-toggle"
-        className="shrink-0 rounded-full p-1 text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground"
+          directly, and the thin inline slider reveals on hover — collapsed
+          otherwise. Hover OR active drag keeps it open; the pointer has to
+          leave (and the drag end) before it collapses again. */}
+      <div
+        ref={volGroupRef}
+        className="flex shrink-0 items-center"
+        onMouseEnter={() => setVolOpen(true)}
+        onMouseLeave={() => setVolOpen(false)}
       >
-        <HugeiconsIcon
-          icon={muted ? VolumeOffIcon : VolumeHighIcon}
-          size={11}
-          strokeWidth={2}
-        />
-      </button>
-      <Slider
-        value={[volume]}
-        min={0}
-        max={1}
-        step={0.05}
-        onValueChange={(v) => handleVolume(v[0] ?? 1)}
-        aria-label="Radio volume"
-        className={cn(
-          "w-14 shrink-0",
-          // Thin-inline overrides of the chunky default slider: 4px track,
-          // 8px thumb (the primitive ships h-2 track / h-4 w-6 thumb).
-          "[&_[data-slot=slider-track]]:h-1",
-          "[&_[data-slot=slider-thumb]]:size-2",
-          "[&_[data-slot=slider-thumb]]:w-2",
-          "[&_[data-slot=slider-thumb]]:ring-0",
-          "[&_[data-slot=slider-thumb]]:shadow-none",
-        )}
-      />
+        <button
+          type="button"
+          title={muted ? "Unmute" : "Mute"}
+          aria-label={muted ? "Unmute radio" : "Mute radio"}
+          aria-pressed={muted}
+          onClick={handleMuteToggle}
+          data-testid="radio-mute-toggle"
+          className="shrink-0 rounded-full p-1 text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground"
+        >
+          <HugeiconsIcon
+            icon={muted ? VolumeOffIcon : VolumeHighIcon}
+            size={11}
+            strokeWidth={2}
+          />
+        </button>
+        <div
+          className={cn(
+            "overflow-hidden transition-[width,opacity] duration-150 ease-out",
+            volOpen ? "w-14 opacity-100" : "w-0 opacity-0",
+          )}
+        >
+          <Slider
+            value={[volume]}
+            min={0}
+            max={1}
+            step={0.05}
+            onValueChange={(v) => handleVolume(v[0] ?? 1)}
+            onPointerDown={() => setVolOpen(true)}
+            onPointerUp={() => {
+              // Radix captures the pointer during a drag, which suppresses
+              // mouseleave on the group. Close only when the release lands
+              // OUTSIDE the group — releasing while still hovering keeps it
+              // open (the hover state would otherwise be stranded closed).
+              if (!volGroupRef.current?.matches(":hover")) setVolOpen(false);
+            }}
+            onFocus={() => setVolOpen(true)}
+            onBlur={() => setVolOpen(false)}
+            aria-label="Radio volume"
+            className={cn(
+              "w-14",
+              // Thin-inline overrides of the chunky default slider: 4px track,
+              // 8px thumb (the primitive ships h-2 track / h-4 w-6 thumb).
+              "[&_[data-slot=slider-track]]:h-1",
+              "[&_[data-slot=slider-thumb]]:size-2",
+              "[&_[data-slot=slider-thumb]]:w-2",
+              "[&_[data-slot=slider-thumb]]:ring-0",
+              "[&_[data-slot=slider-thumb]]:shadow-none",
+            )}
+          />
+        </div>
+      </div>
       {/* Screen-reader/live region only — the visual status is in the pill. */}
       <span className="sr-only">{station ? station.name : "SomaFM radio"}</span>
     </div>

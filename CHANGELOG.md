@@ -13,7 +13,7 @@ All notable changes to the KAI terminal emulator project are documented in this 
 - Radio: CSP media-src allows SomaFM stream hosts.
 - Radio: WebView2 refused live Icecast streams — added a Rust-side local proxy that re-frames the stream as clean chunked HTTP/1.1.
 - Radio: Stop playback item in the station picker (keeps the selection).
-- Radio: volume is now inline in the status bar — the speaker icon toggles mute directly and a thin slider sits beside it (no more popover).
+- Radio: volume is now inline in the status bar — the speaker icon toggles mute directly and a thin slider reveals on hover (no more popover); default volume is 40%; stop moved to its own inline button.
 - Build: esbuild postinstall approval via package.json.
 - Build: removed placeholder pnpm-workspace.yaml that broke every pnpm command.
 
