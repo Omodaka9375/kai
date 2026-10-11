@@ -424,10 +424,32 @@ function stripIncompleteToolCalls(messages: UIMessage[]): UIMessage[] {
     "approval-responded",
   ]);
 
+  // A tool part with an EMPTY tool name ("tool-") or empty/missing
+  // toolCallId is a malformed error part (the SDK emits it when a tool call
+  // fails to parse/resolve). Its empty id converts to tool_call_id: "" and
+  // the provider rejects the entire request ("tool messages must include a
+  // non-empty string tool_call_id") — and because the poison part lives in
+  // the PERSISTED history, every retry re-sends it and the session is
+  // permanently unrecoverable. Drop the whole message at the UI layer
+  // BEFORE conversion, matching the orphaned-tool-call treatment above.
+  const hasMalformedToolPart = (m: UIMessage): boolean => {
+    for (const p of m.parts) {
+      const ptype = (p as { type?: string }).type ?? "";
+      if (!ptype.startsWith("tool-")) continue;
+      const toolName = ptype.slice("tool-".length);
+      const callId = (p as { toolCallId?: unknown }).toolCallId;
+      if (toolName === "" || typeof callId !== "string" || callId === "") {
+        return true;
+      }
+    }
+    return false;
+  };
+
   // Scan ALL assistant messages, not just the last — failed edit retries
   // and dismissed approvals can leave orphaned tool calls anywhere.
   const out = messages.filter((m) => {
     if (m.role !== "assistant") return true;
+    if (hasMalformedToolPart(m)) return false;
     for (const p of m.parts) {
       const ptype = (p as { type?: string }).type ?? "";
       if (!ptype.startsWith("tool-") && ptype !== "dynamic-tool") continue;
@@ -551,22 +573,75 @@ async function imageExtractedText(base64: string): Promise<string> {
 }
 
 /**
- * Post-conversion sanitizer: fix non-object tool-call inputs.
- * Anthropic rejects "Input should be an object" for null/undefined inputs.
+ * Post-conversion sanitizer, three defenses:
+ *  1. Fix non-object tool-call inputs (Anthropic rejects
+ *     "Input should be an object" for null/undefined inputs).
+ *  2. Drop tool-result parts with an EMPTY tool_call_id — providers reject
+ *     the whole request for them ("tool messages must include a non-empty
+ *     string tool_call_id") and a single poison result makes the session
+ *     unrecoverable. Empty ids can only come from malformed parts, so
+ *     dropping (not patching) is correct: there is no matching call to
+ *     attribute the result to.
+ *  3. Drop tool-CALL parts whose input could not be salvaged and that have
+ *     no matching result — nothing references them after their result is
+ *     gone, and orphaned calls are rejected by every provider.
  */
 function sanitizeModelMessages(messages: ModelMessage[]): ModelMessage[] {
-  type AnyPart = { type: string; input?: unknown; [k: string]: unknown };
-  return messages.map((m): ModelMessage => {
+  type AnyPart = { type: string; input?: unknown; toolCallId?: unknown; [k: string]: unknown };
+  const validId = (v: unknown): v is string =>
+    typeof v === "string" && v.trim() !== "";
+
+  // Pass 1: fix non-object inputs; drop tool-CALL parts with invalid ids —
+  // providers reject the whole request for them ("tool messages must include
+  // a non-empty string tool_call_id") and a single poison part makes the
+  // session unrecoverable on every retry.
+  const fixed = messages.map((m): ModelMessage => {
     if (!Array.isArray(m.content)) return m;
     let touched = false;
-    const content = (m.content as AnyPart[]).map((part) => {
-      if (part.type === "tool-call" && (part.input == null || typeof part.input !== "object")) {
-        touched = true;
-        return { ...part, input: {} };
+    const content = (m.content as AnyPart[])
+      .map((part) => {
+        if (part.type === "tool-call" && (part.input == null || typeof part.input !== "object")) {
+          touched = true;
+          return { ...part, input: {} };
+        }
+        return part;
+      })
+      .filter((part) => {
+        if (part.type === "tool-call" && !validId(part.toolCallId)) {
+          touched = true;
+          return false; // poison call with empty id
+        }
+        return true;
+      });
+    return touched ? ({ ...m, content } as ModelMessage) : m;
+  });
+
+  // Pass 2: collect surviving call ids, then drop tool-RESULT parts that are
+  // invalid themselves or orphaned (their matching call was dropped above) —
+  // every provider rejects results without a matching call.
+  const keptCallIds = new Set<string>();
+  for (const m of fixed) {
+    if (!Array.isArray(m.content)) continue;
+    for (const part of m.content as AnyPart[]) {
+      if (part.type === "tool-call" && validId(part.toolCallId)) {
+        keptCallIds.add(part.toolCallId);
       }
-      return part;
+    }
+  }
+  return fixed.map((m): ModelMessage => {
+    if (!Array.isArray(m.content)) return m;
+    let touched = false;
+    const content = (m.content as AnyPart[]).filter((part) => {
+      if (
+        part.type === "tool-result" &&
+        (!validId(part.toolCallId) || !keptCallIds.has(part.toolCallId))
+      ) {
+        touched = true;
+        return false;
+      }
+      return true;
     });
-    return touched ? { ...m, content } as ModelMessage : m;
+    return touched ? ({ ...m, content } as ModelMessage) : m;
   });
 }
 
