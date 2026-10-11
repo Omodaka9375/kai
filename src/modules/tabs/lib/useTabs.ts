@@ -811,26 +811,26 @@ export function useTabs(initial?: Partial<TerminalTab> & { defer?: boolean }) {
     });
   }, []);
 
-  const resetWorkspace = useCallback((cwd?: string) => {
-    const tabId = nextIdRef.current++;
-    const leafId = nextIdRef.current++;
+  /**
+   * Clean workspace reset (launch / project switch / env switch): close ALL
+   * tabs, kill every terminal session, land on the zero-tab StartPage.
+   *
+   * No terminal is auto-spawned here — a spawn-time PTY races the first
+   * paint (the renderer-bind wedge class: broken/blank pane instead of the
+   * StartPage), and a PTY left over from the previous project is dead
+   * weight anyway (its cwd points into the old workspace). Terminals
+   * spawn on demand from the StartPage / tab bar, whose newTab flows
+   * through the renderer-bind retry ladder.
+   */
+  const resetWorkspace = useCallback(() => {
     let toDispose: number[] = [];
     setTabs((curr) => {
       toDispose = curr.flatMap((t) =>
         t.kind === "terminal" ? leafIds(t.paneTree) : [],
       );
-      return [
-        {
-          id: tabId,
-          kind: "terminal",
-          title: "shell",
-          cwd,
-          paneTree: { kind: "leaf", id: leafId, cwd },
-          activeLeafId: leafId,
-        },
-      ];
+      return [];
     });
-    setActiveId(tabId);
+    setActiveId(0);
     // Defer disposing previous sessions so React unmounting/slot-release finishes first!
     setTimeout(() => {
       for (const lid of toDispose) disposeSession(lid);

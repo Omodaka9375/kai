@@ -149,11 +149,6 @@ export default function App() {
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
 
-  // Mount-effect-safe access to newTab: the launch effect runs once with a
-  // mount-time closure; the ref always points at the latest callback.
-  const newTabRef = useRef(newTab);
-  newTabRef.current = newTab;
-
   const activeTerminalTab = useMemo(() => {
     const t = tabs.find((x) => x.id === activeId);
     return t && t.kind === "terminal" ? t : null;
@@ -337,7 +332,7 @@ export default function App() {
           // Non-fatal — git panel will surface "not authorized" if needed.
         }
       }
-      resetWorkspace(nextHome ?? undefined);
+      resetWorkspace();
     },
     [workspaceEnv, setWorkspaceEnv, resetWorkspace],
   );
@@ -384,14 +379,11 @@ export default function App() {
         setLaunchCwd(cwd);
         setLaunchCwdResolved(true);
         // Pin the workspace root to the launch directory so the explorer /
-        // AI sessions resolve against the right project. A plain launch
-        // stays on the StartPage (zero-tab state — no auto-spawned PTY
-        // racing the first paint). An ARGV launch ("Open with KAI", a
-        // pinned shortcut with a path) is an explicit "open this project"
-        // intent — land the user in it with a terminal tab.
+        // AI sessions resolve against the right project. Every launch -
+        // plain, argv, or a shortcut carrying a path - stays on the
+        // StartPage: no mount-time PTY racing the renderer bind (the
+        // broken-first-terminal bug class). Terminals spawn on demand.
         if (cwd) setRootRef.current(cwd);
-        const launch = getLaunchDir();
-        if (launch) newTabRef.current(launch);
       })
       .catch((e) => {
         clearTimeout(watchdog);
@@ -564,7 +556,9 @@ export default function App() {
         return;
       }
       setRootRef.current(path);
-      resetWorkspace(path);
+      // Clean start: kills the old project's terminals, lands on the
+      // StartPage — no auto-spawn racing the renderer bind.
+      resetWorkspace();
     },
     [tabs, explorerRoot, resetWorkspace, newTab],
   );
@@ -758,7 +752,7 @@ export default function App() {
     setActiveSearchAddon(null);
     setActiveEditorHandle(null);
     setRootRef.current(path);
-    resetWorkspace(path);
+    resetWorkspace();
   }, [pendingProjectOpen, resetWorkspace]);
 
   const cancelProjectOpen = useCallback(() => {
