@@ -6,923 +6,597 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ## [1.6.1]
 
-- Tabs: opening a project is now a clean reset — every terminal of the previous workspace is killed and you land on the StartPage, never on a broken auto-spawned terminal; the reset no longer spawns a fresh terminal itself (a spawn-time PTY raced the first paint and produced the blank/wedged pane), and an "Open with KAI" argv launch now just pins the workspace root. Clicking the project you're already in stays a no-op, and the unsaved-edit confirmation before switching is unchanged.
-- AI: agents burn far fewer tool-call failures — the Windows tool-preference instruction named `fs_grep`, a tool that does not exist (models following it called a ghost tool); the multi_edit guidance now covers the four real failure classes (stale-read old_strings, identical old/new edits rejecting the whole batch, edits authored against the pre-batch file instead of the running buffer, skipping the post-batch typecheck/seam read); and the to-do tool stopped demanding an update after literally every step — lists now reuse ids/titles and update only at real transitions, ending the churn of schema-failed to-do writes.
+- Tabs: project open closes all tabs, kills all terminal sessions, and shows the StartPage. No terminal is auto-spawned on project open or launch.
+- AI: fixed incorrect tool name in the Windows instructions; added multi-edit usage rules and reduced to-do update frequency in agent guidance.
 
 ---
 
 ## [1.6.0]
 
-- AI: `look_at_screen` actually delivers the screenshot to the model — the tool emitted its image as a `file-data` (document) part, which Anthropic only accepts for PDFs and silently drops and OpenAI treats as a file upload; it now emits `image-data`, and providers that can't carry images in tool results at all (the openai-compatible family — DeepSeek, Mistral, OpenRouter, z.ai, Groq, xAI, Cerebras, LM Studio) get OCR text instead of an unreadable base64 wall.
-- Tabs: opening a project switches the workspace — the previous project's terminals and tabs close (one batched confirmation if editors are dirty), superseding the 1.5.9 keep-alive behavior that left project A's shells running next to project B; a same-project click stays a no-op.
-- Voice: the no-key browser SpeechRecognition fallback works again on current WebView2 runtimes — Runtime 153+ routes the Web Speech API through the "Ceto" STT service which 403s inside WebView2 (the recognizer died with a `network` error); KAI now launches the webview with the Ceto feature disabled, falling back to the legacy speech endpoint (WebView2Feedback #5724; drop the flag when Microsoft ships the fix).
-- AI: `generate_image` results no longer re-send megabytes of base64 to the model — the generated image was patched into the tool result for the UI, but every later turn stringified that payload into the request as text the model can't read; the payload is now stripped from model-bound history (metadata survives).
-- Editor: word wrap is on by default — the machinery existed (compartment + live reconfigure + the Settings toggle) but shipped off, so long lines in markdown/text/code got a horizontal scrollbar; explicit off-choices persist.
-- Settings: the dialog spawns centered on the monitor — the builder set no position (OS top-left default) and the window-state plugin then saved and faithfully restored that corner forever; the dialog is centered every open and excluded from geometry save/restore.
-- Explorer: hidden files are visible by default — dotfiles and `.git` show in the file tree without hunting for the toggle; explicit off-choices persist.
-- Office files: full read support for documents and spreadsheets — DOCX gets a rich editor preview (headings, lists, tables via mammoth, sanitized), XLSX/XLSM/XLSB/XLS/ODS get a grid view with sheet tabs, sticky Excel-style headers, and numeric right-alignment, and the AI `read_file` tool plus composer attachments parse spreadsheets into per-sheet TSV text (new Rust `fs_parse_spreadsheet`/`fs_parse_spreadsheet_bytes` commands, calamine); PDFs were already covered on all three surfaces. Read-only by design — write-back is a separate feature.
-- Images: new `convert_image` tool — the agent can convert PNG⇄JPEG⇄WebP⇄BMP⇄GIF (format inferred from the target extension) with optional JPEG quality and aspect-preserving downscale; transparency is flattened onto white for JPEG/BMP targets instead of rendering black, and the conversion runs in-process via the existing `image` crate — no shelling out to ImageMagick. Approval-gated like every file-writing tool.
-- Images: `convert_image` also carries an ordered operations pipeline — resize (exact, 5 resampling filters), crop (bounds-checked), rotate 90/180/270, flip, blur, sharpen (unsharp mask), brighten, contrast, hue rotate, grayscale, and invert, applied before the format conversion with one approval card for the whole pipeline; effect-only runs keep the source format, so "blur this png" stays a png.
+- AI: `look_at_screen` delivers screenshots as image parts; unsupported providers fall back to OCR text.
+- AI: `generate_image` results are stripped from model-bound history.
+- Tabs: project open switches the workspace and closes the previous project's tabs, with confirmation when editors are dirty.
+- Voice: disabled the WebView2 Ceto speech service that 403s in WebView2 Runtime 153+ (WebView2Feedback #5724).
+- Editor: word wrap on by default.
+- Settings: dialog always opens centered; excluded from window-state save/restore.
+- Explorer: hidden files visible by default.
+- Office files: read support for DOCX (rich preview) and XLSX/XLSM/XLSB/XLS/ODS (grid preview) in the editor; `read_file` and attachments parse spreadsheets to TSV text.
+- Images: new `convert_image` tool — PNG/JPEG/WebP/BMP/GIF conversion, JPEG quality, aspect-preserving downscale, alpha flattened to white.
+- Images: `convert_image` operations pipeline — resize, crop, rotate, flip, blur, sharpen, brighten, contrast, hue rotate, grayscale, invert.
 
 ---
 
 ## [1.5.9]
 
-- Tabs: opening a project always lands you in it — hamburger > Recent and "Open with KAI" previously did nothing visible (the switch re-rooted silently) or left the project behind the start page; now every project-open surface spawns a terminal tab in the project, keeping existing terminals alive.
-- Terminal: the blank pane after "+" > New Terminal can no longer wedge forever — a stale hasSlot flag (set before the renderer bind, never rolled back on throw) disabled every recovery path; the flag now rolls back and the render watchdog trusts the pool, retries, and logs every intervention.
-- Tabs: the close button is back on the last tab — a pre-start-page leftover hid the X and the context-menu item when only one tab was open.
-- UI: "Format Document" in the right-click menu renders on one row again — the inline formatter name ("Prettier") wrapped the entry onto two lines; it lives in the tooltip now.
-- Tabs: "Close others" in the tab context menu — closes every tab except the right-clicked one, with one batched confirmation when other tabs have unsaved editor changes.
-- Editor: the alien CodeMirror search bar no longer appears on Ctrl+F — CM's find/replace commands open their built-in panel when the editor has no query, and the header search input survived tab switches while the editor's query did not; the query is now re-synced before every navigation.
-- SCM: the git panel updates as you work instead of waiting for a window focus — editor saves and finished terminal commands (OSC 133) now trigger a debounced local refresh; previously the panel only refreshed on mount, alt-tab, or the manual button, so changes made inside KAI stayed invisible until you tabbed away.
+- Tabs: project open (hamburger > Recent, "Open with KAI") spawns a terminal tab in the project.
+- Terminal: blank pane after "+ > New Terminal can no longer wedge — stale hasSlot flag rolls back; render watchdog retries.
+- Tabs: close button shown on the last tab.
+- UI: "Format Document" menu entry on one row.
+- Tabs: "Close others" in the tab context menu.
+- Editor: CodeMirror's built-in search bar no longer appears on Ctrl+F; query re-synced before every navigation.
+- SCM: git panel refreshes on editor saves and finished terminal commands (OSC 133), debounced.
 
 ---
 
 ## [1.5.8]
 
-- Tabs: the StartPage replaces the launch auto-spawn — the mount-time PTY raced the first paint / window restore / font-gate and left blank panes; a neutral start page (quick actions + recent projects) removes the race by construction, terminals spawn on demand, and closing the last tab is now a legal state.
-- Tabs: opening a project keeps every open terminal alive — the old switch path killed all sessions; only the local ↔ WSL env switch still resets (those sessions cannot survive the boundary).
-- AI: cloud stalls recover automatically even when there is nothing to compact — the old gate required compaction to succeed, so low-context stalls always hit the manual error card; now a plain retry with a fresh connection, capped at 2 consecutive attempts.
-- Voice: the mic stays usable while the agent runs — mid-run recordings land in the steering queue, same as typed text.
-- SCM: the Open-PR button is gated to feature branches (hidden on the default branch / detached HEAD / remotes without a HEAD) and the PR base is the remote's default branch — the old code derived it from the branch's own upstream, producing a broken compare/feature...feature self-compare.
-- Windows: paste no longer triggers a native permission prompt stuck in the top-left corner — CLIPBOARD_READ is now allowed in the webview permission handler alongside mic/camera.
-- UI: auto-approved tools show the same dot indicator as every other tool state — the green check-circle icon that flashed between approval and execution read as a glitch.
-- AI: subagents batch — independent run_subagent calls in one step run concurrently (the SDK already parallelizes them); the model just needed the prompt rule. Spawn cards show their description again (dead input fields left them summary-less).
-- Voice: ⌘/Ctrl+M toggles voice input from anywhere — the first keyboard access to the mic (start/stop mirrors the button, ignored mid-transcription); remappable in the Shortcuts dialog.
-- AI: /compact actually shrinks oversized sessions now — the kept tail pairs held the conversation's largest tool outputs verbatim (fresh shell results, file reads), so the context ring stayed >100% even after compacting; tail tool outputs over 500 chars are elided like older ones already were. Applies to cloud and local, manual and automatic compaction — and saves re-sent tokens on every step.
+- Tabs: StartPage replaces the launch auto-spawn; closing the last tab is a legal state.
+- Tabs: project open keeps every open terminal alive; only local ↔ WSL env switch resets.
+- AI: cloud stalls retry automatically (fresh connection), capped at 2 consecutive attempts.
+- Voice: mic usable while the agent runs — mid-run recordings land in the steering queue.
+- SCM: Open-PR button gated to feature branches; PR base derived from the remote's default branch.
+- Windows: paste no longer triggers a stuck native permission prompt — CLIPBOARD_READ allowed in the webview.
+- UI: auto-approved tools use the standard dot indicator.
+- AI: independent run_subagent calls batch in one step and run concurrently.
+- Voice: ⌘/Ctrl+M toggles voice input from anywhere.
+- AI: /compact elides tail tool outputs over 500 chars; context ring stays under 100%.
 
 ---
 
 ## [1.5.7]
 
-- AI: local models that stall at high context now recover seamlessly — endpoint-aware watchdog budgets (10/4 min local vs 5/2 cloud), auto-compact, and an automatic retry in the same session; the error card stays reserved for genuinely dead engines.
-- Voice: hands-free mode — with auto-approve on, stopping voice capture submits the transcription to the agent automatically (a true Enter-equivalent: busy agent → steering queue).
-- Voice: the listening/transcribing status moved into the input placeholder ("Listening…" / "Transcribing…"); the duplicate expanding row below the input is gone.
-- AI: `/compact` and other slash commands now show their outcome under the input bar — previously refusals ("wait for the run", "already minimal") were invisible and the input just cleared.
-- AI: `/goal` (Goal loop) is now discoverable in the `#` command picker and works from both `/` and `#` invocations — the picker path previously fell through to a plain chat message.
-- AI: PowerShell quote-mangling recovery — the stderr hint now also fires when the child interpreter (Python/Node) gets a truncated argument from `\"`-escaped quotes and dies with its own SyntaxError, with concrete recovery paths instead of a blind retry.
-- AI: commit messages via `-F` — a prompt rule sends multi-line or nested-quote messages through write_file → `git commit -F` on the first try instead of after 2-3 mangled `-m` attempts.
-- SCM: the Publish button was permanently grayed out on unpublished branches — git emits no ahead-count without an upstream, so the panel's enablement condition was structurally unreachable; the status now counts ahead against the default remote's HEAD, so publish → PR works end-to-end from the panel.
+- AI: local models that stall at high context recover automatically — endpoint-aware watchdog budgets (10/4 min local, 5/2 cloud), auto-compact, in-session retry.
+- Voice: hands-free mode — stopping voice capture submits the transcription under auto-approve.
+- Voice: listening/transcribing status moved into the input placeholder.
+- AI: slash commands show their outcome under the input bar.
+- AI: `/goal` discoverable in the `#` picker and works from both `/` and `#`.
+- AI: PowerShell quote-mangling recovery hints cover child-interpreter truncation errors.
+- AI: multi-line commit messages go through `write_file` → `git commit -F` on the first try.
+- SCM: Publish button enabled on unpublished branches; ahead counted against the default remote's HEAD.
 
 ---
 
 ## [1.5.6]
 
-- Fixed: the updater popup showed no release notes since 1.5.3 — the CHANGELOG moved to flat bullets under each version and the parser only collected `###`-sectioned bullets; both parsers now accept the flat format (locked by a regression test against the real 1.5.5 layout).
-- Fixed: the voice transcription-error banner pushed its Dismiss button off-screen on long provider errors — the error text now truncates within its own box.
-- AI: `bash_run` timeout ceiling raised 300s → 1000s and the build/cargo/tsc auto-timeout to 600s — agents no longer hit a validation wall requesting sane timeouts for heavy builds.
+- Fixed: updater popup showed no release notes since 1.5.3 — both note parsers accept flat bullets.
+- Fixed: voice error banner pushed Dismiss off-screen on long errors.
+- AI: `bash_run` timeout ceiling 300s → 1000s; build/cargo/tsc auto-timeout 600s.
 
 ---
 
 ## [1.5.5]
 
-- AI: `/compact` — reset the context in place in the same chat (session-state snapshot + recent tail, no new session needed); LM Studio's default context budget raised 32k → 128k so long sessions use the real window.
-- AI: agents can now register MCP servers (`mcp_add_server` / `mcp_list_servers`) — they persist, connect, and appear live in the MCP Servers UI instead of invisible manual edits.
-- SCM: new branches can be published (push -u sets up tracking) and a PR page opened for GitHub/GitLab/Bitbucket — the panel no longer strands UI-created branches.
-- AI: PDF/DOCX attach via the + button now extracts real text (pdfjs/mammoth) — the picker used to hide them.
-- AI: fewer wasted PowerShell quoting attempts — quoting guidance in the prompt/tool schema plus a recovery hint appended to parse errors.
-- Fixed: MCP Extensions panel showed a literal `Loading\u2026` label (and the search placeholder) while the registry loaded.
+- AI: `/compact` resets context in place; LM Studio default context budget 32k → 128k.
+- AI: agents can register MCP servers (`mcp_add_server` / `mcp_list_servers`).
+- SCM: UI-created branches can be published (push -u) and a PR page opened for GitHub/GitLab/Bitbucket.
+- AI: PDF/DOCX attachments extract real text (pdfjs/mammoth) via the + button.
+- AI: PowerShell quoting guidance in prompt and tool schema; recovery hint on parse errors.
+- Fixed: MCP Extensions panel showed literal `Loading…` while the registry loaded.
 
 ---
 
 ## [1.5.4]
 
-- AI: `look_at_screen` — the agent can now see your displays; say "look at my screen" / "my left monitor" and the selected vision model analyzes the screenshot (no extra model needed; OCR fallback for text-only models, transcript shows the thumbnail, every capture needs your approval).
-- AI: local vision models (LM Studio / OpenAI-compatible) no longer get OCR text instead of the image — vision capability is detected from the runtime model name (qwen2-vl, llava, …).
-- AI: Settings → Models gained a Vision override (Auto/On/Off) for both local endpoint blocks, for models whose name gives no vision hint.
-- AI: fixed the mid-stream UI render-loop crash (Minified React error #185) during multi-tool auto-approve.
-- AI: `look_at_screen` works cross-platform — macOS Screen Recording permission string, Linux bundle deps (xcb/xrandr/pipewire/wayland/EGL) and CI build lists.
-- Terminal: fixed the blank pane on project reopen — renderer bind failures now roll back, retry, and self-heal via a render-side watchdog.
-- Voice: removed the bundled local Whisper engine — voice input now uses the OpenAI API (whisper-1) with the browser Speech API fallback; orphaned model downloads are swept at startup.
+- AI: `look_at_screen` — agent vision on your displays; OCR fallback for text-only models; every capture needs approval.
+- AI: local vision models receive the image, detected from the runtime model name.
+- AI: Settings → Models Vision override (Auto/On/Off) for local endpoints.
+- AI: fixed mid-stream React #185 render-loop crash during multi-tool auto-approve.
+- AI: `look_at_screen` cross-platform — macOS permission string, Linux bundle deps, CI build lists.
+- Terminal: fixed blank pane on project reopen — renderer bind rolls back and retries.
+- Voice: removed bundled local Whisper engine — OpenAI API (whisper-1) with browser Speech API fallback.
 
 ---
 
 ## [1.5.3]
 
-- Editor: right-click menus no longer stack — format entries merged into the single Ask Kai/Copy context menu instead of spawning a second menu behind it.
-- AI: fixed the zombie "agent running" state — stale approval cards no longer pin sessions busy forever, and image attachments now survive the redirect when you send while the agent is running.
-- Git: panel refresh now actually fetches from the remote (ahead/behind update immediately), and pull reports what arrived — "Pulled 3 commits (fast-forward)" / "Branch is up to date" — in the footer.
-- AI: project memory no longer freezes at old entries — the system prompt now loads the newest tail of MEMORY.md (append-only file) with a truncation notice, so recent saves are visible to the agent.
-- AI: fixed the mid-stream UI render-loop crash (Minified React error #185) — auto-approve no longer chains dozens of synchronous state updates inside one React commit; each approval defers one macrotask.
+- Editor: right-click menus no longer stack.
+- AI: fixed zombie "agent running" state from stale approval cards; image attachments survive the redirect.
+- Git: panel refresh fetches from the remote; pull reports what arrived.
+- AI: project memory loads the newest tail of MEMORY.md with a truncation notice.
+- AI: fixed mid-stream React #185 crash — approvals defer one macrotask each.
 
 ---
 
 ## [1.5.2]
 
-- AI: `display_image` no longer dumps megabytes of base64 into the tool card — inputs render as `name · KB` and outputs as a one-line "displayed in terminal" confirmation (or the error).
-- AI: `display_image` and injected commands now fall back to the most recently active terminal tab when the active tab isn't a terminal — previously they failed with "no active terminal tab to display into" while you were on an editor/preview tab.
-- AI: base64 tool-call payloads are elided from model context after the call completes (new always-on compaction phase) — a single image call used to be re-sent on every agent step, silently eating context.
-- AI: the same payloads are elided from session persistence so one image call no longer blows the 512KB per-session store cap and trims conversation history.
+- AI: `display_image` elides base64 from tool cards.
+- AI: `display_image` and injected commands fall back to the most recent terminal tab.
+- AI: base64 tool-call payloads elided from model context after the call.
+- AI: same payloads elided from session persistence (512KB store cap).
 
 ---
 
 ## [1.5.1]
 
-- AI: image attachments no longer vanish from the conversation when the selected model can't see images.
-  - Text-only models (DeepSeek, GLM base, etc.) still receive text — but the swap now happens at request time in the agent transport, so the transcript keeps showing your image thumbnail.
-  - Fixed the extraction pipeline that made every image turn into `[attachment "…"] (failed extraction — model may reject it)`: attachments are `data:` URLs (the old code required `blob:`), the temp file path was relative (unwritable in packaged installs), and the `.dat` extension defeated image detection. Extraction (dimensions + OCR via tesseract) is now a Rust command over raw bytes, cached per image for multi-step runs.
-  - After a restart, previously-attached images (stripped from persistence to keep the store small) render as a placeholder chip instead of a broken image.
-  - The input bar shows an amber hint when you attach an image to a model without vision support, naming the model and suggesting a vision-capable one.
+- AI: image attachments no longer vanish on text-only models — swap at request time; transcript keeps the thumbnail.
+- AI: fixed attachment extraction (`data:` URLs, absolute temp paths, extension detection); Rust-side OCR cached per image.
+- AI: previously-attached images render as placeholder chips after restart.
+- AI: amber hint when attaching an image to a model without vision.
 
 ---
 
 ## [1.5.0]
 
-- Editor: right-click "Format Document" / "Format Selection" with automatic language detection by file extension.
-  - Formats via prettier (in-process): JavaScript/JSX, TypeScript/TSX, JSON/JSON5, HTML, CSS/SCSS/Less, Markdown/MDX, YAML, GraphQL.
-  - Python formats via `black` when it's on PATH (temp file round-trip in the file's directory so pyproject.toml config is respected).
-  - The menu names the formatter for the file type; unsupported extensions get a disabled "No formatter for .xxx" row instead of an error.
-  - Selection formatting replaces just the selected text (falling back to whole-document formatting when a fragment isn't parseable on its own, e.g. a JSON slice), restores the selection over the formatted text, and no-ops cleanly when the buffer is already formatted.
+- Editor: "Format Document" / "Format Selection" with language detection by extension.
+- Editor: prettier in-process for JS/TS/JSON/HTML/CSS/Markdown/YAML/GraphQL; `black` for Python when on PATH.
+- Editor: selection formatting restores the selection; disabled rows for unsupported extensions.
 
 ---
 
 ## [1.4.2]
 
-- Local voice transcription: selectable Whisper models (tiny/base/small, English or multilingual, q5_1) in Settings → General. The previous single model (large-v3-turbo q5_0) needs a GPU — on CPU it ran ~11× slower than real-time, so every dictation hit the 45s "Speech transcription timed out" error.
-  - The catalog marks CPU-friendly models; the old turbo model is still offered but flagged "GPU strongly recommended".
-  - Inference now uses all physical cores (was hard-coded to 4), and each pipeline stage is logged with timings for diagnostics.
-  - The transcription timeout scales with the recording's length instead of a fixed 45s.
-  - A missing selected model falls back to any downloaded CPU-friendly model instead of silently re-picking the CPU-hostile one.
-  - Voice error chip in the input bar now has a dismiss button (previously only cleared by starting another recording).
-  
+- Voice: selectable local Whisper models (tiny/base/small, English or multilingual); CPU-friendly catalog; timeout scales with recording length; all-cores inference.
+
 ---
 
 ## [1.4.1]
 
-- Fix: Enable running KAI in multi-instances
-  
+- Fixed: multi-instance support.
+
 ---
 
 ## [1.4.0]
 
-- Source-control panel: local branches are now listed with switch/create/delete (no terminal needed).
-- Source-control panel: merge-conflict banner shows conflict count and per-file line locations (GitHub Desktop style).
-- AI: "Ask KAI to resolve" action on the merge-conflict banner opens the composer preloaded with the conflict context.
-- AI: merge any session (fork) into another; "shadow session" is now labeled "detached copy" in the UI.
-- AI: watch wake-ups are queued instead of dropped when the agent is mid-turn, so watches fire reliably.
-- Fixed stale/missing project memory (case-sensitive keying) and memory/checkpoints writing to the detached copy instead of the real root.
-- Fixed blank terminals on project open (new ConPTY now waits for old console teardowns to drain, bounded).
+- SCM: branch list, switch/create/delete.
+- SCM: merge-conflict banner with per-file line locations.
+- AI: "Ask KAI to resolve" on the conflict banner.
+- AI: session merge (fork into another); "shadow session" relabeled "detached copy".
+- AI: watch wake-ups queued while the agent is mid-turn.
+- Fixed: stale/missing project memory; memory writing to the detached copy.
+- Fixed: blank terminals on project open (ConPTY teardown drain).
 
 ---
 
 ## [1.3.9]
 
-- Fixed React #185 render-loop error
+- Fixed: React #185 render-loop error.
 
 ---
 
 ## [1.3.8]
 
-- Fixed in-app updates on Windows: the kill-on-close Job Object killed the NSIS installer the moment the app exited for the update.
-- Fixed a stall watchdog in the DSML middleware's stream
+- Fixed: in-app updates on Windows — kill-on-close Job Object no longer kills the NSIS installer.
+- Fixed: DSML middleware stream stall watchdog.
 
 ---
 
 ## [1.3.7]
 
-- OpenRouter model list is persisted to disk and seeded at startup, so a failed startup sync no longer drops dynamic models (e.g. GLM 5.3) for that session; failed syncs retry and log. GLM 5.3 / Flash / FlashX added as built-in models (Z.ai + OpenRouter, verified context limits and pricing).
-- Error card now decodes raw errors (network failures, vLLM "EngineCore" provider crashes, minified React render-loop codes, credit rejections) into actionable text, with a Retry button; uncaught frontend errors are logged to the rotating log file.
-- About page uptime now measures real process lifetime (was time since first About visit).
-- Sandbox: dropped the detection-only Docker/devcontainer capability row.
+- OpenRouter model list persisted and seeded at startup; failed syncs retry. GLM 5.3 / Flash / FlashX added.
+- Error card decodes raw provider errors with a Retry button; frontend errors logged to file.
+- About page shows real process uptime.
+- Sandbox: dropped the detection-only Docker/devcontainer row.
 
 ---
 
 ## [1.3.6]
 
-### Added
-
-- Agent sandbox with three enforcement layers, configurable per project (`.kai/sandbox.json`, Settings > Sandbox):
-  - **Policy (all platforms)** — `off` / `readOnly` / `workspaceOnly`. File tools are confined to the project (readable/writable path checks, symlink-traversal aware), and shell commands naming paths outside the project are gated before execution.
-  - **OS confinement (workspaceOnly)** — sandboxed agent shells run under OS-level walls: bubblewrap read-only root with a writable project mount and no network (Linux), Seatbelt profiles denying network and writes outside the project (macOS), and a dedicated minimal `kai-sandbox` WSL distro with per-project mounts (Windows). Platform availability is probed and shown in Settings.
-  - **Shadow sessions** — the agent works in an isolated copy of the project (`~/.kai/shadow/`); you merge or discard at the end. Merges are conflict-safe: files changed in both places are reported, never clobbered; deletions are listed, never auto-applied. Copies respect `.gitignore`, share `node_modules` when possible, and cap at 2 GiB. Sessions survive restarts.
-- Sandbox badge in the AI session header showing the active mode.
-
-### Fixed
-
-- Watch results now wake the agent: a fired watch (CI/build/process monitoring) previously landed in the transcript as a silent system message — the model never reacted to it. It now triggers a new agent run when the session is idle (skipped while the agent is streaming or an approval card is pending, so it can't yank the agent out of a paused state).
-- Shell sandbox gating no longer false-positives on everyday commands (relative test paths, sed/awk programs, URLs, date formats, quoted arguments); it now classifies whole arguments and still catches absolute, home, and `..` traversal paths outside the project.
-- Shadow merge can never write the shadow's `.git` internals over the real repository.
-- Gitignored build outputs (`dist/`, `target/`, `.next/`, …) no longer bloat shadow copies.
+- Added: agent sandbox — policy (`off` / `readOnly` / `workspaceOnly`), OS confinement (bubblewrap / Seatbelt / `kai-sandbox` WSL distro), shadow sessions (conflict-safe merges, 2 GiB cap).
+- Added: sandbox badge in the AI session header.
+- Fixed: watch results wake the agent when idle.
+- Fixed: sandbox gating false-positives on everyday commands.
+- Fixed: shadow merge never writes the shadow's `.git` over the real repository.
+- Fixed: gitignored build outputs no longer bloat shadow copies.
 
 ---
 
 ## [1.3.5]
 
-- Checkpoints moved out of user workspaces (`~/.kai/` with legacy sweep), steering messages no longer swallowed mid-run, agent shell no longer AV-flagged, context ring matches compaction thresholds, ResizeObserver leak + estimateTokens recompute storm fixed, health counters in About, editable save_memory approval cards.
+- Checkpoints moved to `~/.kai/`; steering no longer swallowed mid-run; agent shell no longer AV-flagged; context ring matches compaction thresholds; ResizeObserver leak and estimateTokens storm fixed; health counters in About; editable save_memory approvals.
 
 ---
 
 ## [1.3.4]
 
-- Added guard for Windows specific double terminal trigger issue
-- Fixed rendering images and videos in editor. OCR extraction is explicit
-  
+- Fixed: Windows double-terminal trigger guard.
+- Fixed: image/video rendering in editor; OCR extraction is explicit.
+
 ---
 
 ## [1.3.3]
 
-- Case-insensitive workspace identity (sessions/window-state/model keys), session-migration backup, startup sweep of stale per-instance artifacts (logs, crash dumps, whisper temps), window title shows project name only, and a few markdown/UI polish fixes.
+- Case-insensitive workspace identity; session-migration backup; startup sweep of stale per-instance artifacts; window title shows the project name; markdown/UI polish.
 
 ---
 
 ## [1.3.2]
 
-- Multi-instance support — concurrent instances on different projects no longer collide on shared state (per-process WebView2 profiles, logs, and tmp files; per-project sessions and window geometry).
+- Multi-instance support — per-process WebView2 profiles, logs, tmp files; per-project sessions and window geometry.
 
 ---
 
 ## [1.3.1]
 
-### Added
-
-- Git stashes in Source Control — list, apply, pop, drop, and stash-all.
-
-### Fixed
-
-- Tool output no longer shows internal `[start tool_…]` fence markers.
-- Markdown headings, horizontal rules, and tables no longer render as code boxes.
-- Fetch/pull/push made reliable — descendants no longer deadlock git, explicit remote refspecs, tolerant upstream resolution.
-- Removed the redundant "Diverged from upstream" banner.
-- `.kai/` (per-user agent memory/rules/checkpoints) is now gitignored.
+- Added: git stashes — list, apply, pop, drop, stash-all.
+- Fixed: tool output hides internal fence markers; markdown headings/rules/tables render; fetch/pull/push reliability; `.kai/` gitignored.
 
 ---
 
 ## [1.3.0]
 
-### Added
-
-- Privilege-elevated command execution (sudo/runas/UAC) across platforms.
-- "Private Terminal" option in the new-tab dropdown.
-- Agent security hardening across tool output, memory, and process lifecycle.
-
-### Fixed
-
-- Stop button now reliably halts the agent, and runaway/looping agents auto-stop.
-- Local models show live tokens/sec via a chunk-based estimate.
-- Context-compaction notice shows once per session instead of every turn.
-- Sticky focus outlines after click/drag (WebView2 `:focus-visible` quirk).
-- Commit-signing "ask for approval" honored even under auto-approve all.
-- Dead shell on project reopen now recovers.
-- Issue-prefill URL stays under GitHub's length limit.
+- Added: privilege-elevated command execution (sudo/runas/UAC); private terminal; agent security hardening.
+- Fixed: stop button halts the agent; runaway agents auto-stop; local tokens/sec estimate; compaction notice shown once; sticky focus outlines; commit-signing approvals honored under auto-approve; dead shell recovery; issue-prefill URL length.
 
 ---
 
 ## [1.2.9]
 
-### Added
-
-- One-click issue reporting that pre-fills a GitHub issue with logs and crash snapshots.
-- Copy diagnostics button for the full redacted bundle (home path and secrets stripped).
-
-### Changed
-
-- Image/video generation no longer blocks the chat — results appear when ready.
-- ComfyUI video duration defaults to 5s and is injected into the workflow.
-
-### Fixed
-
-- Window title now shows `KAI — <project>` (was missing the set-title permission).
+- Added: one-click issue reporting with logs and crash snapshots; copy-diagnostics button (redacted).
+- Changed: image/video generation no longer blocks the chat; ComfyUI video duration defaults 5s.
+- Fixed: window title shows `KAI — <project>`.
 
 ---
 
 ## [1.2.8]
 
-### Fixed
-
-- README/markdown preview images now render (raw `<img>` tags and relative local images were leaking as literal text/base64).
-- Opening General settings no longer flashes a console window on Windows (gpg detection now spawns without a console).
-- Dragging files from the explorer into the terminal inserts their relative path again (the native Windows drop handler was swallowing internal HTML5 drops).
+- Fixed: README/markdown preview images render; no console flash opening General settings on Windows; explorer drag-drop inserts relative paths.
 
 ---
 
 ## [1.2.7]
 
-### Added
-
-- Local Whisper voice transcription with bundled Silero VAD.
-- Optional GPG commit signing with auto-sign and approval-needed modes.
-- Explorer multi-select (Shift/Ctrl+Click) with batch context actions.
-- Drag files/folders from the explorer into the terminal to insert their path.
-
-### Changed
-
-- Removed AI inline autocomplete feature and its references.
-
-### Fixed
-
-- Terminal no longer blanks on heavy startup (PTY spawn no longer waits on fonts).
-- Source-control badge count now tracks the active panel's git context.
-- Hamburger menu "Appearance" entry renamed "General" and moved above Models.
+- Added: local Whisper voice transcription with Silero VAD; optional GPG commit signing; explorer multi-select; drag-drop to terminal.
+- Changed: removed AI inline autocomplete.
+- Fixed: terminal no longer blanks on heavy startup; badge count tracks the active panel; menu naming.
 
 ---
 
 ## [1.2.6]
 
-### Fixed
-
-- **Git push/pull error pill flooded the panel**: a rejected push or failed pull dumped multi-line `hint:` blocks and the full `From <url>` fetch ref list into the red feedback pill. Push rejections (`fetch first` / `non-fast-forward`) and pull failures (`not possible to fast-forward` / diverged) now surface a short actionable summary, and any remaining unclassified git detail is capped at 400 chars with an ellipsis.
-- **Watch notifications rendered as raw text**: watch-fired messages carry markdown (`**Watch fired**: \`label\``, fenced stdout/stderr), but were injected as user-role messages and drawn through the plain-text branch, so the markdown showed literally. They're now tagged and rendered through `Streamdown`, the same pipeline as chat and markdown preview.
-- **PowerShell CLIXML in watch output**: when a watched command's stderr/stdout is redirected, PowerShell serializes it as `#< CLIXML` XML. Watch injection now decodes that back into readable lines — extracting `<S>` element text, expanding `_xHHHH_` hex escapes, resolving XML entities, and stripping ANSI CSI sequences.
+- Fixed: git push/pull error pill capped to short actionable summaries.
+- Fixed: watch notifications rendered as markdown via Streamdown.
+- Fixed: PowerShell CLIXML decoded in watch output.
 
 ---
 
 ## [1.2.5]
 
-### Fixed
-
-- **README images blocked in markdown preview**: `skipHtml` dropped raw `<img>` tags and relative paths couldn't resolve against the webview origin. The preview now rewrites `<img>` to markdown image syntax, reads relative images via `fs_read_file_bytes`, and inlines them as `data:` URLs (remote `https:` images pass through). CSP `img-src` widened to allow `https:` and `http://localhost:*`.
-- **List item rendered as a text block**: `wrapAsciiArt` misclassified markdown list items containing box-drawing or `|`-bracketed content as ASCII art and wrapped them in code fences. List items are now excluded from art detection.
-- **App froze during LLM streaming (terminal lagged too)**: `stripLeakedTokens` + Streamdown re-parsed the full accumulated text on every streamed token (O(n²)). Streamed text now renders at a throttled ~12fps with an exact flush on stop, and the copy button computes cleaned text lazily on click instead of per render.
-- **Chats with an ignored tool approval were unrecoverable**: sessions whose last run ended on an unapproved tool call opened blank and couldn't be re-selected. `hydrateSessions` now seeds the restored active session's history before flipping the active id, and loaded history strips incomplete `approval-requested` tool parts at the part level so the session recovers instead of pinning `awaiting-approval`.
+- Fixed: README images inlined as `data:` URLs in markdown preview; CSP `img-src` widened.
+- Fixed: list items not classified as ASCII art.
+- Fixed: streaming renders throttled ~12fps (was O(n²) per token).
+- Fixed: sessions with an ignored tool approval recover on load.
 
 ---
 
 ## [1.2.4]
 
-### Fixed
-
-- **Updater dialog grew off-screen**: long release notes now scroll inside a capped dialog (`max-h-[85vh]` + `overflow-y-auto`) instead of pushing the popup past the viewport.
-- **Release notes rendered as raw text**: the updater dialog dumped bullets as plain text nodes, so `**bold**` and inline code showed literally. Notes now render as markdown via `Streamdown` (same pipeline as chat and markdown preview).
+- Fixed: updater dialog scrolls within a capped height; release notes render as markdown.
 
 ---
 
 ## [1.2.3]
 
-### Fixed
-
-- **PTY exit deadlock**: terminals never reported process exit — flusher was joined before signaling `done`.
-- **SSRF bypass**: IPv4-mapped IPv6 literals (`::ffff:127.0.0.1`, `::ffff:a9fe:a9fe`) now classify as loopback/private.
-- **Orphaned shell children**: timeout/cancel now kills the whole process tree (Unix process group, Windows Job Object).
-- **OCR never produced text**: tesseract invoked with a duplicated input path — now uses a unique output stem.
-- **WSL/UNC paths**: `fs_canonicalize` now strips the `\\?\UNC\` prefix.
-- **MCP stdio on Windows**: child command line is now properly quoted, not `cmd /C` string-joined.
-- **AI session races**: stream callbacks are active-session guarded; last-active session restored; stale loads/evictions fixed.
-- **Empty "Text block" bubbles**: lone `---` no longer renders an empty chat bubble.
-- **Session dropdown missing**: `hydrateSessions` no longer orphans `activeSessionId` on auto `newSession()`.
-- **Updater placeholder notes**: real `CHANGELOG.md` section now feeds release body + `latest.json` notes.
-- **Redundant stop line**: suppressed "Ended after tool call" + Continue while an approval is pending.
-- **Snippet picker scroll**: keyboard selection now scrolls the active item into view.
-- **Groq thinking no-op**: wired `reasoning_effort` for Groq reasoning models.
+- Fixed: PTY exit deadlock; SSRF bypass via IPv4-mapped IPv6; orphaned shell children killed on timeout; OCR output stem; UNC path canonicalization; MCP stdio quoting on Windows; session races; empty text-block bubbles; session dropdown hydration; updater notes source; stop line suppression; snippet picker scroll; Groq reasoning_effort.
 
 ---
 
 ## [1.2.2]
 
-### Added
-
-- **MCP server diagnostics**: MCP child process stderr is now piped instead of discarded — logged (truncated to 2000 chars/line) and forwarded to the frontend, surfacing `mcp-remote` OAuth/Node/bridge errors that were previously invisible. Spawn success (pid + sanitized args), spawn failures, and the real child exit code are logged; a waiter thread reports the actual exit code instead of `code=None`.
-
-### Fixed
-
-- **Escape in editor/terminal silently stopped the running agent**: The global Escape handler in the AI mini-window stopped the agent whenever it was busy, guarding only `INPUT`/`TEXTAREA` targets. CodeMirror (contenteditable div) and xterm (div/canvas) fell through, so Escape used to dismiss autocomplete, enter vim normal mode, or drive shell menus killed the run mid-tool and surfaced as a bare "Stopped" badge. The handler now bails when the keydown originates from a contenteditable surface or `.xterm`. Intentional stops (Stop button, TodoStrip, Escape with chat focus) unchanged.
-- **Git Graph opened the previous project's history**: The sidebar button read `sourceControl.repo` when cached, but that cache is keyed to the launch dir whenever the active tab is a terminal. The button now resolves the repo from the pinned `explorerRoot` (launch dir / File > Open Project, immune to terminal `cd`) on every click via `git rev-parse --show-toplevel`.
-- **Explainable Stopped status**: The green "Stopped" dot now renders a precise label from the provider finish reason — Completed, Context limit reached, Blocked by content filter, Ended after tool call, or Provider error — with a Continue button on non-clean stops.
-- **Same-file edit races**: Added a per-path mutation lock (`mutationLock.ts`) serializing edit / multi_edit / batch_edit / write_file on the same file while keeping cross-file edits parallel. On a stale-match retry failure the tool now explains why and suggests `multi_edit`. Tool descriptions steer the model to `multi_edit` for multiple same-file changes. Edit-failure counters are scoped per session via `WeakMap` (removing dead `resetEditFailures` call sites).
-- **MCP stderr truncate crash**: `truncate()` sliced at a raw byte index and panicked when byte 2000 split a multi-byte character, killing the stderr reader thread. Now uses `floor_char_boundary`.
+- Added: MCP child stderr piped, logged, and forwarded — spawn and exit details logged.
+- Fixed: Escape in editor/terminal no longer stops the agent; Git Graph opens the pinned project's history; Stopped status shows a precise finish reason; same-file edits serialized by a per-path mutation lock; MCP stderr truncation no longer panics on multi-byte boundaries.
 
 ---
 
 ## [1.2.1]
 
-### Added
-
-- **Plain Text table copy**: The table copy dropdown in chat now includes a fourth "Plain Text" option alongside Markdown, CSV, and TSV. Uses column-aligned padding with `|` separators for readability. Built on Streamdown's `extractTableDataFromElement()` — no parsing logic duplicated.
-- **Provider error messages**: The AI SDK's `RetryError` ("Failed after 3 attempts. Last error: Provider returned an error") is now unwrapped to show the actual HTTP status code, response body, and URL. Detectable failure modes get actionable messages: 413 (request too large → reduce MCP tools), 429 (rate limited → wait/switch), 408/504 (timeout → reduce conversation length), 401/403 (auth → check Settings).
-- **Inline session rename**: Session titles in the AiMiniWindow dropdown can now be edited inline. Hover reveals a pencil icon alongside the trash icon; clicking it swaps the title for an Input field. Commit on Enter/Blur, cancel on Escape.
-- **Branch name pill links to GitHub**: The branch name badge in the source control sidebar header now acts as a link to the GitHub tree browse URL (`https://github.com/<owner>/<repo>/tree/<branch>`). Uses `git_remote_url` (Rust) to fetch the origin URL and `parseGithubBranchUrl()` to extract owner/repo. Falls back to a static pill for non-GitHub remotes or detached HEAD.
-
-### Fixed
-
-- **cd in terminal resets workspace**: `useWorkspaceCwd` was deriving `explorerRoot` from the first terminal's live CWD, which changes on every `cd`. Navigating to another project directory shifted the workspace root, triggering `hydrateSessions` and resetting the file tree + AI sessions. Now `explorerRoot` is pinned to the launch directory at startup.
-- **Agent stops prematurely after context compaction**: `buildSessionState()` produced a summary with todos and file snapshots but no instruction to keep working. The model saw a checklist and concluded "task is done." Now `formatTodos()` injects a bold "TASK NOT COMPLETE. Continue from where you stopped." directive when pending items exist. System prompt also strengthened with an explicit "NEVER stop after a successful tool call unless the task is complete" rule.
-- **Orphaned thinking markers in chat**: The model sometimes emits `</thinking>`, `<|/thinking|>`, or `` markers without a matching opening tag (consumed upstream by the AI SDK's reasoning detector). These now get stripped from visible text by `stripThinkingMarkers()`.
-- **ASCII/box-drawing diagrams collapse to one line**: `wrapAsciiArt` lowered its line threshold from 3→2 and added two new detection patterns: lines bracketed by frame chars at both ends (e.g. `│ Content  │`), and lines composed entirely of decorator chars (e.g. `+-----+`). Single-line box-drawing also gets fenced.
-- **Source control pull flakiness**: Removed redundant explicit `git fetch` before `git pull` in both Rust and frontend — `git pull` handles its own fetch internally, and double-fetching was the source of timeouts and "already up to date" races. Added `--no-rebase` to guarantee a merge commit even if `pull.rebase` is configured globally.
-- **Source control status pills clipped / unreadable**: The yellow/red feedback pill (commit/push/pull errors) now wraps text with `break-words whitespace-normal` instead of `truncate`, and is positioned inline in the flow rather than absolute-positioned behind other elements. Visible for 6s (was 3.6s). The staged badge and upstream label now sit on their own line so the label has room to breathe.
+- Added: plain-text table copy; provider errors unwrapped to HTTP status and body; inline session rename; branch pill links to GitHub.
+- Fixed: terminal `cd` no longer resets the workspace root (pinned to launch dir); agent continues after compaction with an explicit TASK NOT COMPLETE directive; orphaned thinking markers stripped; ASCII art detection widened; pull no longer double-fetches and forces a merge commit; status pill wraps.
 
 ---
 
 ## [1.2.0]
 
-### Added
-
-- **Universal file extraction**: Attach or read binary files — the agent extracts them locally instead of erroring. ZIP/JAR/APK archives become entry listings with inline previews of small text files; audio (mp3/flac/m4a/ogg/wav) becomes a metadata card (tags, duration, bitrate); images (png/jpg/webp/gif/tiff) become dimensions plus OCR text when a recognizer is available. Handled server-side in `fs_read_file` (`extract.rs` + `ocr.rs`), surfaced through `read_file` and file attachments.
-- **Text-only model fallback for attachments**: When the selected model has no vision capability (e.g. DeepSeek), image/file attachments are swapped for locally extracted text before send, so they never hard-error the conversation. If extraction still fails, a safe placeholder keeps the chat flowing.
-- **Update popup "What's new"**: The update/restart dialog now reads `CHANGELOG.md` and renders the `Added`/`Fixed` sections for the incoming version below the prompt, so you see what changed before installing.
-
-### Fixed
-
-- **OCR fails fast when tesseract is missing**: `get_ocr_text` short-circuits cleanly when the `tesseract` binary isn't on PATH or in standard install locations — no temp-file churn, image extraction degrades to metadata-only.
-- **Session title leaks snippet markup**: Sessions started with a snippet showed `<snippet name="…">` as the chat name. `deriveTitle` now strips `<snippet>` and `<Kai-command>` blocks before deriving the title.
-- **Clippy cleanups**: Removed `format!`-in-`format!` nesting and a `////` doc-comment typo so `cargo clippy --all-targets --locked -- -D warnings` passes.
+- Added: universal file extraction (archives, audio metadata, image dimensions + OCR); text-only model fallback for attachments; updater popup reads CHANGELOG.md.
+- Fixed: OCR degrades cleanly without tesseract; session title strips snippet markup; clippy cleanups.
 
 ---
 
 ## [1.1.9]
 
-### Fixed
-
-- **_effect field leaking to model, causing premature agent stop**: The `withToolGuard` wrapper in `toolFencing.ts` was annotating every tool result with `_effect` (`COMMITTED`/`NONE`/etc.) via `annotate()`. These internal tracking fields were never stripped before the model saw the result. The model interpreted `"COMMITTED"` as a completion/stop signal, causing the agent to stop with a green "Stopped" indicator after the first RUN or EDIT. Now `_effect`, `_outputWarnings`, and `_outputWarningNote` are deleted from the result in the wrapper's return path before reaching the AI SDK.
-
-### Added
-
-- **Thinking toggle for OpenAI-compatible local models in Settings**: The `openaiCompatibleThinkingMode` preference (already in store.ts) is now wired to the model transport — resolves in `getThinkingMode()` when the selected model is `openai-compatible-custom`. The `openai-compatible` and `lmstudio` providers now emit `reasoningEffort` via `providerOptions.openai` so vLLM, Ollama, Fireworks, and other local endpoints honor the toggle. Settings page: Reasoning button group (off/low/med/high) added to the OpenAI-compatible block, next to the Context field.
+- Fixed: internal `_effect`/warning fields stripped from tool results before the model sees them (caused premature stops).
+- Added: thinking toggle wired for OpenAI-compatible local models.
 
 ---
 
 ## [1.1.8]
 
-### Added
-
-- **Prompt-injection fence system**: Nonce-delimited trust boundaries around every tool output. Tool results are wrapped in `[start tool_NONCE]…[end tool_NONCE]` markers declared in the system prompt. Fence-like markers inside untrusted content are neutralized with zero-width spaces so an attacker can't forge trust boundaries. Multiple trust zones: `tool`, `web`, `mcp`.
-- **EffectStatus — typed tool outcomes**: Every tool result is now annotated with one of six typed outcomes: `COMMITTED`, `NONE`, `UNKNOWN`, `PARTIAL`, `ROLLED_BACK`, `REJECTED`. Resolved per-tool from exit codes, timeout flags, and partial multi_edit results. Removes phantom-state assumptions where the model treats every result as "succeeded."
-- **Watch system**: Periodic shell command polling with a condition DSL and change detection. Agents can create watches with `fire_on_match` (condition true) or `fire_on_change` (output diff from baseline) mode. Results are injected as user messages that don't auto-trigger new agent runs. Max 5 watches per session, auto-reaped on session close.
-- **Output guard — heuristic injection detection**: Four-tier safety check on tool results before they reach the model: prompt injection, role injection, meta-injection (fake DSML/tool calls), and camouflage (zero-width/bidi characters). Runs greedily — stops at the first matched tier. Warnings attach to results so the model sees them alongside fenced content.
-- **Trajectory model**: Provider-neutral canonical conversation representation with `Turn` / `TurnBlock` types, `fromUIMessage` / `toUIMessage` converters, content-addressed attachment references, and `turnsToSummary` compaction helper. Decouples persistence from the AI SDK's internal `UIMessage` format.
-- **Tool irreversibility registry**: Every tool tagged as `read_only`, `reversible`, or `irreversible`. The approval UI can use this to show the user what they're committing to before approving.
-- **Per-model thinking toggle in model picker**: Each reasoning model row in the status-bar dropdown shows a brain-icon toggle that cycles `off → low → med → high` with a single click. Persisted per-model via `setModelThinkingMode`. Removed the Settings modal's `ThinkingModeBlock` — thinking control is now one click away in the main UI.
-- **Background shell owner scoping**: Background processes now carry a `owner` (chat session ID) and `label` field. `shell_bg_reap` kills all background processes owned by a given session, preventing cross-contamination between parallel agent conversations. Called automatically on session delete.
-
-### Fixed
-
-- **Don't abort agent on normal tool denial**: `respondToApproval` was calling `abortSession()` on every denial, killing the entire agent run and leaking `(User canceled)` into context. Now only "Run edited" aborts (to prevent the original command from re-running); normal Deny lets the agent see the rejection and continue gracefully.
-- **Dead terminal on project open**: React strict mode's double-mount left `ptyOpening = true` from the first mount's in-flight spawn. The second mount skipped spawning, and if the first spawn failed (ConPTY race, bad cwd), the terminal stayed empty forever. Now: (1) removes the `!ptyOpening` guard so the second mount always re-attempts, (2) one automatic retry after 1s, (3) on final failure, writes a red error into the terminal. Also bumped the silent-prompt nudge from 1.5s → 3s for pwsh + heavy Oh-My-Posh modules.
+- Added: nonce-delimited prompt-injection fences around tool output; typed tool outcome statuses (EffectStatus); watch system with condition DSL; four-tier output guard (injection, role, meta, camouflage); trajectory model decoupling persistence from UIMessage; tool irreversibility registry; per-model thinking toggle in the status-bar picker; background shell owner scoping.
+- Fixed: normal tool denial no longer aborts the run; dead terminal on project open retried.
 
 ---
 
 ## [1.1.7]
 
-### Fixed
-
-- **DSML tool calls still leaked on DeepSeek V4**: Complete rewrite of the DSML middleware parser to use structural tag matching instead of enumerating namespace variants. Now finds any `<PREFIXinvoke name="...">...</PREFIXinvoke>` pair by matching opening and closing tags via the PREFIX string — catches `__`, `|DSML|`, `&#95;&#95;`, and any future variant without code changes.
-- **`</thinking>` tags mangled in chat UI**: `splitThinkingBlocks` now handles three thinking-block formats: XML-style `<thinking>`, pipe-delimited `<|thinking|>`, and AI SDK thought protocol `...` markers. The detection gate in the chat renderer also recognizes all three so mixed-format thinking blocks render as collapsed reasoning pills instead of leaking as visible text.
-- **"Run edited" ran the original command too**: When the user edited a shell command in the approval card and clicked "Run edited", the agent was not stopped after the denial — it immediately re-issued the original (unedited) command. Now the denial routes through `respondToApprovalStandalone` which calls `abortSession()` to kill the agent after denial. Also removed the now-unused `addToolApprovalResponse` prop from `AiChatView` and `AiMiniWindow`.
-- **`batch_edit` failed on CRLF files**: `batchEdit` did raw `indexOf` on file content without line-ending normalization. On Windows (CRLF files), the model's LF-only `old_string` values never matched. Now mirrors `edit.ts`'s pipeline: normalizes both sides to LF before matching, works in LF space, then restores the original line-ending style.
-- **CI: Rust 1.98 clippy `chunks_exact_to_as_chunks`**: Replaced `chunks_exact(2)` with `as_chunks::<2>()` in the UTF-16 BOM detection code in `fs_read_file`.
+- Fixed: DSML tool-call leakage on DeepSeek V4 (structural tag matching); `</thinking>` variants handled in the renderer; "Run edited" no longer re-runs the original; `batch_edit` CRLF support; CI clippy `as_chunks`.
 
 ---
 
 ## [1.1.5]
 
-### Added
-
-- **Auto-fill commit message for single-file changes**: When exactly one file is staged, the commit message input pre-fills with `Add <file>`, `Update <file>`, `Remove <file>`, or `Rename <file>` based on the file's git status code (A/U → Add, D → Remove, R → Rename, M → Update).
-
-### Fixed
-
-- **Terminal typing becomes sluggish over time**: The global PTY spawn mutex (`SPAWN_LOCK`) was held during a 50ms ConPTY settle sleep on Windows, blocking `pty_write` (keystrokes) and `pty_resize` behind every spawn. The lock is now released before the sleep, replaced with a lock-free atomic timestamp throttle.
-- **DSML tool calls still leaked and stalled on DeepSeek V4**: Multiple fixes for the DSML middleware — added `|DSML|` namespace variant matching, HTML entity decoding (`__` → `__`), whitespace-tolerant regexes, bare invoke tag fallback, and handling of stream-end without an explicit `finish` event. The provider filter was also removed so DSML detection applies to all providers.
-- **Multi-edit strictly all-or-nothing**: Previously one mismatched `old_string` in a `multi_edit` batch rejected every edit. It now retries each edit individually on batch failure — correct edits land immediately, only mismatches are reported.
-- **Edited shell commands printed as text instead of running**: When the user edits a command in the approval card and clicks "Run edited", the command is now injected directly into the active terminal PTY with `\r` — no agent round-trip, no visible chat noise.
-- **Source control files ghosted for 5–10 seconds after commit/push**: Post-mutation refreshes were blocked by an in-flight refresh started before the mutation completed. `refresh()` now accepts a `mutation: true` flag that bypasses inflight dedup, forcing an immediate fresh read.
-- **Fetch and Pull as two separate buttons confused users**: Removed the separate Fetch button. Pull now handles fetch+merge in one click. Added `git_pull` (non-ff-only) Rust command for diverged branches — previously pull was locked to `--ff-only`, so diverged branches were stuck showing "resolve in terminal."
-- **OS window title showed only "KAI"**: `document.title` only touches the HTML `<title>` tag; now uses `getCurrentWindow().setTitle()` from `@tauri-apps/api/window` so the native title bar shows `<project-folder> — KAI`.
-- **CI: `cargo clippy` failed on Linux**: `CONPTY_SETTLE_MS` and `LAST_SPAWN_AT` were only referenced inside `#[cfg(windows)]` but declared in module scope without the gate. Added `#[cfg(windows)]` to both declarations.
-
-### Changed
-
-- **Status pill in source control**: The bare green/amber dot was replaced with a bordered pill matching the green/amber/gray convention (e.g. `● 3 staged` on a green-tinted badge).
+- Added: auto-fill commit message for single-file changes.
+- Fixed: terminal typing sluggish under spawn lock; DSML variants and entity decoding; multi-edit retries per-edit on batch failure; edited commands injected into the PTY directly; SCM ghosted files after commit; Pull handles diverged branches (non-ff merge); native window title; CI clippy cfg gates.
+- Changed: SCM status pill restyled.
 
 ---
 
 ## [1.1.4]
 
-### Added
-
-- **Editable shell command approval cards**: When the LLM proposes a shell command and approval is required, a pencil/edit icon appears. Clicking it swaps the command display for a resizable textarea. "Run edited" injects the edited command directly into the active terminal. The command preview also wraps correctly in the mini-window instead of running as a single long line.
-
-### Fixed
-
-- **DeepSeek V4 stops mid-execution on OpenRouter**: DeepSeek V4 models emit tool calls as DSML XML markup (`<__tool_calls>…`) instead of structured `tool_calls`. OpenRouter passes the raw markup through, so the stream ends with `finishReason: stop` and zero tool calls. Added a V3 `LanguageModelMiddleware` that buffers reasoning/text deltas during the stream and injects synthetic `tool-input-*` events parsed from DSML fragments on `finish`.
+- Added: editable shell-command approval cards.
+- Fixed: DeepSeek V4 DSML tool calls on OpenRouter via stream middleware.
 
 ---
 
 ## [1.1.3]
 
-### Added
-
-- **Per-model thinking modes**: Thinking mode (`off` / `low` / `medium` / `high`) can now be set per model in Settings — model-pinned override wins over the global default. Provider-specific thinking parameters are mapped for Anthropic (`thinking.budgetTokens`), OpenAI (`reasoningEffort`), Google (`thinkingConfig.thinkingBudget`), and xAI (`reasoningEffort`).
-
-### Fixed
-
-- **UI freeze while model is "thinking"**: `stripLeakedTokens` ran an O(braces × text-length) regex on every streamed token, freezing the UI for seconds during long reasoning blocks. Guards now skip the regex when the token doesn't contain a known trigger character, and the generic `<` strip runs after JSON-payload detection to prevent collisions.
-- **Fork button silently no-ops**: `forkSession` read from the persisted snapshot of messages, which could be shorter than the live UI array due to debounced persist or length-trimming. Now slices the live in-memory chat messages, with store as fallback.
-- **Voice dictation non-functional on Windows**: Added WebView2 `PermissionRequested` handler that `SetState(ALLOW)`s `MICROPHONE` and `CAMERA` (wry only auto-grants `CLIPBOARD_READ`). Frontend hardened with `withTimeout` on `getUserMedia` (8s), transcribe (45s), and a Speech-API watchdog.
-- **Stop button stuck on pending approval**: The AI SDK `Chat.stop()` is a no-op when the status is `ready` (e.g. awaiting tool approval). `stopSession()` now follows `chat.stop()` with `releasePendingApprovals()` which strips stale `approval-requested` tool parts from the chat.
-- **Long-context degrader re-injects full thinking traces**: `providerNormalize.ts` converted every `reasoning` part to `<thinking>…` text for non-Anthropic targets at each step. Now only the LAST assistant message's reasoning is carried forward; older traces are dropped.
-- **Session data loss across workspace switches**: `hydrateSessions` now filters sessions to the current workspace root and re-hydrates on workspace switch. The session picker no longer leaks untagged legacy sessions from other projects.
+- Added: per-model thinking modes with provider mappings.
+- Fixed: UI freeze from O(n) regex per token; fork uses live messages; Windows voice permissions; stop releases pending approvals; long-context degrader drops old reasoning traces; sessions filtered by workspace root.
 
 ---
 
 ## [1.1.2]
 
-### Added
-
-- **Project Rules Directory (`.kai/rules/`)**: KAI now walks up the ancestor tree from the workspace root collecting all `KAI.md` and `KAI.local.md` files (modeled after Claude Code's CLAUDE.md discovery). The `.kai/rules/*.md` directory supports path-scoped YAML frontmatter, letting teams organize instructions into topic-specific files that apply only to matching file patterns. All discovered rules are concatenated and injected into the system prompt on every session start.
-
-- **Automatic Edit Checkpoints**: Every `write_file`, `edit`, `multi_edit`, and `batch_edit` call now snapshots the original file content before mutating it. Snapshots are stored in `.kai/checkpoints/` with timestamp and session ID. The new `checkpoint_undo` tool restores the most recent batch of edits in a single call. Checkpoints older than 1 hour are cleaned automatically on each agent run.
-
-- **Auto-Memory / Self-Writing Context**: Each project gets a persistent memory file at `~/.kai/memory/<project-hash>/MEMORY.md`. The new `save_memory` tool lets the agent persist build commands, conventions, debugging discoveries, and architectural decisions across sessions. The first 200 lines are automatically loaded into every session's context window.
-
-- **Multi-File Atomic Edits (`batch_edit`)**: The new `batch_edit` tool applies edits across multiple files in a single all-or-nothing operation. If any edit fails, all changes are rolled back via checkpoint snapshots. Single user approval covers the entire batch. Capped at 10 files per batch.
-
-- **Terminal Image Protocol (`display_image`)**: The new `display_image` tool renders images inline in the active terminal via the iTerm2 OSC 1337 inline image protocol. The agent can push base64-encoded PNG/JPEG/GIF directly to the terminal cursor position. Also includes an OSC 1337 parser for PTY output so images piped through shell commands render natively.
-
-- **Agent Hooks System (`.kai/hooks/`)**: Lifecycle hook scripts that execute before and after tool calls. `pre_tool.sh` runs before every tool and can block execution via non-zero exit code. `post_tool.sh` runs after successful tool calls (fire-and-forget). Tool-specific hooks (`pre_edit.sh`, `post_write_file.sh`, etc.) are also supported. Hooks receive `TOOL_NAME`, `TOOL_INPUT`, `TOOL_PATH`, and `TOOL_RESULT` environment variables.
-
-- **Smart File Context (Auto-Attach)**: A keyword-based relevance engine now auto-discovers potentially relevant files at the start of each agent run. It scores files tracked by `FileTracker` (recently modified > recently read > open in editor) against the user's message and injects the top matches into the `<env>` block. This eliminates the agent's initial "search phase" for many common tasks.
-
-### Fixed
-
-- **Poison-tolerant mutex in parallel grep workers**: `fs_grep`'s parallel walker now uses `mutex_lock()` instead of raw `.lock().unwrap()`, preventing a single panicking worker from poisoning the mutex and cascading failure to every other worker thread.
-
-- **Thread spawn failures no longer panic**: PTY reader, flusher, waiter, and drop thread spawns now return `Err` instead of `.expect()`-panicking when OS thread creation fails. The drop-thread in `pty_close` degrades gracefully with a log warning instead of taking down the command handler.
-
-- **Dead code removed**: `ShellSession::started_at_ms` and its `#[allow(dead_code)]` annotation removed — the field was written but never read.
-
-- **Silent error swallows now logged**: Three `Promise.catch(() => {})` sites in the shell session lifecycle (`cancelAllShellSessions`, `closeShellSession`, abort-handler) now emit `console.debug` so cleanup failures are traceable.
+- Added: `.kai/rules/` ancestor discovery with path-scoped frontmatter; automatic edit checkpoints and `checkpoint_undo`; auto-memory (`save_memory` tool); multi-file atomic `batch_edit`; OSC 1337 `display_image` and parser; agent hooks (`.kai/hooks/`); smart file context auto-attach.
+- Fixed: poison-tolerant grep workers; thread spawns return Err; dead code and silent catches logged.
 
 ---
 
 ## [1.1.1]
 
-### Fixed
-- **Tool call leak after toggling auto-approve**: `stripIncompleteToolCalls` now drops entire assistant messages that contain unresolved tool-call parts, not just the tool parts themselves. Previously, orphaned text from a stripped tool call leaked into the next turn's history, causing models to emit raw XML tool-call syntax and spiral into loops at ~30–40% context usage.
-- **PowerShell mangled inline node commands**: On Windows, one-shot shell commands now use `-EncodedCommand` with UTF-16LE base64 encoding instead of `-Command`. This prevents PowerShell from interpreting special characters (`&`, `|`, `<`, `>`, `"`, `$`, `@()`) inside shell commands, which previously broke inline `node -e` expressions and chained commands.
-- **Multi-edit CRLF corruption**: `applyEdits` now normalizes the entire file content to LF once before applying any edits, then restores the original line-ending style at the end. The per-edit CRLF↔LF positional mapping (`eolAwareFind`, `eolAwareExactFind`) has been removed — all matching now uses plain `indexOf` with fuzzy fallback in a consistent LF-only space, eliminating positional drift in sequential edits.
+- Fixed: tool-call leak after auto-approve toggle; PowerShell `-EncodedCommand` for inline node; multi-edit CRLF corruption.
+
+---
 
 ## [1.1.0]
 
-### Fixed
-- **Model persistence across workspace switches**: `persistProjectModel` now falls back to `lastWorkspaceCwd` when the live context bridge is not yet set, so model selection is preserved across workspace reloads and tab switches.
-- **Window title always shows project name**: Removed the special-case that hid the project name when opened in a folder called "KAI". The title bar now consistently displays `ProjectName — KAI` regardless of the workspace folder name.
-- **Image/file attachments counted in context tokens**: `estimateTokens` now includes file and image parts in its token count, preventing context overflow when sending attachments alongside long conversations.
-- **ESC key no longer closes AiMiniWindow when idle**: The Escape key now only closes the mini-window when the agent is actively running or awaiting approval. An idle chat window remains open.
-- **Double-escaped regex in `stripLeakedTokens` fixed**: The markdown cleanup regex had `[\\\\s\\\\S]` (double-escaped), causing it to match literal backslash characters. Corrected to `[\\s\\S]`.
-- **Tab drag reorder jitter fixed**: `dragIdRef` is no longer reassigned after `moveTab`, eliminating visual jitter when reordering tabs.
-- **Nested code fence rendering in ASCII art blocks**: `wrapAsciiArt` now skips content already inside fenced code blocks, preventing double-fencing that broke markdown rendering.
+- Fixed: model persistence across workspace switches; title bar shows the project name; attachments counted in token estimates; ESC closes the mini-window only while busy; double-escaped regex; tab drag jitter; nested code fences.
 
 ---
 
 ## [1.0.9]
 
-### Fixed
-- **Agent retried denied tool calls**: When a user denied an approval-required tool call, the agent would retry the same call (or a variant), causing an infinite loop. The denial prompt has been strengthened and the agent is now forcibly stopped on denial — the user must re-prompt to continue.
-- **AiMiniWindow Escape key swallowed by child components**: The Escape handler now checks `e.defaultPrevented` so dismissing a dropdown or autocomplete inside the mini-window doesn't collapse the entire panel.
-- **Memory leaks across PTY lifecycle, renderer pool, and MCP channels**:
-  - **Renderer pool**: WebGL contexts are now properly destroyed via `Terminal.dispose()` when a slot is evicted from the pool; the WebGL recovery timer is now cancellable.
-  - **PTY sessions**: Nudge timeout IDs are cleared on session disposal; the detector is reset to prevent stale callbacks.
-  - **MCP manager**: `TauriStdioTransport.close()` now releases its Channel `onmessage` handler to break the reference cycle.
-  - **Rust PTY drop**: `PtyState` now spawns background drop threads per session via `Drop` impl, preventing main-thread blockage from `ClosePseudoConsole` on Windows shutdown.
+- Fixed: denied tool calls no longer retried by the agent; Escape `defaultPrevented` check; PTY/renderer/MCP memory leaks (WebGL dispose, nudge timers, channel handlers, background drop threads).
 
 ---
 
 ## [1.0.8]
 
-### Added
-- **Project folder name in window title bar**: The active workspace folder name is now shown in the title bar as `ProjectName — KAI`, making it easy to identify which project window is which.
-
-### Fixed
-- **Blank page crash from unknown model IDs in saved sessions**: If a saved session referenced a model ID not in the registry (e.g. after removing a provider), `getModel()` would throw, crashing the entire app. It now returns a synthetic fallback model instead. Missing models `moonshotai/kimi-k3`, `qwen/qwen3.7-flash`, and `qwen/qwen3.6-27b` were also added to the registry.
-- **Session leakage across workspaces**: `hydrateSessions` now filters sessions to the current workspace root and re-hydrates on workspace switch. The session picker no longer leaks untagged legacy sessions from other projects.
-- **Stop button unresponsive during approval**: `isBusy` now includes the `awaiting-approval` status, so the stop button, input bar disabled state, and mini-window escape handler all treat a pending approval as agent-busy rather than idle.
-- **Native folder picker replaces shell-out on Windows**: The "Open Project" dialog now uses `tauri-plugin-dialog`'s native folder picker instead of shelling out to PowerShell, providing a faster and more reliable directory selection experience.
+- Added: project folder name in the title bar.
+- Fixed: unknown model IDs in saved sessions fall back instead of crashing; missing registry models added; sessions filtered per workspace; stop button active during approvals; native folder picker.
 
 ---
 
 ## [1.0.6]
 
-### Fixed
-- **Store-file bloat freezing the webview on session hydration**: `loadAll()` was deserializing every `messages:<id>` key in `kai-sessions.json` at once — on projects with many large conversations this could reach 3.5 MB and freeze the webview JS thread, rendering a blank page when opening the AI panel. Now only the lightweight session list and active ID are loaded; messages are fetched lazily per session. A 512 KB guard also truncates oversized message histories on save.
+- Fixed: store load deserializes only the session list; messages lazy per session; 512KB truncation guard on save.
 
 ---
 
 ## [1.0.5]
 
-### Fixed
-- **Close AI panel left AiMiniWindow open**: The conversation toggle icon in the status bar closed the input panel but the chat window stayed visible. Now both close together — `handleToggle` calls `closeMini()` alongside `togglePanel()`.
-- **Minimize button on AiMiniWindow competed with status bar toggle**: Removed the minimize-screen button from the mini-window header. The single conversation toggle in the status bar is now the only way to open/close both the panel and mini-window.
+- Fixed: AI panel and mini-window close together; single toggle owns both.
 
 ---
 
 ## [1.0.4]
 
-### Fixed
-- **Open agent button didn't open the mini-window**: The "Open agent" button in the status bar only toggled `panelOpen`, but `AiMiniWindow` is controlled by a separate `mini.open` state. The button now opens/closes both the input panel and the chat window together.
-- **TPS pill showed "Infinity"**: When the first output token arrived in the same millisecond tick as the stream start timestamp, division by zero produced `Infinity`. Added an `elapsedMs > 0` guard.
-- **Session tracker missing cost estimates for dynamic models**: OpenRouter models fetched at runtime had no `MODEL_PRICING` entries, so `estimateCost` returned `null`. Added `registerDynamicPricing` — pricing data is now collected from the API response alongside context limits.
-- **X close button on AiMiniWindow redundant**: The close button competed with the status bar toggle. Removed — the mini-window is now controlled exclusively via the "Open agent" / conversation toggle button.
-
-### Changed
-- **Tokens/sec moved to separate pill**: The live TPS counter is now a standalone neutral-colored pill to the left of the model name rather than tucked inside the model dropdown trigger.
-- **Privacy and Browse removed from new tab menu**: Both options were non-functional or internal-use only. Removed from the `+` dropdown and cleaned up the prop chain.
+- Fixed: agent button opens and closes both windows; TPS pill Infinity guard; dynamic model pricing registration; redundant close button removed.
+- Changed: TPS is a separate pill; Privacy/Browse removed from the new-tab menu.
 
 ---
 
 ## [1.0.3]
 
-### Fixed
-- **Open agent button only opened — never closed**: `AiOpenButton` called `openPanel()` which only sets `panelOpen: true`. Changed to `togglePanel` so it functions as a proper open/close toggle.
+- Fixed: agent button is a proper open/close toggle.
 
 ---
 
 ## [1.0.2]
 
-### Fixed
-- **Theme sidebar/chart surfaces didn't match selected palette**: Palette themes only defined main surface variables. Added `deriveAuxiliaryVars()` to auto-generate `--sidebar-*`, `--chart-*`, and `--radius` from each palette's existing colors.
-- **Theme clearing looped over all 8 palettes**: `applyUiTheme` now tracks the last-applied keys and only removes exactly what was set.
-- **Theme useEffect ran redundant applies**: Added a `lastAppliedRef` guard to skip no-op (id, mode) cycles.
-- **Settings window re-applied its own theme change**: `onPreferencesChange` callbacks now compare incoming values with current state to skip self-originated events.
-
----
-
-## [1.0.1]
-
-### Fixed
-- **Text truncated after `>` in agent responses**: A broken regex in `stripLeakedTokens` for stripping `<|im_start|>/<|im_end|>` tokens had an unintended regex alternation that matched _any_ `>` character and stripped everything after it. Fixed the escape sequence so only actual LLM tokens are removed.
-- **Dynamic OpenRouter models defaulted to 128K context**: Any model fetched from OpenRouter that wasn't in the hardcoded `MODEL_CONTEXT_LIMITS` fell through to the 128K default — including `deepseek-v4-flash-0731` (which has 1M context). Added a `registerDynamicContextLimits` system that populates context limits from the API response's `context_length` field.
-- **Incorrect model context limits**: Verified every API model against official docs and OpenRouter model pages. Corrected 6 models: GPT-4.1-mini 128K→1M, Llama 4 Scout/Maverick 128K→1M, Inkling 524K→1M, GLM 5.1 200K→205K, Kimi K2.5 256K→262K.
-- **Bogus GLM 5.2 (1M) model entries**: Z.ai and OpenRouter both use `glm-5.2` as the model ID — the `glm-5.2[1m]` suffix was invalid and caused "model not found" errors. Removed the duplicate entries; 1M context is built into GLM 5.2.
-- **Custom Instructions textarea breaks with large text**: The `field-sizing-content` CSS on the Textarea component caused the field to grow unbounded when pasting large prompts, pushing content off-screen. Replaced with fixed height + `overflow-y-auto` scrolling. Added dirty detection (Save only appears on changes), animated "Saved" feedback, and a character counter.
-- **ASCII/Unicode diagrams render as single line**: Streamdown/markdown collapses single newlines into paragraphs, turning multi-line box-drawing diagrams into illegible one-liners. Added `wrapAsciiArt()` — detects contiguous blocks of box-drawing characters (U+2500–U+25FF) or ASCII-art line patterns and wraps them in code fences before rendering.
-- **Theme sidebar/chart surfaces don't match selected palette**: Palette themes (Emerald, Amber, etc.) only defined main surface variables — sidebar, chart, and border-radius stuck to the Kai default gray. Added `deriveAuxiliaryVars()` that auto-generates `--sidebar-*`, `--chart-*`, and `--radius` from each palette's existing colors.
-- **Theme clearing looped over all 8 palettes**: `applyUiTheme` destructively cleared every CSS variable from every theme on each application. Now tracks the last-applied keys and only removes exactly what was set.
-- **Theme useEffect ran redundant applies**: System dark-mode toggle or cross-window event echoes triggered `applyUiTheme` even when the (id, mode) pair hadn't changed. Added a `lastAppliedRef` guard to skip no-op cycles.
-- **Settings window re-applied its own theme change**: The cross-window `PREFS_CHANGED_EVENT` listener in `ThemeProvider` applied changes even when the current window was the originator. Added a value comparison guard in `onPreferencesChange`.
-
-### Changed
-- **Deterministic session state replaces model-based summarization**: Context summarization (`summarize.ts`) called `generateText` with the user's model, which could fail if the model had a small context window (recursive problem). Replaced with `buildSessionState` — a zero-cost `<session_state>` block built from `fileTracker`, `todoStore`, and lightweight regex error extraction. No API call, no model dependency, no failure modes.
-- **Removed unreliable auto-nudge logic**: The `shouldAutoNudge` heuristic often fired on legitimate model completions, injecting unwanted "Continue" messages. Removed entirely along with `hasLeakedToolCall` usage and the nudge counter.
-- **Removed summarization spinner and notice**: Since `buildSessionState` is synchronous, the "Compressing context…" spinner and "Context summarized" notice are no longer needed. Removed along with `summarize.ts` file.
-- **Progressive context compaction thresholds**: Lowered stall-read dropping from 50% to 40%, added tool-result truncation at 60%, and lowered summarization trigger from 90% to 75% of effective context limit. All phases now use the unified `contextLimit - 18K` effective limit.
-- **Token-based gate replaces message-count gate**: The old `MIN_MESSAGES_FOR_SUMMARY = 12` guard prevented summarization on short conversations with huge tool results (e.g. reading a 200KB file in 3 messages). Now uses a 16K token-estimate floor.
-
-### Added
-- **Free model detection & tag**: OpenRouter models with zero pricing or `:free` suffix are now tagged with a green `FREE` badge in the model picker dropdown. Detection runs during the dynamic model fetch.
-- **Live output tokens/sec in status bar**: The model name in the bottom bar now shows a live `123 tok/s` counter during streaming, computed from cumulative output tokens ÷ elapsed time since first token.
-- **Context pressure API for tools**: Added `getRemainingContextTokens()` to `ToolContext`, allowing tools to auto-truncate responses when context is tight.
-- **"None" agent persona option**: Added a `__none__` sentinel to the agent picker. When selected, `getAgentPersona` returns `null` and the `## ACTIVE AGENT` block is omitted from the system prompt — the model sees only the base system prompt + custom instructions.
-
-### Removed
-- **Close AI panel keyboard shortcut pill**: The `Ctrl+I` shortcut pill in the status bar is gone. The conversation icon now toggles the AI panel open/closed.
+- Fixed: palette themes auto-derive sidebar/chart/radius variables; theme clearing only removes what was set; redundant applies and self-echoes skipped.
 
 ---
 
 ## [1.0.0]
 
-### Added
-- **Auto-sync OpenRouter model list**: KAI now periodically fetches the full OpenRouter model catalog and merges it with the hardcoded model list, so models like `deepseek-v4-flash-0731` and other newly released variants never need a manual update.
-- **Latest model additions**: Added GPT-5.6 family (Sol, Terra, Luna), Claude Opus 5 / Sonnet 5 / Fable 5, Gemini 3.6 Flash, Kimi K3, MiniMax M3, Qwen 3.7 Flash/Max/Plus, Gemini 3.5 Flash Lite, Laguna S 2.1, Inkling, LongCat 2.0, Grok Build 0.1.
-- **Sequential approval queue**: When an agent step emits multiple approval-required tool calls, only the first is interactive — the rest render as compact "queued" chips and unlock one at a time as the user responds.
-- **Leaked tool-call detection**: Small/local models that emit raw tool-call markup as plain text are now detected and the model is automatically corrected with a nudge to use native function calling.
-- **Comprehensive AI safety layer**: Added a deny-list refusing obvious secret paths (`.env`, `.ssh/`, credentials) on both read and write paths, with canonical-path re-check to catch symlink traversal.
-- **Poison-tolerant state locks**: Replaced all bare `.unwrap()`/`.expect("poisoned")` calls on shared `Mutex`/`RwLock` with poison-recovering wrappers so one panicking thread doesn't take down every PTY/shell/git command.
+- Added: auto-sync OpenRouter model list; latest model additions (GPT-5.6, Claude Opus/Sonnet/Fable 5, Gemini 3.6 Flash, Kimi K3, MiniMax M3, Qwen 3.7 family, and more); sequential approval queue (one interactive, rest queued); leaked tool-call detection with correction nudge; secret-path deny-list on read and write with canonical-path re-check; poison-tolerant state locks.
+- Fixed: Stop button cancels running shell commands (`abortSignal`); dangling `<thinking>` regex no longer truncates responses (negative lookahead); `->` operators no longer stripped from code blocks.
 
-### Fixed
-- **STOP button now cancels running shell commands**: `bash_run` and `bash_background` respect `abortSignal` — pressing Stop or Esc kills in-flight shell processes.
-- **Over-aggressive thinking-tag regex truncated responses**: The `<thinking>` dangling-tag regex consumed everything from the tag to end-of-string in legitimate responses. Fixed with a negative lookahead for a closing `</thinking>` before stripping.
-- **Code block content truncated around `->` operators**: Fixed regex patterns that incorrectly matched `->`/`->>` as partial tool-call tokens and stripped them from code blocks.
-- **New folders not appearing in file tree**: Agent-created directories now trigger a file tree refresh so they appear immediately without manual reload.
-- **Wide pastes breaking AI input layout**: The AI input textarea now properly constrains its width, preventing horizontal overflow when pasting long lines.
-- **Race conditions and unbounded loops in AI pipeline**: Fixed several edge cases that could cause infinite loops or stale state in the agent's message processing.
-- **Agent SSRF hole in HTTP proxy**: Closed a DNS-rebinding vector by pinning reqwest's resolver to the IPs classified during host validation, and added per-hop redirect re-checking.
-- **Removed annoying error toast popup**: The "Ask Kai to fix" toast that appeared on every error is gone — errors are now shown inline in the chat.
+---
 
-### Removed
-- **Non-functional Agent Orchestrator prototype**: The Agent Orchestrator panel and its backend were removed — they were unreachable and contained dead code paths.
-- **`tsforge` gate tool and `enableGateRollback`**: Removed an unused LLM security analysis tool and its rollback mechanism.
+## [1.0.1]
 
-### Changed
-- **Shortcut wiring extracted from App.tsx**: Keyboard shortcut definitions and registration moved to dedicated modules, keeping `App.tsx` as a thin coordinator.
-- **Simplified edit tools**: The edit tool implementations were streamlined for better reliability and fewer edge cases.
+- Fixed: text no longer truncated after `>` in responses; OpenRouter dynamic models register their real context limits; six model context limits corrected; duplicate GLM 5.2 entries removed; custom instructions textarea bounds; ASCII/Unicode diagrams fenced.
 
 ---
 
 ## [0.9.5]
-### Added
-- **Tab split view**: Right-click any tab to open it as a side-by-side split panel. All tab kinds supported (terminal, editor, preview, git diff, API tester, markdown preview). Terminal tabs additionally offer "Split pane right / down" to split within the tab itself.
-- **Draggable tabs**: Tab bar tabs can now be dragged left and right to reorder them.
-- **Subagent step limit setting**: Subagent max steps doubled from 12 → 24 and exposed as a configurable field in Agent Settings (range 1–200).
 
-### Fixed
-- **Chat session reset on `cd`**: Navigating into a subdirectory of the current project no longer triggers a new chat session. The session switcher now treats any path that starts with the session's project root as the same project.
-- **Plan Mode "System message must be at the beginning" error**: The plan mode prompt was appended as a second `system` role message, which most non-Anthropic providers reject. It is now concatenated into the single system message.
-- **`<thinking>` tags leaking into chat**: Models that emit raw `<thinking>…</thinking>` in their text stream (DeepSeek, Qwen, etc.) now have those blocks extracted and rendered as collapsible reasoning pills, matching the behaviour of native `reasoning` parts. Dangling open tags and pipe-delimited variants are also stripped.
-- **Editor text selection invisible**: Selection highlight in the CodeMirror editor was using `var(--foreground)` at 18% opacity, which blended into the background on dark themes. Raised to 28% (focused) / 14% (unfocused) and split into separate selectors so the two states are visually distinct.
-- **Folder delete via right-click did nothing**: The two-click confirmation used `useState`, which caused a React re-render that replaced the menu item's DOM node and fired a synthetic `mouseleave`, resetting the confirmation state before the second click could land. Confirmation state is now tracked in a `useRef` so no re-render occurs on first click; `e.preventDefault()` is only called on the first click, allowing the second click to close the menu naturally after deleting.
-- **Terminal prompt overwrites last line after stopping a server**: When a process exits without a trailing newline (e.g. Ctrl+C on a dev server), PowerShell's prompt function now checks `[Console]::CursorLeft` and emits a newline + inverted-video `%` marker before drawing the prompt, matching the zsh `PROMPT_CR` convention.
+- Added: tab split view (all tab kinds) and draggable tabs; subagent step limit exposed in settings (24 default).
+- Fixed: `cd` into a subdirectory keeps the chat session; plan-mode system message concatenation; `<thinking>` tags rendered as reasoning pills; editor selection visibility; folder-delete confirmation via ref; prompt redraw on no-output processes.
+
+---
 
 ## [0.9.39]
-### Fixed
-*   **"Input should be an object" API Error**: Added a post-conversion `sanitizeModelMessages` pass that coerces `null`/`undefined`/non-object `tool-call` inputs to `{}` before sending to the provider, preventing Anthropic's `tool_use.input: Input should be an object` rejection.
-*   **Orphaned tool_use Without tool_result**: The same sanitizer now strips any `tool-call` parts that have no matching `tool-result` anywhere in the conversation, catching edge cases that `stripIncompleteToolCalls` and `ignoreIncompleteToolCalls` miss after session restore or mid-stream stops.
-*   **Stuck Shell Commands Unrecoverable**: When `cancelAllShellSessions` fires (Esc / Stop), it now force-closes the shell session after a 3-second grace period and clears the session cache, so a stuck command doesn't permanently block the agent — the next run gets a fresh shell.
-*   **Denied Edit Causes Retry Loop**: Added a `DENIED TOOL CALLS` rule to the system prompt instructing the model to never retry a denied/rejected tool call and to ask the user what to do instead.
-*   **Pasted Text Not Wrapping in Chat**: Added `overflow-wrap-anywhere` to both the user message `<p>` and the `MessageContent` container so long formatted text, URLs, and code snippets wrap correctly inside the AI mini window.
+
+- Fixed: tool-call inputs sanitized to objects before send; orphaned tool_use without tool_result stripped; stuck shell commands force-closed after 3s on cancel; denied-tool-call retry rule in the prompt; chat text wraps.
+
+---
 
 ## [0.9.38]
-### Fixed
-*   **Approval Cards Unresponsive During Fast Edits**: When multiple edit approvals spawned in quick succession, only the last card was clickable. Removed `onRespond` from the `AiToolApproval` memo comparator — the inline closure caused rapid function-identity churn during streaming that prevented earlier cards from responding to clicks.
-*   **Folder Delete & Rename Broken on Windows**: The `dirname()` helper in the file explorer only searched for `/` separators, causing folder delete and rename operations to fail on Windows backslash paths. Now splits on both `/` and `\`.
-*   **Table Download Button Non-Functional**: The download button on markdown tables (from Streamdown) used blob-URL anchor clicks, which don't trigger real downloads inside Tauri's webview. Disabled the table download control; copy and fullscreen still work.
-*   **Agent Chat Not Auto-Scrolling on User Message**: When the user sent a new message while scrolled up, the AI mini window didn't scroll to show the new message or the agent's response. Added a `contextRef`-based scroll-to-bottom trigger on new user messages.
-### Changed
-*   **Agent Identity Decoupled from Persona**: Changed the system prompt from "You are Kai" to "You are an AI agent embedded in a developer terminal emulator called Kai", so custom agent personas aren't overridden by a hardcoded identity.
+
+- Fixed: all approval cards clickable during fast edits; Windows folder delete/rename with backslash paths; table download disabled in the webview; chat auto-scrolls on user messages.
+- Changed: agent identity decoupled from the persona name.
+
+---
 
 ## [0.9.37]
-### Fixed
-*   **Stop agent before injecting steering message**: Prevents orphaned tool_use blocks from reaching the API
-when the user redirects the agent mid-run.
+
+- Fixed: agent stopped before injecting steering messages (orphaned tool_use blocks).
+
+---
+
 ## [0.9.36]
-### Added
-*   **Dedicated MCP Settings Panel**: The "MCP Servers" entry in the File menu now opens its own isolated Settings window showing only the MCP server management section — add, edit, toggle, and remove servers without navigating through the full settings UI.
-*   **Dedicated Snippets Settings Panel**: Added a new "Snippets" entry to the File menu that opens a focused Settings window for creating and managing reusable prompt snippets (`#handle` tokens).
-*   **Lazy-Loaded Settings Sections**: All settings sections are now loaded on demand via `React.lazy`, so opening any isolated settings panel only fetches the code for that specific section — dramatically faster window open times, especially in dev mode.
-### Fixed
-*   **MCP Store Hydration Staleness**: Fixed MCP server configs not reflecting the latest saved state when the settings window reopened, ensuring fresh data is always loaded from disk.
-### Docs
-*   **Claude Code CLI Guide**: Added a README section explaining how to use a Claude subscription via the Claude Code CLI directly inside KAI's terminal.
+
+- Added: dedicated MCP Settings panel; Snippets settings panel; lazy-loaded settings sections.
+- Fixed: MCP store hydration on settings reopen.
+- Docs: Claude Code CLI guide in README.
+
+---
 
 ## [0.9.35]
-### Fixed
-*   **Git Credential Helpers Restored**: Stopped blanking `GIT_ASKPASS` and `SSH_ASKPASS` environment variables in git subprocess calls. Non-interactive credential helpers (Git Credential Manager, ssh-agent) now work correctly for push, pull, and fetch operations.
-*   **Terminal CR Fallback**: Improved carriage return handling in terminal session initialization to prevent edge-case prompt rendering issues.
+
+- Fixed: `GIT_ASKPASS`/`SSH_ASKPASS` no longer blanked — credential helpers work; terminal CR fallback.
+
+---
 
 ## [0.9.34]
-### Added
-*   **Per-Project Model Memory**: KAI now remembers the last AI model selected in each project. When you reopen a workspace, it automatically restores the model you were using — no more reselecting every time you switch projects.
-*   **Save & Save All in File Menu**: Added Save (active dirty editor) and Save All (all unsaved editors, `Ctrl+Shift+S` / `⌘⇧S`) actions to the File dropdown menu.
-*   **Themed AI Input Context Menu**: Right-clicking the AI input textarea now shows a custom themed context menu (Undo, Redo, Cut, Copy, Paste, Select All) matching the app's visual style, replacing the unstyled native browser menu.
-### Fixed
-*   **Shell Prompt Not Appearing on Startup (Windows)**: Fixed an intermittent issue where PowerShell (and other shells) would show only a blinking cursor on launch with no prompt. Added a ConPTY settle delay between sequential PTY spawns to prevent output pipe stalls, and a fallback resize nudge that triggers a prompt redraw if no output is received within 3 seconds.
-*   **AI Summarization Loop**: Fixed a bug where the "Context summarized" notice would trigger on every subsequent agent step instead of just once. The Chat instance now adopts the trimmed message history after summarization, preventing redundant re-summarization.
-*   **Image Paste Crash on Anthropic**: Fixed `image.source.base64: image cannot be empty` errors when sending messages with images to Claude. Stripped image placeholders from persisted sessions are now silently dropped instead of being sent as broken empty payloads.
-*   **Claude Opus Context Limits**: Corrected the context window for Claude Opus 4.6, 4.7, and 4.8 from 200K to the actual 1 million token limit.
-*   **AI Input Bar Overflow**: The AI input textarea now properly expands up to 2 lines and scrolls beyond, instead of pushing the entire workspace layout upward.
-*   **Source Control Unstage Icon**: Fixed the unstage button icon and guarded recent projects persistence behind preferences hydration.
+
+- Added: per-project model memory; Save / Save All in the File menu; themed AI input context menu.
+- Fixed: Windows startup prompt (ConPTY settle + resize nudge); summarization loop; Anthropic empty-image payloads; Opus context limits; input bar expansion; unstage icon.
+
+---
 
 ## [0.9.33]
-### Fixed
-*   **Unsafe Lifetime in Shell Sessions**: Eliminated an unsound `unsafe` block that transmuted a raw pointer to `'static` for the cancel flag in agent shell sessions. Now uses a safe `Arc<AtomicBool>` clone moved into the worker thread.
-*   **CWD Sentinel Collision**: Replaced the static `__KAI_CWD__` sentinel with a per-session random token (timestamp + pid + counter) so command output can never accidentally or maliciously corrupt the agent shell's working directory tracking.
-*   **PTY Final Output Loss (Windows)**: Increased the reader-thread join deadline from 50ms to 500ms with an unconditional `join()` fallback, preventing the last chunk of terminal output from being silently dropped on ConPTY child exit.
-*   **TodoStrip useEffect Dependency**: Changed the auto-collapse effect dependency from a boolean expression (`todos.length > 5`) to the numeric length value, fixing a subtle React hook correctness issue.
-### Added
-*   **Shell Resource Caps**: Added limits of 32 concurrent agent shell sessions and 16 background processes. Exited background processes are auto-reaped before the cap is checked, and clear error messages are returned when limits are hit.
-### Improved
-*   **Git Push Safety**: Replaced a bare `unwrap()` in the git push path with an annotated `expect()` for clearer panic context if the upstream invariant is ever violated.
-*   **WebGL Error Traceability**: Added `console.debug` logging to 7 previously silent `catch {}` blocks in the terminal renderer pool, covering WebGL context loss, addon disposal, and OSC handler teardown.
-*   **DRY Hash Utility**: Extracted the duplicated `djb2` hash function from `tools/fs.ts` and `tools/edit.ts` into a shared `ai/lib/hash.ts` module.
+
+- Fixed: unsafe transmute replaced with `Arc<AtomicBool>`; per-session CWD sentinel token; PTY final output join deadline 500ms; TodoStrip effect dependency.
+- Added: shell resource caps (32 sessions, 16 background).
+- Improved: push `expect`, WebGL logging, shared `djb2` hash module.
+
+---
 
 ## [0.9.32]
-### Added
-*   **Global Text Search in File Tree**: Integrated a fully functional, regex-powered text search inside your workspace files (`fs_grep`) inside the File Explorer search panel.
-    *   **Files vs Content Toggles**: Easily switch between searching for matching file names and searching for matching lines of text inside files.
-    *   **Case Sensitivity**: Toggles exact casing matches using the native `"Aa"` button (mimicking VS Code).
-    *   **Inline Context Previews**: Displays file hits as `filename.ext:line` with matching line snippets rendered inside a beautifully styled inline code block below the filename.
-    *   **Smooth Navigation**: Clicking any text match opens the file and instantly scrolls the editor centered directly to that specific line number.
-*   **Source Control Merge Conflict Safety**: Automatically detects unresolved merge conflicts inside the active working tree.
-    *   **Conflicts Alert Banner**: Displays a prominent red warning banner at the top of the SCM list notifying you of active conflicts.
-    *   **Committed Safeguards**: Disables both the **Commit** button and the **Generate Commit Message** buttons whenever unresolved conflicts are present on disk.
-*   **Isolated Settings Modals**: The File menu setting shortcuts now launch a focused settings window that hides the main TabsList navigation bar entirely, acting as a clean, consistent, dedicated modal.
-### Fixed
-*   **SCM Message Generation Crashes**: Restructured the `generateCommitMessage` handler to statically import dependencies, resolving runtime webview dynamic import failures.
+
+- Added: regex text search in the file-tree explorer with files/content toggle, case sensitivity, inline previews, click-to-line navigation; merge-conflict detection disables Commit and Generate; isolated settings modals.
+- Fixed: commit-message generation static imports.
+
+---
 
 ## [0.9.31]
-*   **Top Bar Button Swapping**: Swapped the Keyboard Shortcuts help button directly into KAI's top-right header action row, replacing the redundant Settings button there.
-*   **DWM Shadow Clashes Resolved**: Disabled standard Windows Desktop Window Manager (DWM) shadows on the settings tauri window builder to resolve the thin square border clashing with custom HTML rounded corners.
-### Fixed
-*   **Needless Borrows Warnings**: Resolved modern Clippy compiler warning failures (`needless_borrows_for_generic_args`) on platform-specific string array slice inputs inside Tauri's Rust lib builder.
+
+- Added: File dropdown menu (New/Open/Recent project, settings shortcuts); native directory picker command per platform.
+- Fixed: shortcuts button in the header; DWM shadow disabled on the settings window; clippy `needless_borrows`.
+
+---
 
 ## [0.9.30]
-### Added
-*   **File Dropdown Menu**: Added a custom, project-focused File Dropdown Menu in the top-left of KAI's header.
-    *   **New Project**: Prompts the developer to pick a parent directory, inputs the project name, creates the subfolder on disk, and automatically opens KAI inside the new workspace.
-    *   **Open Project**: Invokes a native system directory picker to open KAI focused on any project directory on your machine.
-    *   **Recent**: Maintains a dynamic log of the 10 most recently opened projects/folders in `localStorage`, showing folder names and full paths.
-    *   **Settings Section Shortcuts**: Connects drop-down actions to directly launch KAI's Settings window opened to the Models, Agents, Shortcuts, Appearance (General), and About tabs.
-*   **Native Directory Dialog Picker**: Introduced a platform-agnostic `pick_project_folder` command in `lib.rs` (using PowerShell on Windows, AppleScript POSIX choice on macOS, and Zenity/kdialog on Linux) to trigger native directory browsers with zero external crate dependencies.
-### Fixed
-*   **Settings Window Shadow (Windows)**: Disabled DWM (Desktop Window Manager) window shadow (`.shadow(false)`) on the settings `WebviewWindowBuilder` in `src-tauri/src/lib.rs` to prevent Windows from drawing an ugly, thin 1px square border behind the rounded settings window.
+
+- Added: File dropdown menu — New Project, Open Project, Recent (10), settings section shortcuts; platform-agnostic native `pick_project_folder` command.
+- Fixed: settings window DWM shadow (thin border).
+
+---
 
 ## [0.9.29]
-### Added
-*   **Workspace-Scoped AI Sessions**: Partitioned and scoped chat sessions on the active project directory (`workspaceRoot`). Session switches and list dropdowns in `AiMiniWindow` automatically filter based on the current workspace context.
-*   **Late Workspace Hydration**: Resolved boot-time session initialization race conditions by deferring chat state hydration until the local workspace root is fully resolved, and passing it dynamically on boot.
-*   **Auto-Claiming Legacy Chats**: Implemented a background project-claiming system. Any workspace-less or legacy sessions opened in a project are automatically converted and associated with that specific workspace path.
-*   **LaTeX Math Arrow Parsing**: Enhanced token sanitization (`stripLeakedTokens`) in `AiChat.tsx` to automatically parse and translate LaTeX arrow strings (e.g., `\rightarrow`, `\to`, etc.) into clean Unicode equivalents (`→`, `←`, etc.).
+
+- Added: workspace-scoped AI sessions; deferred hydration until the workspace root resolves; background project claiming for legacy chats; LaTeX arrow token translation.
+- Fixed: boot-time session races.
+
+---
 
 ## [0.9.28]
-### Added
-*   **Unified Input Bar Controls**: Moved the voice microphone (`Mic01Icon`) and file attachment (`Add01Icon`) buttons from the bottom status bar directly to the left of the user query input text area inside the `AiInputBar`.
-*   **Custom Local Loopback Bypasses**: Integrated local network bypasses for `127.0.0.1` and `0.0.0.0` loopbacks in `isLocalUrl` (`PreviewPane.tsx`) and link handlers (`App.tsx`), preventing local server traffic from being routed externally.
-*   **Enforced Proxy Percent-Encoding**: Enforced standard percent-encoding on target URLs appended to the preview proxy template to eliminate parameter collisions on the proxy server.
-### Fixed
-*   **Floating Window Padding Consistency**: Standardized unexpanded `AiMiniWindow` margins to `8px` (`right-2`) and aligned expanded sidebar margins to resolve visual gaps and coordinate spacings beautifully across all window states.
-*   **Button Order Flow**: Switched the layout flow of the new input buttons to show the Mic/Voice input control first followed by the Attachment/Add control.
+
+- Added: mic and attachment buttons moved to the input bar; local loopback bypasses in the preview proxy; enforced proxy percent-encoding.
+- Fixed: mini-window margins standardized; mic-before-add button order.
+
+---
 
 ## [0.9.27]
-### Added
-*   **Assistant Copy Response Button**: Added a beautifully styled copy button to assistant messages that appears on hover and provides inline clipboard success states.
-*   **Project Memory Guide**: Included an instructional guide section for local `Kai.md` persistent memory configuration inside the main `README.md`.
-### Fixed
-*   **Symmetrical Expanded Chat Margins**: Positioned the expanded `AiMiniWindow` left and right edges symmetrically (8px) and bound the bottom edge dynamically to the active input bar height.
-*   **Header Separation Bounds**: Clamped the maximum height of the unexpanded floating `AiMiniWindow` to prevent overlaps with KAI's header/top bar.
-*   **Input Bar Margins**: Isolated the sidebar-collapsed left padding from bleeding into the docked `AiInputBar`, allowing it to span flush with window margins.
-*   **Fork Button Alignment**: Redesigned and aligned the conversation fork button directly to the left of user message bubbles with pristine border/background transition effects on hover.
+
+- Added: assistant copy button; project memory guide in README.
+- Fixed: expanded chat margins symmetric; header clamp; input-bar padding; fork button alignment.
+
+---
 
 ## [0.9.26]
-### Fixed
-*   **Resilient Tool Call Stripping**: Made the tool-call sanitization regexes resilient to unclosed or partial tags at the end of the text stream to prevent leaked formatting.
-### Added
-*   **Documentation Revamp**: Updated `README.md` with new feature listings, detailed built-in agent personas, and setup guides for local models (LM Studio) and Model Context Protocol (MCP) servers.
+
+- Fixed: tool-call stripping resilient to unclosed tags.
+- Added: README revamp — features, personas, LM Studio and MCP setup guides.
+
+---
 
 ## [0.9.25]
-### Added
-*   **Open in Live Preview**: Added a right-click context menu option for `.html` / `.htm` files inside the file explorer. Spawns an automated `npx --yes http-server` on port `5500` serving the folder, and automatically launches a connected Web Preview tab pointing directly to the file.
-*   **Auto-Closing Preview Tabs**: Integrated a reactive tab-closing trigger. Clicking the "Stop server" button in the address bar now automatically terminates the server and closes your active preview tab.
-*   **Inline User Image Previews**: Users' uploaded or pasted clipboard images now render as responsive image cards directly inside user message bubbles in the chat log.
-### Fixed
-*   **Live Server Port Mapping**: Changed the server port parameter from `-p 5500` to `--port 5500` inside the launch script, enabling KAI's address bar to match and display the red "Stop server" button successfully.
+
+- Added: "Open in Live Preview" for .html files (http-server on 5500 + preview tab); auto-close of preview tabs on server stop; inline user image previews.
+- Fixed: server port flag for the address-bar stop button.
+
+---
 
 ## [0.9.24]
-### Fixed
-*   **Security & PDF Previews**: Added `blob:` to the `frame-src` directive in the application Content Security Policy (CSP). This successfully unblocks the PDF viewer iframe, allowing generated and converted PDF documents to load natively.
+
+- Fixed: `blob:` in CSP `frame-src` unblocks the PDF viewer.
 
 ---
 
 ## [0.9.23]
-### Fixed
-*   **Programmatic Shell Resilience**: Automatically append the `--yes` (`-y`) confirmation flag to any `npx` commands run by the AI agent to prevent interactive package-install prompts from freezing the background shell session.
-*   **CLI Card Layouts**: Applied `whitespace-pre-wrap` styling to long terminal/shell commands in tool execution detail containers to ensure they wrap beautifully within the width of the panel.
+
+- Fixed: `npx` commands get `--yes`; long commands wrap in tool cards.
 
 ---
 
 ## [0.9.22]
-### Added
-*   **Conway's Game of Life Thinking Spinner**: Replaced the generic loading indicator in the chat stream with an interactive, toroidal 1D Game of Life cellular automaton that animates on a single monospace line while the model is thinking.
-*   **Esc-Key Streaming Interrupt**: Integrated a global keyboard listener on the `Escape` key inside the agent window. Pressing `Esc` now instantly cancels in-flight agent streaming runs and halts running background shell processes, saving API tokens.
+
+- Added: Game-of-Life thinking spinner; Escape interrupts in-flight runs and background shells.
 
 ---
 
 ## [0.9.21]
-### Fixed
-*   **Native Link Opening**: Disabled the redundant, clipped, and non-functional third-party link safety dialog box. Links clicked inside the chat or Markdown preview panes now natively open instantly inside your default system browser via the Tauri opener plugin.
+
+- Fixed: links open natively via the opener plugin; redundant safety dialog removed.
 
 ---
 
 ## [0.9.20]
-### Added
-*   **Editable Built-in Personas**: Enabled full customization of built-in agent prompts (like *Coder* or *Architect*) through local database overrides, complete with a "Reset to default" restore action.
-*   **General Assistant Agent**: Added a new built-in non-coding `"Assistant"` agent persona, optimized specifically for writing, copyediting, brainstorming, and general text tasks.
-### Fixed
-*   **Zustand Infinite Loop**: Replaced a reference-unstable state selector in the custom Agents view with a reactive `useMemo` block, resolving a critical React thread lock that caused the panel to freeze blank.
+
+- Added: editable built-in personas with reset; "Assistant" general-purpose agent.
+- Fixed: agents view Zustand infinite loop (blank panel).
 
 ---
 
 ## [0.9.19]
-### Added
-*   **Multimodal Clipboard Image Pasting**: Users can now copy any image (such as standard screenshots or crops) and paste them directly into the AI input bar with `Ctrl+V`, which attaches them instantly as native visual media chips.
-*   **User Upload Previews**: Attached and pasted images are now fully rendered as inline image cards inside your user chat bubbles.
-*   **MCP Registry Installations**: Corrected registry package parsing to map `streamable-http` remote connections to `"sse"` transport type, unblocking click-to-install actions for official MCP servers.
+
+- Added: clipboard image pasting into the AI input; inline upload previews; MCP registry `streamable-http` → `sse` mapping.
 
 ---
 
 ## [0.9.18]
-### Fixed
-*   **Local Model Fetching**: Corrected a race condition inside the settings dropdown trigger that caused the panel to open prematurely and report "No models found" before the network query had resolved.
+
+- Fixed: local model dropdown race ("No models found" before resolution).
 
 ---
 
 ## [0.9.17]
-### Fixed
-*   **Interface Sizing Alignment**: Aligned the horizontal top border of the AI input bar with the sidebar rail by locking the empty input area height to exactly `42px`, resulting in a continuous, flush split-panel layout.
-*   **Thinking Token Sanitization**: Added a comprehensive regex parser to clean up leaked raw JSON tool calls, thought markers, and streaming delimiters (such as `<|"|>`) from rendering inside your chat messages.
+
+- Fixed: input-bar height locked to 42px (flush split panel); leaked JSON tool calls and thought markers sanitized.
 
 ---
 
 ## [0.9.16]
-### Added
-*   **Auto-Healing Edit Guards**: Replaced strict lockfile-style hash checks on file modifications. The edit tool now automatically heals and syncs its state, applying replacements directly to the fresh on-disk content as long as the targeted old strings match.
-*   **Tucked-In Stop Button**: Cleaned up the large red absolute floating action button by embedding a smaller, subtle, and context-aware gray Stop button directly inside the active `TodoStrip` progress row.
-*   **Automated Todo Completion**: The todo list now automatically runs a cleanup action, closing and removing itself from the agent window once all listed tasks are checked off.
+
+- Added: auto-healing edit guards (hash checks replaced with match-and-apply); stop button embedded in the todo strip; todos auto-complete and dismiss.
 
 ---
 
 ## [0.9.15]
-### Added
-*   **Direct PDF Writer (`convert_to_pdf`)**: Introduced a native agent tool to convert `.md`, `.txt`, and `.docx` files directly into styled, paginated, and beautifully typeset PDF documents, backed by a new binary file-writing Tauri Rust command (`fs_write_file_bytes`).
+
+- Added: `convert_to_pdf` tool (md/txt/docx → PDF) backed by `fs_write_file_bytes`.
 
 ---
 
 ## [0.9.14]
-### Added
-*   **Direct Z.ai (GLM) Integration**: Integrated Z.ai (Zhipu AI) as a first-class, dedicated cloud provider with keys stored securely in your OS keychain.
-*   **Model Upgrades**: Upgraded the curated OpenRouter model selection list to replace deprecated Qwen models with the flagship `Qwen 3.7 Max` and `Qwen 3.7 Plus`.
+
+- Added: Z.ai (GLM) as a first-class provider; Qwen 3.7 Max / Plus models.
 
 ---
 
 ## [0.9.13]
-### Added
-*   **Custom Context Menu**: Implemented a modern, selection-aware context menu on right-click inside the terminal and text editor views, featuring quick actions for copy/paste, split layouts, and Ask Kai.
-*   **Selection Filters**: Added boundary selection filters and native spellcheck toggles.
+
+- Added: custom selection-aware context menu (copy/paste, split layouts, Ask Kai); spellcheck toggles.
