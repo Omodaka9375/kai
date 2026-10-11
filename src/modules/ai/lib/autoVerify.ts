@@ -1,30 +1,37 @@
 /**
- * Auto-verify hook — the machine rule behind "verify every change".
+ * Auto-verify at RUN END — the machine rule behind "verify every change",
+ * without the per-write latency tax.
  *
- * After a write-batch tool (edit / multi_edit / write_file / batch_edit /
- * rename / delete) succeeds, KAI runs the project's verify command and
- * appends the outcome to the tool result. "Agent forgot to typecheck" stops
- * being possible: the result itself carries the check.
+ * Why run-end, not per-write: a per-write await stalls every tool result on a
+ * full typecheck (tens of seconds in real repos), and fires on HALF-EDITED
+ * states — removing a symbol in one file and adding its replacement in the
+ * next makes the intermediate check fail, pressuring the model to "fix" a
+ * state it was about to complete. One verify per run, when the model has
+ * declared itself done, is the correct granularity: the guarantee ("never
+ * finish with a broken build") is preserved, mid-refactor noise disappears,
+ * and the cost is the theoretical minimum.
  *
- * Configuration, first match wins:
+ * Flow:
+ *   1. Write tools call noteWrite() from the tool-fencing layer — a
+ *      synchronous mark, adds nothing to the tool result's latency.
+ *   2. AgentRunBridge, when a run settles to idle (or errors), calls
+ *      verifyIfDirtyAtRunEnd().
+ *   3. If the project is dirty: resolve the verify command, run it (capped).
+ *      FAIL → inject a wake message into the session; the agent gets a new
+ *      turn with the failure output and must fix it before finishing.
+ *      PASS → clear the dirty mark silently.
+ *
+ * Command resolution, first match wins:
  *   1. package.json "verify" / "verify:changed" script
- *   2. package.json "scripts" matching `tsc --noEmit` (TypeScript projects)
- *   3. src-tauri/Cargo.toml present → cargo check (Rust projects)
- *   4. nothing → no verification (plain text folders etc.)
- *
- * Debounced per project and capped: one verify per 15s window per root,
- * output truncated, failures reported as warnings — never as tool errors
- * (the edit DID succeed; the check outcome is information for the model).
+ *   2. any package.json script matching `tsc --noEmit`
+ *   3. src-tauri/Cargo.toml present → cargo check
+ *   4. nothing → no verification
  */
 
 import { invoke } from "@tauri-apps/api/core";
 
-export type VerifyOutcome =
-  | { ran: false; reason: string }
-  | { ran: true; command: string; ok: boolean; summary: string };
-
-/** Tools whose success triggers a verification pass. */
-const WRITE_TOOLS = new Set([
+/** Tools whose success marks the project dirty for end-of-run verification. */
+export const WRITE_TOOLS = new Set([
   "edit",
   "multi_edit",
   "write_file",
@@ -33,11 +40,19 @@ const WRITE_TOOLS = new Set([
   "delete",
 ]);
 
-const DEBOUNCE_MS = 15_000;
-const MAX_OUTPUT_CHARS = 1200;
+const MAX_OUTPUT_CHARS = 1_600;
+const VERIFY_TIMEOUT_S = 240;
 
-type CacheEntry = { at: number; command: string; ok: boolean; summary: string };
-const recentByRoot = new Map<string, CacheEntry>();
+/** Last write timestamp per workspace root — the "dirty" mark. */
+const dirtyAt = new Map<string, number>();
+
+/** In-flight verification per root — prevents concurrent duplicate runs. */
+const inFlight = new Set<string>();
+
+export function noteWrite(toolName: string, workspaceRoot: string | null): void {
+  if (!workspaceRoot || !WRITE_TOOLS.has(toolName)) return;
+  dirtyAt.set(workspaceRoot, Date.now());
+}
 
 type PkgJson = { verify?: string; scripts?: Record<string, string> } | null;
 
@@ -76,9 +91,6 @@ export async function resolveVerifyCommand(root: string): Promise<string | null>
       /\btsc\b[^\n]*--noEmit/.test(s),
     );
     if (tscScript) return tscScript;
-    // package.json with deps but no scripts at all — still run tsc if it's
-    // installed; resolveVerifyCommand has no cheap way to know, so let the
-    // run fail-soft below.
   }
   if (await fileExists(`${root}/src-tauri/Cargo.toml`)) {
     return "cargo check";
@@ -86,74 +98,72 @@ export async function resolveVerifyCommand(root: string): Promise<string | null>
   return null;
 }
 
-/** Run the verify command in the project root, capped and debounced. */
-async function runVerify(root: string, command: string): Promise<CacheEntry> {
+/** Run the verify command in the project root. Returns null on pass. */
+async function runVerify(root: string, command: string): Promise<string | null> {
   const { native } = await import("./native");
   try {
-    const result = await native.runCommand(command, root, 180);
+    const result = await native.runCommand(command, root, VERIFY_TIMEOUT_S);
     const stdout = String(result?.stdout ?? "");
     const stderr = String(result?.stderr ?? "");
     const exit = Number(result?.exit_code ?? 0);
-    const timedOut = Boolean(result?.timed_out);
+    if (exit === 0 && !result?.timed_out) return null;
+
     const combined = `${stdout}${stderr ? (stdout ? "\n" : "") + stderr : ""}`;
-    const tail = combined.slice(-MAX_OUTPUT_CHARS);
-    const firstErr = combined.split("\n").find((l) => /error/i.test(l));
-    const lastLine = tail.split("\n").filter(Boolean).slice(-1)[0] ?? "";
-    const summary = timedOut
-      ? `TIMED OUT (180s) — last: ${lastLine}`
-      : exit === 0
-        ? "passed"
-        : `FAILED (exit ${exit}): ${firstErr ?? lastLine}`;
-    return { at: Date.now(), command, ok: exit === 0 && !timedOut, summary };
+    const lines = combined.split("\n").filter((l) => l.trim());
+    // Prefer the actual error lines; fall back to the output tail.
+    const errorLines = lines.filter((l) => /error|warning:/i.test(l));
+    const tail = (errorLines.length > 0 ? errorLines : lines).slice(-6).join("\n");
+    const clipped = tail.length > MAX_OUTPUT_CHARS
+      ? `${tail.slice(0, MAX_OUTPUT_CHARS)} …[truncated]`
+      : tail;
+    return result?.timed_out
+      ? `"${command}" TIMED OUT after ${VERIFY_TIMEOUT_S}s — last output:\n${clipped}`
+      : `"${command}" FAILED (exit ${exit}):\n${clipped}`;
   } catch (e) {
-    return {
-      at: Date.now(),
-      command,
-      ok: false,
-      summary: `could not run (${String(e).slice(0, 120)})`,
-    };
+    return `could not run "${command}" (${String(e).slice(0, 160)})`;
   }
 }
 
 /**
- * Called from the tool-fencing layer after a successful write tool. Returns
- * the outcome to append to the tool result, or null when nothing ran.
+ * Run end-of-run verification when the project has unverified writes.
+ * Called from AgentRunBridge when the run settles to idle.
+ * On failure, injects a wake message into the session (the existing
+ * watch-wake path — it queues when the agent is busy again, flushes later).
  */
-export async function maybeVerifyAfterWrite(
-  toolName: string,
+export async function verifyIfDirtyAtRunEnd(
+  sessionId: string,
   workspaceRoot: string | null,
-): Promise<VerifyOutcome | null> {
-  if (!WRITE_TOOLS.has(toolName)) return null;
-  if (!workspaceRoot) return null;
-
-  const recent = recentByRoot.get(workspaceRoot);
-  if (recent && Date.now() - recent.at < DEBOUNCE_MS) {
-    // Same window: report the cached outcome, don't re-run. If the cached
-    // run PASSED, say nothing at all — repeating "passed" per edit is noise.
-    if (recent.ok) return null;
-    return {
-      ran: true,
-      command: recent.command,
-      ok: false,
-      summary: `${recent.summary} (cached — check again after your next change)`,
-    };
+  injectMessage: (sessionId: string, text: string) => Promise<void>,
+): Promise<void> {
+  if (!workspaceRoot) return;
+  const lastWrite = dirtyAt.get(workspaceRoot);
+  if (lastWrite === undefined) return; // clean run — nothing to verify
+  if (inFlight.has(workspaceRoot)) return; // a verification is already running
+  inFlight.add(workspaceRoot);
+  try {
+    const command = await resolveVerifyCommand(workspaceRoot);
+    if (!command) {
+      dirtyAt.delete(workspaceRoot); // nothing to verify with — don't re-check
+      return;
+    }
+    const failure = await runVerify(workspaceRoot, command);
+    if (failure === null) {
+      dirtyAt.delete(workspaceRoot); // verified — run is done, clean
+      return;
+    }
+    // Failure: keep the dirty mark (the wake run's writes re-mark it anyway)
+    // and wake the agent with the exact failure output.
+    await injectMessage(
+      sessionId,
+      `[verify] ${failure}\n\nFix these failures before finishing — the project does not currently pass "${command}".`,
+    );
+  } finally {
+    inFlight.delete(workspaceRoot);
   }
-
-  const command = await resolveVerifyCommand(workspaceRoot);
-  if (!command) return null;
-
-  const result = await runVerify(workspaceRoot, command);
-  recentByRoot.set(workspaceRoot, result);
-  if (result.ok) return null; // passed — silence is the signal
-  return {
-    ran: true,
-    command: result.command,
-    ok: false,
-    summary: result.summary,
-  };
 }
 
-/** Test hook — clear the debounce cache between cases. */
-export function _resetVerifyCache(): void {
-  recentByRoot.clear();
+/** Test hook — clear all dirty/in-flight state between cases. */
+export function _resetVerifyState(): void {
+  dirtyAt.clear();
+  inFlight.clear();
 }

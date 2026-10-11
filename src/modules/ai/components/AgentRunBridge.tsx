@@ -13,6 +13,7 @@ import {
   useChatStore,
   type AgentRunStatus,
 } from "../store/chatStore";
+import { verifyIfDirtyAtRunEnd } from "../lib/autoVerify";
 
 /**
  * Headless bridge that mirrors chat lifecycle into the store, so the status
@@ -225,6 +226,19 @@ function Bridge({
     if (status === "submitted" || status === "streaming") return;
     flushPendingWatchWakes(sessionId);
   }, [status, sessionId]);
+
+  // ---- End-of-run auto-verify -----------------------------------------------
+  // Write tools only mark the project dirty (zero latency on the tool result);
+  // the verification runs ONCE here, when the run settles to idle — never on
+  // half-edited mid-refactor states. On failure the wake message injects the
+  // exact errors, so the agent gets another turn to fix them before finishing.
+  const injectMessage = useChatStore((s) => s.injectMessage);
+  useEffect(() => {
+    if (status === "submitted" || status === "streaming") return;
+    const live = useChatStore.getState().live;
+    const root = live.getWorkspaceRoot();
+    void verifyIfDirtyAtRunEnd(sessionId, root, injectMessage);
+  }, [status, sessionId, injectMessage]);
 
   // ---- Auto-approve effect --------------------------------------------------
   const autoApprove = useChatStore((s) => s.autoApprove);

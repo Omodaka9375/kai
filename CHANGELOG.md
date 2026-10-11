@@ -12,7 +12,7 @@ All notable changes to the KAI terminal emulator project are documented in this 
 - Tools: multi_edit skips identical old/new edits instead of rejecting the batch; all-no-op batches error without touching the file; a stale-read guard bounces the call when the file changed since the model's last read.
 - Tools: todo_write normalizes shape mistakes (duplicate ids, multiple in-progress items, empty titles) and reports repairs instead of failing the call.
 - AI: the `<env>` block carries a verified environment inventory — real agent shell + version and installed/absent tool lists, probed once per launch on the Rust side (new `fs_env_inventory` command). Replaces the hardcoded `shell: powershell` assumption.
-- AI: write tools auto-run the project's verify command (`package.json` verify script, `tsc --noEmit`, or `cargo check`) after each change; a failed check is appended to the tool result as `_verify` so the model must fix it before continuing. Debounced per project, silent on pass.
+- AI: write tools mark the project for verification; when a run settles, KAI runs the project's verify command once (`package.json` verify script, `tsc --noEmit`, or `cargo check`) and a failed check wakes the agent with the exact errors as a new message. No per-write latency; no checks on half-edited states.
 
 ---
 

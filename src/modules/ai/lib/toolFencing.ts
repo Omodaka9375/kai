@@ -15,7 +15,7 @@ import { fence } from "./fence";
 import { type EffectStatus } from "./effectStatus";
 import { guardToolOutput, formatGuardWarning } from "./outputGuard";
 import { redactToolOutput } from "./redact";
-import { maybeVerifyAfterWrite } from "./autoVerify";
+import { noteWrite } from "./autoVerify";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ToolDef = any;
@@ -156,24 +156,13 @@ export function withToolGuard(
         }
         result = fenceToolOutput(name, result, fenceState);
       }
-      // AUTO-VERIFY: after a successful write tool, run the project's verify
-      // command (package.json verify script / tsc --noEmit / cargo check) and
-      // surface failures ON the tool result. "Agent forgot to typecheck"
-      // becomes structurally impossible. Debounced 15s per root; passes are
-      // silent — only failures ride along. Never blocks the tool result:
-      // verification outcome is information, not an error.
-      if (effect === "COMMITTED" && result && typeof result === "object") {
-        try {
-          const verify = await maybeVerifyAfterWrite(name, getWorkspaceRoot?.() ?? null);
-          if (verify && verify.ran && !verify.ok) {
-            result = {
-              ...result,
-              _verify: `${verify.command} FAILED: ${verify.summary}`,
-            } as typeof result;
-          }
-        } catch {
-          /* verification is best-effort; never fail the tool for it */
-        }
+      // AUTO-VERIFY: mark the project dirty after a successful write. The
+      // verification itself runs ONCE at run end (AgentRunBridge →
+      // verifyIfDirtyAtRunEnd) — a per-write await would stall every tool
+      // result on a full typecheck and fire on half-edited mid-refactor
+      // states. Zero latency here; the mark is a synchronous Map write.
+      if (effect === "COMMITTED") {
+        noteWrite(name, getWorkspaceRoot?.() ?? null);
       }
       // Strip internal metadata before it reaches the model. The model
       // has no explanation for _effect (e.g. "COMMITTED") and may
