@@ -108,6 +108,10 @@ export type Preferences = {
   sidebarView: "explorer" | "source-control" | "extensions";
   /** Timestamp (ms) of the last automatic update check. */
   updaterLastCheck: number;
+  /** SomaFM status-bar radio — opt-in chill music feature. */
+  radioEnabled: boolean;
+  /** Persisted SomaFM station id (empty = none picked yet). */
+  radioStationId: string;
 };
 
 const STORE_PATH = "Kai-settings.json";
@@ -154,6 +158,8 @@ const KEY_SIDEBAR_WIDTH = "sidebarWidth";
 const KEY_SIDEBAR_VIEW = "sidebarView";
 
 const KEY_UPDATER_LAST_CHECK = "updaterLastCheck";
+const KEY_RADIO_ENABLED = "radioEnabled";
+const KEY_RADIO_STATION = "radioStationId";
 
 export const TERMINAL_FONT_SIZE_DEFAULT = 14;
 export const TERMINAL_FONT_SIZE_MIN = 8;
@@ -221,6 +227,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
   sidebarView: "explorer",
 
   updaterLastCheck: 0,
+  radioEnabled: false,
+  radioStationId: "",
 };
 
 const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
@@ -353,6 +361,10 @@ export async function loadPreferences(): Promise<Preferences> {
     updaterLastCheck:
       get<number>(KEY_UPDATER_LAST_CHECK) ??
       DEFAULT_PREFERENCES.updaterLastCheck,
+    radioEnabled:
+      get<boolean>(KEY_RADIO_ENABLED) ?? DEFAULT_PREFERENCES.radioEnabled,
+    radioStationId:
+      get<string>(KEY_RADIO_STATION) ?? DEFAULT_PREFERENCES.radioStationId,
   };
 }
 
@@ -400,6 +412,14 @@ export async function setAutostart(value: boolean): Promise<void> {
 
 export async function setRestoreWindowState(value: boolean): Promise<void> {
   await writePref(KEY_RESTORE_WINDOW, value);
+}
+
+export async function setRadioEnabled(value: boolean): Promise<void> {
+  await writePref(KEY_RADIO_ENABLED, value);
+}
+
+export async function setRadioStationId(value: string): Promise<void> {
+  await writePref(KEY_RADIO_STATION, value ?? "");
 }
 
 export async function setLmstudioBaseURL(value: string): Promise<void> {
@@ -666,6 +686,8 @@ export async function onPreferencesChange(
     [KEY_SIDEBAR_WIDTH]: "sidebarWidth",
     [KEY_SIDEBAR_VIEW]: "sidebarView",
     [KEY_UPDATER_LAST_CHECK]: "updaterLastCheck",
+    [KEY_RADIO_ENABLED]: "radioEnabled",
+    [KEY_RADIO_STATION]: "radioStationId",
   };
   // Same-process writes still fire onChange immediately; cross-window writes
   // arrive via the Tauri event emitted by writePref().

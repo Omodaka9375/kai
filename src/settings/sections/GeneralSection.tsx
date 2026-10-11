@@ -27,6 +27,7 @@ import {
   setPreviewProxyUrl,
   setRestoreWindowState,
   setShowHidden,
+  setRadioEnabled,
   setTerminalFontSize,
   setTerminalScrollback,
   setTerminalWebglEnabled,
@@ -75,6 +76,7 @@ export function GeneralSection() {
   const vimMode = usePreferencesStore((s) => s.vimMode);
   const editorWordWrap = usePreferencesStore((s) => s.editorWordWrap);
   const showHidden = usePreferencesStore((s) => s.showHidden);
+  const radioEnabled = usePreferencesStore((s) => s.radioEnabled);
   const terminalWebglEnabled = usePreferencesStore(
     (s) => s.terminalWebglEnabled,
   );
@@ -236,6 +238,19 @@ export function GeneralSection() {
           <Switch
             checked={showHidden}
             onCheckedChange={(v) => void setShowHidden(v)}
+          />
+        </SettingRow>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <Label>Mood</Label>
+        <SettingRow
+          title="SomaFM radio"
+          description="Chill background music in the status bar — a station picker and a now-playing marquee. Streams from SomaFM (listener-supported, somafm.com). Every radio operation is fail-safe: a dead stream or offline network degrades to a quiet 'unavailable' state and never blocks or crashes the app."
+        >
+          <Switch
+            checked={radioEnabled}
+            onCheckedChange={(v) => void setRadioEnabled(v)}
           />
         </SettingRow>
       </div>

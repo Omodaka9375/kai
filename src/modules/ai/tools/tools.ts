@@ -15,6 +15,7 @@ import { buildTerminalImageTools } from "./terminalImage";
 import { buildWatchTools } from "./watch";
 import { buildScreenTools } from "./screen";
 import { buildMcpTools } from "./mcpTools";
+import { buildRadioTools } from "./radio";
 
 export { resolvePath, type ToolContext } from "./context";
 
@@ -31,6 +32,7 @@ export function buildCoreTools(ctx: import("./context").ToolContext) {
     ...buildWatchTools(ctx),
     ...buildScreenTools(ctx),
     ...buildMcpTools(ctx),
+    ...buildRadioTools(ctx),
   } as const;
 }
 

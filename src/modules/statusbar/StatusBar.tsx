@@ -14,6 +14,8 @@ import { IncognitoIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { CwdBreadcrumb } from "./CwdBreadcrumb";
 import { WorkspaceEnvSelector } from "./WorkspaceEnvSelector";
+import { RadioMarquee } from "@/modules/radio";
+import { usePreferencesStore } from "@/modules/settings/preferences";
 import type { WorkspaceEnv } from "@/modules/workspace";
 
 type Props = {
@@ -37,6 +39,7 @@ export function StatusBar({
   privateActive,
 }: Props) {
   const panelOpen = useChatStore((s) => s.panelOpen);
+  const radioEnabled = usePreferencesStore((s) => s.radioEnabled);
   const togglePanel = useChatStore((s) => s.togglePanel);
   const openMini = useChatStore((s) => s.openMini);
   const closeMini = useChatStore((s) => s.closeMini);
@@ -57,6 +60,7 @@ export function StatusBar({
         <WorkspaceEnvSelector onSelect={onWorkspaceChange} />
         <CwdBreadcrumb cwd={cwd} filePath={filePath} home={home} onCd={onCd} />
         <GoalStatusPill />
+        {radioEnabled ? <RadioMarquee /> : null}
         {privateActive ? (
           <Tooltip>
             <TooltipTrigger asChild>

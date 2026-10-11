@@ -10,6 +10,8 @@ All notable changes to the KAI terminal emulator project are documented in this 
 - AI: session list rows show compact relative ages (just now / 5m ago / yesterday / Oct 3) with the full local time on hover
 - Session picker: bounded, scrollable menu fix
 - Tabs: fixed new terminals spawning in the previous project after switching projects — the remembered terminal cwd outlived the project switch; a new terminal on a fresh project's StartPage now inherits the current project root.
+- Radio: new opt-in SomaFM radio in the status bar (General settings → Mood) — a bounded now-playing marquee with a station picker (12 curated channels). Every operation is fail-safe: a dead stream or offline network degrades to a quiet unavailable state and never blocks or crashes the app.
+- AI: `play_radio`, `stop_radio`, and `radio_list_stations` tools — the agent can pick a station by name or genre ("put on something ambient") and drive the same player as the status-bar widget.
 
 ---
 
