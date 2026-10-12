@@ -246,7 +246,23 @@ export function GeneralSection() {
         <Label>Mood</Label>
         <SettingRow
           title="SomaFM radio"
-          description="Chill background music in the status bar — a station picker and a now-playing marquee. Streams from SomaFM (listener-supported, somafm.com). Every radio operation is fail-safe: a dead stream or offline network degrades to a quiet 'unavailable' state and never blocks or crashes the app."
+          description={
+            <>
+              Chill background music in the status bar — a station picker and a
+              now-playing marquee. Streams from SomaFM (listener-supported,
+              somafm.com).{" "}
+              <button
+                type="button"
+                className="inline text-foreground/80 underline decoration-dotted underline-offset-2 transition-colors hover:text-foreground"
+                onClick={() =>
+                  void openUrl("https://somafm.com/support/")
+                }
+              >
+                Donate here
+              </button>
+              .
+            </>
+          }
         >
           <Switch
             checked={radioEnabled}

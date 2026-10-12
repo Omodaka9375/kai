@@ -3,7 +3,8 @@ import type { ReactNode } from "react";
 
 type Props = {
   title: ReactNode;
-  description?: string;
+  /** Accepts a plain string or JSX (e.g. an inline link inside the text). */
+  description?: ReactNode;
   children: React.ReactNode;
   className?: string;
 };
