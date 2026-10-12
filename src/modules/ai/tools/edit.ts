@@ -1,6 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { djb2 } from "../lib/hash";
+import { djb2, readCacheEntry } from "../lib/hash";
 import { native } from "../lib/native";
 import { checkReadableCanonical, checkWritableCanonical } from "../lib/security";
 import { newQueuedEditId, usePlanStore } from "../store/planStore";
@@ -139,13 +139,12 @@ async function applyEdits(
 
   const original = r.content;
 
-  // Stale-write guard: update cache if file changed, but allow editing if old_string matches.
+  // Self-heal the cache when content drifted: refresh from disk. Compare
+  // HASH ONLY — size is derived (disk bytes vs UTF-16 length disagree on
+  // any non-ASCII file) and must never participate in a comparison.
   const cached = readCache.get(abs);
-  if (cached) {
-    const freshHash = djb2(original);
-    if (cached.hash !== freshHash || cached.size !== original.length) {
-      readCache.set(abs, { size: original.length, hash: freshHash });
-    }
+  if (cached && cached.hash !== djb2(original)) {
+    readCache.set(abs, readCacheEntry(original));
   }
 
   // Normalize the entire file content to \n before applying edits, then
@@ -284,7 +283,7 @@ async function applyEdits(
 
   try {
     await native.writeFile(abs, content);
-    readCache.set(abs, { size: content.length, hash: djb2(content) });
+    readCache.set(abs, readCacheEntry(content));
     window.dispatchEvent(new CustomEvent("Kai:fs-changed", { detail: abs }));
 
     return {
@@ -316,7 +315,7 @@ async function ensureReadCache(
     if (r.kind === "binary") return { error: "binary file refused", path: abs };
     if (r.kind === "toolarge")
       return { error: `file too large (${r.size} bytes)`, path: abs };
-    ctx.readCache.set(abs, { size: r.size, hash: djb2(r.content) });
+    ctx.readCache.set(abs, readCacheEntry(r.content));
     ctx.fileTracker.markRead(abs);
     return null;
   } catch (e) {
@@ -427,7 +426,7 @@ export function buildEditTools(ctx: ToolContext) {
 
     multi_edit: tool({
       description:
-        "Apply several replacements to ONE file in a single call. Same exact-match rules as edit: every old_string must be copied verbatim from the file. Edits apply in order to the running buffer; if any old_string is missing or non-unique, the batch is retried edit-by-edit so correct edits still land — only the failing ones are reported. Prefer this over repeated edit calls when changing several spots in the same file. Asks for user approval.",
+        "Apply several replacements to ONE file in a single atomic call. Same exact-match rules as edit: every old_string must be copied verbatim from the file's current content. Edits apply in order; an edit that fails to match is reported individually and the rest still land. Prefer this over repeated edit calls when changing several spots in the same file. Asks for user approval.",
       inputSchema: z.object({
         path: z.string().optional(),
         edits: z
@@ -436,6 +435,10 @@ export function buildEditTools(ctx: ToolContext) {
               old_string: z.string(),
               new_string: z.string(),
               replace_all: z.boolean().optional(),
+              line_hint: z
+                .number()
+                .optional()
+                .describe("Approximate 1-based line number where the edit should apply. Used to disambiguate when old_string appears more than once."),
               path: z.string().optional(),
             }),
           )
@@ -452,24 +455,6 @@ export function buildEditTools(ctx: ToolContext) {
         const abs = safety.canonical;
         const guard = await ensureReadCache(abs, ctx);
         if (guard) return guard;
-        // STALE-READ GUARD: the model authors all old_strings against the
-        // content it last READ. If anything changed the file since (another
-        // agent edit, a background process, a formatter), the batch fails
-        // edit-by-edit with confusing not-found errors — or worse, partially
-        // applies against content the model never saw. Compare the cached
-        // read hash against disk up front and bounce with a single clear
-        // instruction instead.
-        const cachedBefore = ctx.readCache.get(abs);
-        if (cachedBefore) {
-          const r = await native.readFile(abs);
-          if (r.kind === "text" && (r.size !== cachedBefore.size || djb2(r.content) !== cachedBefore.hash)) {
-            return {
-              error:
-                "file changed since your last read (it was edited by something else). Read it again with force: true and re-author the edits against the current content before submitting.",
-              path: abs,
-            };
-          }
-        }
         const failures = getEditFailures(ctx).get(abs) ?? 0;
         if (failures >= MAX_EDIT_RETRIES) {
           getEditFailures(ctx).delete(abs);
@@ -477,6 +462,30 @@ export function buildEditTools(ctx: ToolContext) {
             error: `multi_edit failed ${MAX_EDIT_RETRIES} times on this file. Use write_file to replace the entire file content instead.`,
             path: abs,
           };
+        }
+        // STALE-READ GUARD: the model authors all old_strings against the
+        // content it last READ. If anything changed the file since (another
+        // agent edit, a background process, a formatter), the batch would
+        // fail with confusing not-found errors — or worse, partially apply
+        // against content the model never saw. Compare the cached read hash
+        // against disk up front and bounce with one clear instruction.
+        // HASH ONLY: size is disk bytes here but UTF-16 length in the cache
+        // (they disagree on any non-ASCII file), so comparing it produced a
+        // false "file changed" bounce after every one of this tool's own
+        // writes — the loop that made models abandon multi_edit for edit.
+        // The bounce is COUNTED so a model that resubmits regardless hits
+        // the escape hatch above instead of looping forever.
+        const cachedBefore = ctx.readCache.get(abs);
+        if (cachedBefore) {
+          const r = await native.readFile(abs);
+          if (r.kind === "text" && djb2(r.content) !== cachedBefore.hash) {
+            getEditFailures(ctx).set(abs, failures + 1);
+            return {
+              error:
+                "file changed since your last read — edited by something outside this session's write pipeline (another agent, a formatter, a process). Read it again with force: true and re-author the edits against the current content before submitting.",
+              path: abs,
+            };
+          }
         }
         return withFileMutationLock([abs], async () => {
           beginCheckpointBatch(

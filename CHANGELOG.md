@@ -4,6 +4,16 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.6.7]
+
+- AI tools: fixed multi_edit looping on "file changed since your last read" - the read cache stored sizes in two units (disk bytes vs character count), so the tool's own previous write falsely tripped the stale guard on any file with non-ASCII content, pushing models to fall back to single edit calls. The guard now compares content hash only, and a stale bounce counts toward the retry cap that points the model at write_file.
+- AI tools: multi_edit accepts line_hint to disambiguate repeated old_string values (it was silently dropped by the schema before, causing endless not-unique retries).
+- AI tools: batch_edit no longer writes partially applied content to disk when a batch fails validation - validation happens entirely in memory before anything is written, so failures just report the error.
+- Header: the project label shows the folder name only (the folder icon was removed).
+- AI: removed the multi_edit prompt guidance block - the fixed tool behavior makes the extra instructions obsolete.
+
+---
+
 ## [1.6.6]
 
 - Header: the current project folder name is shown next to the sidebar toggle.

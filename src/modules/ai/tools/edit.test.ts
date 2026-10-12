@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { readCacheEntry } from "../lib/hash";
 
 // applyEdits imports these transitively; the native bridge must be a stub
 // because Node has no Tauri IPC. The pure-function behavior under test
@@ -17,6 +18,7 @@ vi.mock("../lib/security", () => ({
 }));
 
 const applyEditsModule = await import("./edit");
+const batchEditModule = await import("./batchEdit");
 
 // applyEdits dispatches a `Kai:fs-changed` CustomEvent on window after
 // writing; Node has neither. Stub both before any edit runs.
@@ -98,5 +100,145 @@ describe("multi_edit identical-edit hardening", () => {
     expect(result.ok).toBeFalsy();
     expect(result.error).toContain("no-ops");
     expect(files.get(path)).toBe("hello\n"); // untouched
+  });
+});
+
+describe("multi_edit stale guard (hash-only, self-write immune)", () => {
+  // The tool's OWN writes must never trip the stale-read guard. The old
+  // guard compared cache size (UTF-16 chars) against the disk read size
+  // (bytes) — any non-ASCII file made them disagree, so the second
+  // multi_edit after a successful first one bounced with "file changed
+  // since your last read", looping models into single edit calls.
+  it("accepts a second multi_edit after its own write on a non-ASCII file", async () => {
+    const path = "/ws/uni.ts";
+    files.set(path, 'const s = "héllo → wörld — ünïcode";\nconst a = 1;\n');
+    const tools = applyEditsModule.buildEditTools(ctx);
+    // Simulate the model's read_file: seed the cache from the same string.
+    ctx.readCache.set(path, readCacheEntry(files.get(path)!));
+
+    const first = (await tools.multi_edit.execute!(
+      {
+        path,
+        edits: [{ old_string: "const a = 1;", new_string: "const a = 2;" }],
+      },
+      {} as never,
+    )) as { ok?: boolean; error?: string };
+    expect(first.ok).toBe(true);
+
+    // Second multi_edit against the content the tool itself wrote.
+    const second = (await tools.multi_edit.execute!(
+      {
+        path,
+        edits: [{ old_string: "const a = 2;", new_string: "const a = 3;" }],
+      },
+      {} as never,
+    )) as { ok?: boolean; error?: string };
+    expect(second.error).toBeUndefined();
+    expect(second.ok).toBe(true);
+    expect(files.get(path)).toBe(
+      'const s = "héllo → wörld — ünïcode";\nconst a = 3;\n',
+    );
+  });
+
+  it("bounces on a GENUINE external change and counts it toward the escape hatch", async () => {
+    const path = "/ws/ext.ts";
+    files.set(path, "externally modified content\n");
+    const tools = applyEditsModule.buildEditTools(ctx);
+    // Cache claims a different content than disk — a real external edit.
+    ctx.readCache.set(path, { size: 5, hash: 1 });
+
+    for (let i = 0; i < 3; i++) {
+      const r = (await tools.multi_edit.execute!(
+        {
+          path,
+          edits: [{ old_string: "x", new_string: "y" }],
+        },
+        {} as never,
+      )) as { error?: string };
+      expect(r.error).toContain("file changed since your last read");
+    }
+    // Fourth consecutive resubmission (no re-read between) hits the hatch.
+    const last = (await tools.multi_edit.execute!(
+      {
+        path,
+        edits: [{ old_string: "x", new_string: "y" }],
+      },
+      {} as never,
+    )) as { error?: string };
+    expect(last.error).toContain("failed 3 times");
+  });
+
+  it("accepts line_hint in the multi_edit schema (was silently stripped)", async () => {
+    const path = "/ws/dup.ts";
+    files.set(path, "flag = 0\n// midpoint\nflag = 0\n");
+    const tools = applyEditsModule.buildEditTools(ctx);
+    ctx.readCache.set(path, readCacheEntry(files.get(path)!));
+    // Sanity: schema now parses line_hint instead of dropping it.
+    const parsed = (
+      tools.multi_edit.inputSchema as unknown as {
+        safeParse: (v: unknown) => {
+          success: boolean;
+          data?: { edits: { line_hint?: number }[] };
+        };
+      }
+    ).safeParse({
+      path,
+      edits: [{ old_string: "flag = 0", new_string: "flag = 1", line_hint: 3 }],
+    });
+    expect(parsed.success).toBe(true);
+    expect(parsed.data?.edits[0]?.line_hint).toBe(3);
+
+    // End to end: line_hint picks the occurrence near line 3.
+    const r = (await tools.multi_edit.execute!(
+      {
+        path,
+        edits: [{ old_string: "flag = 0", new_string: "flag = 1", line_hint: 3 }],
+      },
+      {} as never,
+    )) as { ok?: boolean; replacements?: number };
+    expect(r.ok).toBe(true);
+    expect(r.replacements).toBe(1);
+    expect(files.get(path)).toBe("flag = 0\n// midpoint\nflag = 1\n");
+  });
+});
+
+describe("batch_edit validation failures leave disk untouched", () => {
+  // Regression: a mid-batch validation failure used to call rollback(),
+  // which WROTE the in-memory snapshots (including same-file compounds —
+  // partially applied content) to disk while claiming a rollback.
+  it("does not write partial content when a later edit fails to match", async () => {
+    const path = "/ws/be.ts";
+    const original = "line1\nline2\nline3\n";
+    files.set(path, original);
+    const tools = batchEditModule.buildBatchEditTools(ctx);
+    const result = (await tools.batch_edit.execute!(
+      {
+        edits: [
+          { path, old_string: "line1", new_string: "line1-edit" },
+          { path, old_string: "NO SUCH LINE", new_string: "x" },
+        ],
+      },
+      {} as never,
+    )) as { ok?: boolean; error?: string };
+    expect(result.ok).toBeFalsy();
+    expect(result.error).toContain("not found");
+    // THE assertion: disk still holds the original, not the compound.
+    expect(files.get(path)).toBe(original);
+  });
+
+  it("rejects an identical old/new edit without touching disk", async () => {
+    const path = "/ws/be2.ts";
+    const original = "alpha\nbeta\n";
+    files.set(path, original);
+    const tools = batchEditModule.buildBatchEditTools(ctx);
+    const result = (await tools.batch_edit.execute!(
+      {
+        edits: [{ path, old_string: "alpha", new_string: "alpha" }],
+      },
+      {} as never,
+    )) as { ok?: boolean; error?: string };
+    expect(result.ok).toBeFalsy();
+    expect(result.error).toContain("identical");
+    expect(files.get(path)).toBe(original);
   });
 });

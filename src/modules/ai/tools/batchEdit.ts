@@ -12,7 +12,7 @@ import { checkWritableCanonical } from "../lib/security";
 import { resolvePath, type ToolContext } from "./context";
 import { snapshotFile, beginCheckpointBatch, commitCheckpoint, discardCheckpoint } from "../lib/checkpoints";
 import { withFileMutationLock } from "../lib/mutationLock";
-import { djb2 } from "../lib/hash";
+import { readCacheEntry } from "../lib/hash";
 
 /** Normalize line endings to \n for comparison purposes only. */
 function normEol(s: string): string {
@@ -97,30 +97,32 @@ export function buildBatchEditTools(ctx: ToolContext) {
             const newNorm = stripTrailingWs(normEol(edit.new_string), abs);
 
             if (oldNorm === newNorm) {
-              await rollback(snapshots);
+              // NOTHING has been written at this point — validation happens
+              // entirely in memory against snapshots. The old rollback() call
+              // here WROTE those in-memory snapshots to disk (including
+              // same-file compounds, i.e. partially applied content) while
+              // reporting a rollback — the multi_edit corruption class.
               return {
                 ok: false,
-                error: `old_string and new_string are identical in "${abs}"`,
+                error: `old_string and new_string are identical in "${edit.path}"`,
                 file: edit.path,
               };
             }
 
             const idx = currentNorm.indexOf(oldNorm);
             if (idx === -1) {
-              await rollback(snapshots);
               return {
                 ok: false,
-                error: `old_string not found in "${abs}": ${JSON.stringify(oldNorm.slice(0, 80))}`,
+                error: `old_string not found in "${edit.path}": ${JSON.stringify(oldNorm.slice(0, 80))}`,
                 file: edit.path,
               };
             }
             // Check uniqueness.
             const secondIdx = currentNorm.indexOf(oldNorm, idx + 1);
             if (secondIdx !== -1) {
-              await rollback(snapshots);
               return {
                 ok: false,
-                error: `old_string is not unique in "${abs}". Provide more surrounding context.`,
+                error: `old_string is not unique in "${edit.path}". Provide more surrounding context.`,
                 file: edit.path,
               };
             }
@@ -151,10 +153,7 @@ export function buildBatchEditTools(ctx: ToolContext) {
               await native.writeFile(path, newContent);
               written.push(path);
               totalReplacements += 1;
-              ctx.readCache.set(path, {
-                size: newContent.length,
-                hash: djb2(newContent),
-              });
+              ctx.readCache.set(path, readCacheEntry(newContent));
               ctx.fileTracker.markModified(path);
               window.dispatchEvent(
                 new CustomEvent("Kai:fs-changed", { detail: path }),
@@ -188,18 +187,4 @@ export function buildBatchEditTools(ctx: ToolContext) {
       },
     }),
   } as const;
-}
-
-async function rollback(snapshots: Map<string, string | null>): Promise<void> {
-  for (const [path, content] of snapshots) {
-    try {
-      if (content === null) {
-        await native.deleteFile(path);
-      } else {
-        await native.writeFile(path, content);
-      }
-    } catch {
-      // Best-effort rollback.
-    }
-  }
 }

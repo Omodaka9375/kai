@@ -2,7 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { invoke } from "@tauri-apps/api/core";
 import { isDocumentFile, parseDocument, parseDocx } from "../lib/documentParser";
-import { djb2 } from "../lib/hash";
+import { djb2, readCacheEntry } from "../lib/hash";
 import { native } from "../lib/native";
 import {
   checkReadableCanonical,
@@ -52,7 +52,7 @@ export function buildFsTools(ctx: ToolContext) {
         if (docType) {
           try {
             const text = await parseDocument(abs);
-            ctx.readCache.set(abs, { size: text.length, hash: djb2(text) });
+            ctx.readCache.set(abs, readCacheEntry(text));
             return {
               path: abs,
               content: text.slice(0, READ_BYTE_CAP),
@@ -78,9 +78,10 @@ export function buildFsTools(ctx: ToolContext) {
             };
 
           const hash = djb2(r.content);
+          const entry = readCacheEntry(r.content);
           const isFullRead = offset === undefined && limit === undefined;
           const prior = ctx.readCache.get(abs);
-          if (isFullRead && !force && prior && prior.size === r.size && prior.hash === hash) {
+          if (isFullRead && !force && prior && prior.hash === hash) {
             // Return head + tail preview so the model can construct valid
             // old_string values for edits at the beginning OR end of file.
             const lines = r.content.split("\n");
@@ -106,7 +107,7 @@ export function buildFsTools(ctx: ToolContext) {
               hint: "File unchanged since last read. Head and tail preview included. If you need the full content, call read_file with force: true.",
             };
           }
-          ctx.readCache.set(abs, { size: r.size, hash });
+          ctx.readCache.set(abs, entry);
           ctx.fileTracker.markRead(abs);
 
           if (isFullRead) {
@@ -240,7 +241,7 @@ export function buildFsTools(ctx: ToolContext) {
               }
             }
             await native.writeFile(abs, content);
-            ctx.readCache.set(abs, { size: content.length, hash: djb2(content) });
+            ctx.readCache.set(abs, readCacheEntry(content));
             ctx.fileTracker.markModified(abs);
             window.dispatchEvent(new CustomEvent("Kai:fs-changed", { detail: abs }));
 
