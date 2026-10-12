@@ -15,7 +15,7 @@ export function buildSubagentTools(ctx: ToolContext) {
 Types:
 ${TYPE_KEYS.map((k) => `- ${k}: ${SUBAGENTS[k].description}`).join("\n")}
 
-Auto-executes (no approval) — subagents are read-only by design.`,
+Asks for user approval unless auto-approve is enabled (subagents are read-only by design — the approval gates the spawn + model spend, not file safety).`,
       inputSchema: z.object({
         type: z.enum(TYPE_KEYS),
         prompt: z
@@ -28,6 +28,7 @@ Auto-executes (no approval) — subagents are read-only by design.`,
           .optional()
           .describe("Short label shown in the chat UI for the spawn card."),
       }),
+      needsApproval: true,
       execute: async ({ type, prompt, description }, options) => {
         const abortSignal = options?.abortSignal;
         const { apiKeys, selectedModelId, patchAgentMeta } =

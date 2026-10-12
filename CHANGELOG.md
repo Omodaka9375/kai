@@ -11,6 +11,7 @@ All notable changes to the KAI terminal emulator project are documented in this 
 - AI tools: batch_edit no longer writes partially applied content to disk when a batch fails validation - validation happens entirely in memory before anything is written, so failures just report the error.
 - Header: the project label shows the folder name only (the folder icon was removed).
 - AI: removed the multi_edit prompt guidance block - the fixed tool behavior makes the extra instructions obsolete.
+- AI tools: run_subagent now asks for user approval before spawning, following the auto-approve mode - auto-runs only in "all" mode, and the approval card gates the model spend, not file safety.
 
 ---
 
