@@ -4,6 +4,20 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.6.6]
+
+- Header: the current project folder name is shown next to the sidebar toggle.
+- Radio: the SomaFM station picker stacks each station's genre under its name, matching the session-picker layout.
+- Docs: redesigned the GitHub Pages landing page (animated agent demo, live theme switcher, keyboard-shortcut strip, OS install tabs) and added a keyboard-shortcuts table to the README.
+- Shortcuts: the terminal now keeps its shell control keys (Ctrl+R/D/W/E/L/M/...) when it has focus on Windows/Linux - a focused terminal is no longer hijacked by app shortcuts that share the same chord.
+- Shortcuts: added Save file (Cmd/Ctrl+S) so it works from anywhere, not just inside the editor.
+- Shortcuts: the editor keeps Cmd/Ctrl+F and Cmd/Ctrl+H for its own find/replace when focused.
+- Shortcuts: the terminal's delete-word-backward and Shift+Enter (multiline prompt) conveniences are now listed, customizable, and grouped under Terminal.
+- Shortcuts: Split pane down now matches Split pane right for non-terminal tabs.
+- Shortcuts: added tests for key matching, terminal-collision detection, and registry integrity (no duplicate ids or bindings).
+
+---
+
 ## [1.6.5]
 
 - Radio: fixed "Playback rejected (NotSupportedError)" on every station - the CSP media-src allowed SomaFM hosts but not the local icecast proxy URL (http://127.0.0.1) that the audio element actually loads; media-src now allows the proxy, localhost, and SomaFM.

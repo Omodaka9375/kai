@@ -28,10 +28,13 @@ export type ShortcutId =
   | "ai.toggle"
   | "ai.voice"
   | "ai.askSelection"
+  | "editor.save"
   | "editor.saveAll"
   | "shortcuts.open"
   | "settings.open"
-  | "sidebar.toggle";
+  | "sidebar.toggle"
+  | "terminal.ctrlBackspace"
+  | "terminal.shiftEnter";
 
 export type ShortcutGroup =
   | "General"
@@ -39,7 +42,8 @@ export type ShortcutGroup =
   | "Panes"
   | "Search"
   | "AI"
-  | "View";
+  | "View"
+  | "Terminal";
 
 export type KeyBinding = {
   key: string;
@@ -58,6 +62,12 @@ export type Shortcut = {
 };
 
 export const SHORTCUTS: Shortcut[] = [
+  {
+    id: "editor.save",
+    label: "Save file",
+    group: "General",
+    defaultBindings: [{ [MOD_PROP]: true, key: "s" }],
+  },
   {
     id: "editor.saveAll",
     label: "Save all open files",
@@ -228,6 +238,18 @@ export const SHORTCUTS: Shortcut[] = [
     group: "View",
     defaultBindings: [{ [MOD_PROP]: true, key: "0" }],
   },
+  {
+    id: "terminal.ctrlBackspace",
+    label: "Delete word backward",
+    group: "Terminal",
+    defaultBindings: [{ [MOD_PROP]: true, key: "Backspace" }],
+  },
+  {
+    id: "terminal.shiftEnter",
+    label: "Insert newline (multiline prompt)",
+    group: "Terminal",
+    defaultBindings: [{ shift: true, key: "Enter" }],
+  },
 ];
 
 export const SHORTCUT_GROUPS: ShortcutGroup[] = [
@@ -237,6 +259,7 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
   "View",
   "Search",
   "AI",
+  "Terminal",
 ];
 
 /**
@@ -263,6 +286,22 @@ export function matchBinding(
     !!e.altKey === !!binding.alt &&
     !!e.metaKey === !!binding.meta
   );
+}
+
+/**
+ * True when a chord would be swallowed by a focused terminal's shell rather
+ * than by KAI.
+ *
+ * On macOS the primary modifier is ⌘, which the PTY never sees (shells use ⌃),
+ * so no binding collides. On Windows/Linux the primary modifier IS Ctrl, which
+ * the shell reads as a readline control key — Ctrl+R reverse-search, Ctrl+D
+ * EOF, Ctrl+W delete-word, Ctrl+E end-of-line, Ctrl+L clear, Ctrl+M enter, …
+ * A bare Ctrl+key chord (no Shift/Alt/Meta) therefore belongs to the shell when
+ * the terminal is focused, and the dispatcher must let it through.
+ */
+export function collidesWithTerminal(binding: KeyBinding): boolean {
+  if (IS_MAC) return false;
+  return !!binding.ctrl && !binding.shift && !binding.alt && !binding.meta;
 }
 
 /**

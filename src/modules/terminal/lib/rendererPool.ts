@@ -1,5 +1,11 @@
 import { detectMonoFontFamily } from "@/lib/fonts";
 import { usePreferencesStore } from "@/modules/settings/preferences";
+import {
+  SHORTCUTS,
+  matchBinding,
+  type KeyBinding,
+  type ShortcutId,
+} from "@/modules/shortcuts/shortcuts";
 import { buildTerminalTheme } from "@/styles/terminalTheme";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { FitAddon } from "@xterm/addon-fit";
@@ -668,15 +674,25 @@ export function getSlotForLeaf(leafId: number): Slot | null {
   return slots.find((s) => s.currentLeafId === leafId) ?? null;
 }
 
+/**
+ * Resolve a terminal convenience chord against the user's shortcut overrides.
+ * Returns the bindings for `id` ([] = cleared/disabled, so the key passes
+ * through to the shell untouched).
+ */
+function terminalBindings(id: ShortcutId): KeyBinding[] {
+  const s = SHORTCUTS.find((x) => x.id === id);
+  if (!s) return [];
+  return usePreferencesStore.getState().shortcuts?.[id] ?? s.defaultBindings;
+}
+
 function isCtrlBackspace(e: KeyboardEvent): boolean {
-  const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
-  const isMac = /Mac|iPhone|iPad/.test(ua);
-  const mod = isMac ? e.metaKey : e.ctrlKey;
-  return mod && (e.key === "Backspace" || e.code === "Backspace");
+  return terminalBindings("terminal.ctrlBackspace").some((b) =>
+    matchBinding(e, b, "terminal.ctrlBackspace"),
+  );
 }
 
 function isShiftEnter(e: KeyboardEvent): boolean {
-  return (
-    e.key === "Enter" && e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey
+  return terminalBindings("terminal.shiftEnter").some((b) =>
+    matchBinding(e, b, "terminal.shiftEnter"),
   );
 }

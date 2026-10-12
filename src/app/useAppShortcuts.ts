@@ -32,6 +32,7 @@ export type AppShortcutDeps = {
   toggleSourceControl: () => void;
   togglePanelAndFocus: () => void;
   askFromSelection: () => void;
+  handleSave: () => void;
   handleSaveAll: () => void;
   toggleSidebar: () => void;
   toggleExplorerFocus: () => void;
@@ -65,6 +66,7 @@ export function useAppShortcuts(deps: AppShortcutDeps): {
     toggleSourceControl,
     togglePanelAndFocus,
     askFromSelection,
+    handleSave,
     handleSaveAll,
     toggleSidebar,
     toggleExplorerFocus,
@@ -102,7 +104,15 @@ export function useAppShortcuts(deps: AppShortcutDeps): {
           toggleSplitTab(t.id);
         }
       },
-      "pane.splitDown": () => splitActivePaneInActiveTab("col"),
+      "pane.splitDown": () => {
+        const t = tabsRef.current.find((x) => x.id === activeId);
+        if (t?.kind === "terminal") {
+          splitActivePaneInActiveTab("col");
+        } else if (t) {
+          // Non-terminal: open as workspace split (mirrors pane.splitRight).
+          toggleSplitTab(t.id);
+        }
+      },
       "pane.focusNext": () => focusNextPaneInTab(activeId, 1),
       "pane.focusPrev": () => focusNextPaneInTab(activeId, -1),
       "pane.source": toggleSourceControl,
@@ -116,6 +126,7 @@ export function useAppShortcuts(deps: AppShortcutDeps): {
         window.dispatchEvent(new Event("Kai:ai-voice-toggle"));
       },
       "ai.askSelection": askFromSelection,
+      "editor.save": handleSave,
       "editor.saveAll": handleSaveAll,
       "shortcuts.open": () => setShortcutsOpen((v) => !v),
       "settings.open": () => void openSettingsWindow(),
@@ -140,6 +151,7 @@ export function useAppShortcuts(deps: AppShortcutDeps): {
       toggleSourceControl,
       togglePanelAndFocus,
       askFromSelection,
+      handleSave,
       handleSaveAll,
       toggleSidebar,
       toggleExplorerFocus,
@@ -150,7 +162,16 @@ export function useAppShortcuts(deps: AppShortcutDeps): {
     ],
   );
 
-  useGlobalShortcuts(handlers);
+  useGlobalShortcuts(handlers, {
+    // The editor owns ⌘F / ⌘H — CodeMirror opens its own find/replace panel
+    // when the editor has focus. Let those chords through to CM instead of
+    // routing them to the header's SearchInline.
+    isDisabled: (id, e) => {
+      if (id !== "search.focus" && id !== "search.replace") return false;
+      const t = e.target as HTMLElement | null;
+      return !!t?.closest?.(".cm-editor");
+    },
+  });
 
   return { shortcutsOpen, setShortcutsOpen, newEditorOpen, setNewEditorOpen };
 }

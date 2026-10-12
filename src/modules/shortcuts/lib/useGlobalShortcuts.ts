@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   SHORTCUTS,
+  collidesWithTerminal,
   matchBinding,
   type ShortcutId,
 } from "../shortcuts";
@@ -26,14 +27,20 @@ export function useGlobalShortcuts(
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const { handlers, options } = latest.current;
+      // A focused terminal owns its shell control keys on Windows/Linux
+      // (Ctrl+R/D/W/…) — those chords are the PTY's, not KAI's, so let them
+      // through instead of hijacking them in the capture phase.
+      const target = e.target as HTMLElement | null;
+      const inTerminal = !!target?.closest?.(".xterm");
       for (const s of SHORTCUTS) {
         if (e.repeat && !s.allowRepeat) continue;
         const bindings = userShortcuts[s.id] || s.defaultBindings;
-        const isMatch = bindings.some((b) => matchBinding(e, b, s.id));
-        if (!isMatch) continue;
+        const matched = bindings.find((b) => matchBinding(e, b, s.id));
+        if (!matched) continue;
+        if (inTerminal && collidesWithTerminal(matched)) continue;
         if (options?.isDisabled?.(s.id, e)) return;
         const h = handlers[s.id];
-        if (!h) return;
+        if (!h) continue;
         e.preventDefault();
         e.stopImmediatePropagation();
         h(e);

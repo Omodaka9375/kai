@@ -1304,6 +1304,7 @@ export default function App() {
       toggleSourceControl,
       togglePanelAndFocus,
       askFromSelection,
+      handleSave,
       handleSaveAll,
       toggleSidebar,
       toggleExplorerFocus,
