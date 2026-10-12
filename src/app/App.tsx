@@ -580,18 +580,22 @@ export default function App() {
     };
   }, []);
 
+  // Current project folder name — the last path segment. Used for the window
+  // title (taskbar / Alt+Tab disambiguation) and the header's project label.
+  const projectName = useMemo(() => {
+    if (!explorerRoot) return null;
+    return explorerRoot.split(/[\\/]/).filter(Boolean).pop() ?? explorerRoot;
+  }, [explorerRoot]);
+
   // Reflect the current project folder in the window title so the user can
   // distinguish multiple KAI instances in the taskbar / Alt+Tab. Show only
   // the project name (no "KAI —" prefix).
   useEffect(() => {
-    const name = explorerRoot
-      ? explorerRoot.split(/[\\/]/).filter(Boolean).pop() ?? explorerRoot
-      : null;
     const w = getCurrentWindow();
-    const title = name ?? "KAI";
+    const title = projectName ?? "KAI";
     void w.setTitle(title);
     document.title = title;
-  }, [explorerRoot]);
+  }, [projectName]);
 
   // Persist the workspace root so it's restored on next launch.
   // Guard behind prefsHydrated so we don't overwrite the persisted recent
@@ -1646,6 +1650,7 @@ export default function App() {
             onSave={handleSave}
             onSaveAll={handleSaveAll}
             dirtyCount={dirtyEditorTabs.length}
+            projectName={projectName}
           />
 
           <main className="zoom-content flex min-h-0 flex-1 flex-col">

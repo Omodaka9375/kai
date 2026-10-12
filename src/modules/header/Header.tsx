@@ -23,6 +23,7 @@ import type { Tab } from "@/modules/tabs";
 import { TabBar } from "@/modules/tabs";
 import {
   FloppyDiskIcon,
+  Folder01Icon,
   KeyboardIcon,
   SidebarLeftIcon,
 } from "@hugeicons/core-free-icons";
@@ -61,6 +62,8 @@ type Props = {
   onSaveAll: () => void;
   /** Number of editor tabs with unsaved changes. */
   dirtyCount: number;
+  /** Current workspace folder name, shown next to the sidebar toggle. */
+  projectName: string | null;
 };
 
 const COMPACT_WIDTH = 720;
@@ -88,6 +91,7 @@ export function Header({
   onSave,
   onSaveAll,
   dirtyCount,
+  projectName,
 }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [compact, setCompact] = useState(false);
@@ -325,6 +329,23 @@ export function Header({
         >
           <HugeiconsIcon icon={SidebarLeftIcon} size={18} strokeWidth={1.75} />
         </Button>
+
+        {projectName && !compact && (
+          <div
+            className="ml-0.5 flex min-w-0 items-center gap-1.5"
+            title={projectName}
+          >
+            <HugeiconsIcon
+              icon={Folder01Icon}
+              size={13}
+              strokeWidth={1.75}
+              className="shrink-0 text-muted-foreground/60"
+            />
+            <span className="max-w-[180px] truncate text-xs font-medium text-muted-foreground">
+              {projectName}
+            </span>
+          </div>
+        )}
 
       </div>
 

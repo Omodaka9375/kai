@@ -155,7 +155,7 @@ export function RadioMarquee() {
               key={s.id}
               onSelect={() => handleStationPick(s.id)}
               className={cn(
-                "gap-2 text-xs",
+                "gap-2 py-1.5 text-xs",
                 stationId === s.id && "bg-accent/40",
               )}
             >
@@ -164,13 +164,15 @@ export function RadioMarquee() {
                 size={11}
                 strokeWidth={1.75}
                 className={cn(
-                  "shrink-0",
+                  "shrink-0 self-start mt-0.5",
                   stationId === s.id && "text-emerald-500",
                 )}
               />
-              <span className="min-w-0 flex-1 truncate">{s.name}</span>
-              <span className="shrink-0 text-[10px] text-muted-foreground/70">
-                {s.genre}
+              <span className="min-w-0 flex-1">
+                <span className="block truncate">{s.name}</span>
+                <span className="block truncate text-[10px] leading-tight text-muted-foreground/70">
+                  {s.genre}
+                </span>
               </span>
             </DropdownMenuItem>
           ))}
