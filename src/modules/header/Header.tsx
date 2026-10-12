@@ -23,7 +23,6 @@ import type { Tab } from "@/modules/tabs";
 import { TabBar } from "@/modules/tabs";
 import {
   FloppyDiskIcon,
-  Folder01Icon,
   KeyboardIcon,
   SidebarLeftIcon,
 } from "@hugeicons/core-free-icons";
@@ -331,20 +330,12 @@ export function Header({
         </Button>
 
         {projectName && !compact && (
-          <div
-            className="ml-0.5 flex min-w-0 items-center gap-1.5"
+          <span
+            className="ml-1 max-w-[180px] truncate text-xs font-medium text-muted-foreground"
             title={projectName}
           >
-            <HugeiconsIcon
-              icon={Folder01Icon}
-              size={13}
-              strokeWidth={1.75}
-              className="shrink-0 text-muted-foreground/60"
-            />
-            <span className="max-w-[180px] truncate text-xs font-medium text-muted-foreground">
-              {projectName}
-            </span>
-          </div>
+            {projectName}
+          </span>
         )}
 
       </div>
