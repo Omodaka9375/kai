@@ -21,6 +21,7 @@ import {
   findStation,
 } from "./lib/stations";
 import {
+  radioFetchNowPlaying,
   radioGetMuted,
   radioGetVolume,
   radioSetMuted,
@@ -39,6 +40,12 @@ import { setRadioStationId } from "./radioPrefs";
 
 const MARQUEE_MAX_WIDTH = "max-w-[420px]";
 
+/** How often the now-playing metadata is refreshed while a station plays. */
+const NOW_PLAYING_POLL_MS = 20_000;
+
+/** Live radio metadata (current track) shown in the marquee while playing. */
+type NowPlaying = { artist: string | null; title: string | null } | null;
+
 export function RadioMarquee() {
   const player = useRadioPlayer();
   const [muted, setMuted] = useState(radioGetMuted());
@@ -47,6 +54,10 @@ export function RadioMarquee() {
   // NO auto-resume on launch. Starting the app must never blast audio;
   // the user starts playback per session (click or agent tool).
   const [stationId, setStationIdLocal] = useState<string | null>(null);
+  // Current track (artist — title) polled from SomaFM while a station is
+  // playing. Null when stopped/connecting or when the song feed is
+  // unavailable — the pill then shows the station name.
+  const [track, setTrack] = useState<NowPlaying>(null);
 
   // Restore the persisted station SELECTION once on mount (fail-safe in the
   // prefs lib). Deliberately does not play — see above.
@@ -75,8 +86,12 @@ export function RadioMarquee() {
     if (!station) return "SomaFM";
     if (s.state === "connecting") return `${station.name} · connecting…`;
     if (s.state === "error") return `${station.name} · ${s.message}`;
+    const artist = track?.artist?.trim();
+    const title = track?.title?.trim();
+    if (artist && title) return `♪ ${artist} — ${title}`;
+    if (title) return `♪ ${title}`;
     return `♪ ${station.name} · ${station.genre} · SomaFM`;
-  }, [player.status]);
+  }, [player.status, track]);
 
   const handleStationPick = (id: string) => {
     setStationIdLocal(id);
@@ -109,11 +124,63 @@ export function RadioMarquee() {
   const connecting = player.status.state === "connecting";
   const active = playing || connecting;
   const station = stationId ? findStation(stationId) : null;
+
+  // Poll now-playing metadata while a station is actually playing (the
+  // hook's stationId reflects the live player, not just the picker
+  // selection). Fail-safe: a failed poll just keeps the previous text.
+  const liveStationId = player.stationId;
+  useEffect(() => {
+    if (!playing || !liveStationId) {
+      setTrack(null);
+      return;
+    }
+    let cancelled = false;
+    const pull = () => {
+      void radioFetchNowPlaying(liveStationId).then((t) => {
+        if (!cancelled) setTrack(t);
+      });
+    };
+    pull();
+    const iv = window.setInterval(pull, NOW_PLAYING_POLL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(iv);
+    };
+  }, [playing, liveStationId]);
   // Volume slider is hidden until the group (icon + slider) is hovered or
   // the thumb is being dragged — collapsed to zero width, not display:none,
   // so the reveal can transition smoothly and the status bar never janks.
   const [volOpen, setVolOpen] = useState(false);
   const volGroupRef = useRef<HTMLDivElement | null>(null);
+  // The pill text only scrolls when it actually overflows — short text
+  // ("connecting…", a short track name) stays still, so the widget never
+  // looks like it's animating for its own sake. The overflow distance is
+  // written to --marquee-shift for the CSS keyframes in globals.css.
+  const [scrolling, setScrolling] = useState(false);
+  const trackSpanRef = useRef<HTMLSpanElement | null>(null);
+  useEffect(() => {
+    const el = trackSpanRef.current;
+    if (!el) {
+      setScrolling(false);
+      return;
+    }
+    const update = () => {
+      const over = el.scrollWidth > el.clientWidth + 1;
+      setScrolling((prev) => (prev !== over ? over : prev));
+      if (over) {
+        const shift = Math.max(0, el.scrollWidth - el.clientWidth);
+        el.style.setProperty("--marquee-shift", `-${shift}px`);
+      } else {
+        el.style.removeProperty("--marquee-shift");
+      }
+    };
+    update();
+    // Track changes can arrive mid-scroll and status text changes with
+    // state; re-measure whenever the content may have changed.
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [statusText, scrolling]);
 
   return (
     <div
@@ -139,7 +206,15 @@ export function RadioMarquee() {
               strokeWidth={2}
               className={cn("shrink-0", playing && "text-emerald-500")}
             />
-            <span className="truncate">{statusText}</span>
+            <span className="min-w-0 overflow-hidden">
+              <span
+                ref={trackSpanRef}
+                data-scrolling={scrolling || undefined}
+                className="Kai-marquee block whitespace-nowrap"
+              >
+                {statusText}
+              </span>
+            </span>
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent

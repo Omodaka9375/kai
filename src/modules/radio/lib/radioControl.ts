@@ -333,6 +333,30 @@ export function radioShutdown(): void {
   }
 }
 
+/**
+ * Now-playing metadata for a station (SomaFM's public song JSON via the
+ * Rust `radio_now_playing` command). Fail-safe: returns null on any
+ * failure (offline, not under Tauri, shape change) — the marquee falls
+ * back to the station name. songs[0] is the CURRENT track.
+ */
+export async function radioFetchNowPlaying(
+  id: string,
+): Promise<{ artist: string | null; title: string | null } | null> {
+  try {
+    const data = await invoke<{
+      songs?: Array<{ artist?: string; title?: string }>;
+    }>("radio_now_playing", { stationId: id });
+    const current = data?.songs?.[0];
+    if (!current) return null;
+    return {
+      artist: typeof current.artist === "string" ? current.artist : null,
+      title: typeof current.title === "string" ? current.title : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** Case-insensitive name/id/genre match so "groove salad" or "ambient" resolve. */
 function fuzzyStation(query: string): ReturnType<typeof findStation> {
   const q = query.trim().toLowerCase();
