@@ -30,28 +30,30 @@ use tauri::Manager;
 
 // ── Pinned artifacts ────────────────────────────────────────────────────────
 
-/// whisper.cpp prebuilt CPU binaries (win-x64; mac/linux pick their asset).
-/// b5454 = nightly that carries whisper-cli.exe + ggml DLLs.
+/// whisper.cpp prebuilt CPU binaries.
+/// b5454 = nightly that carries whisper-cli + ggml libs.
+/// macOS has no standalone CLI bundle upstream (only an xcframework zip) —
+/// local STT is Windows/Linux only; the setup command returns a clean error.
 #[cfg(windows)]
-const WHISPER_ZIP_URL: &str =
+const WHISPER_BIN_URL: &str =
     "https://github.com/ggml-org/whisper.cpp/releases/download/b5454/whisper-bin-x64.zip";
-#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-const WHISPER_ZIP_URL: &str =
-    "https://github.com/ggml-org/whisper.cpp/releases/download/b5454/whisper-bin-x64.zip"; // NOTE: mac uses xcframework zip — unsupported v1
 #[cfg(target_os = "linux")]
-const WHISPER_ZIP_URL: &str =
+const WHISPER_BIN_URL: &str =
     "https://github.com/ggml-org/whisper.cpp/releases/download/b5454/whisper-bin-ubuntu-x64.tar.gz";
 
-/// Piper 1.2.0 (last rhasspy release; MIT).
+/// Piper 1.2.0 (last rhasspy release; MIT). The macOS tarballs are broken
+/// upstream (libonnxruntime.dylib is missing — only its empty .dSTM ships),
+/// so local TTS is Windows/Linux only.
 #[cfg(windows)]
-const PIPER_ZIP_URL: &str =
+const PIPER_BIN_URL: &str =
     "https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_windows_amd64.zip";
-#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-const PIPER_ZIP_URL: &str =
-    "https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_macos_aarch64.tar.gz";
 #[cfg(target_os = "linux")]
-const PIPER_ZIP_URL: &str =
+const PIPER_BIN_URL: &str =
     "https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_x86_64.tar.gz";
+
+#[cfg(not(any(windows, target_os = "linux")))]
+const LOCAL_VOICE_UNSUPPORTED: &str =
+    "Local voice engines aren't available on macOS yet — use API mode (or Browser STT).";
 
 /// Quantized whisper models on the ggerganov HF repo (verified sizes:
 /// tiny.en 32MB, base.en 59.7MB, small.en 190MB).
@@ -201,6 +203,7 @@ async fn download_with_progress(
 
 /// Extract a .zip, flattening nested `whisper/Release/` or `piper/piper/`
 /// prefixes, keeping only the files the engines need.
+#[cfg(windows)]
 fn extract_zip_flat(zip_path: &Path, dest: &Path, keep: &[&str]) -> Result<(), String> {
     let f = std::fs::File::open(zip_path).map_err(|e| e.to_string())?;
     let mut archive = zip::ZipArchive::new(f).map_err(|e| e.to_string())?;
@@ -211,11 +214,12 @@ fn extract_zip_flat(zip_path: &Path, dest: &Path, keep: &[&str]) -> Result<(), S
         }
         let name = entry.name().replace('\\', "/");
         let file_name = name.rsplit('/').next().unwrap_or("").to_string();
-        // Keep by extension (win zips carry many test exes we don't want).
+        // Keep by name/extension (win zips carry many test exes we don't want).
+        // NOTE: espeak-ng-data must match on the FULL path — the basename
+        // ("en_dict") never contains the prefix.
         let keep_it = keep.iter().any(|k| file_name == *k)
             || file_name.ends_with(".dll")
-            || file_name.ends_with(".so")
-            || file_name.starts_with("espeak-ng-data/");
+            || name.contains("espeak-ng-data/");
         if !keep_it {
             continue;
         }
@@ -235,27 +239,36 @@ fn extract_zip_flat(zip_path: &Path, dest: &Path, keep: &[&str]) -> Result<(), S
     Ok(())
 }
 
-/// Extract a .tar.gz (linux/mac piper, linux whisper).
-fn extract_tgz(tgz_path: &Path, dest: &Path, keep: &[&str]) -> Result<(), String> {
+/// Extract a .tar.gz (linux piper / linux whisper). Handles the real-world
+/// layouts: versioned shared libs (libwhisper.so.1.9.5) + their unversioned
+/// SYMLINKS, the espeak-ng-data tree, and exec bits for engine binaries.
+#[cfg(target_os = "linux")]
+fn extract_tgz(tgz_path: &Path, dest: &Path, bins: &[&str]) -> Result<(), String> {
+    use std::os::unix::fs::{PermissionsExt, symlink};
+
     let f = std::fs::File::open(tgz_path).map_err(|e| e.to_string())?;
     let gz = flate2::read::GzDecoder::new(f);
     let mut archive = tar::Archive::new(gz);
     for entry in archive.entries().map_err(|e| e.to_string())? {
         let mut entry = entry.map_err(|e| e.to_string())?;
+        let is_dir = entry.header().entry_type().is_dir();
         let name = entry
             .path()
             .map_err(|e| e.to_string())?
             .to_string_lossy()
             .replace('\\', "/");
         let file_name = name.rsplit('/').next().unwrap_or("").to_string();
-        let keep_it = keep.iter().any(|k| file_name == *k)
-            || file_name.ends_with(".so")
-            || name.contains("espeak-ng-data/");
+        // Keep: engine binaries, shared libs (incl. versioned .so.N.N and
+        // their symlink names), and the espeak-ng-data tree. Skip dirs,
+        // test/bench binaries, .dSYM debug bundles, pkgconfig.
+        let keep_it = !is_dir
+            && (bins.contains(&file_name.as_str())
+                || (file_name.starts_with("lib") && file_name.contains(".so"))
+                || name.contains("espeak-ng-data/"));
         if !keep_it {
             continue;
         }
-        let out_path = if name.contains("espeak-ng-data/") {
-            let idx = name.find("espeak-ng-data/").unwrap_or(0);
+        let out_path = if let Some(idx) = name.find("espeak-ng-data/") {
             dest.join(&name[idx..])
         } else {
             dest.join(&file_name)
@@ -263,8 +276,26 @@ fn extract_tgz(tgz_path: &Path, dest: &Path, keep: &[&str]) -> Result<(), String
         if let Some(parent) = out_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
+        // Symlinks (e.g. libwhisper.so -> libwhisper.so.1): recreate, don't
+        // copy — a copied symlink is an empty file and breaks the loader.
+        let link = entry
+            .link_name()
+            .ok()
+            .flatten()
+            .map(|p| p.to_string_lossy().to_string());
+        if let Some(target) = link {
+            let _ = std::fs::remove_file(&out_path);
+            symlink(&target, &out_path).map_err(|e| e.to_string())?;
+            continue;
+        }
         let mut out = std::fs::File::create(&out_path).map_err(|e| e.to_string())?;
         std::io::copy(&mut entry, &mut out).map_err(|e| e.to_string())?;
+        // Engine binaries need the exec bit (tar mode doesn't survive our
+        // manual copy — files default to 0644 under umask).
+        if bins.contains(&file_name.as_str()) {
+            std::fs::set_permissions(&out_path, std::fs::Permissions::from_mode(0o755))
+                .map_err(|e| e.to_string())?;
+        }
     }
     Ok(())
 }
@@ -291,6 +322,15 @@ async fn setup_stt_inner(
     model: &str,
     on_event: &Channel<VoiceSetupEvent>,
 ) -> Result<(), String> {
+    // macOS: no standalone whisper.cpp CLI bundle exists upstream — local
+    // STT is Windows/Linux only.
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        let _ = (app, model, on_event);
+        return Err(LOCAL_VOICE_UNSUPPORTED.to_string());
+    }
+    #[cfg(any(windows, target_os = "linux"))]
+    {
     let (_, url, size) = STT_MODELS
         .iter()
         .find(|(n, _, _)| n == &model)
@@ -307,12 +347,11 @@ async fn setup_stt_inner(
             total: 0,
             message: Some("downloading whisper.cpp…".into()),
         });
-        download_with_progress(WHISPER_ZIP_URL, &tmp, on_event, "stt-bin").await?;
-        if WHISPER_ZIP_URL.ends_with(".zip") {
-            extract_zip_flat(&tmp, &dir, &["whisper-cli.exe", "whisper-cli", "ggml.dll", "whisper.dll", "SDL2.dll"])?;
-        } else {
-            extract_tgz(&tmp, &dir, &["whisper-cli", "main"])?;
-        }
+        download_with_progress(WHISPER_BIN_URL, &tmp, on_event, "stt-bin").await?;
+        #[cfg(windows)]
+        extract_zip_flat(&tmp, &dir, &["whisper-cli.exe", "ggml.dll", "whisper.dll", "SDL2.dll"])?;
+        #[cfg(target_os = "linux")]
+        extract_tgz(&tmp, &dir, &["whisper-cli"])?;
         let _ = std::fs::remove_file(&tmp);
     }
 
@@ -342,6 +381,7 @@ async fn setup_stt_inner(
         message: Some("local STT ready".into()),
     });
     Ok(())
+    }
 }
 
 /// Install Piper + a chosen voice.
@@ -364,6 +404,15 @@ async fn setup_tts_inner(
     voice: &str,
     on_event: &Channel<VoiceSetupEvent>,
 ) -> Result<(), String> {
+    // macOS: the rhasspy piper tarballs are broken upstream (missing
+    // libonnxruntime.dylib) — local TTS is Windows/Linux only.
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        let _ = (app, voice, on_event);
+        return Err(LOCAL_VOICE_UNSUPPORTED.to_string());
+    }
+    #[cfg(any(windows, target_os = "linux"))]
+    {
     let (_, url, size) = TTS_VOICES
         .iter()
         .find(|(n, _, _)| n == &voice)
@@ -380,12 +429,11 @@ async fn setup_tts_inner(
             total: 0,
             message: Some("downloading Piper…".into()),
         });
-        download_with_progress(PIPER_ZIP_URL, &tmp, on_event, "tts-bin").await?;
-        if PIPER_ZIP_URL.ends_with(".zip") {
-            extract_zip_flat(&tmp, &dir, &["piper.exe", "piper", "espeak-ng.dll", "onnxruntime.dll", "onnxruntime_providers_shared.dll", "piper_phonemize.dll", "libtashkeel_model.ort"])?;
-        } else {
-            extract_tgz(&tmp, &dir, &["piper", "libtashkeel_model.ort"])?;
-        }
+        download_with_progress(PIPER_BIN_URL, &tmp, on_event, "tts-bin").await?;
+        #[cfg(windows)]
+        extract_zip_flat(&tmp, &dir, &["piper.exe", "espeak-ng.dll", "onnxruntime.dll", "onnxruntime_providers_shared.dll", "piper_phonemize.dll", "libtashkeel_model.ort"])?;
+        #[cfg(target_os = "linux")]
+        extract_tgz(&tmp, &dir, &["piper"])?;
         let _ = std::fs::remove_file(&tmp);
     }
 
@@ -413,6 +461,7 @@ async fn setup_tts_inner(
         message: Some("local TTS ready".into()),
     });
     Ok(())
+    }
 }
 
 /// Remove both engines and all models (~150MB freed).
@@ -436,6 +485,14 @@ pub async fn voice_transcribe(
     app: tauri::AppHandle,
     audio_base64: String,
 ) -> Result<String, String> {
+    // macOS: no local engine can be installed (see setup_stt_inner).
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        let _ = (app, audio_base64);
+        return Err(LOCAL_VOICE_UNSUPPORTED.to_string());
+    }
+    #[cfg(any(windows, target_os = "linux"))]
+    {
     let dir = stt_dir(&app)?;
     let cli = whisper_cli_path(&dir);
     if !cli.exists() {
@@ -495,12 +552,21 @@ pub async fn voice_transcribe(
     .await
     .map_err(|e| e.to_string())??;
     Ok(run)
+    }
 }
 
 /// Synthesize speech with Piper. Returns WAV bytes (base64) for the frontend
 /// to play via a blob URL.
 #[tauri::command]
 pub async fn voice_tts(app: tauri::AppHandle, text: String) -> Result<String, String> {
+    // macOS: no local engine can be installed (see setup_tts_inner).
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        let _ = (app, text);
+        return Err(LOCAL_VOICE_UNSUPPORTED.to_string());
+    }
+    #[cfg(any(windows, target_os = "linux"))]
+    {
     let dir = tts_dir(&app)?;
     let piper = piper_path(&dir);
     if !piper.exists() {
@@ -547,6 +613,7 @@ pub async fn voice_tts(app: tauri::AppHandle, text: String) -> Result<String, St
     .await
     .map_err(|e| e.to_string())??;
     Ok(run)
+    }
 }
 
 /// Sweep stale download .part files (crash leftovers) at boot. Public so
