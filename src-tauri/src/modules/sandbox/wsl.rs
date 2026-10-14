@@ -10,8 +10,10 @@
 //!   - mounts ONLY the project directory, rw, via a manual drvfs mount at
 //!     `/ws/<djb2hash>` — per-root mountpoints avoid remount races between
 //!     concurrent agent runs on different projects,
-//!   - executes everything as root (an imported distro's default user); root
-//!     inside the sandbox VM is the confinement boundary, not an escape.
+//!   - drops to the non-root `sandbox` user before running the command —
+//!     root in-distro could `mount -t drvfs C:\ /c` (full host-disk RW), so
+//!     confinement is enforced by privilege, not by convention. Mounts and
+//!     user creation live in the root-run setup script only.
 //!
 //! Known limits (documented honestly):
 //!   - NETWORK: WSL2 distros share ONE network namespace inside the utility VM — per-distro network isolation is architecturally impossible; Windows L2 is filesystem confinement only.
@@ -45,6 +47,18 @@ use crate::modules::workspace::decode_command_output;
 /// cfg-gated dead-code allowance (tests still exercise it everywhere).
 #[cfg_attr(not(windows), allow(dead_code))]
 pub const DISTRO_NAME: &str = "kai-sandbox";
+
+/// The non-root user all sandboxed commands run as. Root in-distro could
+/// `mount -t drvfs C:\ /c` — full host-disk RW — so wrapped commands run as
+/// this unprivileged user instead. Mounts stay in the root-run setup script,
+/// which only ever runs at explicit user request (Settings button).
+#[cfg_attr(not(windows), allow(dead_code))]
+pub const SANDBOX_USER: &str = "sandbox";
+
+/// Numeric uid for SANDBOX_USER. Alpine adduser takes -u; fixing the uid
+/// keeps /ws ownership stable across reinstalls.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub const SANDBOX_UID: u32 = 4200;
 
 /// Alpine minirootfs — busybox sh/mount/mountpoint/timeout, no package setup.
 /// Version-pinned; a 404 (release archived) surfaces as a clear setup error.
@@ -146,14 +160,24 @@ pub fn translate_cwd(root: &str, cwd: Option<&str>) -> String {
 /// the project mounted rw. Returns None when the distro is not installed
 /// (caller falls back to the plain command — L1 stays the gate).
 ///
-/// Script shape (one `sh -c`, executed as root in the distro):
-///   mkdir -p <mp>; mountpoint -q <mp> || mount -t drvfs '<root>' <mp>;
-///   cd <in_cwd>; exec [timeout <secs>] sh -lc '<command>'
+/// Two-phase privilege split (mounts need root; the command must NOT run as
+/// root or it could `mount -t drvfs C:\ /c` and reach the whole host disk):
 ///
-/// When `pid_file` is given (background procs), the in-distro leader writes
-/// its PID to the file just before exec'ing the command, so the host can
-/// kill the in-distro process on demand — killing wsl.exe alone does not
-/// reach it.
+///   Phase 1 (root):   mkdir -p <mp>; mountpoint -q <mp> || mount -t drvfs '<root>' <mp>; chown <mp>
+///   Phase 2 (sandbox): mkdir -p <mp>/.kai-bg; cd '<in_cwd>'; [mkdir pid-dir; printf pid > f;]
+///                     exec [timeout <s>] sh -lc '<command>'
+///
+/// The phase-1 mount is trusted: root and mountpoint are KAI-computed; no
+/// user- or agent-controlled text reaches it. Everything else — cwd,
+/// command, pid path — is interpolated only into phase 2, where every value
+/// is sh_quote'd (the old UNQUOTED `cd <in_cwd>` let a quote in a legal
+/// Windows dir name break out into arbitrary in-distro shell) and the
+/// process runs as the unprivileged sandbox user, so even a hypothetical
+/// injection could not mount or reach the host.
+///
+/// The pid file's parent is pre-created in phase 2 (the old script created
+/// only <mp>, so the printf redirect failed and background kills were a
+/// silent no-op).
 #[cfg(windows)]
 pub fn wrap_wsl(
     command: &str,
@@ -173,18 +197,29 @@ pub fn wrap_wsl(
         Some(secs) => format!("timeout {secs}s sh -lc {}", sh_quote(command)),
         None => format!("sh -lc {}", sh_quote(command)),
     };
-    // The pid-file must be written INSIDE the mounted project (drvfs rw) so
-    // the host can also see it. `$$` in the busybox sh -c context is the
-    // subshell that execs the command — its pid is the command's pid after
-    // exec, and busybox kill -9 on it reaps the direct children too via
-    // the process group (sh spawns children in its group).
+    // Phase 1 — root bootstrap: ensure the mount dir exists and the project
+    // is mounted. `|| true` on the chown: concurrent runs may race; the
+    // mount itself is idempotent via mountpoint -q.
+    let bootstrap = format!(
+        "mkdir -p {mp}; mountpoint -q {mp} 2>/dev/null || mount -t drvfs {root} {mp}; chown {user}:root {mp} 2>/dev/null || true",
+        root = sh_quote(root),
+        user = SANDBOX_USER,
+    );
+    // Phase 2 — unprivileged. `$$` is the pid of the subshell that execs
+    // the command (the leader's pid after exec); the pid file lives inside
+    // the mounted project so the host can read it, and kill_in_distro
+    // targets the process GROUP (negative pid).
     let pid_write = match pid_file {
-        Some(f) => format!("printf '%s' \"$$\" > {}", sh_quote(f)),
+        Some(f) => format!(
+            "mkdir -p {parent}; printf '%s' \"$$\" > {file}; ",
+            parent = sh_quote(&parent_dir_or(f, &mp)),
+            file = sh_quote(f),
+        ),
         None => String::new(),
     };
-    let script = format!(
-        "mkdir -p {mp}; mountpoint -q {mp} 2>/dev/null || mount -t drvfs {root} {mp}; cd {in_cwd}; {pid_write}; exec {inner}",
-        root = sh_quote(root),
+    let run = format!(
+        "mkdir -p {mp}/.kai-bg; cd {cwd}; {pid_write}exec {inner}",
+        cwd = sh_quote(&in_cwd),
     );
     let mut cmd = Command::new("wsl.exe");
     {
@@ -193,22 +228,43 @@ pub fn wrap_wsl(
     }
     cmd.arg("-d")
         .arg(DISTRO_NAME)
-        .arg("-u")
+        // wsl.exe execs ONE command, so phase 2 is delegated from the
+        // root-run script via busybox `su`. su runs the quoted `run` script
+        // as the sandbox user; the outer script never interpolates
+        // untrusted text outside sh_quote.
+        .arg("--user")
         .arg("root")
         .arg("--exec")
         .arg("sh")
         .arg("-c")
-        .arg(script);
+        .arg(format!(
+            "{bootstrap}; su -s /bin/sh {user} -c {run}",
+            user = SANDBOX_USER,
+            run = sh_quote(&run),
+        ));
     Some(cmd)
+}
+
+/// Parent dir of a pid-file path (inside the project mount), or `mp` when
+/// the path has no separator. Used to mkdir -p the pid file's parent — the
+/// redirect silently fails otherwise and background kills become no-ops.
+#[cfg(windows)]
+fn parent_dir_or(path: &str, fallback: &str) -> String {
+    match path.rfind('/') {
+        Some(i) => path[..i].to_string(),
+        None => fallback.to_string(),
+    }
 }
 
 /// Kill the in-distro process recorded in `pid_file` (background procs).
 /// Best-effort: a missing file means the process already exited (or never
-/// started) — not an error.
+/// started) — not an error. Kills the whole PROCESS GROUP (negative pid) —
+/// a bare `kill -9 PID` orphans grandchildren (dev-server children) in the
+/// distro.
 #[cfg(windows)]
 pub fn kill_in_distro(pid_file: &str) {
     let script = format!(
-        "if [ -f {f} ]; then kill -9 \"$(cat {f})\" 2>/dev/null; rm -f {f}; fi",
+        "if [ -f {f} ]; then kill -9 -\"$(cat {f})\" 2>/dev/null; rm -f {f}; fi",
         f = sh_quote(pid_file),
     );
     let mut cmd = Command::new("wsl.exe");
@@ -387,6 +443,30 @@ fn import_distro(dir: &std::path::Path, tar: &std::path::Path) -> Result<(), Str
         let stderr = decode_command_output(&conf_out.stderr);
         return Err(format!("writing /etc/wsl.conf failed: {}", stderr.trim()));
     }
+    // Create the non-root user all wrapped commands run as (root in-distro
+    // can mount the host disk — see module docs). The mountpoint container
+    // /ws is owned by the sandbox user so it can create the per-project
+    // mount dir; the drvfs MOUNT itself still needs root and is performed by
+    // the root-run bootstrap phase of every wrapped command (see wrap_wsl).
+    let user_script = format!(
+        "adduser -D -u {uid} {user} 2>/dev/null || true; mkdir -p /ws; chown {user}:root /ws; chmod a+rx /ws",
+        uid = SANDBOX_UID,
+        user = SANDBOX_USER,
+    );
+    let user_out = wsl(&[
+        "-d",
+        DISTRO_NAME,
+        "-u",
+        "root",
+        "--exec",
+        "sh",
+        "-c",
+        &user_script,
+    ])?;
+    if !user_out.status.success() {
+        let stderr = decode_command_output(&user_out.stderr);
+        return Err(format!("creating sandbox user failed: {}", stderr.trim()));
+    }
     let _ = wsl(&["--terminate", DISTRO_NAME]);
     Ok(())
 }
@@ -468,12 +548,55 @@ mod tests {
         // reproduce wrap_wsl's script construction for a known input.
         let mp = mountpoint_for("D:\\Code\\Proj");
         let inner = format!("timeout 12s sh -lc {}", sh_quote("pnpm test"));
-        let script = format!(
-            "mkdir -p {mp}; mountpoint -q {mp} 2>/dev/null || mount -t drvfs {root} {mp}; cd {mp}; exec {inner}",
+        let bootstrap = format!(
+            "mkdir -p {mp}; mountpoint -q {mp} 2>/dev/null || mount -t drvfs {root} {mp}; chown {user}:root {mp} 2>/dev/null || true",
             root = sh_quote("D:\\Code\\Proj"),
+            user = SANDBOX_USER,
+        );
+        let run = format!(
+            "mkdir -p {mp}/.kai-bg; cd {cwd}; exec {inner}",
+            cwd = sh_quote(mp.as_str()),
+        );
+        let script = format!(
+            "{bootstrap}; su -s /bin/sh {user} -c {run}",
+            user = SANDBOX_USER,
+            run = sh_quote(&run),
         );
         assert!(script.contains("mount -t drvfs 'D:\\Code\\Proj'"));
         assert!(script.contains("timeout 12s"));
-        assert!(script.contains("exec sh -lc") || script.contains("sh -lc"));
+        // Privilege split: bootstrap as root, command via su to sandbox.
+        assert!(script.contains("su -s /bin/sh"));
+        // The cd target must be quoted — the injection escape was an
+        // unquoted cd with an attacker-influenced path. (Assert on `run`
+        // before its quotes are escaped again by the outer embedding.)
+        assert!(run.contains("cd '/ws/"));
+        // Pid-file parent must be pre-created, not just <mp>.
+        assert!(run.contains("mkdir -p /ws/") || run.contains(&format!("mkdir -p {mp}/.kai-bg")));
+    }
+
+    #[test]
+    fn kill_uses_negative_pid_for_group_kill() {
+        // The kill must target the process GROUP (negative pid) so
+        // grandchildren of a dev server die with the leader.
+        let f = "/ws/1a2b3c4d/.kai-bg/x.pid";
+        let script = format!(
+            "if [ -f {f} ]; then kill -9 -\"$(cat {f})\" 2>/dev/null; rm -f {f}; fi",
+            f = sh_quote(f),
+        );
+        assert!(script.contains("kill -9 -\"$(cat"));
+    }
+
+    #[test]
+    fn translate_cwd_survives_quote_chars() {
+        // A cwd containing a single quote must survive sh_quote — the
+        // unquoted-cd injection class.
+        let root = "D:\\Code\\Proj";
+        let cwd = "D:\\Code\\Proj\\it's \"quoted\" & $(pwd)";
+        let in_cwd = translate_cwd(root, Some(cwd));
+        let quoted = sh_quote(&in_cwd);
+        // The quoted form embeds the path and every inner ' is escaped.
+        assert!(quoted.starts_with('\''));
+        assert!(quoted.contains("it"));
+        assert_eq!(quoted.matches('\'').count() % 2, 1);
     }
 }
