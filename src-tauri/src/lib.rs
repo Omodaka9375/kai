@@ -677,8 +677,8 @@ app.manage(Mutex::new(None::<fs::env_probe::EnvInventory>));
             modules::radio_proxy::radio_proxy_start,
             modules::radio_proxy::radio_proxy_stop,
             modules::radio_proxy::radio_now_playing,
-            screen::screen_list_monitors,
-            screen::screen_capture,
+            modules::heartbeat::watch_heartbeat,
+            screen::screen_list_monitors,            screen::screen_capture,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

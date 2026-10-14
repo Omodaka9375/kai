@@ -377,6 +377,10 @@ export const native = {
     invoke<void>("shell_session_close", { id }),
   shellSessionCancel: (id: number) =>
     invoke<void>("shell_session_cancel", { id }),
+  /** Rust-driven 1s tick for the watch scheduler — immune to WebView2's
+   *  hidden-page timer throttling. See modules/heartbeat.rs. */
+  watchHeartbeat: (onTick: unknown) =>
+    invoke<void>("watch_heartbeat", { onTick }),
   shellBgSpawn: (
     command: string,
     cwd?: string | null,

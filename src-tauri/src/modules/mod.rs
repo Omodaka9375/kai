@@ -2,6 +2,7 @@ pub mod diagnostics;
 pub mod fs;
 pub mod git;
 pub mod gpg;
+pub mod heartbeat;
 pub mod lock;
 pub mod mcp;
 pub mod mcp_oauth;

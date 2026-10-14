@@ -22,12 +22,71 @@
  */
 
 import { native } from "../lib/native";
-import { useChatStore } from "../store/chatStore";
+import { useChatStore, flushAllPendingWatchWakes } from "../store/chatStore";
 import { tool, generateId } from "ai";
 import { z } from "zod";
 import type { ToolContext } from "./context";
 import { checkShellCommand } from "../lib/security";
 import { checkShellSandbox, sandboxExecRoot } from "../lib/sandbox";
+
+// ── Heartbeat (Rust-driven scheduler tick) ─────────────────────────────────
+//
+// WHY NOT setInterval: WebView2 (Chromium) intensively throttles timers in
+// hidden pages — after ~5 minutes in the background, timers wake at most
+// once per minute. A 5s watch degraded to ~1 poll/min exactly when the user
+// had KAI backgrounded ("watches often don't fire"). IPC event delivery is
+// NOT subject to timer throttling, so the tick comes from a Rust thread via
+// a Channel. The JS side is now a tick-driven scheduler: each watch owns a
+// nextDue timestamp; on every tick, due watches poll. setInterval remains
+// only as a fallback when the Rust heartbeat is unavailable (tests, plain
+// web) so watches still work there — just throttled when hidden.
+
+/** Fixed per-poll timeout, scaled to the interval so a slow command cannot
+ *  strangle the schedule (5s interval → 5s timeout, not a fixed 30s that
+ *  serializes one slow command across three tick periods). */
+export function pollTimeoutSecsFor(intervalSecs: number): number {
+  return Math.max(5, Math.min(30, intervalSecs));
+}
+
+/** A watch whose poll has failed N consecutive times is presumed dead (its
+ *  shell session died with the app restart, the sandbox distro was removed,
+ *  etc.). Rather than silently no-oping forever — the classic "watch never
+ *  fired and nobody knew" — it self-reports ONE final injection with the
+ *  last error, then stops itself. Circuit-breaker threshold. */
+export const WATCH_MAX_CONSECUTIVE_FAILURES = 10;
+
+let heartbeatStarted = false;
+
+async function ensureHeartbeat(): Promise<void> {
+  if (heartbeatStarted) return;
+  heartbeatStarted = true;
+  try {
+    const { Channel } = await import("@tauri-apps/api/core");
+    const channel = new Channel<void>();
+    channel.onmessage = () => {
+      schedulerTick();
+    };
+    await native.watchHeartbeat(channel);
+  } catch {
+    // Rust heartbeat unavailable (tests, plain web) — fall back to a local
+    // 1s timer. Subject to background throttling, but strictly better than
+    // no scheduling at all.
+    setInterval(() => schedulerTick(), 1000);
+  }
+}
+
+/** Advance the schedule: poll every watch whose nextDue has passed. Runs at
+ *  most once per tick; a poll already in flight skips its turn (see poll). */
+function schedulerTick(): void {
+  const now = Date.now();
+  for (const w of watches.values()) {
+    if (!w.active) continue;
+    if (w.inFlight) continue; // previous poll still running — skip this tick
+    if (now < w.nextDue) continue;
+    w.nextDue = now + w.intervalSecs * 1000;
+    void poll(w);
+  }
+}
 
 export type WatchMode = "fire_on_match" | "fire_on_change";
 
@@ -57,8 +116,14 @@ export interface WatchConfig {
 }
 
 interface WatchState extends WatchConfig {
-  /** Interval handle for cleanup. */
-  interval: ReturnType<typeof setInterval>;
+  /** Next timestamp (ms) at which the scheduler may poll. */
+  nextDue: number;
+  /** A poll is currently executing — skip ticks until it settles. */
+  inFlight: boolean;
+  /** Consecutive failed polls (reset on success) — drives the breaker. */
+  consecutiveFailures: number;
+  /** Last error text for the breaker's self-report. */
+  lastError: string | null;
   /** Previous stdout/exit_code for change detection. */
   lastResult: string | null;
   /** How many times we've polled. */
@@ -73,17 +138,22 @@ interface WatchState extends WatchConfig {
 
 const watches = new Map<string, WatchState>();
 
-/** Create a watch and start polling. */
-function startWatch(config: WatchConfig): WatchState {
+/** Create a watch and register it with the tick-driven scheduler. The first
+ *  watch creation also (lazily) starts the Rust heartbeat. */
+async function startWatch(config: WatchConfig): Promise<WatchState> {
   const state: WatchState = {
     ...config,
-    interval: setInterval(() => poll(state), config.intervalSecs * 1000),
+    nextDue: Date.now(),
+    inFlight: false,
+    consecutiveFailures: 0,
+    lastError: null,
     lastResult: null,
     polls: 0,
     hasBaseline: false,
     active: true,
   };
   watches.set(config.id, state);
+  await ensureHeartbeat();
   return state;
 }
 
@@ -91,28 +161,31 @@ function startWatch(config: WatchConfig): WatchState {
 function stopWatch(id: string): boolean {
   const w = watches.get(id);
   if (!w) return false;
-  clearInterval(w.interval);
   w.active = false;
   watches.delete(id);
   return true;
+}
+
+/** Stop and remove a watch by id. Exported for tests + watch_kill. */
+export function stopWatchById(id: string): boolean {
+  return stopWatch(id);
 }
 
 /** Reap all watches owned by a session. */
 export function reapSessionWatches(sessionId: string): void {
   for (const [id, w] of watches) {
     if (w.sessionId === sessionId) {
-      clearInterval(w.interval);
       w.active = false;
       watches.delete(id);
     }
   }
 }
 
-/** Get all active watch IDs (for listing). */
+/** Get all active watch configs (for listing). */
 export function listWatches(): WatchConfig[] {
   return Array.from(watches.values())
     .filter((w) => w.active)
-    .map(({ interval: _, lastResult: _l, polls: _p, hasBaseline: _h, active: _a, ...cfg }) => cfg);
+    .map(({ nextDue: _nd, inFlight: _if, consecutiveFailures: _cf, lastError: _le, ...cfg }) => cfg);
 }
 
 /** Number of live watch timers (diagnostics). */
@@ -123,17 +196,19 @@ export function watchCount(): number {
 // ── Polling ────────────────────────────────────────────────────────────────
 
 async function poll(w: WatchState): Promise<void> {
-  if (!w.active) return;
+  if (!w.active || w.inFlight) return;
+  w.inFlight = true;
   w.polls++;
-
   try {
     const result = await native.shellSessionRun(
       w.shellId,
       w.command,
       w.cwd,
-      30, // 30s timeout per poll
+      pollTimeoutSecsFor(w.intervalSecs),
       await sandboxExecRoot(),
     );
+    w.consecutiveFailures = 0;
+    w.lastError = null;
 
     const fingerprint = `${result.exit_code}:${result.stdout}:${result.stderr}`;
 
@@ -156,20 +231,31 @@ async function poll(w: WatchState): Promise<void> {
       }
     }
   } catch (e) {
-    // Poll failed — log but don't kill the watch. `console.warn` (not debug)
-    // so it surfaces in the on-disk log via the console bridge: a watch that
-    // never fires because its shell session is dead / the command errored was
-    // previously invisible, leaving the user (and the model) with no signal.
-    console.warn(
-      `[kai] watch ${w.id} poll failed (command: ${w.command}):`,
-      e instanceof Error ? e.message : e,
-    );
+    const msg = e instanceof Error ? e.message : String(e);
+    w.lastError = msg;
+    w.consecutiveFailures++;
+    // Circuit breaker: N consecutive failures means the watch is dead (shell
+    // session gone, sandbox distro removed, ...). Self-report ONCE into the
+    // chat so the model (and user) see why it stopped, then stop the watch —
+    // previously this looped silently forever.
+    if (w.consecutiveFailures >= WATCH_MAX_CONSECUTIVE_FAILURES) {
+      injectWatchFailure(w);
+      stopWatch(w.id);
+    } else {
+      console.warn(
+        `[kai] watch ${w.id} poll failed (${w.consecutiveFailures}/${WATCH_MAX_CONSECUTIVE_FAILURES}, command: ${w.command}):`,
+        msg,
+      );
+    }
+  } finally {
+    w.inFlight = false;
   }
 }
 
 // ── Condition evaluation ──────────────────────────────────────────────────
 
-function evaluateCondition(
+/** Evaluate the condition expression against a poll result. Pure, exported for tests. */
+export function evaluateCondition(
   condition: string | undefined,
   result: { exit_code: number | null; stdout: string; stderr: string; timed_out: boolean },
 ): boolean {
@@ -264,6 +350,22 @@ function injectWatchResult(
   // Inject as a system message so the model sees it as new information.
   const sessionId = w.sessionId;
   void useChatStore.getState().injectMessage(sessionId, text);
+  // The injection may have queued a wake for a NON-active session (the
+  // bridge only flushes for the session it's mounted against) — flush all
+  // queued wakes so the background session reacts too.
+  flushAllPendingWatchWakes();
+}
+
+/** Terminal self-report for a dead watch (circuit breaker). Tells the model
+ *  the watch is gone and why, so it can re-create it or tell the user. */
+function injectWatchFailure(w: WatchState): void {
+  const label = w.label ?? w.command;
+  const text =
+    `**Watch stopped**: \`${label}\` (id: ${w.id}) — its command failed ${w.consecutiveFailures} polls in a row ` +
+    `and the watch was auto-stopped. Last error:\n\`\`\`\n${(w.lastError ?? "unknown").slice(0, 500)}\n\`\`\`\n` +
+    `If this task still needs monitoring, create a new watch with watch_create.`;
+  void useChatStore.getState().injectMessage(w.sessionId, text);
+  flushAllPendingWatchWakes();
 }
 
 // ── Tool implementations ──────────────────────────────────────────────────
@@ -315,7 +417,7 @@ export function buildWatchTools(ctx: ToolContext) {
           sessionId,
         };
 
-        startWatch(config);
+        await startWatch(config);
 
         return {
           ok: true,

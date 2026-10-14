@@ -381,6 +381,21 @@ export function flushPendingWatchWakes(sessionId: string): void {
   });
 }
 
+/**
+ * Flush queued watch wakes for ALL sessions, not just the active one. The
+ * AgentRunBridge effect only fires for the session it's mounted against —
+ * a watch on a background session (the user switched chats mid-monitoring)
+ * stayed queued forever: its wake sat in pendingWatchWakes until the user
+ * happened to switch back, so "the watch fired but the agent never
+ * reacted". Called whenever a watch injects a message, so every firing
+ * gets its session a wake attempt regardless of which session is open.
+ */
+export function flushAllPendingWatchWakes(): void {
+  for (const id of pendingWatchWakes) {
+    flushPendingWatchWakes(id);
+  }
+}
+
 export function registerRunController(sessionId: string, c: AbortController): void {
   // A new run supersedes any stale controller for the session.
   runControllers.get(sessionId)?.abort();
