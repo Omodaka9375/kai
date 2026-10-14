@@ -4,6 +4,16 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.6.8]
+
+- AI: restored per-project models resolve at launch - the model catalog is seeded at startup and the selection re-announced once dynamic models register.
+- AI: reasoning effort patch for compatible-endpoint options; added OpenRouter, DeepSeek, and Z.AI mappings.
+- Sandbox: closed the OS-layer escapes.
+- Watch: watches fire reliably.
+- Voice: new Voice settings section with API and local STT/TTS - whisper.cpp and Piper download on demand; spoken replies are sanitized to prose only.
+
+---
+
 ## [1.6.7]
 
 - AI tools: fixed multi_edit looping on "file changed since your last read" - the read cache stored sizes in two units (disk bytes vs character count), so the tool's own previous write falsely tripped the stale guard on any file with non-ASCII content, pushing models to fall back to single edit calls. The guard now compares content hash only, and a stale bounce counts toward the retry cap that points the model at write_file.
