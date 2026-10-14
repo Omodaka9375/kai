@@ -535,6 +535,8 @@ pub fn run() {
                 }
             }
             screen::sweep_stale_screens();
+            // Voice: sweep crash-leftover download .part files.
+            modules::voice::sweep_stale_voice_parts(app.handle());
             // One-shot shell commands run via script files (not
             // -EncodedCommand — AV flags that as dropper behavior). Point
             // them at app data and sweep anything a crash left behind.
@@ -678,6 +680,12 @@ app.manage(Mutex::new(None::<fs::env_probe::EnvInventory>));
             modules::radio_proxy::radio_proxy_stop,
             modules::radio_proxy::radio_now_playing,
             modules::heartbeat::watch_heartbeat,
+            modules::voice::voice_status,
+            modules::voice::voice_setup_stt,
+            modules::voice::voice_setup_tts,
+            modules::voice::voice_remove_local,
+            modules::voice::voice_transcribe,
+            modules::voice::voice_tts,
             screen::screen_list_monitors,            screen::screen_capture,
         ])
         .run(tauri::generate_context!())

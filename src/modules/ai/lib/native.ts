@@ -151,6 +151,20 @@ export type SandboxSetupEvent = {
   message: string | null;
 };
 
+export type VoiceStatus = {
+  sttInstalled: boolean;
+  ttsInstalled: boolean;
+  sttModel: string | null;
+  ttsVoice: string | null;
+};
+
+export type VoiceSetupEvent = {
+  phase: string;
+  downloaded: number;
+  total: number;
+  message: string | null;
+};
+
 export type ShadowInfo = {
   projectRoot: string;
   shadowRoot: string;
@@ -381,6 +395,16 @@ export const native = {
    *  hidden-page timer throttling. See modules/heartbeat.rs. */
   watchHeartbeat: (onTick: unknown) =>
     invoke<void>("watch_heartbeat", { onTick }),
+  // ── Voice (local engines: whisper.cpp STT + Piper TTS) ──
+  voiceStatus: () => invoke<VoiceStatus>("voice_status"),
+  voiceSetupStt: (model: string, onEvent: unknown) =>
+    invoke<void>("voice_setup_stt", { model, onEvent }),
+  voiceSetupTts: (voice: string, onEvent: unknown) =>
+    invoke<void>("voice_setup_tts", { voice, onEvent }),
+  voiceRemoveLocal: () => invoke<void>("voice_remove_local"),
+  voiceTranscribe: (audioBase64: string) =>
+    invoke<string>("voice_transcribe", { audioBase64 }),
+  voiceTts: (text: string) => invoke<string>("voice_tts", { text }),
   shellBgSpawn: (
     command: string,
     cwd?: string | null,

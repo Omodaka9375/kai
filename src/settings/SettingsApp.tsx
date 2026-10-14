@@ -12,6 +12,7 @@ import {
   UserMultiple02Icon,
   KeyboardIcon,
   Shield01Icon,
+  Mic01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
@@ -24,6 +25,7 @@ const AgentsSection = lazy(() => import("./sections/AgentsSection").then((m) => 
 const SnippetsSection = lazy(() => import("./sections/SnippetsSection").then((m) => ({ default: m.SnippetsSection })));
 const McpSection = lazy(() => import("./sections/McpSection").then((m) => ({ default: m.McpSection })));
 const SandboxSection = lazy(() => import("./sections/SandboxSection").then((m) => ({ default: m.SandboxSection })));
+const VoiceSection = lazy(() => import("./sections/VoiceSection").then((m) => ({ default: m.VoiceSection })));
 const AboutSection = lazy(() => import("./sections/AboutSection").then((m) => ({ default: m.AboutSection })));
 
 type TabDef = { id: SettingsTab; label: string; icon: typeof Settings01Icon; component: React.LazyExoticComponent<() => React.JSX.Element> };
@@ -37,6 +39,7 @@ const TABS: TabDef[] =
     { id: "snippets", label: "Snippets", icon: SparklesIcon, component: SnippetsSection },
     { id: "mcp", label: "MCP Servers", icon: PuzzleIcon, component: McpSection },
     { id: "sandbox", label: "Sandbox", icon: Shield01Icon, component: SandboxSection },
+    { id: "voice", label: "Voice", icon: Mic01Icon, component: VoiceSection },
     { id: "about", label: "About", icon: InformationCircleIcon, component: AboutSection },
   ];
 
@@ -48,6 +51,7 @@ const VALID_TABS: SettingsTab[] = [
   "snippets",
   "mcp",
   "sandbox",
+  "voice",
   "about",
 ];
 

@@ -8,6 +8,7 @@ export type SettingsTab =
   | "snippets"
   | "mcp"
   | "sandbox"
+  | "voice"
   | "about";
 
 export async function openSettingsWindow(tab?: string): Promise<void> {

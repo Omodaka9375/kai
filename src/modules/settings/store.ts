@@ -112,6 +112,22 @@ export type Preferences = {
   radioEnabled: boolean;
   /** Persisted SomaFM station id (empty = none picked yet). */
   radioStationId: string;
+  /** Voice input mode: "api" (OpenAI whisper), "local" (whisper.cpp), "browser" (SpeechRecognition fallback). */
+  voiceSttMode: "api" | "local" | "browser";
+  /** Local STT model name (whisper.cpp quantized ggml). */
+  voiceSttModel: string;
+  /** API STT model id. */
+  voiceSttApiModel: string;
+  /** Text-to-speech mode: "off" | "api" (OpenAI TTS) | "local" (Piper). */
+  voiceTtsMode: "off" | "api" | "local";
+  /** API TTS voice (alloy/echo/...). */
+  voiceTtsApiVoice: string;
+  /** API TTS model id. */
+  voiceTtsApiModel: string;
+  /** Local TTS voice name (Piper). */
+  voiceTtsLocalVoice: string;
+  /** Auto-speak assistant replies when TTS is active. */
+  voiceSpeakReplies: boolean;
 };
 
 const STORE_PATH = "Kai-settings.json";
@@ -160,6 +176,14 @@ const KEY_SIDEBAR_VIEW = "sidebarView";
 const KEY_UPDATER_LAST_CHECK = "updaterLastCheck";
 const KEY_RADIO_ENABLED = "radioEnabled";
 const KEY_RADIO_STATION = "radioStationId";
+const KEY_VOICE_STT_MODE = "voiceSttMode";
+const KEY_VOICE_STT_MODEL = "voiceSttModel";
+const KEY_VOICE_STT_API_MODEL = "voiceSttApiModel";
+const KEY_VOICE_TTS_MODE = "voiceTtsMode";
+const KEY_VOICE_TTS_API_VOICE = "voiceTtsApiVoice";
+const KEY_VOICE_TTS_API_MODEL = "voiceTtsApiModel";
+const KEY_VOICE_TTS_LOCAL_VOICE = "voiceTtsLocalVoice";
+const KEY_VOICE_SPEAK_REPLIES = "voiceSpeakReplies";
 
 export const TERMINAL_FONT_SIZE_DEFAULT = 14;
 export const TERMINAL_FONT_SIZE_MIN = 8;
@@ -229,6 +253,14 @@ export const DEFAULT_PREFERENCES: Preferences = {
   updaterLastCheck: 0,
   radioEnabled: false,
   radioStationId: "",
+  voiceSttMode: "api",
+  voiceSttModel: "base.en",
+  voiceSttApiModel: "whisper-1",
+  voiceTtsMode: "off",
+  voiceTtsApiVoice: "alloy",
+  voiceTtsApiModel: "gpt-4o-mini-tts",
+  voiceTtsLocalVoice: "en_US-lessac-medium",
+  voiceSpeakReplies: false,
 };
 
 const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
@@ -361,11 +393,29 @@ export async function loadPreferences(): Promise<Preferences> {
     updaterLastCheck:
       get<number>(KEY_UPDATER_LAST_CHECK) ??
       DEFAULT_PREFERENCES.updaterLastCheck,
-    radioEnabled:
-      get<boolean>(KEY_RADIO_ENABLED) ?? DEFAULT_PREFERENCES.radioEnabled,
-    radioStationId:
-      get<string>(KEY_RADIO_STATION) ?? DEFAULT_PREFERENCES.radioStationId,
-  };
+      radioEnabled:
+        get<boolean>(KEY_RADIO_ENABLED) ?? DEFAULT_PREFERENCES.radioEnabled,
+      radioStationId:
+        get<string>(KEY_RADIO_STATION) ?? DEFAULT_PREFERENCES.radioStationId,
+      voiceSttMode:
+        (get<string>(KEY_VOICE_STT_MODE) as Preferences["voiceSttMode"]) ??
+        DEFAULT_PREFERENCES.voiceSttMode,
+      voiceSttModel:
+        get<string>(KEY_VOICE_STT_MODEL) ?? DEFAULT_PREFERENCES.voiceSttModel,
+      voiceSttApiModel:
+        get<string>(KEY_VOICE_STT_API_MODEL) ?? DEFAULT_PREFERENCES.voiceSttApiModel,
+      voiceTtsMode:
+        (get<string>(KEY_VOICE_TTS_MODE) as Preferences["voiceTtsMode"]) ??
+        DEFAULT_PREFERENCES.voiceTtsMode,
+      voiceTtsApiVoice:
+        get<string>(KEY_VOICE_TTS_API_VOICE) ?? DEFAULT_PREFERENCES.voiceTtsApiVoice,
+      voiceTtsApiModel:
+        get<string>(KEY_VOICE_TTS_API_MODEL) ?? DEFAULT_PREFERENCES.voiceTtsApiModel,
+      voiceTtsLocalVoice:
+        get<string>(KEY_VOICE_TTS_LOCAL_VOICE) ?? DEFAULT_PREFERENCES.voiceTtsLocalVoice,
+      voiceSpeakReplies:
+        get<boolean>(KEY_VOICE_SPEAK_REPLIES) ?? DEFAULT_PREFERENCES.voiceSpeakReplies,
+    };
 }
 
 export async function setTheme(value: ThemePref): Promise<void> {
@@ -420,6 +470,38 @@ export async function setRadioEnabled(value: boolean): Promise<void> {
 
 export async function setRadioStationId(value: string): Promise<void> {
   await writePref(KEY_RADIO_STATION, value ?? "");
+}
+
+export async function setVoiceSttMode(value: Preferences["voiceSttMode"]): Promise<void> {
+  await writePref(KEY_VOICE_STT_MODE, value);
+}
+
+export async function setVoiceSttModel(value: string): Promise<void> {
+  await writePref(KEY_VOICE_STT_MODEL, value ?? "");
+}
+
+export async function setVoiceSttApiModel(value: string): Promise<void> {
+  await writePref(KEY_VOICE_STT_API_MODEL, value ?? "");
+}
+
+export async function setVoiceTtsMode(value: Preferences["voiceTtsMode"]): Promise<void> {
+  await writePref(KEY_VOICE_TTS_MODE, value);
+}
+
+export async function setVoiceTtsApiVoice(value: string): Promise<void> {
+  await writePref(KEY_VOICE_TTS_API_VOICE, value ?? "");
+}
+
+export async function setVoiceTtsApiModel(value: string): Promise<void> {
+  await writePref(KEY_VOICE_TTS_API_MODEL, value ?? "");
+}
+
+export async function setVoiceTtsLocalVoice(value: string): Promise<void> {
+  await writePref(KEY_VOICE_TTS_LOCAL_VOICE, value ?? "");
+}
+
+export async function setVoiceSpeakReplies(value: boolean): Promise<void> {
+  await writePref(KEY_VOICE_SPEAK_REPLIES, value);
 }
 
 export async function setLmstudioBaseURL(value: string): Promise<void> {
@@ -688,6 +770,14 @@ export async function onPreferencesChange(
     [KEY_UPDATER_LAST_CHECK]: "updaterLastCheck",
     [KEY_RADIO_ENABLED]: "radioEnabled",
     [KEY_RADIO_STATION]: "radioStationId",
+    [KEY_VOICE_STT_MODE]: "voiceSttMode",
+    [KEY_VOICE_STT_MODEL]: "voiceSttModel",
+    [KEY_VOICE_STT_API_MODEL]: "voiceSttApiModel",
+    [KEY_VOICE_TTS_MODE]: "voiceTtsMode",
+    [KEY_VOICE_TTS_API_VOICE]: "voiceTtsApiVoice",
+    [KEY_VOICE_TTS_API_MODEL]: "voiceTtsApiModel",
+    [KEY_VOICE_TTS_LOCAL_VOICE]: "voiceTtsLocalVoice",
+    [KEY_VOICE_SPEAK_REPLIES]: "voiceSpeakReplies",
   };
   // Same-process writes still fire onChange immediately; cross-window writes
   // arrive via the Tauri event emitted by writePref().

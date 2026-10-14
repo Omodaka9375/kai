@@ -2,6 +2,8 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { experimental_transcribe as transcribe } from "ai";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useChatStore } from "../store/chatStore";
+import { encodeWav, transcribeLocal } from "../lib/voiceTts";
+import { usePreferencesStore } from "@/modules/settings/preferences";
 
 const MIME_CANDIDATES = [
   "audio/webm;codecs=opus",
@@ -47,8 +49,9 @@ function withTimeout<T>(p: Promise<T>, ms: number, msg: string): Promise<T> {
 async function transcribeBlob(blob: Blob, apiKey: string): Promise<string> {
   const openai = createOpenAI({ apiKey });
   const buf = new Uint8Array(await blob.arrayBuffer());
+  const modelId = usePreferencesStore.getState().voiceSttApiModel || "whisper-1";
   const { text } = await transcribe({
-    model: openai.transcription("whisper-1"),
+    model: openai.transcription(modelId),
     audio: buf,
   });
   return text;
@@ -95,12 +98,20 @@ export function useWhisperRecording({
   onAutoSubmit?: (transcript: string) => void;
 }) {
   const apiKey = useChatStore((s) => s.apiKeys.openai);
+  const sttMode = usePreferencesStore((s) => s.voiceSttMode);
   const [state, setState] = useState<State>("idle");
   const [error, setError] = useState<string | null>(null);
   const recRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const speechRef = useRef<SpeechRec | null>(null);
+  // Local (whisper.cpp) route: raw PCM tap → WAV, encoded at stop.
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const procRef = useRef<ScriptProcessorNode | null>(null);
+  const pcmRef = useRef<Float32Array[]>([]);
+  /** Late-bound stop for the local route — `stop` is declared before the
+   *  local callbacks; a ref breaks the TDZ cycle without reordering. */
+  const stopLocalRef = useRef<(() => void) | null>(null);
   const startingRef = useRef(false);
   /** Ensure a recording can't overrun an unanswered permission / stuck API. */
   const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -155,6 +166,15 @@ export function useWhisperRecording({
   const teardownStream = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+    // Local route teardown: disconnect the tap and close the context.
+    try {
+      procRef.current?.disconnect();
+      audioCtxRef.current?.close();
+    } catch {
+      // ignore — best effort
+    }
+    procRef.current = null;
+    audioCtxRef.current = null;
   }, []);
 
   const stop = useCallback(() => {
@@ -177,6 +197,11 @@ export function useWhisperRecording({
       } catch {
         fail("Could not stop the recorder.");
       }
+      return;
+    }
+    // Local route: PCM tap active — flush and transcribe.
+    if (audioCtxRef.current) {
+      void stopLocalRef.current?.();
     }
   }, [fail]);
 
@@ -313,6 +338,96 @@ export function useWhisperRecording({
     [apiKey, fail, teardownStream, deliver],
   );
 
+  /** Local whisper.cpp route: mic → ScriptProcessor PCM tap → WAV → Rust
+   *  voice_transcribe → transcript. No key needed; engine must be installed
+   *  (Settings → Voice). */
+  const startLocalWhisper = useCallback(async () => {
+    try {
+      const stream = await withTimeout(
+        navigator.mediaDevices.getUserMedia({ audio: true }),
+        GET_MEDIA_TIMEOUT_MS,
+        "Timed out waiting for microphone access",
+      );
+      streamRef.current = stream;
+      const ctx = new AudioContext({ sampleRate: 16000 });
+      audioCtxRef.current = ctx;
+      const src = ctx.createMediaStreamSource(stream);
+      const proc = ctx.createScriptProcessor(4096, 1, 1);
+      procRef.current = proc;
+      pcmRef.current = [];
+      proc.onaudioprocess = (e) => {
+        // Copy — the buffer is reused by the audio thread.
+        pcmRef.current.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+      };
+      src.connect(proc);
+      // ScriptProcessor requires a destination to pump; a muted gain avoids
+      // speaker feedback while keeping the graph live.
+      const mute = ctx.createGain();
+      mute.gain.value = 0;
+      proc.connect(mute);
+      mute.connect(ctx.destination);
+      startingRef.current = false;
+      clearWatchdog();
+      setState("recording");
+    } catch (e) {
+      const msg = typeof (e as Error)?.message === "string"
+        ? String((e as Error).message)
+        : String(e);
+      teardownStream();
+      startingRef.current = false;
+      setError(
+        looksLikeDenied(msg)
+          ? "Microphone permission denied. Enable mic access for this app in your OS / WebView settings."
+          : `Could not start microphone: ${msg}`,
+      );
+      setState("idle");
+    }
+  }, [teardownStream]);
+
+  /** Stop the local route: flush PCM → WAV → transcribe. */
+  const stopLocalWhisper = useCallback(async () => {
+    const ctx = audioCtxRef.current;
+    const chunks = pcmRef.current;
+    pcmRef.current = [];
+    teardownStream();
+    const sampleRate = ctx?.sampleRate ?? 16000;
+    if (chunks.length === 0) {
+      setState("idle");
+      return;
+    }
+    const total = chunks.reduce((n, c) => n + c.length, 0);
+    const merged = new Float32Array(total);
+    let off = 0;
+    for (const c of chunks) {
+      merged.set(c, off);
+      off += c.length;
+    }
+    const wav = encodeWav(merged, sampleRate);
+    if (wav.size <= 44) {
+      setState("idle");
+      return;
+    }
+    setState("transcribing");
+    try {
+      const text = await withTimeout(
+        transcribeLocal(wav),
+        120_000,
+        "Local transcription timed out",
+      );
+      if (text.trim()) deliver(text.trim());
+    } catch (e) {
+      console.error("local stt", e);
+      setError(
+        typeof (e as Error)?.message === "string" && (e as Error).message
+          ? `Local transcription failed: ${(e as Error).message}`
+          : "Local transcription failed — is the engine installed in Settings → Voice?",
+      );
+    } finally {
+      setState("idle");
+    }
+  }, [teardownStream, deliver]);
+  stopLocalRef.current = () => void stopLocalWhisper();
+
   const start = useCallback(() => {
     if (startingRef.current || state !== "idle") return;
     if (!supported) {
@@ -322,15 +437,19 @@ export function useWhisperRecording({
     setError(null);
     startingRef.current = true;
 
-    // Determine the freshest transcription route each time. Priority:
-    // OpenAI whisper-1 (if key) → browser Speech API.
-    if (useWhisper) {
+    // Route by configured STT mode (freshest prefs each toggle):
+    //   local  → whisper.cpp via WAV tap (needs engine, no key)
+    //   api    → OpenAI whisper (needs key; falls back to browser STT)
+    //   browser→ WebView SpeechRecognition (no key)
+    if (sttMode === "local") {
+      void startLocalWhisper();
+    } else if (sttMode === "api" && useWhisper) {
       // startWhisper is async and catches its own errors; keep non-blocking.
       void startWhisper();
     } else {
       startSpeechApi();
     }
-  }, [state, supported, useWhisper, startWhisper, startSpeechApi]);
+  }, [state, supported, sttMode, useWhisper, startWhisper, startLocalWhisper, startSpeechApi]);
 
   const clearError = useCallback(() => setError(null), []);
 
@@ -339,6 +458,12 @@ export function useWhisperRecording({
       clearWatchdog();
       recRef.current?.stop();
       speechRef.current?.stop();
+      try {
+        procRef.current?.disconnect();
+        audioCtxRef.current?.close();
+      } catch {
+        // ignore
+      }
       streamRef.current?.getTracks().forEach((t) => t.stop());
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

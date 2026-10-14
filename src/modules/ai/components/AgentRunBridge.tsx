@@ -14,6 +14,7 @@ import {
   type AgentRunStatus,
 } from "../store/chatStore";
 import { verifyIfDirtyAtRunEnd } from "../lib/autoVerify";
+import { speakText } from "../lib/voiceTts";
 
 /**
  * Headless bridge that mirrors chat lifecycle into the store, so the status
@@ -239,6 +240,37 @@ function Bridge({
     const root = live.getWorkspaceRoot();
     void verifyIfDirtyAtRunEnd(sessionId, root, injectMessage);
   }, [status, sessionId, injectMessage]);
+
+  // ---- Auto-speak finished replies (Voice settings) -----------------------
+  // When a run settles to idle after streaming AND the user enabled
+  // auto-speak, read the last assistant text aloud via the configured TTS
+  // mode (local Piper / OpenAI). Tracked with a ref so a re-mount (session
+  // switch) doesn't re-speak an old message: only transitions count.
+  const speakReplies = usePreferencesStore((s) => s.voiceSpeakReplies);
+  const spokenForRef = useRef<string | null>(null);
+  const prevStatusRef = useRef(status);
+  useEffect(() => {
+    const wasStreaming = prevStatusRef.current === "streaming";
+    prevStatusRef.current = status;
+    if (!speakReplies || !wasStreaming || status === "submitted" || status === "streaming") {
+      return;
+    }
+    // The last assistant message that has text is the reply just finished.
+    let text = "";
+    for (let i = messages.length - 1; i >= 0 && !text; i--) {
+      const m = messages[i];
+      if (m.role !== "assistant") continue;
+      text = m.parts
+        .filter((p): p is { type: "text"; text: string } => p.type === "text")
+        .map((p) => p.text)
+        .join(" ")
+        .trim();
+    }
+    const key = `${sessionId}:${messages.length}`;
+    if (!text || spokenForRef.current === key) return;
+    spokenForRef.current = key;
+    void speakText(text);
+  }, [status, speakReplies, messages, sessionId]);
 
   // ---- Auto-approve effect --------------------------------------------------
   const autoApprove = useChatStore((s) => s.autoApprove);
