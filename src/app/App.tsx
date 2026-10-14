@@ -635,6 +635,12 @@ export default function App() {
     // block reads it from cache (verified shell + installed tool list,
     // replacing hardcoded assumptions).
     void import("@/modules/ai/lib/transport").then((m) => m.fetchEnvInventory());
+    // Seed the model catalog immediately (disk cache first, no key needed)
+    // so a restored per-project model resolves instead of hitting the
+    // synthetic "Unknown model" fallback before the picker ever mounts.
+    void import("@/modules/ai/store/openrouterModelsStore").then((m) =>
+      m.useOpenRouterModelsStore.getState().fetch(),
+    );
   }, [hydrateSessions, launchCwdResolved, explorerRoot, launchCwd, home]);
 
   useEffect(() => {

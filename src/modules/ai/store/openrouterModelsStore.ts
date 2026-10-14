@@ -4,6 +4,7 @@ import { LazyStore } from "@tauri-apps/plugin-store";
 import type { ModelInfo, ModelPricing, ModelTag } from "../config";
 import { MODELS, registerDynamicContextLimits, registerDynamicPricing, registerExternalModelLookup } from "../config";
 import { type PersistedCatalog, reviveCatalog } from "./catalog";
+import { useChatStore } from "./chatStore";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -22,6 +23,21 @@ type OpenRouterResponse = {
 };
 
 // ── Store ───────────────────────────────────────────────────────────────────
+
+/** Re-emit the current model selection after the catalog registers. Any
+ *  consumer that resolved `getModel(selectedModelId)` BEFORE the OpenRouter
+ *  lookup existed (session restore is faster than the picker mount) cached
+ *  the synthetic "Unknown model" fallback; a same-value set notifies every
+ *  `selectedModelId` subscriber so they re-resolve with real data. */
+function announceCatalogToModelConsumers(): void {
+  try {
+    const { selectedModelId, setSelectedModelId } = useChatStore.getState();
+    setSelectedModelId(selectedModelId);
+  } catch {
+    // chatStore not ready yet (early hydration) — subscribers will resolve
+    // correctly on their next render since the lookup is now registered.
+  }
+}
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 /** Delay before retrying a failed catalog fetch. Static (no backoff): the
@@ -90,6 +106,7 @@ export const useOpenRouterModelsStore = create<State>((set, get) => ({
       const merged = mergeModels(parsed);
       // Register a lookup so getModel() can resolve dynamically-fetched models.
       registerExternalModelLookup((id) => merged.find((m) => m.id === id));
+      announceCatalogToModelConsumers();
       // Register context limits and pricing from fetched data so dynamic
       // models get accurate context windows and cost estimates.
       registerDynamicContextLimits(contextLimits);
@@ -340,6 +357,7 @@ async function hydrateFromDisk(set: (partial: Partial<State>) => void): Promise<
     if (!catalog) return;
     const merged = mergeModels(catalog.models);
     registerExternalModelLookup((id) => merged.find((m) => m.id === id));
+    announceCatalogToModelConsumers();
     registerDynamicContextLimits(catalog.contextLimits);
     registerDynamicPricing(catalog.pricing);
     set({ models: merged, lastFetched: catalog.fetchedAt, loading: false });
