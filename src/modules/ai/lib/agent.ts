@@ -18,6 +18,8 @@ import {
   THINKING_BUDGET_ANTHROPIC,
   THINKING_BUDGET_GOOGLE,
   THINKING_EFFORT_OPENAI,
+  THINKING_EFFORT_OPENROUTER,
+  THINKING_EFFORT_DEEPSEEK,
   THINKING_EFFORT_GROQ,
   THINKING_EFFORT_XAI,
   type ModelId,
@@ -768,11 +770,38 @@ export async function runAgentStream(opts: RunAgentOptions) {
         break;
       case "openai-compatible":
       case "lmstudio":
-        // OpenAI-compatible endpoints use the same params as the openai
-        // provider. vLLM, Ollama, Z.AI, Fireworks, etc. accept
-        // `reasoning_effort` natively.
-        thinkingProviderOpts.openai = {
+        // OpenAI-compatible endpoints accept `reasoning_effort` natively
+        // (vLLM, Ollama, Z.AI, Fireworks, ...). CRITICAL: @ai-sdk's
+        // openai-compatible provider reads providerOptions under the NAME
+        // passed to createOpenAICompatible ("openai-compatible"/"lmstudio")
+        // — a "openai" key is silently dropped and the param never sent.
+        thinkingProviderOpts[provider] = {
           reasoningEffort: THINKING_EFFORT_OPENAI[thinkingMode],
+        };
+        break;
+      case "openrouter":
+        // OpenRouter normalizes reasoning across upstreams via its own
+        // `reasoning` body param. openai-compatible passes unknown keys
+        // under the provider name through to the request body verbatim,
+        // so this lands as `"reasoning": {"effort": "..."}`.
+        thinkingProviderOpts.openrouter = {
+          reasoning: { effort: THINKING_EFFORT_OPENROUTER[thinkingMode] },
+        };
+        break;
+      case "deepseek":
+        // DeepSeek accepts `reasoning_effort` (low/high/max; its own
+        // mapping sends requested "medium" to actual "high") in OpenAI
+        // format. Parsed into reasoning_effort by the compat provider.
+        thinkingProviderOpts.deepseek = {
+          reasoningEffort: THINKING_EFFORT_DEEPSEEK[thinkingMode],
+        };
+        break;
+      case "zai":
+        // Z.AI GLM has no effort levels — the body-level `thinking` toggle
+        // (passed through verbatim by the compat provider) is the only
+        // control. Mode != off here, so thinking is enabled.
+        thinkingProviderOpts.zai = {
+          thinking: { type: "enabled" as const },
         };
         break;
     }

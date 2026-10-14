@@ -38,6 +38,24 @@ export const THINKING_EFFORT_OPENAI: Record<ThinkingMode, string> = {
   high: "high",
 };
 
+/** Reasoning effort strings per mode for OpenRouter's `reasoning` param. */
+export const THINKING_EFFORT_OPENROUTER: Record<ThinkingMode, string> = {
+  off: "",
+  low: "low",
+  medium: "medium",
+  high: "high",
+};
+
+/** Reasoning effort strings per mode for DeepSeek's OpenAI-format
+ *  `reasoning_effort` (accepts low/high/max; its own mapping sends a
+ *  requested "medium" to actual "high", so medium maps to high here). */
+export const THINKING_EFFORT_DEEPSEEK: Record<ThinkingMode, string> = {
+  off: "",
+  low: "low",
+  medium: "high",
+  high: "high",
+};
+
 /** Thinking budget tokens for Google Gemini. */
 export const THINKING_BUDGET_GOOGLE: Record<ThinkingMode, number> = {
   off: 0,
