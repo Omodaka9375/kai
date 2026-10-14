@@ -550,13 +550,28 @@ pub fn sweep_stale_shell_scripts(dir: &Path) {
     }
 }
 
+/// Translate bash-style escaped double quotes to PowerShell's escape BEFORE
+/// the script is written. Models write `\"` by bash reflex; in PowerShell a
+/// backslash is a literal character and the `"` CLOSES the string, so
+/// `python -c "print(\"x\")"` truncates the child's argument at the first
+/// `\"` (the classic mangling the old stderr hint tried to coach around).
+/// Backtick-quote (`` `" ``) is PS's literal quote — the exact semantic
+/// equivalent of bash's `\"` — so the rewrite preserves intent:
+/// `"print(\"x\")"` → `"print(`"x`")"` → python receives `print("x")`.
+/// Backslash is literal in PS, so `\\` and `\'` already mean what bash
+/// means and are left untouched.
+#[cfg(windows)]
+fn repair_bash_style_quotes(command: &str) -> String {
+    command.replace("\\\"", "`\"")
+}
+
 /// Write `command` to a unique one-shot script file (UTF-8 with BOM —
 /// Windows PowerShell 5.1 reads BOM-less scripts as ANSI and would mangle
 /// non-ASCII content).
 #[cfg(windows)]
 fn write_shell_script(dir: &Path, command: &str) -> Result<PathBuf, String> {
+    let command = repair_bash_style_quotes(command);
     std::fs::create_dir_all(dir).map_err(|e| {
-        log::warn!("shell script dir create failed ({}): {e}", dir.display());
         e.to_string()
     })?;
     static CTR: AtomicU64 = AtomicU64::new(0);
@@ -673,4 +688,31 @@ fn drain<R: Read>(reader: &mut R) -> (Vec<u8>, bool) {
         }
     }
     (out, truncated)
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::repair_bash_style_quotes;
+
+    #[test]
+    fn rewrites_bash_escaped_quotes_to_backtick_escapes() {
+        assert_eq!(
+            repair_bash_style_quotes(r#"python -c "print(\"x\")""#),
+            "python -c \"print(`\"x`\")\""
+        );
+    }
+
+    #[test]
+    fn leaves_untouched_commands_alone() {
+        assert_eq!(repair_bash_style_quotes("Get-ChildItem -Path 'a b'"), "Get-ChildItem -Path 'a b'");
+        // Backslash is literal in PS: \\ and \' already mean what bash means.
+        assert_eq!(repair_bash_style_quotes("echo \"a\\\\b\""), "echo \"a\\\\b\"");
+        assert_eq!(repair_bash_style_quotes("echo \"don\\'t\""), "echo \"don\\'t\"");
+    }
+
+    #[test]
+    fn empty_and_plain_strings_pass_through() {
+        assert_eq!(repair_bash_style_quotes(""), "");
+        assert_eq!(repair_bash_style_quotes("ls -la"), "ls -la");
+    }
 }
