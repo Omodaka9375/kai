@@ -704,21 +704,48 @@ export const useChatStore = create<StoreState>((set, get) => ({
     // On cold start, restore the persisted last-active session before
     // falling back to a fresh/reusable one.
     const restoredActiveId = loadedActiveId ?? null;
+
+    // A real project switch (File > Open Project / StartPage recent /
+    // local↔WSL) is the ONLY way the workspace root changes — plain terminal
+    // `cd` never re-locks the root (useWorkspaceCwd). On a switch the
+    // previous project's conversation must NOT stay active: resolve this
+    // project's own session instead.
+    const isWorkspaceSwitch =
+      get().sessionsHydrated &&
+      currentActiveId != null &&
+      norm(get().lastHydratedWorkspace) !== normalizedRoot;
+
+    // Sessions belonging to the target workspace, newest first. Falls back
+    // to unscoped sessions when hydrating the unscoped store.
+    const workspaceMatched = allSessions
+      .filter(
+        (s) =>
+          norm(s.workspaceRoot) === normalizedRoot ||
+          (!s.workspaceRoot && normalizedRoot == null),
+      )
+      .sort((a, b) => b.updatedAt - a.updatedAt);
+
     let nextSessions: SessionMeta[];
     let nextActiveId: string | null = currentActiveId;
 
+    if (isWorkspaceSwitch) {
+      // Prefer the project's persisted last-active session, then its newest.
+      nextActiveId =
+        restoredActiveId != null &&
+        allSessions.some((s) => s.id === restoredActiveId)
+          ? restoredActiveId
+          : (workspaceMatched[0]?.id ?? null);
+    } else if (!currentActiveId) {
+      nextActiveId =
+        restoredActiveId != null &&
+        allSessions.some((s) => s.id === restoredActiveId)
+          ? restoredActiveId
+          : null;
+    }
+
     if (reusable) {
-      // Use the existing session but don't force-switch — keep the
-      // current session active so the user doesn't lose context when
-      // the workspace root changes (e.g. by cding in the terminal).
       nextSessions = allSessions;
-      if (!currentActiveId) {
-        nextActiveId =
-          restoredActiveId != null &&
-          allSessions.some((s) => s.id === restoredActiveId)
-            ? restoredActiveId
-            : reusable.id;
-      }
+      if (!nextActiveId) nextActiveId = reusable.id;
     } else {
       const freshId = newSessionId();
       const fresh: SessionMeta = {
@@ -729,15 +756,9 @@ export const useChatStore = create<StoreState>((set, get) => ({
         workspaceRoot: root,
       };
       nextSessions = [fresh, ...allSessions];
-      // Only auto-switch if there's no active session — otherwise
-      // keep the current one so the user's conversation isn't lost.
-      if (!currentActiveId) {
-        nextActiveId =
-          restoredActiveId != null &&
-          allSessions.some((s) => s.id === restoredActiveId)
-            ? restoredActiveId
-            : freshId;
-      }
+      // Nothing from the target workspace to activate — the fresh session
+      // (stamped with this root) becomes active.
+      if (!nextActiveId) nextActiveId = freshId;
       void saveSessionsList(nextSessions).catch((err) =>
         console.error("[hydrateSessions] Failed to persist sessions:", err),
       );

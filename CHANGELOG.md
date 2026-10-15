@@ -6,6 +6,7 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ## [1.6.8]
 
+- Sessions: switching projects now switches the AI session - the previous project's conversation no longer stays active or pinned in the picker; returning to a project restores its last-active session.
 - AI: restored per-project models resolve at launch - the model catalog is seeded at startup and the selection re-announced once dynamic models register.
 - AI: reasoning effort patch for compatible-endpoint options; added OpenRouter, DeepSeek, and Z.AI mappings.
 - Sandbox: closed the OS-layer escapes.
