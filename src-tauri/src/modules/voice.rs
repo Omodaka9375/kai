@@ -510,18 +510,29 @@ pub async fn voice_transcribe(
         .decode(audio_base64.as_bytes())
         .map_err(|e| format!("bad audio base64: {e}"))?;
 
+    // Write the WAV to a temp file instead of piping to stdin: whisper-cli
+    // b5454's stdin path is broken on Windows — it reads the bytes but the
+    // transcript never reaches stdout (unless -of is also passed). File
+    // input transcribes correctly (verified end-to-end).
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp_wav = std::env::temp_dir().join(format!("kai-stt-{}-{nanos}.wav", std::process::id()));
+    std::fs::write(&tmp_wav, &bytes).map_err(|e| format!("temp wav write: {e}"))?;
+
     let mut cmd = std::process::Command::new(&cli);
     cmd.arg("-m").arg(&mpath)
         .arg("-nt")           // no timestamps on stdout
         .arg("-np")           // no prints (loading bar)
         .arg("-l").arg("en")
-        .arg("-f").arg("-");  // audio from stdin
+        .arg("-f").arg(&tmp_wav); // file input (stdin path is broken, see above)
     // VAD improves long-clip segmentation (whisper.cpp ≥1.9, verified flags:
     // --vad + --vad-model).
     if vad.exists() {
         cmd.arg("--vad").arg("--vad-model").arg(&vad);
     }
-    cmd.stdin(std::process::Stdio::piped())
+    cmd.stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
     #[cfg(windows)]
@@ -531,23 +542,19 @@ pub async fn voice_transcribe(
     }
 
     let run = tokio::task::spawn_blocking(move || -> Result<String, String> {
-        use std::io::Write as _;
-        let mut child = cmd.spawn().map_err(|e| format!("spawn whisper-cli: {e}"))?;
-        {
-            let mut stdin = child.stdin.take().ok_or("no stdin")?;
-            // Write in chunks; large writes can hit pipe buffer limits.
-            for chunk in bytes.chunks(64 * 1024) {
-                let _ = stdin.write_all(chunk);
+        let result = (|| -> Result<String, String> {
+            let child = cmd.spawn().map_err(|e| format!("spawn whisper-cli: {e}"))?;
+            let out = child
+                .wait_with_output()
+                .map_err(|e| format!("whisper-cli run: {e}"))?;
+            if !out.status.success() {
+                let err = String::from_utf8_lossy(&out.stderr);
+                return Err(format!("whisper-cli failed: {}", err.trim().chars().take(400).collect::<String>()));
             }
-        }
-        let out = child
-            .wait_with_output()
-            .map_err(|e| format!("whisper-cli run: {e}"))?;
-        if !out.status.success() {
-            let err = String::from_utf8_lossy(&out.stderr);
-            return Err(format!("whisper-cli failed: {}", err.trim().chars().take(400).collect::<String>()));
-        }
-        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+            Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+        })();
+        let _ = std::fs::remove_file(&tmp_wav);
+        result
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -580,13 +587,23 @@ pub async fn voice_tts(app: tauri::AppHandle, text: String) -> Result<String, St
     let (vonnx, _) = voice_paths(&dir, &voice);
     let espeak = dir.join("espeak-ng-data");
 
+    // Piper must write to a real FILE, not stdout: on Windows its `-f -`
+    // stdout stream is opened in text mode and every 0x0A byte becomes
+    // 0x0D 0x0A — the WAV arrives as full-scale static. Same text to `-f
+    // <file>` transcribes perfectly through whisper (verified).
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp_out = std::env::temp_dir().join(format!("kai-tts-{}-{nanos}.wav", std::process::id()));
+
     let mut cmd = std::process::Command::new(&piper);
     cmd.arg("--model").arg(&vonnx)
         .arg("--espeak_data").arg(&espeak)
         .arg("-q")
-        .arg("-f").arg("-"); // WAV to stdout (verified: piper --help)
+        .arg("-f").arg(&tmp_out);
     cmd.stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped());
     #[cfg(windows)]
     {
@@ -596,19 +613,25 @@ pub async fn voice_tts(app: tauri::AppHandle, text: String) -> Result<String, St
 
     let run = tokio::task::spawn_blocking(move || -> Result<String, String> {
         use std::io::Write as _;
-        let mut child = cmd.spawn().map_err(|e| format!("spawn piper: {e}"))?;
-        {
-            let mut stdin = child.stdin.take().ok_or("no stdin")?;
-            let _ = stdin.write_all(text.as_bytes());
-        }
-        let out = child
-            .wait_with_output()
-            .map_err(|e| format!("piper run: {e}"))?;
-        if !out.status.success() {
-            let err = String::from_utf8_lossy(&out.stderr);
-            return Err(format!("piper failed: {}", err.trim().chars().take(400).collect::<String>()));
-        }
-        Ok(base64::engine::general_purpose::STANDARD.encode(&out.stdout))
+        let result = (|| -> Result<String, String> {
+            let mut child = cmd.spawn().map_err(|e| format!("spawn piper: {e}"))?;
+            {
+                let mut stdin = child.stdin.take().ok_or("no stdin")?;
+                let _ = stdin.write_all(text.as_bytes());
+            }
+            let out = child
+                .wait_with_output()
+                .map_err(|e| format!("piper run: {e}"))?;
+            if !out.status.success() {
+                let err = String::from_utf8_lossy(&out.stderr);
+                return Err(format!("piper failed: {}", err.trim().chars().take(400).collect::<String>()));
+            }
+            let wav = std::fs::read(&tmp_out)
+                .map_err(|e| format!("piper output missing: {e}"))?;
+            Ok(base64::engine::general_purpose::STANDARD.encode(&wav))
+        })();
+        let _ = std::fs::remove_file(&tmp_out);
+        result
     })
     .await
     .map_err(|e| e.to_string())??;
