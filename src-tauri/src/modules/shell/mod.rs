@@ -560,9 +560,61 @@ pub fn sweep_stale_shell_scripts(dir: &Path) {
 /// `"print(\"x\")"` → `"print(`"x`")"` → python receives `print("x")`.
 /// Backslash is literal in PS, so `\\` and `\'` already mean what bash
 /// means and are left untouched.
+/// Translate bash-style escaping into PowerShell's dialect before the
+/// command is written into a `.ps1` script. Both shells mean "literal
+/// quote" by `\"` (bash) and `` `" `` (PS); both mean "literal backtick" by
+/// `` \' `` (bash) and a doubled backtick (PS). Everything else passes
+/// through untouched — PS-native backtick escapes like `` `n `` must
+/// survive. Handles the double-escape feedback loop where a model combined
+/// both dialects (`` `\" `` — backtick AND backslash before the quote): the
+/// backslash is literal dead weight inside a PS string, and the bare `"`
+/// would terminate it, truncating the child's argument.
 #[cfg(windows)]
 fn repair_bash_style_quotes(command: &str) -> String {
-    command.replace("\\\"", "`\"")
+    let chars: Vec<char> = command.chars().collect();
+    let mut out = String::with_capacity(command.len() + 8);
+    let mut i = 0;
+    while i < chars.len() {
+        match chars[i] {
+            // `` `\" `` — the double-escape feedback loop (backtick AND
+            // backslash before the quote). Drop the dead backslash, keep
+            // the PS literal quote: doubling the backtick instead would
+            // emit a literal backtick followed by a string TERMINATOR.
+            '`' if i + 2 < chars.len() && chars[i + 1] == '\\' && chars[i + 2] == '"' => {
+                out.push('`');
+                out.push('"');
+                i += 3;
+            }
+            // `` `" `` is already PS's literal quote — keep both, skip the
+            // quote so a later `\\` arm can't re-escape it.
+            '`' if i + 1 < chars.len() && chars[i + 1] == '"' => {
+                out.push('`');
+                out.push('"');
+                i += 2;
+            }
+            '`' => {
+                out.push('`');
+                i += 1;
+            }
+            '\\' if i + 1 < chars.len() && chars[i + 1] == '"' => {
+                // bash \" → PS literal quote
+                out.push('`');
+                out.push('"');
+                i += 2;
+            }
+            '\\' if i + 1 < chars.len() && chars[i + 1] == '`' => {
+                // bash \` → PS literal backtick (doubled)
+                out.push('`');
+                out.push('`');
+                i += 2;
+            }
+            c => {
+                out.push(c);
+                i += 1;
+            }
+        }
+    }
+    out
 }
 
 /// Write `command` to a unique one-shot script file (UTF-8 with BOM —
@@ -714,5 +766,46 @@ mod tests {
     fn empty_and_plain_strings_pass_through() {
         assert_eq!(repair_bash_style_quotes(""), "");
         assert_eq!(repair_bash_style_quotes("ls -la"), "ls -la");
+    }
+
+    #[test]
+    fn rewrites_bash_escaped_backticks_to_doubled() {
+        // bash `echo \`date\`` → PS `echo ``date``` — doubled backtick is a
+        // literal backtick inside a PS string.
+        assert_eq!(
+            repair_bash_style_quotes(r#"echo "run \`date\` now""#),
+            "echo \"run ``date`` now\""
+        );
+    }
+
+    #[test]
+    fn unescapes_the_backtick_backslash_quote_double_escape() {
+        // The observed real-world double-escape (real openers, `` `\" ``
+        // around the embedded token): `` `\" `` → `` `" `` so the string
+        // stays balanced and parseable.
+        assert_eq!(
+            repair_bash_style_quotes(
+                r#"git grep -n "state === `\"submitted`\"" -- src/f.ts"#
+            ),
+            "git grep -n \"state === `\"submitted`\"\" -- src/f.ts"
+        );
+        // Pure-bash shape: escaped quotes around the whole argument pass
+        // literal quotes in argv (bash semantics) — `` `" `` outside a
+        // string is exactly that in PS.
+        assert_eq!(
+            repair_bash_style_quotes(r#"echo \"a \`b\` c\""#),
+            "echo `\"a ``b`` c`\""
+        );
+    }
+
+    #[test]
+    fn preserves_ps_native_backtick_escapes() {
+        // `` `n `` (newline), `` `t `` (tab), `` `$ `` (literal dollar) are
+        // real PS escapes — untouched, or the wrapper epilogue breaks.
+        assert_eq!(
+            repair_bash_style_quotes("ForEach-Object { $_ -join \"`n\" }"),
+            "ForEach-Object { $_ -join \"`n\" }"
+        );
+        assert_eq!(repair_bash_style_quotes("`$home"), "`$home");
     }
 }

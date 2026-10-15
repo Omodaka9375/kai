@@ -129,9 +129,29 @@ impl ShellSession {
         }
         let resolved_cwd = self.current_cwd().replace('\\', "/");
 
+        // Backstop for dialect mangling: if PowerShell couldn't even parse
+        // the script, the agent wrote bash-style escapes that survived the
+        // transport repair (or real PS syntax errors). Point at the fix in
+        // one line instead of leaving a bare parse dump.
+        let parse_failed = raw
+            .exit_code
+            .map(|c| c != 0)
+            .unwrap_or(false)
+            && (raw.stderr.to_lowercase().contains("parsererror")
+                || raw.stderr.to_lowercase().contains("missing the terminator"));
+        let stderr = if parse_failed
+        {
+            format!(
+                "{}\n[Kai hint: PowerShell failed to parse this script - it was written as a .ps1 file, so use PowerShell syntax: backtick-quote (`\") for a literal quote inside a string, doubled backtick for a literal backtick, never bash \\\" or \\` escapes. Unterminated strings from this are the usual cause.]",
+                raw.stderr
+            )
+        } else {
+            raw.stderr
+        };
+
         Ok(SessionRunOutput {
             stdout: stdout_clean,
-            stderr: raw.stderr,
+            stderr,
             exit_code: raw.exit_code,
             timed_out: raw.timed_out,
             truncated: raw.truncated,
