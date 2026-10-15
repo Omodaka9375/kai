@@ -1418,7 +1418,16 @@ export default function App() {
     return null;
   }, [isTerminalTab, isEditorTab, activeId, activeSearchAddon, activeEditorHandle]);
 
-  const activeCwd = activeTerminalLeafCwd;
+  const activeCwd = (() => {
+    // Terminal tabs show the live leaf cwd. Everything else (StartPage,
+    // editor, preview, no tabs at all) falls back to the project folder —
+    // with auto-spawn terminals gone, a bare `activeTerminalLeafCwd` left
+    // the breadcrumb on "no directory" whenever no terminal was open.
+    if (activeTab?.kind === "terminal") {
+      return activeTerminalLeafCwd ?? activeTab.cwd ?? null;
+    }
+    return explorerRoot ?? workspaceFallbackPath ?? home ?? null;
+  })();
 
   // Most recently active terminal tab — lets agent tools (display_image,
   // "Run edited") target a terminal even when the user is on an editor or
