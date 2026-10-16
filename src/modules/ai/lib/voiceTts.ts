@@ -270,13 +270,13 @@ export async function speakText(
     for (const chunk of splitForSpeech(cleaned)) {
       // Superseded by a newer utterance (or stopped) — abandon the rest.
       if (token !== runToken) return true;
-      let bytes: ArrayBuffer;
-      if (mode === "local") {
-        const b64 = await native.voiceTts(chunk);
-        bytes = base64ToBytes(b64);
-      } else {
-        bytes = await speakViaOpenAi(chunk, prefs.voiceTtsApiModel, prefs.voiceTtsApiVoice);
-      }
+    let bytes: ArrayBuffer;
+    if (mode === "local") {
+      const b64 = await native.voiceTts(chunk, prefs.voiceTtsLocalVoice);
+      bytes = base64ToBytes(b64);
+    } else {
+      bytes = await speakViaOpenAi(chunk, prefs.voiceTtsApiModel, prefs.voiceTtsApiVoice);
+    }
       if (token !== runToken) return true;
       await playBuffer(bytes);
     }

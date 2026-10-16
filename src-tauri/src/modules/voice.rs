@@ -131,7 +131,12 @@ pub struct VoiceStatus {
     pub stt_installed: bool,
     pub tts_installed: bool,
     pub stt_model: Option<String>,
+    /// First installed TTS voice (legacy single-field view).
     pub tts_voice: Option<String>,
+    /// Every voice currently on disk. The UI must check membership here —
+    /// a `find`-first report made the second-installed voice show "Install"
+    /// forever, and the runtime used it too (picked Amy, heard Lessac).
+    pub tts_voices: Vec<String>,
 }
 
 #[tauri::command]
@@ -144,15 +149,18 @@ pub fn voice_status(app: tauri::AppHandle) -> Result<VoiceStatus, String> {
         .iter()
         .find(|(name, _, _)| model_path(&stt, name).exists())
         .map(|(name, _, _)| name.to_string());
-    let tts_voice = TTS_VOICES
+    let installed_voices: Vec<String> = TTS_VOICES
         .iter()
-        .find(|(name, _, _)| voice_paths(&tts, name).0.exists())
-        .map(|(name, _, _)| name.to_string());
+        .filter(|(name, _, _)| voice_paths(&tts, name).0.exists())
+        .map(|(name, _, _)| name.to_string())
+        .collect();
+    let first = installed_voices.first().cloned();
     Ok(VoiceStatus {
         stt_installed,
         tts_installed,
         stt_model,
-        tts_voice,
+        tts_voice: first,
+        tts_voices: installed_voices,
     })
 }
 
@@ -565,11 +573,15 @@ pub async fn voice_transcribe(
 /// Synthesize speech with Piper. Returns WAV bytes (base64) for the frontend
 /// to play via a blob URL.
 #[tauri::command]
-pub async fn voice_tts(app: tauri::AppHandle, text: String) -> Result<String, String> {
+pub async fn voice_tts(
+    app: tauri::AppHandle,
+    text: String,
+    voice_arg: Option<String>,
+) -> Result<String, String> {
     // macOS: no local engine can be installed (see setup_tts_inner).
     #[cfg(not(any(windows, target_os = "linux")))]
     {
-        let _ = (app, text);
+        let _ = (app, text, voice_arg);
         return Err(LOCAL_VOICE_UNSUPPORTED.to_string());
     }
     #[cfg(any(windows, target_os = "linux"))]
@@ -579,11 +591,21 @@ pub async fn voice_tts(app: tauri::AppHandle, text: String) -> Result<String, St
     if !piper.exists() {
         return Err("local TTS not installed — run setup in Settings → Voice".into());
     }
-    let voice = TTS_VOICES
+    // Honor the caller's requested voice when it is actually installed.
+    // (Previously this picked the FIRST installed voice regardless of the
+    // user's selection — picking Amy with Lessac also on disk played Lessac.)
+    let installed: Vec<String> = TTS_VOICES
         .iter()
-        .find(|(n, _, _)| voice_paths(&dir, n).0.exists())
+        .filter(|(n, _, _)| voice_paths(&dir, n).0.exists())
         .map(|(n, _, _)| n.to_string())
-        .ok_or_else(|| "no piper voice installed".to_string())?;
+        .collect();
+    let voice = match voice_arg.as_deref() {
+        Some(v) if installed.iter().any(|i| i == v) => v.to_string(),
+        _ => installed
+            .first()
+            .cloned()
+            .ok_or_else(|| "no piper voice installed".to_string())?,
+    };
     let (vonnx, _) = voice_paths(&dir, &voice);
     let espeak = dir.join("espeak-ng-data");
 

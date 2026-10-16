@@ -151,6 +151,17 @@ export function VoiceSection() {
     refreshStatus();
   }, []);
 
+  // The install button reflects the SELECTED voice, not "any" voice — with
+  // both voices on disk, a first-in-list-only status kept showing "Install"
+  // for the second one (and the runtime played the first voice regardless).
+  const installedVoices = status?.ttsVoices ?? [];
+  const selectedVoiceInstalled =
+    !!prefs.voiceTtsLocalVoice &&
+    installedVoices.includes(prefs.voiceTtsLocalVoice);
+  const installedVoicesSummary = installedVoices.length
+    ? ` — ${installedVoices.length} voice${installedVoices.length === 1 ? "" : "s"}: ${installedVoices.join(", ")}`
+    : " — no voice yet";
+
   const onSetupStt = async (model: string) => {
     if (busy) return;
     setBusy("stt");
@@ -387,14 +398,14 @@ export function VoiceSection() {
             >
               {busy === "tts"
                 ? "Downloading…"
-                : status?.ttsInstalled && status.ttsVoice === prefs.voiceTtsLocalVoice
+                : selectedVoiceInstalled
                   ? "Reinstall"
                   : "Install local TTS"}
             </Button>
           </div>
           {status?.ttsInstalled ? (
             <span className="text-[11.5px] text-emerald-500">
-              Piper installed{status.ttsVoice ? ` — voice: ${status.ttsVoice}` : " — no voice yet"}
+              Piper installed{installedVoicesSummary}
             </span>
           ) : (
             <span className="text-[11.5px] text-muted-foreground/70">

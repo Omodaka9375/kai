@@ -155,7 +155,10 @@ export type VoiceStatus = {
   sttInstalled: boolean;
   ttsInstalled: boolean;
   sttModel: string | null;
+  /** First installed TTS voice (legacy single-field view). */
   ttsVoice: string | null;
+  /** Every voice currently on disk — the selected voice must be in here. */
+  ttsVoices: string[];
 };
 
 export type VoiceSetupEvent = {
@@ -404,7 +407,8 @@ export const native = {
   voiceRemoveLocal: () => invoke<void>("voice_remove_local"),
   voiceTranscribe: (audioBase64: string) =>
     invoke<string>("voice_transcribe", { audioBase64 }),
-  voiceTts: (text: string) => invoke<string>("voice_tts", { text }),
+  voiceTts: (text: string, voice?: string) =>
+    invoke<string>("voice_tts", { text, voice: voice ?? null }),
   shellBgSpawn: (
     command: string,
     cwd?: string | null,
