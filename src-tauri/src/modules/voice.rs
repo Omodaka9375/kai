@@ -589,12 +589,17 @@ pub async fn voice_transcribe(
 pub async fn voice_tts(
     app: tauri::AppHandle,
     text: String,
-    voice_arg: Option<String>,
+    // Param name MUST stay `voice` — the frontend invoke passes the key
+    // `voice`, and Tauri's camelCase→snake_case conversion only maps
+    // voiceArg→voice_arg, never voice→voice_arg. A name mismatch here is
+    // SILENT: Option falls back to None and the first installed voice plays
+    // regardless of the user's selection (the Amy/Lessac bug).
+    voice: Option<String>,
 ) -> Result<String, String> {
     // macOS: no local engine can be installed (see setup_tts_inner).
     #[cfg(not(any(windows, target_os = "linux")))]
     {
-        let _ = (app, text, voice_arg);
+        let _ = (app, text, voice);
         return Err(LOCAL_VOICE_UNSUPPORTED.to_string());
     }
     #[cfg(any(windows, target_os = "linux"))]
@@ -612,14 +617,14 @@ pub async fn voice_tts(
         .filter(|(n, _, _)| voice_paths(&dir, n).0.exists())
         .map(|(n, _, _)| n.to_string())
         .collect();
-    let voice = match voice_arg.as_deref() {
+    let selected = match voice.as_deref() {
         Some(v) if installed.iter().any(|i| i == v) => v.to_string(),
         _ => installed
             .first()
             .cloned()
             .ok_or_else(|| "no piper voice installed".to_string())?,
     };
-    let (vonnx, _) = voice_paths(&dir, &voice);
+    let (vonnx, _) = voice_paths(&dir, &selected);
     let espeak = dir.join("espeak-ng-data");
 
     // Piper must write to a real FILE, not stdout: on Windows its `-f -`
