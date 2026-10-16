@@ -6,15 +6,15 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ## [1.6.9]
 
-- Voice: local engines work on Windows - Piper's stdout output was opened in text mode (every newline byte corrupted the WAV into static) and whisper-cli's stdin never yielded a transcript on Windows; both engines now exchange audio through temp files that are deleted after each run.
-- Voice: fixed the macOS build - local-engine download URLs are gated to Windows/Linux so every target compiles, with a clean "not available" message on macOS; the Linux tar extractor now preserves versioned .so libraries, recreates symlinks, and sets executable bits.
-- Voice: OpenAI TTS now actually speaks - the API key was read from a store the settings window never hydrates (it now comes from the OS keyring in every window), the Test voice button works in API mode too, and failures surface in the section instead of staying console-only. Picking an API voice plays a short preview.
-- Voice: selecting a TTS mode is the auto-speak opt-in - the separate "auto-speak replies" checkbox is gone; replies are spoken whenever TTS mode is API or Local, and silencing is just setting the mode back to Off.
-- Voice: long replies are no longer cut at 4,000 characters mid-read - text is split into sentence-boundary chunks and spoken sequentially (the first chunk plays while later chunks synthesize), with a 24,000-character ceiling for pathological dumps and a supersede rule so a newer utterance cancels the queued remainder.
-- Voice: switching between Amy and Lessac no longer shows an install button for an already-installed voice, and the voice you pick is the one actually played - status now reports every installed voice and the runtime honors the selection (previously it silently played the first voice found).
-- Source control: opening a project no longer lands on the source-control panel (the sidebar resets to the file tree), stale branch/"detached" data from the previous project is cleared immediately, the local status renders without waiting on the initial network fetch, and a "syncing" indicator in the header shows while a background refresh is in flight.
-- Shell: fixed PowerShell backtick mangling in agent commands - bash-style escaped quotes and backticks were translated into sequences PowerShell parses as escape characters, producing parse errors (and a double-escape feedback loop); the translation is now PowerShell-dialect-aware and parse errors carry a one-line dialect hint.
-- Status bar: the breadcrumb shows the project folder when no terminal is open (StartPage, editor, or preview tabs) instead of reading "no directory".
+- Voice: local STT/TTS fixed on Windows.
+- Voice: macOS build fixed; local engines stay Windows/Linux only.
+- Voice: OpenAI TTS now speaks (key from keyring, test button, visible errors).
+- Voice: picking a TTS mode is the auto-speak opt-in (checkbox removed).
+- Voice: long replies are spoken in full.
+- Voice: the selected Piper voice (Amy/Lessac) is respected.
+- Source control: projects open on the file tree again, stale data cleared, syncing indicator shown.
+- Shell: PowerShell backtick mangling fixed in agent commands.
+- Status bar: breadcrumb shows the project folder when no terminal is open.
 
 ---
 
