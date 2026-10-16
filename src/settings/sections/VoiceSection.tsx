@@ -13,7 +13,6 @@ import {
   setVoiceTtsApiVoice,
   setVoiceTtsApiModel,
   setVoiceTtsLocalVoice,
-  setVoiceSpeakReplies,
 } from "@/modules/settings/store";
 import { Channel } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
@@ -417,15 +416,10 @@ export function VoiceSection() {
 
       {ttsMode !== "off" ? (
         <div className="flex items-center justify-between text-[12px]">
-          <span className="text-muted-foreground">
-            Auto-speak full agent replies when a response finishes
+          <span className="text-muted-foreground/80">
+            Agent replies are spoken automatically when they finish. Set TTS
+            mode to Off to silence.
           </span>
-          <input
-            type="checkbox"
-            checked={prefs.voiceSpeakReplies}
-            onChange={(e) => void setVoiceSpeakReplies(e.target.checked)}
-            className="size-3.5 accent-foreground"
-          />
         </div>
       ) : null}
 

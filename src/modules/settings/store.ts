@@ -126,8 +126,6 @@ export type Preferences = {
   voiceTtsApiModel: string;
   /** Local TTS voice name (Piper). */
   voiceTtsLocalVoice: string;
-  /** Auto-speak assistant replies when TTS is active. */
-  voiceSpeakReplies: boolean;
 };
 
 const STORE_PATH = "Kai-settings.json";
@@ -183,7 +181,6 @@ const KEY_VOICE_TTS_MODE = "voiceTtsMode";
 const KEY_VOICE_TTS_API_VOICE = "voiceTtsApiVoice";
 const KEY_VOICE_TTS_API_MODEL = "voiceTtsApiModel";
 const KEY_VOICE_TTS_LOCAL_VOICE = "voiceTtsLocalVoice";
-const KEY_VOICE_SPEAK_REPLIES = "voiceSpeakReplies";
 
 export const TERMINAL_FONT_SIZE_DEFAULT = 14;
 export const TERMINAL_FONT_SIZE_MIN = 8;
@@ -260,7 +257,6 @@ export const DEFAULT_PREFERENCES: Preferences = {
   voiceTtsApiVoice: "alloy",
   voiceTtsApiModel: "gpt-4o-mini-tts",
   voiceTtsLocalVoice: "en_US-lessac-medium",
-  voiceSpeakReplies: false,
 };
 
 const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
@@ -413,8 +409,6 @@ export async function loadPreferences(): Promise<Preferences> {
         get<string>(KEY_VOICE_TTS_API_MODEL) ?? DEFAULT_PREFERENCES.voiceTtsApiModel,
       voiceTtsLocalVoice:
         get<string>(KEY_VOICE_TTS_LOCAL_VOICE) ?? DEFAULT_PREFERENCES.voiceTtsLocalVoice,
-      voiceSpeakReplies:
-        get<boolean>(KEY_VOICE_SPEAK_REPLIES) ?? DEFAULT_PREFERENCES.voiceSpeakReplies,
     };
 }
 
@@ -498,10 +492,6 @@ export async function setVoiceTtsApiModel(value: string): Promise<void> {
 
 export async function setVoiceTtsLocalVoice(value: string): Promise<void> {
   await writePref(KEY_VOICE_TTS_LOCAL_VOICE, value ?? "");
-}
-
-export async function setVoiceSpeakReplies(value: boolean): Promise<void> {
-  await writePref(KEY_VOICE_SPEAK_REPLIES, value);
 }
 
 export async function setLmstudioBaseURL(value: string): Promise<void> {
@@ -777,7 +767,6 @@ export async function onPreferencesChange(
     [KEY_VOICE_TTS_API_VOICE]: "voiceTtsApiVoice",
     [KEY_VOICE_TTS_API_MODEL]: "voiceTtsApiModel",
     [KEY_VOICE_TTS_LOCAL_VOICE]: "voiceTtsLocalVoice",
-    [KEY_VOICE_SPEAK_REPLIES]: "voiceSpeakReplies",
   };
   // Same-process writes still fire onChange immediately; cross-window writes
   // arrive via the Tauri event emitted by writePref().

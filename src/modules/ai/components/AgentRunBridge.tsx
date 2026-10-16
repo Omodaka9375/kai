@@ -242,17 +242,18 @@ function Bridge({
   }, [status, sessionId, injectMessage]);
 
   // ---- Auto-speak finished replies (Voice settings) -----------------------
-  // When a run settles to idle after streaming AND the user enabled
-  // auto-speak, read the last assistant text aloud via the configured TTS
-  // mode (local Piper / OpenAI). Tracked with a ref so a re-mount (session
-  // switch) doesn't re-speak an old message: only transitions count.
-  const speakReplies = usePreferencesStore((s) => s.voiceSpeakReplies);
+  // When a run settles to idle after streaming, read the last assistant text
+  // aloud via the configured TTS mode (local Piper / OpenAI). Selecting any
+  // TTS mode other than "off" IS the opt-in — there is no separate checkbox.
+  // Tracked with a ref so a re-mount (session switch) doesn't re-speak an
+  // old message: only transitions count.
+  const ttsActive = usePreferencesStore((s) => s.voiceTtsMode !== "off");
   const spokenForRef = useRef<string | null>(null);
   const prevStatusRef = useRef(status);
   useEffect(() => {
     const wasStreaming = prevStatusRef.current === "streaming";
     prevStatusRef.current = status;
-    if (!speakReplies || !wasStreaming || status === "submitted" || status === "streaming") {
+    if (!ttsActive || !wasStreaming || status === "submitted" || status === "streaming") {
       return;
     }
     // The last assistant message that has text is the reply just finished.
@@ -270,7 +271,7 @@ function Bridge({
     if (!text || spokenForRef.current === key) return;
     spokenForRef.current = key;
     void speakText(text);
-  }, [status, speakReplies, messages, sessionId]);
+  }, [status, ttsActive, messages, sessionId]);
 
   // ---- Auto-approve effect --------------------------------------------------
   const autoApprove = useChatStore((s) => s.autoApprove);
