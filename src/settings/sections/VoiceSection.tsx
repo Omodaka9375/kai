@@ -200,6 +200,29 @@ export function VoiceSection() {
     }
   };
 
+  // ── TTS preview / test ──────────────────────────────────────────────
+  // speakText reads its mode from live prefs, so a preview of a NEWLY picked
+  // voice must persist it first, then speak. onError surfaces the failure in
+  // the section (speakText is fail-safe and would otherwise stay silent).
+  const onTestVoice = async () => {
+    setError("");
+    const m = await import("@/modules/ai/lib/voiceTts");
+    await m.speakText(
+      "This is how agent replies will sound.",
+      (msg) => setError(msg),
+    );
+  };
+
+  const onPreviewApiVoice = async (voice: string) => {
+    await setVoiceTtsApiVoice(voice);
+    setError("");
+    const m = await import("@/modules/ai/lib/voiceTts");
+    await m.speakText(
+      `Hello, this is the ${voice} voice.`,
+      (msg) => setError(msg),
+    );
+  };
+
   const sttMode = prefs.voiceSttMode;
   const ttsMode = prefs.voiceTtsMode;
   const setSttMode = (m: SttMode) => void setVoiceSttMode(m);
@@ -312,21 +335,36 @@ export function VoiceSection() {
       </div>
 
       {ttsMode === "api" ? (
-        <div className="flex flex-wrap items-center justify-between gap-2 text-[12px]">
-          <span className="text-muted-foreground">TTS model / voice</span>
+        <div className="flex flex-col gap-2 rounded-lg border border-border/60 bg-card/60 px-3 py-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-[12px]">
+            <span className="text-muted-foreground">TTS model / voice</span>
+            <div className="flex items-center gap-2">
+              <Select
+                ariaLabel="API TTS model"
+                value={prefs.voiceTtsApiModel}
+                onChange={(v) => void setVoiceTtsApiModel(v)}
+                options={TTS_API_MODELS}
+              />
+              <Select
+                ariaLabel="API TTS voice"
+                value={prefs.voiceTtsApiVoice}
+                onChange={(v) => void onPreviewApiVoice(v)}
+                options={TTS_API_VOICES.map((v) => ({ id: v, label: v }))}
+              />
+            </div>
+          </div>
           <div className="flex items-center gap-2">
-            <Select
-              ariaLabel="API TTS model"
-              value={prefs.voiceTtsApiModel}
-              onChange={(v) => void setVoiceTtsApiModel(v)}
-              options={TTS_API_MODELS}
-            />
-            <Select
-              ariaLabel="API TTS voice"
-              value={prefs.voiceTtsApiVoice}
-              onChange={(v) => void setVoiceTtsApiVoice(v)}
-              options={TTS_API_VOICES.map((v) => ({ id: v, label: v }))}
-            />
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => void onTestVoice()}
+            >
+              Test voice
+            </Button>
+            <span className="text-[11px] text-muted-foreground/70">
+              Picking a voice speaks a short sample.
+            </span>
           </div>
         </div>
       ) : null}
@@ -370,11 +408,7 @@ export function VoiceSection() {
             size="sm"
             variant="ghost"
             disabled={busy !== "" || !status?.ttsInstalled}
-            onClick={() => {
-              void import("@/modules/ai/lib/voiceTts").then((m) =>
-                m.speakText("Voice engines ready. This is how agent replies will sound."),
-              );
-            }}
+            onClick={() => void onTestVoice()}
           >
             Test voice
           </Button>

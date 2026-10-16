@@ -194,8 +194,12 @@ export function ttsPlaying(): boolean {
 /** Speak `text` via the configured TTS mode (local Piper or OpenAI API).
  *  The input is SANITIZED first — code blocks, thinking tags, and markdown
  *  formatting are stripped so only the natural prose is spoken (see
- *  toSpeechText). Fail-safe: logs and returns false rather than throwing. */
-export async function speakText(text: string): Promise<boolean> {
+ *  toSpeechText). Fail-safe: logs and returns false rather than throwing;
+ *  pass `onError` to surface the reason in UI (settings sections do). */
+export async function speakText(
+  text: string,
+  onError?: (message: string) => void,
+): Promise<boolean> {
   const cleaned = capForSpeech(toSpeechText(text));
   if (!cleaned) return false;
   const prefs = usePreferencesStore.getState();
@@ -218,7 +222,9 @@ export async function speakText(text: string): Promise<boolean> {
     await el.play();
     return true;
   } catch (e) {
+    const msg = e instanceof Error && e.message ? e.message : String(e);
     console.error("[kai] tts failed:", e);
+    onError?.(msg);
     return false;
   }
 }
@@ -231,12 +237,13 @@ function base64ToBytes(b64: string): ArrayBuffer {
 }
 
 /** OpenAI /v1/audio/speech via the SSRF-hardened Rust proxy (binary response).
- *  Uses the plain REST endpoint — the AI SDK's speech support routes through
- *  here anyway; going direct via proxyFetch keeps the key out of webview
- *  fetch scope and pins the binary response. */
+ *  The key comes straight from the OS keyring, NOT the chat store: the
+ *  settings window is a separate webview whose chatStore never hydrates
+ *  apiKeys, so a store read silently fails there. keyring.getKey works in
+ *  every window. */
 async function speakViaOpenAi(text: string, model: string, voice: string): Promise<ArrayBuffer> {
-  const { useChatStore } = await import("../store/chatStore");
-  const apiKey = useChatStore.getState().apiKeys.openai;
+  const { getKey } = await import("../lib/keyring");
+  const apiKey = await getKey("openai");
   if (!apiKey) throw new Error("TTS needs an OpenAI API key (Settings → Models).");
   const { proxyFetch } = await import("./proxyFetch");
   const resp = await proxyFetch("https://api.openai.com/v1/audio/speech", {
