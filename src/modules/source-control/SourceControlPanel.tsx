@@ -189,6 +189,10 @@ export const SourceControlPanel = memo(function SourceControlPanel({
   }, []);
 
   const isRefreshing = scm.panelState === "loading";
+  // Background refresh in flight (incl. the initial remote fetch): surface a
+  // syncing indicator in the header instead of leaving the previous
+  // project's branch label / "detached" badge frozen with no explanation.
+  const isSyncing = scm.isSyncing === true;
   const repoLabel = useMemo(() => {
     if (!scm.status) return "Source Control";
     return scm.status.isDetached ? "detached" : scm.status.branch;
@@ -638,6 +642,15 @@ export const SourceControlPanel = memo(function SourceControlPanel({
             {scm.status?.isDetached ? (
               <span className="rounded bg-muted/55 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                 detached
+              </span>
+            ) : null}
+            {isSyncing ? (
+              <span
+                title="Syncing with remote — showing the last known status"
+                className="inline-flex shrink-0 items-center gap-1 rounded bg-muted/55 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground"
+              >
+                <Spinner className="size-2.5" />
+                syncing
               </span>
             ) : null}
           </div>

@@ -557,7 +557,11 @@ export default function App() {
       }
       setRootRef.current(path);
       // Clean start: kills the old project's terminals, lands on the
-      // StartPage — no auto-spawn racing the renderer bind.
+      // StartPage — no auto-spawn racing the renderer bind. Also reset the
+      // sidebar to the file tree: sidebarView persists globally across
+      // projects, so once source-control was active EVERY project opened
+      // with the git panel (with stale data) instead of the explorer.
+      persistSidebarView("explorer");
       resetWorkspace();
     },
     [tabs, explorerRoot, resetWorkspace, newTab],

@@ -34,6 +34,10 @@ export type SourceControlSummary = {
   behind: number;
   hasRepo: boolean;
   isLoading: boolean;
+  /** A refresh or background remote sync is in flight. Unlike `isLoading`
+   *  (which blanks the panel on first load), this survives alongside already-
+   *  shown data so the header can show a syncing indicator. */
+  isSyncing: boolean;
   localError: string | null;
   busyAction: SourceControlRemoteAction | null;
   lastRemoteError: string | null;
@@ -66,6 +70,7 @@ type SourceControlSummaryState = {
   status: GitStatusSnapshot | null;
   hasRepo: boolean;
   isLoading: boolean;
+  isSyncing: boolean;
   localError: string | null;
   busyAction: SourceControlRemoteAction | null;
   lastRemoteError: string | null;
@@ -180,6 +185,7 @@ export function useSourceControl(
     status: null,
     hasRepo: false,
     isLoading: false,
+    isSyncing: false,
     localError: null,
     busyAction: null,
     lastRemoteError: null,
@@ -209,6 +215,7 @@ export function useSourceControl(
       status: null,
       hasRepo: false,
       isLoading: false,
+      isSyncing: false,
       localError: null,
       busyAction: null,
       lastRemoteError: null,
@@ -238,6 +245,7 @@ export function useSourceControl(
           status: null,
           hasRepo: false,
           isLoading: false,
+          isSyncing: false,
           localError: null,
           busyAction: null,
           lastRemoteError: null,
@@ -252,7 +260,25 @@ export function useSourceControl(
           ? activeRoot
           : undefined;
 
-      setState((current) => ({ ...current, isLoading: true, localError: null }));
+      setState((current) => {
+        // Same repo (or nothing stale to clear): keep data, flip the loading
+        // flags. Different repo: blank the PREVIOUS project's data NOW so
+        // the panel and header never render the old branch/status under the
+        // new context while the new snapshot loads.
+        if (reusableRoot || !(current.repo || current.status || current.hasRepo)) {
+          return { ...current, isLoading: true, isSyncing: true, localError: null };
+        }
+        return {
+          repo: null,
+          status: null,
+          hasRepo: false,
+          isLoading: true,
+          isSyncing: true,
+          localError: null,
+          busyAction: current.busyAction,
+          lastRemoteError: current.lastRemoteError,
+        };
+      });
 
       try {
         let repo: GitRepoInfo | null;
@@ -281,6 +307,7 @@ export function useSourceControl(
                 status: null,
                 hasRepo: false,
                 isLoading: false,
+                isSyncing: false,
                 localError: null,
               }));
               return;
@@ -298,6 +325,7 @@ export function useSourceControl(
               status: null,
               hasRepo: false,
               isLoading: false,
+              isSyncing: false,
               localError: null,
             }));
             return;
@@ -313,42 +341,57 @@ export function useSourceControl(
             status: null,
             hasRepo: false,
             isLoading: false,
+            isSyncing: false,
             localError: null,
           }));
           return;
         }
 
-        let nextRemoteError = stateRef.current.lastRemoteError;
         const shouldAutoFetch =
-          repo.upstream &&
+          !!repo.upstream &&
           remoteMode !== "never" &&
           (remoteMode === "always" ||
             Date.now() -
               (autoFetchByRepoRef.current.get(repo.repoRoot) ?? 0) >=
               AUTO_FETCH_THROTTLE_MS);
 
-        if (shouldAutoFetch) {
-          try {
-            await native.gitFetch(repo.repoRoot);
-            touchAutoFetch(autoFetchByRepoRef.current, repo.repoRoot);
-            nextRemoteError = null;
-            if (requestId !== requestIdRef.current) return;
-            status = await native.gitStatus(repo.repoRoot);
-            if (requestId !== requestIdRef.current) return;
-          } catch (error) {
-            nextRemoteError = normalizeError(error);
-          }
-        }
-
+        // Surface the LOCAL snapshot immediately — the first paint must not
+        // wait on the network. With an upstream, a background fetch follows
+        // and refreshes ahead/behind when it lands (isSyncing stays true so
+        // the header shows a syncing indicator meanwhile).
+        if (requestId !== requestIdRef.current) return;
         setState((current) => ({
           ...current,
           repo,
           status,
           hasRepo: true,
           isLoading: false,
+          isSyncing: shouldAutoFetch,
           localError: null,
-          lastRemoteError: nextRemoteError,
         }));
+
+        if (shouldAutoFetch) {
+          try {
+            await native.gitFetch(repo.repoRoot);
+            touchAutoFetch(autoFetchByRepoRef.current, repo.repoRoot);
+            if (requestId !== requestIdRef.current) return;
+            const fresh = await native.gitStatus(repo.repoRoot);
+            if (requestId !== requestIdRef.current) return;
+            setState((current) => ({
+              ...current,
+              status: fresh,
+              lastRemoteError: null,
+              isSyncing: false,
+            }));
+          } catch (error) {
+            if (requestId !== requestIdRef.current) return;
+            setState((current) => ({
+              ...current,
+              lastRemoteError: normalizeError(error),
+              isSyncing: false,
+            }));
+          }
+        }
       } catch (error) {
         if (requestId !== requestIdRef.current) return;
         setState((current) => ({
@@ -357,6 +400,7 @@ export function useSourceControl(
           hasRepo: false,
           status: null,
           isLoading: false,
+          isSyncing: false,
           localError: normalizeError(error),
         }));
       }
@@ -475,6 +519,7 @@ export function useSourceControl(
         status: null,
         hasRepo: false,
         isLoading: false,
+        isSyncing: false,
         localError: null,
         busyAction: null,
         lastRemoteError: null,
@@ -529,6 +574,7 @@ export function useSourceControl(
       behind: state.status?.behind ?? 0,
       hasRepo: state.hasRepo,
       isLoading: state.isLoading,
+      isSyncing: state.isSyncing,
       localError: state.localError,
       busyAction: state.busyAction,
       lastRemoteError: state.lastRemoteError,

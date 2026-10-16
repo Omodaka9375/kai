@@ -63,6 +63,8 @@ type SourceControlPanelState = {
   panelState: PanelState;
   repo: GitRepoInfo | null;
   status: GitStatusSnapshot | null;
+  /** Background refresh/remote-sync in flight (header "syncing" pill). */
+  isSyncing: boolean;
   selected: DiffSelection | null;
   commitMessage: string;
   actionBusy: string | null;
@@ -1128,6 +1130,7 @@ export function useSourceControlPanel(
     panelState,
     repo,
     status,
+    isSyncing: summary.isSyncing,
     selected,
     commitMessage,
     actionBusy: localActionBusy ?? summary.busyAction,
