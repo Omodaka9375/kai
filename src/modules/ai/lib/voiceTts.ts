@@ -76,10 +76,13 @@ export async function transcribeLocal(wav: Blob): Promise<string> {
 
 // ── Speech sanitization ─────────────────────────────────────────────────
 
-/** Upper bound on spoken text. Piper and OpenAI TTS both degrade with long
- *  inputs (Piper generates minutes of audio linearly; the API charges per
- *  character) — replies longer than this are cut at a sentence boundary. */
-const SPEECH_TEXT_CAP = 4000;
+/** OpenAI /v1/audio/speech rejects inputs over 4096 chars, so chunks stay
+ *  under it with headroom. Piper has no hard limit, but chunking also keeps
+ *  first-audio latency low (speak chunk 1 while later chunks synthesize). */
+const SPEECH_CHUNK_CHARS = 3800;
+/** Pathological-dump guard (~15+ min of audio). A reply beyond this is a
+ *  file dump, not prose; cut at a sentence boundary rather than reading it. */
+const SPEECH_TOTAL_CAP = 24000;
 
 /**
  * Reduce an assistant message's raw markdown to natural prose for TTS.
@@ -141,18 +144,61 @@ export function toSpeechText(raw: string): string {
   return s.replace(/\s+/g, " ").trim();
 }
 
-/** Truncate to SPEECH_TEXT_CAP at a sentence boundary when possible. */
-function capForSpeech(s: string): string {
-  if (s.length <= SPEECH_TEXT_CAP) return s;
-  const head = s.slice(0, SPEECH_TEXT_CAP);
+/** Truncate to `cap` chars at a sentence boundary when possible. */
+function capForSpeech(s: string, cap: number): string {
+  if (s.length <= cap) return s;
+  const head = s.slice(0, cap);
   const cut = head.lastIndexOf(". ");
-  return (cut > SPEECH_TEXT_CAP * 0.5 ? s.slice(0, cut + 1) : head.trim()) ;
+  return cut > cap * 0.5 ? s.slice(0, cut + 1) : head.trim();
+}
+
+/**
+ * Split sanitized speech text into engine-sized chunks at sentence
+ * boundaries. Greedy sentence packing — a sentence longer than the chunk
+ * cap itself is hard-split at a word boundary. Exported for tests.
+ */
+export function splitForSpeech(s: string): string[] {
+  if (!s.trim()) return [];
+  const sentences = s.match(/[^.!?]+[.!?]+["')\]]*\s*|[^.!?]+$/g) ?? [s];
+  const chunks: string[] = [];
+  let cur = "";
+  const flush = () => {
+    const t = cur.trim();
+    if (t) chunks.push(t);
+    cur = "";
+  };
+  for (const sentence of sentences) {
+    if (sentence.length > SPEECH_CHUNK_CHARS) {
+      flush();
+      let rest = sentence.trim();
+      while (rest.length > SPEECH_CHUNK_CHARS) {
+        let cut = rest.lastIndexOf(" ", SPEECH_CHUNK_CHARS);
+        if (cut <= 0) cut = SPEECH_CHUNK_CHARS;
+        chunks.push(rest.slice(0, cut).trim());
+        rest = rest.slice(cut);
+      }
+      cur = rest;
+      continue;
+    }
+    if (cur && cur.length + sentence.length > SPEECH_CHUNK_CHARS) {
+      flush();
+    }
+    cur += sentence;
+  }
+  flush();
+  return chunks;
 }
 
 // ── TTS playback ───────────────────────────────────────────────────────────
 
 let sharedAudio: HTMLAudioElement | null = null;
 let currentUrl: string | null = null;
+/** Identifies the newest speakText call; every older queue self-terminates
+ *  when it observes a token mismatch. Monotonic — never reused. */
+let runToken = 0;
+/** Highest token still synthesizing/queueing — lets ttsPlaying() report
+ *  in-flight synthesis for the current run. 0 = idle. */
+let synthesizingRun = 0;
 
 function getAudioEl(): HTMLAudioElement | null {
   if (typeof window === "undefined") return null;
@@ -166,67 +212,99 @@ function getAudioEl(): HTMLAudioElement | null {
   return sharedAudio;
 }
 
-/** Stop any in-flight playback and release the blob URL. Fail-safe. */
+/** Revoke the current chunk's blob URL (idempotent). */
+function releaseUrl(): void {
+  if (currentUrl) {
+    URL.revokeObjectURL(currentUrl);
+    currentUrl = null;
+  }
+}
+
+/** Stop any in-flight playback and discard the queued remainder. Fail-safe. */
 export function ttsStop(): void {
+  runToken++; // invalidates every queued/synthesizing chunk of older runs
   const el = getAudioEl();
   if (!el) return;
   try {
     el.pause();
     el.removeAttribute("src");
-    if (currentUrl) {
-      URL.revokeObjectURL(currentUrl);
-      currentUrl = null;
-    }
+    releaseUrl();
   } catch {
     // ignore
   }
 }
 
-/** True when a TTS utterance is playing. */
+/** True when a TTS utterance is playing (or synthesizing, for the latest run). */
 export function ttsPlaying(): boolean {
   try {
-    return !!sharedAudio && !sharedAudio.paused && !sharedAudio.ended;
+    const audioActive = !!sharedAudio && !sharedAudio.paused && !sharedAudio.ended;
+    return audioActive || (synthesizingRun >= runToken && synthesizingRun !== 0);
   } catch {
     return false;
   }
 }
 
-/** Speak `text` via the configured TTS mode (local Piper or OpenAI API).
- *  The input is SANITIZED first — code blocks, thinking tags, and markdown
- *  formatting are stripped so only the natural prose is spoken (see
- *  toSpeechText). Fail-safe: logs and returns false rather than throwing;
- *  pass `onError` to surface the reason in UI (settings sections do). */
+/**
+ * Speak `text` — the WHOLE thing, not a truncated fragment. The sanitized
+ * text is split into engine-sized chunks (splitForSpeech) and spoken
+ * sequentially: chunk 1 starts as soon as it is synthesized while later
+ * chunks synthesize in the background. A newer speakText/ttsStop call
+ * invalidates every pending chunk of an older run (monotonic run token).
+ * Fail-safe: logs and returns false rather than throwing; pass `onError`
+ * to surface the reason in UI (settings sections do).
+ */
 export async function speakText(
   text: string,
   onError?: (message: string) => void,
 ): Promise<boolean> {
-  const cleaned = capForSpeech(toSpeechText(text));
+  const cleaned = capForSpeech(toSpeechText(text), SPEECH_TOTAL_CAP);
   if (!cleaned) return false;
   const prefs = usePreferencesStore.getState();
   const mode = prefs.voiceTtsMode;
   if (mode === "off") return false;
+  // A new utterance replaces whatever is playing/queued.
   ttsStop();
+  const token = ++runToken;
+  synthesizingRun = token;
   try {
-    let bytes: ArrayBuffer;
-    if (mode === "local") {
-      const b64 = await native.voiceTts(cleaned);
-      bytes = base64ToBytes(b64);
-    } else {
-      bytes = await speakViaOpenAi(cleaned, prefs.voiceTtsApiModel, prefs.voiceTtsApiVoice);
+    for (const chunk of splitForSpeech(cleaned)) {
+      // Superseded by a newer utterance (or stopped) — abandon the rest.
+      if (token !== runToken) return true;
+      let bytes: ArrayBuffer;
+      if (mode === "local") {
+        const b64 = await native.voiceTts(chunk);
+        bytes = base64ToBytes(b64);
+      } else {
+        bytes = await speakViaOpenAi(chunk, prefs.voiceTtsApiModel, prefs.voiceTtsApiVoice);
+      }
+      if (token !== runToken) return true;
+      await playBuffer(bytes);
     }
-    const blob = new Blob([bytes], { type: "audio/wav" });
-    currentUrl = URL.createObjectURL(blob);
-    const el = getAudioEl();
-    if (!el) return false;
-    el.src = currentUrl;
-    await el.play();
     return true;
   } catch (e) {
     const msg = e instanceof Error && e.message ? e.message : String(e);
     console.error("[kai] tts failed:", e);
     onError?.(msg);
     return false;
+  } finally {
+    if (synthesizingRun === token) synthesizingRun = 0;
   }
+}
+
+/** Blob → shared <audio> playback, resolved when the chunk finishes. */
+function playBuffer(bytes: ArrayBuffer): Promise<void> {
+  return new Promise((resolve) => {
+    const el = getAudioEl();
+    if (!el) {
+      resolve();
+      return;
+    }
+    releaseUrl();
+    currentUrl = URL.createObjectURL(new Blob([bytes], { type: "audio/wav" }));
+    el.src = currentUrl;
+    void el.play().catch(() => resolve());
+    el.addEventListener("ended", () => resolve(), { once: true });
+  });
 }
 
 function base64ToBytes(b64: string): ArrayBuffer {

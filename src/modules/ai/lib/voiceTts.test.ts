@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { toSpeechText } from "./voiceTts";
+import { splitForSpeech, toSpeechText } from "./voiceTts";
 
 // native + preferences are not touched by toSpeechText (pure), but the
 // module imports them at top level — mock before import.
@@ -70,5 +70,50 @@ describe("toSpeechText", () => {
 
   it("collapses newlines into sentence breaks", () => {
     expect(toSpeechText("Line one.\nLine two.")).toBe("Line one. Line two.");
+  });
+});
+
+describe("splitForSpeech", () => {
+  it("returns a single chunk for short text", () => {
+    expect(splitForSpeech("One sentence only.")).toEqual(["One sentence only."]);
+  });
+
+  it("returns no chunks for empty or whitespace-only text", () => {
+    expect(splitForSpeech("")).toEqual([]);
+    expect(splitForSpeech("   \n  ")).toEqual([]);
+  });
+
+  it("packs multiple sentences under the chunk cap", () => {
+    const sentence = "This is a moderately long sentence about build tooling. ";
+    const text = sentence.repeat(80); // ~4560 chars → 2 chunks
+    const chunks = splitForSpeech(text);
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const c of chunks) {
+      expect(c.length).toBeLessThanOrEqual(3800);
+    }
+    // No text lost: reassembly (ignoring boundary whitespace) covers input.
+    expect(chunks.join(" ").split(/\s+/).length).toBe(
+      text.trim().split(/\s+/).length,
+    );
+  });
+
+  it("hard-splits a single sentence longer than the cap", () => {
+    const long = "word ".repeat(1200); // 6000 chars, no sentence marks
+    const chunks = splitForSpeech(long.trim());
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const c of chunks) {
+      expect(c.length).toBeLessThanOrEqual(3800);
+    }
+  });
+
+  it("breaks at sentence boundaries, not mid-sentence", () => {
+    const a = "First sentence ends here. ".repeat(100);
+    const b = "Second distinct paragraph sentence. ".repeat(100);
+    const chunks = splitForSpeech((a + b).trim());
+    expect(chunks.length).toBeGreaterThan(1);
+    // Every chunk except possibly the last ends with sentence punctuation.
+    for (const c of chunks.slice(0, -1)) {
+      expect(/[.!?]$/.test(c)).toBe(true);
+    }
   });
 });
