@@ -23,6 +23,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+// The base64 trait is only used inside the win/linux engine bodies; macOS
+// early-returns before any decode/encode, so gate the import to keep that
+// cfg expansion warning-free.
+#[cfg(any(windows, target_os = "linux"))]
 use base64::Engine;
 use serde::Serialize;
 use tauri::ipc::Channel;
@@ -79,6 +83,7 @@ pub const TTS_VOICES: &[(&str, &str, u64)] = &[
 ];
 
 /// Optional Silero VAD (885KB) — improves segmentation on longer clips.
+#[cfg(any(windows, target_os = "linux"))]
 const SILERO_URL: &str =
     "https://huggingface.co/ggml-org/silero-v5.1.2/resolve/main/ggml-silero-v5.1.2.bin";
 
@@ -181,32 +186,40 @@ async fn download_with_progress(
     on_event: &Channel<VoiceSetupEvent>,
     phase: &str,
 ) -> Result<(), String> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(600))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let resp = client.get(url).send().await.map_err(|e| e.to_string())?;
-    if !resp.status().is_success() {
-        return Err(format!("download failed: HTTP {} from {url}", resp.status()));
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        let _ = (url, dest, on_event, phase);
+        unreachable!()
     }
-    let total = resp.content_length().unwrap_or(0);
-    use futures_util::StreamExt;
-    let mut file = std::fs::File::create(dest).map_err(|e| e.to_string())?;
-    let mut downloaded: u64 = 0;
-    let mut stream = resp.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| e.to_string())?;
-        file.write_all(&chunk).map_err(|e| e.to_string())?;
-        downloaded += chunk.len() as u64;
-        let _ = on_event.send(VoiceSetupEvent {
-            phase: phase.to_string(),
-            downloaded,
-            total,
-            message: None,
-        });
+    #[cfg(any(windows, target_os = "linux"))]
+    {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(600))
+            .build()
+            .map_err(|e| e.to_string())?;
+        let resp = client.get(url).send().await.map_err(|e| e.to_string())?;
+        if !resp.status().is_success() {
+            return Err(format!("download failed: HTTP {} from {url}", resp.status()));
+        }
+        let total = resp.content_length().unwrap_or(0);
+        use futures_util::StreamExt;
+        let mut file = std::fs::File::create(dest).map_err(|e| e.to_string())?;
+        let mut downloaded: u64 = 0;
+        let mut stream = resp.bytes_stream();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|e| e.to_string())?;
+            file.write_all(&chunk).map_err(|e| e.to_string())?;
+            downloaded += chunk.len() as u64;
+            let _ = on_event.send(VoiceSetupEvent {
+                phase: phase.to_string(),
+                downloaded,
+                total,
+                message: None,
+            });
+        }
+        file.flush().map_err(|e| e.to_string())?;
+        Ok(())
     }
-    file.flush().map_err(|e| e.to_string())?;
-    Ok(())
 }
 
 /// Extract a .zip, flattening nested `whisper/Release/` or `piper/piper/`

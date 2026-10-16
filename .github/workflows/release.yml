@@ -175,6 +175,27 @@ jobs:
           echo "APPLE_API_KEY_PATH=$HOME/private_keys/AuthKey.p8" >> "$GITHUB_ENV"
 
       - uses: tauri-apps/tauri-action@v0
+        id: tauri-build
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          releaseId: ${{ needs.create-release.outputs.release-id }}
+          tagName: ${{ github.ref_name }}
+          releaseName: "Kai ${{ github.ref_name }}"
+          releaseBody: ${{ needs.create-release.outputs.release-body }}
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+
+      # The 7-minute builds occasionally die AFTER bundling on a transient
+      # "Connect Timeout Error" against the GitHub upload host — losing the
+      # whole release. Retry once: the rebuild is fast (rust-cache) and
+      # tauri-action replaces same-name assets on the draft release.
+      - uses: tauri-apps/tauri-action@v0
+        if: steps.tauri-build.outcome == 'failure'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}

@@ -86,6 +86,10 @@ pub struct SandboxStatus {
     pub kernel: Option<String>,
 }
 
+#[cfg_attr(
+    not(any(windows, target_os = "linux")),
+    allow(dead_code)
+)]
 fn probe(program: &str, arg: &str) -> bool {
     let mut cmd = Command::new(program);
     cmd.arg(arg);
