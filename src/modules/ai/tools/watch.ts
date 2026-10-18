@@ -232,14 +232,14 @@ function handlePollResult(
       // The condition expression itself is broken — the watch can never
       // fire. Count it like a poll failure so the circuit breaker stops
       // and self-reports it instead of polling silently forever.
-      w.lastError = `Condition expression failed to evaluate: ${w.condition}`;
+      w.lastError = `Condition expression failed to evaluate: ${w.condition}${check.reason ? ` (${check.reason})` : ""}`;
       w.consecutiveFailures++;
       if (w.consecutiveFailures >= WATCH_MAX_CONSECUTIVE_FAILURES) {
         injectWatchFailure(w);
         stopWatch(w.id);
       } else {
         console.warn(
-          `[kai] watch ${w.id} condition failed to evaluate (${w.consecutiveFailures}/${WATCH_MAX_CONSECUTIVE_FAILURES}, condition: ${w.condition})`,
+          `[kai] watch ${w.id} condition failed to evaluate (${w.consecutiveFailures}/${WATCH_MAX_CONSECUTIVE_FAILURES}, condition: ${w.condition}${check.reason ? `, reason: ${check.reason}` : ""})`,
         );
       }
       return;
@@ -366,29 +366,252 @@ export function evaluateCondition(
  * and return false forever — the watch polled forever, never fired, and
  * never self-reported ("never fired and nobody knew"). The caller feeds
  * `ok: false` into the same circuit breaker that catches dead shells.
+ *
+ * Eval-free BY DESIGN: the packaged app's CSP (`script-src 'self'
+ * 'wasm-unsafe-eval'`) has no 'unsafe-eval', so `new Function` throws
+ * EvalError on EVERY poll — every conditional watch auto-stopped after 10
+ * polls with a misleading "failed to evaluate" (tests passed because vitest
+ * runs in Node, which has no CSP). This parser understands the documented
+ * DSL — identifiers (exit_code/stdout/stderr/timed_out), numeric and quoted
+ * literals, `.includes()` / `.length`, comparison operators, && || ! and
+ * parentheses — which is everything the tool description advertises.
+ * Anything outside the DSL reports ok:false with a parser reason, keeping
+ * the typo'd-identifier trap detection intact.
  */
 export function evaluateConditionChecked(
   condition: string | undefined,
   result: { exit_code: number | null; stdout: string; stderr: string; timed_out: boolean },
-): { ok: boolean; value: boolean } {
+): { ok: boolean; value: boolean; reason?: string } {
   if (!condition) return { ok: true, value: true }; // No condition = always fire.
 
+  const parser = new ConditionParser(condition);
+  let ast: ConditionNode;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-implied-eval
-    const fn = new Function(
-      "exit_code",
-      "stdout",
-      "stderr",
-      "timed_out",
-      `return Boolean(${condition})`,
-    );
+    ast = parser.parseOr();
+    const leftover = parser.peek();
+    if (leftover !== "") {
+      return { ok: false, value: false, reason: `unexpected token after expression: ${leftover}` };
+    }
+  } catch (e) {
     return {
-      ok: true,
-      value: Boolean(fn(result.exit_code, result.stdout, result.stderr, result.timed_out)),
+      ok: false,
+      value: false,
+      reason: e instanceof Error ? e.message : "parse error",
     };
-  } catch {
-    return { ok: false, value: false };
   }
+  try {
+    return { ok: true, value: evalNode(ast, result) };
+  } catch (e) {
+    return {
+      ok: false,
+      value: false,
+      reason: e instanceof Error ? e.message : "evaluation error",
+    };
+  }
+}
+
+// ── Tiny expression DSL (no eval; CSP-safe) ───────────────────────────────
+
+type ConditionNode =
+  | { kind: "const"; value: boolean }
+  | { kind: "field"; name: string }
+  | { kind: "not"; node: ConditionNode }
+  | { kind: "and"; left: ConditionNode; right: ConditionNode }
+  | { kind: "or"; left: ConditionNode; right: ConditionNode }
+  | { kind: "cmp"; op: string; left: ConditionNode; right: ConditionNode }
+  | { kind: "includes"; node: ConditionNode; needle: string }
+  | { kind: "length"; node: ConditionNode };
+
+const FIELD_TYPES: Record<string, "number" | "string" | "boolean"> = {
+  exit_code: "number",
+  stdout: "string",
+  stderr: "string",
+  timed_out: "boolean",
+};
+
+class ConditionParser {
+  private i = 0;
+  constructor(private src: string) {}
+
+  peek(): string {
+    this.skipWs();
+    return this.src.slice(this.i);
+  }
+  private skipWs(): void {
+    while (this.i < this.src.length && /\s/.test(this.src[this.i])) this.i++;
+  }
+  private eatWord(): string {
+    this.skipWs();
+    const m = /^[A-Za-z_][A-Za-z0-9_]*/.exec(this.src.slice(this.i));
+    if (!m) return "";
+    this.i += m[0].length;
+    return m[0];
+  }
+  private eat(expected: string): boolean {
+    this.skipWs();
+    if (this.src.startsWith(expected, this.i)) {
+      this.i += expected.length;
+      return true;
+    }
+    return false;
+  }
+
+  parseOr(): ConditionNode {
+    let left = this.parseAnd();
+    while (this.eat("||")) left = { kind: "or", left, right: this.parseAnd() };
+    return left;
+  }
+  private parseAnd(): ConditionNode {
+    let left = this.parseUnary();
+    while (this.eat("&&")) left = { kind: "and", left, right: this.parseUnary() };
+    return left;
+  }
+  private parseUnary(): ConditionNode {
+    if (this.eat("!")) return { kind: "not", node: this.parseUnary() };
+    return this.parseComparison();
+  }
+  private parseComparison(): ConditionNode {
+    const left = this.parsePrimary();
+    this.skipWs();
+    for (const op of ["!==", "===", "!=", "==", ">=", "<=", ">", "<"]) {
+      if (this.src.startsWith(op, this.i)) {
+        this.i += op.length;
+        return { kind: "cmp", op, left, right: this.parsePrimary() };
+      }
+    }
+    return left;
+  }
+  private parsePrimary(): ConditionNode {
+    this.skipWs();
+    // Parenthesized sub-expression — full expression grammar inside
+    // (supports `((stdout || ""))` coalescing feeding `.includes`).
+    if (this.eat("(")) {
+      const node = this.parseOr();
+      if (!this.eat(")")) throw new Error("missing ) in condition");
+      return this.parseSuffixes(node);
+    }
+    const rest = this.src.slice(this.i);
+    // Quoted string literal (single or double quotes).
+    const str = /^"((?:[^"\\]|\\.)*)"|^'((?:[^'\\]|\\.)*)'/.exec(rest);
+    if (str) {
+      this.i += str[0].length;
+      const raw = str[1] ?? str[2] ?? "";
+      return { kind: "field", name: `"${raw.replace(/\\"/g, '"').replace(/\\'/g, "'")}"` };
+    }
+    // Numeric literal (including negative).
+    const num = /^-?\d+(\.\d+)?/.exec(rest);
+    if (num) {
+      this.i += num[0].length;
+      return { kind: "field", name: `#${num[0]}` };
+    }
+    // Identifier: field, `true`/`false`, or field.method(...)
+    const word = this.eatWord();
+    if (!word) throw new Error(`unexpected token: ${rest.slice(0, 12) || "end of expression"}`);
+    if (word === "true") return { kind: "const", value: true };
+    if (word === "false") return { kind: "const", value: false };
+    if (!(word in FIELD_TYPES)) throw new Error(`unknown identifier: ${word}`);
+    return this.parseSuffixes({ kind: "field", name: word });
+  }
+  /** Method suffixes: `.includes("...")` and `.length`, chained. */
+  private parseSuffixes(node: ConditionNode): ConditionNode {
+    for (;;) {
+      if (this.eat(".includes(")) {
+        const arg = this.parseStringLiteral();
+        this.skipWs();
+        if (!this.eat(")")) throw new Error("missing ) after .includes(...)");
+        node = { kind: "includes", node, needle: arg };
+        continue;
+      }
+      if (this.eat(".length")) {
+        node = { kind: "length", node };
+        continue;
+      }
+      break;
+    }
+    return node;
+  }
+  private parseStringLiteral(): string {
+    this.skipWs();
+    const rest = this.src.slice(this.i);
+    const str = /^"((?:[^"\\]|\\.)*)"|^'((?:[^'\\]|\\.)*)'/.exec(rest);
+    if (!str) throw new Error(".includes needs a quoted string argument");
+    this.i += str[0].length;
+    const raw = str[1] ?? str[2] ?? "";
+    return raw.replace(/\\"/g, '"').replace(/\\'/g, "'").replace(/\\\\/g, "\\");
+  }
+}
+
+/**
+ * Value-preserving evaluation (JS semantics): `a && b` / `a || b` return the
+ * VALUE of an operand, not just a boolean — `(stdout || "")` coalesces to the
+ * stdout string (or "" when stdout is falsy), which `.includes` then uses.
+ * Null (exit_code of a killed process) propagates only into explicit
+ * comparisons, where it throws — same as `new Function` would have.
+ */
+function valueOf(
+  node: ConditionNode,
+  result: { exit_code: number | null; stdout: string; stderr: string; timed_out: boolean },
+): string | number | boolean | null {
+  switch (node.kind) {
+    case "const":
+      return node.value;
+    case "field": {
+      if (node.name.startsWith('"')) return node.name.slice(1, -1);
+      if (node.name.startsWith("#")) return Number(node.name.slice(1));
+      switch (node.name) {
+        case "exit_code": return result.exit_code;
+        case "stdout": return result.stdout;
+        case "stderr": return result.stderr;
+        case "timed_out": return result.timed_out;
+        default: return null;
+      }
+    }
+    case "not":
+      return !valueOf(node.node, result);
+    case "and": {
+      const l = valueOf(node.left, result);
+      return l ? valueOf(node.right, result) : l;
+    }
+    case "or": {
+      const l = valueOf(node.left, result);
+      return l ? l : valueOf(node.right, result);
+    }
+    case "includes": {
+      const v = valueOf(node.node, result);
+      if (typeof v !== "string") throw new Error(".includes is only valid on strings");
+      return v.includes(node.needle);
+    }
+    case "length": {
+      const v = valueOf(node.node, result);
+      if (typeof v !== "string") throw new Error(".length is only valid on strings");
+      return v.length;
+    }
+    case "cmp": {
+      const l = valueOf(node.left, result);
+      const r = valueOf(node.right, result);
+      if (l === null || r === null) throw new Error("cannot compare null (killed process has no exit_code)");
+      switch (node.op) {
+        case "==":
+        case "===":
+          return l === r;
+        case "!=":
+        case "!==":
+          return l !== r;
+        case ">": return (l as number) > (r as number);
+        case "<": return (l as number) < (r as number);
+        case ">=": return (l as number) >= (r as number);
+        case "<=": return (l as number) <= (r as number);
+        default: throw new Error(`unsupported operator: ${node.op}`);
+      }
+    }
+  }
+}
+
+function evalNode(
+  node: ConditionNode,
+  result: { exit_code: number | null; stdout: string; stderr: string; timed_out: boolean },
+): boolean {
+  return Boolean(valueOf(node, result));
 }
 
 // ── Result injection ──────────────────────────────────────────────────────

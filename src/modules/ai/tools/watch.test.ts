@@ -116,6 +116,62 @@ describe("evaluateConditionChecked", () => {
       ok: false,
     });
   });
+
+  it("parses the eval-free DSL the packaged CSP requires (regression: every conditional watch auto-stopped under script-src without unsafe-eval)", () => {
+    // The exact condition from the field report that auto-stopped in the
+    // packaged app: an A || B of .includes over stdout.
+    expect(
+      watchModule.evaluateConditionChecked(
+        '((stdout || "")).includes("ALL_EVALS_DONE") || ((stdout || "")).includes("eval chain exited")',
+        { ...result, stdout: "… ALL_EVALS_DONE …" },
+      ),
+    ).toEqual({ ok: true, value: true });
+    expect(
+      watchModule.evaluateConditionChecked(
+        '((stdout || "")).includes("ALL_EVALS_DONE") || ((stdout || "")).includes("eval chain exited")',
+        { ...result, stdout: "still running" },
+      ),
+    ).toEqual({ ok: true, value: false });
+  });
+
+  it("supports the full documented DSL surface", () => {
+    // Comparisons, .length, !, &&, parentheses, numeric literals.
+    expect(watchModule.evaluateConditionChecked("stdout.length > 3", result)).toEqual({
+      ok: true,
+      value: true,
+    });
+    expect(watchModule.evaluateConditionChecked("stdout.length > 100", result)).toEqual({
+      ok: true,
+      value: false,
+    });
+    expect(watchModule.evaluateConditionChecked("exit_code !== 0", result)).toEqual({
+      ok: true,
+      value: false,
+    });
+    expect(
+      watchModule.evaluateConditionChecked(
+        "(exit_code === 0 && stdout.includes(\"MERGED\")) || timed_out",
+        result,
+      ),
+    ).toEqual({ ok: true, value: true });
+    expect(watchModule.evaluateConditionChecked("!timed_out", result)).toEqual({
+      ok: true,
+      value: true,
+    });
+  });
+
+  it("reports a parser reason for DSL violations (no more blind catch)", () => {
+    const out = watchModule.evaluateConditionChecked("exit_code.process.pid === 0", result);
+    expect(out.ok).toBe(false);
+    expect(typeof out.reason).toBe("string");
+    expect(out.reason!.length).toBeGreaterThan(0);
+    // Method outside the DSL is rejected, not silently false.
+    const evil = watchModule.evaluateConditionChecked(
+      'stdout.constructor.constructor("return 1")()',
+      result,
+    );
+    expect(evil.ok).toBe(false);
+  });
 });
 
 describe("circuit breaker threshold", () => {
