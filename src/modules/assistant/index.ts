@@ -24,7 +24,7 @@
  * pause), and sends replies back through telegram_send_*.
  */
 
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import type { UIMessage } from "@ai-sdk/react";
 import { generateText, stepCountIs, type ModelMessage } from "ai";
 import { getModel, DEFAULT_MODEL_ID, type ModelId } from "@/modules/ai/config";
@@ -241,11 +241,17 @@ export type TelegramEvent =
   | { kind: "error"; message: string };
 
 export const telegramNative = {
-  start: (token: string, ownerChatId: number | null, onEvent: (e: TelegramEvent) => void) =>
-    invoke<{ running: boolean; ownerChatId: number | null; botUsername: string | null }>(
+  start: async (token: string, ownerChatId: number | null, onEvent: (e: TelegramEvent) => void) => {
+    // A Tauri `Channel<T>` argument must be an actual Channel instance — a bare
+    // JS function isn't serializable, so the arg arrives missing
+    // ("command telegram_start missing required key onEvent").
+    const channel = new Channel<TelegramEvent>();
+    channel.onmessage = (e) => onEvent(e);
+    return await invoke<{ running: boolean; ownerChatId: number | null; botUsername: string | null }>(
       "telegram_start",
-      { token, ownerChatId, onEvent },
-    ),
+      { token, ownerChatId, onEvent: channel },
+    );
+  },
   stop: () => invoke<{ running: boolean }>("telegram_stop"),
   bindOwner: () => invoke<void>("telegram_bind_owner"),
   clearOwner: () => invoke<void>("telegram_clear_owner"),
