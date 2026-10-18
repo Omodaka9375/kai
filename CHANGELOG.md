@@ -7,6 +7,7 @@ All notable changes to the KAI terminal emulator project are documented in this 
 ## [1.7.5]
 
 - Assistant: fixed saving the Telegram bot token in Settings → External (a wrong argument name made the keychain write fail).
+- Voice: Auto end mode now actually engages after changing the setting (a stale closure kept silence detection disabled until restart).
 
 ---
 
