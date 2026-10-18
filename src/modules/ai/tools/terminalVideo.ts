@@ -77,11 +77,25 @@ async function extractPosterFrame(
   }
   // Read the frame bytes via the fs module (NOT shell) and encode to base64.
   const bytes = await native.readFileBytes(out);
-  const bin = String.fromCharCode(...bytes);
-  const b64 = btoa(bin);
+  const b64 = bytesToBase64(bytes);
   // Best-effort cleanup of the temp frame file; ignore failures.
   void native.deleteFile(out).catch(() => {});
   return b64;
+}
+
+/**
+ * bytes → base64 in 8KB slices. `String.fromCharCode(...bytes)` overflows
+ * the call stack at ~120k args (verified: throws at 300k) — a single 1080p
+ * poster frame is 0.5–3 MB, so the spread version threw on EVERY real video.
+ * Same chunking pattern as transcribeLocal in voiceTts.ts.
+ */
+function bytesToBase64(bytes: number[] | Uint8Array): string {
+  let binary = "";
+  const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  for (let i = 0; i < u8.length; i += 8192) {
+    binary += String.fromCharCode(...u8.subarray(i, i + 8192));
+  }
+  return btoa(binary);
 }
 
 export function buildTerminalVideoTools(ctx: ToolContext) {
@@ -167,9 +181,16 @@ export function buildTerminalVideoTools(ctx: ToolContext) {
             return { error: `Download failed: HTTP ${resp.status}` };
           }
           const buf = new Uint8Array(await resp.arrayBuffer());
-          // 256 MB cap — a video file, not an unbounded disk fill.
-          if (buf.byteLength > 256 * 1024 * 1024) {
-            return { error: "Video too large to display (over 256 MB)." };
+          // 8 MB cap — the bytes travel to Rust as a JSON number[] via IPC
+          // (fs_write_file_bytes), which is impractically slow/memory-heavy
+          // beyond that. Bigger downloads should go through `path` (the user
+          // downloads the file) — this tool's job is a poster frame, not a
+          // transfer client.
+          if (buf.byteLength > 8 * 1024 * 1024) {
+            return {
+              error:
+                "Remote video over 8 MB — download it to a local file (curl/wget) and pass `path` instead.",
+            };
           }
           const isWin = navigator.platform.startsWith("Win");
           const sep = isWin ? "\\" : "/";

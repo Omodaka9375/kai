@@ -109,6 +109,15 @@ function renderImageDecoration(
   };
   registry.add(record);
 
+  // The terminal itself can close (tab killed) before anything disposes the
+  // record via the cap — detach it from the registry so the Set doesn't hold
+  // dead records (and their blob URLs) for the lifetime of a live terminal.
+  decoration.onDispose(() => {
+    registry.delete(record);
+  });
+
+  // onRender can fire more than once (xterm re-renders decorations on
+  // resize/scroll-back); guard the element so we never stack a second <img>.
   decoration.onRender((element) => {
     const img = document.createElement("img");
     img.src = url;
