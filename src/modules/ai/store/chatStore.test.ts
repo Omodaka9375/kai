@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 /**
  * Tests for stale-approval discrimination via the store's
@@ -167,8 +167,16 @@ describe("stale approval release", () => {
  *  releaseStaleApprovals action (guarded behind a Tauri-free import because
  *  the store module pulls @tauri-apps APIs at top level). */
 describe("chatStore exports", () => {
-  it("exposes releaseStaleApprovals on the store", async () => {
-    const mod = await import("./chatStore");
+  // One shared dynamic import. The module graph (AI SDK + mocked Tauri)
+  // costs ~1.4s to load even in isolation — under full-suite worker
+  // contention that blew the 5s default test timeout. Loading once here
+  // with a generous hook timeout keeps the individual tests instant.
+  let mod: typeof import("./chatStore");
+  beforeAll(async () => {
+    mod = await import("./chatStore");
+  }, 30_000);
+
+  it("exposes releaseStaleApprovals on the store", () => {
     const state = mod.useChatStore.getState();
     expect(typeof state.releaseStaleApprovals).toBe("function");
     expect(typeof state.setSteeringMessage).toBe("function");
@@ -185,7 +193,6 @@ describe("chatStore exports", () => {
 
   describe("workspace switching", () => {
     it("activates the new project's own session on a project switch", async () => {
-      const mod = await import("./chatStore");
       const store = mod.useChatStore;
 
       // Cold start on project A: a fresh session stamped with A becomes
