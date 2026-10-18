@@ -31,6 +31,10 @@ const decorationsByTerm = new WeakMap<Terminal, Set<{ dispose: () => void }>>();
 /** Cap simultaneous images per terminal (memory guard). */
 const MAX_IMAGES_PER_TERM = 12;
 
+/** Cap a single decoded image (~16 MB of pixels ≈ a huge screenshot).
+ *  base64 chars → bytes is 3/4, so 22M chars ≈ 16 MB decoded. */
+const MAX_BASE64_BYTES = 22_000_000;
+
 /**
  * Register the OSC 1337 handler on a terminal. Returns a dispose function.
  * On `File=...inline=1:<b64>`: writes a newline, drops a decoration anchored
@@ -59,6 +63,11 @@ function renderImageDecoration(
   base64Data: string,
   registry: Set<{ dispose: () => void }>,
 ): void {
+  // PTY output is UNTRUSTED (an SSH session or `cat` of an attacker file can
+  // emit arbitrary OSC payloads). Cap the decoded size BEFORE decoding —
+  // `atob` on a multi-hundred-MB string OOMs the renderer; the count cap
+  // below bounds decorations, not the size of one.
+  if (base64Data.length > MAX_BASE64_BYTES) return;
   const bytes = base64ToBytes(base64Data);
   if (bytes.length === 0) return;
   const mime = sniffImageMime(bytes);

@@ -2,7 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import type { ToolContext } from "./context";
 import { buildOsc1337 } from "./terminalImage";
-import { checkReadable } from "../lib/security";
+import { checkReadable, checkWritable } from "../lib/security";
 
 /**
  * Terminal video display — a poster-frame variant of the inline-image path.
@@ -31,17 +31,24 @@ async function hasFfmpeg(): Promise<boolean> {
   return ffmpegAvailable;
 }
 
-/** Minimal arg-escape for a Windows/Unix ffmpeg spawn (no shell metachars). */
+/**
+ * Quote a value for the ffmpeg command line AND reject every shell metachar.
+ * The command runs through the Rust oneshot runner (PowerShell -File on
+ * Windows, `$SHELL -lc` elsewhere), so metachars are live in BOTH dialects:
+ * `"` breaks out of quoting, `;` chains statements, `$(` + backtick interpolate
+ * inside double quotes, `&` chains, backslash escapes. The reject-list is a
+ * SINGLE character class — an earlier draft had `&` outside the class, which
+ * accepted `x"; cmd; #` (statement injection).
+ */
 function shellQuote(s: string): string {
-  // This command runs through the Rust oneshot runner (PowerShell on Windows,
-  // /bin/sh elsewhere). Inside double quotes PS would interpolate `$(`, `$env`,
-  // and backticks; sh would interpolate `$( )` and backticks too. Reject any
-  // of these outright rather than trying to escape dialect-specifically.
-  if (/[$`";]&|\\|\r|\n/.test(s)) {
+  if (/[$`;&"\\]|\r|\n/.test(s)) {
     throw new Error("unsupported characters in video path/URL");
   }
   return `"${s}"`;
 }
+
+/** Test seam — the gate itself, without building a command. */
+export const shellQuoteForTest = shellQuote;
 
 /**
  * Extract a poster frame (base64 PNG) from a local video file at `atSecs`.
@@ -52,7 +59,13 @@ async function extractPosterFrame(
   atSecs: number,
 ): Promise<string> {
   const { native } = await import("../lib/native");
+  // The frame file is derived by APPENDING to the source path, so it always
+  // lands in the source's directory — the append cannot traverse. The WRITE
+  // still goes through the same deny-lists as fs tools (shell-init files,
+  // protected dirs) because ffmpeg performs it outside the fs module.
   const out = `${source}.kai-frame.png`;
+  const writeGate = checkWritable(out);
+  if (!writeGate.ok) throw new Error(writeGate.reason);
   const cmd =
     `ffmpeg -y -loglevel error -ss ${atSecs} -i ${shellQuote(source)} ` +
     `-frames:v 1 ${shellQuote(out)}`;
@@ -117,32 +130,58 @@ export function buildTerminalVideoTools(ctx: ToolContext) {
           };
         }
 
-        let localPath = path ?? "";
+        // The name/label is interpolated into an OSC 1337 sequence — same
+        // control-byte gate as display_image (BEL/ESC would terminate the
+        // sequence early and inject trailing bytes as terminal input).
         let label = name ?? (path ? path.split(/[\\/]/).pop()! : "video");
-
-        // 2. Remote URL → download to a temp file first (ffmpeg reads files).
-        if (url) {
-          if (!/^https:\/\//i.test(url)) {
-            return { error: "Only https:// URLs are supported." };
-          }
-          const { native } = await import("../lib/native");
-          const tmp = `${navigator.platform.startsWith("Win") ? "C:" + "\\Windows\\Temp" : "/tmp"}\\kai-video-${Date.now()}.mp4`;
-          const dl = await native.runCommand(
-            `curl -L -s -o ${shellQuote(tmp)} ${shellQuote(url)}`,
-            null,
-            120,
-          );
-          if (dl.exit_code !== 0) {
-            return { error: `Download failed: ${dl.stderr?.slice(0, 200) || dl.exit_code}` };
-          }
-          localPath = tmp;
-          if (!name) label = url.split("/").pop()?.slice(0, 40) ?? "video";
+        if (/[\x00-\x1f\x7f]/.test(label)) {
+          return { error: "name must not contain control bytes" };
         }
 
-        // 3. Local path — safety gate + existence is implied by ffmpeg's error.
+        let localPath = path ?? "";
+
+        // 2. Local path gate — same deny-lists the fs tools apply.
         if (path) {
           const safety = checkReadable(path);
           if (!safety.ok) return { error: safety.reason };
+        }
+
+        // 3. Remote URL → download via the SSRF-hardened Rust proxy
+        // (allowPrivateNetwork: false — model-callable fetchers never reach
+        // loopback/private/metadata IPs), write through the fs module. The
+        // previous curl-through-shell path both bypassed the proxy policy and
+        // was dead code: its malformed temp path always threw in shellQuote.
+        if (url) {
+          let parsed: URL;
+          try {
+            parsed = new URL(url);
+          } catch {
+            return { error: "Invalid URL." };
+          }
+          if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+            return { error: "Only http(s) URLs are supported." };
+          }
+          const { proxyFetch } = await import("../lib/proxyFetch");
+          const resp = await proxyFetch(url, { redirect: "error" });
+          if (!resp.ok) {
+            return { error: `Download failed: HTTP ${resp.status}` };
+          }
+          const buf = new Uint8Array(await resp.arrayBuffer());
+          // 256 MB cap — a video file, not an unbounded disk fill.
+          if (buf.byteLength > 256 * 1024 * 1024) {
+            return { error: "Video too large to display (over 256 MB)." };
+          }
+          const isWin = navigator.platform.startsWith("Win");
+          const sep = isWin ? "\\" : "/";
+          const tmpBase = isWin
+            ? (globalThis as { process?: { env?: Record<string, string> } })
+                .process?.env?.TEMP ?? "C:\\Windows\\Temp"
+            : "/tmp";
+          const tmp = `${tmpBase}${sep}kai-video-${Date.now()}.mp4`;
+          const { native } = await import("../lib/native");
+          await native.writeFileBytes(tmp, Array.from(buf));
+          localPath = tmp;
+          if (!name) label = url.split("/").pop()?.slice(0, 40) ?? "video";
         }
 
         // 4. Extract the poster frame (base64 PNG via ffmpeg).
