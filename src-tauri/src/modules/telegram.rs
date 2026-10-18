@@ -41,6 +41,22 @@ static BIND_MODE: AtomicBool = AtomicBool::new(false);
 
 static LAST_UPDATE_ID: LazyLock<Mutex<i64>> = LazyLock::new(|| Mutex::new(0));
 
+/// The current event channel. `telegram_start` REPLACES it on every call: the
+/// loop is global, but delivery follows the most recent starter — the bridge
+/// can be (re)claimed from any window (settings panel mount, main window
+/// focus) so a closed settings window never strands the loop pushing into a
+/// dead channel.
+static EVENT_CHANNEL: LazyLock<Mutex<Option<Channel<TelegramEvent>>>> =
+    LazyLock::new(|| Mutex::new(None));
+
+/// Send an event to the current channel (silently dropped when none/dead).
+fn emit_event(event: TelegramEvent) {
+    let ch = crate::modules::lock::mutex_lock(&EVENT_CHANNEL);
+    if let Some(c) = ch.as_ref() {
+        let _ = c.send(event);
+    }
+}
+
 const API: &str = "https://api.telegram.org";
 /// getUpdates hold time. Telegram caps at 50s; the frontend agent replies
 /// happen on the main runtime, this loop only delivers updates.
@@ -247,7 +263,7 @@ async fn poll_once(
 }
 
 /// Classify one update against the owner gate and emit the right event.
-fn classify(update: &TgUpdate, channel: &Channel<TelegramEvent>) -> Option<i64> {
+fn classify(update: &TgUpdate) -> Option<i64> {
     let msg = update.message.as_ref()?;
     let chat_id = msg.chat.as_ref()?.id?;
     let message_id = msg.message_id.unwrap_or(0);
@@ -261,14 +277,14 @@ fn classify(update: &TgUpdate, channel: &Channel<TelegramEvent>) -> Option<i64> 
         if BIND_MODE.swap(false, Ordering::SeqCst) {
             // Claim binding — this chat becomes the owner.
             OWNER_CHAT_ID.store(chat_id, Ordering::SeqCst);
-            let _ = channel.send(TelegramEvent::StartCandidate { chat_id, message_id, date });
+            emit_event(TelegramEvent::StartCandidate { chat_id, message_id, date });
             return Some(chat_id);
         }
         // Not in bind mode: drop silently (no owner leak, no response).
         return None;
     }
     if owner != -1 && chat_id != owner {
-        let _ = channel.send(TelegramEvent::Rejected { chat_id, date });
+        emit_event(TelegramEvent::Rejected { chat_id, date });
         return None;
     }
     if owner == -1 {
@@ -277,7 +293,7 @@ fn classify(update: &TgUpdate, channel: &Channel<TelegramEvent>) -> Option<i64> 
     }
 
     if let Some(voice) = &msg.voice {
-        let _ = channel.send(TelegramEvent::Message {
+        emit_event(TelegramEvent::Message {
             chat_id,
             message_id,
             text: None,
@@ -286,7 +302,7 @@ fn classify(update: &TgUpdate, channel: &Channel<TelegramEvent>) -> Option<i64> 
             date,
         });
     } else if let Some(text) = &msg.text {
-        let _ = channel.send(TelegramEvent::Message {
+        emit_event(TelegramEvent::Message {
             chat_id,
             message_id,
             text: Some(text.clone()),
@@ -298,7 +314,7 @@ fn classify(update: &TgUpdate, channel: &Channel<TelegramEvent>) -> Option<i64> 
         // photo: Vec<PhotoSize> sorted small→large; take the largest file_id.
         let best = photo.iter().rev().find_map(|s| s.file_id.clone());
         if let Some(file_id) = best {
-            let _ = channel.send(TelegramEvent::Photo {
+            emit_event(TelegramEvent::Photo {
                 chat_id,
                 message_id,
                 photo_file_id: file_id,
@@ -307,7 +323,7 @@ fn classify(update: &TgUpdate, channel: &Channel<TelegramEvent>) -> Option<i64> 
             });
         }
     } else if let Some(doc) = &msg.document {
-        let _ = channel.send(TelegramEvent::Document {
+        emit_event(TelegramEvent::Document {
             chat_id,
             message_id,
             document_file_id: doc.file_id.clone().unwrap_or_default(),
@@ -316,7 +332,7 @@ fn classify(update: &TgUpdate, channel: &Channel<TelegramEvent>) -> Option<i64> 
             date,
         });
     } else if let Some(video) = &msg.video {
-        let _ = channel.send(TelegramEvent::Video {
+        emit_event(TelegramEvent::Video {
             chat_id,
             message_id,
             video_file_id: video.file_id.clone().unwrap_or_default(),
@@ -340,8 +356,14 @@ pub async fn telegram_start(
         return Err("bot token is empty".into());
     }
     OWNER_CHAT_ID.store(owner_chat_id.unwrap_or(-1), Ordering::SeqCst);
+    // Replace the delivery channel FIRST — even when the loop is already
+    // running, the most recent caller takes over event delivery.
+    {
+        let mut ch = crate::modules::lock::mutex_lock(&EVENT_CHANNEL);
+        *ch = Some(on_event);
+    }
     if RUNNING.swap(true, Ordering::SeqCst) {
-        // Already running — return current status (loop keeps its channel).
+        // Already running — the loop picks up the new channel above.
         return Ok(status());
     }
     POLL_SHUTDOWN.store(false, Ordering::SeqCst);
@@ -353,7 +375,7 @@ pub async fn telegram_start(
             Ok(rt) => rt,
             Err(e) => {
                 RUNNING.store(false, Ordering::SeqCst);
-                let _ = on_event.send(TelegramEvent::Error { message: format!("runtime: {e}") });
+                emit_event(TelegramEvent::Error { message: format!("runtime: {e}") });
                 return;
             }
         };
@@ -373,7 +395,7 @@ pub async fn telegram_start(
                 match poll_once(&client, &token, offset).await {
                     Ok(updates) => {
                         for u in &updates {
-                            classify(u, &on_event);
+                            classify(u);
                             let mut last = crate::modules::lock::mutex_lock(&LAST_UPDATE_ID);
                             if u.update_id > *last {
                                 *last = u.update_id;
@@ -383,7 +405,7 @@ pub async fn telegram_start(
                     Err(e) => {
                         // Transient (network/token). Report at most one event
                         // per failure burst; back off 5s.
-                        let _ = on_event.send(TelegramEvent::Error { message: e });
+                        emit_event(TelegramEvent::Error { message: e });
                         tokio::time::sleep(Duration::from_secs(5)).await;
                     }
                 }
@@ -399,6 +421,8 @@ pub async fn telegram_start(
 pub fn telegram_stop() -> Result<TelegramStatus, String> {
     POLL_SHUTDOWN.store(true, Ordering::SeqCst);
     RUNNING.store(false, Ordering::SeqCst);
+    // Drop the delivery channel so a stopped loop can't push anywhere.
+    *crate::modules::lock::mutex_lock(&EVENT_CHANNEL) = None;
     Ok(status())
 }
 

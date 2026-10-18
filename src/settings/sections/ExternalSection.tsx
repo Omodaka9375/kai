@@ -37,6 +37,24 @@ export function ExternalSection() {
   const [isError, setIsError] = useState(false);
   const [botUsername, setBotUsername] = useState<string | null>(null);
 
+  // Poll the Rust-side status while the panel is open: the owner can bind via
+  // /start from Telegram at any moment (the poll loop updates Rust state and
+  // the bridge handler persists prefs) — this row must catch up on its own.
+  const refreshOwner = useCallback(async () => {
+    try {
+      const s = await telegramNative.status();
+      setPrefs((p) => {
+        if (!p || s.ownerChatId == null) return p;
+        if (p.ownerChatId === s.ownerChatId) return p;
+        const merged = { ...p, ownerChatId: s.ownerChatId };
+        void saveAssistantPrefs(merged);
+        return merged;
+      });
+    } catch {
+      // status polling is best-effort
+    }
+  }, []);
+
   useEffect(() => {
     void loadAssistantPrefs().then(setPrefs);
     void getTelegramToken().then((t) => {
@@ -44,7 +62,9 @@ export function ExternalSection() {
       if (t) setToken(t.slice(0, 4) + "…" + t.slice(-4));
     });
     void telegramNative.status().then((s) => setBotUsername(s.botUsername));
-  }, []);
+    const iv = setInterval(() => void refreshOwner(), 3000);
+    return () => clearInterval(iv);
+  }, [refreshOwner]);
 
   const patch = useCallback(
     async (next: Partial<AssistantPrefs>) => {
@@ -72,13 +92,15 @@ export function ExternalSection() {
           await setTelegramToken(token.trim());
           setTokenSet(true);
         }
+        // Persist enabled BEFORE starting: startAssistantBridge re-loads
+        // prefs from disk and refuses when enabled is not yet saved.
+        await patch({ enabled: true });
         const result = await startAssistantBridge();
         if (!result.ok) {
           setIsError(true);
           setStatus(result.error ?? "failed to start");
           return;
         }
-        await patch({ enabled: true });
         setStatus(
           prefs?.ownerChatId == null
             ? "Started — send /start to your bot on Telegram to bind your account as its owner."
