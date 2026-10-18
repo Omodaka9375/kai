@@ -4,6 +4,12 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.7.6]
+
+- Assistant: Telegram enable now actually starts the bot (the first enable didn't persist the flag before starting, so the poll loop never ran and /start never bound an owner); the bot's event channel follows the latest window that started it, and the Owner row updates live in Settings → External.
+
+---
+
 ## [1.7.5]
 
 - Assistant: fixed saving the Telegram bot token in Settings → External (a wrong argument name made the keychain write fail).
