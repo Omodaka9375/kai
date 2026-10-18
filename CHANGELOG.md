@@ -4,6 +4,12 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.7.3]
+
+- Voice: TTS now reads the reply that just finished instead of the previous turn's — a race between the run status and the streamed message made auto-speak one turn behind.
+
+---
+
 ## [1.7.2]
 
 - Settings: the File menu now includes External, making the Telegram assistant setup reachable from the menu.
