@@ -23,6 +23,7 @@ import type { Tab } from "@/modules/tabs";
 import { TabBar } from "@/modules/tabs";
 import {
   FloppyDiskIcon,
+  GlobeIcon,
   KeyboardIcon,
   Mic01Icon, SidebarLeftIcon,
 } from "@hugeicons/core-free-icons";
@@ -303,6 +304,10 @@ export function Header({
             <DropdownMenuItem onSelect={() => void openSettingsWindow("voice")} className="gap-2 text-xs">
               <HugeiconsIcon icon={Mic01Icon} size={13} strokeWidth={1.75} className="text-muted-foreground/80" />
               <span className="flex-1">Voice</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void openSettingsWindow("external")} className="gap-2 text-xs">
+              <HugeiconsIcon icon={GlobeIcon} size={13} strokeWidth={1.75} className="text-muted-foreground/80" />
+              <span className="flex-1">External</span>
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => void openSettingsWindow("shortcuts")} className="gap-2 text-xs">
               <HugeiconsIcon icon={KeyboardIcon} size={13} strokeWidth={1.75} className="text-muted-foreground/80" />
