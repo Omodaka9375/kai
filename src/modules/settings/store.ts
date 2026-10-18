@@ -80,10 +80,6 @@ export type Preferences = {
   openaiCompatibleVision: VisionOverride;
   /** Active UI color theme. "default" uses the built-in Kai palette. */
   uiThemeId: string;
-  /** ComfyUI local server URL. */
-  comfyuiBaseURL: string;
-  /** ComfyUI workflow JSON (API format) uploaded by the user. */
-  comfyuiWorkflow: string;
   /** List of recently opened projects/folders. */
   recentProjects: string[];
   /** Per-project last-used model ID. Keys are normalized workspace roots. */
@@ -160,8 +156,6 @@ const KEY_COMPAT_THINKING = "openaiCompatibleThinkingMode";
 const KEY_LMSTUDIO_VISION = "lmstudioVision";
 const KEY_COMPAT_VISION = "openaiCompatibleVision";
 const KEY_UI_THEME = "uiThemeId";
-const KEY_COMFYUI_BASE_URL = "comfyuiBaseURL";
-const KEY_COMFYUI_WORKFLOW = "comfyuiWorkflow";
 const KEY_SUBAGENT_MAX_STEPS = "subagentMaxSteps";
 const KEY_THINKING_MODE = "thinkingMode";
 const KEY_MODEL_THINKING_MODES = "modelThinkingModes";
@@ -234,8 +228,6 @@ export const DEFAULT_PREFERENCES: Preferences = {
   lmstudioVision: "auto" as VisionOverride,
   openaiCompatibleVision: "auto" as VisionOverride,
   uiThemeId: "default",
-  comfyuiBaseURL: "http://*********:8188",
-  comfyuiWorkflow: "",
   recentProjects: [],
   projectModelIds: {},
   subagentMaxSteps: 24,
@@ -357,10 +349,6 @@ export async function loadPreferences(): Promise<Preferences> {
       DEFAULT_PREFERENCES.openaiCompatibleVision,
     uiThemeId:
       get<string>(KEY_UI_THEME) ?? DEFAULT_PREFERENCES.uiThemeId,
-    comfyuiBaseURL:
-      get<string>(KEY_COMFYUI_BASE_URL) ?? DEFAULT_PREFERENCES.comfyuiBaseURL,
-    comfyuiWorkflow:
-      get<string>(KEY_COMFYUI_WORKFLOW) ?? DEFAULT_PREFERENCES.comfyuiWorkflow,
     recentProjects:
       get<string[]>("recentProjects") ?? DEFAULT_PREFERENCES.recentProjects,
     projectModelIds:
@@ -619,14 +607,6 @@ export async function setUiThemeId(value: string): Promise<void> {
   await writePref(KEY_UI_THEME, value);
 }
 
-export async function setComfyuiBaseURL(value: string): Promise<void> {
-  await writePref(KEY_COMFYUI_BASE_URL, value);
-}
-
-export async function setComfyuiWorkflow(value: string): Promise<void> {
-  await writePref(KEY_COMFYUI_WORKFLOW, value);
-}
-
 export async function setSubagentMaxSteps(value: number): Promise<void> {
   const clamped = Math.max(1, Math.min(200, Math.round(value)));
   await writePref(KEY_SUBAGENT_MAX_STEPS, clamped);
@@ -746,8 +726,6 @@ export async function onPreferencesChange(
     [KEY_LMSTUDIO_VISION]: "lmstudioVision",
     [KEY_COMPAT_VISION]: "openaiCompatibleVision",
     [KEY_UI_THEME]: "uiThemeId",
-    [KEY_COMFYUI_BASE_URL]: "comfyuiBaseURL",
-    [KEY_COMFYUI_WORKFLOW]: "comfyuiWorkflow",
     projectModelIds: "projectModelIds",
     [KEY_SUBAGENT_MAX_STEPS]: "subagentMaxSteps",
     [KEY_THINKING_MODE]: "thinkingMode",

@@ -4,12 +4,11 @@ import { useChatStore } from "../store/chatStore";
 import { generateOpenAIImage } from "../lib/media/openai-image";
 import { generateGoogleImage } from "../lib/media/google-image";
 import { generateXAIImage } from "../lib/media/xai-image";
-import { generateComfyImage } from "../lib/media/comfyui";
 import { spawnMediaTask } from "../lib/media/task";
 import type { ImageResult } from "../lib/media/types";
 import type { ToolContext } from "./context";
 
-const PROVIDER_ENUM = ["openai", "google", "xai", "comfyui"] as const;
+const PROVIDER_ENUM = ["openai", "google", "xai"] as const;
 
 export function buildImageGenTools(_ctx: ToolContext) {
   return {
@@ -20,7 +19,6 @@ Providers:
 - openai: GPT Image 2 (best quality, supports editing)
 - google: Nano Banana 2 (Gemini, fast, good quality)
 - xai: Grok Imagine (good quality)
-- comfyui: local ComfyUI instance (upload workflow JSON in Settings)
 
 You MUST specify a provider. Ask the user which one to use if unclear.
 Auto-executes — no approval needed.`,
@@ -47,45 +45,6 @@ Auto-executes — no approval needed.`,
       execute: async ({ prompt, provider, size, quality }, options) => {
         const keys = useChatStore.getState().apiKeys;
         const signal = options?.abortSignal;
-
-        // ComfyUI: no key needed, uses workflow from settings. Generation runs
-        // in the background and patches its result into this tool-call part.
-        if (provider === "comfyui") {
-          const prefs = await import("@/modules/settings/preferences").then(
-            (m) => m.usePreferencesStore.getState(),
-          );
-          if (!prefs.comfyuiWorkflow) {
-            return { error: "No ComfyUI workflow uploaded. Go to Settings → Models → ComfyUI and upload a workflow JSON." };
-          }
-          let workflow: Record<string, unknown>;
-          try {
-            workflow = JSON.parse(prefs.comfyuiWorkflow) as Record<string, unknown>;
-          } catch {
-            return { error: "ComfyUI workflow is not valid JSON. Re-export it using 'Save (API Format)'." };
-          }
-
-          spawnMediaTask(_ctx.getSessionId(), options.toolCallId, signal, () =>
-            generateComfyImage(prefs.comfyuiBaseURL, workflow, prompt, { signal }).then(
-              (result) => ({
-                type: "image" as const,
-                provider: result.provider,
-                mimeType: result.mimeType,
-                width: result.width,
-                height: result.height,
-                base64: result.base64,
-                url: result.url,
-                prompt,
-              }),
-            ),
-          );
-
-          return {
-            status: "generating",
-            kind: "image",
-            provider: "comfyui",
-            prompt,
-          };
-        }
 
         const key = keys[provider as keyof typeof keys];
         if (!key) {
