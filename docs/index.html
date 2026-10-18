@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="kai">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Kai — AI-native terminal emulator</title>
   <meta name="description" content="Fast, cross-platform terminal with a built-in AI agent, code editor, and file explorer. Open source, BYOK, zero telemetry." />
-  <meta name="theme-color" content="#09090b" />
+  <meta name="theme-color" content="#ffffff" />
 
   <!-- Open Graph / Twitter -->
   <meta property="og:title" content="Kai — Minimal, private AI-native terminal emulator" />
@@ -22,250 +22,286 @@
 
   <link rel="icon" type="image/png" href="logo.png" />
   <link rel="apple-touch-icon" href="logo.png" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
 
   <style>
-    /* ── Theme tokens (default: Kai). JS swaps these on <html>. ── */
+    /* ————————————————————————————————————————
+       kai — monochrome editorial system
+       one ink, one paper, hairline rules, tabular grids
+       ———————————————————————————————————————— */
+
     :root {
-      --bg: #09090b;
-      --bg-card: #111113;
-      --bg-subtle: #19191c;
-      --border: rgba(255,255,255,0.08);
-      --border-strong: rgba(255,255,255,0.14);
-      --text: #ececf0;
-      --text-muted: #8a8a98;
-      --accent: #d4a43c;
-      --accent-ink: #09090b;
-      --accent-glow: rgba(212,164,60,0.14);
-      --green: #4ade80;
-      --red: #f87171;
-      --purple: #c4b5fd;
-      --rose: #fb7185;
-      --cyan: #22d3ee;
-      --amber: #facc15;
-      --shadow: 0 16px 48px rgba(0,0,0,0.45);
-      --font-sans: 'Instrument Sans', system-ui, -apple-system, sans-serif;
-      --font-mono: 'JetBrains Mono', ui-monospace, monospace;
-      --max-w: 1080px;
-      --ease: cubic-bezier(0.16, 1, 0.3, 1);
+      color-scheme: light dark;
+      /* Palette: ink / paper / steps between. No hue anywhere. */
+      --ink:       #111111;
+      --ink-2:     #333333;
+      --ink-3:     #666666;
+      --ink-4:     #999999;
+      --paper:     #ffffff;
+      --paper-2:   #f4f4f2;   /* slight warm cast, avoids clinical white */
+      --paper-3:   #ececea;
+      --rule:      #d9d9d6;
+      --rule-dark: #111111;
+      --sel:       #111111;   /* selection = inverted */
+      --sel-text:  #ffffff;
+      --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, "Times New Roman", serif;
+      --sans:  "Helvetica Neue", Helvetica, Inter, "Segoe UI", Arial, sans-serif;
+      --mono:  ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+      --max: 1060px;
     }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-mode="light"]) {
+        --ink:      #e8e8e6;
+        --ink-2:    #c8c8c6;
+        --ink-3:    #909090;
+        --ink-4:    #6a6a6a;
+        --paper:    #101010;
+        --paper-2:  #171717;
+        --paper-3:  #202020;
+        --rule:     #333333;
+        --rule-dark:#e8e8e6;
+        --sel:      #e8e8e6;
+        --sel-text: #101010;
+      }
+    }
+    html[data-mode="dark"] {
+      color-scheme: dark;
+      --ink:      #e8e8e6;
+      --ink-2:    #c8c8c6;
+      --ink-3:    #909090;
+      --ink-4:    #6a6a6a;
+      --paper:    #101010;
+      --paper-2:  #171717;
+      --paper-3:  #202020;
+      --rule:     #333333;
+      --rule-dark:#e8e8e6;
+      --sel:      #e8e8e6;
+      --sel-text: #101010;
+    }
+    html[data-mode="light"] { color-scheme: light; }
 
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-    html { scroll-behavior: smooth; -webkit-font-smoothing: antialiased; scroll-padding-top: 72px; }
+    ::selection { background: var(--sel); color: var(--sel-text); }
+    html { scroll-behavior: smooth; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
     body {
-      font-family: var(--font-sans);
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.6;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: var(--sans);
+      font-size: 16px;
+      line-height: 1.55;
       overflow-x: hidden;
-      transition: background 0.4s var(--ease), color 0.4s var(--ease);
     }
-    a { color: var(--accent); text-decoration: none; }
-    a:hover { text-decoration: underline; }
+    a { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+    a:hover { text-decoration-thickness: 2px; }
     img { display: block; max-width: 100%; height: auto; }
     picture { display: block; }
-
-    :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+    code { font-family: var(--mono); font-size: 0.85em; }
+    :focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
 
     .skip {
       position: absolute; left: -9999px; top: 0; z-index: 200;
-      background: var(--accent); color: var(--accent-ink);
-      padding: 10px 16px; border-radius: 0 0 8px 0; font-weight: 600;
+      background: var(--ink); color: var(--paper);
+      font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase;
+      padding: 10px 16px; border: 1px solid var(--rule-dark);
     }
     .skip:focus { left: 0; }
 
-    /* ── Grain ── */
-    body::after {
-      content: ''; position: fixed; inset: 0; pointer-events: none;
-      opacity: 0.025; z-index: 9999;
-      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-    }
+    .wrap { max-width: var(--max); margin: 0 auto; padding: 0 clamp(20px, 4vw, 48px); }
 
-    .container { max-width: var(--max-w); margin: 0 auto; padding: 0 24px; }
-    section { padding: 96px 0; }
-    .center { text-align: center; }
+    /* ————— top rule ————— */
+    .topbar { border-bottom: 1px solid var(--rule); font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
+    .topbar .wrap { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding-top: 10px; padding-bottom: 10px; }
+    .topbar a { color: var(--ink-2); text-decoration: none; }
+    .topbar a:hover { color: var(--ink); text-decoration: underline; }
+    .topbar .brand { color: var(--ink); font-weight: 700; }
+    .topbar-links { display: flex; gap: 14px; }
 
-    /* ── Nav ── */
-    nav {
-      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-      background: var(--bg); /* fallback where color-mix is unsupported */
-      background: color-mix(in srgb, var(--bg) 82%, transparent);
-      backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-      border-bottom: 1px solid var(--border);
+    /* ————— masthead ————— */
+    .masthead { border-bottom: 3px solid var(--rule-dark); }
+    .masthead .wrap { padding-top: clamp(56px, 10vh, 110px); padding-bottom: clamp(36px, 6vh, 64px); }
+    .masthead h1 {
+      font-family: var(--mono);
+      font-size: clamp(2.6rem, 8vw, 5.2rem);
+      line-height: 1;
+      font-weight: 700;
+      letter-spacing: -0.04em;
+      margin: 0 0 20px;
     }
-    nav .container { display: flex; align-items: center; justify-content: space-between; height: 56px; }
-    .nav-brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; color: var(--text); }
-    .nav-brand img { width: 34px; height: 34px; border-radius: 8px; }
-    .nav-links { display: flex; gap: 26px; align-items: center; }
-    .nav-links a { font-size: 13px; font-weight: 500; color: var(--text-muted); transition: color 0.2s; }
-    .nav-links a:hover { color: var(--text); text-decoration: none; }
-    .btn-nav {
-      background: var(--accent); color: var(--accent-ink) !important;
-      padding: 7px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; transition: opacity 0.2s;
+    .masthead h1 .cursor { color: var(--ink-4); font-weight: 400; }
+    .masthead .dek {
+      font-family: var(--serif);
+      font-size: clamp(1.15rem, 2.4vw, 1.45rem);
+      line-height: 1.4;
+      max-width: 44ch;
+      margin: 0 0 32px;
+      color: var(--ink-2);
     }
-    .btn-nav:hover { opacity: 0.85; text-decoration: none; }
+    .masthead .dek strong { color: var(--ink); font-weight: 600; }
 
-    /* ── Buttons ── */
-    .btn-primary {
-      background: var(--accent); color: var(--accent-ink);
-      padding: 13px 26px; border-radius: 10px; font-size: 15px; font-weight: 600;
+    .mast-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 40px; }
+    .btn-primary, .btn-secondary {
       display: inline-flex; align-items: center; gap: 8px;
-      transition: transform 0.2s var(--ease), box-shadow 0.2s;
-      border: none; cursor: pointer;
+      font-family: var(--mono); font-size: 0.72rem; font-weight: 700;
+      letter-spacing: 0.12em; text-transform: uppercase;
+      padding: 12px 22px; cursor: pointer; text-decoration: none;
     }
-    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 10px 28px var(--accent-glow); text-decoration: none; }
-    .btn-secondary {
-      background: var(--bg-subtle); color: var(--text);
-      padding: 13px 26px; border-radius: 10px; font-size: 15px; font-weight: 500;
-      border: 1px solid var(--border); display: inline-flex; align-items: center; gap: 8px;
-      transition: border-color 0.2s;
-    }
-    .btn-secondary:hover { border-color: var(--accent); text-decoration: none; }
+    .btn-primary { background: var(--ink); color: var(--paper); border: 1px solid var(--ink); }
+    .btn-primary:hover { background: var(--paper); color: var(--ink); text-decoration: none; }
+    .btn-secondary { background: transparent; color: var(--ink); border: 1px solid var(--ink-3); }
+    .btn-secondary:hover { border-color: var(--ink); text-decoration: none; }
 
-    /* ── Hero ── */
-    .hero { padding-top: 150px; padding-bottom: 60px; text-align: center; position: relative; }
-    .hero::before {
-      content: ''; position: absolute; top: 40px; left: 50%; transform: translateX(-50%);
-      width: 640px; height: 640px; pointer-events: none;
-      background: radial-gradient(circle, var(--accent-glow) 0%, transparent 68%);
+    /* Spec strip: each spec is one unbreakable "LABEL value" pair on a
+       baseline; pairs wrap as whole units. */
+    .specs {
+      display: flex;
+      flex-wrap: wrap;
+      align-content: flex-start;
+      border-top: 1px solid var(--rule);
+      font-family: var(--mono);
+      margin: 0;
     }
-    .eyebrow {
-      display: inline-flex; align-items: center; gap: 8px;
-      font-size: 12px; font-weight: 600; letter-spacing: 0.02em;
-      color: var(--text-muted); background: var(--bg-card);
-      border: 1px solid var(--border); border-radius: 999px;
-      padding: 6px 14px; margin-bottom: 22px; position: relative;
+    .specs > div {
+      display: flex;
+      align-items: baseline;
+      gap: 9px;
+      padding: 13px 28px 13px 0;
+      margin-right: 28px;
+      border-bottom: 1px solid var(--rule);
+      border-right: 1px solid var(--rule);
+      white-space: nowrap;
     }
-    .eyebrow b { color: var(--text); font-weight: 600; }
-    .hero h1 {
-      font-size: clamp(40px, 6vw, 72px); font-weight: 700; letter-spacing: -0.03em;
-      line-height: 1.08; margin-bottom: 20px; position: relative;
+    .specs > div:last-child { border-right: 0; margin-right: 0; padding-right: 0; }
+    .specs dt {
+      font-size: 0.64rem;
+      font-weight: 700;
+      letter-spacing: 0.13em;
+      text-transform: uppercase;
+      color: var(--ink-4);
     }
-    .hero h1 span { color: var(--accent); }
-    .hero .sub { font-size: 18px; color: var(--text-muted); max-width: 560px; margin: 0 auto 34px; line-height: 1.7; position: relative; }
-    .hero-actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; position: relative; }
+    .specs dd { margin: 0; font-size: 0.88rem; font-weight: 600; color: var(--ink); }
 
-    .hero-badges {
-      display: flex; gap: 22px; justify-content: center; margin-top: 30px;
-      color: var(--text-muted); font-size: 13px; font-weight: 500; flex-wrap: wrap;
+    /* ————— sections ————— */
+    section { border-bottom: 1px solid var(--rule); }
+    section .wrap { padding-top: clamp(44px, 7vw, 76px); padding-bottom: clamp(44px, 7vw, 76px); }
+    .kicker {
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      margin: 0 0 8px;
+      color: var(--ink);
     }
-    .hero-badges span { display: flex; align-items: center; gap: 7px; }
-    .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
-    .dot-green { background: var(--green); }
-    .dot-amber { background: var(--amber); }
-    .dot-purple { background: var(--purple); }
+    .kicker::before { content: "§ "; color: var(--ink-4); }
+    h2 {
+      font-family: var(--serif);
+      font-size: clamp(1.7rem, 3.4vw, 2.3rem);
+      font-weight: 500;
+      letter-spacing: -0.01em;
+      line-height: 1.15;
+      margin: 0 0 14px;
+    }
+    .lead { font-size: 1.02rem; max-width: 68ch; color: var(--ink-2); margin: 0 0 32px; }
 
-    /* ── Terminal mock / animation ── */
+    .sec-head { display: flex; align-items: baseline; justify-content: space-between; gap: 24px; margin-bottom: 14px; }
+    .sec-head h2 { margin: 0; }
+    .sec-no { font-family: var(--mono); font-size: 0.75rem; color: var(--ink-4); white-space: nowrap; }
+
+    /* ————— component table (not cards) ————— */
+    table.blocks { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+    table.blocks td, table.blocks th { text-align: left; vertical-align: top; padding: 18px 20px 18px 0; border-bottom: 1px solid var(--rule); }
+    table.blocks th {
+      font-family: var(--mono); font-weight: 700; font-size: 0.66rem;
+      letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-4);
+      padding-top: 0;
+    }
+    table.blocks td:first-child { font-family: var(--mono); font-size: 0.8rem; font-weight: 700; white-space: nowrap; color: var(--ink); padding-right: 32px; }
+    table.blocks td { color: var(--ink-2); }
+    table.blocks td b { color: var(--ink); font-weight: 600; }
+    @media (max-width: 720px) {
+      table.blocks, table.blocks tbody, table.blocks tr, table.blocks td, table.blocks th { display: block; width: 100%; }
+      table.blocks th { display: none; }
+      table.blocks td:first-child { padding: 16px 0 4px; }
+    }
+
+    /* ————— screenshots ————— */
+    .shots .wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .shots img { width: 100%; border: 1px solid var(--rule); }
+    /* Uniform frame: crop every image in this section to the same box so the pair aligns. */
+    .shots.uniform img { aspect-ratio: 16 / 10; object-fit: cover; object-position: left top; }
+    .shot-wide img { width: 100%; border: 1px solid var(--rule); }
+
+    /* ————— terminal mock / animation ————— */
     .term {
-      background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px;
-      overflow: hidden; max-width: 680px; margin: 52px auto 0; box-shadow: var(--shadow);
+      background: var(--paper-2); border: 1px solid var(--rule-dark);
+      overflow: hidden; max-width: 680px; margin: 44px 0 0;
       text-align: left; position: relative;
-      transition: background 0.4s var(--ease), border-color 0.4s var(--ease);
     }
     .term-bar {
-      display: flex; align-items: center; gap: 7px; padding: 12px 16px;
-      background: var(--bg-subtle); border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 7px; padding: 10px 14px;
+      background: var(--paper-3); border-bottom: 1px solid var(--rule);
+      font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3);
     }
-    .term-dot { width: 11px; height: 11px; border-radius: 50%; }
-    .term-title { margin-left: 10px; font-family: var(--font-mono); font-size: 11.5px; color: var(--text-muted); }
+    .term-dot { width: 9px; height: 9px; border-radius: 50%; border: 1px solid var(--ink-3); background: transparent; }
+    .term-title { margin-left: 10px; }
     .term-body {
-      padding: 20px 22px; font-family: var(--font-mono); font-size: 13px; line-height: 1.75;
-      min-height: 268px; color: var(--text-muted);
+      padding: 18px 20px; font-family: var(--mono); font-size: 13px; line-height: 1.75;
+      min-height: 268px; color: var(--ink-3);
     }
     .t-line { white-space: pre-wrap; word-break: break-word; }
-    .t-prompt { color: var(--green); }
-    .t-cmd { color: var(--text); }
-    .t-out { color: var(--text-muted); }
-    .t-accent { color: var(--accent); }
-    .t-ok { color: var(--green); }
+    .t-prompt { color: var(--ink); }
+    .t-cmd { color: var(--ink-2); }
+    .t-out { color: var(--ink-3); }
+    .t-ok { color: var(--ink); }
     .caret {
       display: inline-block; width: 7px; height: 15px; vertical-align: -2px;
-      background: var(--text); animation: blink 1.1s steps(1) infinite;
+      background: var(--ink); animation: blink 1.1s steps(1) infinite;
     }
     @keyframes blink { 50% { opacity: 0; } }
     .t-tool {
       opacity: 0; transform: translateY(4px);
-      transition: opacity 0.35s var(--ease), transform 0.35s var(--ease);
+      transition: opacity 0.35s var(--ease, ease), transform 0.35s var(--ease, ease);
     }
     .t-tool.in { opacity: 1; transform: none; }
     .t-row { display: flex; align-items: center; gap: 9px; }
     .t-chip {
-      flex: none; width: 20px; height: 20px; border-radius: 6px; display: grid; place-items: center;
-      font-size: 11px; background: var(--bg-subtle); border: 1px solid var(--border);
+      flex: none; width: 20px; height: 20px; display: grid; place-items: center;
+      font-size: 11px; background: var(--paper); border: 1px solid var(--rule); color: var(--ink-2);
     }
-    .t-name { color: var(--text); }
-    .t-arg { color: var(--text-muted); }
-    .t-diff { margin: 2px 0 6px 29px; border-left: 2px solid var(--border); padding-left: 12px; font-size: 12.5px; }
-    .t-add { color: var(--green); }
-    .t-del { color: var(--red); }
+    .t-name { color: var(--ink); }
+    .t-arg { color: var(--ink-3); }
+    .t-diff { margin: 2px 0 6px 29px; border-left: 2px solid var(--rule-dark); padding-left: 12px; font-size: 12.5px; }
+    .t-add { color: var(--ink); }
+    .t-del { color: var(--ink-3); }
     .thinking-dots::after { content: '…'; animation: dots 1.2s steps(4) infinite; }
     @keyframes dots { 0% { content: ''; } 25% { content: '.'; } 50% { content: '..'; } 75% { content: '…'; } }
 
-    /* ── Theme switcher ── */
-    .themebar { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 22px; flex-wrap: wrap; position: relative; }
-    .themebar span { font-size: 12px; color: var(--text-muted); font-weight: 500; }
-    .swatches { display: flex; gap: 8px; }
-    .swatch {
-      width: 22px; height: 22px; border-radius: 50%; cursor: pointer; border: 2px solid transparent;
-      box-shadow: inset 0 0 0 1px rgba(0,0,0,0.25); transition: transform 0.15s var(--ease), border-color 0.15s;
-      padding: 0; background: var(--bg-subtle);
+    /* ————— mode switcher (paper / ink) ————— */
+    .modebar { display: flex; align-items: center; gap: 10px; margin-top: 18px; flex-wrap: wrap; }
+    .modebar > span { font-family: var(--mono); font-size: 0.62rem; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-4); }
+    .modebtn {
+      font-family: var(--mono); font-size: 0.62rem; font-weight: 700;
+      letter-spacing: 0.14em; text-transform: uppercase;
+      background: var(--paper); color: var(--ink-2);
+      border: 1px solid var(--rule-dark); padding: 7px 14px; cursor: pointer;
     }
-    .swatch:hover { transform: scale(1.14); }
-    .swatch[aria-pressed="true"] { border-color: var(--text); transform: scale(1.14); }
+    .modebtn:hover { background: var(--paper-2); }
+    .modebtn[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
 
-    /* ── Screenshots ── */
-    .shots { padding: 12px 0 58px; }
-    .shots .container { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-    .shots img { width: 100%; border-radius: 12px; border: 1px solid var(--border); box-shadow: var(--shadow); }
-    .shot-wide { padding: 0 0 58px; }
-    .shot-wide img { width: 100%; border-radius: 14px; border: 1px solid var(--border); box-shadow: var(--shadow); }
-
-    /* ── Section headers ── */
-    .section-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--accent); margin-bottom: 12px; }
-    .section-title { font-size: clamp(27px, 4vw, 40px); font-weight: 700; letter-spacing: -0.02em; margin-bottom: 16px; }
-    .section-desc { font-size: 16px; color: var(--text-muted); max-width: 620px; margin-bottom: 46px; }
-    .center .section-desc { margin-left: auto; margin-right: auto; }
-
-    /* ── Feature cards ── */
-    .features-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
-    .feature-card {
-      background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; padding: 26px;
-      transition: border-color 0.25s, transform 0.25s var(--ease), background 0.4s var(--ease);
-    }
-    .feature-card:hover { border-color: var(--border-strong); transform: translateY(-2px); }
-    .feature-icon {
-      width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center;
-      margin-bottom: 15px; background: var(--bg-subtle); border: 1px solid var(--border);
-    }
-    .feature-icon svg { width: 19px; height: 19px; stroke: var(--accent); stroke-width: 1.9; fill: none; stroke-linecap: round; stroke-linejoin: round; }
-    .feature-card h3 { font-size: 15.5px; font-weight: 600; margin-bottom: 7px; }
-    .feature-card p { font-size: 13.5px; color: var(--text-muted); line-height: 1.65; }
-
-    /* ── Keycaps ── */
-    .keys { display: flex; flex-wrap: wrap; gap: 14px 18px; justify-content: center; margin-top: 6px; }
-    .key-row { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text-muted); }
+    /* ————— keycaps ————— */
+    .keys { display: flex; flex-wrap: wrap; gap: 14px 22px; margin-top: 6px; }
+    .key-row { display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 0.78rem; color: var(--ink-2); }
     .key {
-      font-family: var(--font-mono); font-size: 12px; font-weight: 500; color: var(--text);
-      background: var(--bg-subtle); border: 1px solid var(--border-strong);
-      border-radius: 7px; padding: 5px 10px; box-shadow: 0 2px 0 var(--border-strong);
-      min-width: 30px; text-align: center;
+      font-family: var(--mono); font-size: 0.75rem; font-weight: 600; color: var(--ink);
+      background: var(--paper); border: 1px solid var(--rule-dark);
+      padding: 5px 10px; min-width: 30px; text-align: center;
     }
 
-    /* ── Stats ── */
-    .stats {
-      display: flex; gap: 44px; justify-content: center; flex-wrap: wrap;
-      padding: 56px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
-    }
-    .stat { text-align: center; }
-    .stat-value { font-family: var(--font-mono); font-size: 30px; font-weight: 600; color: var(--text); }
-    .stat-label { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+    /* ————— stats strip ————— */
+    .stats dd { font-size: 1.5rem; letter-spacing: -0.02em; }
 
-    /* ── Providers marquee ── */
-    .providers { text-align: center; }
+    /* ————— providers marquee ————— */
     .marquee {
-      overflow: hidden; margin-top: 34px; position: relative;
+      overflow: hidden; margin-top: 8px; position: relative;
       mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
       -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
     }
@@ -273,59 +309,74 @@
     .marquee:hover .marquee-track { animation-play-state: paused; }
     @keyframes scroll { to { transform: translateX(-50%); } }
     .chip {
-      background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px;
-      padding: 10px 18px; font-size: 13px; font-weight: 500; color: var(--text-muted); white-space: nowrap;
+      background: var(--paper); border: 1px solid var(--rule);
+      font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase;
+      padding: 9px 16px; color: var(--ink-2); white-space: nowrap;
       transition: border-color 0.2s, color 0.2s;
     }
-    .chip:hover { border-color: var(--accent); color: var(--text); }
+    .chip:hover { border-color: var(--ink); color: var(--ink); }
 
-    /* ── Install ── */
-    .os-tabs { display: flex; gap: 8px; justify-content: center; margin-bottom: 26px; flex-wrap: wrap; }
-    .os-tab {
-      font-size: 13px; font-weight: 600; color: var(--text-muted); cursor: pointer;
-      background: var(--bg-card); border: 1px solid var(--border); border-radius: 9px; padding: 9px 20px;
-      transition: color 0.2s, border-color 0.2s, background 0.2s;
+    /* ————— note callouts ————— */
+    .note {
+      border-left: 3px solid var(--rule-dark);
+      padding: 4px 0 4px 22px;
+      margin: 28px 0 0;
+      max-width: 72ch;
     }
-    .os-tab:hover { color: var(--text); }
-    .os-tab[aria-selected="true"] { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); }
-    .os-panel { display: none; max-width: 620px; margin: 0 auto; }
+    .note p { margin: 0; font-size: 0.95rem; color: var(--ink-2); }
+    .note b { color: var(--ink); }
+
+    /* ————— install ————— */
+    .os-tabs { display: flex; flex-wrap: wrap; width: max-content; max-width: 100%; border: 1px solid var(--rule-dark); }
+    .os-tab {
+      border: 0; border-right: 1px solid var(--rule-dark);
+      background: var(--paper); color: var(--ink-2);
+      font-family: var(--mono); font-size: 0.7rem; font-weight: 700;
+      letter-spacing: 0.1em; text-transform: uppercase;
+      padding: 12px 20px; cursor: pointer;
+    }
+    .os-tab:last-child { border-right: 0; }
+    .os-tab:hover { background: var(--paper-2); }
+    .os-tab[aria-selected="true"] { background: var(--ink); color: var(--paper); }
+    .os-panel { display: none; max-width: 620px; }
     .os-panel.active { display: block; }
     .os-card {
-      background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; padding: 26px;
-      text-align: left;
+      background: var(--paper-2); border: 1px solid var(--rule-dark); border-top: 0;
+      padding: 24px 26px; text-align: left;
     }
-    .os-card h4 { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
-    .os-card p { font-size: 14px; color: var(--text-muted); margin-bottom: 18px; }
-    .os-meta { display: flex; gap: 18px; flex-wrap: wrap; font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); margin-top: 16px; }
-    .os-meta b { color: var(--text); font-weight: 500; }
+    .os-card h4 {
+      font-family: var(--mono); font-size: 0.72rem; font-weight: 700;
+      letter-spacing: 0.14em; text-transform: uppercase; margin: 0 0 8px; color: var(--ink);
+    }
+    .os-card p { font-size: 0.95rem; color: var(--ink-2); margin: 0 0 18px; max-width: 60ch; }
+    .os-meta {
+      display: flex; gap: 18px; flex-wrap: wrap;
+      font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase;
+      color: var(--ink-3); margin-top: 20px;
+    }
+    .os-meta b { color: var(--ink); font-weight: 600; }
 
-    /* ── CTA ── */
-    .cta { text-align: center; padding-top: 0; }
-    .cta h2 { font-size: clamp(28px, 4vw, 40px); font-weight: 700; letter-spacing: -0.02em; margin-bottom: 16px; }
-    .cta p { color: var(--text-muted); font-size: 16px; margin-bottom: 30px; }
+    /* ————— footer / colophon ————— */
+    footer { background: var(--ink); color: var(--paper); border-bottom: 0; }
+    footer .wrap { padding-top: 40px; padding-bottom: 40px; display: flex; flex-wrap: wrap; gap: 32px; justify-content: space-between; align-items: baseline; }
+    footer .fn { font-family: var(--serif); font-size: 1.3rem; }
+    footer p { margin: 0; font-family: var(--mono); font-size: 0.72rem; line-height: 1.8; color: #a0a09e; max-width: 46ch; }
+    footer a { color: var(--paper); }
+    @media (prefers-color-scheme: dark) { footer p { color: #909090; } }
 
-    /* ── Footer ── */
-    footer { border-top: 1px solid var(--border); padding: 34px 0; text-align: center; font-size: 13px; color: var(--text-muted); }
-    footer a { color: var(--text-muted); }
-    footer a:hover { color: var(--text); }
-    .foot-links { display: flex; gap: 20px; justify-content: center; margin-top: 12px; flex-wrap: wrap; }
-
-    /* ── Responsive ── */
+    /* ————— responsive ————— */
     @media (max-width: 800px) {
-      .features-grid { grid-template-columns: 1fr 1fr; }
+      .shots .wrap { grid-template-columns: 1fr; }
     }
     @media (max-width: 720px) {
-      section { padding: 64px 0; }
-      .hero { padding-top: 118px; }
-      .features-grid { grid-template-columns: 1fr; }
-      .shots .container { grid-template-columns: 1fr; }
-      .stats { gap: 28px; }
-      .nav-links a:not(.btn-nav) { display: none; }
+      section .wrap { padding-top: 48px; padding-bottom: 48px; }
+      .topbar-links { display: none; }
       .term-body { font-size: 12px; min-height: 240px; }
+      .stats dd { font-size: 1.15rem; }
     }
 
-    /* ── Motion ── */
-    .fade-in { opacity: 0; transform: translateY(20px); transition: opacity 0.6s var(--ease), transform 0.6s var(--ease); }
+    /* ————— motion ————— */
+    .fade-in { opacity: 0; transform: translateY(20px); transition: opacity 0.6s var(--ease, ease), transform 0.6s var(--ease, ease); }
     .fade-in.visible { opacity: 1; transform: none; }
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
@@ -337,306 +388,279 @@
 <body>
   <a class="skip" href="#features">Skip to content</a>
 
-  <!-- Nav -->
-  <nav>
-    <div class="container">
-      <a href="#" class="nav-brand"><img src="logo.png" alt="Kai" width="34" height="34" />Kai</a>
-      <div class="nav-links">
+  <!-- Top rule -->
+  <div class="topbar">
+    <div class="wrap">
+      <span class="brand"><a href="#">kai / terminal</a></span>
+      <span class="topbar-links">
         <a href="#features">Features</a>
         <a href="#providers">Providers</a>
         <a href="#install">Install</a>
         <a href="https://github.com/Omodaka9375/kai">GitHub</a>
-        <a href="https://github.com/Omodaka9375/kai/releases/latest" class="btn-nav">Download</a>
-      </div>
+      </span>
+      <span><span id="heroVersion">v1.6.5</span> · <b id="heroStars">★ open source</b></span>
     </div>
-  </nav>
+  </div>
 
-  <!-- Hero -->
-  <header class="hero">
-    <div class="container">
-      <div class="eyebrow"><span id="heroVersion">v1.6.5</span> · <b id="heroStars">★ open source</b></div>
-      <h1>Minimal, private<br /><span>AI terminal emulator</span></h1>
-      <p class="sub">A fast, cross-platform terminal with an AI agent that actually reads, edits, and runs your code — in the same window.</p>
-      <div class="hero-actions">
+  <!-- Masthead -->
+  <header class="masthead">
+    <div class="wrap">
+      <h1>kai<span class="cursor">_</span></h1>
+      <p class="dek">
+        A <strong>minimal, private</strong> AI-native terminal emulator. A fast, cross-platform
+        terminal with an agent that actually <strong>reads, edits, and runs</strong> your code —
+        in the same window.
+      </p>
+      <div class="mast-actions">
         <a href="https://github.com/Omodaka9375/kai/releases/latest" class="btn-primary">↓ Download Kai</a>
         <a href="https://github.com/Omodaka9375/kai" class="btn-secondary">View on GitHub</a>
       </div>
-      <div class="hero-badges">
-        <span><span class="dot dot-green"></span> Zero telemetry</span>
-        <span><span class="dot dot-amber"></span> BYOK, 12 providers</span>
-        <span><span class="dot dot-purple"></span> macOS · Linux · Windows</span>
-      </div>
+      <dl class="specs">
+        <div><dt>Platforms</dt><dd>macOS · Linux · Windows</dd></div>
+        <div><dt>AI providers</dt><dd>12, BYOK</dd></div>
+        <div><dt>Telemetry</dt><dd>0</dd></div>
+        <div><dt>License</dt><dd>Apache-2.0</dd></div>
+      </dl>
 
       <!-- Animated agent session -->
       <div class="term" role="img" aria-label="Kai AI agent fixing a failing test in the terminal">
         <div class="term-bar">
-          <span class="term-dot" style="background:#ff5f57"></span>
-          <span class="term-dot" style="background:#febc2e"></span>
-          <span class="term-dot" style="background:#28c840"></span>
+          <span class="term-dot"></span>
+          <span class="term-dot"></span>
+          <span class="term-dot"></span>
           <span class="term-title">~/project — kai</span>
         </div>
         <div class="term-body" id="termBody"></div>
       </div>
 
-      <!-- Theme switcher -->
-      <div class="themebar">
-        <span>UI theme</span>
-        <div class="swatches" id="swatches" role="group" aria-label="Preview UI themes"></div>
+      <!-- Mode switcher -->
+      <div class="modebar">
+        <span>Mode</span>
+        <button class="modebtn" type="button" data-mode="light" aria-pressed="false">Paper</button>
+        <button class="modebtn" type="button" data-mode="dark" aria-pressed="false">Ink</button>
       </div>
     </div>
   </header>
 
-  <!-- Screenshots -->
-  <section class="shots">
-    <div class="container">
-      <picture class="fade-in">
-        <source srcset="terminal.webp" type="image/webp" />
-        <img src="terminal.png" alt="Kai terminal with an AI agent session" width="1907" height="1200" loading="lazy" decoding="async" />
-      </picture>
-      <picture class="fade-in">
-        <source srcset="editor.webp" type="image/webp" />
-        <img src="editor.png" alt="Kai's CodeMirror code editor open beside the terminal" width="1920" height="1042" loading="lazy" decoding="async" />
-      </picture>
-    </div>
-  </section>
+  <main>
 
-  <!-- Features -->
-  <section id="features">
-    <div class="container">
-      <div class="section-label">Features</div>
-      <h2 class="section-title">Everything in one window.</h2>
-      <p class="section-desc">No browser tabs, no context switching. Terminal, editor, AI, and dev tools — unified.</p>
-      <div class="features-grid">
-        <div class="feature-card fade-in">
-          <div class="feature-icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><polyline points="7 9 10 12 7 15"/><line x1="12" y1="15" x2="16" y2="15"/></svg></div>
-          <h3>Terminal</h3>
-          <p>xterm.js with WebGL rendering. Multi-tab, split panes, and shell integration for bash, zsh, PowerShell, and cmd.</p>
+    <!-- Screenshots -->
+    <section class="shots uniform">
+      <div class="wrap">
+        <picture class="fade-in">
+          <source srcset="terminal.webp" type="image/webp" />
+          <img src="terminal.png" alt="Kai terminal with an AI agent session" width="1907" height="1200" loading="lazy" decoding="async" />
+        </picture>
+        <picture class="fade-in">
+          <source srcset="editor.webp" type="image/webp" />
+          <img src="editor.png" alt="Kai's CodeMirror code editor open beside the terminal" width="1920" height="1042" loading="lazy" decoding="async" />
+        </picture>
+      </div>
+    </section>
+
+    <!-- Features -->
+    <section id="features">
+      <div class="wrap">
+        <div class="sec-head">
+          <p class="kicker">Scope</p>
+          <span class="sec-no">01 / 05</span>
         </div>
-        <div class="feature-card fade-in">
-          <div class="feature-icon"><svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></div>
-          <h3>Code Editor</h3>
-          <p>CodeMirror 6 with 44 languages, find &amp; replace, Vim mode, and 9 color themes.</p>
+        <h2>Everything in one window</h2>
+        <p class="lead">
+          No browser tabs, no context switching. Terminal, editor, AI, and dev tools — unified.
+        </p>
+        <table class="blocks">
+          <thead><tr><th>Component</th><th>Covers</th></tr></thead>
+          <tbody>
+            <tr><td>terminal</td><td><b>xterm.js with WebGL rendering.</b> Multi-tab, split panes, and shell integration for bash, zsh, PowerShell, and cmd.</td></tr>
+            <tr><td>editor</td><td><b>CodeMirror 6.</b> 44 languages, find &amp; replace, Vim mode, and 9 color themes.</td></tr>
+            <tr><td>ai agent</td><td><b>Reads, writes, and runs code.</b> Edit-diff approval flow, auto-approve modes, context summarization, and local voice dictation.</td></tr>
+            <tr><td>mcp</td><td><b>External tool servers</b> via the Model Context Protocol. Browse and install from the official registry.</td></tr>
+            <tr><td>media gen</td><td><b>Image &amp; video generation.</b> GPT Image 2, Nano Banana 2, Grok Imagine, ComfyUI; Kling 3.0, Veo 3.1, Seedance 2.0 — from chat, with inline preview.</td></tr>
+            <tr><td>explorer</td><td><b>File tree.</b> Catppuccin icon theme, fuzzy search, inline rename, multi-select batch actions, drag-to-terminal, image &amp; PDF preview.</td></tr>
+            <tr><td>preview</td><td><b>Web preview.</b> A built-in browser for local dev servers — live-reload previews right next to your terminal, no alt-tabbing.</td></tr>
+            <tr><td>api tester</td><td><b>REST client.</b> Method selector, headers, body editor, and JSON pretty-print — test endpoints without leaving the terminal.</td></tr>
+            <tr><td>git</td><td><b>Stage, commit, push, review diffs</b> from the sidebar — with optional GPG signing for GitHub's Verified badge.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Keyboard -->
+    <section id="keys">
+      <div class="wrap">
+        <div class="sec-head">
+          <p class="kicker">Keyboard</p>
+          <span class="sec-no">02 / 05</span>
         </div>
-        <div class="feature-card fade-in">
-          <div class="feature-icon"><svg viewBox="0 0 24 24"><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><circle cx="12" cy="12" r="4"/></svg></div>
-          <h3>AI Agent</h3>
-          <p>Reads, writes, and runs code with an edit-diff approval flow, auto-approve modes, context summarization, and local voice dictation.</p>
+        <h2>Built by people who live in a shell.</h2>
+        <div class="keys">
+          <div class="key-row"><span class="key">⌘I</span> Toggle AI</div>
+          <div class="key-row"><span class="key">⌘T</span> New terminal</div>
+          <div class="key-row"><span class="key">⌘D</span> Split pane</div>
+          <div class="key-row"><span class="key">⌘⇧F</span> Search files</div>
+          <div class="key-row"><span class="key">⌘B</span> Explorer</div>
+          <div class="key-row"><span class="key">⌘,</span> Settings</div>
         </div>
-        <div class="feature-card fade-in">
-          <div class="feature-icon"><svg viewBox="0 0 24 24"><path d="M9 3H5a2 2 0 0 0-2 2v4M15 3h4a2 2 0 0 1 2 2v4M9 21H5a2 2 0 0 1-2-2v-4M15 21h4a2 2 0 0 0 2-2v-4"/></svg></div>
-          <h3>MCP Support</h3>
-          <p>Connect external tool servers via the Model Context Protocol. Browse and install from the official registry.</p>
+        <p class="lead" style="margin: 22px 0 0; font-size: 0.85rem;">Use <b style="color:var(--ink)">Ctrl</b> on Windows &amp; Linux.</p>
+      </div>
+    </section>
+
+    <!-- Wide showcase -->
+    <section class="shot-wide">
+      <div class="wrap">
+        <picture class="fade-in">
+          <source srcset="split-panes.webp" type="image/webp" />
+          <img src="split-panes.png" alt="Kai with multiple split terminal panes and the AI agent running" width="3164" height="2062" loading="lazy" decoding="async" />
+        </picture>
+      </div>
+    </section>
+
+    <!-- Screenshots 2 -->
+    <section class="shots">
+      <div class="wrap">
+        <picture class="fade-in">
+          <source srcset="ai-workflow.webp" type="image/webp" />
+          <img src="ai-workflow.png" alt="The Kai AI agent proposing an edit diff for approval" width="1920" height="1042" loading="lazy" decoding="async" />
+        </picture>
+        <picture class="fade-in">
+          <source srcset="web-preview.webp" type="image/webp" />
+          <img src="web-preview.png" alt="Kai showing a live web preview beside the terminal" width="1919" height="1042" loading="lazy" decoding="async" />
+        </picture>
+      </div>
+    </section>
+
+    <!-- Stats -->
+    <section class="stats-sec">
+      <div class="wrap">
+        <dl class="specs stats">
+          <div><dt>Installer</dt><dd>&lt;10 MB</dd></div>
+          <div><dt>Languages</dt><dd>44</dd></div>
+          <div><dt>AI providers</dt><dd>12</dd></div>
+          <div><dt>Themes</dt><dd>9</dd></div>
+          <div><dt>Telemetry</dt><dd>0</dd></div>
+        </dl>
+      </div>
+    </section>
+
+    <!-- Providers -->
+    <section id="providers">
+      <div class="wrap">
+        <div class="sec-head">
+          <p class="kicker">Providers</p>
+          <span class="sec-no">03 / 05</span>
         </div>
-        <div class="feature-card fade-in">
-          <div class="feature-icon"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg></div>
-          <h3>Image &amp; Video Gen</h3>
-          <p>Generate images (GPT Image 2, Nano Banana 2, Grok Imagine, ComfyUI) and videos (Kling 3.0, Veo 3.1, Seedance 2.0) from chat, with inline preview.</p>
+        <h2>Works with every provider.</h2>
+        <p class="lead">
+          Bring your own key. Cloud APIs, local models, or your own endpoint. No lock-in.
+        </p>
+      </div>
+      <div class="marquee">
+        <div class="marquee-track" id="marqueeTrack"></div>
+      </div>
+      <div class="wrap">
+        <div class="note"><p><b>Also on board.</b> Image generation (GPT Image 2, Nano Banana 2, Grok Imagine, ComfyUI local) and video generation (Kling 3.0, Veo 3.1, Seedance 2.0) — from chat, with inline preview.</p></div>
+      </div>
+    </section>
+
+    <!-- Install -->
+    <section id="install">
+      <div class="wrap">
+        <div class="sec-head">
+          <p class="kicker">Install</p>
+          <span class="sec-no">04 / 05</span>
         </div>
-        <div class="feature-card fade-in">
-          <div class="feature-icon"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg></div>
-          <h3>File Explorer</h3>
-          <p>Catppuccin icon theme, fuzzy search, inline rename, multi-select batch actions, drag-to-terminal, and image &amp; PDF preview.</p>
+        <h2>Get Kai in seconds.</h2>
+        <p class="lead">
+          Native installers for every desktop OS. No account, no telemetry.
+        </p>
+        <div class="os-tabs" role="tablist" id="osTabs">
+          <button class="os-tab" role="tab" data-os="macos">macOS</button>
+          <button class="os-tab" role="tab" data-os="windows">Windows</button>
+          <button class="os-tab" role="tab" data-os="linux">Linux</button>
         </div>
-        <div class="feature-card fade-in">
-          <div class="feature-icon"><svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="14" rx="2"/><line x1="2" y1="9" x2="22" y2="9"/><line x1="6" y1="6.5" x2="6" y2="6.5"/></svg></div>
-          <h3>Web Preview</h3>
-          <p>A built-in browser for local dev servers — live-reload previews right next to your terminal, no alt-tabbing.</p>
+        <div class="os-panel" data-os="macos">
+          <div class="os-card">
+            <h4>macOS</h4>
+            <p>Apple silicon &amp; Intel. Download the disk image, drag Kai to Applications.</p>
+            <a href="https://github.com/Omodaka9375/kai/releases/latest" class="btn-primary">↓ Download for macOS</a>
+            <div class="os-meta"><span>Format <b>.dmg</b></span><span>Min <b>macOS 10.15</b></span><span>Signed &amp; notarized</span></div>
+          </div>
         </div>
-        <div class="feature-card fade-in">
-          <div class="feature-icon"><svg viewBox="0 0 24 24"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg></div>
-          <h3>API Tester</h3>
-          <p>A REST client with method selector, headers, body editor, and JSON pretty-print — test endpoints without leaving the terminal.</p>
+        <div class="os-panel" data-os="windows">
+          <div class="os-card">
+            <h4>Windows</h4>
+            <p>Self-contained installer (no admin required). WebView2 is bundled for offline setup.</p>
+            <a href="https://github.com/Omodaka9375/kai/releases/latest" class="btn-primary">↓ Download for Windows</a>
+            <div class="os-meta"><span>Format <b>.exe (NSIS)</b></span><span>Per-user, no admin</span><span>WebView2 bundled</span></div>
+          </div>
         </div>
-        <div class="feature-card fade-in">
-          <div class="feature-icon"><svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M8.5 6H15a3 3 0 0 1 3 3v0"/></svg></div>
-          <h3>Git Integration</h3>
-          <p>Stage, commit, push, and review diffs from the sidebar — with optional GPG signing for GitHub's Verified badge.</p>
+        <div class="os-panel" data-os="linux">
+          <div class="os-card">
+            <h4>Linux</h4>
+            <p>AppImage, Debian, and RPM packages. The AppImage bundles its own media framework.</p>
+            <a href="https://github.com/Omodaka9375/kai/releases/latest" class="btn-primary">↓ Download for Linux</a>
+            <div class="os-meta"><span>Formats <b>.AppImage · .deb · .rpm</b></span><span>GTK 3</span><span>WebKitGTK 4.1</span></div>
+          </div>
         </div>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- Keycaps -->
-  <section style="padding-top:0">
-    <div class="container center">
-      <div class="section-label">Keyboard-first</div>
-      <h2 class="section-title">Built by people who live in a shell.</h2>
-      <div class="keys">
-        <div class="key-row"><span class="key">⌘I</span> Toggle AI</div>
-        <div class="key-row"><span class="key">⌘T</span> New terminal</div>
-        <div class="key-row"><span class="key">⌘D</span> Split pane</div>
-        <div class="key-row"><span class="key">⌘⇧F</span> Search files</div>
-        <div class="key-row"><span class="key">⌘B</span> Explorer</div>
-        <div class="key-row"><span class="key">⌘,</span> Settings</div>
-      </div>
-      <p class="section-desc" style="margin:22px auto 0; font-size:13px">Use <b style="color:var(--text)">Ctrl</b> on Windows &amp; Linux.</p>
-    </div>
-  </section>
-
-  <!-- Wide showcase -->
-  <section class="shot-wide" style="padding-top:0">
-    <div class="container">
-      <picture class="fade-in">
-        <source srcset="split-panes.webp" type="image/webp" />
-        <img src="split-panes.png" alt="Kai with multiple split terminal panes and the AI agent running" width="3164" height="2062" loading="lazy" decoding="async" />
-      </picture>
-    </div>
-  </section>
-
-  <!-- Screenshots 2 -->
-  <section class="shots" style="padding-top:0">
-    <div class="container">
-      <picture class="fade-in">
-        <source srcset="ai-workflow.webp" type="image/webp" />
-        <img src="ai-workflow.png" alt="The Kai AI agent proposing an edit diff for approval" width="1920" height="1042" loading="lazy" decoding="async" />
-      </picture>
-      <picture class="fade-in">
-        <source srcset="web-preview.webp" type="image/webp" />
-        <img src="web-preview.png" alt="Kai showing a live web preview beside the terminal" width="1919" height="1042" loading="lazy" decoding="async" />
-      </picture>
-    </div>
-  </section>
-
-  <!-- Stats -->
-  <div class="container">
-    <div class="stats fade-in">
-      <div class="stat"><div class="stat-value">&lt;10 MB</div><div class="stat-label">Installer</div></div>
-      <div class="stat"><div class="stat-value">44</div><div class="stat-label">Languages</div></div>
-      <div class="stat"><div class="stat-value">12</div><div class="stat-label">AI providers</div></div>
-      <div class="stat"><div class="stat-value">9</div><div class="stat-label">Themes</div></div>
-      <div class="stat"><div class="stat-value">0</div><div class="stat-label">Telemetry</div></div>
-    </div>
-  </div>
-
-  <!-- Providers -->
-  <section id="providers" class="providers">
-    <div class="container">
-      <div class="section-label">Bring Your Own Key</div>
-      <h2 class="section-title">Works with every provider.</h2>
-      <p class="section-desc center">Cloud APIs, local models, or your own endpoint. No lock-in.</p>
-    </div>
-    <div class="marquee">
-      <div class="marquee-track" id="marqueeTrack"></div>
-    </div>
-    <div class="container" style="margin-top:30px">
-      <p class="section-desc center" style="margin-bottom:0; font-size:13px">Also: GPT Image 2 · Nano Banana 2 · Grok Imagine · Kling 3.0 · Veo 3.1 · Seedance 2.0 · ComfyUI (local)</p>
-    </div>
-  </section>
-
-  <!-- Install -->
-  <section id="install">
-    <div class="container center">
-      <div class="section-label">Install</div>
-      <h2 class="section-title">Get Kai in seconds.</h2>
-      <p class="section-desc center">Native installers for every desktop OS. No account, no telemetry.</p>
-      <div class="os-tabs" role="tablist" id="osTabs">
-        <button class="os-tab" role="tab" data-os="macos">macOS</button>
-        <button class="os-tab" role="tab" data-os="windows">Windows</button>
-        <button class="os-tab" role="tab" data-os="linux">Linux</button>
-      </div>
-      <div class="os-panel" data-os="macos">
-        <div class="os-card">
-          <h4>macOS</h4>
-          <p>Apple silicon &amp; Intel. Download the disk image, drag Kai to Applications.</p>
-          <a href="https://github.com/Omodaka9375/kai/releases/latest" class="btn-primary">↓ Download for macOS</a>
-          <div class="os-meta"><span>Format <b>.dmg</b></span><span>Min <b>macOS 10.15</b></span><span>Signed &amp; notarized</span></div>
+    <!-- CTA -->
+    <section id="cta">
+      <div class="wrap">
+        <div class="sec-head">
+          <p class="kicker">Start</p>
+          <span class="sec-no">05 / 05</span>
+        </div>
+        <h2>Start building with Kai.</h2>
+        <p class="lead">Free, open source, no account required.</p>
+        <div class="mast-actions" style="margin-bottom: 0;">
+          <a href="https://github.com/Omodaka9375/kai/releases/latest" class="btn-primary">↓ Download for free</a>
+          <a href="https://github.com/Omodaka9375/kai" class="btn-secondary">Star on GitHub</a>
         </div>
       </div>
-      <div class="os-panel" data-os="windows">
-        <div class="os-card">
-          <h4>Windows</h4>
-          <p>Self-contained installer (no admin required). WebView2 is bundled for offline setup.</p>
-          <a href="https://github.com/Omodaka9375/kai/releases/latest" class="btn-primary">↓ Download for Windows</a>
-          <div class="os-meta"><span>Format <b>.exe (NSIS)</b></span><span>Per-user, no admin</span><span>WebView2 bundled</span></div>
-        </div>
-      </div>
-      <div class="os-panel" data-os="linux">
-        <div class="os-card">
-          <h4>Linux</h4>
-          <p>AppImage, Debian, and RPM packages. The AppImage bundles its own media framework.</p>
-          <a href="https://github.com/Omodaka9375/kai/releases/latest" class="btn-primary">↓ Download for Linux</a>
-          <div class="os-meta"><span>Formats <b>.AppImage · .deb · .rpm</b></span><span>GTK 3</span><span>WebKitGTK 4.1</span></div>
-        </div>
-      </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- CTA -->
-  <section class="cta">
-    <div class="container">
-      <h2>Start building with Kai.</h2>
-      <p>Free, open source, no account required.</p>
-      <div class="hero-actions">
-        <a href="https://github.com/Omodaka9375/kai/releases/latest" class="btn-primary">↓ Download for free</a>
-        <a href="https://github.com/Omodaka9375/kai" class="btn-secondary">Star on GitHub</a>
-      </div>
-    </div>
-  </section>
+  </main>
 
   <footer>
-    <div class="container">
-      <p>Kai is open source under <a href="https://github.com/Omodaka9375/kai/blob/main/LICENSE">Apache-2.0</a></p>
-      <div class="foot-links">
-        <a href="https://github.com/Omodaka9375/kai">GitHub</a>
-        <a href="https://github.com/Omodaka9375/kai/releases">Releases</a>
+    <div class="wrap">
+      <div class="fn">kai_</div>
+      <p>
+        Kai is open source under <a href="https://github.com/Omodaka9375/kai/blob/main/LICENSE">Apache-2.0</a>.<br />
+        <a href="https://github.com/Omodaka9375/kai">GitHub</a> ·
+        <a href="https://github.com/Omodaka9375/kai/releases">Releases</a> ·
         <a href="https://github.com/Omodaka9375/kai/issues">Issues</a>
-      </div>
+      </p>
     </div>
   </footer>
 
   <script>
-    /* ─────────────────────────────  Themes  ───────────────────────────── */
-    const THEMES = {
-      kai:         { bg:'#09090b', card:'#111113', subtle:'#19191c', border:'rgba(255,255,255,0.08)', borderStrong:'rgba(255,255,255,0.14)', text:'#ececf0', muted:'#8a8a98', accent:'#d4a43c', ink:'#09090b', glow:'rgba(212,164,60,0.14)', green:'#4ade80', red:'#f87171' },
-      tokyonight:  { bg:'#1a1b26', card:'#1f2233', subtle:'#24283b', border:'rgba(192,202,245,0.10)', borderStrong:'rgba(192,202,245,0.20)', text:'#c0caf5', muted:'#7f87b3', accent:'#7aa2f7', ink:'#16161e', glow:'rgba(122,162,247,0.16)', green:'#9ece6a', red:'#f7768e' },
-      nord:        { bg:'#2e3440', card:'#3b4252', subtle:'#434c5e', border:'rgba(216,222,233,0.10)', borderStrong:'rgba(216,222,233,0.22)', text:'#eceff4', muted:'#9aa5b5', accent:'#88c0d0', ink:'#2e3440', glow:'rgba(136,192,208,0.16)', green:'#a3be8c', red:'#bf616a' },
-      github:      { bg:'#ffffff', card:'#f6f8fa', subtle:'#eaeef2', border:'rgba(31,35,40,0.12)', borderStrong:'rgba(31,35,40,0.22)', text:'#1f2328', muted:'#656d76', accent:'#0969da', ink:'#ffffff', glow:'rgba(9,105,218,0.12)', green:'#1a7f37', red:'#cf222e' },
-      atoone:      { bg:'#282c34', card:'#2f343d', subtle:'#3a3f4b', border:'rgba(171,178,191,0.12)', borderStrong:'rgba(171,178,191,0.24)', text:'#abb2bf', muted:'#828a99', accent:'#61afef', ink:'#282c34', glow:'rgba(97,175,239,0.16)', green:'#98c379', red:'#e06c75' },
-      aura:        { bg:'#15141b', card:'#1b1a23', subtle:'#23222c', border:'rgba(237,236,238,0.09)', borderStrong:'rgba(237,236,238,0.18)', text:'#edecee', muted:'#8f8c9e', accent:'#a277ff', ink:'#15141b', glow:'rgba(162,119,255,0.18)', green:'#61ffca', red:'#ff6767' },
-      copilot:     { bg:'#0d1117', card:'#161b22', subtle:'#21262d', border:'rgba(230,237,243,0.10)', borderStrong:'rgba(230,237,243,0.20)', text:'#e6edf3', muted:'#7d8590', accent:'#2f81f7', ink:'#0d1117', glow:'rgba(47,129,247,0.16)', green:'#3fb950', red:'#f85149' },
-      xcode:       { bg:'#292a30', card:'#33343a', subtle:'#3d3f45', border:'rgba(223,223,224,0.12)', borderStrong:'rgba(223,223,224,0.24)', text:'#dfdfe0', muted:'#9a9ca3', accent:'#4eb0de', ink:'#292a30', glow:'rgba(78,176,222,0.16)', green:'#67c98a', red:'#e06c75' },
-    };
-    const ORDER = ['kai','tokyonight','nord','github','atoone','aura','copilot','xcode'];
+    /* ─────────────────────────────  Mode (paper / ink)  ───────────────── */
     const metaTheme = document.querySelector('meta[name="theme-color"]');
+    const modeButtons = document.querySelectorAll('.modebtn');
+    const darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const initialMode = darkQuery.matches ? 'dark' : 'light';
 
-    function applyTheme(id) {
-      const t = THEMES[id] || THEMES.kai;
-      const r = document.documentElement.style;
-      r.setProperty('--bg', t.bg);
-      r.setProperty('--bg-card', t.card);
-      r.setProperty('--bg-subtle', t.subtle);
-      r.setProperty('--border', t.border);
-      r.setProperty('--border-strong', t.borderStrong);
-      r.setProperty('--text', t.text);
-      r.setProperty('--text-muted', t.muted);
-      r.setProperty('--accent', t.accent);
-      r.setProperty('--accent-ink', t.ink);
-      r.setProperty('--accent-glow', t.glow);
-      r.setProperty('--green', t.green);
-      r.setProperty('--red', t.red);
-      document.documentElement.setAttribute('data-theme', id);
-      if (metaTheme) metaTheme.setAttribute('content', t.bg);
-      for (const b of document.querySelectorAll('.swatch')) {
-        b.setAttribute('aria-pressed', b.dataset.theme === id ? 'true' : 'false');
+    function syncModeButtons(mode) {
+      for (const b of modeButtons) {
+        b.setAttribute('aria-pressed', b.dataset.mode === mode ? 'true' : 'false');
       }
     }
 
-    const swatchWrap = document.getElementById('swatches');
-    if (swatchWrap) {
-      for (const id of ORDER) {
-        const t = THEMES[id];
-        const s = document.createElement('button');
-        s.className = 'swatch';
-        s.dataset.theme = id;
-        s.type = 'button';
-        s.title = id;
-        s.setAttribute('aria-label', 'Preview ' + id + ' theme');
-        s.style.background = 'linear-gradient(135deg, ' + t.accent + ' 0 50%, ' + t.card + ' 50% 100%)';
-        s.addEventListener('click', () => applyTheme(id));
-        swatchWrap.appendChild(s);
-      }
-      applyTheme('kai');
+    function applyMode(mode) {
+      document.documentElement.setAttribute('data-mode', mode);
+      if (metaTheme) metaTheme.setAttribute('content', mode === 'dark' ? '#101010' : '#ffffff');
+      syncModeButtons(mode);
     }
+
+    for (const b of modeButtons) {
+      b.addEventListener('click', () => applyMode(b.dataset.mode));
+    }
+    // Initial state follows the system preference without forcing an override.
+    syncModeButtons(initialMode);
+    if (metaTheme) metaTheme.setAttribute('content', initialMode === 'dark' ? '#101010' : '#ffffff');
 
     /* ───────────────────────────  Providers  ──────────────────────────── */
     const PROVIDERS = ['OpenAI','Anthropic','Google','Groq','xAI','Cerebras','DeepSeek','Mistral','OpenRouter','z.ai','LM Studio','Ollama','Any OpenAI-compatible'];
