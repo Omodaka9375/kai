@@ -4,6 +4,13 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.7.7]
+
+- Assistant: `/start` binding is now reliable end to end — the bot hands event delivery to the main window so closing Settings can't leave the poll loop talking to a dead channel, a stop/start toggle can no longer spawn a zombie loop that skips messages, and tool-step progress no longer floods the chat with one message per tool call.
+- Assistant: added IPC contract tests pinning the Telegram command argument shapes, so a keychain or event-channel argument regression fails in CI instead of after a release build.
+
+---
+
 ## [1.7.6]
 
 - Assistant: Telegram enable now actually starts the bot (the first enable didn't persist the flag before starting, so the poll loop never ran and /start never bound an owner); the bot's event channel follows the latest window that started it, and the Owner row updates live in Settings → External.
