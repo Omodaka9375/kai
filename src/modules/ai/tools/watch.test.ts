@@ -77,6 +77,47 @@ describe("evaluateCondition", () => {
   });
 });
 
+describe("evaluateConditionChecked", () => {
+  const result = {
+    exit_code: 0,
+    stdout: "MERGED into main",
+    stderr: "",
+    timed_out: false,
+  };
+
+  it("reports ok for a valid expression (match and no-match)", () => {
+    expect(watchModule.evaluateConditionChecked("exit_code === 0", result)).toEqual({
+      ok: true,
+      value: true,
+    });
+    expect(watchModule.evaluateConditionChecked("exit_code === 1", result)).toEqual({
+      ok: true,
+      value: false,
+    });
+  });
+
+  it("reports ok:true with value:true when no condition is given", () => {
+    expect(watchModule.evaluateConditionChecked(undefined, result)).toEqual({
+      ok: true,
+      value: true,
+    });
+  });
+
+  it("reports ok:false for a typo'd identifier (the never-fires trap)", () => {
+    // A typo like `resuls` throws a ReferenceError on EVERY poll — the watch
+    // could never fire, yet the old code treated it as a normal no-match.
+    expect(watchModule.evaluateConditionChecked("resuls.exit_code === 0", result)).toMatchObject({
+      ok: false,
+    });
+  });
+
+  it("reports ok:false for a syntax error", () => {
+    expect(watchModule.evaluateConditionChecked("syntax ((( error", result)).toMatchObject({
+      ok: false,
+    });
+  });
+});
+
 describe("circuit breaker threshold", () => {
   it("trips after 10 consecutive failures", () => {
     expect(watchModule.WATCH_MAX_CONSECUTIVE_FAILURES).toBe(10);

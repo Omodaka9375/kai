@@ -24,6 +24,7 @@ KAI loads `KAI.md` from the workspace root as agent memory (similar to AGENTS.md
 - `shell::shell_run_command` — **one-shot** subshell exec used by AI tools. Distinct from PTY sessions; not the user's interactive terminal. On Windows it shells out via PowerShell (`-NoProfile -Command`); on Unix via `$SHELL -lc`. Shared helper `build_oneshot_command`.
 - `shell::shell_session_*` — persistent agent shell with state across calls.
 - `shell::shell_bg_*` — long-running background processes (dev servers etc.) with bounded ring-buffer log capture.
+- `modules::heartbeat` — 1s Rust-side tick thread feeding the watch scheduler via a Tauri Channel (immune to WebView2 hidden-page timer throttling); drops dead channels individually.
 - `secrets::secrets_*` — OS keychain via the `keyring` crate. Service constant `kai`. Linux uses a file-based fallback gated behind `#[cfg(target_os = "linux")]`.
 - `git::*` — git operations for the source-control panel and git-history views (own process runner with availability caching, WSL-aware).
 - `net::ai_http_request` / `net::ai_http_stream` — SSRF-hardened HTTP proxy for AI tools and cloud provider calls. Blocks loopback/private/metadata IPs (DNS-pinned via `resolve_to_addrs`, redirect policy re-checks every hop) unless the caller passes `allowPrivateNetwork: true` (reserved for user-configured local endpoints like LM Studio — never for model-callable browse tools).

@@ -370,9 +370,18 @@ function queueWatchWake(sessionId: string): void {
 export function flushPendingWatchWakes(sessionId: string): void {
   if (!pendingWatchWakes.delete(sessionId)) return;
   const chat = chats.get(sessionId);
-  if (!chat || hasPendingApprovals(chat)) return;
-  if (chat.status === "streaming" || chat.status === "submitted") {
-    // Still busy — re-queue and wait for the next idle transition.
+  if (!chat) return;
+  if (
+    chat.status === "streaming" ||
+    chat.status === "submitted" ||
+    hasPendingApprovals(chat)
+  ) {
+    // Still busy OR paused on an approval card — re-queue and wait for the
+    // next settle. (The approvals path used to DROP the wake: a watch that
+    // fired while the user was deciding sat unanswered until the next user
+    // turn. Re-queueing keeps it one transition away from delivery; when the
+    // approval resolves, the continuation's history snapshot already
+    // includes the watch message, so at worst the wake is redundant.)
     pendingWatchWakes.add(sessionId);
     return;
   }

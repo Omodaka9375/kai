@@ -195,58 +195,156 @@ export function watchCount(): number {
 
 // ── Polling ────────────────────────────────────────────────────────────────
 
+/** Count one poll failure and trip the breaker when exhausted. Shared by the
+ *  outer catch and the shell-reopen retry paths so failure accounting is
+ *  identical everywhere. */
+function countPollFailure(w: WatchState, msg: string): void {
+  w.lastError = msg;
+  w.consecutiveFailures++;
+  // Circuit breaker: N consecutive failures means the watch is dead (shell
+  // session gone, sandbox distro removed, ...). Self-report ONCE into the
+  // chat so the model (and user) see why it stopped, then stop the watch —
+  // previously this looped silently forever.
+  if (w.consecutiveFailures >= WATCH_MAX_CONSECUTIVE_FAILURES) {
+    injectWatchFailure(w);
+    stopWatch(w.id);
+  } else {
+    console.warn(
+      `[kai] watch ${w.id} poll failed (${w.consecutiveFailures}/${WATCH_MAX_CONSECUTIVE_FAILURES}, command: ${w.command}):`,
+      msg,
+    );
+  }
+}
+
+/** Classify a poll result and fire/record accordingly. Shared by the normal
+ *  poll path and the catch-path shell-reopen retry. Also resets the breaker
+ *  counters on any successful run (shell-level success, regardless of exit
+ *  code — the condition decides firing, not the exit code). */
+function handlePollResult(
+  w: WatchState,
+  result: { exit_code: number | null; stdout: string; stderr: string; timed_out: boolean },
+): void {
+  const fingerprint = `${result.exit_code}:${result.stdout}:${result.stderr}`;
+
+  if (w.mode === "fire_on_match") {
+    const check = evaluateConditionChecked(w.condition, result);
+    if (!check.ok) {
+      // The condition expression itself is broken — the watch can never
+      // fire. Count it like a poll failure so the circuit breaker stops
+      // and self-reports it instead of polling silently forever.
+      w.lastError = `Condition expression failed to evaluate: ${w.condition}`;
+      w.consecutiveFailures++;
+      if (w.consecutiveFailures >= WATCH_MAX_CONSECUTIVE_FAILURES) {
+        injectWatchFailure(w);
+        stopWatch(w.id);
+      } else {
+        console.warn(
+          `[kai] watch ${w.id} condition failed to evaluate (${w.consecutiveFailures}/${WATCH_MAX_CONSECUTIVE_FAILURES}, condition: ${w.condition})`,
+        );
+      }
+      return;
+    }
+    w.consecutiveFailures = 0;
+    w.lastError = null;
+    if (check.value) {
+      injectWatchResult(w, result);
+      // Don't stop — the watch keeps running for subsequent matches.
+    }
+  } else {
+    // Change detection mode (no condition to evaluate).
+    w.consecutiveFailures = 0;
+    w.lastError = null;
+    if (!w.hasBaseline) {
+      // First poll — establish baseline, don't fire.
+      w.lastResult = fingerprint;
+      w.hasBaseline = true;
+      return;
+    }
+    if (fingerprint !== w.lastResult) {
+      w.lastResult = fingerprint;
+      injectWatchResult(w, result);
+    }
+  }
+}
+
 async function poll(w: WatchState): Promise<void> {
   if (!w.active || w.inFlight) return;
   w.inFlight = true;
   w.polls++;
   try {
-    const result = await native.shellSessionRun(
+    let result = await native.shellSessionRun(
       w.shellId,
       w.command,
       w.cwd,
       pollTimeoutSecsFor(w.intervalSecs),
       await sandboxExecRoot(),
     );
-    w.consecutiveFailures = 0;
-    w.lastError = null;
 
-    const fingerprint = `${result.exit_code}:${result.stdout}:${result.stderr}`;
-
-    if (w.mode === "fire_on_match") {
-      if (evaluateCondition(w.condition, result)) {
-        injectWatchResult(w, result);
-        // Don't stop — the watch keeps running for subsequent matches.
-      }
-    } else {
-      // Change detection mode.
-      if (!w.hasBaseline) {
-        // First poll — establish baseline, don't fire.
-        w.lastResult = fingerprint;
-        w.hasBaseline = true;
-        return;
-      }
-      if (fingerprint !== w.lastResult) {
-        w.lastResult = fingerprint;
-        injectWatchResult(w, result);
+    // Self-heal: the cached shell session can die while the chat session
+    // stays alive (shell subsystem restart, PTY reap). One failure then
+    // re-opens a fresh shell and retries the SAME poll once before any
+    // breaker counting — instead of failing for 10 intervals and tripping
+    // the breaker on something a fresh shell fixes.
+    if (result.exit_code === null && !result.timed_out && isDeadShellError(result.stderr)) {
+      const fresh = await reopenShell(w.sessionId);
+      if (fresh != null) {
+        w.shellId = fresh;
+        try {
+          result = await native.shellSessionRun(
+            w.shellId,
+            w.command,
+            w.cwd,
+            pollTimeoutSecsFor(w.intervalSecs),
+            await sandboxExecRoot(),
+          );
+        } catch (retryErr) {
+          // Retry also failed — count it like any other poll failure (do NOT
+          // run handlePollResult on the dead result: a condition like
+          // `exit_code !== 0` would match null and report a bogus firing).
+          countPollFailure(
+            w,
+            retryErr instanceof Error ? retryErr.message : String(retryErr),
+          );
+          return;
+        }
       }
     }
+    handlePollResult(w, result);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    w.lastError = msg;
-    w.consecutiveFailures++;
-    // Circuit breaker: N consecutive failures means the watch is dead (shell
-    // session gone, sandbox distro removed, ...). Self-report ONCE into the
-    // chat so the model (and user) see why it stopped, then stop the watch —
-    // previously this looped silently forever.
-    if (w.consecutiveFailures >= WATCH_MAX_CONSECUTIVE_FAILURES) {
-      injectWatchFailure(w);
-      stopWatch(w.id);
-    } else {
-      console.warn(
-        `[kai] watch ${w.id} poll failed (${w.consecutiveFailures}/${WATCH_MAX_CONSECUTIVE_FAILURES}, command: ${w.command}):`,
-        msg,
-      );
+    // Self-heal FIRST: a thrown "session not found / closed / exited" error
+    // usually means the cached shell id went stale, not that the watch is
+    // beyond saving. Re-open once and retry the same poll; only count a
+    // breaker failure when the retry also fails.
+    if (isDeadShellError(msg)) {
+      const fresh = await reopenShell(w.sessionId);
+      if (fresh != null) {
+        w.shellId = fresh;
+        try {
+          const result = await native.shellSessionRun(
+            w.shellId,
+            w.command,
+            w.cwd,
+            pollTimeoutSecsFor(w.intervalSecs),
+            await sandboxExecRoot(),
+          );
+          // Retry succeeded — treat this poll as clean (reset counters,
+          // run the normal match/change logic once, no breaker count).
+          w.consecutiveFailures = 0;
+          w.lastError = null;
+          handlePollResult(w, result);
+          return;
+        } catch (retryErr) {
+          // Retry also failed — count it like any other poll failure.
+          countPollFailure(
+            w,
+            retryErr instanceof Error ? retryErr.message : String(retryErr),
+          );
+          return;
+        }
+      }
     }
+    countPollFailure(w, msg);
   } finally {
     w.inFlight = false;
   }
@@ -259,7 +357,21 @@ export function evaluateCondition(
   condition: string | undefined,
   result: { exit_code: number | null; stdout: string; stderr: string; timed_out: boolean },
 ): boolean {
-  if (!condition) return true; // No condition = always fire.
+  return evaluateConditionChecked(condition, result).value;
+}
+
+/**
+ * Evaluate the condition and REPORT whether the expression itself is broken.
+ * A typo'd condition (`resuls.exit_code`) used to throw, log a debug line,
+ * and return false forever — the watch polled forever, never fired, and
+ * never self-reported ("never fired and nobody knew"). The caller feeds
+ * `ok: false` into the same circuit breaker that catches dead shells.
+ */
+export function evaluateConditionChecked(
+  condition: string | undefined,
+  result: { exit_code: number | null; stdout: string; stderr: string; timed_out: boolean },
+): { ok: boolean; value: boolean } {
+  if (!condition) return { ok: true, value: true }; // No condition = always fire.
 
   try {
     // eslint-disable-next-line @typescript-eslint/no-implied-eval
@@ -270,10 +382,12 @@ export function evaluateCondition(
       "timed_out",
       `return Boolean(${condition})`,
     );
-    return fn(result.exit_code, result.stdout, result.stderr, result.timed_out);
+    return {
+      ok: true,
+      value: Boolean(fn(result.exit_code, result.stdout, result.stderr, result.timed_out)),
+    };
   } catch {
-    console.debug(`[kai] watch condition eval failed: ${condition}`);
-    return false;
+    return { ok: false, value: false };
   }
 }
 
@@ -462,7 +576,7 @@ export function buildWatchTools(ctx: ToolContext) {
   } as const;
 }
 
-// ── Shell session reuse ───────────────────────────────────────────────────
+// ── Shell session reuse + self-healing ────────────────────────────────────
 
 const sessionShellIds = new Map<string, number>();
 
@@ -472,6 +586,52 @@ async function getOrCreateShell(ctx: ToolContext, sessionId: string): Promise<nu
   const id = await native.shellSessionOpen(ctx.getCwd());
   sessionShellIds.set(sessionId, id);
   return id;
+}
+
+/**
+ * Open a replacement shell after the cached one died. A shell session can
+ * vanish out from under a watch while the session itself stays open (shell
+ * subsystem restart, PTY/SendTo reap, crash recovery). The watch would then
+ * fail every poll for up to 10 intervals before the breaker declared it
+ * dead — even though a fresh shell makes it work again. Self-heal instead:
+ * on the first failure we drop the cache and re-open on the next poll.
+ */
+async function reopenShell(sessionId: string): Promise<number | null> {
+  const old = sessionShellIds.get(sessionId);
+  if (old != null) {
+    // Best-effort close of the husk; ignore errors (it may already be gone).
+    void native.shellSessionClose(old).catch(() => {});
+    sessionShellIds.delete(sessionId);
+  }
+  try {
+    const id = await native.shellSessionOpen(null);
+    sessionShellIds.set(sessionId, id);
+    return id;
+  } catch (e) {
+    console.warn(`[kai] watch shell reopen failed for session ${sessionId}:`, e);
+    return null;
+  }
+}
+
+/** Is this poll failure the kind a fresh shell can fix? */
+function isDeadShellError(msg: string): boolean {
+  const m = msg.toLowerCase();
+  return (
+    m.includes("no such session") ||
+    m.includes("invalid session") ||
+    m.includes("unknown session") ||
+    m.includes("session not found") ||
+    m.includes("not found") ||
+    m.includes("dead") ||
+    m.includes("closed") ||
+    m.includes("process exited") ||
+    m.includes("pty closed") ||
+    m.includes("no process") ||
+    m.includes("child process") ||
+    m.includes("spawn") ||
+    m.includes("pty") ||
+    m.includes("shell")
+  );
 }
 
 /** Close and release session shell (called on session close). */
