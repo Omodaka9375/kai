@@ -306,7 +306,7 @@ export async function setTelegramToken(token: string): Promise<void> {
   await invoke<void>("secrets_set", {
     service: KEYRING_SERVICE,
     account: TELEGRAM_TOKEN_KEY,
-    value: token,
+    password: token,
   });
 }
 
