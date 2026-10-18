@@ -101,6 +101,12 @@ export function useWhisperRecording({
   const apiKey = useChatStore((s) => s.apiKeys.openai);
   const sttMode = usePreferencesStore((s) => s.voiceSttMode);
   const endMode = usePreferencesStore((s) => s.voiceSttEndMode);
+  // Ref-mirror: startWhisper/startLocalWhisper are memoized callbacks whose
+  // dep arrays don't include the detector builders — a closure over `endMode`
+  // there would go stale after a settings change and silently disable the
+  // detector. Reading through a ref keeps every closure current.
+  const endModeRef = useRef(endMode);
+  endModeRef.current = endMode;
   const [state, setState] = useState<State>("idle");
   const [error, setError] = useState<string | null>(null);
   const recRef = useRef<MediaRecorder | null>(null);
@@ -136,7 +142,7 @@ export function useWhisperRecording({
 
   /** Build a fresh detector armed to stop this recording. */
   const makeDetector = useCallback(() => {
-    if (endMode !== "auto") return null;
+    if (endModeRef.current !== "auto") return null;
     const d = new SilenceDetector({
       onSpeechEnd: () => {
         // Fire on a microtask so a throwing stop() can't break the audio thread.
@@ -149,7 +155,7 @@ export function useWhisperRecording({
     });
     detectorRef.current = d;
     return d;
-  }, [endMode]);
+  }, []);
 
   /** Shared PCM level tap builder: feeds the detector from any route's
    *  audio graph. Returns a cleanup that tears the tap down. */
