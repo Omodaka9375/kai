@@ -362,7 +362,20 @@ export function useSourceControl(
         if (requestId !== requestIdRef.current) return;
         setState((current) => ({
           ...current,
-          repo,
+          repo: {
+            ...repo,
+            // `status` is authoritative for identity fields — `repo` is loaded
+            // once and cached per root (reusableRoot path), so its `branch`/
+            // `upstream`/`isDetached` can be one switch behind after a branch
+            // switch. Deriving them from the fresh status snapshot prevents
+            // the header pill (which renders `repo.branch` downstream) from
+            // showing the OLD branch for the gap between this status landing
+            // and the next full snapshot. Null status (snapshot path) keeps
+            // the repo's own values.
+            branch: status?.branch ?? repo.branch,
+            upstream: status?.upstream ?? repo.upstream,
+            isDetached: status?.isDetached ?? repo.isDetached,
+          },
           status,
           hasRepo: true,
           isLoading: false,

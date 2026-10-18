@@ -98,7 +98,10 @@ type SourceControlPanelState = {
   cancelDropStash: () => void;
   pendingDropStash: GitStashEntry | null;
   setCommitMessage: (value: string) => void;
-  refresh: () => Promise<void>;
+  /** Re-read repo status. `mutation: true` skips the forced network fetch —
+   *  a local mutation (branch switch, commit, stage) only needs the fresh
+   *  LOCAL snapshot, and skipping fetch is what keeps the switch instant. */
+  refresh: (options?: { mutation?: boolean }) => Promise<void>;
   /** Contextual pull with footer feedback (commit count / up-to-date). */
   pull: () => Promise<void>;
   selectEntry: (entry: SourceControlEntry) => Promise<void>;
@@ -578,13 +581,20 @@ export function useSourceControlPanel(
     [onOpenDiff],
   );
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (options?: { mutation?: boolean }) => {
     if (!isOpen) {
       setPanelState("closed");
       setSelectionTransition("none");
       return;
     }
     if (summary.repo) invalidateRepoDiffs(summary.repo.repoRoot);
+    if (options?.mutation) {
+      // Local-only fast path: a branch switch (or any local mutation) needs
+      // the fresh LOCAL snapshot, not a forced remote fetch — the network
+      // round-trip here was a large part of the post-switch lag.
+      await summary.refresh({ remote: "never", mutation: true });
+      return;
+    }
     await summary.fetchNow();
   }, [isOpen, summary]);
 

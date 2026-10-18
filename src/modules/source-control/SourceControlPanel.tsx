@@ -587,7 +587,7 @@ export const SourceControlPanel = memo(function SourceControlPanel({
                 repoRoot={scm.status.repoRoot}
                 currentBranch={scm.status.branch}
                 isDetached={scm.status.isDetached}
-                onChanged={() => scm.refresh()}
+                onChanged={() => scm.refresh({ mutation: true })}
               />
             ) : (
               <div className="inline-flex min-w-0 items-center gap-1.5 rounded-md bg-foreground/5 px-2 py-1 text-[11.5px] font-medium leading-none text-foreground">

@@ -89,12 +89,16 @@ export function BranchSwitcher({
     async (name: string) => {
       setBusy(`switch:${name}`);
       setError(null);
+      // Close the popover IMMEDIATELY — the click should feel instant and the
+      // header pill is the progress indicator (it flips when the refresh
+      // lands). On failure we re-open with the error, so nothing is lost.
+      setOpen(false);
       try {
         await native.gitSwitchBranch(repoRoot, name);
-        setOpen(false);
         await onChanged();
       } catch (e) {
         setError(String(e instanceof Error ? e.message : e));
+        setOpen(true);
         void load();
       } finally {
         setBusy(null);
