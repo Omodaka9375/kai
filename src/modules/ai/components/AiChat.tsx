@@ -68,7 +68,7 @@ function ForkButton({ messageIndex }: { messageIndex: number }) {
       type="button"
       onClick={onClick}
       disabled={forking}
-      title="Fork conversation from here"
+      title="Continue in a new chat from here — same project files, fresh thread (for isolated FILES, use Shadow mode in the session menu)"
       className="shrink-0 size-6 flex items-center justify-center rounded-md border border-border/40 bg-background/50 text-muted-foreground opacity-0 group-hover/msg:opacity-100 transition-all hover:bg-accent hover:text-foreground shadow-sm"
     >
       <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round">

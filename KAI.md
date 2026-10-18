@@ -79,6 +79,13 @@ Each module is self-contained, exports a thin barrel via `index.ts`, and owns it
 - **updater/** — auto-updater UI built on `tauri-plugin-updater`.
 - **ai/** — see below.
 
+### Shadow mode — vocabulary contract
+
+Two isolation axes compose, but the UI names them so they never collide:
+
+- **Shadow mode** (files, sandbox L3 `shadow.rs` + `lib/shadow.ts`): edits go to an isolated copy at `~/.kai/shadow/<hash>/`; tools redirect via `withShadowRedirect`. Strip buttons are **Apply** (copy changes back into the real project) and **Discard** (delete the copy). NEVER call the strip's action "Merge" — that word belongs to the session menu's merge-into-another-chat. Entry: "Shadow mode" in the session dropdown (`ShadowSessionMenuItem` → `startShadowMode`), which creates the copy AND forks the conversation in one action — users learn one concept.
+- **Fork / Merge session** (conversation, `chatStore.forkSession`/`mergeSession`): message history only, same project files. Fork = branch the thread from a message; Merge = append one transcript into another (divider-marked). Per-message fork button tooltip spells out the distinction ("same project files… for isolated FILES use Shadow mode").
+
 ### AI subsystem (`src/modules/ai/`)
 
 BYOK. Multi-provider via `@ai-sdk/*`: **OpenAI, Anthropic, Google, Groq, xAI, Cerebras, DeepSeek, Mistral, OpenRouter, z.ai, OpenAI-compatible, LM Studio** (last two for local/offline; DeepSeek/Mistral/OpenRouter/z.ai ride the openai-compatible client with fixed base URLs). Provider list in `config/providers.ts` (`PROVIDERS`, 12 entries; barrel `config/index.ts` re-exports providers/models/runtime/prompt); model registry in `config/models.ts` includes `DEFAULT_MODEL_ID` + `DEFAULT_AUTOCOMPLETE_MODEL`. The OpenRouter model list auto-syncs at runtime. The OpenRouter model list auto-syncs at runtime.

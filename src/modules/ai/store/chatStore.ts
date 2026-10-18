@@ -34,6 +34,7 @@ import { cancelAllShellSessions } from "../tools/shell";
 import { clearFenceState, summarizeMessagesNow } from "../lib/transport";
 import { reapSessionWatches, closeWatchSessionShell } from "../tools/watch";
 import { agentBus } from "../lib/eventBus";
+import { createShadow, getShadow } from "../lib/shadow";
 import {
   disposeSessionToolContext,
   getSessionToolContext,
@@ -309,6 +310,15 @@ type StoreState = {
   injectMessage: (id: string, text: string) => Promise<void>;
   /** Fork the current session at a message index, creating a new branch. */
   forkSession: (atMessageIndex: number) => Promise<string | null>;
+  /**
+   * Shadow mode — one user-facing action that starts BOTH isolation axes:
+   * a detached copy of the project files (L3 shadow) and a fork of the
+   * conversation. The agent then edits the copy while the user watches from
+   * the forked thread; Apply/Discard in the strip resolves both. Returns the
+   * new session id, or null when there is no active session / the copy
+   * failed / a shadow is already active for this project.
+   */
+  startShadowMode: () => Promise<string | null>;
   /** Merge a session's messages into another (append source onto target), then
    *  remove the source. Returns true on success. */
   mergeSession: (sourceId: string, targetId: string) => Promise<boolean>;
@@ -1136,6 +1146,47 @@ export const useChatStore = create<StoreState>((set, get) => ({
       return newId;
     } catch (err) {
       console.error("[forkSession] failed:", err);
+      return null;
+    }
+  },
+
+  startShadowMode: async () => {
+    const activeId = get().activeSessionId;
+    const root = get().live?.getWorkspaceRoot?.() ?? null;
+    if (!activeId || !root) return null;
+    // One shadow per project (Rust invariant) — don't double-start.
+    if (getShadow(root)) return null;
+    try {
+      // Files first: if the copy fails, the conversation was never forked and
+      // the user sees one actionable error instead of a half-applied mode.
+      await createShadow(root);
+      // Conversation: fork the FULL history (the user keeps watching the same
+      // thread; the original session stays untouched as the "before" record).
+      const live = chats.get(activeId)?.messages;
+      const source =
+        live && live.length > 0
+          ? live
+          : await loadMessages(activeId).then((m) => m ?? []);
+      const messages = stripIncompleteToolMessages(source);
+      const newId = newSessionId();
+      await saveMessages(newId, messages);
+      const meta: SessionMeta = {
+        id: newId,
+        title: "Shadow mode",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        parentId: activeId,
+        forkMessageIndex: Math.max(0, messages.length - 1),
+        workspaceRoot: root,
+      };
+      const next = [meta, ...get().sessions];
+      set({ sessions: next, activeSessionId: newId, agentMeta: IDLE_META });
+      seedMessages.set(newId, messages);
+      void saveSessionsList(next);
+      void saveActiveId(newId);
+      return newId;
+    } catch (err) {
+      console.error("[startShadowMode] failed:", err);
       return null;
     }
   },
