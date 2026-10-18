@@ -22,6 +22,7 @@ import {
   SparklesIcon,
   TerminalIcon,
   ToolsIcon,
+  VideoIcon,
 } from "@hugeicons/core-free-icons";
 import { useChatStore } from "@/modules/ai/store/chatStore";
 import { unfenceDeep } from "@/modules/ai/lib/fence";
@@ -50,6 +51,8 @@ const TOOL_META: Record<string, { label: string; icon: typeof File01Icon }> = {
   suggest_command: { label: "Suggest", icon: SparklesIcon },
   open_preview: { label: "Preview", icon: EyeIcon },
   run_subagent: { label: "Subagent", icon: RobotIcon },
+  display_image: { label: "Display img", icon: EyeIcon },
+  display_video: { label: "Display vid", icon: VideoIcon },
   todo_write: { label: "Todos", icon: CheckListIcon },
 };
 
@@ -471,6 +474,35 @@ function renderToolOutput(toolName: string, output: unknown): ReactNode | null {
         <span className="text-foreground">displayed in terminal</span>
         {size != null ? (
           <span className="text-muted-foreground">({formatBytes(size)})</span>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (toolName === "display_video") {
+    // Success: { ok, displayed_in, label, source }; ffmpeg-missing: { ok:false, note }.
+    if (typeof o.error === "string") {
+      return (
+        <div className="font-mono text-[11px] text-destructive">{o.error}</div>
+      );
+    }
+    const label = typeof o.label === "string" ? o.label : null;
+    const source = typeof o.source === "string" ? o.source : null;
+    const note = typeof o.note === "string" ? o.note : null;
+    if (note) {
+      return (
+        <div className="font-mono text-[11px] text-amber-600 dark:text-amber-400">
+          {note}
+        </div>
+      );
+    }
+    return (
+      <div className="flex items-center gap-1.5 font-mono text-[11px]">
+        <span className="text-emerald-600 dark:text-emerald-400">✓</span>
+        <span className="text-foreground">video poster in terminal</span>
+        {label ? <span className="text-muted-foreground">· {label}</span> : null}
+        {source ? (
+          <span className="truncate text-muted-foreground">({source})</span>
         ) : null}
       </div>
     );

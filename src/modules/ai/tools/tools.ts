@@ -12,6 +12,7 @@ import { buildYouTubeTools } from "./youtube";
 import { buildMemoryTools } from "./memory";
 import { buildBatchEditTools } from "./batchEdit";
 import { buildTerminalImageTools } from "./terminalImage";
+import { buildTerminalVideoTools } from "./terminalVideo";
 import { buildWatchTools } from "./watch";
 import { buildScreenTools } from "./screen";
 import { buildMcpTools } from "./mcpTools";
@@ -29,6 +30,7 @@ export function buildCoreTools(ctx: import("./context").ToolContext) {
     ...buildMemoryTools(ctx),
     ...buildBatchEditTools(ctx),
     ...buildTerminalImageTools(ctx),
+    ...buildTerminalVideoTools(ctx),
     ...buildWatchTools(ctx),
     ...buildScreenTools(ctx),
     ...buildMcpTools(ctx),
