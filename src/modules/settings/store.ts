@@ -114,6 +114,11 @@ export type Preferences = {
   voiceSttModel: string;
   /** API STT model id. */
   voiceSttApiModel: string;
+  /** How a voice recording ends: "manual" (click to stop — turn-based) or
+   *  "auto" (silence detection ends it after speech, one click total).
+   *  Browser STT route has no audio access — auto only applies to the
+   *  local and API routes. */
+  voiceSttEndMode: "manual" | "auto";
   /** Text-to-speech mode: "off" | "api" (OpenAI TTS) | "local" (Piper). */
   voiceTtsMode: "off" | "api" | "local";
   /** API TTS voice (alloy/echo/...). */
@@ -171,6 +176,7 @@ const KEY_RADIO_STATION = "radioStationId";
 const KEY_VOICE_STT_MODE = "voiceSttMode";
 const KEY_VOICE_STT_MODEL = "voiceSttModel";
 const KEY_VOICE_STT_API_MODEL = "voiceSttApiModel";
+const KEY_VOICE_STT_END_MODE = "voiceSttEndMode";
 const KEY_VOICE_TTS_MODE = "voiceTtsMode";
 const KEY_VOICE_TTS_API_VOICE = "voiceTtsApiVoice";
 const KEY_VOICE_TTS_API_MODEL = "voiceTtsApiModel";
@@ -245,6 +251,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   voiceSttMode: "api",
   voiceSttModel: "base.en",
   voiceSttApiModel: "whisper-1",
+  voiceSttEndMode: "manual",
   voiceTtsMode: "off",
   voiceTtsApiVoice: "alloy",
   voiceTtsApiModel: "gpt-4o-mini-tts",
@@ -388,6 +395,8 @@ export async function loadPreferences(): Promise<Preferences> {
         get<string>(KEY_VOICE_STT_MODEL) ?? DEFAULT_PREFERENCES.voiceSttModel,
       voiceSttApiModel:
         get<string>(KEY_VOICE_STT_API_MODEL) ?? DEFAULT_PREFERENCES.voiceSttApiModel,
+      voiceSttEndMode:
+        get<string>(KEY_VOICE_STT_END_MODE) === "auto" ? "auto" : "manual",
       voiceTtsMode:
         (get<string>(KEY_VOICE_TTS_MODE) as Preferences["voiceTtsMode"]) ??
         DEFAULT_PREFERENCES.voiceTtsMode,
@@ -464,6 +473,10 @@ export async function setVoiceSttModel(value: string): Promise<void> {
 
 export async function setVoiceSttApiModel(value: string): Promise<void> {
   await writePref(KEY_VOICE_STT_API_MODEL, value ?? "");
+}
+
+export async function setVoiceSttEndMode(value: "manual" | "auto"): Promise<void> {
+  await writePref(KEY_VOICE_STT_END_MODE, value);
 }
 
 export async function setVoiceTtsMode(value: Preferences["voiceTtsMode"]): Promise<void> {
@@ -741,6 +754,7 @@ export async function onPreferencesChange(
     [KEY_VOICE_STT_MODE]: "voiceSttMode",
     [KEY_VOICE_STT_MODEL]: "voiceSttModel",
     [KEY_VOICE_STT_API_MODEL]: "voiceSttApiModel",
+    [KEY_VOICE_STT_END_MODE]: "voiceSttEndMode",
     [KEY_VOICE_TTS_MODE]: "voiceTtsMode",
     [KEY_VOICE_TTS_API_VOICE]: "voiceTtsApiVoice",
     [KEY_VOICE_TTS_API_MODEL]: "voiceTtsApiModel",

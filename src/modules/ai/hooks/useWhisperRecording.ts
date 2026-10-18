@@ -3,6 +3,7 @@ import { experimental_transcribe as transcribe } from "ai";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useChatStore } from "../store/chatStore";
 import { encodeWav, transcribeLocal } from "../lib/voiceTts";
+import { frameRms, SilenceDetector } from "../lib/silence";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 
 const MIME_CANDIDATES = [
@@ -99,6 +100,7 @@ export function useWhisperRecording({
 }) {
   const apiKey = useChatStore((s) => s.apiKeys.openai);
   const sttMode = usePreferencesStore((s) => s.voiceSttMode);
+  const endMode = usePreferencesStore((s) => s.voiceSttEndMode);
   const [state, setState] = useState<State>("idle");
   const [error, setError] = useState<string | null>(null);
   const recRef = useRef<MediaRecorder | null>(null);
@@ -123,6 +125,65 @@ export function useWhisperRecording({
   autoSubmitRef.current = !!autoSubmit;
   const onAutoSubmitRef = useRef(onAutoSubmit);
   onAutoSubmitRef.current = onAutoSubmit;
+  /** Silence auto-end (Voice → "Auto" end mode). Local + API routes feed the
+   *  live mic levels into a SilenceDetector that calls stop() once the user
+   *  appears done speaking. Browser STT has no audio access — no detector. */
+  const detectorRef = useRef<SilenceDetector | null>(null);
+  /** Late-bound stop for the silence detector (stop is defined below). */
+  const stopRef = useRef<(() => void) | null>(null);
+  /** Cleanup for the parallel detector audio tap (API route). */
+  const detachTapRef = useRef<(() => void) | null>(null);
+
+  /** Build a fresh detector armed to stop this recording. */
+  const makeDetector = useCallback(() => {
+    if (endMode !== "auto") return null;
+    const d = new SilenceDetector({
+      onSpeechEnd: () => {
+        // Fire on a microtask so a throwing stop() can't break the audio thread.
+        try {
+          stopRef.current?.();
+        } catch {
+          // ignore — user can still click stop
+        }
+      },
+    });
+    detectorRef.current = d;
+    return d;
+  }, [endMode]);
+
+  /** Shared PCM level tap builder: feeds the detector from any route's
+   *  audio graph. Returns a cleanup that tears the tap down. */
+  const attachDetectorTap = useCallback(
+    (stream: MediaStream) => {
+      const detector = makeDetector();
+      if (!detector) return () => {};
+      const ctx = new AudioContext();
+      const src = ctx.createMediaStreamSource(stream);
+      const proc = ctx.createScriptProcessor(2048, 1, 1);
+      proc.onaudioprocess = (e) => {
+        const frame = e.inputBuffer.getChannelData(0);
+        // ScriptProcessor frames are ~2048 samples at the context rate —
+        // frameMs derived from the actual rate, not hardcoded.
+        detector.feed(frameRms(frame), (frame.length / ctx.sampleRate) * 1000);
+      };
+      const mute = ctx.createGain();
+      mute.gain.value = 0;
+      src.connect(proc);
+      proc.connect(mute);
+      mute.connect(ctx.destination);
+      return () => {
+        try {
+          proc.disconnect();
+          src.disconnect();
+          mute.disconnect();
+          void ctx.close();
+        } catch {
+          // ignore — best effort
+        }
+      };
+    },
+    [makeDetector],
+  );
 
   /** Deliver a final transcript: always populate, then auto-submit if on. */
   const deliver = useCallback((text: string) => {
@@ -164,6 +225,9 @@ export function useWhisperRecording({
   }, []);
 
   const teardownStream = useCallback(() => {
+    detachTapRef.current?.();
+    detachTapRef.current = null;
+    detectorRef.current = null;
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     // Local route teardown: disconnect the tap and close the context.
@@ -180,6 +244,7 @@ export function useWhisperRecording({
   const stop = useCallback(() => {
     startingRef.current = false;
     clearWatchdog();
+    detectorRef.current = null; // fired or manual — detector is done
     const sr = speechRef.current;
     if (sr) {
       // onend/onerror triggers the idle reset + transcript flush.
@@ -204,6 +269,8 @@ export function useWhisperRecording({
       void stopLocalRef.current?.();
     }
   }, [fail]);
+
+  stopRef.current = stop;
 
   const startSpeechApi = useCallback(() => {
     const sr = createSpeechRecognition();
@@ -280,6 +347,9 @@ export function useWhisperRecording({
           "Timed out waiting for microphone access",
         );
         streamRef.current = stream;
+        // API route: parallel muted tap feeds the silence detector.
+        detachTapRef.current?.();
+        detachTapRef.current = attachDetectorTap(stream);
         const mimeType = pickMime();
         const rec = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
         chunksRef.current = [];
@@ -291,6 +361,8 @@ export function useWhisperRecording({
             type: rec.mimeType || "audio/webm",
           });
           chunksRef.current = [];
+          detachTapRef.current?.();
+          detachTapRef.current = null;
           teardownStream();
           if (blob.size === 0) {
             setState("idle");
@@ -355,9 +427,15 @@ export function useWhisperRecording({
       const proc = ctx.createScriptProcessor(4096, 1, 1);
       procRef.current = proc;
       pcmRef.current = [];
+      // Silence auto-end (local route): same PCM tap feeds the detector.
+      const detector = makeDetector();
       proc.onaudioprocess = (e) => {
         // Copy — the buffer is reused by the audio thread.
-        pcmRef.current.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+        const copy = new Float32Array(e.inputBuffer.getChannelData(0));
+        pcmRef.current.push(copy);
+        if (detector) {
+          detector.feed(frameRms(copy), (copy.length / ctx.sampleRate) * 1000);
+        }
       };
       src.connect(proc);
       // ScriptProcessor requires a destination to pump; a muted gain avoids
@@ -456,6 +534,8 @@ export function useWhisperRecording({
   useEffect(() => {
     return () => {
       clearWatchdog();
+      detachTapRef.current?.();
+      detachTapRef.current = null;
       recRef.current?.stop();
       speechRef.current?.stop();
       try {

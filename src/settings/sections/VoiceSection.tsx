@@ -9,6 +9,7 @@ import {
   setVoiceSttMode,
   setVoiceSttModel,
   setVoiceSttApiModel,
+  setVoiceSttEndMode,
   setVoiceTtsMode,
   setVoiceTtsApiVoice,
   setVoiceTtsApiModel,
@@ -268,6 +269,30 @@ export function VoiceSection() {
             onClick={() => setSttMode("browser")}
           />
         </div>
+      </div>
+
+      {/* ── Recording end mode ── */}
+      <div className="flex flex-col gap-2">
+        <span className="text-[12.5px] font-semibold">How recording ends</span>
+        <div className="flex flex-col gap-1.5">
+          <ModeCard
+            active={prefs.voiceSttEndMode !== "auto"}
+            title="Turn-based"
+            description="Click the mic to start, click again to stop. You control exactly when the recording ends."
+            onClick={() => void setVoiceSttEndMode("manual")}
+          />
+          <ModeCard
+            active={prefs.voiceSttEndMode === "auto"}
+            title="Auto (silence detection)"
+            description="One click — the recording ends by itself after you stop speaking (~1.6s of silence). Needs a local or API STT engine; the Browser engine has no audio access, so it stays turn-based."
+            onClick={() => void setVoiceSttEndMode("auto")}
+          />
+        </div>
+        {sttMode === "browser" && prefs.voiceSttEndMode === "auto" ? (
+          <span className="text-[11.5px] text-amber-500">
+            Auto end needs audio levels — switch STT to Local or API, or use Turn-based.
+          </span>
+        ) : null}
       </div>
 
       {sttMode === "api" ? (
