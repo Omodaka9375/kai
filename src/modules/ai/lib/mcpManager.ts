@@ -18,7 +18,8 @@ export type McpControlAction =
   | { kind: "connect"; serverId: string }
   | { kind: "disconnect"; serverId: string }
   | { kind: "reconnect"; serverId: string }
-  | { kind: "connectAll" };
+  | { kind: "connectAll" }
+  | { kind: "refreshStatuses" };
 
 // ── Tauri stdio transport ──────────────────────────────────────────────────
 
@@ -123,6 +124,8 @@ export type McpServerStatus = {
   status: McpConnectionStatus;
   error: string | null;
   toolCount: number;
+  /** Server-reported identity from the initialize handshake (name + version). */
+  serverInfo?: { name: string; version: string };
 };
 
 // ── MCP Client Manager ────────────────────────────────────────────────────
@@ -188,7 +191,7 @@ class McpClientManager {
         const action = event.payload;
         const servers = await configLoader();
         const cfg =
-          action.kind === "connectAll"
+          action.kind === "connectAll" || action.kind === "refreshStatuses"
             ? undefined
             : servers.find((s) => s.id === action.serverId);
         switch (action.kind) {
@@ -203,6 +206,9 @@ class McpClientManager {
             break;
           case "connectAll":
             await this.connectAll(servers);
+            break;
+          case "refreshStatuses":
+            this.refreshAllStatuses();
             break;
         }
       });
@@ -337,7 +343,17 @@ class McpClientManager {
       const managed: ManagedClient = {
         client,
         config,
-        status: { status: "connected", error: null, toolCount },
+        status: {
+          status: "connected",
+          error: null,
+          toolCount,
+          serverInfo: client.serverInfo
+            ? {
+                name: String(client.serverInfo.name ?? ""),
+                version: String(client.serverInfo.version ?? ""),
+              }
+            : undefined,
+        },
         tools,
         instructions,
       };
@@ -448,6 +464,10 @@ class McpClientManager {
    */
   refreshAllStatuses(): void {
     for (const [id, managed] of this.clients) {
+      // The owner replays current state across the realm boundary so a
+      // freshly-opened Settings webview shows real statuses immediately
+      // (its own clients map is always empty — it holds no processes).
+      if (isMainWindow()) this.broadcastGlobal(id, managed.status);
       this.notify(id, managed.status);
     }
   }

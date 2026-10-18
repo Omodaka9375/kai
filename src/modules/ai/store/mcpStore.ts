@@ -80,6 +80,10 @@ export const useMcpStore = create<McpState>((set, get) => {
       if (isMainWindow()) {
         void mcpManager.connectAll(servers);
       } else {
+        // We hold no clients in this realm — ask the owner to replay its
+        // current statuses across the global event, then refresh our own
+        // (empty) map for any statuses that exist only here.
+        requestControl({ kind: "refreshStatuses" });
         mcpManager.refreshAllStatuses();
       }
 

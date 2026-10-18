@@ -102,6 +102,20 @@ export function McpSection() {
                   className="flex items-center gap-2 rounded-lg border border-border/60 bg-card/60 px-3 py-2"
                 >
                   <span className={cn("size-1.5 shrink-0 rounded-full", statusColor)} />
+                  <span
+                    className={cn(
+                      "w-16 shrink-0 truncate text-[9px] font-medium uppercase tracking-wider",
+                      st?.status === "connected"
+                        ? "text-emerald-600 dark:text-emerald-400"
+                        : st?.status === "connecting"
+                          ? "text-amber-600 dark:text-amber-400"
+                          : st?.status === "error"
+                            ? "text-destructive"
+                            : "text-muted-foreground/70",
+                    )}
+                  >
+                    {!s.enabled ? "disabled" : (st?.status ?? "disconnected")}
+                  </span>
                   <HugeiconsIcon
                     icon={WifiConnected01Icon}
                     size={13}
@@ -112,10 +126,22 @@ export function McpSection() {
                     <span className="truncate text-[12px] font-medium">
                       {s.name || s.command || s.url || "Unnamed server"}
                     </span>
-                    <span className="truncate text-[10.5px] text-muted-foreground">
-                      {s.transport}{st?.toolCount ? ` · ${st.toolCount} tools` : ""}
-                      {st?.error ? ` · ${st.error}` : ""}
-                    </span>
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <span className="truncate text-[10.5px] text-muted-foreground">
+                        {s.transport}
+                        {st?.toolCount ? ` · ${st.toolCount} tools` : ""}
+                      </span>
+                      {st?.status === "connected" && st.serverInfo?.version ? (
+                        <span className="shrink-0 rounded border border-border/60 bg-background px-1 font-mono text-[9px] text-muted-foreground">
+                          v{st.serverInfo.version}
+                        </span>
+                      ) : null}
+                    </div>
+                    {st?.error ? (
+                      <span className="truncate text-[10.5px] text-destructive/90">
+                        {st.error}
+                      </span>
+                    ) : null}
                   </div>
                   <Button
                     size="icon"
