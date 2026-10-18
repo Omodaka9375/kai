@@ -135,7 +135,6 @@ const HEAVY_CONTENT_TOOLS = new Set([
   "write_file",
   "edit",
   "multi_edit",
-  "run_subagent",
   "todo_write",
 ]);
 
@@ -348,6 +347,23 @@ function renderInputPreview(
       </div>
     );
   }
+  if (toolName === "run_subagent") {
+    const prompt = str("prompt");
+    return (
+      <div className="space-y-1">
+        {str("type") ? (
+          <div className="font-mono text-[10.5px] text-muted-foreground">
+            {str("type")}
+          </div>
+        ) : null}
+        {prompt ? (
+          <div className="whitespace-pre-wrap text-[12px] leading-relaxed text-foreground/90">
+            {prompt}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
   return null;
 }
 
@@ -399,6 +415,26 @@ function ToolOutput({
 function renderToolOutput(toolName: string, output: unknown): ReactNode | null {
   if (!output || typeof output !== "object") return null;
   const o = output as Record<string, unknown>;
+
+  if (toolName === "run_subagent") {
+    const summary = typeof o.summary === "string" ? o.summary : null;
+    const steps = typeof o.stepCount === "number" ? o.stepCount : null;
+    const ms = typeof o.durationMs === "number" ? o.durationMs : null;
+    const kind = typeof o.type === "string" ? o.type : null;
+    if (!summary) return null;
+    return (
+      <div className="space-y-1.5">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[10.5px] text-muted-foreground">
+          {kind ? <span>{kind}</span> : null}
+          {steps != null ? <span>· {steps} steps</span> : null}
+          {ms != null ? <span>· {(ms / 1000).toFixed(1)}s</span> : null}
+        </div>
+        <div className="whitespace-pre-wrap text-[12px] leading-relaxed text-foreground/90">
+          {summary}
+        </div>
+      </div>
+    );
+  }
 
   if (toolName === "read_file") {
     const path = typeof o.path === "string" ? o.path : "";
