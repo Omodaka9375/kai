@@ -29,7 +29,18 @@ export type ToolContext = {
   writeToActiveTerminalDisplay: (text: string) => boolean;
   /** Open a new preview tab (in-app iframe) at the given URL. */
   openPreview: (url: string) => boolean;
-  readCache: Map<string, { size: number; hash: number }>;
+  /** Read cache: per-file { size, hash, coverage? } — `coverage` records
+   *  whether the model saw the FULL file (write_file-safe) or a partial
+   *  view (truncated read / unchanged-preview → write_file refuses). */
+  readCache: Map<string, {
+    size: number;
+    hash: number;
+    coverage?: {
+      full: boolean;
+      lines?: number;
+      seenThrough?: number;
+    };
+  }>;
   /** Active chat session id — used by tools that persist per-session state (todos). */
   getSessionId: () => string | null;
   /** Tracks files read/modified during this session for smarter compaction. */

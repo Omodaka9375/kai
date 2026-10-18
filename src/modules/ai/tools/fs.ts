@@ -82,6 +82,20 @@ export function buildFsTools(ctx: ToolContext) {
           const isFullRead = offset === undefined && limit === undefined;
           const prior = ctx.readCache.get(abs);
           if (isFullRead && !force && prior && prior.hash === hash) {
+            // Unchanged-preview path: the model is shown head+tail ONLY —
+            // partial view, UNLESS the model had already paged through the
+            // whole file (prior coverage full). The preview doesn't erase
+            // knowledge the model already has; downgrading a full coverage
+            // here would lock the file against writes until re-paging.
+            if (!prior.coverage?.full) {
+              ctx.readCache.set(
+                abs,
+                readCacheEntry(r.content, {
+                  full: false,
+                  lines: r.content.split("\n").length,
+                }),
+              );
+            }
             // Return head + tail preview so the model can construct valid
             // old_string values for edits at the beginning OR end of file.
             const lines = r.content.split("\n");
@@ -107,6 +121,10 @@ export function buildFsTools(ctx: ToolContext) {
               hint: "File unchanged since last read. Head and tail preview included. If you need the full content, call read_file with force: true.",
             };
           }
+          // Coverage: the cache entry must record what the model SAW, not
+          // what the tool loaded. A capped read (line/byte caps below) is
+          // partial — write_file refuses to overwrite from a partial view.
+          // This is the read-side half of the truncation guard.
           ctx.readCache.set(abs, entry);
           ctx.fileTracker.markRead(abs);
 
@@ -118,6 +136,12 @@ export function buildFsTools(ctx: ToolContext) {
             if (content.length > READ_BYTE_CAP) {
               content = content.slice(0, READ_BYTE_CAP);
               truncated = true;
+            }
+            if (truncated) {
+              ctx.readCache.set(
+                abs,
+                readCacheEntry(r.content, { full: false, lines: lines.length }),
+              );
             }
             return {
               path: abs,
@@ -136,9 +160,40 @@ export function buildFsTools(ctx: ToolContext) {
           const end = Math.min(lines.length, start + requested);
           let content = lines.slice(start, end).join("\n");
           let truncated = end < lines.length;
+          let byteCapped = false;
           if (content.length > READ_BYTE_CAP) {
             content = content.slice(0, READ_BYTE_CAP);
             truncated = true;
+            byteCapped = true;
+          }
+          // Paged read: track CONTIGUOUS-FROM-0 coverage across pages.
+          // IMPORTANT: use the `prior` captured BEFORE the unconditional
+          // `readCache.set(abs, entry)` above — that set (hash-refresh for
+          // the stale guard) clobbers any coverage the previous page
+          // recorded; re-reading the cache here would see seenThrough: 0
+          // and restart coverage on every page (the bug that made paging
+          // never reach full coverage).
+          // `truncated` means "the file continues past this page" — the page
+          // itself was still fully seen (lines [start, end)). Only a BYTE
+          // cap cuts a page at an unknown line, so only byteCapped blocks
+          // coverage extension. A page with a gap before it (start >
+          // seenThrough) restarts coverage conservatively — write_file
+          // refuses until pages genuinely span the whole file from line 0.
+          {
+            const priorThrough = prior?.coverage?.seenThrough ?? 0;
+            const extendsRange = !byteCapped && start <= priorThrough;
+            const seenThrough = extendsRange
+              ? Math.max(priorThrough, end)
+              : 0;
+            const full = seenThrough >= lines.length;
+            ctx.readCache.set(
+              abs,
+              readCacheEntry(r.content, {
+                full,
+                lines: lines.length,
+                seenThrough,
+              }),
+            );
           }
           return {
             path: abs,
@@ -193,6 +248,21 @@ export function buildFsTools(ctx: ToolContext) {
         const safety = await checkWritableCanonical(reqPath, native.canonicalize);
         if (!safety.ok) return { error: safety.reason, path: reqPath };
         const abs = safety.canonical;
+
+        // PARTIAL-VIEW GUARD: if the model's last read of this file was
+        // truncated (read_file caps) or only an unchanged-preview, its
+        // `content` is a partial view of a LARGER file. Overwriting now
+        // would silently truncate the file to that view — data loss with a
+        // success result. Refuse and tell the model how to see the whole
+        // file. New files (no cache entry) are always fine.
+        const cached = ctx.readCache.get(abs);
+        if (cached?.coverage && !cached.coverage.full) {
+          return {
+            error:
+              "Your last read of this file was truncated (partial view) — writing would silently destroy the unseen portion. Read the file in full first: call read_file with offset/limit to page through it (the hint includes total_lines), then re-submit the write with the complete content.",
+            path: abs,
+          };
+        }
 
         if (usePlanStore.getState().active) {
           let original = "";
