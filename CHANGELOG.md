@@ -4,6 +4,16 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.7.1]
+
+- AI tools: write_file refuses to overwrite a file from a partial read — reads truncated by size caps or shown as unchanged previews are now tracked, so a rewrite can no longer silently drop unseen content.
+- AI: watch conditions work in the packaged app (a stricter script policy had broken conditional watch);
+- Windows/Linux: the window has square corners, matching each platform's native look.
+- Assistant: chat with KAI from Telegram — text and voice notes via your own bot (Settings → External), fenced to a scratch folder, first /start binds you as its only owner.
+- Assistant: multiple named chats (/new, /sessions, /use, /del), photo input the model can see, generated images and videos delivered to the chat, and /watch pings to your phone.
+
+---
+
 ## [1.7.0]
 
 - Terminal: display_image works — images render inline in the terminal (JPEG, PNG, GIF, WebP).
