@@ -25,6 +25,7 @@
  */
 
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { UIMessage } from "@ai-sdk/react";
 import { generateText, stepCountIs, type ModelMessage } from "ai";
 import { getModel, DEFAULT_MODEL_ID, type ModelId } from "@/modules/ai/config";
@@ -769,6 +770,75 @@ export async function startAssistantBridge(): Promise<{ ok: boolean; error?: str
     : { ok: false, error: "poll loop failed to start" };
 }
 
+// ── Event-channel ownership (cross-window handoff) ────────────────────────
+
+const ASSISTANT_CLAIM_EVENT = "Kai://assistant-claim";
+let reclaimInFlight = false;
+
+/**
+ * Re-register THIS window as the Telegram event-channel owner.
+ *
+ * The poll loop is global (Rust), but its delivery `Channel` belongs to ONE
+ * webview. First enable has to happen in the settings window (that's where the
+ * toggle lives), yet that window is transient — once it closes its Channel is
+ * dead and the loop would push every event into the void, so the bot would
+ * silently ignore messages until the app restarted. The always-alive main
+ * window therefore takes delivery over right after the panel starts the bridge
+ * (see `requestAssistantClaim`), and on every launch.
+ *
+ * Cheap and idempotent: Rust swaps the channel and leaves a running loop
+ * alone, so this is safe to call repeatedly.
+ */
+export async function reclaimAssistantEvents(): Promise<void> {
+  if (reclaimInFlight) return;
+  reclaimInFlight = true;
+  try {
+    const prefs = await loadAssistantPrefs();
+    if (!prefs.enabled) return;
+    const token = await getTelegramToken();
+    if (!token) return;
+    // Rust state is authoritative for the owner: the loop sets it the moment
+    // /start binds, which may be before any window persisted it.
+    let owner = prefs.ownerChatId;
+    try {
+      const st = await telegramNative.status();
+      if (st.ownerChatId != null) {
+        owner = st.ownerChatId;
+        if (prefs.ownerChatId !== owner) {
+          await saveAssistantPrefs({ ...prefs, ownerChatId: owner });
+        }
+      }
+    } catch {
+      // status is best-effort — fall back to the persisted owner
+    }
+    if (owner == null) {
+      // Unbound: keep the single-use bind handshake armed so a /start can
+      // still claim ownership after the handoff (e.g. the settings window
+      // armed it, then closed before the user sent /start).
+      await telegramNative.bindOwner();
+    }
+    const onEvent = (e: TelegramEvent) => void handleTelegramEvent(e);
+    const status = await telegramNative.start(token, owner, onEvent);
+    bridgeStarted = status.running;
+  } catch (e) {
+    console.warn("[kai:assistant] event-channel reclaim failed:", e);
+  } finally {
+    reclaimInFlight = false;
+  }
+}
+
+/** Ask the main window to take over Telegram event delivery. Called by the
+ *  settings panel after it starts the bridge, so closing that window can't
+ *  strand the loop. */
+export async function requestAssistantClaim(): Promise<void> {
+  await emit(ASSISTANT_CLAIM_EVENT).catch(() => {});
+}
+
+/** Subscribe to claim requests (main window). Returns an unlisten fn. */
+export function onAssistantClaimRequested(cb: () => void): Promise<UnlistenFn> {
+  return listen(ASSISTANT_CLAIM_EVENT, () => cb());
+}
+
 // ── Watch pings (proactive notifications) ─────────────────────────────────
 
 /**
@@ -1004,13 +1074,19 @@ async function drainQueue(): Promise<void> {
   turnInFlight = true;
   const token = await getTelegramToken();
   if (!token) {
+    // Never fail silently: a missing key must tell the owner what to fix.
+    console.warn("[kai:assistant] no bot token — dropping queued message");
     turnInFlight = false;
+    if (pendingQueue.length > 0) void drainQueue();
     return;
   }
   try {
     const reply = await runAssistantTurn(next.text, {
+      // Tool notices are progress, not conversation: sending one Telegram
+      // message per tool step floods the chat. Log only — the final reply
+      // (or the ⚠️ error below) is what the user sees.
       onNotice: (notice) => {
-        void telegramNative.sendMessage(token, next.chatId, notice).catch(() => {});
+        console.debug("[kai:assistant]", notice);
       },
       imageBase64: next.imageBase64,
       imageMime: next.imageMime,

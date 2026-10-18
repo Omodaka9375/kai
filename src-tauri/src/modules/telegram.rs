@@ -22,7 +22,7 @@
 //! (fail-soft: text-only replies when absent).
 
 use std::io::Write;
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
@@ -40,6 +40,12 @@ static OWNER_CHAT_ID: AtomicI64 = AtomicI64::new(-1);
 static BIND_MODE: AtomicBool = AtomicBool::new(false);
 
 static LAST_UPDATE_ID: LazyLock<Mutex<i64>> = LazyLock::new(|| Mutex::new(0));
+
+/// Incremented by every stop/start cycle. A poll thread exits when the
+/// generation it was spawned under is no longer current, so a quick toggle
+/// off→on can't leave a zombie loop sharing LAST_UPDATE_ID with a fresh one
+/// (a 40s long-poll is still blocked in-flight when the stop lands).
+static GENERATION: AtomicU64 = AtomicU64::new(0);
 
 /// The current event channel. `telegram_start` REPLACES it on every call: the
 /// loop is global, but delivery follows the most recent starter — the bridge
@@ -367,6 +373,8 @@ pub async fn telegram_start(
         return Ok(status());
     }
     POLL_SHUTDOWN.store(false, Ordering::SeqCst);
+    // Claim a fresh generation for this loop.
+    let generation = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
 
     // Tokio runtime for this thread's async work (the main Tauri runtime is
     // busy with commands; a dedicated 1-thread runtime matches net.rs use).
@@ -385,7 +393,12 @@ pub async fn telegram_start(
                 .build()
                 .expect("reqwest client");
             loop {
-                if POLL_SHUTDOWN.load(Ordering::SeqCst) {
+                // Exit when stopped, or when a newer start superseded us — a
+                // stale thread must never share LAST_UPDATE_ID with the new
+                // loop (double-advancing the offset skips messages).
+                if POLL_SHUTDOWN.load(Ordering::SeqCst)
+                    || GENERATION.load(Ordering::SeqCst) != generation
+                {
                     break;
                 }
                 let offset = {
@@ -410,7 +423,11 @@ pub async fn telegram_start(
                     }
                 }
             }
-            RUNNING.store(false, Ordering::SeqCst);
+            // Only the CURRENT generation may clear the running flag: a
+            // stale thread exiting late must not kill the new loop's state.
+            if GENERATION.load(Ordering::SeqCst) == generation {
+                RUNNING.store(false, Ordering::SeqCst);
+            }
         });
     });
     Ok(status())
@@ -420,6 +437,9 @@ pub async fn telegram_start(
 #[tauri::command]
 pub fn telegram_stop() -> Result<TelegramStatus, String> {
     POLL_SHUTDOWN.store(true, Ordering::SeqCst);
+    // Supersede the running poll thread (it may be blocked in a 40s
+    // long-poll) so it can never deliver or advance the offset again.
+    GENERATION.fetch_add(1, Ordering::SeqCst);
     RUNNING.store(false, Ordering::SeqCst);
     // Drop the delivery channel so a stopped loop can't push anywhere.
     *crate::modules::lock::mutex_lock(&EVENT_CHANNEL) = None;

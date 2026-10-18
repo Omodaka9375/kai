@@ -640,17 +640,6 @@ export default function App() {
     void useAgentsStore.getState().hydrate();
     void useSnippetsStore.getState().hydrate();
     void useMcpStore.getState().hydrate();
-    // Personal assistant (Telegram bridge) — auto-start when enabled in
-    // Settings → External. Fire-and-forget; failures land in the console
-    // and the panel shows the loop status on next open.
-    void import("@/modules/assistant")
-      .then(({ startAssistantBridge }) => startAssistantBridge())
-      .then((r) => {
-        if (!r.ok && r.error && r.error !== "assistant disabled") {
-          console.warn("[kai:assistant] bridge not started:", r.error);
-        }
-      })
-      .catch((e) => console.warn("[kai:assistant] bridge import failed:", e));
     // Fire the env probe in the background — the first agent turn's <env>
     // block reads it from cache (verified shell + installed tool list,
     // replacing hardcoded assumptions).
@@ -662,6 +651,40 @@ export default function App() {
       m.useOpenRouterModelsStore.getState().fetch(),
     );
   }, [hydrateSessions, launchCwdResolved, explorerRoot, launchCwd, home]);
+
+  // Personal assistant (Telegram bridge) — ONCE per app launch.
+  //
+  // Deliberately its own effect: the bootstrap above re-runs whenever
+  // `explorerRoot` changes (project switch), which would stack duplicate claim
+  // listeners. This one depends on nothing.
+  //
+  // The main window is the long-lived owner of Telegram event delivery.
+  // `reclaimAssistantEvents` re-registers the poll loop's Channel here (the
+  // loop itself is a global Rust thread), and the claim listener lets the
+  // Settings panel hand delivery over after it enables the bot — otherwise
+  // closing that transient window would strand the loop on a dead Channel and
+  // the bot would silently ignore every message.
+  const assistantClaimUnlisten = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    void import("@/modules/assistant")
+      .then(async ({ startAssistantBridge, reclaimAssistantEvents, onAssistantClaimRequested }) => {
+        assistantClaimUnlisten.current = await onAssistantClaimRequested(() => {
+          void reclaimAssistantEvents();
+        });
+        const r = await startAssistantBridge();
+        if (!r.ok && r.error && r.error !== "assistant disabled") {
+          console.warn("[kai:assistant] bridge not started:", r.error);
+        }
+        // Bridge may already be running (started from Settings) — take over
+        // delivery either way.
+        if (r.ok) await reclaimAssistantEvents();
+      })
+      .catch((e) => console.warn("[kai:assistant] bridge import failed:", e));
+    return () => {
+      assistantClaimUnlisten.current?.();
+      assistantClaimUnlisten.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     setActiveSearchAddon(

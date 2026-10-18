@@ -8,6 +8,7 @@ import {
   saveAssistantPrefs,
   startAssistantBridge,
   stopAssistantBridge,
+  requestAssistantClaim,
   telegramNative,
   getTelegramToken,
   setTelegramToken,
@@ -101,6 +102,9 @@ export function ExternalSection() {
           setStatus(result.error ?? "failed to start");
           return;
         }
+        // This window is transient: hand event delivery to the main window
+        // so closing Settings can't strand the poll loop on a dead Channel.
+        await requestAssistantClaim();
         setStatus(
           prefs?.ownerChatId == null
             ? "Started — send /start to your bot on Telegram to bind your account as its owner."

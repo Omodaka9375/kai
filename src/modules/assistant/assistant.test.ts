@@ -6,7 +6,15 @@ import { describe, expect, it, vi } from "vitest";
  * Network/agent paths are mocked (no Tauri, no Telegram, no model).
  */
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+// `Channel` must exist as a real class: telegram_start's payload is asserted
+// to be an instance of it (a bare function is silently dropped by Tauri).
+class MockChannel<T> {
+  onmessage: ((e: T) => void) | null = null;
+}
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(),
+  Channel: MockChannel,
+}));
 vi.mock("@tauri-apps/plugin-store", () => {
   const maps = new Map<string, Map<string, unknown>>();
   return {
@@ -31,6 +39,7 @@ vi.mock("@tauri-apps/plugin-store", () => {
 });
 
 const assistant = await import("./index");
+const { invoke, Channel } = await import("@tauri-apps/api/core");
 
 describe("assistant persona", () => {
   it("resolves the builtin general Assistant persona", () => {
@@ -126,5 +135,73 @@ describe("sessions (multi-conversation store)", () => {
     );
     expect(src).toContain('await prefsStore.get<UIMessage[]>("history")');
     expect(src).toContain('createSession("Main")');
+  });
+});
+
+/**
+ * IPC CONTRACT — the argument NAMES must match the Rust command signatures.
+ *
+ * Two production builds shipped broken on exactly this class of bug:
+ *   - `secrets_set` was called with `value:` instead of `password:` →
+ *     "missing required key password"
+ *   - `telegram_start` was passed a bare function instead of a Tauri
+ *     `Channel` → "missing required key onEvent"
+ *
+ * Tauri maps camelCase JS keys to snake_case Rust params, so a renamed key
+ * fails at runtime with no type error. These tests execute the wrappers and
+ * assert the exact payload shape.
+ */
+describe("telegram IPC contract", () => {
+  it("secrets_set sends `password` (not `value`) for the bot token", async () => {
+    vi.mocked(invoke).mockClear();
+    await assistant.setTelegramToken("123:abc");
+    const calls = vi.mocked(invoke).mock.calls; const [cmd, args] = calls[calls.length - 1]!;
+    expect(cmd).toBe("secrets_set");
+    const payload = args as Record<string, unknown>;
+    expect(payload).toHaveProperty("password", "123:abc");
+    expect(payload).not.toHaveProperty("value");
+    expect(payload).toMatchObject({
+      service: expect.any(String),
+      account: "telegram_bot_token",
+    });
+  });
+
+  it("telegram_start passes a real Channel, never a bare function", async () => {
+    vi.mocked(invoke).mockClear();
+    const handler = vi.fn();
+    await assistant.telegramNative.start("123:abc", null, handler);
+    const calls = vi.mocked(invoke).mock.calls; const [cmd, args] = calls[calls.length - 1]!;
+    expect(cmd).toBe("telegram_start");
+    const payload = args as Record<string, unknown>;
+    // A function is not serializable — Tauri silently drops the argument and
+    // the Rust command reports a missing key. Must be a Channel instance.
+    expect(typeof payload.onEvent).not.toBe("function");
+    expect(payload.onEvent).toBeInstanceOf(Channel);
+    expect(payload).toHaveProperty("ownerChatId", null);
+  });
+
+  it("every telegram command name matches a registered Rust command", async () => {
+    vi.mocked(invoke).mockClear();
+    const t = assistant.telegramNative;
+    await t.stop();
+    await t.bindOwner();
+    await t.clearOwner();
+    await t.status();
+    await t.sendMessage("tok", 1, "hi");
+    await t.downloadVoice("tok", "fid");
+    await t.downloadFile("tok", "fid");
+    const names = vi.mocked(invoke).mock.calls.map((c) => c[0]);
+    expect(names).toEqual([
+      "telegram_stop",
+      "telegram_bind_owner",
+      "telegram_clear_owner",
+      "telegram_status",
+      "telegram_send_message",
+      "telegram_download_voice",
+      "telegram_download_file",
+    ]);
+    // camelCase keys Tauri maps onto snake_case Rust params.
+    const sendArgs = vi.mocked(invoke).mock.calls[4]![1] as Record<string, unknown>;
+    expect(sendArgs).toEqual({ token: "tok", chatId: 1, text: "hi" });
   });
 });
