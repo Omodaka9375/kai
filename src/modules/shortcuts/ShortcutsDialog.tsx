@@ -28,7 +28,7 @@ export function ShortcutsDialog({ open, onOpenChange }: Props) {
 
   const onOpenSettings = () => {
     onOpenChange(false);
-    void openSettingsWindow("shortcuts&isolate=true");
+    void openSettingsWindow("shortcuts");
   };
 
   return (

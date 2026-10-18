@@ -1,4 +1,3 @@
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { WindowControls } from "@/components/WindowControls";
 import { IS_MAC, USE_CUSTOM_WINDOW_CONTROLS } from "@/lib/platform";
 import type { SettingsTab } from "@/modules/settings/openSettingsWindow";
@@ -14,9 +13,7 @@ import {
   Shield01Icon,
   Mic01Icon,
 } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
-import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect } from "react";
 
 const GeneralSection = lazy(() => import("./sections/GeneralSection").then((m) => ({ default: m.GeneralSection })));
 const ShortcutsSection = lazy(() => import("./sections/ShortcutsSection").then((m) => ({ default: m.ShortcutsSection })));
@@ -67,44 +64,20 @@ function readInitialTab(): SettingsTab {
   return "general";
 }
 
-function isInitialIsolated(): boolean {
-  if (typeof window === "undefined") return false;
-  const url = new URL(window.location.href);
-  const t = url.searchParams.get("tab") || "";
-  return url.searchParams.get("isolate") === "true" || t.includes("isolate=true");
-}
-
+/**
+ * Every settings panel opens as its OWN window (one per panel — the old
+ * shared tab-strip Settings window is gone), so the app is permanently in
+ * "isolated" mode: the header shows the panel title instead of a tab bar
+ * and there is no in-window tab switching.
+ */
 export function SettingsApp() {
-  const [active, setActive] = useState<SettingsTab>(readInitialTab);
-  const [isolated, setIsolated] = useState(isInitialIsolated);
+  const active = readInitialTab();
   const init = usePreferencesStore((s) => s.init);
   const ActiveSection = TABS.find(t => t.id === active)?.component;
 
   useEffect(() => {
     void init();
   }, [init]);
-
-  useEffect(() => {
-    const apply = (detail: string) => {
-      const isIso = detail.includes("isolate=true");
-      setIsolated(isIso);
-      const cleanTab = detail.split("&")[0];
-      if (cleanTab === "ai" || cleanTab === "connections") {
-        setActive("models");
-        return;
-      }
-      if ((VALID_TABS as string[]).includes(cleanTab)) {
-        setActive(cleanTab as SettingsTab);
-      }
-    };
-    const unlistenPromise = getCurrentWebviewWindow().listen<string>(
-      "Kai:settings-tab",
-      (e) => apply(e.payload),
-    );
-    return () => {
-      void unlistenPromise.then((un) => un());
-    };
-  }, []);
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground select-none">
@@ -113,32 +86,9 @@ export function SettingsApp() {
         className={`flex h-11 shrink-0 items-center border-b border-border/60 bg-card/60 ${IS_MAC ? "pr-3 pl-22" : "pr-0 pl-3"
           }`}
       >
-        {isolated ? (
-          <div className="flex-1 px-3 text-[12.5px] font-semibold text-foreground tracking-tight" data-tauri-drag-region>
-            {TABS.find((t) => t.id === active)?.label ?? "Settings"}
-          </div>
-        ) : (
-          <Tabs
-            value={active}
-            onValueChange={(v) => setActive(v as SettingsTab)}
-            orientation="horizontal"
-            className="flex-1 items-center"
-            data-tauri-drag-region
-          >
-            <TabsList className="mx-auto h-7 bg-muted/40 px-2">
-              {TABS.map((t) => (
-                <TabsTrigger
-                  key={t.id}
-                  value={t.id}
-                  className="h-6 gap-1.5 px-2.5 text-[11.5px]"
-                >
-                  <HugeiconsIcon icon={t.icon} size={12} strokeWidth={1.75} />
-                  <span>{t.label}</span>
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </Tabs>
-        )}
+        <div className="flex-1 px-3 text-[12.5px] font-semibold text-foreground tracking-tight" data-tauri-drag-region>
+          {TABS.find((t) => t.id === active)?.label ?? "Settings"}
+        </div>
         {USE_CUSTOM_WINDOW_CONTROLS && <WindowControls closeOnly />}
       </header>
 

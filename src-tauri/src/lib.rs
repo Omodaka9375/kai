@@ -269,14 +269,60 @@ fn project_key(root: &str) -> String {
 #[cfg(target_os = "windows")]
 const WINDOWS_BROWSER_ARGS: &str = "--disable-features=msSpeechRecognitionServiceUseCetoService";
 
+/// Canonical settings panel key from a `tab` request. Tolerates the legacy
+/// `&isolate=true` suffix (older callers appended it) and the legacy
+/// "ai"/"connections" aliases. Unknown values fall back to "general".
+///
+/// Each panel opens as its OWN window (one window per panel, like the
+/// hamburger menu) — the label below keys the window identity, so this
+/// must be canonical: two aliases mapping to different labels would let
+/// duplicate "Models" windows coexist.
+fn settings_panel_key(tab: Option<&str>) -> String {
+    let raw = tab
+        .unwrap_or("")
+        .split('&')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_lowercase();
+    let key = match raw.as_str() {
+        "ai" | "connections" => "models".to_string(),
+        _ => raw,
+    };
+    if matches!(
+        key.as_str(),
+        "general" | "shortcuts" | "models" | "agents" | "snippets" | "mcp" | "sandbox" | "voice" | "about"
+    ) {
+        key
+    } else {
+        "general".to_string()
+    }
+}
+
+/// Human window title for a canonical panel key (taskbar / alt-tab).
+fn settings_panel_title(key: &str) -> String {
+    let name = match key {
+        "general" => "General",
+        "shortcuts" => "Shortcuts",
+        "models" => "Models",
+        "agents" => "Agents",
+        "snippets" => "Snippets",
+        "mcp" => "MCP Servers",
+        "sandbox" => "Sandbox",
+        "voice" => "Voice",
+        _ => "About",
+    };
+    format!("KAI — {name}")
+}
+
 #[tauri::command]
 async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Result<(), String> {
-    let url_path = match tab.as_deref() {
-        Some(t) if !t.is_empty() => format!("settings.html?tab={}", t),
-        _ => "settings.html".to_string(),
-    };
+    let key = settings_panel_key(tab.as_deref());
+    let label = format!("settings-{key}");
+    let url_path = format!("settings.html?tab={key}");
+    let title = settings_panel_title(&key);
 
-    if let Some(window) = app.get_webview_window("settings") {
+    if let Some(window) = app.get_webview_window(&label) {
         // SELF-HEAL: if a previous settings-window creation failed partway
         // (e.g. the WebView2 environment mismatch bug this command once had),
         // a hidden husk window can linger — every later click would just
@@ -284,21 +330,17 @@ async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Res
         // window is hidden, recreate it cleanly instead of focusing the husk.
         let visible = window.is_visible().unwrap_or(true);
         if visible {
+            // Each window is fixed to its single panel — nothing to retarget.
             let _ = window.set_focus();
-            if let Some(t) = tab.as_deref().filter(|s| !s.is_empty()) {
-                // emit() serializes via JSON — no string-escape footgun, unlike
-                // eval() with format!(). Frontend listens via Tauri event API.
-                let _ = window.emit("KAI:settings-tab", t);
-            }
             return Ok(());
-        } else {
-            let _ = window.destroy();
         }
+        let _ = window.destroy();
     }
 
     let instance_id = app.state::<InstanceId>().0.clone();
-    let mut builder = WebviewWindowBuilder::new(&app, "settings", WebviewUrl::App(url_path.into()))
-        .title("Settings")
+    let mut builder =
+        WebviewWindowBuilder::new(&app, label.as_str(), WebviewUrl::App(url_path.into()))
+            .title(title.as_str())
         .inner_size(860.0, 640.0)
         .min_inner_size(720.0, 520.0)
         .resizable(true)
@@ -412,11 +454,21 @@ pub fn run() {
         .plugin(
             tauri_plugin_window_state::Builder::new()
                 .with_state_flags(StateFlags::all() & !StateFlags::VISIBLE)
-                // The settings dialog is a transient modal — always centered
-                // by open_settings_window. Exclude it from geometry save/
-                // restore entirely, or the first top-left spawn would be
-                // saved and then faithfully restored forever after.
-                .with_denylist(&["settings"])
+                // Settings panels are transient, always-centered windows —
+                // exclude them from geometry save/restore entirely, or the
+                // first top-left spawn would be saved and then faithfully
+                // restored forever after. One label per panel (settings-*).
+                .with_denylist(&[
+                    "settings-general",
+                    "settings-shortcuts",
+                    "settings-models",
+                    "settings-agents",
+                    "settings-snippets",
+                    "settings-mcp",
+                    "settings-sandbox",
+                    "settings-voice",
+                    "settings-about",
+                ])
                 // Key window geometry per project so two instances on different
                 // projects don't fight over one last-closer-wins state file.
                 // Same keyspace as the frontend sessions scoping.

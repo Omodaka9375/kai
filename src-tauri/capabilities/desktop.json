@@ -5,10 +5,7 @@
     "windows",
     "linux"
   ],
-  "windows": [
-    "main",
-    "settings"
-  ],
+  "windows": ["main", "settings-*"],
   "permissions": [
     "autostart:default",
     "window-state:default",
