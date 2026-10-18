@@ -61,6 +61,31 @@ pub enum TelegramEvent {
         voice_duration_secs: Option<i64>,
         date: i64,
     },
+    /// Incoming photo (largest size) — model gets it as a vision part.
+    Photo {
+        chat_id: i64,
+        message_id: i64,
+        photo_file_id: String,
+        caption: Option<String>,
+        date: i64,
+    },
+    /// Incoming document (any file) — saved to the assistant scratch dir.
+    Document {
+        chat_id: i64,
+        message_id: i64,
+        document_file_id: String,
+        file_name: String,
+        mime_type: Option<String>,
+        date: i64,
+    },
+    /// Incoming video (mp4 note or regular video).
+    Video {
+        chat_id: i64,
+        message_id: i64,
+        video_file_id: String,
+        duration_secs: Option<i64>,
+        date: i64,
+    },
     /// Owner not yet bound — this /start may claim binding.
     StartCandidate { chat_id: i64, message_id: i64, date: i64 },
     /// Message from a non-owner chat (silently ignored by the agent).
@@ -118,11 +143,43 @@ async fn post_json<T: serde::de::DeserializeOwned>(
 }
 
 #[derive(Debug, Deserialize)]
+struct TgPhotoSize {
+    #[serde(default)]
+    file_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TgDocument {
+    #[serde(default)]
+    file_id: Option<String>,
+    #[serde(default)]
+    file_name: Option<String>,
+    #[serde(default)]
+    mime_type: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TgVideo {
+    #[serde(default)]
+    file_id: Option<String>,
+    #[serde(default)]
+    duration: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
 struct TgMessage {
     #[serde(default)]
     text: Option<String>,
     #[serde(default)]
     voice: Option<TgVoice>,
+    #[serde(default)]
+    photo: Option<Vec<TgPhotoSize>>,
+    #[serde(default)]
+    document: Option<TgDocument>,
+    #[serde(default)]
+    video: Option<TgVideo>,
+    #[serde(default)]
+    caption: Option<String>,
     #[serde(default)]
     chat: Option<TgChat>,
     #[serde(default)]
@@ -235,6 +292,35 @@ fn classify(update: &TgUpdate, channel: &Channel<TelegramEvent>) -> Option<i64> 
             text: Some(text.clone()),
             voice_file_id: None,
             voice_duration_secs: None,
+            date,
+        });
+    } else if let Some(photo) = &msg.photo {
+        // photo: Vec<PhotoSize> sorted small→large; take the largest file_id.
+        let best = photo.iter().rev().find_map(|s| s.file_id.clone());
+        if let Some(file_id) = best {
+            let _ = channel.send(TelegramEvent::Photo {
+                chat_id,
+                message_id,
+                photo_file_id: file_id,
+                caption: msg.caption.clone(),
+                date,
+            });
+        }
+    } else if let Some(doc) = &msg.document {
+        let _ = channel.send(TelegramEvent::Document {
+            chat_id,
+            message_id,
+            document_file_id: doc.file_id.clone().unwrap_or_default(),
+            file_name: doc.file_name.clone().unwrap_or_else(|| "file".into()),
+            mime_type: doc.mime_type.clone(),
+            date,
+        });
+    } else if let Some(video) = &msg.video {
+        let _ = channel.send(TelegramEvent::Video {
+            chat_id,
+            message_id,
+            video_file_id: video.file_id.clone().unwrap_or_default(),
+            duration_secs: video.duration,
             date,
         });
     }
@@ -433,12 +519,30 @@ pub async fn telegram_download_voice(
     token: String,
     file_id: String,
 ) -> Result<String, String> {
+    let bytes = download_file(&token, &file_id).await?;
+    let wav = ogg_to_wav(&bytes)?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(wav))
+}
+
+/// Generic file download by file_id → base64 bytes. Used for photos
+/// (vision input), documents and videos (saved to the scratch dir).
+#[tauri::command]
+pub async fn telegram_download_file(
+    token: String,
+    file_id: String,
+) -> Result<String, String> {
+    let bytes = download_file(&token, &file_id).await?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+}
+
+/// Shared download core: getFile → HTTPS fetch → bytes (20 MB cap).
+async fn download_file(token: &str, file_id: &str) -> Result<bytes::Bytes, String> {
     #[derive(Deserialize)]
     struct FilePath {
         #[serde(default)]
         file_path: Option<String>,
     }
-    let fp: FilePath = post_json(&token, "getFile", &serde_json::json!({ "file_id": file_id })).await?;
+    let fp: FilePath = post_json(token, "getFile", &serde_json::json!({ "file_id": file_id })).await?;
     let rel = fp.file_path.ok_or("no file_path in getFile result")?;
     let url = format!("{API}/file/bot{token}/{rel}");
     let client = reqwest::Client::builder()
@@ -454,12 +558,113 @@ pub async fn telegram_download_voice(
         return Err(format!("download HTTP {}", resp.status()));
     }
     let bytes = resp.bytes().await.map_err(|e| format!("body: {e}"))?;
-    // Telegram caps downloads at 20 MB — enforce a sanity cap anyway.
     if bytes.len() > 20 * 1024 * 1024 {
-        return Err("voice file too large (over 20 MB)".into());
+        return Err("file too large (over 20 MB)".into());
     }
-    let wav = ogg_to_wav(&bytes)?;
-    Ok(base64::engine::general_purpose::STANDARD.encode(wav))
+    Ok(bytes)
+}
+
+// ── Media send (photos / videos / documents) ───────────────────────────────
+
+/// Upload bytes as a multipart part with the right method + field name.
+/// Params map 1:1 onto the Telegram form fields — an options struct would
+/// just hide that correspondence.
+#[allow(clippy::too_many_arguments)]
+async fn send_multipart(
+    token: &str,
+    method: &str,
+    field: &str,
+    chat_id: i64,
+    file_name: &str,
+    mime: &str,
+    data: Vec<u8>,
+    caption: Option<String>,
+) -> Result<(), String> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(180))
+        .build()
+        .map_err(|e| format!("client: {e}"))?;
+    let part = reqwest::multipart::Part::bytes(data)
+        .file_name(file_name.to_string())
+        .mime_str(mime)
+        .map_err(|e| format!("mime: {e}"))?;
+    let mut form = reqwest::multipart::Form::new()
+        .text("chat_id", chat_id.to_string());
+    if let Some(c) = caption {
+        form = form.text("caption", c);
+    }
+    form = form.part(field.to_string(), part);
+    let resp = client
+        .post(api_url(token, method))
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| format!("{method}: {e}"))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let t = resp.text().await.unwrap_or_default();
+        return Err(format!(
+            "{method} HTTP {status}: {}",
+            t.chars().take(200).collect::<String>()
+        ));
+    }
+    Ok(())
+}
+
+/// Send a photo (base64 image bytes). Falls back to sendDocument when the
+/// format isn't a Telegram-accepted image type — the caller's caption is
+/// preserved either way.
+#[tauri::command]
+pub async fn telegram_send_photo(
+    token: String,
+    chat_id: i64,
+    photo_base64: String,
+    caption: Option<String>,
+) -> Result<(), String> {
+    let data = base64::engine::general_purpose::STANDARD
+        .decode(photo_base64.as_bytes())
+        .map_err(|e| format!("bad photo base64: {e}"))?;
+    send_multipart(&token, "sendPhoto", "photo", chat_id, "photo.png", "image/png", data, caption).await
+}
+
+/// Send a video (base64 video bytes, e.g. a generated mp4).
+#[tauri::command]
+pub async fn telegram_send_video(
+    token: String,
+    chat_id: i64,
+    video_base64: String,
+    caption: Option<String>,
+) -> Result<(), String> {
+    let data = base64::engine::general_purpose::STANDARD
+        .decode(video_base64.as_bytes())
+        .map_err(|e| format!("bad video base64: {e}"))?;
+    send_multipart(&token, "sendVideo", "video", chat_id, "video.mp4", "video/mp4", data, caption).await
+}
+
+/// Send any file as a document (e.g. files from the scratch dir the user
+/// asked for, exports, etc.).
+#[tauri::command]
+pub async fn telegram_send_document(
+    token: String,
+    chat_id: i64,
+    data_base64: String,
+    file_name: String,
+    mime_type: Option<String>,
+) -> Result<(), String> {
+    let data = base64::engine::general_purpose::STANDARD
+        .decode(data_base64.as_bytes())
+        .map_err(|e| format!("bad data base64: {e}"))?;
+    send_multipart(
+        &token,
+        "sendDocument",
+        "document",
+        chat_id,
+        &file_name,
+        mime_type.as_deref().unwrap_or("application/octet-stream"),
+        data,
+        None,
+    )
+    .await
 }
 
 // ── ffmpeg helpers (fail-soft) ─────────────────────────────────────────────

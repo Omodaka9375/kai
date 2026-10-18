@@ -107,6 +107,9 @@ export interface WatchConfig {
   mode: WatchMode;
   /** Human-readable label shown when the watch fires. */
   label?: string;
+  /** ALSO ping the owner's Telegram when this watch fires (needs the
+   *  personal assistant enabled + bound). */
+  notifyTelegram?: boolean;
   /** Shell session ID used for execution. */
   shellId: number;
   /** Current CWD when the watch was created. */
@@ -691,6 +694,20 @@ function injectWatchResult(
   // bridge only flushes for the session it's mounted against) — flush all
   // queued wakes so the background session reacts too.
   flushAllPendingWatchWakes();
+
+  // Optional Telegram ping: the same firing ALSO reaches the owner's phone
+  // when the watch opted in. Fail-soft — no assistant → silent no-op.
+  if (w.notifyTelegram) {
+    void import("@/modules/assistant")
+      .then(({ telegramPing }) =>
+        telegramPing(
+          `🔔 Watch fired: ${w.label ?? w.command}\n\n${stripClixml(result.stdout ?? "").slice(0, 3000)}`,
+        ),
+      )
+      .catch(() => {
+        /* assistant module not loadable — ignore */
+      });
+  }
 }
 
 /** Terminal self-report for a dead watch (circuit breaker). Tells the model
@@ -722,9 +739,12 @@ export function buildWatchTools(ctx: ToolContext) {
           "fire_on_match: fire when condition is true. fire_on_change: fire when command output differs from the previous poll.",
         ),
         label: z.string().optional().describe("Human-readable label for notifications."),
+        notify_telegram: z.boolean().optional().describe(
+          "ALSO send a Telegram ping to the user when this watch fires (requires the personal assistant to be enabled and bound). Use for long-running jobs the user walks away from.",
+        ),
       }),
       needsApproval: true,
-      execute: async ({ command, interval_secs, condition, mode, label }, options) => {
+      execute: async ({ command, interval_secs, condition, mode, label, notify_telegram }, options) => {
         const safety = checkShellCommand(command);
         if (!safety.ok) return { error: safety.reason };
         const sandbox = await checkShellSandbox(command);
@@ -749,6 +769,7 @@ export function buildWatchTools(ctx: ToolContext) {
           condition,
           mode,
           label,
+          notifyTelegram: notify_telegram === true,
           shellId,
           cwd: ctx.getCwd(),
           sessionId,

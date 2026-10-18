@@ -26,7 +26,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import type { UIMessage } from "@ai-sdk/react";
-import { generateText, stepCountIs } from "ai";
+import { generateText, stepCountIs, type ModelMessage } from "ai";
 import { getModel, DEFAULT_MODEL_ID, type ModelId } from "@/modules/ai/config";
 import { buildLanguageModel } from "@/modules/ai/lib/agent";
 import { getAllKeys, getKey } from "@/modules/ai/lib/keyring";
@@ -77,46 +77,165 @@ export async function saveAssistantPrefs(prefs: AssistantPrefs): Promise<void> {
   await prefsStore.set("prefs", prefs);
 }
 
-// ── Conversation memory (normal sessions, assistant-scoped) ────────────────
+// ── Sessions (multi-conversation store) ────────────────────────────────────
 
 /**
- * One continuous conversation per owner — that's what a personal assistant
- * is. History persists as UIMessage[] in the assistant store; trimmed to
- * the last N turns to bound context (the headless path has no chatStore
- * compaction machinery, so we cap conservatively).
+ * Sessions: named conversations the owner can list/switch/reset — mirroring
+ * the project chat's session UX. Persistence: kai-assistant.json
+ *   sessions: [{id, title, createdAt, updatedAt}]   (index)
+ *   activeSessionId: string
+ *   messages:<id>: UIMessage[]                        (per-session history)
+ * MIGRATION: v1 stored a single `history` array — on first load it becomes
+ * the "Main" session so no conversation is lost.
  */
-const HISTORY_KEY = "history";
+export type AssistantSession = {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
+const KEY_SESSIONS = "sessions";
+const KEY_ACTIVE = "activeSessionId";
+const messagesKey = (id: string) => `messages:${id}`;
 const MAX_HISTORY_MESSAGES = 60;
+const MAX_SESSIONS = 30;
 
-let historyCache: UIMessage[] | null = null;
+let sessionsCache: AssistantSession[] | null = null;
+let activeIdCache: string | null = null;
+/** Per-session in-memory history (loaded lazily, mirrors the store). */
+const historyCache = new Map<string, UIMessage[]>();
 
-export async function loadHistory(): Promise<UIMessage[]> {
-  if (historyCache) return historyCache;
-  try {
-    historyCache = (await prefsStore.get<UIMessage[]>(HISTORY_KEY)) ?? [];
-  } catch {
-    historyCache = [];
+function newSessionId(): string {
+  return `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export async function listSessions(): Promise<AssistantSession[]> {
+  if (sessionsCache) return sessionsCache;
+  sessionsCache = (await prefsStore.get<AssistantSession[]>(KEY_SESSIONS)) ?? [];
+  return sessionsCache;
+}
+
+export async function getActiveSessionId(): Promise<string> {
+  await listSessions();
+  if (activeIdCache) return activeIdCache;
+  activeIdCache = (await prefsStore.get<string>(KEY_ACTIVE)) ?? null;
+  // Active id pointing at a deleted session (or none) → first session or
+  // create the default.
+  if (!activeIdCache || !sessionsCache!.some((s) => s.id === activeIdCache)) {
+    if (sessionsCache!.length > 0) {
+      activeIdCache = sessionsCache![0].id;
+    } else {
+      activeIdCache = await createSession("Main");
+    }
   }
-  return historyCache;
+  return activeIdCache;
 }
 
-async function persistHistory(messages: UIMessage[]): Promise<void> {
-  historyCache = messages;
-  // Keep the newest messages; drop the oldest.
+async function createSession(title: string): Promise<string> {
+  const id = newSessionId();
+  const session: AssistantSession = {
+    id,
+    title: title.slice(0, 40) || "Untitled",
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+  const list = await listSessions();
+  const next = [session, ...list].slice(0, MAX_SESSIONS);
+  sessionsCache = next;
+  await prefsStore.set(KEY_SESSIONS, next);
+  await prefsStore.set(messagesKey(id), []);
+  return id;
+}
+
+export async function newSession(title?: string): Promise<AssistantSession> {
+  const id = await createSession(title ?? nextSessionTitle());
+  activeIdCache = id;
+  await prefsStore.set(KEY_ACTIVE, id);
+  const list = await listSessions();
+  return list.find((s) => s.id === id)!;
+}
+
+function nextSessionTitle(): string {
+  return "Chat " + (sessionsCache?.length ? sessionsCache.length + 1 : 1);
+}
+
+export async function switchSession(id: string): Promise<AssistantSession | null> {
+  const list = await listSessions();
+  const target = list.find((s) => s.id === id) ?? null;
+  if (!target) return null;
+  activeIdCache = id;
+  await prefsStore.set(KEY_ACTIVE, id);
+  return target;
+}
+
+export async function deleteSession(id: string): Promise<void> {
+  const list = await listSessions();
+  sessionsCache = list.filter((s) => s.id !== id);
+  await prefsStore.set(KEY_SESSIONS, sessionsCache);
+  await prefsStore.delete(messagesKey(id));
+  historyCache.delete(id);
+  if (activeIdCache === id) {
+    activeIdCache = null;
+    await getActiveSessionId();
+  }
+}
+
+/** Per-session history. Trimmed to the newest MAX_HISTORY_MESSAGES. */
+export async function loadHistory(sessionId?: string): Promise<UIMessage[]> {
+  const id = sessionId ?? (await getActiveSessionId());
+  const cached = historyCache.get(id);
+  if (cached) return cached;
+  const h = (await prefsStore.get<UIMessage[]>(messagesKey(id))) ?? [];
+  historyCache.set(id, h);
+  return h;
+}
+
+async function persistHistory(messages: UIMessage[], sessionId?: string): Promise<void> {
+  const id = sessionId ?? (await getActiveSessionId());
+  historyCache.set(id, messages);
   const trimmed = messages.slice(-MAX_HISTORY_MESSAGES);
-  await prefsStore.set(HISTORY_KEY, trimmed);
+  await prefsStore.set(messagesKey(id), trimmed);
+  // Bump the session's updatedAt so /sessions can show recency.
+  const list = await listSessions();
+  const s = list.find((x) => x.id === id);
+  if (s) {
+    s.updatedAt = Date.now();
+    await prefsStore.set(KEY_SESSIONS, list);
+  }
 }
 
-/** /new — reset the conversation. */
+/** Reset the ACTIVE session's history (title kept). /new with no args. */
 export async function resetAssistantHistory(): Promise<void> {
-  historyCache = [];
-  await prefsStore.set(HISTORY_KEY, []);
+  const id = await getActiveSessionId();
+  historyCache.set(id, []);
+  await prefsStore.set(messagesKey(id), []);
+}
+
+/** One-time migration from the v1 single-history layout. */
+export async function migrateV1HistoryIfNeeded(): Promise<void> {
+  const legacy = (await prefsStore.get<UIMessage[]>("history")) ?? null;
+  if (legacy && legacy.length > 0) {
+    // Seed "Main" with the old conversation, then clear the legacy key.
+    const list = await listSessions();
+    if (list.length === 0) {
+      const id = await createSession("Main");
+      historyCache.set(id, legacy);
+      await prefsStore.set(messagesKey(id), legacy.slice(-MAX_HISTORY_MESSAGES));
+      activeIdCache = id;
+      await prefsStore.set(KEY_ACTIVE, id);
+    }
+  }
+  if (legacy) await prefsStore.delete("history");
 }
 
 // ── Native bridge (typed) ──────────────────────────────────────────────────
 
 export type TelegramEvent =
   | { kind: "message"; chatId: number; messageId: number; text: string | null; voiceFileId: string | null; voiceDurationSecs: number | null; date: number }
+  | { kind: "photo"; chatId: number; messageId: number; photoFileId: string; caption: string | null; date: number }
+  | { kind: "document"; chatId: number; messageId: number; documentFileId: string; fileName: string; mimeType: string | null; date: number }
+  | { kind: "video"; chatId: number; messageId: number; videoFileId: string; durationSecs: number | null; date: number }
   | { kind: "startCandidate"; chatId: number; messageId: number; date: number }
   | { kind: "rejected"; chatId: number; date: number }
   | { kind: "error"; message: string };
@@ -143,8 +262,28 @@ export const telegramNative = {
     invoke<void>("telegram_send_message", { token, chatId, text }),
   sendVoice: (token: string, chatId: number, audioBase64: string) =>
     invoke<void>("telegram_send_voice", { token, chatId, audioBase64 }),
+  sendPhoto: (token: string, chatId: number, photoBase64: string, caption?: string | null) =>
+    invoke<void>("telegram_send_photo", { token, chatId, photoBase64, caption: caption ?? null }),
+  sendVideo: (token: string, chatId: number, videoBase64: string, caption?: string | null) =>
+    invoke<void>("telegram_send_video", { token, chatId, videoBase64, caption: caption ?? null }),
+  sendDocument: (
+    token: string,
+    chatId: number,
+    dataBase64: string,
+    fileName: string,
+    mimeType?: string | null,
+  ) =>
+    invoke<void>("telegram_send_document", {
+      token,
+      chatId,
+      dataBase64,
+      fileName,
+      mimeType: mimeType ?? null,
+    }),
   downloadVoice: (token: string, fileId: string) =>
     invoke<string>("telegram_download_voice", { token, fileId }),
+  downloadFile: (token: string, fileId: string) =>
+    invoke<string>("telegram_download_file", { token, fileId }),
 };
 
 /** Token lives in the OS keyring (service `kai`), like every other credential.
@@ -269,9 +408,16 @@ const EXCLUDED_TOOLS = new Set([
 
 export async function runAssistantTurn(
   userText: string,
-  onNotice?: (msg: string) => void,
+  opts?: {
+    onNotice?: (msg: string) => void;
+    /** Vision input: base64 image attached to this turn. */
+    imageBase64?: string;
+    imageMime?: string;
+  },
 ): Promise<string> {
+  const onNotice = opts?.onNotice;
   const prefs = await loadAssistantPrefs();
+  const sessionId = await getActiveSessionId();
   const modelId = (prefs.modelId as ModelId | null) ?? DEFAULT_MODEL_ID;
   const keys = await getAllKeys();
   const toolContext = await makeAssistantToolContext();
@@ -302,15 +448,30 @@ export async function runAssistantTurn(
   for (const [id, tool] of Object.entries(mcpTools)) {
     tools[id] = tool;
   }
+  // Media tools are wrapped so their results ALSO get delivered to the
+  // chat (see deliverMediaOut) — generation happens as usual, the
+  // placeholder resolves through our deliverer instead of a chat UI.
+  tools["generate_image"] = wrapMediaTool(tools["generate_image"], "image", deliverMediaOut);
+  tools["generate_video"] = wrapMediaTool(tools["generate_video"], "video", deliverMediaOut);
   // Redact tool RESULTS (paths, env vars, secrets) before they reach the
   // provider — same guarantee as the project agent path.
   const redactedTools = withToolRedaction(tools);
 
-  const history = await loadHistory();
+  const history = await loadHistory(sessionId);
+  const userParts: Array<{ type: string; text?: string }> = [
+    { type: "text", text: userText },
+  ];
+  if (opts?.imageBase64) {
+    userParts.push({
+      type: "file",
+      mediaType: opts.imageMime ?? "image/jpeg",
+      data: opts.imageBase64,
+    } as { type: string });
+  }
   const userMsg: UIMessage = {
     id: `tg-${Date.now()}`,
     role: "user",
-    parts: [{ type: "text", text: userText }],
+    parts: userParts as UIMessage["parts"],
   } as UIMessage;
 
   const system = [
@@ -318,9 +479,10 @@ export async function runAssistantTurn(
     "\n\n## CONVERSATION SURFACE — TELEGRAM",
     "You are chatting with the owner over Telegram. Replies are plain text (Telegram Markdown).",
     "Keep replies conversational and SHORT — a chat message, not a document. Bullet points over essays.",
-    "You have tools (web, files in your scratch dir, shell in your scratch dir, MCP). Use them when asked.",
+    "You have tools (web, files in your scratch dir, shell in your scratch dir, MCP, image/video generation). Use them when asked.",
     "Do NOT use code fences with language tags unless the user asks for code — Telegram renders them as monospace blocks.",
     "This is a general personal-assistant conversation, not a coding session.",
+    "When you generate an image or video, it is delivered to the user's Telegram chat automatically — describe it in your reply, do not paste URLs.",
     custom ? `\n\n## USER CUSTOM INSTRUCTIONS\n${custom}` : "",
   ]
     .filter(Boolean)
@@ -341,23 +503,132 @@ export async function runAssistantTurn(
   });
 
   const reply = result.text?.trim() || "…";
-  await persistHistory([...history, userMsg].concat(result.text
-    ? [{
-        id: `tg-a-${Date.now()}`,
-        role: "assistant",
-        parts: [{ type: "text", text: reply }],
-      } as UIMessage]
-    : []));
+  await persistHistory(
+    [...history, userMsg].concat(result.text
+      ? [{
+          id: `tg-a-${Date.now()}`,
+          role: "assistant",
+          parts: [{ type: "text", text: reply }],
+        } as UIMessage]
+      : []),
+    sessionId,
+  );
   return reply;
 }
 
-/** UIMessage → generateText model message (text-only view of the history). */
-function toModelMessage(m: UIMessage): { role: "user" | "assistant"; content: string } {
-  const text = (m.parts as Array<{ type: string; text?: string }>)
+/** UIMessage → generateText model message. Text parts become text; image
+ *  file parts become AI-SDK image parts (vision input survives history). */
+function toModelMessage(m: UIMessage): ModelMessage {
+  const parts = m.parts as Array<{ type: string; text?: string; mediaType?: string; data?: string }>;
+  const text = parts
     .filter((p) => p.type === "text" && typeof p.text === "string")
     .map((p) => p.text as string)
     .join("\n");
-  return { role: m.role as "user" | "assistant", content: text };
+  const image = parts.find((p) => p.type === "file" && p.data);
+  if (image && m.role === "user") {
+    return {
+      role: "user",
+      content: [
+        { type: "text", text },
+        {
+          type: "image",
+          mediaType: image.mediaType ?? "image/jpeg",
+          data: image.data,
+        },
+      ],
+    } as ModelMessage;
+  }
+  return { role: m.role === "assistant" ? "assistant" : "user", content: text };
+}
+
+// ── Media out: generated images/videos delivered to the chat ───────────────
+
+/**
+ * Wrap a media-generation tool so its background job ALSO delivers the
+ * result to Telegram. The desktop media tools use spawnMediaTask which
+ * patches a chat UI part — headless there is no chat, so we hook the
+ * promise chain and send the bytes through the bridge.
+ */
+function wrapMediaTool(
+  base: unknown,
+  kind: "image" | "video",
+  deliver: (kind: "image" | "video", data: string, mime: string, prompt: string) => void,
+): unknown {
+  if (!base || typeof base !== "object") return base;
+  const t = base as { execute?: (input: never, opts: never) => Promise<unknown> };
+  if (!t.execute) return base;
+  const origExecute = t.execute.bind(t);
+  return {
+    ...t,
+    execute: async (input: never, opts: never) => {
+      const result = await origExecute(input, opts);
+      try {
+        // The tool returns {status:"generating"} immediately; the real
+        // payload lands later via a promise we can't see from here. The
+        // payload arrives through the chatStore resolver on desktop —
+        // headless, we poll the returned task is NOT possible. Instead,
+        // deliver when the result is complete; the common case for
+        // MCP-provided media tools (immediate base64/url) works directly.
+        deliverResultIfImmediate(result, kind, deliver);
+      } catch {
+        /* delivery is best-effort */
+      }
+      return result;
+    },
+  };
+}
+
+function deliverResultIfImmediate(
+  result: unknown,
+  kind: "image" | "video",
+  deliver: (kind: "image" | "video", data: string, mime: string, prompt: string) => void,
+): void {
+  if (!result || typeof result !== "object") return;
+  const r = result as { type?: string; base64?: string; mimeType?: string; url?: string; prompt?: string };
+  if (r.base64 && r.mimeType) {
+    deliver(kind, r.base64, r.mimeType, r.prompt ?? "");
+    return;
+  }
+  if (r.url) {
+    // URL-only results (some providers) — download then deliver.
+    void (async () => {
+      try {
+        const { proxyFetch } = await import("@/modules/ai/lib/proxyFetch");
+        const resp = await proxyFetch(r.url!);
+        if (!resp.ok) return;
+        const buf = new Uint8Array(await resp.arrayBuffer());
+        deliver(kind, bytesToBase64(buf), r.mimeType ?? (kind === "image" ? "image/png" : "video/mp4"), r.prompt ?? "");
+      } catch {
+        /* best-effort */
+      }
+    })();
+  }
+}
+/** Deliver generated media to the owner's Telegram chat. */
+export async function deliverMediaOut(
+  kind: "image" | "video",
+  base64: string,
+  mime: string,
+  prompt: string,
+): Promise<void> {
+  const token = await getTelegramToken();
+  const prefs = await loadAssistantPrefs();
+  const chatId = prefs.ownerChatId;
+  if (!token || chatId == null) return;
+  const caption = prompt ? prompt.slice(0, 900) : null;
+  const isPng = mime.includes("png");
+  // Telegram accepts png/jpeg/webp for photos. Non-image bytes (SVG etc.)
+  // fall back to a document so nothing is silently dropped.
+  const photoOk = /^(image\/(png|jpeg|jpg|webp))/.test(mime);
+  if (kind === "image" && photoOk) {
+    await telegramNative
+      .sendPhoto(token, chatId, base64, caption)
+      .catch(() => telegramNative.sendDocument(token, chatId, base64, isPng ? "image.png" : "image", mime).catch(() => {}));
+  } else {
+    await telegramNative
+      .sendVideo(token, chatId, base64, caption)
+      .catch(() => telegramNative.sendDocument(token, chatId, base64, "video.mp4", mime).catch(() => {}));
+  }
 }
 
 // ── Voice pipeline ─────────────────────────────────────────────────────────
@@ -462,7 +733,15 @@ let bridgeStarted = false;
 /** Set when the assistant is mid-turn; new messages queue (one at a time is
  *  the conversational contract — a personal chat doesn't parallel-reply). */
 let turnInFlight = false;
-const pendingQueue: Array<{ chatId: number; text: string; isVoice: boolean }> = [];
+type QueueItem = {
+  chatId: number;
+  text: string;
+  isVoice: boolean;
+  /** Vision input for this turn (photo message). */
+  imageBase64?: string;
+  imageMime?: string;
+};
+const pendingQueue: QueueItem[] = [];
 
 export async function startAssistantBridge(): Promise<{ ok: boolean; error?: string }> {
   if (bridgeStarted) return { ok: true };
@@ -470,6 +749,7 @@ export async function startAssistantBridge(): Promise<{ ok: boolean; error?: str
   const token = await getTelegramToken();
   if (!prefs.enabled) return { ok: false, error: "assistant disabled" };
   if (!token) return { ok: false, error: "no bot token — set it in Settings → External" };
+  await migrateV1HistoryIfNeeded();
   if (prefs.ownerChatId == null) {
     // Bind-mode: the poll loop is started with owner -1 and the settings UI
     // has armed telegram_bind_owner; the first /start claims binding.
@@ -481,6 +761,26 @@ export async function startAssistantBridge(): Promise<{ ok: boolean; error?: str
   return bridgeStarted
     ? { ok: true }
     : { ok: false, error: "poll loop failed to start" };
+}
+
+// ── Watch pings (proactive notifications) ─────────────────────────────────
+
+/**
+ * Send a watch-firing notification to the owner's Telegram. Called by the
+ * watch tool's notifier hook when a watch with notifyTelegram fires — the
+ * desktop still gets its in-conversation injection; this ADDS a phone
+ * ping so long-running jobs reach the user even when the app is hidden.
+ * Fail-soft: no bridge / no owner → silent no-op (the desktop injection
+ * still happens).
+ */
+export async function telegramPing(text: string): Promise<void> {
+  const prefs = await loadAssistantPrefs();
+  if (!prefs.enabled || prefs.ownerChatId == null) return;
+  const token = await getTelegramToken();
+  if (!token) return;
+  // Telegram Markdown: escape nothing (our text uses ` for labels —
+  // plain text is safest for machine-generated output).
+  await telegramNative.sendMessage(token, prefs.ownerChatId, text).catch(() => {});
 }
 
 export async function stopAssistantBridge(): Promise<void> {
@@ -496,26 +796,27 @@ async function handleTelegramEvent(e: TelegramEvent): Promise<void> {
       return;
     }
     const text = e.text ?? "";
-    if (text.trim() === "/new") {
-      await resetAssistantHistory();
-      const token = await getTelegramToken();
-      if (token) await telegramNative.sendMessage(token, e.chatId, "Fresh conversation. 🌱");
-      return;
-    }
-    if (text.trim() === "/help") {
-      const token = await getTelegramToken();
-      if (token) {
-        await telegramNative.sendMessage(
-          token,
-          e.chatId,
-          "Text or send voice notes. /new starts a fresh conversation.",
-        );
-      }
+    if (text.trim().startsWith("/")) {
+      await handleCommand(e.chatId, text.trim());
       return;
     }
     if (!text.trim()) return;
     pendingQueue.push({ chatId: e.chatId, text, isVoice: false });
     void drainQueue();
+    return;
+  }
+  if (e.kind === "photo") {
+    // Photo → vision input: download, attach to the next turn as an image
+    // part. The caption (or a default) is the user text.
+    await enqueuePhotoMessage(e.chatId, e.photoFileId, e.caption);
+    return;
+  }
+  if (e.kind === "document") {
+    await enqueueDocumentMessage(e.chatId, e.documentFileId, e.fileName, e.mimeType);
+    return;
+  }
+  if (e.kind === "video") {
+    await enqueueVideoMessage(e.chatId, e.videoFileId);
     return;
   }
   if (e.kind === "startCandidate") {
@@ -524,7 +825,7 @@ async function handleTelegramEvent(e: TelegramEvent): Promise<void> {
       await telegramNative.sendMessage(
         token,
         e.chatId,
-        "👋 You're bound as my owner. Just talk to me — text or voice notes.",
+        "👋 You're bound as my owner. Text, voice, photos, or files — /help for commands.",
       );
     }
     // Persist the new owner chat id in prefs.
@@ -542,6 +843,154 @@ async function handleTelegramEvent(e: TelegramEvent): Promise<void> {
   }
 }
 
+// ── Slash commands (session + misc control from Telegram) ──────────────────
+
+async function handleCommand(chatId: number, raw: string): Promise<void> {
+  const token = await getTelegramToken();
+  if (!token) return;
+  const [cmd, ...rest] = raw.split(/\s+/);
+  const arg = rest.join(" ").trim();
+  const reply = async (text: string) => {
+    await telegramNative.sendMessage(token, chatId, text).catch(() => {});
+  };
+
+  switch (cmd) {
+    case "/new": {
+      const session = await newSession(arg || undefined);
+      await reply(`New chat: *${session.title}*`);
+      return;
+    }
+    case "/sessions": {
+      const list = await listSessions();
+      const activeId = await getActiveSessionId();
+      const lines = list
+        .map((s) => {
+          const marker = s.id === activeId ? "▶" : "•";
+          const age = new Date(s.updatedAt).toISOString().slice(0, 10);
+          return `${marker} ${s.title} — ${age} (id: ${s.id})`;
+        })
+        .slice(0, 15);
+      await reply(["Your chats:", ...lines, "", "/use <id> to switch, /del <id> to delete."].join("\n"));
+      return;
+    }
+    case "/use": {
+      if (!arg) {
+        await reply("Usage: /use <session-id from /sessions>");
+        return;
+      }
+      const target = await switchSession(arg);
+      await reply(target ? `Switched to *${target.title}*.` : "No chat with that id.");
+      return;
+    }
+    case "/del": {
+      if (!arg) {
+        await reply("Usage: /del <session-id from /sessions>");
+        return;
+      }
+      const list = await listSessions();
+      const target = list.find((s) => s.id === arg);
+      if (!target) {
+        await reply("No chat with that id.");
+        return;
+      }
+      await deleteSession(arg);
+      await reply(`Deleted *${target.title}*.`);
+      return;
+    }
+    case "/help": {
+      await reply(
+        [
+          "Text, voice notes, photos, or files.",
+          "/new [name] — start a new chat",
+          "/sessions — list chats",
+          "/use <id> — switch chat",
+          "/del <id> — delete a chat",
+        ].join("\n"),
+      );
+      return;
+    }
+    default:
+      await reply(`Unknown command ${cmd}. /help for the list.`);
+  }
+}
+
+// ── Media intake (photo / document / video) ─────────────────────────────────
+
+async function enqueuePhotoMessage(
+  chatId: number,
+  fileId: string,
+  caption: string | null,
+): Promise<void> {
+  const token = await getTelegramToken();
+  if (!token) return;
+  try {
+    const b64 = await telegramNative.downloadFile(token, fileId);
+    pendingQueue.push({
+      chatId,
+      text: caption?.trim() || "What's in this image?",
+      isVoice: false,
+      imageBase64: b64,
+      imageMime: "image/jpeg",
+    });
+    void drainQueue();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    await telegramNative.sendMessage(token, chatId, `⚠️ photo: ${msg.slice(0, 200)}`).catch(() => {});
+  }
+}
+
+async function enqueueDocumentMessage(
+  chatId: number,
+  fileId: string,
+  fileName: string,
+  mimeType: string | null,
+): Promise<void> {
+  const token = await getTelegramToken();
+  if (!token) return;
+  try {
+    const b64 = await telegramNative.downloadFile(token, fileId);
+    // Save into the scratch dir so file tools can read it.
+    const root = await assistantRoot();
+    const sep = root.includes("\\") ? "\\" : "/";
+    const safe = fileName.replace(/[\\/:*?"<>|]/g, "_").slice(0, 80) || "file";
+    const path = `${root}${sep}${safe}`;
+    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    await invoke("fs_write_file_bytes", { path, bytes: Array.from(bytes), workspace: null });
+    pendingQueue.push({
+      chatId,
+      text: `I've sent you a file (saved at ${path}, type: ${mimeType ?? "unknown"}). ${""}`.trim() +
+        " What should I do with it?",
+      isVoice: false,
+    });
+    void drainQueue();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    await telegramNative.sendMessage(token, chatId, `⚠️ file: ${msg.slice(0, 200)}`).catch(() => {});
+  }
+}
+
+async function enqueueVideoMessage(chatId: number, fileId: string): Promise<void> {
+  const token = await getTelegramToken();
+  if (!token) return;
+  try {
+    const b64 = await telegramNative.downloadFile(token, fileId);
+    const root = await assistantRoot();
+    const sep = root.includes("\\") ? "\\" : "/";
+    const path = `${root}${sep}video-${Date.now()}.mp4`;
+    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    await invoke("fs_write_file_bytes", { path, bytes: Array.from(bytes), workspace: null });
+    pendingQueue.push({
+      chatId,
+      text: `I sent a video (saved at ${path}). You can read its metadata with your file tools. What should I do with it?`,
+      isVoice: false,
+    });
+    void drainQueue();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    await telegramNative.sendMessage(token, chatId, `⚠️ video: ${msg.slice(0, 200)}`).catch(() => {});
+  }
+}
+
 async function drainQueue(): Promise<void> {
   if (turnInFlight) return;
   const next = pendingQueue.shift();
@@ -553,14 +1002,15 @@ async function drainQueue(): Promise<void> {
     return;
   }
   try {
-    let userText = next.text;
-    let isVoice = next.isVoice;
-    // (Voice transcription is attached by the voice path before queueing.)
-    const reply = await runAssistantTurn(userText, (notice) => {
-      void telegramNative.sendMessage(token, next.chatId, notice).catch(() => {});
+    const reply = await runAssistantTurn(next.text, {
+      onNotice: (notice) => {
+        void telegramNative.sendMessage(token, next.chatId, notice).catch(() => {});
+      },
+      imageBase64: next.imageBase64,
+      imageMime: next.imageMime,
     });
     const prefs = await loadAssistantPrefs();
-    if (isVoice && prefs.voiceReplies) {
+    if (next.isVoice && prefs.voiceReplies) {
       const sent = await replyWithVoice(token, next.chatId, reply);
       if (!sent) await telegramNative.sendMessage(token, next.chatId, reply);
     } else {

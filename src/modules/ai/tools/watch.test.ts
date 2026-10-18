@@ -193,3 +193,21 @@ describe("watch registry lifecycle", () => {
     expect(watchModule.listWatches().every((w) => w.sessionId !== "session-a")).toBe(true);
   });
 });
+
+describe("notify_telegram (schema field → WatchConfig)", () => {
+  // The schema exposes notify_telegram; the config carries notifyTelegram.
+  // Contract test: the field name must survive the snake→camel boundary —
+  // a dropped param would silently disable phone pings (the voice_arg bug
+  // class: unknown keys are silently ignored by the AI SDK).
+  it("is described in the watch_create schema", async () => {
+    const src = await import("node:fs").then((fs) =>
+      fs.readFileSync(new URL("./watch.ts", import.meta.url), "utf8"),
+    );
+    expect(src).toContain("notify_telegram: z.boolean().optional()");
+    expect(src).toContain("notifyTelegram: notify_telegram === true");
+    // And the firing path actually pings when the flag is set.
+    expect(src).toContain("if (w.notifyTelegram)");
+    expect(src).toContain("telegramPing");
+  });
+});
+
