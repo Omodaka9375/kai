@@ -4,6 +4,12 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.7.2]
+
+- Settings: the File menu now includes External, making the Telegram assistant setup reachable from the menu.
+
+---
+
 ## [1.7.1]
 
 - AI tools: write_file refuses to overwrite a file from a partial read — reads truncated by size caps or shown as unchanged previews are now tracked, so a rewrite can no longer silently drop unseen content.
