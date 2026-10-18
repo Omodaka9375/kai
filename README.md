@@ -29,6 +29,8 @@ Kai is a fast, cross-platform terminal built on **Tauri 2 + Rust** and **React 1
 
 - [Features](#features) · [Agent Personas](#agent-personas) · [Install](#install) · [Quick Start](#quick-start) · [Keyboard Shortcuts](#keyboard-shortcuts) · [Configuration Guides](#configuration-guides) · [Build from Source](#build-from-source) · [Tech Stack](#tech-stack)
 
+> New: [Personal Assistant over Telegram](#5-personal-assistant-on-telegram) — chat with KAI from your phone.
+
 ## Features
 
 ### Terminal
@@ -57,6 +59,7 @@ Kai is a fast, cross-platform terminal built on **Tauri 2 + Rust** and **React 1
 - Per-model thinking control — a toggle on each reasoning model cycles effort off/low/medium/high
 - Multi-step goals with automation, plan mode (queue edits for review as one diff), and sub-agents (explore / code-review / security / research)
 - Conversation forking and merging — branch any message into a parallel thread, then merge it back or into another thread
+- Watch monitoring — the agent polls any shell command on an interval and reports back when it matches (`watch_create`), with optional Telegram pings when you're away
 
 ### Image & Video Generation
 
@@ -84,6 +87,17 @@ Kai is a fast, cross-platform terminal built on **Tauri 2 + Rust** and **React 1
 - `Kai.md` project memory, context summarization, and auto-approve modes — plus save/red persistent memory tools the agent can use mid-session
 - Skills & snippets
 - Per-project **sandbox** (read-only or workspace-only) and a **detached-copy** workflow — work in an isolated copy, then merge or discard
+
+### Personal Assistant
+
+- **Telegram bridge** — chat with KAI from your phone via your own bot (Settings → External): text and voice notes, answered by the same models, tools, and MCP servers you use on the desktop
+- Voice notes are transcribed and answered with spoken replies (your configured STT/TTS engines; ffmpeg bridges Telegram's audio format)
+- **Owner-locked** — the first `/start` binds your Telegram account; every other account is silently ignored
+- Multiple named chats from Telegram — `/new`, `/sessions`, `/use`, `/del`
+- Send photos the model can see, or files it can work on (saved to a scratch folder)
+- Generated images and videos are delivered straight to your chat
+- `watch_create` with `notify_telegram` pings your phone when a long-running job finishes
+- **Fenced by design** — file and shell tools are limited to a scratch folder (`~/.kai/assistant`), never your projects or home directory; the desktop app must be running (tray is fine) for the bot to answer
 
 ## Agent Personas
 
@@ -169,6 +183,23 @@ KAI's built-in AI agent is BYOK — Anthropic models selected in **Settings → 
 4. Give Claude Code its own terminal tab. KAI keeps background PTYs alive across tab switches, so the session keeps running while you work in the editor.
 
 > **Why the terminal**: per Anthropic's terms, Claude subscription auth is only for its official clients (Claude Code, claude.ai). Running the official CLI in a terminal is the supported way to use your subscription; KAI's own AI agent remains API-key based and unaffected.
+
+### 5. Personal Assistant on Telegram
+
+KAI can run a personal-assistant bot on your Telegram account — the same agent, tools, and MCP servers, reachable from your phone.
+
+1. In Telegram, message **@BotFather** → `/newbot` → follow the prompts and copy the token.
+2. In KAI, open **Settings → External**, paste the token, press **Test** (it shows your bot's `@username`), then toggle **Telegram** on.
+3. From Telegram, send `/start` to your bot. The **first account** to do so is bound as its owner — the bot ignores everyone else, permanently.
+4. Chat by text or voice notes. `/new [name]` starts a fresh conversation, `/sessions` lists them, `/use <id>` switches, `/del <id>` deletes. `/help` lists all commands.
+
+Notes:
+
+- **Safety**: file and shell tools are fenced to a scratch folder (`~/.kai/assistant`) — your projects and home directory are off-limits. Web search/browse and MCP tools work normally.
+- **Voice**: voice notes are transcribed with your configured STT engine and answered with TTS (Settings → Voice). [ffmpeg](https://ffmpeg.org) must be on PATH for Telegram's audio format.
+- **Media**: send photos and the model sees them; ask it to generate images or videos and they arrive in the chat.
+- **Watches**: `watch_create` with `notify_telegram: true` pings your phone when the watch fires.
+- The desktop app must be running (tray is fine) for the bot to answer.
 
 ## Build from Source
 
