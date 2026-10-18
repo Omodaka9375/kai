@@ -470,7 +470,12 @@ export default function App() {
     if (!prefsHydrated) return;
     const s = usePreferencesStore.getState();
     sidebarWidthRef.current = s.sidebarWidth;
-    setSidebarViewState(s.sidebarView);
+    // ALWAYS start on the file tree. The persisted view is intentionally not
+    // restored here: if source-control was the last view, every launch opened
+    // the git panel first — it kicks off its snapshot + auto-fetch at mount
+    // and races the file tree / PTY init for the main thread, which reads as
+    // startup lag. The git panel is one click away on the rail when wanted.
+    setSidebarViewState("explorer");
 
     const applyWidth = () => {
       const panel = sidebarRef.current;
