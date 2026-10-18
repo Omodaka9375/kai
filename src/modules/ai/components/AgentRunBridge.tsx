@@ -247,19 +247,56 @@ function Bridge({
   // TTS mode other than "off" IS the opt-in — there is no separate checkbox.
   // Tracked with a ref so a re-mount (session switch) doesn't re-speak an
   // old message: only transitions count.
+  //
+  // Two-phase on purpose: useChat throttles MESSAGE notifications
+  // (experimental_throttle: 50) but NOT status notifications, so at end of
+  // run the status flips to idle up to 50ms before the final message commit
+  // lands. Acting on the status change alone reads a stale messages array
+  // and speaks the PREVIOUS turn's reply (always one turn behind). Phase 1
+  // (the transition) only arms runEndedRef; phase 2 — re-entered when the
+  // final messages land — actually speaks.
   const ttsActive = usePreferencesStore((s) => s.voiceTtsMode !== "off");
   const spokenForRef = useRef<string | null>(null);
   const prevStatusRef = useRef(status);
+  const prevSessionRef = useRef(sessionId);
+  // True between a streaming→idle transition and the speak actually firing.
+  const runEndedRef = useRef(false);
+  // Latest render's state, read at speak time (after messages settle).
+  const statusRef = useRef(status);
+  statusRef.current = status;
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
   useEffect(() => {
+    // Session switch: refs carry over (Bridge is not remounted), so reset the
+    // transition tracking rather than speaking the new session's old tail.
+    if (prevSessionRef.current !== sessionId) {
+      prevSessionRef.current = sessionId;
+      prevStatusRef.current = status;
+      runEndedRef.current = false;
+      return;
+    }
     const wasStreaming = prevStatusRef.current === "streaming";
     prevStatusRef.current = status;
-    if (!ttsActive || !wasStreaming || status === "submitted" || status === "streaming") {
+    if (!ttsActive) {
+      runEndedRef.current = false;
+      return;
+    }
+    if (wasStreaming && status !== "submitted" && status !== "streaming") {
+      // A run just settled — arm the speak (fires once messages settle).
+      runEndedRef.current = true;
+    }
+    if (!runEndedRef.current) return;
+    if (status === "submitted" || status === "streaming") {
+      // A NEW run started before the settled one produced speakable text —
+      // disarm so it can never speak a stale message from an earlier turn.
+      runEndedRef.current = false;
       return;
     }
     // The last assistant message that has text is the reply just finished.
+    const msgs = messagesRef.current;
     let text = "";
-    for (let i = messages.length - 1; i >= 0 && !text; i--) {
-      const m = messages[i];
+    for (let i = msgs.length - 1; i >= 0 && !text; i--) {
+      const m = msgs[i];
       if (m.role !== "assistant") continue;
       text = m.parts
         .filter((p): p is { type: "text"; text: string } => p.type === "text")
@@ -267,8 +304,10 @@ function Bridge({
         .join(" ")
         .trim();
     }
-    const key = `${sessionId}:${messages.length}`;
-    if (!text || spokenForRef.current === key) return;
+    if (!text) return; // final message not landed yet (throttle trailing edge)
+    const key = `${sessionId}:${msgs.length}`;
+    runEndedRef.current = false;
+    if (spokenForRef.current === key) return;
     spokenForRef.current = key;
     void speakText(text);
   }, [status, ttsActive, messages, sessionId]);
