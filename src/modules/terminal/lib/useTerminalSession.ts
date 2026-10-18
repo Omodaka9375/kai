@@ -10,6 +10,7 @@ import {
   registerCwdHandler,
   registerPromptTracker,
 } from "./osc-handlers";
+import { registerOscImageHandler } from "./oscImage";
 import { openPty, type PtySession } from "./pty-bridge";
 import {
   acquireSlot,
@@ -449,7 +450,10 @@ function bindLeafToSlot(leafId: number, s: Session): void {
           },
           shellState,
         );
-        return [prompt.dispose, cwd];
+        // OSC 1337 — iTerm2 inline images (display_image tool, shell-side
+        // imgcat-style output). Renders via decoration; see oscImage.ts.
+        const images = registerOscImageHandler(term);
+        return [prompt.dispose, cwd, images];
       },
       onSearchReady: (addon) => s.callbacks.onSearchReady?.(addon),
     });

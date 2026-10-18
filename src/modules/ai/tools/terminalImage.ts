@@ -71,7 +71,13 @@ export function buildTerminalImageTools(ctx: ToolContext) {
         }
         const sizeBytes = Math.ceil((base64_data.length * 3) / 4);
         const seq = buildOsc1337(base64_data, imgName, sizeBytes);
-        const ok = ctx.injectIntoActivePty(seq);
+        // DISPLAY write, not shell stdin: the OSC 1337 sequence must reach the
+        // xterm parser (which renders it as an inline decoration), never the
+        // shell's input stream — typing megabytes of base64 into a live prompt
+        // would execute garbage or wedge the shell.
+        const ok = ctx.writeToActiveTerminalDisplay
+          ? ctx.writeToActiveTerminalDisplay(seq)
+          : ctx.injectIntoActivePty(seq); // legacy contexts (tests) fallback
         if (!ok) return { error: "no active terminal tab to display into" };
         return {
           ok: true,

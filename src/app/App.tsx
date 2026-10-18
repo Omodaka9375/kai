@@ -1508,6 +1508,32 @@ export default function App() {
         term.focus();
         return true;
       },
+      // DISPLAY write — raw bytes into the xterm parser of the terminal pane,
+      // NOT shell stdin. The injector above is the shell-input path (used by
+      // approval-run commands); escape sequences like OSC 1337 inline images
+      // must be interpreted by the terminal, never typed into the shell.
+      writeToActiveTerminalDisplay: (data) => {
+        const isTerminalLike = (
+          x: (typeof tabs)[number] | undefined,
+        ): x is (typeof tabs)[number] & { activeLeafId: number } =>
+          !!x && x.kind === "terminal";
+        const active = tabs.find((x) => x.id === activeId);
+        const last = tabs.find((x) => x.id === lastTerminalTabIdRef.current);
+        const newest = [...tabs].reverse().find((x) => x.kind === "terminal");
+        const t = isTerminalLike(active)
+          ? active
+          : isTerminalLike(last)
+            ? last
+            : isTerminalLike(newest)
+              ? newest
+              : null;
+        if (!t) return false;
+        const term = terminalRefs.current.get(t.activeLeafId);
+        if (!term) return false;
+        // No focus steal — displaying an image shouldn't yank keyboard focus.
+        term.write(data);
+        return true;
+      },
       getWorkspaceRoot: () => explorerRoot ?? launchCwd ?? home ?? null,
       getActiveFile: () => {
         const t = tabs.find((x) => x.id === activeId);

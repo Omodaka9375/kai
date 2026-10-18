@@ -53,6 +53,8 @@ type Live = {
   getTerminalContext: () => string | null;
   isActiveTerminalPrivate: () => boolean;
   injectIntoActivePty: (text: string) => boolean;
+  /** Raw write to the active terminal's DISPLAY (xterm parser), not shell stdin. */
+  writeToActiveTerminalDisplay: (text: string) => boolean;
   getWorkspaceRoot: () => string | null;
   getActiveFile: () => string | null;
   openPreview: (url: string) => boolean;
@@ -324,6 +326,7 @@ const NOOP_LIVE: Live = {
   getTerminalContext: () => null,
   isActiveTerminalPrivate: () => false,
   injectIntoActivePty: () => false,
+  writeToActiveTerminalDisplay: () => false,
   getWorkspaceRoot: () => null,
   getActiveFile: () => null,
   openPreview: () => false,
@@ -483,6 +486,8 @@ const runtimeDeps: ChatRuntimeDeps = {
       useChatStore.getState().live.isActiveTerminalPrivate(),
     injectIntoActivePty: (text) =>
       useChatStore.getState().live.injectIntoActivePty(text),
+    writeToActiveTerminalDisplay: (text) =>
+      useChatStore.getState().live.writeToActiveTerminalDisplay(text),
     getWorkspaceRoot: () => useChatStore.getState().live.getWorkspaceRoot(),
     openPreview: (url) => useChatStore.getState().live.openPreview(url),
   },
