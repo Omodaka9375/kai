@@ -203,6 +203,17 @@ fn get_launch_dir(state: State<'_, LaunchDir>) -> Option<String> {
     mutex_lock(&state.0).take()
 }
 
+/// Home directory (forward- or backslash per-OS) — used by the assistant
+/// module to resolve ~/.kai/assistant. Raw home path, no shadowing.
+/// NOTE: NOT `pub fn` — a pub Tauri command at the crate root makes the
+/// macro re-export its own __cmd__ marker and collide (E0255).
+#[tauri::command]
+fn kai_home_dir() -> Result<String, String> {
+    dirs::home_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .ok_or_else(|| "no home directory".to_string())
+}
+
 fn parse_launch_dir() -> Option<String> {
     parse_launch_dir_from(std::env::args().skip(1))
 }
@@ -291,7 +302,7 @@ fn settings_panel_key(tab: Option<&str>) -> String {
     };
     if matches!(
         key.as_str(),
-        "general" | "shortcuts" | "models" | "agents" | "snippets" | "mcp" | "sandbox" | "voice" | "about"
+        "general" | "shortcuts" | "models" | "agents" | "snippets" | "mcp" | "sandbox" | "voice" | "external" | "about"
     ) {
         key
     } else {
@@ -310,6 +321,7 @@ fn settings_panel_title(key: &str) -> String {
         "mcp" => "MCP Servers",
         "sandbox" => "Sandbox",
         "voice" => "Voice",
+        "external" => "External",
         _ => "About",
     };
     format!("KAI — {name}")
@@ -467,6 +479,7 @@ pub fn run() {
                     "settings-mcp",
                     "settings-sandbox",
                     "settings-voice",
+                    "settings-external",
                     "settings-about",
                 ])
                 // Key window geometry per project so two instances on different
@@ -711,6 +724,7 @@ app.manage(Mutex::new(None::<fs::env_probe::EnvInventory>));
             diagnostics::diagnostics_collect,
             diagnostics::health_counts,
             get_launch_dir,
+            kai_home_dir,
             open_settings_window,
             modules::updater::update_install,
             pick_project_folder,
@@ -718,6 +732,15 @@ app.manage(Mutex::new(None::<fs::env_probe::EnvInventory>));
             secrets::secrets_set,
             secrets::secrets_delete,
             secrets::secrets_get_all,
+            modules::telegram::telegram_start,
+            modules::telegram::telegram_stop,
+            modules::telegram::telegram_bind_owner,
+            modules::telegram::telegram_clear_owner,
+            modules::telegram::telegram_status,
+            modules::telegram::telegram_test,
+            modules::telegram::telegram_send_message,
+            modules::telegram::telegram_send_voice,
+            modules::telegram::telegram_download_voice,
             mcp::mcp_stdio_open,
             mcp::mcp_stdio_send,
             mcp::mcp_stdio_close,

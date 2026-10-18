@@ -1,0 +1,581 @@
+//! Telegram bot bridge — the "External / personal assistant" channel.
+//!
+//! WHY THIS IS A RUST THREAD, not a webview setInterval: long-polling
+//! `getUpdates` holds a request open for up to 50 seconds. WebView2 (and
+//! hidden browser windows generally) throttle timers and even fetch
+//! scheduling on hidden pages — the same reason `modules::heartbeat` exists.
+//! A dedicated thread owns the poll loop and forwards each update over a
+//! Tauri `Channel` (IPC delivery is NOT throttled).
+//!
+//! SECURITY MODEL:
+//!   - The bot token lives in the OS keyring (service `kai`, key
+//!     `telegram_bot_token`) — never in the settings store.
+//!   - OWNER BINDING is mandatory: `telegram_owner_chat_id` records the
+//!     chat id of the FIRST user to `/start` the bot (and only when the
+//!     frontend allows binding — see `telegram_bind_owner`). Every other
+//!     chat is rejected silently. A bot token is an internet-reachable
+//!     handle to an agent with tool access; without the gate, anyone who
+//!     discovers the bot gets the assistant.
+//!
+//! Transcoding: Telegram voice is OGG/Opus; the local STT wants WAV and the
+//! local TTS emits WAV. ffmpeg bridges both directions when it is on PATH
+//! (fail-soft: text-only replies when absent).
+
+use std::io::Write;
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::{LazyLock, Mutex};
+use std::time::Duration;
+
+use base64::Engine;
+use serde::{Deserialize, Serialize};
+use tauri::ipc::Channel;
+use tokio::runtime::Runtime;
+
+static RUNNING: AtomicBool = AtomicBool::new(false);
+static POLL_SHUTDOWN: AtomicBool = AtomicBool::new(false);
+static OWNER_CHAT_ID: AtomicI64 = AtomicI64::new(-1);
+
+/// Pending owner binding: set by `telegram_bind_owner`, consumed by the
+/// FIRST `/start` that arrives after it (single-use handshake token).
+static BIND_MODE: AtomicBool = AtomicBool::new(false);
+
+static LAST_UPDATE_ID: LazyLock<Mutex<i64>> = LazyLock::new(|| Mutex::new(0));
+
+const API: &str = "https://api.telegram.org";
+/// getUpdates hold time. Telegram caps at 50s; the frontend agent replies
+/// happen on the main runtime, this loop only delivers updates.
+const LONG_POLL_SECS: u64 = 40;
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum TelegramEvent {
+    /// An incoming message (text or voice) from the owner.
+    Message {
+        chat_id: i64,
+        message_id: i64,
+        /// None for voice messages (then `file_id` is set).
+        text: Option<String>,
+        /// Telegram file_id of a voice note, when the message is voice.
+        voice_file_id: Option<String>,
+        /// Seconds of voice duration (for the STT size gate).
+        voice_duration_secs: Option<i64>,
+        date: i64,
+    },
+    /// Owner not yet bound — this /start may claim binding.
+    StartCandidate { chat_id: i64, message_id: i64, date: i64 },
+    /// Message from a non-owner chat (silently ignored by the agent).
+    Rejected { chat_id: i64, date: i64 },
+    /// Loop-level error (network down, token revoked). Reportable, not fatal.
+    Error { message: String },
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TelegramStatus {
+    pub running: bool,
+    pub owner_chat_id: Option<i64>,
+    /// Bot username from getMe — filled by `telegram_test`.
+    pub bot_username: Option<String>,
+}
+
+fn api_url(token: &str, method: &str) -> String {
+    format!("{API}/bot{token}/{method}")
+}
+
+async fn post_json<T: serde::de::DeserializeOwned>(
+    token: &str,
+    method: &str,
+    body: &serde_json::Value,
+) -> Result<T, String> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(60))
+        .build()
+        .map_err(|e| format!("client build: {e}"))?;
+    let resp = client
+        .post(api_url(token, method))
+        .json(body)
+        .send()
+        .await
+        .map_err(|e| format!("{method}: {e}"))?;
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(format!("{method} HTTP {status}: {}", text.chars().take(300).collect::<String>()));
+    }
+    // Telegram wraps everything in { ok: bool, result: T | description }.
+    #[derive(Deserialize)]
+    struct Envelope<T> {
+        ok: bool,
+        result: Option<T>,
+        description: Option<String>,
+    }
+    let env: Envelope<T> =
+        serde_json::from_str(&text).map_err(|e| format!("{method} decode: {e}"))?;
+    if !env.ok {
+        return Err(format!("{method}: {}", env.description.unwrap_or_else(|| "unknown".into())));
+    }
+    env.result.ok_or_else(|| format!("{method}: empty result"))
+}
+
+#[derive(Debug, Deserialize)]
+struct TgMessage {
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(default)]
+    voice: Option<TgVoice>,
+    #[serde(default)]
+    chat: Option<TgChat>,
+    #[serde(default)]
+    message_id: Option<i64>,
+    #[serde(default)]
+    date: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TgVoice {
+    #[serde(default)]
+    file_id: Option<String>,
+    #[serde(default)]
+    duration: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TgChat {
+    #[serde(default)]
+    id: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TgUpdate {
+    #[serde(default)]
+    update_id: i64,
+    #[serde(default)]
+    message: Option<TgMessage>,
+}
+
+/// Minimal getUpdates result — we only need message updates.
+async fn poll_once(
+    client: &reqwest::Client,
+    token: &str,
+    offset: i64,
+) -> Result<Vec<TgUpdate>, String> {
+    let resp = client
+        .post(api_url(token, "getUpdates"))
+        .json(&serde_json::json!({
+            "offset": offset,
+            "timeout": LONG_POLL_SECS as i64,
+            "allowed_updates": ["message"],
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("getUpdates: {e}"))?;
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(format!("getUpdates HTTP {status}"));
+    }
+    #[derive(Deserialize)]
+    struct Envelope {
+        ok: bool,
+        #[serde(default)]
+        result: Vec<TgUpdate>,
+        #[serde(default)]
+        description: Option<String>,
+    }
+    let env: Envelope = serde_json::from_str(&text).map_err(|e| format!("decode: {e}"))?;
+    if !env.ok {
+        return Err(env.description.unwrap_or_else(|| "getUpdates failed".into()));
+    }
+    Ok(env.result)
+}
+
+/// Classify one update against the owner gate and emit the right event.
+fn classify(update: &TgUpdate, channel: &Channel<TelegramEvent>) -> Option<i64> {
+    let msg = update.message.as_ref()?;
+    let chat_id = msg.chat.as_ref()?.id?;
+    let message_id = msg.message_id.unwrap_or(0);
+    let date = msg.date.unwrap_or(0);
+
+    // Owner gate. -1 = unbound.
+    let owner = OWNER_CHAT_ID.load(Ordering::SeqCst);
+    let is_start = msg.text.as_deref().map(|t| t.trim() == "/start").unwrap_or(false);
+
+    if owner == -1 && is_start {
+        if BIND_MODE.swap(false, Ordering::SeqCst) {
+            // Claim binding — this chat becomes the owner.
+            OWNER_CHAT_ID.store(chat_id, Ordering::SeqCst);
+            let _ = channel.send(TelegramEvent::StartCandidate { chat_id, message_id, date });
+            return Some(chat_id);
+        }
+        // Not in bind mode: drop silently (no owner leak, no response).
+        return None;
+    }
+    if owner != -1 && chat_id != owner {
+        let _ = channel.send(TelegramEvent::Rejected { chat_id, date });
+        return None;
+    }
+    if owner == -1 {
+        // Unbound and not a bindable /start — drop.
+        return None;
+    }
+
+    if let Some(voice) = &msg.voice {
+        let _ = channel.send(TelegramEvent::Message {
+            chat_id,
+            message_id,
+            text: None,
+            voice_file_id: voice.file_id.clone(),
+            voice_duration_secs: voice.duration,
+            date,
+        });
+    } else if let Some(text) = &msg.text {
+        let _ = channel.send(TelegramEvent::Message {
+            chat_id,
+            message_id,
+            text: Some(text.clone()),
+            voice_file_id: None,
+            voice_duration_secs: None,
+            date,
+        });
+    }
+    Some(chat_id)
+}
+
+/// Start the long-poll thread. Called from the settings UI (and app start
+/// when the assistant is enabled). Restartable: starting while running is a
+/// no-op except for refreshing the channel.
+#[tauri::command]
+pub async fn telegram_start(
+    token: String,
+    owner_chat_id: Option<i64>,
+    on_event: Channel<TelegramEvent>,
+) -> Result<TelegramStatus, String> {
+    if token.trim().is_empty() {
+        return Err("bot token is empty".into());
+    }
+    OWNER_CHAT_ID.store(owner_chat_id.unwrap_or(-1), Ordering::SeqCst);
+    if RUNNING.swap(true, Ordering::SeqCst) {
+        // Already running — return current status (loop keeps its channel).
+        return Ok(status());
+    }
+    POLL_SHUTDOWN.store(false, Ordering::SeqCst);
+
+    // Tokio runtime for this thread's async work (the main Tauri runtime is
+    // busy with commands; a dedicated 1-thread runtime matches net.rs use).
+    std::thread::spawn(move || {
+        let rt = match Runtime::new() {
+            Ok(rt) => rt,
+            Err(e) => {
+                RUNNING.store(false, Ordering::SeqCst);
+                let _ = on_event.send(TelegramEvent::Error { message: format!("runtime: {e}") });
+                return;
+            }
+        };
+        rt.block_on(async move {
+            let client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(LONG_POLL_SECS + 15))
+                .build()
+                .expect("reqwest client");
+            loop {
+                if POLL_SHUTDOWN.load(Ordering::SeqCst) {
+                    break;
+                }
+                let offset = {
+                    let last = crate::modules::lock::mutex_lock(&LAST_UPDATE_ID);
+                    *last + 1
+                };
+                match poll_once(&client, &token, offset).await {
+                    Ok(updates) => {
+                        for u in &updates {
+                            classify(u, &on_event);
+                            let mut last = crate::modules::lock::mutex_lock(&LAST_UPDATE_ID);
+                            if u.update_id > *last {
+                                *last = u.update_id;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        // Transient (network/token). Report at most one event
+                        // per failure burst; back off 5s.
+                        let _ = on_event.send(TelegramEvent::Error { message: e });
+                        tokio::time::sleep(Duration::from_secs(5)).await;
+                    }
+                }
+            }
+            RUNNING.store(false, Ordering::SeqCst);
+        });
+    });
+    Ok(status())
+}
+
+/// Stop the poll loop (settings toggle off / app exit).
+#[tauri::command]
+pub fn telegram_stop() -> Result<TelegramStatus, String> {
+    POLL_SHUTDOWN.store(true, Ordering::SeqCst);
+    RUNNING.store(false, Ordering::SeqCst);
+    Ok(status())
+}
+
+/// One-use handshake: the NEXT /start binds that chat as owner. The settings
+/// UI enables this only when no owner is bound yet.
+#[tauri::command]
+pub fn telegram_bind_owner() -> Result<(), String> {
+    BIND_MODE.store(true, Ordering::SeqCst);
+    Ok(())
+}
+
+/// Clear the owner binding (re-bind to a different account).
+#[tauri::command]
+pub fn telegram_clear_owner() -> Result<(), String> {
+    OWNER_CHAT_ID.store(-1, Ordering::SeqCst);
+    Ok(())
+}
+
+fn status() -> TelegramStatus {
+    let owner = OWNER_CHAT_ID.load(Ordering::SeqCst);
+    TelegramStatus {
+        running: RUNNING.load(Ordering::SeqCst),
+        owner_chat_id: if owner == -1 { None } else { Some(owner) },
+        bot_username: None,
+    }
+}
+
+/// Current bridge status (no API call — for the settings toggle).
+#[tauri::command]
+pub fn telegram_status() -> Result<TelegramStatus, String> {
+    Ok(status())
+}
+
+/// Connectivity + token test: getMe. Returns the bot username so the settings
+/// page can show "connected as @foo".
+#[tauri::command]
+pub async fn telegram_test(token: String) -> Result<TelegramStatus, String> {
+    #[derive(Deserialize)]
+    struct Me {
+        #[serde(default)]
+        username: Option<String>,
+    }
+    let me: Me = post_json(&token, "getMe", &serde_json::json!({})).await?;
+    let mut s = status();
+    s.bot_username = me.username;
+    Ok(s)
+}
+
+/// Send a text message (agent reply). Errors are surfaced to the caller which
+/// logs them in the session — the user sees the assistant went quiet and why.
+#[tauri::command]
+pub async fn telegram_send_message(token: String, chat_id: i64, text: String) -> Result<(), String> {
+    // 4096 is Telegram's hard message cap; split long agent replies.
+    for chunk in split_message(&text) {
+        post_json::<serde_json::Value>(
+            &token,
+            "sendMessage",
+            &serde_json::json!({
+                "chat_id": chat_id,
+                "text": chunk,
+                "parse_mode": "Markdown",
+            }),
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+/// Send a voice note (TTS reply). `audio` is base64 WAV/MP3 from voice_tts /
+/// OpenAI TTS; transcoded to OGG/Opus via ffmpeg when available, else the
+/// raw audio is sent as a document (fail-soft, still delivered).
+#[tauri::command]
+pub async fn telegram_send_voice(
+    token: String,
+    chat_id: i64,
+    audio_base64: String,
+) -> Result<(), String> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(audio_base64.as_bytes())
+        .map_err(|e| format!("bad audio base64: {e}"))?;
+
+    // ffmpeg WAV/MP3 → OGG/Opus (Telegram voice requirement).
+    let ogg = transcode_to_ogg(&bytes)?;
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(120))
+        .build()
+        .map_err(|e| format!("client: {e}"))?;
+    let part = reqwest::multipart::Part::bytes(ogg)
+        .file_name("voice.ogg")
+        .mime_str("audio/ogg")
+        .map_err(|e| format!("mime: {e}"))?;
+    let form = reqwest::multipart::Form::new()
+        .text("chat_id", chat_id.to_string())
+        .part("voice", part);
+    let resp = client
+        .post(api_url(&token, "sendVoice"))
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| format!("sendVoice: {e}"))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let t = resp.text().await.unwrap_or_default();
+        return Err(format!(
+            "sendVoice HTTP {}: {}",
+            status,
+            t.chars().take(200).collect::<String>()
+        ));
+    }
+    Ok(())
+}
+
+/// Download a voice file by file_id and return PCM WAV base64 (for STT).
+/// Telegram serves voice as OGG/Opus; whisper needs WAV — ffmpeg transcodes.
+#[tauri::command]
+pub async fn telegram_download_voice(
+    token: String,
+    file_id: String,
+) -> Result<String, String> {
+    #[derive(Deserialize)]
+    struct FilePath {
+        #[serde(default)]
+        file_path: Option<String>,
+    }
+    let fp: FilePath = post_json(&token, "getFile", &serde_json::json!({ "file_id": file_id })).await?;
+    let rel = fp.file_path.ok_or("no file_path in getFile result")?;
+    let url = format!("{API}/file/bot{token}/{rel}");
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(60))
+        .build()
+        .map_err(|e| format!("client: {e}"))?;
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("download: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("download HTTP {}", resp.status()));
+    }
+    let bytes = resp.bytes().await.map_err(|e| format!("body: {e}"))?;
+    // Telegram caps downloads at 20 MB — enforce a sanity cap anyway.
+    if bytes.len() > 20 * 1024 * 1024 {
+        return Err("voice file too large (over 20 MB)".into());
+    }
+    let wav = ogg_to_wav(&bytes)?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(wav))
+}
+
+// ── ffmpeg helpers (fail-soft) ─────────────────────────────────────────────
+
+fn ffmpeg_available() -> bool {
+    std::process::Command::new("ffmpeg")
+        .arg("-version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+fn transcode_to_ogg(input: &[u8]) -> Result<Vec<u8>, String> {
+    if !ffmpeg_available() {
+        // No ffmpeg: deliver raw audio as-is; Telegram may reject the voice
+        // MIME but the caller already warns once about missing ffmpeg.
+        return Ok(input.to_vec());
+    }
+    run_ffmpeg(input, &["-c:a", "libopus", "-b:a", "64k", "-f", "ogg"])
+}
+
+fn ogg_to_wav(input: &[u8]) -> Result<Vec<u8>, String> {
+    if !ffmpeg_available() {
+        return Err("ffmpeg not found — required to transcode Telegram voice notes for STT. Install ffmpeg.".into());
+    }
+    run_ffmpeg(input, &["-ar", "16000", "-ac", "1", "-f", "wav"])
+}
+
+/// Pipe bytes through ffmpeg via temp files (stdin pipes are flaky with
+/// ffmpeg on Windows; temp in std::env::temp_dir()).
+fn run_ffmpeg(input: &[u8], encode_args: &[&str]) -> Result<Vec<u8>, String> {
+    let dir = std::env::temp_dir().join("kai-telegram");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("tmpdir: {e}"))?;
+    let in_path = dir.join(format!("in-{}.bin", std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0)));
+    let out_path = in_path.with_extension("out");
+
+    let mut f = std::fs::File::create(&in_path).map_err(|e| format!("tmp write: {e}"))?;
+    f.write_all(input).map_err(|e| format!("tmp write: {e}"))?;
+    drop(f);
+
+    let out = std::process::Command::new("ffmpeg")
+        .arg("-y")
+        .arg("-loglevel").arg("error")
+        .arg("-i").arg(&in_path)
+        .args(encode_args)
+        .arg(&out_path)
+        .output()
+        .map_err(|e| format!("ffmpeg spawn: {e}"))?;
+    let _ = std::fs::remove_file(&in_path);
+    if !out.status.success() {
+        let _ = std::fs::remove_file(&out_path);
+        return Err(format!("ffmpeg failed: {}", String::from_utf8_lossy(&out.stderr).chars().take(200).collect::<String>()));
+    }
+    let result = std::fs::read(&out_path).map_err(|e| format!("tmp read: {e}"))?;
+    let _ = std::fs::remove_file(&out_path);
+    Ok(result)
+}
+
+/// Split into ≤4096-char chunks at line boundaries (Telegram hard cap).
+fn split_message(text: &str) -> Vec<String> {
+    const CAP: usize = 4000;
+    if text.chars().count() <= CAP {
+        return vec![text.to_string()];
+    }
+    let mut chunks = Vec::new();
+    let mut current = String::new();
+    for line in text.lines() {
+        let line_len = line.chars().count() + 1;
+        if !current.is_empty() && current.chars().count() + line_len > CAP {
+            chunks.push(std::mem::take(&mut current));
+        }
+        if current.is_empty() && line.chars().count() > CAP {
+            // Single pathological line — hard-split at char boundary.
+            let chars: Vec<char> = line.chars().collect();
+            for sl in chars.chunks(CAP) {
+                chunks.push(sl.iter().collect());
+            }
+            continue;
+        }
+        current.push_str(line);
+        current.push('\n');
+    }
+    if !current.is_empty() {
+        chunks.push(current);
+    }
+    if chunks.is_empty() {
+        chunks.push(String::new());
+    }
+    chunks
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn split_message_respects_cap() {
+        let long = "a".repeat(12_000);
+        let chunks = split_message(&long);
+        assert!(chunks.len() >= 3);
+        for c in &chunks {
+            assert!(c.chars().count() <= 4096);
+        }
+    }
+
+    #[test]
+    fn split_message_keeps_short_text_whole() {
+        assert_eq!(split_message("hello"), vec!["hello".to_string()]);
+    }
+
+    #[test]
+    fn split_message_splits_on_lines() {
+        let text = "line1\nline2\nline3";
+        assert_eq!(split_message(text), vec![text.to_string()]);
+    }
+}

@@ -640,6 +640,17 @@ export default function App() {
     void useAgentsStore.getState().hydrate();
     void useSnippetsStore.getState().hydrate();
     void useMcpStore.getState().hydrate();
+    // Personal assistant (Telegram bridge) — auto-start when enabled in
+    // Settings → External. Fire-and-forget; failures land in the console
+    // and the panel shows the loop status on next open.
+    void import("@/modules/assistant")
+      .then(({ startAssistantBridge }) => startAssistantBridge())
+      .then((r) => {
+        if (!r.ok && r.error && r.error !== "assistant disabled") {
+          console.warn("[kai:assistant] bridge not started:", r.error);
+        }
+      })
+      .catch((e) => console.warn("[kai:assistant] bridge import failed:", e));
     // Fire the env probe in the background — the first agent turn's <env>
     // block reads it from cache (verified shell + installed tool list,
     // replacing hardcoded assumptions).
