@@ -4,6 +4,24 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.7.0]
+
+- Terminal: display_image works — images render inline in the terminal (JPEG, PNG, GIF, WebP).
+- Terminal: new display_video shows a video poster frame inline (uses local ffmpeg).
+- AI: Shadow mode — work on an isolated copy of your files with a branched chat, then Apply or Discard.
+- AI: subagent cards are clickable — see the prompt while running and the full findings when done.
+- AI: watches self-heal — broken conditions and dead shells self-report instead of failing silently.
+- AI: removed built-in ComfyUI — local image/video generation belongs in MCP servers now.
+- MCP: live status dots and the server version are shown in Settings.
+- Settings: each panel opens as its own window; the shared tabbed window is gone.
+- Voice: a yellow speaker button appears while the AI speaks — click it to stop.
+- Source control: branch switching is instant and the header shows the right branch immediately.
+- Sidebar: KAI always opens on the file tree, keeping startup fast.
+- Docs: landing page redesigned in a minimal monochrome editorial style.
+- Security: hardened the new media tools (safe command building, download limits).
+
+---
+
 ## [1.6.9]
 
 - Voice: local STT/TTS fixed on Windows.
