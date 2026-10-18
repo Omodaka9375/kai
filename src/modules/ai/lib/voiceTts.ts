@@ -232,6 +232,7 @@ export function ttsStop(): void {
   } catch {
     // ignore
   }
+  notifyTtsListeners();
 }
 
 /** True when a TTS utterance is playing (or synthesizing, for the latest run). */
@@ -241,6 +242,45 @@ export function ttsPlaying(): boolean {
     return audioActive || (synthesizingRun >= runToken && synthesizingRun !== 0);
   } catch {
     return false;
+  }
+}
+
+// ── Playing-state subscription (UI needs a live indicator, not a poll) ──────
+
+type TtsPlayingListener = (playing: boolean) => void;
+const ttsListeners = new Set<TtsPlayingListener>();
+
+/** Subscribe to playing-state changes. Returns an unsubscribe function.
+ *  The callback fires ONLY on transitions (idle→playing / playing→idle),
+ *  not on every internal state poll. */
+export function subscribeTtsPlaying(cb: TtsPlayingListener): () => void {
+  ttsListeners.add(cb);
+  // Deliver the current state synchronously so the subscriber is immediately
+  // consistent (a button appearing/disappearing must not depend on the next
+  // transition happening to occur).
+  try {
+    cb(ttsPlaying());
+  } catch {
+    // Listener errors must not break the TTS pipeline.
+  }
+  return () => {
+    ttsListeners.delete(cb);
+  };
+}
+
+/** Notify subscribers on playing-state transitions. Cheap — compare with the
+ *  last broadcast to suppress duplicate notifications. */
+let lastNotified: boolean | null = null;
+function notifyTtsListeners(): void {
+  const playing = ttsPlaying();
+  if (playing === lastNotified) return;
+  lastNotified = playing;
+  for (const cb of ttsListeners) {
+    try {
+      cb(playing);
+    } catch {
+      // Listener errors must not break the TTS pipeline.
+    }
   }
 }
 
@@ -266,6 +306,7 @@ export async function speakText(
   ttsStop();
   const token = ++runToken;
   synthesizingRun = token;
+  notifyTtsListeners();
   try {
     for (const chunk of splitForSpeech(cleaned)) {
       // Superseded by a newer utterance (or stopped) — abandon the rest.
@@ -288,6 +329,7 @@ export async function speakText(
     return false;
   } finally {
     if (synthesizingRun === token) synthesizingRun = 0;
+    notifyTtsListeners();
   }
 }
 
@@ -304,6 +346,10 @@ function playBuffer(bytes: ArrayBuffer): Promise<void> {
     el.src = currentUrl;
     void el.play().catch(() => resolve());
     el.addEventListener("ended", () => resolve(), { once: true });
+    el.addEventListener("ended", () => notifyTtsListeners(), { once: true });
+    // `play` can reject even on success path (autoplay quirks) — notify on
+    // the next tick either way so the icon follows reality, not intent.
+    setTimeout(notifyTtsListeners, 0);
   });
 }
 

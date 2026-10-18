@@ -14,6 +14,7 @@ import {
   RedoIcon,
   Scissor01Icon,
   TerminalIcon,
+  VolumeHighIcon,
   TextSelectIcon,
   UndoIcon,
   UserWarning01Icon,
@@ -37,6 +38,7 @@ import {
 } from "../lib/inputTriggers";
 import { useChatStore } from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
+import { subscribeTtsPlaying, ttsStop } from "../lib/voiceTts";
 import { AutoApproveToggle } from "./AutoApproveToggle";
 import { FilePickerContent } from "./FilePicker";
 import { SnippetPickerContent, type PickerItem } from "./SnippetPicker";
@@ -52,6 +54,10 @@ export function AiInputBar() {
   const [fileTrigger, setFileTrigger] = useState<FileTrigger | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
+  // Live TTS playing state — drives the stop button in the mic slot while
+  // the AI's voice response is speaking. Subscribes to transitions only.
+  const [ttsPlaying, setTtsPlaying] = useState(false);
+  useEffect(() => subscribeTtsPlaying(setTtsPlaying), []);
   const workspaceFiles = useWorkspaceFiles(workspaceRoot, fileTrigger !== null);
 
   const [fileQuery, setFileQuery] = useState("");
@@ -272,7 +278,20 @@ export function AiInputBar() {
                 }}
               />
 
-              {c.voice.supported && (
+              {ttsPlaying && !c.voice.recording ? (
+                <button
+                  type="button"
+                  title="Stop voice response"
+                  onClick={() => ttsStop()}
+                  className="shrink-0 size-6 flex items-center justify-center rounded-md bg-amber-500/15 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 hover:text-amber-600 dark:hover:text-amber-400 transition-colors"
+                >
+                  <HugeiconsIcon
+                    icon={VolumeHighIcon}
+                    size={14}
+                    strokeWidth={1.75}
+                  />
+                </button>
+              ) : c.voice.supported ? (
                 <button
                   type="button"
                   title={
@@ -314,7 +333,7 @@ export function AiInputBar() {
                     <HugeiconsIcon icon={Mic01Icon} size={14} strokeWidth={1.75} />
                   )}
                 </button>
-              )}
+              ) : null}
 
               <button
                 type="button"
