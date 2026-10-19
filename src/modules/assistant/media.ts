@@ -131,11 +131,10 @@ export function buildAssistantMediaTools(): Record<string, unknown> {
 
   const generateVideo = tool({
     description:
-      "Generate a short video from a text prompt (5-30s) with Google Veo 3.1, using the configured Google key. The video is delivered to the chat when ready; generation takes 1-5 minutes. If the user wants a different engine (Kling, Seedance…), tell them to install that vendor's MCP server in the desktop app's Settings → MCP.",
+      "Generate a short video from a text prompt (4-8s) with Google Veo 3.1, using the configured Google key. The video is delivered to the chat when ready; generation takes 1-5 minutes. If the user wants a different engine (Kling, Seedance…), tell them to install that vendor's MCP server in the desktop app's Settings → MCP.",
     inputSchema: z.object({
       prompt: z.string().describe("Scene description: subject, motion, camera work, mood."),
-      duration: z.number().min(5).max(30).optional().describe("Duration in seconds (5-30). Default 5."),
-      aspect_ratio: z.string().optional().describe("Aspect ratio like '16:9' or '9:16'. Default 16:9."),
+        duration: z.number().min(4).max(8).optional().describe("Duration in seconds (4-8 only — the provider rejects anything else). Default 8."),     aspect_ratio: z.string().optional().describe("Aspect ratio like '16:9' or '9:16'. Default 16:9."),
     }),
     execute: async ({ prompt, duration, aspect_ratio }) => {
       const p = await pickVideoProvider();

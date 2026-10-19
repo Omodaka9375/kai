@@ -13,6 +13,12 @@ const MAX_POLLS = 120;
 const MODEL = "veo-3.1-generate-preview";
 const BASE = "https://generativelanguage.googleapis.com/v1beta";
 
+// Veo 3.1 accepts 4-8 seconds ONLY — anything else 400s the submit.
+function clampDuration(d: number | undefined): number {
+  if (!Number.isFinite(d ?? NaN)) return 8;
+  return Math.min(8, Math.max(4, Math.round(d as number)));
+}
+
 /** Generate a video via Google Veo 3.1 (Gemini API). */
 export async function generateGoogleVideo(
   apiKey: string,
@@ -26,7 +32,7 @@ export async function generateGoogleVideo(
       instances: [{ prompt: opts.prompt }],
       parameters: {
         aspectRatio: opts.aspectRatio ?? "16:9",
-        durationSeconds: opts.duration ?? 8,
+        durationSeconds: clampDuration(opts.duration),
       },
     }),
   );
@@ -65,7 +71,7 @@ export async function generateGoogleVideo(
         url: videoUri,
         base64: download,
         mimeType: "video/mp4",
-        durationSeconds: opts.duration ?? 8,
+        durationSeconds: clampDuration(opts.duration),
         provider: "google",
       };
     }

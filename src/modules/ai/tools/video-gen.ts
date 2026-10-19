@@ -5,7 +5,7 @@ import { generateGoogleVideo } from "../lib/media/google-video";
 import { spawnMediaTask } from "../lib/media/task";
 import type { ToolContext } from "./context";
 
-const DEFAULT_DURATION = 5;
+const DEFAULT_DURATION = 8;
 
 /**
  * Video generation — Google Veo only, by design. Other generators (Kling,
@@ -30,7 +30,7 @@ If the user asks for a different video engine (Kling, Seedance, …), tell them 
         duration: z
           .number()
           .optional()
-          .describe("Video duration in seconds (5-30). Defaults to 5."),
+          .describe("Video duration in seconds (4-8). Defaults to 8."),
         aspect_ratio: z
           .string()
           .optional()
