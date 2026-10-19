@@ -44,14 +44,27 @@ export function StartPage({ onNewTerminal, onOpenProject }: Props) {
   const recentProjects = usePreferencesStore((s) => s.recentProjects) || [];
   const lastWorkspaceCwd = usePreferencesStore((s) => s.lastWorkspaceCwd);
   const openPanel = useChatStore((s) => s.openPanel);
+  const panelOpen = useChatStore((s) => s.panelOpen);
   const focusInput = useChatStore((s) => s.focusInput);
+  const openMini = useChatStore((s) => s.openMini);
+  const closeMini = useChatStore((s) => s.closeMini);
+  const togglePanel = useChatStore((s) => s.togglePanel);
   const newTerminalHint = useShortcutLabel("tab.new");
   const chatHint = useShortcutLabel("ai.toggle");
 
   const openChat = useCallback(() => {
-    openPanel();
-    focusInput(null);
-  }, [openPanel, focusInput]);
+    // Same contract as the status-bar agent button (f1411bb): the panel and
+    // the mini window open/close TOGETHER. StartPage's button used to open
+    // only the bottom panel, so the agent window never appeared.
+    if (panelOpen) {
+      togglePanel();
+      closeMini();
+    } else {
+      openPanel();
+      openMini();
+      focusInput(null);
+    }
+  }, [panelOpen, togglePanel, openPanel, openMini, closeMini, focusInput]);
 
   const pickProject = useCallback(async () => {
     try {
