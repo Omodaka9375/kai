@@ -172,10 +172,13 @@ export function stripLeakedTokens(text: string): string {
       .replace(/<thinking>[\s\S]*?<\/thinking>/gi, "")
       .replace(/<thinking>(?![\s\S]*<\/thinking>)[\s\S]*$/gi, "");
   }
-  // Strip AI SDK thought protocol markers (Vercel AI SDK v6).
-  if (cleaned.includes("</")) {
-    cleaned = cleaned.replace(/\n{2}[\s\S]*?\n{2}/gi, "");
-  }
+  // NOTE: an earlier "Strip AI SDK thought protocol markers" branch here
+  // ran `cleaned.replace(/\n{2}[\s\S]*?\n{2}/gi, "")` on ANY text containing
+  // "</" — deleting whole paragraphs between blank lines whenever a reply
+  // held a closing HTML/XML tag (e.g. </div> in a code sample). It silently
+  // ate content and could swallow a ``` fence line, unbalancing fences so
+  // the rest of the message rendered as raw unstyled text. Removed — no
+  // legitimate thought marker exists that this implements.
   if (
     cleaned.includes("call:") ||
     cleaned.includes("<tool_call") ||
