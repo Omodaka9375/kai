@@ -4,6 +4,15 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.7.9]
+
+- Assistant: the External settings panel is now **Assistant** (menu, sidebar, window title) — and when Voice replies are ON without a TTS engine picked, the panel warns that replies currently fall back to text.
+- Assistant: replies follow an execution-clarity protocol — past-tense reports of what ran, no future-action narration, and never a completed action mixed with a question in one message (a question means it's waiting for your answer).
+- Agents: the selected agent persona is remembered **per project** (like the model) — switching workspaces re-applies each project's persona; legacy global selection stays as the fallback.
+- Chat: desktop TTS reads only the final text part of an agent run — no more narrating intermediate step-by-step text alongside the actual reply.
+- Chat: JSON tool output (MCP results arrive as JSON strings) renders pretty-printed in tool cards instead of raw escaped one-liners.
+- Media: missing-key errors on all four generation surfaces (desktop image/video, assistant image/video) now tell the user shortly to add a key in Settings → Models or use the engine's official MCP server.
+
 ## [1.7.8]
 
 - Assistant: Telegram replies are no longer silently dropped — event payloads now serialize camelCase on the wire (`rename_all_fields`), pinned by a wire-contract test.
