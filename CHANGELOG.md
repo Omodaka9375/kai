@@ -3,6 +3,15 @@
 All notable changes to the KAI terminal emulator project are documented in this file. KAI adheres to Semantic Versioning.
 
 ---
+## [1.8.0]
+
+- Tabs: terminal tabs say “terminal”, not the project folder name (private stays “private”).
+- Chat: replies no longer break into raw unstyled text — the </-triggered paragraph deletion in stripLeakedTokens is gone.
+- Settings: clicking Assistant opens Assistant — the Rust panel-key validator missed the rename.
+- About: uptime only — memory/session rows and the 10s poll removed.
+- About: Report an issue sits next to Copy diagnostics on its own row.
+- Updater: release notes render at 11px so the changelog fits the dialog.
+
 ## [1.7.9]
 
 - Assistant: the External panel is now **Assistant** (menu, sidebar, window).
