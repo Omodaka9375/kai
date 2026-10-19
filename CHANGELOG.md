@@ -4,6 +4,16 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.7.8]
+
+- Assistant: Telegram replies are no longer silently dropped — event payloads now serialize camelCase on the wire (`rename_all_fields`), pinned by a wire-contract test.
+- Assistant: MCP tools with dotted names (e.g. `net.ping`) no longer break every reply — tool names are sanitized for the provider's naming pattern, original name kept in the description.
+- Assistant: media generation is assistant-native on Telegram — images and videos generate synchronously and deliver straight to the chat (photo/video/document by MIME), no longer routed through a chat-UI part that doesn't exist headless.
+- Media: Google image generation fixed — Nano Banana 2 model (`gemini-3.1-flash-image`), and the invalid `responseMimeType` that 400'd every request is gone.
+- Media: Google video generation rewritten to the current Veo REST contract (`veo-3.1-generate-preview:predictLongRunning`), with byte downloads and per-consumer base64 delivery; durations clamped to the 4-8s the API accepts.
+- Media: Kling and Seedance native integrations removed — video is Google Veo only; other engines via their official MCP servers (Settings → MCP).
+- Settings: the STT model picker and installer moved into the Speech-to-text section (they were rendering under "How recording ends").
+
 ## [1.7.7]
 
 - Assistant: `/start` binding is now reliable end to end — the bot hands event delivery to the main window so closing Settings can't leave the poll loop talking to a dead channel, a stop/start toggle can no longer spawn a zombie loop that skips messages, and tool-step progress no longer floods the chat with one message per tool call.
