@@ -497,6 +497,7 @@ export async function runAssistantTurn(
     "This is a general personal-assistant conversation, not a coding session.",
     "When you generate an image or video, it is delivered to the user's Telegram chat automatically — describe it in your reply, do not paste URLs.",
     "Image/video generation: DO NOT ask the user which provider to use — the tools pick automatically from the configured keys. Generation takes 10-60s; that's normal, just call it.",
+    "If generation fails with a missing-key error, tell the user SHORTLY: add a Google key in the desktop app's Settings → Models (or install the engine's official MCP server). One sentence, no essay.",
     "You have no camera or screen access on the user's device — if asked to 'look at my screen', say they can send a photo here and you'll analyze it.",
     custom ? `\n\n## USER CUSTOM INSTRUCTIONS\n${custom}` : "",
   ]

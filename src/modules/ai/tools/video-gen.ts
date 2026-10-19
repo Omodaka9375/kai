@@ -44,7 +44,7 @@ If the user asks for a different video engine (Kling, Seedance, …), tell them 
         if (!key) {
           return {
             error:
-              "No Google API key configured — add one in Settings → Models. (Video generation is Google Veo only; other engines are available via their MCP servers.)",
+              "No Google API key configured. Tell the user: add a Google key in Settings → Models, or use another engine's official MCP server (Settings → MCP). Keep it short.",
           };
         }
 

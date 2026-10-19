@@ -49,7 +49,7 @@ Auto-executes — no approval needed.`,
         const key = keys[provider as keyof typeof keys];
         if (!key) {
           return {
-            error: `No API key configured for ${provider}. Add one in Settings → Models.`,
+            error: `No API key configured for ${provider}. Tell the user: add a ${provider === "google" ? "Google" : provider} key in Settings → Models, or use that engine's official MCP server (Settings → MCP). Keep it short.`,
           };
         }
 

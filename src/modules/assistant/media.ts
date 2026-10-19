@@ -102,7 +102,7 @@ export function buildAssistantMediaTools(): Record<string, unknown> {
       if (!p) {
         return {
           error:
-            "No image-generation key configured (google/openai/xai). Add one in Settings → Models.",
+            "No image key configured. Tell the user: add a Google/OpenAI/xAI key in the desktop app's Settings → Models, or use an engine's official MCP server. Keep it short.",
         };
       }
       try {
@@ -138,13 +138,13 @@ export function buildAssistantMediaTools(): Record<string, unknown> {
     }),
     execute: async ({ prompt, duration, aspect_ratio }) => {
       const p = await pickVideoProvider();
-      if (!p) {
-        return {
-          error: "No Google API key configured — video generation needs one (Settings → Models). Other engines are available via their MCP servers.",
-        };
-      }
-      try {
-        const gen = (await import("@/modules/ai/lib/media/google-video")).generateGoogleVideo;
+        if (!p) {
+          return {
+            error: "No Google API key configured. Tell the user: add a Google key in the desktop app's Settings → Models, or use another engine's official MCP server. Keep it short.",
+          };
+        }
+        try {
+          const gen = (await import("@/modules/ai/lib/media/google-video")).generateGoogleVideo;
         const result = await gen(p.key, {
           prompt,
           duration,
