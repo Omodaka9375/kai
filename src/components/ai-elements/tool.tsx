@@ -141,6 +141,24 @@ const HEAVY_CONTENT_TOOLS = new Set([
   "todo_write",
 ]);
 
+/** Pretty display name for tool-call card headers. MCP tools arrive as
+ *  `<server>__<name>` (dots sanitized to underscores — providers reject them),
+ *  e.g. `ugnas__files_find`. KAI's own tools read like "Read"/"Run"; the raw
+ *  MCP key would too, so render it as `ugnas: files find`. Wire names are
+ *  untouched — this is display-only. */
+function prettyToolName(toolName: string): string {
+  const sep = toolName.indexOf("__");
+  if (sep > 0) {
+    const server = toolName.slice(0, sep);
+    const rest = toolName
+      .slice(sep + 2)
+      .replace(/_/g, " ")
+      .trim();
+    if (rest) return `${server}: ${rest}`;
+  }
+  return toolName;
+}
+
 const ToolImpl = ({
   className,
   toolName,
@@ -153,7 +171,7 @@ const ToolImpl = ({
 }: ToolProps) => {
   const meta = TOOL_META[toolName];
   const Icon = meta?.icon ?? ToolsIcon;
-  const label = meta?.label ?? toolName;
+  const label = meta?.label ?? prettyToolName(toolName);
   const summary = deriveSummary(toolName, input);
   const isError = state === "output-error";
   const open = defaultOpen ?? isError;
