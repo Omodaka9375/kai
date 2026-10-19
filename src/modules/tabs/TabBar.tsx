@@ -410,6 +410,11 @@ function labelFor(t: Tab): string {
   if (t.kind === "git-commit-file") return t.title;
   if (t.kind === "md-preview") return t.title;
   if (t.kind === "api-tester") return t.title;
+  // Terminal tabs label by what they ARE, not by the cwd basename — the
+  // project folder name belongs to the window title / header label, and
+  // every terminal in a project would otherwise read identically anyway.
+  // `private` keeps its distinct title so private tabs stay recognizable.
+  if (t.kind === "terminal") return t.title === "private" ? "private" : "terminal";
   if (!t.cwd) return t.title;
   const parts = t.cwd.split(/[\\\/]/).filter(Boolean);
   return parts.length ? parts[parts.length - 1] : "/";
