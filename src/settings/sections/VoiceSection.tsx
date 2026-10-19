@@ -269,6 +269,55 @@ export function VoiceSection() {
             onClick={() => setSttMode("browser")}
           />
         </div>
+
+        {sttMode === "api" ? (
+          <div className="flex items-center justify-between text-[12px]">
+            <span className="text-muted-foreground">STT model</span>
+            <Select
+              ariaLabel="API STT model"
+              value={prefs.voiceSttApiModel}
+              onChange={(v) => void setVoiceSttApiModel(v)}
+              options={STT_API_MODELS}
+            />
+          </div>
+        ) : null}
+
+        {sttMode === "local" ? (
+          <div className="flex flex-col gap-2 rounded-lg border border-border/60 bg-card/60 px-3 py-2.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[12px] text-muted-foreground">Model</span>
+              <Select
+                ariaLabel="Local STT model"
+                value={prefs.voiceSttModel}
+                onChange={(v) => void setVoiceSttModel(v)}
+                options={STT_MODELS.map((m) => ({ id: m.id, label: `${m.label} — ${m.size} (${m.note})` }))}
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={busy !== ""}
+                onClick={() => void onSetupStt(prefs.voiceSttModel)}
+              >
+                {busy === "stt"
+                  ? "Downloading…"
+                  : status?.sttInstalled && status.sttModel === prefs.voiceSttModel
+                    ? "Reinstall"
+                    : "Install local STT"}
+              </Button>
+            </div>
+            {status?.sttInstalled ? (
+              <span className="text-[11.5px] text-emerald-500">
+                Engine installed{status.sttModel ? ` — model: ${status.sttModel}` : " — no model yet"}
+              </span>
+            ) : (
+              <span className="text-[11.5px] text-muted-foreground/70">
+                Engine not installed — mic input falls back to Browser mode until installed.
+              </span>
+            )}
+            {busy === "stt" && progress ? <Progress ev={progress} /> : null}
+          </div>
+        ) : null}
       </div>
 
       {/* ── Recording end mode ── */}
@@ -294,55 +343,6 @@ export function VoiceSection() {
           </span>
         ) : null}
       </div>
-
-      {sttMode === "api" ? (
-        <div className="flex items-center justify-between text-[12px]">
-          <span className="text-muted-foreground">STT model</span>
-          <Select
-            ariaLabel="API STT model"
-            value={prefs.voiceSttApiModel}
-            onChange={(v) => void setVoiceSttApiModel(v)}
-            options={STT_API_MODELS}
-          />
-        </div>
-      ) : null}
-
-      {sttMode === "local" ? (
-        <div className="flex flex-col gap-2 rounded-lg border border-border/60 bg-card/60 px-3 py-2.5">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[12px] text-muted-foreground">Model</span>
-            <Select
-              ariaLabel="Local STT model"
-              value={prefs.voiceSttModel}
-              onChange={(v) => void setVoiceSttModel(v)}
-              options={STT_MODELS.map((m) => ({ id: m.id, label: `${m.label} — ${m.size} (${m.note})` }))}
-            />
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={busy !== ""}
-              onClick={() => void onSetupStt(prefs.voiceSttModel)}
-            >
-              {busy === "stt"
-                ? "Downloading…"
-                : status?.sttInstalled && status.sttModel === prefs.voiceSttModel
-                  ? "Reinstall"
-                  : "Install local STT"}
-            </Button>
-          </div>
-          {status?.sttInstalled ? (
-            <span className="text-[11.5px] text-emerald-500">
-              Engine installed{status.sttModel ? ` — model: ${status.sttModel}` : " — no model yet"}
-            </span>
-          ) : (
-            <span className="text-[11.5px] text-muted-foreground/70">
-              Engine not installed — mic input falls back to Browser mode until installed.
-            </span>
-          )}
-          {busy === "stt" && progress ? <Progress ev={progress} /> : null}
-        </div>
-      ) : null}
 
       {/* ── Text-to-speech ── */}
       <div className="flex flex-col gap-2">
