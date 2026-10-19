@@ -211,3 +211,47 @@ describe("notify_telegram (schema field → WatchConfig)", () => {
   });
 });
 
+describe("watch wake-up flush must not iterate the live pending set", () => {
+  // REGRESSION (whole-app freeze, Task-Manager kill): a watch firing while the
+  // agent was streaming queued its session, then flushAllPendingWatchWakes
+  // iterated the LIVE pendingWatchWakes set — flushPendingWatchWakes re-queues
+  // busy sessions back into that same set, and JS `for..of` over a Set visits
+  // items added mid-iteration: delete → busy → re-add → visit → … forever,
+  // synchronously on the webview main thread. The fix iterates a snapshot
+  // ([...pendingWatchWakes]); this test pins that shape so a refactor can't
+  // silently reintroduce the infinite loop.
+  it("iterates a snapshot copy, not the live Set", async () => {
+    const src = await import("node:fs").then((fs) =>
+      fs.readFileSync(new URL("../store/chatStore.ts", import.meta.url), "utf8"),
+    );
+    expect(src).toContain("for (const id of [...pendingWatchWakes])");
+    expect(src).not.toContain("for (const id of pendingWatchWakes) {");
+  });
+
+  it("Set iteration DOES revisit a re-added item removed then re-added mid-iteration", () => {
+    // The exact engine semantics the freeze depended on: delete + re-add of
+    // the SAME id during iteration makes for..of visit it again (insertion
+    // order moves to the end). flushPendingWatchWakes does delete-then-add
+    // for busy sessions — that is what looped forever pre-fix.
+    const live = new Set<string>(["a"]);
+    const visited: string[] = [];
+    let guard = 0;
+    for (const id of live) {
+      visited.push(id);
+      live.delete(id); // busy → flushPendingWatchWakes' delete(...)
+      live.add(id); //   → ...then re-add(...)
+      if (++guard > 50) break; // pre-fix this never exits on its own
+    }
+    expect(visited.length).toBeGreaterThan(1); // proves delete+re-add IS revisited
+    // Snapshot iteration: one visit per queued id, delete+re-add is invisible.
+    const snap = new Set<string>(["a"]);
+    const visited2: string[] = [];
+    for (const id of [...snap]) {
+      visited2.push(id);
+      snap.delete(id);
+      snap.add(id);
+    }
+    expect(visited2).toEqual(["a"]);
+  });
+});
+

@@ -413,7 +413,15 @@ export function flushPendingWatchWakes(sessionId: string): void {
  * gets its session a wake attempt regardless of which session is open.
  */
 export function flushAllPendingWatchWakes(): void {
-  for (const id of pendingWatchWakes) {
+  // SNAPSHOT before iterating: `flushPendingWatchWakes` re-queues busy
+  // sessions back into this same Set, and a JS `for..of` over a Set visits
+  // items added mid-iteration — so iterating the live Set loops FOREVER
+  // whenever any queued session is busy (agent streaming/submitted or an
+  // approval pending): delete → busy → re-add → visit again → …
+  // Synchronously, on the webview main thread — the whole app froze and had
+  // to be killed from Task Manager. Iterating a copy visits each session
+  // at most once; busy ones keep their queue entry for the next flush.
+  for (const id of [...pendingWatchWakes]) {
     flushPendingWatchWakes(id);
   }
 }
