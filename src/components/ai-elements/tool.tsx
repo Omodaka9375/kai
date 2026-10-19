@@ -449,6 +449,41 @@ function renderToolOutput(toolName: string, output: unknown): ReactNode | null {
   if (!output || typeof output !== "object") return null;
   const o = output as Record<string, unknown>;
 
+  // MCP result shape: { content: [{type:"text", text:"…"}], structuredContent?, isError }.
+  // The `text` payloads arrive JSON-stringified, so a raw dump renders as one
+  // escaped one-liner (`{\n  "path": …`). Render the real content instead:
+  // prefer structuredContent (already an object), else parse each text part.
+  if (Array.isArray(o.content) && o.content.length > 0) {
+    const structured = o.structuredContent;
+    if (structured && typeof structured === "object") {
+      return (
+        <CodeBlockMini
+          code={JSON.stringify(structured, null, 2)}
+          language="json"
+        />
+      );
+    }
+    const texts = (o.content as unknown[])
+      .map((c) =>
+        c && typeof c === "object" && typeof (c as { text?: unknown }).text === "string"
+          ? (c as { text: string }).text
+          : null,
+      )
+      .filter((t): t is string => t != null);
+    if (texts.length > 0) {
+      const joined = texts.join("\n\n");
+      let parsed: unknown | undefined;
+      try {
+        parsed = JSON.parse(joined);
+      } catch {
+        parsed = undefined;
+      }
+      return parsed !== undefined && typeof parsed === "object"
+        ? <CodeBlockMini code={JSON.stringify(parsed, null, 2)} language="json" />
+        : <CodeBlockMini code={joined} language="text" />;
+    }
+  }
+
   if (toolName === "run_subagent") {
     const summary = typeof o.summary === "string" ? o.summary : null;
     const steps = typeof o.stepCount === "number" ? o.stepCount : null;
