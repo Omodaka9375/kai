@@ -415,5 +415,5 @@ function labelFor(t: Tab): string {
   // every terminal in a project would otherwise read identically anyway.
   // `private` keeps its distinct title so private tabs stay recognizable.
   if (t.kind === "terminal") return t.title === "private" ? "private" : "terminal";
-  return t.title;
+  return (t as { title?: string }).title ?? "";
 }
