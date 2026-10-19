@@ -298,11 +298,17 @@ function Bridge({
     for (let i = msgs.length - 1; i >= 0 && !text; i--) {
       const m = msgs[i];
       if (m.role !== "assistant") continue;
-      text = m.parts
-        .filter((p): p is { type: "text"; text: string } => p.type === "text")
-        .map((p) => p.text)
-        .join(" ")
-        .trim();
+      // Multi-step runs accumulate EVERY step's text parts into the one
+      // assistant message — narrations like "Let me check that…" land
+      // alongside the final answer. Speak only the LAST text part (the
+      // actual reply), not the join of all parts (the step-by-step lead-up).
+      for (let j = m.parts.length - 1; j >= 0; j--) {
+        const p = m.parts[j];
+        if (p.type === "text" && typeof p.text === "string" && p.text.trim()) {
+          text = p.text.trim();
+          break;
+        }
+      }
     }
     if (!text) return; // final message not landed yet (throttle trailing edge)
     const key = `${sessionId}:${msgs.length}`;
