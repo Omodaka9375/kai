@@ -110,13 +110,18 @@ export const NONE_AGENT_ID = "__none__";
 
 const STORE_PATH = "kai-agents.json";
 const KEY_CUSTOM = "customAgents";
+/** Legacy global key — kept as the fallback when a project has no entry. */
 const KEY_ACTIVE = "activeAgentId";
+/** Per-project map: workspace root → active agent id (mirrors projectModelIds). */
+const KEY_ACTIVE_MAP = "activeAgentIds";
 
 const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
 
 export type LoadedAgents = {
   custom: Agent[];
   activeId: string;
+  /** Per-project selections; legacy global key is the fallback. */
+  activeAgentIds: Record<string, string>;
 };
 
 export async function loadAgents(): Promise<LoadedAgents> {
@@ -124,11 +129,17 @@ export async function loadAgents(): Promise<LoadedAgents> {
   const entries = await store.entries();
   let custom: Agent[] | undefined;
   let activeId: string | undefined;
+  let activeAgentIds: Record<string, string> | undefined;
   for (const [k, v] of entries) {
     if (k === KEY_CUSTOM) custom = v as Agent[];
     else if (k === KEY_ACTIVE) activeId = v as string;
+    else if (k === KEY_ACTIVE_MAP) activeAgentIds = v as Record<string, string>;
   }
-  return { custom: custom ?? [], activeId: activeId ?? NONE_AGENT_ID };
+  return {
+    custom: custom ?? [],
+    activeId: activeId ?? NONE_AGENT_ID,
+    activeAgentIds: activeAgentIds ?? {},
+  };
 }
 
 export async function saveCustomAgents(custom: Agent[]): Promise<void> {
@@ -137,6 +148,20 @@ export async function saveCustomAgents(custom: Agent[]): Promise<void> {
 }
 
 export async function saveActiveAgentId(id: string): Promise<void> {
+  await store.set(KEY_ACTIVE, id);
+  await store.save();
+}
+
+/** Save the active agent for a specific project root. Also mirrors into the
+ *  legacy global key ("most recent selection") so projects with no entry yet
+ *  and the Settings window keep working unchanged. */
+export async function saveActiveAgentIdFor(
+  root: string,
+  id: string,
+): Promise<void> {
+  const map = (await store.get<Record<string, string>>(KEY_ACTIVE_MAP)) ?? {};
+  map[root] = id;
+  await store.set(KEY_ACTIVE_MAP, map);
   await store.set(KEY_ACTIVE, id);
   await store.save();
 }

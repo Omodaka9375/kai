@@ -631,6 +631,9 @@ export default function App() {
     projectModelRoot.current = root;
     const saved = root ? projectModelIds[root] : undefined;
     setSelectedModelId((saved ?? prefDefaultModel) as ModelId);
+    // Same project switch also re-applies the per-project AGENT persona
+    // (legacy global selection is the fallback inside the store).
+    useAgentsStore.getState().setRoot(root);
   }, [prefsHydrated, explorerRoot, projectModelIds, prefDefaultModel, setSelectedModelId]);
 
   useEffect(() => {
