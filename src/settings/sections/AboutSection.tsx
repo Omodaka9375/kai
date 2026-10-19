@@ -240,6 +240,8 @@ export function AboutSection() {
             <HugeiconsIcon icon={GithubIcon} size={12} strokeWidth={1.75} />
             View on GitHub
           </Button>
+        </div>
+        <div className="flex flex-wrap gap-2">
           <Button
             variant="ghost"
             size="sm"
