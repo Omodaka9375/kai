@@ -298,11 +298,13 @@ fn settings_panel_key(tab: Option<&str>) -> String {
         .to_lowercase();
     let key = match raw.as_str() {
         "ai" | "connections" => "models".to_string(),
+        // Legacy key from before the External panel was renamed Assistant.
+        "external" => "assistant".to_string(),
         _ => raw,
     };
     if matches!(
         key.as_str(),
-        "general" | "shortcuts" | "models" | "agents" | "snippets" | "mcp" | "sandbox" | "voice" | "external" | "about"
+        "general" | "shortcuts" | "models" | "agents" | "snippets" | "mcp" | "sandbox" | "voice" | "assistant" | "external" | "about"
     ) {
         key
     } else {
