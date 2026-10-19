@@ -3,73 +3,59 @@
 All notable changes to the KAI terminal emulator project are documented in this file. KAI adheres to Semantic Versioning.
 
 ---
-
 ## [1.7.9]
 
-- Assistant: the External settings panel is now **Assistant** (menu, sidebar, window title) — and when Voice replies are ON without a TTS engine picked, the panel warns that replies currently fall back to text.
-- Assistant: replies follow an execution-clarity protocol — past-tense reports of what ran, no future-action narration, and never a completed action mixed with a question in one message (a question means it's waiting for your answer).
-- Agents: the selected agent persona is remembered **per project** (like the model) — switching workspaces re-applies each project's persona; legacy global selection stays as the fallback.
-- Chat: desktop TTS reads only the final text part of an agent run — no more narrating intermediate step-by-step text alongside the actual reply.
-- Chat: JSON tool output (MCP results arrive as JSON strings) renders pretty-printed in tool cards instead of raw escaped one-liners.
-- Media: missing-key errors on all four generation surfaces (desktop image/video, assistant image/video) now tell the user shortly to add a key in Settings → Models or use the engine's official MCP server.
+- Assistant: the External panel is now **Assistant** (menu, sidebar, window).
+- Assistant: the Voice replies toggle refuses to turn on until a TTS engine is picked.
+- Assistant: replies follow an execution-clarity protocol — past tense, no action+question mixing.
+- Agents: selected persona is remembered per project (like the model); legacy global stays as fallback.
+- Voice: TTS reads only the final text part — no more step-by-step narration.
+- Chat: JSON tool output (MCP results) renders pretty-printed in tool cards.
+- Media: missing-key errors tell the user to add a key in Settings → Models or use an MCP server.
 
 ## [1.7.8]
 
-- Assistant: Telegram replies are no longer silently dropped — event payloads now serialize camelCase on the wire (`rename_all_fields`), pinned by a wire-contract test.
-- Assistant: MCP tools with dotted names (e.g. `net.ping`) no longer break every reply — tool names are sanitized for the provider's naming pattern, original name kept in the description.
-- Assistant: media generation is assistant-native on Telegram — images and videos generate synchronously and deliver straight to the chat (photo/video/document by MIME), no longer routed through a chat-UI part that doesn't exist headless.
-- Media: Google image generation fixed — Nano Banana 2 model (`gemini-3.1-flash-image`), and the invalid `responseMimeType` that 400'd every request is gone.
-- Media: Google video generation rewritten to the current Veo REST contract (`veo-3.1-generate-preview:predictLongRunning`), with byte downloads and per-consumer base64 delivery; durations clamped to the 4-8s the API accepts.
-- Media: Kling and Seedance native integrations removed — video is Google Veo only; other engines via their official MCP servers (Settings → MCP).
-- Settings: the STT model picker and installer moved into the Speech-to-text section (they were rendering under "How recording ends").
+- Assistant: Telegram replies no longer silently dropped — event payloads serialize camelCase, pinned by a wire test.
+- Assistant: MCP tools with dotted names (`net.ping`) no longer break every reply.
+- Assistant: image/video generation is assistant-native on Telegram — delivered straight to the chat.
+- Media: Google image gen fixed — Nano Banana 2 model, invalid `responseMimeType` removed.
+- Media: Google video gen rewritten to the current Veo REST contract; durations clamped to 4-8s.
+- Media: Kling and Seedance native integrations removed — Google Veo only, others via MCP.
+- Settings: STT model picker and installer moved into the Speech-to-text section.
 
 ## [1.7.7]
 
-- Assistant: `/start` binding is now reliable end to end — the bot hands event delivery to the main window so closing Settings can't leave the poll loop talking to a dead channel, a stop/start toggle can no longer spawn a zombie loop that skips messages, and tool-step progress no longer floods the chat with one message per tool call.
-- Assistant: added IPC contract tests pinning the Telegram command argument shapes, so a keychain or event-channel argument regression fails in CI instead of after a release build.
-
----
+- Assistant: /start binding reliable end to end — no dead-channel loops, no zombie poll loops, no per-tool-step chat spam.
+- Assistant: IPC contract tests pin the Telegram command argument shapes.
 
 ## [1.7.6]
 
-- Assistant: Telegram enable now actually starts the bot (the first enable didn't persist the flag before starting, so the poll loop never ran and /start never bound an owner); the bot's event channel follows the latest window that started it, and the Owner row updates live in Settings → External.
-
----
+- Assistant: Telegram enable now actually starts the bot; the Owner row updates live in Settings.
 
 ## [1.7.5]
 
-- Assistant: fixed saving the Telegram bot token in Settings → External (a wrong argument name made the keychain write fail).
-- Voice: Auto end mode now actually engages after changing the setting (a stale closure kept silence detection disabled until restart).
-
----
+- Assistant: fixed saving the Telegram bot token (a wrong argument name failed the keychain write).
+- Voice: Auto end mode now engages after changing the setting (stale closure fixed).
 
 ## [1.7.4]
 
-- Voice: new Auto end mode — one click to record; silence detection stops the recording after you finish speaking. Turn-based (click to stop) stays the default under Settings → Voice.
-
----
+- Voice: new Auto end mode — one click to record, silence detection stops it. Turn-based stays default.
 
 ## [1.7.3]
 
-- Voice: TTS now reads the reply that just finished instead of the previous turn's — a race between the run status and the streamed message made auto-speak one turn behind.
-
----
+- Voice: TTS reads the reply that just finished, not the previous turn's.
 
 ## [1.7.2]
 
-- Settings: the File menu now includes External, making the Telegram assistant setup reachable from the menu.
-
----
+- Settings: the File menu now includes External, for Telegram assistant setup.
 
 ## [1.7.1]
 
-- AI tools: write_file refuses to overwrite a file from a partial read — reads truncated by size caps or shown as unchanged previews are now tracked, so a rewrite can no longer silently drop unseen content.
-- AI: watch conditions work in the packaged app (a stricter script policy had broken conditional watch);
+- AI tools: write_file refuses to overwrite from a partial read — capped reads are tracked.
+- AI: watch conditions work in the packaged app (CSP-safe parser).
 - Windows/Linux: the window has square corners, matching each platform's native look.
-- Assistant: chat with KAI from Telegram — text and voice notes via your own bot (Settings → External), fenced to a scratch folder, first /start binds you as its only owner.
-- Assistant: multiple named chats (/new, /sessions, /use, /del), photo input the model can see, generated images and videos delivered to the chat, and /watch pings to your phone.
-
----
+- Assistant: chat with KAI from Telegram — text and voice notes, fenced to a scratch folder, /start binds the owner.
+- Assistant: multiple named chats (/new, /sessions, /use), photo input, media delivery, and /watch pings.
 
 ## [1.7.0]
 
