@@ -168,7 +168,7 @@ export function UpdaterDialog() {
         {!downloading && changelog.sections && (
           <div className="mt-1 max-h-[200px] overflow-y-auto rounded-md border border-border/60 bg-muted/40 px-3 py-2">
             <Streamdown
-              className="prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+              className="prose prose-sm dark:prose-invert max-w-none text-[11px] leading-snug [&_*]:text-[11px] [&_h1]:text-[12.5px] [&_h2]:text-[12.5px] [&_h3]:text-[12.5px] [&_strong]:text-[11px] [&_code]:text-[10.5px] [&_*:first-child]:mt-0 [&>*:last-child]:mb-0"
               linkSafety={{ enabled: false }}
               skipHtml
             >
