@@ -305,9 +305,9 @@ export function Header({
               <HugeiconsIcon icon={Mic01Icon} size={13} strokeWidth={1.75} className="text-muted-foreground/80" />
               <span className="flex-1">Voice</span>
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => void openSettingsWindow("external")} className="gap-2 text-xs">
+            <DropdownMenuItem onSelect={() => void openSettingsWindow("assistant")} className="gap-2 text-xs">
               <HugeiconsIcon icon={GlobeIcon} size={13} strokeWidth={1.75} className="text-muted-foreground/80" />
-              <span className="flex-1">External</span>
+              <span className="flex-1">Assistant</span>
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => void openSettingsWindow("shortcuts")} className="gap-2 text-xs">
               <HugeiconsIcon icon={KeyboardIcon} size={13} strokeWidth={1.75} className="text-muted-foreground/80" />

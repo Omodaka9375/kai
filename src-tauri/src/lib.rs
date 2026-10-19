@@ -321,7 +321,8 @@ fn settings_panel_title(key: &str) -> String {
         "mcp" => "MCP Servers",
         "sandbox" => "Sandbox",
         "voice" => "Voice",
-        "external" => "External",
+        "external" => "Assistant",
+        "assistant" => "Assistant",
         _ => "About",
     };
     format!("KAI — {name}")
@@ -479,7 +480,7 @@ pub fn run() {
                     "settings-mcp",
                     "settings-sandbox",
                     "settings-voice",
-                    "settings-external",
+                    "settings-assistant",
                     "settings-about",
                 ])
                 // Key window geometry per project so two instances on different

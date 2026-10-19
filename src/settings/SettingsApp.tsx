@@ -25,6 +25,8 @@ const McpSection = lazy(() => import("./sections/McpSection").then((m) => ({ def
 const SandboxSection = lazy(() => import("./sections/SandboxSection").then((m) => ({ default: m.SandboxSection })));
 const VoiceSection = lazy(() => import("./sections/VoiceSection").then((m) => ({ default: m.VoiceSection })));
 const ExternalSection = lazy(() => import("./sections/ExternalSection").then((m) => ({ default: m.ExternalSection })));
+// "Assistant" panel — file kept as ExternalSection.tsx (renaming would churn
+// the denylist/window-state keys); id changed external → assistant.
 const AboutSection = lazy(() => import("./sections/AboutSection").then((m) => ({ default: m.AboutSection })));
 
 type TabDef = { id: SettingsTab; label: string; icon: typeof Settings01Icon; component: React.LazyExoticComponent<() => React.JSX.Element> };
@@ -39,7 +41,7 @@ const TABS: TabDef[] =
     { id: "mcp", label: "MCP Servers", icon: PuzzleIcon, component: McpSection },
     { id: "sandbox", label: "Sandbox", icon: Shield01Icon, component: SandboxSection },
     { id: "voice", label: "Voice", icon: Mic01Icon, component: VoiceSection },
-    { id: "external", label: "External", icon: GlobeIcon, component: ExternalSection },
+    { id: "assistant", label: "Assistant", icon: GlobeIcon, component: ExternalSection },
     { id: "about", label: "About", icon: InformationCircleIcon, component: AboutSection },
   ];
 
@@ -52,7 +54,7 @@ const VALID_TABS: SettingsTab[] = [
   "mcp",
   "sandbox",
   "voice",
-  "external",
+  "assistant",
   "about",
 ];
 

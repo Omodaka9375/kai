@@ -9,7 +9,7 @@ export type SettingsTab =
   | "mcp"
   | "sandbox"
   | "voice"
-  | "external"
+  | "assistant"
   | "about";
 
 export async function openSettingsWindow(tab?: string): Promise<void> {

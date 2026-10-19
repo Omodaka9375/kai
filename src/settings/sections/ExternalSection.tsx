@@ -17,10 +17,13 @@ import {
 } from "@/modules/assistant";
 import { SectionHeader } from "../components/SectionHeader";
 import { SettingRow } from "../components/SettingRow";
+import { usePreferencesStore } from "@/modules/settings/preferences";
 import { cn } from "@/lib/utils";
 
 /**
- * External — the personal-assistant channels panel. v1: Telegram.
+ * Assistant — the personal-assistant channels panel. v1: Telegram.
+ *
+ * (File kept as ExternalSection.tsx; the panel was renamed External → Assistant.)
  *
  * Setup flow:
  *   1. Create a bot with @BotFather → paste the token here (stored in the
@@ -30,6 +33,7 @@ import { cn } from "@/lib/utils";
  *      as its owner; everyone else is silently ignored forever after.
  */
 export function ExternalSection() {
+  const ttsMode = usePreferencesStore((s) => s.voiceTtsMode);
   const [prefs, setPrefs] = useState<AssistantPrefs | null>(null);
   const [token, setToken] = useState("");
   const [tokenSet, setTokenSet] = useState(false);
@@ -172,7 +176,7 @@ export function ExternalSection() {
   return (
     <div className="flex flex-col gap-6">
       <SectionHeader
-        title="External"
+        title="Assistant"
         description="Chat with your assistant outside the app."
       />
 
@@ -245,6 +249,14 @@ export function ExternalSection() {
             onCheckedChange={(v) => void patch({ voiceReplies: v })}
           />
         </SettingRow>
+
+        {prefs.voiceReplies && ttsMode === "off" ? (
+          <div className="rounded-lg bg-amber-500/10 px-3 py-2 text-[11.5px] text-amber-500">
+            Voice replies are ON but no TTS engine is picked — replies currently
+            fall back to text. Set “Text to speech (agent replies)” to Local or
+            API in Settings → Voice.
+          </div>
+        ) : null}
 
         {status ? (
           <div
