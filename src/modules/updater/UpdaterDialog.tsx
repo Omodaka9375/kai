@@ -10,7 +10,6 @@ import {
 import { Progress } from "@/components/ui/progress";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useState, useEffect } from "react";
-import { Streamdown } from "streamdown";
 import { useUpdater } from "./useUpdater";
 import { invoke } from "@tauri-apps/api/core";
 import { parseChangelogSection, parseReleaseNotes } from "./parseChangelog";
@@ -166,21 +165,23 @@ export function UpdaterDialog() {
         )}
 
         {!downloading && changelog.sections && (
-          <div className="mt-1 max-h-[200px] overflow-y-auto rounded-md border border-border/60 bg-muted/40 px-3 py-2">
-            <Streamdown
-              className="prose prose-sm dark:prose-invert max-w-none text-[11px] leading-snug [&_*]:text-[11px] [&_h1]:text-[12.5px] [&_h2]:text-[12.5px] [&_h3]:text-[12.5px] [&_strong]:text-[11px] [&_code]:text-[10.5px] [&_*:first-child]:mt-0 [&>*:last-child]:mb-0"
-              linkSafety={{ enabled: false }}
-              skipHtml
-            >
-              {changelog.sections
-                .map(
-                  (sec) =>
-                    `${sec.title ? `### ${sec.title}\n` : ""}${sec.body
-                      .map((b) => `- ${b}`)
-                      .join("\n")}`,
-                )
-                .join("\n\n")}
-            </Streamdown>
+          <div className="mt-1 max-h-[280px] overflow-y-auto rounded-md border border-border/60 bg-muted/40 px-3 py-2">
+            {changelog.sections.map((sec, si) => (
+              <div key={si} className={si > 0 ? "mt-2" : ""}>
+                {sec.title ? (
+                  <div className="mb-0.5 text-[12px] font-semibold text-foreground">
+                    {sec.title}
+                  </div>
+                ) : null}
+                <ul className="list-disc space-y-0.5 pl-4">
+                  {sec.body.map((b, bi) => (
+                    <li key={bi} className="text-[11px] leading-relaxed text-foreground/90">
+                      {b}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
           </div>
         )}
 
