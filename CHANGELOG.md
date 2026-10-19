@@ -3,6 +3,16 @@
 All notable changes to the KAI terminal emulator project are documented in this file. KAI adheres to Semantic Versioning.
 
 ---
+## [1.8.1]
+
+- Watch: fixed a whole-app freeze — a watch firing while the agent was busy re-queued itself into the live wake-up set forever; the scheduler now iterates a snapshot.
+- Watch: conditions now evaluate in the packaged app (a stricter script policy had broken every conditional watch after 10 polls); broken conditions self-report the actual reason.
+- Tabs: "Open chat" on the start screen now opens the AI panel and mini window together, matching the status-bar agent button.
+- AI: write_file refuses to overwrite a file from a truncated read — silent content loss is no longer possible.
+- UI: MCP tool calls render clean — `server__tool` labels read as "server: tool name", and MCP result payloads (structuredContent / JSON text parts) pretty-print instead of arriving as escaped one-liners.
+
+---
+
 ## [1.8.0]
 
 - Tabs: terminal tabs say “terminal”, not the project folder name (private stays “private”).
