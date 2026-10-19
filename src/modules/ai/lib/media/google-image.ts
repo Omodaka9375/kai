@@ -1,7 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ImageGenerateOpts, ImageResult } from "./types";
 
-const MODEL = "gemini-2.0-flash-exp";
+// Nano Banana 2 (Gemini 3.1 Flash Image). The 2024 `gemini-2.0-flash-exp`
+// id was long dead; this is the current image-gen workhorse.
+const MODEL = "gemini-3.1-flash-image";
 
 /** Generate an image via Google Gemini (Nano Banana 2). */
 export async function generateGoogleImage(
@@ -18,9 +20,11 @@ export async function generateGoogleImage(
         parts: [{ text: opts.prompt }],
       },
     ],
+    // Gemini image generation: ONLY responseModalities. responseMimeType
+    // accepts text/JSON types (never image/*) — sending it 400s the request
+    // ("allowed mimetypes are text/plain, application/json, ...").
     generationConfig: {
       responseModalities: ["IMAGE", "TEXT"],
-      responseMimeType: "image/png",
     },
   });
 

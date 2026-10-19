@@ -20,6 +20,9 @@ type ImageOutput = {
 type VideoOutput = {
   type: "video";
   url: string;
+  /** Inline bytes — Veo's URI needs an auth header, so bytes are the only
+   * thing a bare <video src> can play. */
+  base64?: string;
   mimeType: string;
   durationSeconds: number;
   provider: string;
@@ -70,6 +73,9 @@ export const MediaMessage = memo(function MediaMessage({ output }: Props) {
       if (output.base64) return `data:${output.mimeType};base64,${output.base64}`;
       return output.url ?? "";
     }
+    // Video: prefer inline bytes — Veo's URI needs an auth header to fetch,
+    // which a bare <video src> cannot send.
+    if (output.base64) return `data:${output.mimeType};base64,${output.base64}`;
     return output.url;
   }, [output]);
 
@@ -79,9 +85,7 @@ export const MediaMessage = memo(function MediaMessage({ output }: Props) {
     openai: "GPT Image 2",
     google: "Nano Banana 2",
     xai: "Grok Imagine",
-    kling: "Kling 3.0",
     veo: "Veo 3.1",
-    seedance: "Seedance 2.0",
   }[output.provider] ?? output.provider;
 
   const download = () => {

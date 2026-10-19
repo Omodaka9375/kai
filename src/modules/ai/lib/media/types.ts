@@ -14,7 +14,11 @@ export type ImageResult = {
 
 /** Result from a video generation provider. */
 export type VideoResult = {
+  /** Remote URL (temporary — download promptly). */
   url: string;
+  /** Base64-encoded video bytes (Veo's URI needs an auth header to fetch,
+   * so we download in-process and hand bytes downstream instead). */
+  base64?: string;
   mimeType: string;
   durationSeconds: number;
   provider: string;

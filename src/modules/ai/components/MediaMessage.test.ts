@@ -23,7 +23,7 @@ describe("isMediaOutput", () => {
         url: "https://example.com/video.mp4",
         mimeType: "video/mp4",
         durationSeconds: 5,
-        provider: "kling",
+        provider: "google",
         prompt: "a sunset",
       }),
     ).toBe(true);

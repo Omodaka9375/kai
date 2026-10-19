@@ -455,11 +455,17 @@ export async function runAssistantTurn(
   for (const [id, tool] of Object.entries(mcpTools)) {
     tools[id] = tool;
   }
-  // Media tools are wrapped so their results ALSO get delivered to the
-  // chat (see deliverMediaOut) — generation happens as usual, the
-  // placeholder resolves through our deliverer instead of a chat UI.
-  tools["generate_image"] = wrapMediaTool(tools["generate_image"], "image", deliverMediaOut);
-  tools["generate_video"] = wrapMediaTool(tools["generate_video"], "video", deliverMediaOut);
+  // Assistant-NATIVE media tools replace the desktop ones here: the desktop
+  // tools are async fire-and-forget (spawnMediaTask patches a chat-UI part
+  // that doesn't exist headless — payloads were silently dropped). These run
+  // synchronously in-step and deliver straight to Telegram. Avoid the
+  // module-level circular import: media.ts statically imports index.ts
+  // (getTelegramToken/loadAssistantPrefs), so index must load it lazily.
+  delete tools["generate_image"];
+  delete tools["generate_video"];
+  const mediaTools = await import("./media");
+  tools["generate_image"] = mediaTools.buildAssistantMediaTools()["generate_image"];
+  tools["generate_video"] = mediaTools.buildAssistantMediaTools()["generate_video"];
   // Redact tool RESULTS (paths, env vars, secrets) before they reach the
   // provider — same guarantee as the project agent path.
   const redactedTools = withToolRedaction(tools);
@@ -490,6 +496,8 @@ export async function runAssistantTurn(
     "Do NOT use code fences with language tags unless the user asks for code — Telegram renders them as monospace blocks.",
     "This is a general personal-assistant conversation, not a coding session.",
     "When you generate an image or video, it is delivered to the user's Telegram chat automatically — describe it in your reply, do not paste URLs.",
+    "Image/video generation: DO NOT ask the user which provider to use — the tools pick automatically from the configured keys. Generation takes 10-60s; that's normal, just call it.",
+    "You have no camera or screen access on the user's device — if asked to 'look at my screen', say they can send a photo here and you'll analyze it.",
     custom ? `\n\n## USER CUSTOM INSTRUCTIONS\n${custom}` : "",
   ]
     .filter(Boolean)
@@ -546,96 +554,6 @@ function toModelMessage(m: UIMessage): ModelMessage {
     } as ModelMessage;
   }
   return { role: m.role === "assistant" ? "assistant" : "user", content: text };
-}
-
-// ── Media out: generated images/videos delivered to the chat ───────────────
-
-/**
- * Wrap a media-generation tool so its background job ALSO delivers the
- * result to Telegram. The desktop media tools use spawnMediaTask which
- * patches a chat UI part — headless there is no chat, so we hook the
- * promise chain and send the bytes through the bridge.
- */
-function wrapMediaTool(
-  base: unknown,
-  kind: "image" | "video",
-  deliver: (kind: "image" | "video", data: string, mime: string, prompt: string) => void,
-): unknown {
-  if (!base || typeof base !== "object") return base;
-  const t = base as { execute?: (input: never, opts: never) => Promise<unknown> };
-  if (!t.execute) return base;
-  const origExecute = t.execute.bind(t);
-  return {
-    ...t,
-    execute: async (input: never, opts: never) => {
-      const result = await origExecute(input, opts);
-      try {
-        // The tool returns {status:"generating"} immediately; the real
-        // payload lands later via a promise we can't see from here. The
-        // payload arrives through the chatStore resolver on desktop —
-        // headless, we poll the returned task is NOT possible. Instead,
-        // deliver when the result is complete; the common case for
-        // MCP-provided media tools (immediate base64/url) works directly.
-        deliverResultIfImmediate(result, kind, deliver);
-      } catch {
-        /* delivery is best-effort */
-      }
-      return result;
-    },
-  };
-}
-
-function deliverResultIfImmediate(
-  result: unknown,
-  kind: "image" | "video",
-  deliver: (kind: "image" | "video", data: string, mime: string, prompt: string) => void,
-): void {
-  if (!result || typeof result !== "object") return;
-  const r = result as { type?: string; base64?: string; mimeType?: string; url?: string; prompt?: string };
-  if (r.base64 && r.mimeType) {
-    deliver(kind, r.base64, r.mimeType, r.prompt ?? "");
-    return;
-  }
-  if (r.url) {
-    // URL-only results (some providers) — download then deliver.
-    void (async () => {
-      try {
-        const { proxyFetch } = await import("@/modules/ai/lib/proxyFetch");
-        const resp = await proxyFetch(r.url!);
-        if (!resp.ok) return;
-        const buf = new Uint8Array(await resp.arrayBuffer());
-        deliver(kind, bytesToBase64(buf), r.mimeType ?? (kind === "image" ? "image/png" : "video/mp4"), r.prompt ?? "");
-      } catch {
-        /* best-effort */
-      }
-    })();
-  }
-}
-/** Deliver generated media to the owner's Telegram chat. */
-export async function deliverMediaOut(
-  kind: "image" | "video",
-  base64: string,
-  mime: string,
-  prompt: string,
-): Promise<void> {
-  const token = await getTelegramToken();
-  const prefs = await loadAssistantPrefs();
-  const chatId = prefs.ownerChatId;
-  if (!token || chatId == null) return;
-  const caption = prompt ? prompt.slice(0, 900) : null;
-  const isPng = mime.includes("png");
-  // Telegram accepts png/jpeg/webp for photos. Non-image bytes (SVG etc.)
-  // fall back to a document so nothing is silently dropped.
-  const photoOk = /^(image\/(png|jpeg|jpg|webp))/.test(mime);
-  if (kind === "image" && photoOk) {
-    await telegramNative
-      .sendPhoto(token, chatId, base64, caption)
-      .catch(() => telegramNative.sendDocument(token, chatId, base64, isPng ? "image.png" : "image", mime).catch(() => {}));
-  } else {
-    await telegramNative
-      .sendVideo(token, chatId, base64, caption)
-      .catch(() => telegramNative.sendDocument(token, chatId, base64, "video.mp4", mime).catch(() => {}));
-  }
 }
 
 // ── Voice pipeline ─────────────────────────────────────────────────────────

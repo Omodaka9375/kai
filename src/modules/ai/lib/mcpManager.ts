@@ -411,11 +411,19 @@ class McpClientManager {
   /** Get the merged tool map from all connected servers (namespaced). */
   getActiveTools(): Record<string, unknown> {
     const merged: Record<string, unknown> = {};
-    for (const [, managed] of this.clients) {
+    for (const [serverKey, managed] of this.clients) {
       if (managed.status.status !== "connected") continue;
       const prefix = sanitizeName(managed.config.name);
       for (const [name, tool] of Object.entries(managed.tools)) {
-        merged[`${prefix}__${name}`] = tool;
+        // Provider tool-name pattern: ^[a-zA-Z0-9_-]+$. MCP tool names may
+        // contain dots (net.ping) — replace invalid chars (case-preserving,
+        // no truncation, so names stay unique); append the original name to
+        // the description so it stays discoverable.
+        const safeSuffix = sanitizeToolName(name);
+        const key = `${prefix}__${safeSuffix}`;
+        const wrapped = wrapMcpTool(tool, name);
+        if (merged[key] === undefined) merged[key] = wrapped;
+        else merged[`${serverKey}:${key}`.replace(/[^a-zA-Z0-9_-]/g, "_")] = wrapped;
       }
     }
     return merged;
@@ -430,7 +438,7 @@ class McpClientManager {
       if (managed.status.status !== "connected") continue;
       const prefix = sanitizeName(managed.config.name);
       for (const [name, tool] of Object.entries(managed.tools)) {
-        merged[`${prefix}__${name}`] = tool;
+        merged[`${prefix}__${sanitizeToolName(name)}`] = wrapMcpTool(tool, name);
       }
     }
     return merged;
@@ -493,6 +501,29 @@ function sanitizeName(name: string): string {
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "")
     .slice(0, 30) || "mcp";
+}
+
+/**
+ * Sanitize an MCP TOOL name for the provider tool-name pattern
+ * ^[a-zA-Z0-9_-]+$: case-preserving, no truncation (keeps names unique —
+ * truncating or lowercasing could collide two distinct tools).
+ */
+function sanitizeToolName(name: string): string {
+  const cleaned = name.replace(/[^a-zA-Z0-9_-]+/g, "_");
+  return cleaned || "tool";
+}
+
+/**
+ * Wrap an MCP tool so its description carries the original (possibly
+ * dot-containing) name — the sanitized key is what the model calls it by,
+ * the description keeps the real identity discoverable.
+ */
+function wrapMcpTool(tool: unknown, originalName: string): unknown {
+  if (!tool || typeof tool !== "object") return tool;
+  const t = tool as { description?: unknown };
+  const base = typeof t.description === "string" ? t.description : "";
+  const desc = `${base} (MCP tool: ${originalName})`.trim();
+  return { ...(t as Record<string, unknown>), description: desc };
 }
 
 /** Race a promise against a timeout. */

@@ -69,7 +69,12 @@ const API: &str = "https://api.telegram.org";
 const LONG_POLL_SECS: u64 = 40;
 
 #[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase", tag = "kind")]
+// `rename_all` covers the VARIANT names (the tag values: "message", "photo"…).
+// Internally-tagged enums do NOT apply it to variant FIELDS — without
+// `rename_all_fields` the payload serialized snake_case (`chat_id`) while the
+// TS handler read camelCase (`chatId` → undefined → every reply died with
+// "missing required key chatId"). Keep both.
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase", tag = "kind")]
 pub enum TelegramEvent {
     /// An incoming message (text or voice) from the owner.
     Message {
@@ -129,39 +134,77 @@ fn api_url(token: &str, method: &str) -> String {
     format!("{API}/bot{token}/{method}")
 }
 
+/// Shared pooled HTTP client. One per-process client means one connection
+/// pool: repeated sendMessage calls reuse the warm TLS session instead of
+/// handshaking from scratch every time (fresh-client-per-call made sends
+/// flaky whenever the handshake hit a transient DNS/TLS/VPN hiccup).
+fn http_client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(Duration::from_secs(60))
+            .connect_timeout(Duration::from_secs(15))
+            .pool_idle_timeout(Duration::from_secs(90))
+            .build()
+            .expect("reqwest client")
+    })
+}
+
+/// reqwest's Display ("error sending request for url …") hides the real
+/// cause. Walk the source chain so logs name the actual failure.
+fn err_chain(e: &reqwest::Error) -> String {
+    use std::error::Error as _;
+    let mut parts = vec![e.to_string()];
+    let mut src = e.source();
+    while let Some(s) = src {
+        parts.push(s.to_string());
+        src = s.source();
+    }
+    parts.join(" | ")
+}
+
 async fn post_json<T: serde::de::DeserializeOwned>(
     token: &str,
     method: &str,
     body: &serde_json::Value,
 ) -> Result<T, String> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(60))
-        .build()
-        .map_err(|e| format!("client build: {e}"))?;
-    let resp = client
-        .post(api_url(token, method))
-        .json(body)
-        .send()
-        .await
-        .map_err(|e| format!("{method}: {e}"))?;
-    let status = resp.status();
-    let text = resp.text().await.unwrap_or_default();
-    if !status.is_success() {
-        return Err(format!("{method} HTTP {status}: {}", text.chars().take(300).collect::<String>()));
+    let url = api_url(token, method);
+    let mut last_err = String::new();
+    // Transport-level failures (connect/TLS/DNS/reset/timeout) are transient
+    // — retry up to 3 attempts with backoff before surfacing. HTTP-level
+    // errors (4xx/5xx, Telegram `ok:false`) are NOT retried: the request
+    // reached Telegram and the answer is authoritative.
+    for attempt in 1..=3u32 {
+        if attempt > 1 {
+            tokio::time::sleep(Duration::from_millis(500 * u64::from(attempt - 1))).await;
+        }
+        let resp = match http_client().post(&url).json(body).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                last_err = format!("{method}: {}", err_chain(&e));
+                continue;
+            }
+        };
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        if !status.is_success() {
+            return Err(format!("{method} HTTP {status}: {}", text.chars().take(300).collect::<String>()));
+        }
+        // Telegram wraps everything in { ok: bool, result: T | description }.
+        #[derive(Deserialize)]
+        struct Envelope<T> {
+            ok: bool,
+            result: Option<T>,
+            description: Option<String>,
+        }
+        let env: Envelope<T> =
+            serde_json::from_str(&text).map_err(|e| format!("{method} decode: {e}"))?;
+        if !env.ok {
+            return Err(format!("{method}: {}", env.description.unwrap_or_else(|| "unknown".into())));
+        }
+        return env.result.ok_or_else(|| format!("{method}: empty result"));
     }
-    // Telegram wraps everything in { ok: bool, result: T | description }.
-    #[derive(Deserialize)]
-    struct Envelope<T> {
-        ok: bool,
-        result: Option<T>,
-        description: Option<String>,
-    }
-    let env: Envelope<T> =
-        serde_json::from_str(&text).map_err(|e| format!("{method} decode: {e}"))?;
-    if !env.ok {
-        return Err(format!("{method}: {}", env.description.unwrap_or_else(|| "unknown".into())));
-    }
-    env.result.ok_or_else(|| format!("{method}: empty result"))
+    Err(last_err)
 }
 
 #[derive(Debug, Deserialize)]
@@ -454,10 +497,14 @@ pub fn telegram_bind_owner() -> Result<(), String> {
     Ok(())
 }
 
-/// Clear the owner binding (re-bind to a different account).
+/// Clear the owner binding (re-bind to a different account). Re-arms the
+/// single-use bind handshake so the NEXT /start claims ownership — without
+/// this, an unbound bot silently drops everything forever (the handshake
+/// flag is consumed by the first /start and never re-armed on clear).
 #[tauri::command]
 pub fn telegram_clear_owner() -> Result<(), String> {
     OWNER_CHAT_ID.store(-1, Ordering::SeqCst);
+    BIND_MODE.store(true, Ordering::SeqCst);
     Ok(())
 }
 
@@ -497,16 +544,23 @@ pub async fn telegram_test(token: String) -> Result<TelegramStatus, String> {
 pub async fn telegram_send_message(token: String, chat_id: i64, text: String) -> Result<(), String> {
     // 4096 is Telegram's hard message cap; split long agent replies.
     for chunk in split_message(&text) {
-        post_json::<serde_json::Value>(
-            &token,
-            "sendMessage",
-            &serde_json::json!({
-                "chat_id": chat_id,
-                "text": chunk,
-                "parse_mode": "Markdown",
-            }),
-        )
-        .await?;
+        // Markdown first (nicer rendering). Agent replies often contain raw
+        // backticks / half-written Markdown that Telegram's parser rejects
+        // with HTTP 400 "can't parse entities" — fall back to plain text so
+        // the reply is never lost to formatting.
+        let md = serde_json::json!({
+            "chat_id": chat_id,
+            "text": chunk,
+            "parse_mode": "Markdown",
+        });
+        if let Err(e) = post_json::<serde_json::Value>(&token, "sendMessage", &md).await {
+            if e.contains("can't parse entities") {
+                let plain = serde_json::json!({ "chat_id": chat_id, "text": chunk });
+                post_json::<serde_json::Value>(&token, "sendMessage", &plain).await?;
+            } else {
+                return Err(e);
+            }
+        }
     }
     Ok(())
 }
@@ -527,10 +581,6 @@ pub async fn telegram_send_voice(
     // ffmpeg WAV/MP3 → OGG/Opus (Telegram voice requirement).
     let ogg = transcode_to_ogg(&bytes)?;
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(120))
-        .build()
-        .map_err(|e| format!("client: {e}"))?;
     let part = reqwest::multipart::Part::bytes(ogg)
         .file_name("voice.ogg")
         .mime_str("audio/ogg")
@@ -538,12 +588,12 @@ pub async fn telegram_send_voice(
     let form = reqwest::multipart::Form::new()
         .text("chat_id", chat_id.to_string())
         .part("voice", part);
-    let resp = client
+    let resp = http_client()
         .post(api_url(&token, "sendVoice"))
         .multipart(form)
         .send()
         .await
-        .map_err(|e| format!("sendVoice: {e}"))?;
+        .map_err(|e| format!("sendVoice: {}", err_chain(&e)))?;
     if !resp.status().is_success() {
         let status = resp.status();
         let t = resp.text().await.unwrap_or_default();
@@ -589,19 +639,15 @@ async fn download_file(token: &str, file_id: &str) -> Result<bytes::Bytes, Strin
     let fp: FilePath = post_json(token, "getFile", &serde_json::json!({ "file_id": file_id })).await?;
     let rel = fp.file_path.ok_or("no file_path in getFile result")?;
     let url = format!("{API}/file/bot{token}/{rel}");
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(60))
-        .build()
-        .map_err(|e| format!("client: {e}"))?;
-    let resp = client
+    let resp = http_client()
         .get(&url)
         .send()
         .await
-        .map_err(|e| format!("download: {e}"))?;
+        .map_err(|e| format!("download: {}", err_chain(&e)))?;
     if !resp.status().is_success() {
         return Err(format!("download HTTP {}", resp.status()));
     }
-    let bytes = resp.bytes().await.map_err(|e| format!("body: {e}"))?;
+    let bytes = resp.bytes().await.map_err(|e| format!("body: {}", err_chain(&e)))?;
     if bytes.len() > 20 * 1024 * 1024 {
         return Err("file too large (over 20 MB)".into());
     }
@@ -624,10 +670,6 @@ async fn send_multipart(
     data: Vec<u8>,
     caption: Option<String>,
 ) -> Result<(), String> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(180))
-        .build()
-        .map_err(|e| format!("client: {e}"))?;
     let part = reqwest::multipart::Part::bytes(data)
         .file_name(file_name.to_string())
         .mime_str(mime)
@@ -638,12 +680,12 @@ async fn send_multipart(
         form = form.text("caption", c);
     }
     form = form.part(field.to_string(), part);
-    let resp = client
+    let resp = http_client()
         .post(api_url(token, method))
         .multipart(form)
         .send()
         .await
-        .map_err(|e| format!("{method}: {e}"))?;
+        .map_err(|e| format!("{method}: {}", err_chain(&e)))?;
     if !resp.status().is_success() {
         let status = resp.status();
         let t = resp.text().await.unwrap_or_default();
@@ -709,6 +751,51 @@ pub async fn telegram_send_document(
         None,
     )
     .await
+}
+
+/// Send media referenced by a URL: fetch server-side (Rust, so no CSP/webview
+/// fetch limits), then upload as photo / video / document. This is how the
+/// assistant delivers provider-generated media — most providers return a
+/// temporary URL rather than inline bytes, and the fetch+upload must happen
+/// off the webview anyway. Video snapshots are generated in the caller; the
+/// 20 MB cap matches Telegram's bot upload limit.
+#[tauri::command]
+pub async fn telegram_send_media_url(
+    token: String,
+    chat_id: i64,
+    url: String,
+    kind: String, // "image" | "video" | "document"
+    caption: Option<String>,
+) -> Result<(), String> {
+    const MAX_BYTES: usize = 20 * 1024 * 1024;
+    let resp = http_client()
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("media download: {}", err_chain(&e)))?;
+    if !resp.status().is_success() {
+        return Err(format!("media download HTTP {}", resp.status()));
+    }
+    let mime = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.split(';').next().unwrap_or("application/octet-stream").trim().to_string())
+        .unwrap_or_else(|| "application/octet-stream".into());
+    let bytes = resp.bytes().await.map_err(|e| format!("media body: {}", err_chain(&e)))?;
+    if bytes.len() > MAX_BYTES {
+        return Err("media too large (over 20 MB)".into());
+    }
+    let (method, field, name) = match (kind.as_str(), mime.as_str()) {
+        ("image", "image/png") => ("sendPhoto", "photo", "image.png"),
+        ("image", "image/jpeg") => ("sendPhoto", "photo", "image.jpg"),
+        ("image", "image/webp") => ("sendPhoto", "photo", "image.webp"),
+        ("image", _) => ("sendDocument", "document", "image"),
+        ("video", "video/mp4") => ("sendVideo", "video", "video.mp4"),
+        ("video", _) => ("sendDocument", "document", "video"),
+        _ => ("sendDocument", "document", "file"),
+    };
+    send_multipart(&token, method, field, chat_id, name, &mime, bytes.to_vec(), caption).await
 }
 
 // ── ffmpeg helpers (fail-soft) ─────────────────────────────────────────────
@@ -806,6 +893,36 @@ fn split_message(text: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn event_serializes_camel_case_for_channel() {
+        // The frontend Channel handler reads `kind`, `chatId`, `text`, … —
+        // a field naming mismatch here silently drops the field (undefined),
+        // which previously killed every reply with "missing required key
+        // chatId". Pin the exact wire shape.
+        let e = TelegramEvent::Message {
+            chat_id: 42,
+            message_id: 7,
+            text: Some("hi".into()),
+            voice_file_id: None,
+            voice_duration_secs: None,
+            date: 0,
+        };
+        let j = serde_json::to_value(&e).unwrap();
+        assert_eq!(j["kind"], "message");
+        assert_eq!(j["chatId"], 42);
+        assert_eq!(j["text"], "hi");
+        let p = TelegramEvent::Photo {
+            chat_id: 42,
+            message_id: 7,
+            photo_file_id: "f".into(),
+            caption: None,
+            date: 0,
+        };
+        let j = serde_json::to_value(&p).unwrap();
+        assert_eq!(j["kind"], "photo");
+        assert_eq!(j["photoFileId"], "f");
+    }
 
     #[test]
     fn split_message_respects_cap() {

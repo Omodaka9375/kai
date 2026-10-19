@@ -743,6 +743,7 @@ app.manage(Mutex::new(None::<fs::env_probe::EnvInventory>));
             modules::telegram::telegram_send_photo,
             modules::telegram::telegram_send_video,
             modules::telegram::telegram_send_document,
+            modules::telegram::telegram_send_media_url,
             modules::telegram::telegram_download_voice,
             modules::telegram::telegram_download_file,
             mcp::mcp_stdio_open,
