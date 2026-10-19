@@ -396,7 +396,19 @@ function ToolOutput({
 
   let body: ReactNode;
   if (typeof output === "string") {
-    body = <CodeBlockMini code={output} language="text" />;
+    // MCP tool results arrive as a STRING whose body is JSON (that exact
+    // escaped text is also what the model sees). If it parses, show it
+    // pretty-printed instead of the raw one-line \"escaped\" form.
+    let parsed: unknown | undefined;
+    try {
+      parsed = JSON.parse(output);
+    } catch {
+      parsed = undefined;
+    }
+    body =
+      parsed !== undefined && typeof parsed === "object"
+        ? <CodeBlockMini code={JSON.stringify(parsed, null, 2)} language="json" />
+        : <CodeBlockMini code={output} language="text" />;
   } else if (typeof output === "object" && !isValidElement(output)) {
     body = (
       <CodeBlockMini code={JSON.stringify(output, null, 2)} language="json" />
