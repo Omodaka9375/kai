@@ -246,17 +246,20 @@ export function ExternalSection() {
           <Switch
             checked={prefs.voiceReplies}
             disabled={busy}
-            onCheckedChange={(v) => void patch({ voiceReplies: v })}
+            onCheckedChange={(v) => {
+              if (v && ttsMode === "off") {
+                // Gate: enabling requires a TTS engine — otherwise replies would
+                // silently fall back to text and read as broken.
+                setIsError(false);
+                setStatus(
+                  "Turn on a TTS engine first — Settings → Voice → “Text to speech (agent replies)”: Local or API.",
+                );
+                return;
+              }
+              void patch({ voiceReplies: v });
+            }}
           />
         </SettingRow>
-
-        {prefs.voiceReplies && ttsMode === "off" ? (
-          <div className="rounded-lg bg-amber-500/10 px-3 py-2 text-[11.5px] text-amber-500">
-            Voice replies are ON but no TTS engine is picked — replies currently
-            fall back to text. Set “Text to speech (agent replies)” to Local or
-            API in Settings → Voice.
-          </div>
-        ) : null}
 
         {status ? (
           <div
