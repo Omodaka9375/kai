@@ -3,6 +3,22 @@
 All notable changes to the KAI terminal emulator project are documented in this file. KAI adheres to Semantic Versioning.
 
 ---
+## [1.8.2]
+
+- Security: agent audit trail - append-only, credential-scrubbed JSONL under ~/.kai/audit/ (agent-unwritable); records tool exec, approval decisions, security denials, sandbox mode flips, and assistant turns. Fence coverage for subagents and the Telegram assistant; scoped approval allowlist ("always allow" for low-risk commands only, executed with a runtime re-check).
+- Models: first-class local/LAN OpenAI-compatible endpoints (base URL + model id), fenced from the SSRF proxy like every other provider.
+- Security: LAN-only agent network policy - model-chosen web tools and shell egress are denied to the public internet; provider/MCP/api-tester fetches are never restricted.
+- AI: bash_run no longer kills test runners mid-run (timeouts stopped reaping long compile/test processes).
+- Watch: dedup match-mode firings - no more chat replay and context refill on repeated identical polls.
+- Settings: Security panel reachable from the menu + covered by the window-state denylist.
+- Assistant: searchable model picker with its own model override, decoupled from the project agent's model ("Follow default" rides the app default).
+- EOL: LF enforced repo-wide (.gitattributes + editorconfig + VS Code) - fixes byte-exact edit-tool match failures against CRLF working trees; the edit tools themselves are EOL-tolerant on any folder, git or not.
+- Settings: Assistant panel opens in ~1s instead of ~1min - the panel stopped statically importing the whole AI runtime (light prefs module + dynamic bridge imports).
+- Settings: Security panel "open audit folder" button works - opener open_path needed both the command permission and a scoped `$HOME/.kai/**` entry.
+- Security: approval audit events record the real tool name - the subject column no longer reads "Unknown" (the name lives in part.type, not toolName).
+
+---
+
 ## [1.8.1]
 
 - Watch: fixed a whole-app freeze — a watch firing while the agent was busy re-queued itself into the live wake-up set forever; the scheduler now iterates a snapshot.
