@@ -94,8 +94,15 @@ function slowCommandTimeout(cmd: string): number | undefined {
   // Build commands — Rust/TS compilation can take 5+ minutes.
   if (/\b(npm|pnpm|yarn|bun)\s+(run\s+)?build\b/.test(lower)) return 600;
   if (/\b(cargo\s+build|cargo\s+test|tsc)\b/.test(lower)) return 600;
-  // Test/lint — usually under 2 minutes but give headroom.
-  if (/\b(npm|pnpm|yarn|bun)\s+(run\s+)?(test|lint|typecheck|check)\b/.test(lower)) return 120;
+  // Test commands — vitest/jest boot a per-file worker pool (node_modules
+  // resolution alone is 30-60s cold) and a full suite can easily exceed 2
+  // minutes through the pnpm -> node -> runner chain. 300s matches the
+  // class of work, not the optimistic median (same reasoning 8a58c89
+  // applied to builds: an undersized timeout kills the runner mid-test and
+  // loses ALL collected output).
+  if (/\b(npm|pnpm|yarn|bun)\s+(run\s+)?(test|lint|typecheck|check)\b/.test(lower)) return 300;
+  // Bare runner invocations too (vitest run, jest).
+  if (/\b(vitest|jest)\b/.test(lower)) return 300;
   return undefined;
 }
 
@@ -254,13 +261,34 @@ export function buildShellTools(ctx: ToolContext) {
             effectiveTimeout,
             await sandboxExecRoot(),
           );
+          const stdout = stripAnsi(r.stdout);
+          const stderr = stripAnsi(r.stderr);
+          if (r.timed_out) {
+            // A timeout kills the whole process tree (Job Object) — the
+            // runner dies mid-run with no exit code, and the agent sees only
+            // partial output with no explanation. Say WHAT happened, HOW LONG
+            // the budget was, and WHAT to do: re-run detached so the runner
+            // survives past the tool call, then poll its log. This is the
+            // recurring "killed mid-test" artifact — make it actionable.
+            return {
+              command,
+              elevated: false,
+              stdout,
+              stderr,
+              exit_code: r.exit_code,
+              timed_out: true,
+              truncated: r.truncated,
+              cwd_after: r.cwd_after,
+              hint: `Command exceeded the ${effectiveTimeout}s timeout and was force-killed (partial output above). To finish the run: re-spawn it via bash_background and poll bash_logs — background processes are not subject to the foreground timeout. Or pass a larger timeout_secs (max 1000) when the command legitimately needs longer.`,
+            };
+          }
           return {
             command,
             elevated: false,
-            stdout: stripAnsi(r.stdout),
-            stderr: stripAnsi(r.stderr),
+            stdout,
+            stderr,
             exit_code: r.exit_code,
-            timed_out: r.timed_out,
+            timed_out: false,
             truncated: r.truncated,
             cwd_after: r.cwd_after,
           };
