@@ -34,6 +34,7 @@ import { cancelAllShellSessions } from "../tools/shell";
 import { clearFenceState, summarizeMessagesNow } from "../lib/transport";
 import { reapSessionWatches, closeWatchSessionShell } from "../tools/watch";
 import { agentBus } from "../lib/eventBus";
+import { auditAppend, AUDIT_KINDS } from "../lib/audit";
 import { createShadow, getShadow } from "../lib/shadow";
 import {
   disposeSessionToolContext,
@@ -1465,10 +1466,62 @@ export function respondToApprovalStandalone(
   approved: boolean,
 ): void {
   const state = useChatStore.getState();
+  // AUDIT: record the human decision — the one thing the agent's own
+  // transcript can't prove. Fire-and-forget; never blocks the response.
+  const auditSummary = describeApproval(approvalId, approved, state);
+  auditAppend(
+    approved ? AUDIT_KINDS.approvalApprove : AUDIT_KINDS.approvalDeny,
+    auditSummary.subject,
+    auditSummary.summary,
+    auditSummary.root,
+  );
   const fn = state.approvalResponder;
   if (fn) fn(approvalId, approved);
   // Same rationale as respondToApproval: don't abort on denial.
   // The agent should see the denial and continue gracefully.
+}
+
+/** Best-effort approval description for the audit trail: tool name + a
+ *  scrubbed short excerpt of the input. Never throws. */
+function describeApproval(
+  approvalId: string,
+  approved: boolean,
+  state: StoreState,
+): { subject: string; summary: string; root: string } {
+  try {
+    // Find the approval-requested part across session messages to recover
+    // the tool name + input. (The resolver map isn't exported; scanning is
+    // acceptable — one pass over the active session's messages.)
+    const root =
+      state.live?.getWorkspaceRoot?.() ??
+      usePreferencesStore.getState().lastWorkspaceCwd ??
+      "";
+    const chat = chats.get(state.activeSessionId ?? "");
+    if (!chat) return { subject: "unknown", summary: `approval ${approved ? "approved" : "denied"} (${approvalId})`, root };
+    for (const m of chat.messages) {
+      for (const p of m.parts as Array<Record<string, unknown>>) {
+        const approval = p.approval as { id?: string } | undefined;
+        if (approval?.id !== approvalId) continue;
+        const input = (p.input ?? {}) as Record<string, unknown>;
+        const subject = String(p.toolName ?? "unknown");
+        // Command/path excerpt — scrubbed again on the Rust side.
+        const cmd =
+          typeof input.command === "string"
+            ? input.command.slice(0, 160)
+            : typeof input.path === "string"
+              ? input.path
+              : "";
+        return {
+          subject,
+          summary: `${approved ? "approved" : "denied"}${cmd ? `: ${cmd}` : ""}`,
+          root,
+        };
+      }
+    }
+    return { subject: "unknown", summary: `approval ${approved ? "approved" : "denied"} (${approvalId})`, root };
+  } catch {
+    return { subject: "unknown", summary: `approval decision (${approvalId})`, root: "" };
+  }
 }
 
 /**

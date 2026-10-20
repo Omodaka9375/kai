@@ -14,6 +14,8 @@ import {
   type AgentRunStatus,
 } from "../store/chatStore";
 import { verifyIfDirtyAtRunEnd } from "../lib/autoVerify";
+import { isCommandAllowed } from "../lib/allowlist";
+import { checkShellCommand } from "../lib/security";
 import { speakText } from "../lib/voiceTts";
 
 /**
@@ -335,6 +337,7 @@ function Bridge({
 
   useEffect(() => {
     if (autoApprove === "off") return;
+    let cancelled = false;
     for (const m of messages) {
       if (m.role !== "assistant") continue;
       for (const p of m.parts as AnyPart[]) {
@@ -358,6 +361,33 @@ function Bridge({
           signingApprovalRequired &&
           isGitCommitCommand(input?.command as string | undefined);
         if (isSignedCommit) continue;
+        // Scoped allowlist (approval-fatigue fix): a command the user pinned
+        // as "always allow" for THIS project auto-approves even with
+        // autoApprove off. Guards above already ran, and isCommandAllowed
+        // re-checks the hard deny-list — a pinned command can never be
+        // elevated, signed, destructive, or chained.
+        if (toolName === "bash_run" && typeof input?.command === "string") {
+          const cmd = input.command;
+          // The hard deny-list must still pass (it always would —
+          // isAllowlistable required it at pin time — but check anyway:
+          // defense in depth against a tampered store).
+          if (!checkShellCommand(cmd).ok) continue;
+          const root = useChatStore.getState().live.getWorkspaceRoot();
+          void isCommandAllowed(cmd, root).then((allowed) => {
+            if (!allowed || cancelled) return;
+            if (autoApprovedRef.current.has(id)) return;
+            autoApprovedRef.current.add(id);
+            markAutoApproved(id);
+            setTimeout(() => {
+              try {
+                addToolApprovalResponse({ id, approved: true });
+              } catch {
+                // Stale call — ignore.
+              }
+            }, 0);
+          });
+          continue;
+        }
         const shouldApprove =
           autoApprove === "all" ||
           (autoApprove === "edits" && FILE_MUTATION_TOOLS.has(toolName));
@@ -383,6 +413,9 @@ function Bridge({
         }, 0);
       }
     }
+    return () => {
+      cancelled = true;
+    };
   }, [messages, autoApprove, addToolApprovalResponse, markAutoApproved, signingApprovalRequired]);
 
   // ---- AI diff tab management ----------------------------------------------

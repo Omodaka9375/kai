@@ -304,7 +304,7 @@ fn settings_panel_key(tab: Option<&str>) -> String {
     };
     if matches!(
         key.as_str(),
-        "general" | "shortcuts" | "models" | "agents" | "snippets" | "mcp" | "sandbox" | "voice" | "assistant" | "external" | "about"
+        "general" | "shortcuts" | "models" | "agents" | "snippets" | "mcp" | "sandbox" | "security" | "voice" | "assistant" | "external" | "about"
     ) {
         key
     } else {
@@ -322,6 +322,7 @@ fn settings_panel_title(key: &str) -> String {
         "snippets" => "Snippets",
         "mcp" => "MCP Servers",
         "sandbox" => "Sandbox",
+        "security" => "Security",
         "voice" => "Voice",
         "external" => "Assistant",
         "assistant" => "Assistant",
@@ -704,6 +705,10 @@ app.manage(Mutex::new(None::<fs::env_probe::EnvInventory>));
             modules::sandbox::sandbox_save_config,
             modules::sandbox::wsl::sandbox_wsl_setup,
             modules::sandbox::wsl::sandbox_wsl_remove,
+            modules::audit::audit_append,
+            modules::audit::audit_recent,
+            modules::audit::audit_clear,
+            modules::audit::audit_dir_path,
             modules::sandbox::shadow::shadow_status,
             modules::sandbox::shadow::shadow_create,
             modules::sandbox::shadow::shadow_merge,

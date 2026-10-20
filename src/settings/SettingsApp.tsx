@@ -23,6 +23,7 @@ const AgentsSection = lazy(() => import("./sections/AgentsSection").then((m) => 
 const SnippetsSection = lazy(() => import("./sections/SnippetsSection").then((m) => ({ default: m.SnippetsSection })));
 const McpSection = lazy(() => import("./sections/McpSection").then((m) => ({ default: m.McpSection })));
 const SandboxSection = lazy(() => import("./sections/SandboxSection").then((m) => ({ default: m.SandboxSection })));
+const SecuritySection = lazy(() => import("./sections/SecuritySection").then((m) => ({ default: m.SecuritySection })));
 const VoiceSection = lazy(() => import("./sections/VoiceSection").then((m) => ({ default: m.VoiceSection })));
 const ExternalSection = lazy(() => import("./sections/ExternalSection").then((m) => ({ default: m.ExternalSection })));
 // "Assistant" panel — file kept as ExternalSection.tsx (renaming would churn
@@ -40,6 +41,7 @@ const TABS: TabDef[] =
     { id: "snippets", label: "Snippets", icon: SparklesIcon, component: SnippetsSection },
     { id: "mcp", label: "MCP Servers", icon: PuzzleIcon, component: McpSection },
     { id: "sandbox", label: "Sandbox", icon: Shield01Icon, component: SandboxSection },
+    { id: "security", label: "Security", icon: Shield01Icon, component: SecuritySection },
     { id: "voice", label: "Voice", icon: Mic01Icon, component: VoiceSection },
     { id: "assistant", label: "Assistant", icon: GlobeIcon, component: ExternalSection },
     { id: "about", label: "About", icon: InformationCircleIcon, component: AboutSection },
@@ -53,6 +55,7 @@ const VALID_TABS: SettingsTab[] = [
   "snippets",
   "mcp",
   "sandbox",
+  "security",
   "voice",
   "assistant",
   "about",

@@ -5,7 +5,8 @@ import type { ProviderKeys } from "../lib/keyring";
 import type { ToolContext } from "../tools/context";
 import { buildFsTools } from "../tools/fs";
 import { buildSearchTools } from "../tools/search";
-import { withToolRedaction } from "../lib/toolFencing";
+import { withToolRedaction, withToolGuard } from "../lib/toolFencing";
+import { createFenceState, fence, fenceSystemPrompt } from "../lib/fence";
 import { SUBAGENTS, type SubagentType } from "./registry";
 
 const SUBAGENT_MAX_STEPS_DEFAULT = 24;
@@ -60,6 +61,12 @@ export async function runSubagent({
   // has to be applied here too — otherwise a read_file from inside a subagent
   // reaches the provider completely unscrubbed.
   const redactedTools = withToolRedaction(tools);
+  // Fence the subagent's tool results with its OWN nonce set: an injected
+  // README saying "ignore your rules" reaches the sub-model inside a trust
+  // boundary it was told never to obey. The parent's fence nonces are
+  // different on purpose — a subagent nonce can't impersonate parent fences.
+  const fenceState = createFenceState();
+  const guardedTools = withToolGuard(redactedTools, fenceState, null);
 
   // Resolve model id for local providers that use a user-configured model name.
   const m = getModel(modelId);
@@ -80,9 +87,9 @@ export async function runSubagent({
   const start = Date.now();
   const result = await generateText({
     model,
-    system: def.systemPrompt,
+    system: def.systemPrompt + "\n\n" + fenceSystemPrompt(fenceState),
     prompt,
-    tools: redactedTools as Parameters<typeof generateText>[0]["tools"],
+    tools: guardedTools as Parameters<typeof generateText>[0]["tools"],
     stopWhen: stepCountIs(maxSteps ?? SUBAGENT_MAX_STEPS_DEFAULT),
     abortSignal,
     onStepFinish: (step) => {
@@ -93,7 +100,7 @@ export async function runSubagent({
   });
 
   return {
-    summary: result.text || "(no output)",
+    summary: fence("tool", fenceState.nonces.tool, result.text || "(no output)"),
     stepCount: result.steps?.length ?? 0,
     durationMs: Date.now() - start,
   };

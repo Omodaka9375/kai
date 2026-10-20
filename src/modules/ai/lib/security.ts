@@ -28,6 +28,7 @@
  *    into a protected directory.
  */
 
+import { auditAppend, AUDIT_KINDS } from "./audit";
 import { checkSandbox } from "./sandbox";
 
 const SECRET_BASENAME_PATTERNS: RegExp[] = [
@@ -66,6 +67,14 @@ const SECRET_BASENAME_PATTERNS: RegExp[] = [
  * the comparator handles separators.
  */
 const PROTECTED_DIRS = [
+  // KAI's own control-plane state. The approval allowlist lives under
+  // ~/.kai/allowlist/ — agent-writable it would be a self-grant: a prompt
+  // injection could pin its own commands and never see an approval card
+  // again. The audit dir is blocked on the write side by the same rule
+  // (append-only integrity is enforced by the Rust module; here we keep
+  // the agent from touching either at all).
+  "/.kai/allowlist",
+  "/.kai/audit",
   "/.ssh",
   "/.gnupg",
   "/.aws",
@@ -302,12 +311,30 @@ export function checkWritable(path: string): SafetyResult {
  * Returns the canonical path on success so callers can use it for the actual
  * read — avoids TOCTOU between the safety check and the read.
  */
+/** Record a security/sandbox denial to the audit trail. Fire-and-forget;
+ *  the deny path must stay fast and never throw into the tool result. */
+function auditDeny(op: "read" | "write", path: string, reason: string): void {
+  try {
+    auditAppend(
+      AUDIT_KINDS.securityDeny,
+      op,
+      `${reason} — ${path.slice(0, 160)}`,
+      "",
+    );
+  } catch {
+    // never break the deny path
+  }
+}
+
 export async function checkReadableCanonical(
   path: string,
   canonicalize: (p: string) => Promise<string>,
 ): Promise<{ ok: true; canonical: string } | { ok: false; reason: string }> {
   const initial = checkReadable(path);
-  if (!initial.ok) return initial;
+  if (!initial.ok) {
+    auditDeny("read", path, initial.reason);
+    return initial;
+  }
   let canonical: string;
   try {
     canonical = await canonicalize(path);
@@ -319,11 +346,17 @@ export async function checkReadableCanonical(
   // checks themselves can have OS-specific gaps (NTFS streams, trailing
   // dot/space) that warrant a second pass against the comparison form.
   const recheck = checkReadable(canonical);
-  if (!recheck.ok) return recheck;
+  if (!recheck.ok) {
+    auditDeny("read", canonical, recheck.reason);
+    return recheck;
+  }
   // Project sandbox (see lib/sandbox.ts): workspaceOnly confines reads to
   // the project root. No-op when the sandbox is off.
   const sandbox = await checkSandbox("read", canonical);
-  if (!sandbox.ok) return sandbox;
+  if (!sandbox.ok) {
+    auditDeny("read", canonical, sandbox.reason);
+    return sandbox;
+  }
   return { ok: true, canonical };
 }
 
@@ -337,17 +370,26 @@ export async function checkWritableCanonical(
   canonicalize: (p: string) => Promise<string>,
 ): Promise<{ ok: true; canonical: string } | { ok: false; reason: string }> {
   const initial = checkWritable(path);
-  if (!initial.ok) return initial;
+  if (!initial.ok) {
+    auditDeny("write", path, initial.reason);
+    return initial;
+  }
   // Try canonicalizing the target itself first.
   try {
     const canonical = await canonicalize(path);
     // Always recheck the canonical form — same rationale as checkReadableCanonical.
     const recheck = checkWritable(canonical);
-    if (!recheck.ok) return recheck;
+    if (!recheck.ok) {
+      auditDeny("write", canonical, recheck.reason);
+      return recheck;
+    }
     // Project sandbox: readOnly + workspaceBoth confine writes to the
     // project root. No-op when the sandbox is off.
     const sandbox = await checkSandbox("write", canonical);
-    if (!sandbox.ok) return sandbox;
+    if (!sandbox.ok) {
+      auditDeny("write", canonical, sandbox.reason);
+      return sandbox;
+    }
     return { ok: true, canonical };
   } catch {
     // Target doesn't exist — canonicalize the parent so we still catch a
@@ -359,9 +401,15 @@ export async function checkWritableCanonical(
       try {
         const canonParent = await canonicalize(parent);
         const recheckParent = checkWritable(canonParent + tail);
-        if (!recheckParent.ok) return recheckParent;
+        if (!recheckParent.ok) {
+          auditDeny("write", canonParent + tail, recheckParent.reason);
+          return recheckParent;
+        }
         const sandbox = await checkSandbox("write", canonParent + tail);
-        if (!sandbox.ok) return sandbox;
+        if (!sandbox.ok) {
+          auditDeny("write", canonParent + tail, sandbox.reason);
+          return sandbox;
+        }
         return { ok: true, canonical: canonParent + tail };
       } catch {
         // Parent doesn't exist either — let the caller surface the actual error.

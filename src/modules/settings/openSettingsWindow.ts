@@ -8,6 +8,7 @@ export type SettingsTab =
   | "snippets"
   | "mcp"
   | "sandbox"
+  | "security"
   | "voice"
   | "assistant"
   | "about";

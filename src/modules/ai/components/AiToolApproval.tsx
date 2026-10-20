@@ -21,6 +21,7 @@ import { useChatStore } from "../store/chatStore";
 import { abortSession } from "../store/chatStore";
 import { setEditedToolInput } from "../lib/toolInputOverrides";
 import { getToolActionInfo, analyzeShellCommand } from "../lib/policy";
+import { isAllowlistable, pinCommand } from "../lib/allowlist";
 
 type Props = {
   part: Extract<ToolUIPart, { state: "approval-requested" }>;
@@ -130,6 +131,22 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue }: Props) {
   const elevatedInfo = isElevated
     ? { riskLevel: "critical" as const, description: "Administrator/root privileges — OS prompt will appear" }
     : null;
+
+  // Scoped allowlist: offer "Always allow" only for plain, low-risk,
+  // un-chained commands — never for elevated, destructive, or complex ones.
+  const canPin =
+    toolName === "bash_run" &&
+    !isElevated &&
+    typeof input.command === "string" &&
+    isAllowlistable(input.command);
+  const onAlwaysAllow = useCallback(() => {
+    const root = useChatStore.getState().live.getWorkspaceRoot();
+    const cmd = typeof input.command === "string" ? input.command : "";
+    if (!root || !cmd) return;
+    void pinCommand(root, cmd).then((ok) => {
+      if (ok) onRespond(true);
+    });
+  }, [input.command, onRespond]);
 
   if (wasAutoApproved) {
     return (
@@ -313,6 +330,17 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue }: Props) {
               <HugeiconsIcon icon={Cancel01Icon} size={12} strokeWidth={2} />
               Deny
             </Button>
+            {canPin ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={onAlwaysAllow}
+                title="Run this now and auto-approve this exact command in this project from now on"
+                className="h-7 gap-1 text-[11px]"
+              >
+                Always allow
+              </Button>
+            ) : null}
             <Button
               size="sm"
               variant={isElevated ? "destructive" : "default"}

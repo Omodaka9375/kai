@@ -32,7 +32,9 @@ import { getModel, DEFAULT_MODEL_ID, type ModelId } from "@/modules/ai/config";
 import { buildLanguageModel } from "@/modules/ai/lib/agent";
 import { getAllKeys, getKey } from "@/modules/ai/lib/keyring";
 import { KEYRING_SERVICE } from "@/modules/ai/config";
-import { withToolRedaction } from "@/modules/ai/lib/toolFencing";
+import { withToolRedaction, withToolGuard } from "@/modules/ai/lib/toolFencing";
+import { createFenceState, fenceSystemPrompt } from "@/modules/ai/lib/fence";
+import { auditAppend, AUDIT_KINDS } from "@/modules/ai/lib/audit";
 import { buildTools } from "@/modules/ai/tools/tools";
 import type { ToolContext } from "@/modules/ai/tools/context";
 import { BUILTIN_AGENTS } from "@/modules/ai/lib/agents";
@@ -467,8 +469,12 @@ export async function runAssistantTurn(
   tools["generate_image"] = mediaTools.buildAssistantMediaTools()["generate_image"];
   tools["generate_video"] = mediaTools.buildAssistantMediaTools()["generate_video"];
   // Redact tool RESULTS (paths, env vars, secrets) before they reach the
-  // provider — same guarantee as the project agent path.
+  // provider — same guarantee as the project agent path. Then fence them:
+  // the assistant reads web pages and arbitrary user files, so its tool
+  // output gets the same nonce trust-boundary the desktop agent has.
+  const fenceState = createFenceState();
   const redactedTools = withToolRedaction(tools);
+  const guardedTools = withToolGuard(redactedTools, fenceState, null);
 
   const history = await loadHistory(sessionId);
   const userParts: Array<{ type: string; text?: string }> = [
@@ -489,6 +495,7 @@ export async function runAssistantTurn(
 
   const system = [
     persona.instructions,
+    fenceSystemPrompt(fenceState),
     "\n\n## CONVERSATION SURFACE — TELEGRAM",
     "You are chatting with the owner over Telegram. Replies are plain text (Telegram Markdown).",
     "Keep replies conversational and SHORT — a chat message, not a document. Bullet points over essays.",
@@ -513,11 +520,19 @@ export async function runAssistantTurn(
 
   const modelMessages = [...history, userMsg].map(toModelMessage);
 
+  // Audit the turn BEFORE the model runs: a headless run the user can't see
+  // must still land in the trail even if the provider call throws.
+  auditAppend(
+    AUDIT_KINDS.assistantExec,
+    "telegram",
+    userText.slice(0, 160),
+    "",
+  );
   const result = await generateText({
     model,
     system,
     messages: modelMessages,
-    tools: redactedTools as Parameters<typeof generateText>[0]["tools"],
+    tools: guardedTools as Parameters<typeof generateText>[0]["tools"],
     stopWhen: stepCountIs(ASSISTANT_MAX_STEPS),
     onStepFinish: (step) => {
       const last = step.toolCalls?.[step.toolCalls.length - 1];

@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { native, type SandboxMode, type SandboxSetupEvent, type SandboxStatus } from "@/modules/ai/lib/native";
 import { invalidateSandboxCache } from "@/modules/ai/lib/sandbox";
+import { auditAppend, AUDIT_KINDS } from "@/modules/ai/lib/audit";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { IS_WINDOWS } from "@/lib/platform";
 import { Channel } from "@tauri-apps/api/core";
@@ -103,6 +104,12 @@ export function SandboxSection() {
     try {
       await native.sandboxSaveConfig(root, next);
       invalidateSandboxCache();
+      auditAppend(
+        AUDIT_KINDS.sandboxChange,
+        "sandbox",
+        `mode → ${next}`,
+        root,
+      );
     } catch (e) {
       console.error("sandbox: failed to save config", e);
     } finally {
