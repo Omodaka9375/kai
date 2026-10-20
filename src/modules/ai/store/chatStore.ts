@@ -1503,7 +1503,16 @@ function describeApproval(
         const approval = p.approval as { id?: string } | undefined;
         if (approval?.id !== approvalId) continue;
         const input = (p.input ?? {}) as Record<string, unknown>;
-        const subject = String(p.toolName ?? "unknown");
+        // Tool name derivation mirrors AiChat's pendingApprovals: regular
+        // tools encode it in part.type ("tool-<name>"); dynamic-tool parts
+        // (MCP) carry it under toolName. Reading p.toolName directly made
+        // every regular approval audit as "unknown".
+        const type = String((p as { type?: string }).type ?? "");
+        const subject = String(
+          type === "dynamic-tool"
+            ? ((p as { toolName?: string }).toolName ?? "tool")
+            : type.replace(/^tool-/, ""),
+        );
         // Command/path excerpt — scrubbed again on the Rust side.
         const cmd =
           typeof input.command === "string"

@@ -223,3 +223,22 @@ describe("chatStore exports", () => {
     });
   });
 });
+
+describe("describeApproval subject derivation (audit 'Unknown' regression)", () => {
+  // Source-contract: the tool name lives in part.type ("tool-<name>") for
+  // regular tools and under toolName only for dynamic-tool parts. A
+  // describeApproval that read p.toolName directly audited EVERY regular
+  // approval as subject "unknown" in the Security panel.
+  it("derives the subject from part.type like AiChat does", async () => {
+    const src = await import("node:fs").then((fs) =>
+      fs.readFileSync(
+        new URL("./chatStore.ts", import.meta.url),
+        "utf8",
+      ),
+    );
+    expect(src).toMatch(
+      /type === "dynamic-tool"\s*\?\s*\(\(p as \{ toolName\?: string \}\)\.toolName/,
+    );
+    expect(src).toMatch(/type\.replace\(\/\^tool-\/, ""\)/);
+  });
+});
