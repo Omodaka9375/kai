@@ -14,7 +14,6 @@ import { buildSessionState } from "./sessionState";
 import type { FileSnapshot } from "./fileTracker";
 import type { ToolContext } from "../tools/tools";
 import { useChatStore, registerRunController } from "../store/chatStore";
-import { useGoalsStore } from "../store/goalsStore";
 import { IS_WINDOWS, IS_MAC, IS_LINUX } from "@/lib/platform";
 
 import { extensionRegistry } from "./extensions";
@@ -236,7 +235,6 @@ export function createContextAwareTransport(deps: Deps) {
       customVisionOverride: deps.getCustomVisionOverride?.() ?? null,
       planMode: deps.getPlanMode?.(),
       projectMemory: effectiveMemory,
-      goalContext: useGoalsStore.getState().activeGoalId ?? undefined,
       stackInfo: deps.getStackInfo?.(),
       thinkingMode: deps.getThinkingMode?.() ?? "off",
       uiMessages: messagesForRun,

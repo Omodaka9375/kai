@@ -298,7 +298,6 @@ export function buildStableSystem(
   persona: { name: string; instructions: string } | null,
   customInstructions: string | undefined,
   projectMemory: string | null,
-  goalContext?: string | null,
   stackInfo?: StackInfo | null,
 ): string {
   const base = SYSTEM_PROMPT;
@@ -312,9 +311,6 @@ export function buildStableSystem(
     projectMemory && projectMemory.trim().length > 0
       ? `\n\n## PROJECT — Kai.md\n${projectMemory.trim()}`
       : "";
-  const goalBlock = goalContext?.trim()
-    ? `\n${goalContext.trim()}`
-    : "";
 
   // Add stack detection and rule packs if available
   let stackBlock = "";
@@ -326,7 +322,7 @@ export function buildStableSystem(
     }
   }
 
-  return `${base}${memoryBlock}${personaBlock}${customBlock}${stackBlock}${goalBlock}`;
+  return `${base}${memoryBlock}${personaBlock}${customBlock}${stackBlock}`;
 }
 
 // OpenAI / Gemini / DeepSeek apply prefix caching automatically; only
@@ -392,7 +388,6 @@ export type RunAgentOptions = {
   customVisionOverride?: import("../config").VisionOverride | null;
   planMode?: boolean;
   projectMemory?: string | null;
-  goalContext?: string | null;
   stackInfo?: StackInfo | null;
   thinkingMode?: string;
   uiMessages: UIMessage[];
@@ -676,7 +671,6 @@ export async function runAgentStream(opts: RunAgentOptions) {
     opts.agentPersona ?? null,
     opts.customInstructions,
     opts.projectMemory ?? null,
-    opts.goalContext ?? null,
     opts.stackInfo ?? null,
   ) + mcpBlock + fencePrompt;
 

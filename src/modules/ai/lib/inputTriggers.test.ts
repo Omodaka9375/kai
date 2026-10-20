@@ -31,7 +31,7 @@ describe("detectSnippetTrigger (command/snippet picker)", () => {
 
   it("opens after a leading space (mid-text)", () => {
     expect(detectSnippetTrigger("do this #plan", 13)?.query).toBe("plan");
-    expect(detectSnippetTrigger("do this /goal", 13)?.query).toBe("goal");
+    expect(detectSnippetTrigger("do this /compact", 16)?.query).toBe("compact");
   });
 
   it("does not open mid-word (e.g. inside a url or path)", () => {

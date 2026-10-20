@@ -2,10 +2,8 @@ import {
   CheckListIcon,
   SparklesIcon,
   ArrowShrink01Icon,
-  Target01Icon,
 } from "@hugeicons/core-free-icons";
 import { usePlanStore } from "../store/planStore";
-import { handleGoalCommand } from "./goalHandler";
 
 /**
  * Outcome of intercepting a slash command from the composer.
@@ -15,7 +13,7 @@ import { handleGoalCommand } from "./goalHandler";
  * - `"none"`: not a slash command; let the composer behave as usual.
  */
 export type SlashOutcome =
-  | { kind: "handled"; toast?: string; goalId?: string }
+  | { kind: "handled"; toast?: string }
   | { kind: "send-prompt"; prompt: string; commandName?: string }
   | { kind: "none" };
 
@@ -54,12 +52,6 @@ export const SLASH_COMMANDS: Record<string, SlashCommandMeta> = {
     invocation: "/compact",
     label: "Compress context in place",
     icon: ArrowShrink01Icon,
-  },
-  goal: {
-    name: "goal",
-    invocation: "/goal",
-    label: "Goal loop",
-    icon: Target01Icon,
   },
 };
 
@@ -106,17 +98,6 @@ export async function tryRunSlashCommand(input: string): Promise<SlashOutcome> {
       const { useChatStore } = await import("../store/chatStore");
       const result = useChatStore.getState().compactActiveSession();
       return { kind: "handled", toast: result };
-    }
-    case "goal": {
-      // Delegate to goal handler
-      const result = await handleGoalCommand(trimmed);
-      if (result.handled) {
-        if (result.error) {
-          return { kind: "handled", toast: result.error };
-        }
-        return { kind: "handled", goalId: result.goalId };
-      }
-      return { kind: "none" };
     }
     default:
       return { kind: "none" };

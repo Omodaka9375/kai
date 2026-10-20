@@ -47,7 +47,6 @@ import { Input } from "@/components/ui/input";
 import { usePlanStore } from "../store/planStore";
 import { AgentSwitcher } from "./AgentSwitcher";
 import { AiChatView } from "./AiChat";
-import { GoalPanel } from "./GoalPanel";
 import { PlanDiffReview } from "./PlanDiffReview";
 import { TodoStrip } from "./TodoStrip";
 import { useComposer } from "./composer";
@@ -245,7 +244,6 @@ function Body({
         }}
       />
       <ShadowStrip sessionId={sessionId} />
-      <GoalPanel />
     </>
   );
 }
