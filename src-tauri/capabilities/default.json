@@ -17,7 +17,10 @@
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "opener:default",
-    "opener:allow-open-path",
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [{ "path": "$HOME/.kai/**" }]
+    },
     "log:default",
     "os:default",
     "store:default",
