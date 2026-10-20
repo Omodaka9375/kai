@@ -203,9 +203,7 @@ export function createContextAwareTransport(deps: Deps) {
     const autoApproveHint =
       autoApprove === "all"
         ? "\n\n## AUTO-APPROVE MODE — ACTIVE\nAll tool calls (file edits, shell commands, etc.) are pre-approved and execute immediately. Do NOT stop to ask for permission or narrate what you're about to do — just call the tools directly. Chain all actions in a single turn until the task is complete."
-        : autoApprove === "edits"
-          ? "\n\n## AUTO-APPROVE MODE — EDITS ONLY\nFile mutations (write_file, edit, multi_edit, create_directory) are pre-approved. Shell commands still require approval. Do not stop to ask permission for file edits — just call the tool."
-          : "";
+        : "";
     const effectiveCustomInstructions =
       (deps.getCustomInstructions() || "") + autoApproveHint;
 

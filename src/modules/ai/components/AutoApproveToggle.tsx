@@ -3,23 +3,20 @@ import { useChatStore, type AutoApproveMode } from "../store/chatStore";
 
 const LABELS: Record<AutoApproveMode, string> = {
   off: "Ask",
-  edits: "Auto: edits",
-  all: "Auto: all",
+  all: "Auto",
 };
 
 const DOTS: Record<AutoApproveMode, string> = {
   off: "bg-muted-foreground/50",
-  edits: "bg-amber-500",
   all: "bg-emerald-500",
 };
 
 const TOOLTIPS: Record<AutoApproveMode, string> = {
-  off: "Tool calls require manual approval",
-  edits: "File edits auto-approved, shell commands need approval",
-  all: "All tool calls auto-approved",
+  off: "Ask before every tool call — except pinned \"Always allow\" commands, which run without asking",
+  all: "Auto-approve every tool call (elevation and signed commits still ask)",
 };
 
-/** Compact cycling toggle for auto-approve mode. */
+/** Compact cycling toggle for auto-approve mode. Two states: Ask / Auto. */
 export function AutoApproveToggle({ className }: { className?: string }) {
   const mode = useChatStore((s) => s.autoApprove);
   const cycle = useChatStore((s) => s.cycleAutoApprove);

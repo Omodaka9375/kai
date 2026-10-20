@@ -217,7 +217,10 @@ export type ApprovalResponder = (
 ) => void;
 
 /** Auto-approve modes: off = manual, edits = file mutations only, all = everything. */
-export type AutoApproveMode = "off" | "edits" | "all";
+/** Two-state approval mode (2026-10: "edits" dropped — nobody used it in
+ * practice; pinned allowlist commands cover the repeated-shell-command case,
+ * and "all" covers trust-a-lot sessions). */
+export type AutoApproveMode = "off" | "all";
 
 /** Tool names that are file mutations (auto-approved in 'edits' mode). */
 export const FILE_MUTATION_TOOLS = new Set([
@@ -649,8 +652,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
   setAutoApprove: (mode) => set({ autoApprove: mode }),
   cycleAutoApprove: () => {
     const cur = get().autoApprove;
-    const next: AutoApproveMode =
-      cur === "off" ? "edits" : cur === "edits" ? "all" : "off";
+    const next: AutoApproveMode = cur === "off" ? "all" : "off";
     set({ autoApprove: next });
   },
   autoApprovedIds: new Set<string>(),

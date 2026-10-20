@@ -6,7 +6,6 @@ import { checkReadable } from "../lib/security";
 import { resolvePath } from "../tools/tools";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
-  FILE_MUTATION_TOOLS,
   flushPendingWatchWakes,
   flushPersist,
   getOrCreateChat,
@@ -390,15 +389,13 @@ function Bridge({
             }, 0);
           });
           // FALL THROUGH — do NOT continue here. A command that is NOT
-          // pinned must still auto-approve under autoApprove "all"/"edits"
-          // via the generic branch below. (The .then is guarded by
-          // autoApprovedRef, so a pinned command responds exactly once.)
+          // pinned must still auto-approve under autoApprove "all" via the
+          // generic branch below. (The .then is guarded by autoApprovedRef,
+          // so a pinned command responds exactly once.)
           // The unconditional `continue` that used to live here made EVERY
           // bash_run prompt for review even with approve-all set.
         }
-        const shouldApprove =
-          autoApprove === "all" ||
-          (autoApprove === "edits" && FILE_MUTATION_TOOLS.has(toolName));
+        const shouldApprove = autoApprove === "all";
         if (!shouldApprove) continue;
         autoApprovedRef.current.add(id);
         markAutoApproved(id);
