@@ -368,7 +368,7 @@ function Bridge({
         // as "always allow" for THIS project auto-approves even with
         // autoApprove off. Guards above already ran, and isCommandAllowed
         // re-checks the hard deny-list — a pinned command can never be
-        // elevated, signed, destructive, or chained.
+        // elevated, signed, destructive, or high-risk in any segment.
         if (toolName === "bash_run" && typeof input?.command === "string") {
           const cmd = input.command;
           // The hard deny-list must still pass (it always would —
@@ -389,7 +389,12 @@ function Bridge({
               }
             }, 0);
           });
-          continue;
+          // FALL THROUGH — do NOT continue here. A command that is NOT
+          // pinned must still auto-approve under autoApprove "all"/"edits"
+          // via the generic branch below. (The .then is guarded by
+          // autoApprovedRef, so a pinned command responds exactly once.)
+          // The unconditional `continue` that used to live here made EVERY
+          // bash_run prompt for review even with approve-all set.
         }
         const shouldApprove =
           autoApprove === "all" ||

@@ -98,7 +98,9 @@ export function SecuritySection() {
   };
 
   const refresh = useCallback(() => {
-    auditRecent(100)
+    // Last 5 — the panel is a glance, not a log viewer; Open folder shows
+    // the full JSONL history.
+    auditRecent(5)
       .then(setEvents)
       .catch((e) => {
         setError(String(e));

@@ -132,8 +132,9 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue }: Props) {
     ? { riskLevel: "critical" as const, description: "Administrator/root privileges — OS prompt will appear" }
     : null;
 
-  // Scoped allowlist: offer "Always allow" only for plain, low-risk,
-  // un-chained commands — never for elevated, destructive, or complex ones.
+  // Scoped allowlist: offer "Always allow" for low-risk commands whose every
+  // segment is warning-free and non-write-shaped — never for elevated,
+  // destructive, or substitution-bearing ones.
   const canPin =
     toolName === "bash_run" &&
     !isElevated &&

