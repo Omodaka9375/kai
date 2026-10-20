@@ -482,6 +482,7 @@ pub fn run() {
                     "settings-snippets",
                     "settings-mcp",
                     "settings-sandbox",
+                    "settings-security",
                     "settings-voice",
                     "settings-assistant",
                     "settings-about",

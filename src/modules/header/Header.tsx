@@ -25,7 +25,7 @@ import {
   FloppyDiskIcon,
   GlobeIcon,
   KeyboardIcon,
-  Mic01Icon, SidebarLeftIcon,
+  Mic01Icon, Shield02Icon, SidebarLeftIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
@@ -300,6 +300,10 @@ export function Header({
                 <path d="M5.5 8l2 2 3-3.5" />
               </svg>
               <span className="flex-1">Sandbox</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void openSettingsWindow("security")} className="gap-2 text-xs">
+              <HugeiconsIcon icon={Shield02Icon} size={13} strokeWidth={1.75} className="text-muted-foreground/80" />
+              <span className="flex-1">Security</span>
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => void openSettingsWindow("voice")} className="gap-2 text-xs">
               <HugeiconsIcon icon={Mic01Icon} size={13} strokeWidth={1.75} className="text-muted-foreground/80" />
