@@ -61,6 +61,39 @@ describe("SearchableModelPicker contract", () => {
   });
 });
 
+describe("Assistant panel load-cost contract (the ~1min open bug)", () => {
+  it("never statically imports the heavy assistant barrel", () => {
+    // The barrel (@/modules/assistant → index.ts) drags in the ENTIRE AI
+    // runtime (agent stack, @ai-sdk providers, buildTools, mcpManager,
+    // voiceTts) — hundreds of unbundled ESM round-trips in dev, which made
+    // the Assistant panel take ~a minute to open. The panel statically
+    // imports ONLY the light prefs module; bridge functions are dynamic.
+    expect(panel).not.toMatch(/from\s+"@\/modules\/assistant"/);
+    expect(panel).not.toMatch(/from\s+"@\/modules\/assistant\/index"/);
+  });
+
+  it("imports the light prefs surface statically", () => {
+    expect(panel).toMatch(/from "@\/modules\/assistant\/prefs"/);
+  });
+
+  it("loads the bridge functions dynamically at call time", () => {
+    expect(panel).toMatch(/await import\("@\/modules\/assistant"\)/);
+  });
+
+  it("prefs.ts imports no AI runtime (tauri core + config registry only)", () => {
+    const prefs = readFileSync(
+      new URL("../../modules/assistant/prefs.ts", import.meta.url),
+      "utf8",
+    );
+    // Only import statements count — the header comment legitimately NAMES
+    // the modules this file avoids (don't substring-match the whole file).
+    const imports = prefs.match(/^import .*$/gm)?.join("\n") ?? "";
+    expect(imports).not.toMatch(/@ai-sdk\//);
+    expect(imports).not.toMatch(/buildTools|mcpManager|voiceTts|generateText|lib\/agent/);
+    expect(imports).toContain("@tauri-apps/api/core");
+  });
+});
+
 describe("assistant runtime honors the override", () => {
   it("null follows the USER'S default model, not the hardcoded constant", () => {
     // The picker's "Follow default" entry promises Settings → Models →

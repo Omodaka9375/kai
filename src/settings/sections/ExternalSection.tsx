@@ -6,15 +6,16 @@ import { Switch } from "@/components/ui/switch";
 import {
   loadAssistantPrefs,
   saveAssistantPrefs,
-  startAssistantBridge,
-  stopAssistantBridge,
-  requestAssistantClaim,
   telegramNative,
   getTelegramToken,
   setTelegramToken,
   clearTelegramToken,
   type AssistantPrefs,
-} from "@/modules/assistant";
+} from "@/modules/assistant/prefs";
+// Heavy bridge functions (startAssistantBridge et al.) are imported
+// DYNAMICALLY at call time — a static import would drag the whole AI runtime
+// (agent stack, @ai-sdk providers, buildTools, mcpManager) into the settings
+// window and the panel took ~a minute to open in dev.
 import { SectionHeader } from "../components/SectionHeader";
 import { SettingRow } from "../components/SettingRow";
 import { SearchableModelPicker } from "../components/SearchableModelPicker";
@@ -101,6 +102,7 @@ export function ExternalSection() {
         // Persist enabled BEFORE starting: startAssistantBridge re-loads
         // prefs from disk and refuses when enabled is not yet saved.
         await patch({ enabled: true });
+        const { startAssistantBridge, requestAssistantClaim } = await import("@/modules/assistant");
         const result = await startAssistantBridge();
         if (!result.ok) {
           setIsError(true);
@@ -116,6 +118,7 @@ export function ExternalSection() {
             : "Assistant is listening.",
         );
       } else {
+        const { stopAssistantBridge } = await import("@/modules/assistant");
         await stopAssistantBridge();
         await patch({ enabled: false });
         setStatus("Stopped.");
