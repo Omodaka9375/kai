@@ -363,10 +363,11 @@ function LocalModelsBlock() {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-0.5">
-        <Label>Local — LM Studio</Label>
+        <Label>Local / LAN — LM Studio</Label>
         <span className="text-[10.5px] leading-relaxed text-muted-foreground">
-          Run any GGUF model on your machine via LM Studio's HTTP server. Enable
-          the server in LM Studio → Developer tab.
+          Run any GGUF model via LM Studio's HTTP server — on this machine or
+          another box on your LAN. Enable the server in LM Studio → Developer
+          tab; the base URL below accepts LAN hosts too.
         </span>
       </div>
 
@@ -445,6 +446,18 @@ function LocalModelsBlock() {
   );
 }
 
+/** One-click base URLs for common local/LAN OpenAI-compatible servers.
+ *  Presets are just quick-fill — the field itself accepts any URL, LAN or
+ *  remote, http or https. 127.0.0.1 forms (not localhost) so the Rust ping
+ *  path sees a plain loopback IP, and users editing the host octets keep a
+ *  valid LAN shape (http://192.168.1.50:11434/v1). */
+const LOCAL_SERVER_PRESETS = [
+  { label: "Ollama", url: "http://127.0.0.1:11434/v1" },
+  { label: "llama.cpp", url: "http://127.0.0.1:8080/v1" },
+  { label: "vLLM", url: "http://127.0.0.1:8000/v1" },
+  { label: "LM Studio", url: "http://127.0.0.1:1234/v1" },
+] as const;
+
 function OpenAICompatibleBlock({
   compatKey,
   onSaveKey,
@@ -492,10 +505,14 @@ function OpenAICompatibleBlock({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-0.5">
-        <Label>OpenAI-compatible endpoint</Label>
+        <Label>Local / LAN — OpenAI-compatible endpoint</Label>
         <span className="text-[10.5px] leading-relaxed text-muted-foreground">
-          Any OpenAI-compatible HTTPS endpoint — vLLM, Z.AI, Fireworks, hosted
-          Ollama, etc.
+          Any OpenAI-compatible server — on your LAN or remote. Perfect for
+          Ollama (http://192.168.1.50:11434/v1 — include the /v1), vLLM,
+          llama.cpp server, LM Studio on another machine, or a hosted
+          endpoint (Z.AI, Fireworks, …). Plain http:// is fine on the LAN;
+          self-signed certs are accepted for private addresses. API key
+          optional — leave empty for unauthenticated servers.
         </span>
       </div>
 
@@ -509,7 +526,7 @@ function OpenAICompatibleBlock({
                 const v = urlDraft.trim();
                 if (v !== baseURL) void setOpenaiCompatibleBaseURL(v);
               }}
-              placeholder="https://api.example.com/v1"
+              placeholder="http://192.168.1.50:11434/v1"
               spellCheck={false}
               className="h-8 flex-1 font-mono text-[11.5px]"
             />
@@ -531,6 +548,25 @@ function OpenAICompatibleBlock({
               Save
             </Button>
           </div>
+          <div className="flex flex-wrap gap-1 pt-1">
+            {LOCAL_SERVER_PRESETS.map((preset) => (
+              <button
+                key={preset.label}
+                type="button"
+                title={preset.url}
+                onClick={() => {
+                  setUrlDraft(preset.url);
+                  if (preset.url !== baseURL) void setOpenaiCompatibleBaseURL(preset.url);
+                }}
+                className={cn(
+                  "rounded-md border border-border/60 bg-card/60 px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:border-border hover:text-foreground",
+                  urlDraft === preset.url && "border-primary/40 text-foreground",
+                )}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
         </FieldRow>
 
         <FieldRow label="Model ID">
@@ -539,7 +575,7 @@ function OpenAICompatibleBlock({
             onChange={setModelDraft}
             onBlur={(v) => { if (v !== modelId) void setOpenaiCompatibleModelId(v); }}
             baseUrl={urlDraft}
-            placeholder="gpt-5.5, qwen3.7-max, glm-5.2, …"
+            placeholder="llama3.1:8b, qwen2.5-coder-7b-instruct, gpt-5.5, …"
           />
         </FieldRow>
 

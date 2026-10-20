@@ -680,7 +680,7 @@ export const MODELS = [
     provider: "openai-compatible",
     label: "Custom endpoint",
     hint: "Configurable",
-    description: "Any OpenAI-compatible endpoint.",
+    description: "Any OpenAI-compatible endpoint — local/LAN (Ollama, vLLM, llama.cpp, LM Studio) or remote. Configure in Settings → Models.",
     capabilities: { intelligence: 3, speed: 3, cost: 3 },
   },
 
