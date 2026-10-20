@@ -1,0 +1,52 @@
+# KAI line-ending policy — everything is LF, everywhere.
+#
+# Why: the in-app AI edit tools match `old_string` byte-exactly. A multi-line
+# anchor written with \n can never match a CRLF working tree (single-line
+# edits keep working, which makes the failure look random). `eol=lf` forces LF
+# on checkout on every OS and overrides core.autocrlf on Windows; `text=auto`
+# normalizes to LF on add, so the repo can never regress to CRLF.
+
+* text=auto eol=lf
+
+# Binaries — never normalize, never diff-merge.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.icns binary
+*.webp binary
+*.bmp  binary
+*.tiff binary
+*.woff binary
+*.woff2 binary
+*.ttf  binary
+*.otf  binary
+*.eot  binary
+*.mp3  binary
+*.mp4  binary
+*.wav  binary
+*.ogg  binary
+*.flac binary
+*.mov  binary
+*.webm binary
+*.zip  binary
+*.gz   binary
+*.tgz  binary
+*.tar  binary
+*.7z   binary
+*.rar  binary
+*.exe  binary
+*.dll  binary
+*.so   binary
+*.dylib binary
+*.a    binary
+*.lib  binary
+*.wasm binary
+*.node binary
+*.pdf  binary
+*.jar  binary
+
+# cmd.exe misparses LF-only batch files — these stay CRLF.
+*.bat  text eol=crlf
+*.cmd  text eol=crlf

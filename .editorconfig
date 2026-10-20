@@ -1,0 +1,13 @@
+# Editor-side enforcement of the repo line-ending policy (see .gitattributes).
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+
+[*.bat]
+end_of_line = crlf
+
+[*.cmd]
+end_of_line = crlf

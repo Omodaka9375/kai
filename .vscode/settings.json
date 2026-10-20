@@ -1,0 +1,6 @@
+{
+  // Line endings: match .gitattributes / .editorconfig — LF everywhere.
+  // "auto" would default NEW files to CRLF on Windows and re-break byte-exact
+  // tooling (see .gitattributes header comment).
+  "files.eol": "\n"
+}
