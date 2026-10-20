@@ -8,6 +8,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const AUTO_FETCH_THROTTLE_MS = 5 * 60_000;
 const AUTO_FETCH_LRU_LIMIT = 16;
+/** How long a context path must stay stable before it drives a git refresh.
+ * Tab switches and OSC 7 cwd arrivals flicker the context (A → B → A in
+ * one or two frames); every cross-repo change blanks the panel
+ * synchronously — the full-panel blink. */
+const CONTEXT_SETTLE_MS = 200;
 
 export type SourceControlRefreshMode = "auto" | "always" | "never";
 export type SourceControlRemoteAction = "fetch" | "pull" | "push";
@@ -222,6 +227,23 @@ export function useSourceControl(
     });
   }, [workspaceKey]);
 
+  // Debounced context switch. The raw context path flickers during tab
+  // switches (active leaf cwd briefly unresolved → tab spawn cwd → real
+  // leaf cwd) and OSC 7 arrivals; a cross-repo change blanks the panel
+  // synchronously in doRefresh (the "different repo" branch). A path must
+  // stay stable for CONTEXT_SETTLE_MS before it becomes the refresh
+  // context — momentary flickers never reach git, so the panel never
+  // blanks for a context it is about to switch back from.
+  const [settledContextPath, setSettledContextPath] = useState(contextPath);
+  useEffect(() => {
+    if (contextPath === settledContextPath) return;
+    const timer = window.setTimeout(
+      () => setSettledContextPath(contextPath),
+      CONTEXT_SETTLE_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [contextPath, settledContextPath]);
+
   const applyStatus = useCallback(
     (updater: (status: GitStatusSnapshot) => GitStatusSnapshot) => {
       setState((current) => {
@@ -239,7 +261,7 @@ export function useSourceControl(
       if (!enabledRef.current) return;
       const requestId = ++requestIdRef.current;
 
-      if (!contextPath) {
+      if (!settledContextPath) {
         setState({
           repo: null,
           status: null,
@@ -256,7 +278,8 @@ export function useSourceControl(
       const activeRoot = stateRef.current.repo?.repoRoot ?? null;
       const reusableRoot =
         activeRoot &&
-        (contextPath === activeRoot || contextPath.startsWith(`${activeRoot}/`))
+        (settledContextPath === activeRoot ||
+          settledContextPath.startsWith(`${activeRoot}/`))
           ? activeRoot
           : undefined;
 
@@ -298,7 +321,7 @@ export function useSourceControl(
               };
             }
           } catch {
-            const snapshot = await native.gitPanelSnapshot(contextPath);
+            const snapshot = await native.gitPanelSnapshot(settledContextPath);
             if (requestId !== requestIdRef.current) return;
             if (!snapshot.repo) {
               setState((current) => ({
@@ -316,7 +339,7 @@ export function useSourceControl(
             status = snapshot.status ?? null;
           }
         } else {
-          const snapshot = await native.gitPanelSnapshot(contextPath);
+          const snapshot = await native.gitPanelSnapshot(settledContextPath);
           if (requestId !== requestIdRef.current) return;
           if (!snapshot.repo) {
             setState((current) => ({
@@ -407,18 +430,34 @@ export function useSourceControl(
         }
       } catch (error) {
         if (requestId !== requestIdRef.current) return;
-        setState((current) => ({
-          ...current,
-          repo: null,
-          hasRepo: false,
-          status: null,
-          isLoading: false,
-          isSyncing: false,
-          localError: normalizeError(error),
-        }));
+        setState((current) => {
+          // Transient failure (index.lock contention during a commit, IPC
+          // hiccup, git briefly unavailable): KEEP the last good snapshot.
+          // Blank-and-error here made the whole panel blink to the error
+          // state and wiped the commit message on a retry-able failure.
+          // localError still surfaces (header); the panel keeps its data.
+          if (current.status || current.repo) {
+            return {
+              ...current,
+              isLoading: false,
+              isSyncing: false,
+              localError: normalizeError(error),
+            };
+          }
+          return {
+            repo: null,
+            hasRepo: false,
+            status: null,
+            isLoading: false,
+            isSyncing: false,
+            localError: normalizeError(error),
+            busyAction: current.busyAction,
+            lastRemoteError: current.lastRemoteError,
+          };
+        });
       }
     },
-    [contextPath, workspaceKey],
+    [settledContextPath, workspaceKey],
   );
 
   const refresh = useCallback(
