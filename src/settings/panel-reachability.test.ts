@@ -78,3 +78,29 @@ describe("Rust settings-window plumbing", () => {
     expect(libRs).toContain('"security" => "Security"');
   });
 });
+
+describe("capability permissions for panel features", () => {
+  // Regression: the Security panel's "open audit folder" button shipped
+  // dead — SecuritySection calls opener.openPath(), but the capability
+  // only granted opener:default (URLs/reveal), so every click threw
+  // "opener.open_path not allowed" into unhandledrejection.
+  const securitySection = readFileSync(
+    new URL("../settings/sections/SecuritySection.tsx", import.meta.url),
+    "utf8",
+  );
+  const capabilities = readFileSync(
+    new URL("../../src-tauri/capabilities/default.json", import.meta.url),
+    "utf8",
+  );
+
+  it("openPath users are covered by the opener:allow-open-path permission", () => {
+    const usesOpenPath =
+      readFileSync(
+        new URL("../modules/explorer/lib/contextActions.ts", import.meta.url),
+        "utf8",
+      ).includes("revealItemInDir") || securitySection.includes("openPath");
+    if (usesOpenPath) {
+      expect(capabilities).toContain("opener:allow-open-path");
+    }
+  });
+});
