@@ -17,8 +17,10 @@ import {
 } from "./lib/contextActions";
 import { fileIconUrl, folderIconUrl } from "./lib/iconResolver";
 import { COMPACT_CONTENT, COMPACT_ITEM } from "./lib/menuItemClass";
+import { quoteForShell } from "./lib/shellQuote";
 import type { useFileTree } from "./lib/useFileTree";
 import { native } from "@/modules/ai/lib/native";
+import { IS_WINDOWS } from "@/lib/platform";
 
 type Tree = ReturnType<typeof useFileTree>;
 
@@ -103,11 +105,12 @@ function EntryRowImpl(props: EntryRowProps) {
     // Drag the whole selection when this row is part of it, otherwise just
     // this row. The terminal reads the relative paths (text/plain) and
     // inserts them; the absolute paths ride along for future consumers.
+    // Paths are single-quoted per shell (see quoteForShell) so a filename
+    // like `x$(cmd)` or `it's $1` can never execute or expand on Enter.
     const paths = isSelected ? selectedPaths : [path];
-    const rel = paths.map((p) => {
-      const r = relativePath(rootPath, p);
-      return /\s/.test(r) ? `"${r}"` : r;
-    });
+    const rel = paths.map((p) =>
+      quoteForShell(relativePath(rootPath, p), IS_WINDOWS),
+    );
     e.dataTransfer.effectAllowed = "copy";
     e.dataTransfer.setData("text/plain", rel.join(" "));
     e.dataTransfer.setData("application/x-kai-files", JSON.stringify(paths));

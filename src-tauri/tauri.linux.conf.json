@@ -6,7 +6,8 @@
         "label": "main",
         "decorations": false,
         "transparent": true,
-        "create": false
+        "create": false,
+        "dragDropEnabled": false
       }
     ]
   }

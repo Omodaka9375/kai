@@ -16,6 +16,9 @@ All notable changes to the KAI terminal emulator project are documented in this 
 - Settings: Assistant panel opens in ~1s instead of ~1min - the panel stopped statically importing the whole AI runtime (light prefs module + dynamic bridge imports).
 - Settings: Security panel "open audit folder" button works - opener open_path needed both the command permission and a scoped `$HOME/.kai/**` entry.
 - Security: approval audit events record the real tool name - the subject column no longer reads "Unknown" (the name lives in part.type, not toolName).
+- AI: pinned "always allow" commands now actually auto-approve in every auto-approve mode (the effect early-returned before the allowlist branch).
+- Terminal: drag-and-drop hardening - explorer→terminal drags insert shell-literal quoted paths (single-quote per shell, so a filename like `x$(cmd)` can never execute on Enter), external text drops are sanitized (no newlines auto-executing, no control bytes), and a drop-target ring shows where the payload lands.
+- Terminal: drag-and-drop cross-platform fix - native drag-drop handler disabled on base + Linux configs too (it swallows HTML5 drag events on webkitgtk/WebView2; macOS inherits the base config).
 
 ---
 

@@ -21,7 +21,8 @@
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "visible": false,
-        "create": false
+        "create": false,
+        "dragDropEnabled": false
       }
     ],
     "security": {
