@@ -296,7 +296,13 @@ export function analyzeShellCommand(cmd: string): ShellCommandAnalysis {
   }
 
   // Check for file operations on sensitive locations
-  const sensitivePaths = ["/etc/", "/var/log/", "/tmp/", "~/"];
+  // Sensitive-path warnings: system config and system logs. `~/` and `/tmp/`
+  // are deliberately NOT here — `~` prefixes are idiomatic pwsh and `~`/`/tmp`
+  // wipes are already hard-blocked by checkShellCommand (security.ts) which
+  // does not depend on this warning; warning on them made harmless listings
+  // (`Get-ChildItem ~/Downloads`) unpinnable and pushed cargo/pnpm temp-file
+  // builds out of the low-risk class.
+  const sensitivePaths = ["/etc/", "/var/log/"];
   for (const sensitive of sensitivePaths) {
     if (normalized.includes(sensitive)) {
       warnings.push(`Access to sensitive path: ${sensitive}`);
