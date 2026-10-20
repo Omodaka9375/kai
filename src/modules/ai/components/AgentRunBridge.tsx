@@ -336,7 +336,10 @@ function Bridge({
   );
 
   useEffect(() => {
-    if (autoApprove === "off") return;
+    // NOTE: no early return on autoApprove === "off" — the scoped-allowlist
+    // branch below must run in every mode (a pinned "always allow" command
+    // auto-approves even with auto-approve off). The generic branch self-gates:
+    // shouldApprove is false for "off", so only the allowlist path fires.
     let cancelled = false;
     for (const m of messages) {
       if (m.role !== "assistant") continue;

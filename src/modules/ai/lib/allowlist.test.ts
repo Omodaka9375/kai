@@ -105,3 +105,23 @@ describe("isCommandAllowed defense-in-depth", () => {
     expect(await isCommandAllowed("cargo check", null)).toBe(false);
   });
 });
+
+describe("AgentRunBridge wiring (pinned commands actually auto-approve)", () => {
+  // Regression: the auto-approve effect early-returned on autoApprove ===
+  // "off" BEFORE the scoped-allowlist branch — so a pinned "always allow"
+  // command (which is supposed to work in every mode) never fired, and the
+  // user kept getting prompted despite pinning. Source-contract pin.
+  it("the auto-approve effect has no autoApprove-off early return", async () => {
+    const fs = await import("node:fs");
+    const src = fs.readFileSync(
+      new URL("../../../modules/ai/components/AgentRunBridge.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(src).not.toMatch(/if\s*\(autoApprove === "off"\)\s*return/);
+    // The allowlist branch must run before the mode-gated generic branch.
+    const allowlistIdx = src.indexOf("isCommandAllowed(cmd, root)");
+    const genericIdx = src.indexOf('autoApprove === "all"');
+    expect(allowlistIdx).toBeGreaterThan(-1);
+    expect(allowlistIdx).toBeLessThan(genericIdx);
+  });
+});
