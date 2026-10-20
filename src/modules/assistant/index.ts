@@ -28,7 +28,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { UIMessage } from "@ai-sdk/react";
 import { generateText, stepCountIs, type ModelMessage } from "ai";
-import { getModel, DEFAULT_MODEL_ID, type ModelId } from "@/modules/ai/config";
+import { getModel, type ModelId } from "@/modules/ai/config";
 import { buildLanguageModel } from "@/modules/ai/lib/agent";
 import { getAllKeys, getKey } from "@/modules/ai/lib/keyring";
 import { KEYRING_SERVICE } from "@/modules/ai/config";
@@ -427,7 +427,13 @@ export async function runAssistantTurn(
   const onNotice = opts?.onNotice;
   const prefs = await loadAssistantPrefs();
   const sessionId = await getActiveSessionId();
-  const modelId = (prefs.modelId as ModelId | null) ?? DEFAULT_MODEL_ID;
+  // null = follow the app's DEFAULT MODEL (Settings → Models), NOT the
+  // hardcoded registry constant — the picker's "Follow default" entry
+  // promises exactly this. getState() is kept current cross-window by
+  // preferences.ts (Kai://prefs-changed), so settings-window changes apply
+  // to the next assistant turn.
+  const modelId = (prefs.modelId as ModelId | null) ??
+    usePreferencesStore.getState().defaultModelId;
   const keys = await getAllKeys();
   const toolContext = await makeAssistantToolContext();
   const persona = assistantPersona();

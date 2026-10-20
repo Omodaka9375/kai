@@ -17,6 +17,7 @@ import {
 } from "@/modules/assistant";
 import { SectionHeader } from "../components/SectionHeader";
 import { SettingRow } from "../components/SettingRow";
+import { SearchableModelPicker } from "../components/SearchableModelPicker";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { cn } from "@/lib/utils";
 
@@ -223,6 +224,16 @@ export function ExternalSection() {
         ) : null}
 
         <SettingRow
+          title="Model"
+          description="Model the assistant replies with. Search by name or provider — “Follow default” rides the app's default model (Settings → Models)."
+        >
+          <SearchableModelPicker
+            value={prefs.modelId}
+            onChange={(id) => void patch({ modelId: id })}
+          />
+        </SettingRow>
+
+        <SettingRow
           title="Owner"
           description={
             prefs.ownerChatId != null
@@ -283,8 +294,8 @@ export function ExternalSection() {
           <li>Chat by text or voice notes. /new resets the conversation.</li>
         </ol>
         <div className="mt-2">
-          The assistant uses the general Assistant persona, your default model, your MCP
-          servers, and web tools. File and shell tools are fenced to a scratch folder
+          The assistant uses the general Assistant persona, the model picked above
+          (or your default model), your MCP servers, and web tools. File and shell tools are fenced to a scratch folder
           (~/.kai/assistant) — not your projects. The app must be running (tray is fine)
           for the bot to answer.
         </div>
