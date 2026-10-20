@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { tool } from "ai";
 import { z } from "zod";
 import type { ToolContext } from "./context";
+import { requireLanOnly } from "../lib/proxyFetch";
 
 const YT_URL_PATTERNS = [
   /(?:youtube\.com\/watch\?.*v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/v\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/,
@@ -29,6 +30,8 @@ async function httpGet(url: string): Promise<string> {
       "Accept-Language": "en-US,en;q=0.9",
     },
     allowPrivateNetwork: false,
+    // Model-chosen URL - LAN-only network policy applies.
+    requireLanOnly: requireLanOnly(),
   });
   return new TextDecoder().decode(new Uint8Array(resp.body));
 }

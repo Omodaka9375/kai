@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { tool } from "ai";
 import { z } from "zod";
 import type { ToolContext } from "./context";
+import { requireLanOnly } from "../lib/proxyFetch";
 
 /**
  * Fetch a URL via the Rust HTTP proxy (bypasses CORS, no Python needed).
@@ -16,6 +17,8 @@ async function httpFetch(url: string): Promise<{ status: number; body: string }>
       // The agent calls this tool unsupervised — never let it reach LAN /
       // loopback / cloud-metadata addresses (SSRF guard lives in net.rs).
       allowPrivateNetwork: false,
+      // Model-chosen URL — the LAN-only network policy applies.
+      requireLanOnly: requireLanOnly(),
     },
   );
   const body = new TextDecoder().decode(new Uint8Array(resp.body));

@@ -353,6 +353,12 @@ export default function App() {
       } catch (e) {
         console.warn("[Kai] launch: preferences init failed:", e);
       }
+      // LAN-only network policy hook: security.ts checkShellCommand reads
+      // this instead of importing the preferences store (avoids a settings
+      // circular import). Lazy getter - every call reads the live store, so
+      // a Settings flip applies to the very next shell command.
+      (globalThis as { __kaiLanOnlyPolicy?: () => boolean }).__kaiLanOnlyPolicy =
+        () => usePreferencesStore.getState().networkPolicy === "lan";
       const saved = usePreferencesStore.getState().lastWorkspaceCwd;
       if (saved) return saved;
       try {

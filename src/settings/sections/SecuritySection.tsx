@@ -4,12 +4,15 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { Button } from "@/components/ui/button";
 import {
+  auditAppend,
+  AUDIT_KINDS,
   auditClear,
   auditDirPath,
   auditRecent,
   type AuditEvent,
 } from "@/modules/ai/lib/audit";
 import { listCommands, unpinCommand, allowlistDirFor } from "@/modules/ai/lib/allowlist";
+import { setNetworkPolicy } from "@/modules/settings/store";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { SectionHeader } from "../components/SectionHeader";
 import { SettingRow } from "../components/SettingRow";
@@ -49,6 +52,19 @@ function formatTime(ts: number): string {
 }
 
 export function SecuritySection() {
+  const networkPolicy = usePreferencesStore((s) => s.networkPolicy);
+
+  const onNetworkPolicy = (v: "full" | "lan") => {
+    if (v === networkPolicy) return;
+    void setNetworkPolicy(v);
+    auditAppend(
+      AUDIT_KINDS.sandboxChange,
+      "network",
+      v === "lan" ? "network policy: LAN only" : "network policy: full access",
+      "",
+    );
+  };
+
   const [events, setEvents] = useState<AuditEvent[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -122,6 +138,29 @@ export function SecuritySection() {
         title="Security"
         description="Append-only record of agent actions: what you approved, what was blocked, sandbox changes, and headless (Telegram) runs. Lives outside your projects at ~/.kai/audit — agent code cannot rewrite it. Credential-shaped values are scrubbed before anything is written."
       />
+
+      <SettingRow
+        title="Agent network access"
+        description={
+          networkPolicy === "lan"
+            ? "Agent web tools and shell commands can reach the LAN (intranet hostnames, local model servers) but not the public internet. Model provider calls, your MCP servers, and the API tester are never restricted — the agent must stay able to think, and human-configured endpoints are trusted. Policy layer, not an OS firewall: for hard confinement use Sandbox → Workspace only."
+            : "Unrestricted. The agent's web tools may fetch any public URL (SSRF guard still blocks LAN/metadata), and shell commands may reach the internet."
+        }
+      >
+        <div className="flex items-center gap-1">
+          {(["full", "lan"] as const).map((v) => (
+            <Button
+              key={v}
+              size="sm"
+              variant={networkPolicy === v ? "default" : "outline"}
+              onClick={() => onNetworkPolicy(v)}
+              className="h-7 px-3 text-[11px]"
+            >
+              {v === "full" ? "Full access" : "LAN only"}
+            </Button>
+          ))}
+        </div>
+      </SettingRow>
 
       <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card/50 p-4">
         <div className="flex items-center justify-between gap-3">

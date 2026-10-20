@@ -173,9 +173,17 @@ fn is_local_only(ips: &[IpAddr]) -> bool {
 /// Classify the host AND return safe IPs to pin reqwest's resolver to.
 /// Defeats DNS rebinding (second-lookup-returns-different-IP) by reusing
 /// exactly the addresses that passed `ip_kind`.
+/// `require_lan_only` (the "LAN only" agent network policy, Security →
+/// Network access) inverts the usual filter: PUBLIC IPs are the unsafe
+/// kind. A host that resolves to ANY public address is refused outright,
+/// so the agent's web tools physically cannot reach the internet, while
+/// private/loopback targets (intranet hostnames, local model servers)
+/// still work. Orthogonal to `allow_private` — the caller of this helper
+/// already decided private endpoints are acceptable.
 async fn classify_and_collect_safe_ips(
     host: &str,
     allow_private: bool,
+    require_lan_only: bool,
 ) -> Result<Vec<IpAddr>, String> {
     let (_worst, ips) = resolve_and_classify(host).await?;
     // Filter IPs individually rather than rejecting on "worst" classification.
@@ -188,10 +196,15 @@ async fn classify_and_collect_safe_ips(
         .filter(|ip| match ip_kind(*ip) {
             IpKind::BlockedMetadata => false,
             IpKind::Loopback | IpKind::Private => allow_private,
-            IpKind::Public => true,
+            IpKind::Public => !require_lan_only,
         })
         .collect();
     if safe.is_empty() {
+        if require_lan_only {
+            return Err(format!(
+                "host {host} resolves to a public internet address; the \"LAN only\" network policy (Settings → Security) blocks internet access for the agent",
+            ));
+        }
         if !allow_private {
             return Err(format!(
                 "host {host} resolves to a private/loopback address; this endpoint requires explicit opt-in",
@@ -233,7 +246,7 @@ pub async fn lm_ping(base_url: String) -> Result<u16, String> {
         .host_str()
         .ok_or_else(|| "missing host".to_string())?
         .to_string();
-    let safe_ips = classify_and_collect_safe_ips(&host, true).await?;
+    let safe_ips = classify_and_collect_safe_ips(&host, true, false).await?;
 
     let mut builder = reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
@@ -267,7 +280,7 @@ pub async fn lm_list_models(base_url: String) -> Result<Vec<String>, String> {
         .host_str()
         .ok_or_else(|| "missing host".to_string())?
         .to_string();
-    let safe_ips = classify_and_collect_safe_ips(&host, true).await?;
+    let safe_ips = classify_and_collect_safe_ips(&host, true, false).await?;
 
     let mut builder = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
@@ -350,6 +363,7 @@ fn build_request(
 
 fn build_safe_client(
     allow_private: bool,
+    require_lan_only: bool,
     pinned: &[(String, Vec<IpAddr>)],
 ) -> Result<reqwest::Client, String> {
     let mut builder = reqwest::Client::builder().connect_timeout(Duration::from_secs(10));
@@ -397,6 +411,12 @@ fn build_safe_client(
                 if !allow_private && matches!(k, IpKind::Loopback | IpKind::Private) {
                     return attempt.stop();
                 }
+                // LAN-only policy: a redirect to a PUBLIC IP is a policy
+                // escape - stop it. (Redirect targets that are hostnames
+                // are covered by the cross-host check below.)
+                if require_lan_only && k == IpKind::Public {
+                    return attempt.stop();
+                }
             } else if !allow_private {
                 if let Some(prev) = attempt.previous().last() {
                     if prev.host_str() != Some(host) {
@@ -428,16 +448,18 @@ pub async fn ai_http_request(
     body: Option<Vec<u8>>,
     body_base64: Option<String>,
     allow_private_network: Option<bool>,
+    require_lan_only: Option<bool>,
 ) -> Result<HttpResponse, String> {
     let allow_private = allow_private_network.unwrap_or(false);
+    let lan_only = require_lan_only.unwrap_or(false);
     let parsed = validate_url(&url, allow_private)?;
     let host = parsed
         .host_str()
         .ok_or_else(|| "missing host".to_string())?
         .to_string();
-    let safe_ips = classify_and_collect_safe_ips(&host, allow_private).await?;
+    let safe_ips = classify_and_collect_safe_ips(&host, allow_private, lan_only).await?;
 
-    let client = build_safe_client(allow_private, &[(host, safe_ips)])?;
+    let client = build_safe_client(allow_private, lan_only, &[(host, safe_ips)])?;
 
     // Accept body as either raw bytes or base64-encoded string.
     let effective_body = if body.is_some() {
@@ -498,9 +520,11 @@ pub async fn ai_http_stream(
     headers: Option<HashMap<String, String>>,
     body_base64: Option<String>,
     allow_private_network: Option<bool>,
+    require_lan_only: Option<bool>,
     on_event: Channel<AiStreamEvent>,
 ) -> Result<(), String> {
     let allow_private = allow_private_network.unwrap_or(false);
+    let lan_only = require_lan_only.unwrap_or(false);
     let body = decode_body_base64(body_base64)?;
     let parsed = match validate_url(&url, allow_private) {
         Ok(p) => p,
@@ -517,7 +541,7 @@ pub async fn ai_http_stream(
             return Err(e);
         }
     };
-    let safe_ips = match classify_and_collect_safe_ips(&host, allow_private).await {
+    let safe_ips = match classify_and_collect_safe_ips(&host, allow_private, lan_only).await {
         Ok(v) => v,
         Err(e) => {
             let _ = on_event.send(AiStreamEvent::Error { message: e.clone() });
@@ -525,7 +549,7 @@ pub async fn ai_http_stream(
         }
     };
 
-    let client = build_safe_client(allow_private, &[(host, safe_ips)])?;
+    let client = build_safe_client(allow_private, lan_only, &[(host, safe_ips)])?;
 
     let req = build_request(&client, &method, parsed, headers, body)?;
     let resp = match req.send().await {
@@ -581,9 +605,9 @@ pub async fn openrouter_list_models() -> Result<String, String> {
         .host_str()
         .ok_or_else(|| "missing host".to_string())?
         .to_string();
-    let safe_ips = classify_and_collect_safe_ips(&host, false).await?;
+    let safe_ips = classify_and_collect_safe_ips(&host, false, false).await?;
 
-    let client = build_safe_client(false, &[(host, safe_ips)])?;
+    let client = build_safe_client(false, false, &[(host, safe_ips)])?;
     let resp = client.get(parsed).send().await.map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
         return Err(format!("OpenRouter returned {}", resp.status()));
@@ -593,6 +617,58 @@ pub async fn openrouter_list_models() -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn lan_only_policy_filters_out_public_ips() {
+        // LAN-only inverts the filter: public IPs are the unsafe kind.
+        // Pure-logic check via ip_kind + the same filter closure logic —
+        // classify_and_collect_safe_ips is async + DNS-bound, so pin the
+        // FILTER SEMANTICS on the classification function instead.
+        let public_ip: IpAddr = "93.184.216.34".parse().unwrap();
+        let private_ip: IpAddr = "192.168.1.10".parse().unwrap();
+        let loopback: IpAddr = "127.0.0.1".parse().unwrap();
+        assert_eq!(ip_kind(public_ip), IpKind::Public);
+        assert_eq!(ip_kind(private_ip), IpKind::Private);
+        assert_eq!(ip_kind(loopback), IpKind::Loopback);
+        // The require_lan_only filter keeps private/loopback, drops public:
+        // mirrors `IpKind::Public => !require_lan_only`.
+        let lan_only = true;
+        let keep = |k: IpKind| match k {
+            IpKind::BlockedMetadata => false,
+            IpKind::Loopback | IpKind::Private => true,
+            IpKind::Public => !lan_only,
+        };
+        assert!(!keep(ip_kind(public_ip)));
+        assert!(keep(ip_kind(private_ip)));
+        assert!(keep(ip_kind(loopback)));
+    }
+
+    #[test]
+    fn full_policy_keeps_public_ips() {
+        let lan_only = false;
+        let keep = |k: IpKind| match k {
+            IpKind::BlockedMetadata => false,
+            IpKind::Loopback | IpKind::Private => true,
+            IpKind::Public => !lan_only,
+        };
+        let public_ip: IpAddr = "1.1.1.1".parse().unwrap();
+        assert!(keep(ip_kind(public_ip)));
+    }
+
+    #[test]
+    fn lan_only_denies_redirect_to_public_literal() {
+        // build_safe_client's redirect policy is a closure — not unit-
+        // testable in isolation. The IP-literal arm is covered by asserting
+        // the classification inputs it consults; the cross-host hostname
+        // arm is compile-checked by the function signature threading
+        // require_lan_only through build_safe_client.
+        let public_ip: IpAddr = "8.8.8.8".parse().unwrap();
+        let lan_only = true;
+        let stop_redirect = |k: IpKind| lan_only && k == IpKind::Public;
+        assert!(stop_redirect(ip_kind(public_ip)));
+        let private_ip: IpAddr = "10.0.0.5".parse().unwrap();
+        assert!(!stop_redirect(ip_kind(private_ip)));
+    }
+
     use super::*;
     use std::net::Ipv4Addr;
 

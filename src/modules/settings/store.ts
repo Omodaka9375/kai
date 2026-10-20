@@ -127,6 +127,11 @@ export type Preferences = {
   voiceTtsApiModel: string;
   /** Local TTS voice name (Piper). */
   voiceTtsLocalVoice: string;
+  /** Agent network policy. "full" = unrestricted; "lan" = agent web/shell
+   *  tools may only reach private/loopback endpoints (no internet). Model
+   *  provider calls are NEVER restricted — the agent must stay able to
+   *  think. Policy layer, not an OS firewall (that's Sandbox workspaceOnly). */
+  networkPolicy: "full" | "lan";
 };
 
 const STORE_PATH = "Kai-settings.json";
@@ -181,6 +186,7 @@ const KEY_VOICE_TTS_MODE = "voiceTtsMode";
 const KEY_VOICE_TTS_API_VOICE = "voiceTtsApiVoice";
 const KEY_VOICE_TTS_API_MODEL = "voiceTtsApiModel";
 const KEY_VOICE_TTS_LOCAL_VOICE = "voiceTtsLocalVoice";
+const KEY_NETWORK_POLICY = "networkPolicy";
 
 export const TERMINAL_FONT_SIZE_DEFAULT = 14;
 export const TERMINAL_FONT_SIZE_MIN = 8;
@@ -256,6 +262,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   voiceTtsApiVoice: "alloy",
   voiceTtsApiModel: "gpt-4o-mini-tts",
   voiceTtsLocalVoice: "en_US-lessac-medium",
+  networkPolicy: "full",
 };
 
 const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
@@ -404,8 +411,12 @@ export async function loadPreferences(): Promise<Preferences> {
         get<string>(KEY_VOICE_TTS_API_VOICE) ?? DEFAULT_PREFERENCES.voiceTtsApiVoice,
       voiceTtsApiModel:
         get<string>(KEY_VOICE_TTS_API_MODEL) ?? DEFAULT_PREFERENCES.voiceTtsApiModel,
-      voiceTtsLocalVoice:
-        get<string>(KEY_VOICE_TTS_LOCAL_VOICE) ?? DEFAULT_PREFERENCES.voiceTtsLocalVoice,
+    voiceTtsLocalVoice:
+      get<string>(KEY_VOICE_TTS_LOCAL_VOICE) ?? DEFAULT_PREFERENCES.voiceTtsLocalVoice,
+    networkPolicy:
+      get<Preferences["networkPolicy"]>(KEY_NETWORK_POLICY) === "lan"
+        ? "lan"
+        : "full",
     };
 }
 
@@ -433,6 +444,10 @@ export async function setProjectModelId(workspaceRoot: string, modelId: string):
     }
   }
   await writePref("projectModelIds", current);
+}
+
+export async function setNetworkPolicy(value: "full" | "lan"): Promise<void> {
+  await writePref(KEY_NETWORK_POLICY, value === "lan" ? "lan" : "full");
 }
 
 export async function setDefaultModel(value: ModelId): Promise<void> {
@@ -759,6 +774,7 @@ export async function onPreferencesChange(
     [KEY_VOICE_TTS_API_VOICE]: "voiceTtsApiVoice",
     [KEY_VOICE_TTS_API_MODEL]: "voiceTtsApiModel",
     [KEY_VOICE_TTS_LOCAL_VOICE]: "voiceTtsLocalVoice",
+    [KEY_NETWORK_POLICY]: "networkPolicy",
   };
   // Same-process writes still fire onChange immediately; cross-window writes
   // arrive via the Tauri event emitted by writePref().

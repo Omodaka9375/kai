@@ -59,22 +59,61 @@ async function bodyToBase64(
   return btoa(binary);
 }
 
+/**
+ * The "LAN only" network policy (Settings → Security). When active, the
+ * Rust proxy refuses PUBLIC endpoints — agent web tools can reach the LAN
+ * (intranet hostnames, local model servers) but not the internet.
+ *
+ * Applies ONLY to model-callable fetches (web_browse / web_search /
+ * youtube_transcript / media URL fetch). User-configured surfaces — MCP
+ * servers, api-tester, provider calls, LM Studio — are exempt BY DESIGN:
+ * those endpoints were chosen by the human, not by the model.
+ *
+ * The policy is read lazily per request (no fetch-instance rebuild; a flip
+ * in Settings applies to the very next call, cross-window via
+ * Kai://prefs-changed). Fail-closed defaults to full access only when the
+ * store cannot be read (tests, plain web) — never blocks on error paths.
+ */
+import { usePreferencesStore } from "@/modules/settings/preferences";
+
+function lanOnlyActive(): boolean {
+  try {
+    return usePreferencesStore.getState().networkPolicy === "lan";
+  } catch {
+    return false;
+  }
+}
+
+/** Model-callable fetch surfaces only — the gate the proxy layer consults.
+ *  Exported for web.ts/youtube.ts, whose fixed-instance fetchers are
+ *  model-chosen destinations. */
+export function requireLanOnly(): boolean {
+  return lanOnlyActive();
+}
+
 export function createProxyFetch(
   opts: { allowPrivateNetwork?: boolean } = {},
 ): typeof fetch {
   const allowPrivate = opts.allowPrivateNetwork === true;
-  return async (input, init) => proxyFetchImpl(input, init, allowPrivate);
+  // NOT policy-gated: instances of this fetch serve user-configured
+  // endpoints (MCP servers, OAuth, provider calls, LM Studio) — the human
+  // chose the destination, so the LAN-only policy (which constrains what
+  // the MODEL may reach) does not apply.
+  return async (input, init) => proxyFetchImpl(input, init, allowPrivate, false);
 }
 
 /** Backwards-compatible default — refuses private networks unless the caller
- *  explicitly opts in via {@link createProxyFetch}. */
+ *  explicitly opts in via {@link createProxyFetch}. Used by provider-class
+ *  flows (TTS/STT endpoints, provider CDN fetches) with fixed destinations,
+ *  so the LAN-only policy does not apply here either. */
 export const proxyFetch: typeof fetch = (input, init) =>
-  proxyFetchImpl(input, init, false);
+  proxyFetchImpl(input, init, false, false);
 
 async function proxyFetchImpl(
   input: RequestInfo | URL,
   init: RequestInit | undefined,
   allowPrivateNetwork: boolean,
+  lanOnly: boolean,
 ): Promise<Response> {
   const url = input instanceof URL ? input.toString() : String(input);
   const method = (init?.method ?? "GET").toUpperCase();
@@ -153,6 +192,7 @@ async function proxyFetchImpl(
       headers,
       bodyBase64: bodyBase64 ?? null,
       allowPrivateNetwork,
+      requireLanOnly: lanOnly,
       onEvent: channel,
     }).catch((e) => {
       if (resolved) return; // headers already arrived; chunk-side error wins

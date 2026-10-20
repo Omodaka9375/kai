@@ -491,5 +491,106 @@ export function checkShellCommand(cmd: string): SafetyResult {
         "Refused: piping a network download directly into a shell is blocked. Download first, inspect, then run.",
     };
   }
+  // LAN-only network policy (Settings → Security): block shell egress to the
+  // public internet. One classifier, every execution path — bash_run,
+  // bash_background, watch_create, and the approval-allowlist re-check all
+  // route through checkShellCommand, so this is the single choke point.
+  if (isLanOnlyPolicyActive() && !lanOnlyShellCommandOk(c)) {
+    return { ok: false, reason: lanOnlyDenyReason(c) };
+  }
   return { ok: true };
+}
+
+// ── LAN-only shell egress classifier ───────────────────────────────────────────
+//
+// DESIGN: best-effort POLICY layer, not a sandbox. It recognizes common
+// egress clients and inspects every URL/host literal in the command.
+// "Every host is local" (RFC1918/loopback/.local/unqualified) → allowed;
+// any public host → denied with the policy pointer. A determined adversary
+// could write an unrecognized client, but the layer below (Sandbox
+// workspaceOnly) is the OS-confinement backstop — this layer makes
+// accidental egress loud instead of silent.
+
+function isLanOnlyPolicyActive(): boolean {
+  try {
+    const hook = (globalThis as { __kaiLanOnlyPolicy?: () => boolean })
+      .__kaiLanOnlyPolicy;
+    return hook ? hook() : false;
+  } catch {
+    return false;
+  }
+}
+
+/** Hosts that are unambiguously local. */
+function isLocalHostLiteral(h: string): boolean {
+  const s = h.toLowerCase().replace(/^[[]|[]]$/g, "");
+  if (s === "localhost" || s.endsWith(".local") || s.endsWith(".internal")) return true;
+  if (/^(127\.|10\.|192\.168\.|169\.254\.|0\.)/.test(s)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(s)) return true;
+  if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(s)) return true;
+  if (/^(::1|fe80:|fc|fd)/.test(s)) return true;
+  if (/^::ffff:/.test(s)) return isLocalHostLiteral(s.slice(7));
+  // Unqualified single-label hostname (nas, printer): resolvable only via
+  // LAN search domains in practice — treat as local.
+  return !s.includes(".") && s.length > 0;
+}
+
+/** Host-carrying tokens in the command: URLs and scp-style user@host:path. */
+function extractHostsFromCommand(c: string): string[] {
+  const hosts: string[] = [];
+  const urlRe = /[a-z][a-z0-9+.-]*:\/\/(?:[^@\s]+@)?(\[[^\]]+\]|[a-z0-9._-]+)(?::\d+)?/gi;
+  let m: RegExpExecArray | null;
+  while ((m = urlRe.exec(c)) !== null) hosts.push(m[1] ?? "");
+  const scpRe = /\b[a-z0-9._%+-]+@([a-z0-9._-]+):/gi;
+  while ((m = scpRe.exec(c)) !== null) hosts.push(m[1] ?? "");
+  return hosts.filter(Boolean);
+}
+
+/** Commands that can reach the network. */
+const EGRESS_RE =
+  /\b(curl|wget|Invoke-WebRequest|Invoke-RestMethod|iwr|irm|nc|ncat|netcat|socat|ssh|scp|sftp|rsync|telnet|ftp|git\s+(clone|fetch|pull|push|remote|ls-remote|submodule)|npm|pnpm|yarn|bun|pip|pip3|uv\s+pip|cargo\s+(install|update|publish)|go\s+(get|install|mod)|gem|composer|dotnet\s+(add|restore|install)|brew|apt|apt-get|dnf|yum|winget|choco|scoop)\b/i;
+
+/** Package installs: allowed ONLY when a local registry/index is pinned. */
+function hasLocalRegistryFlag(c: string): boolean {
+  return (
+    /--registry(\s|=)\S+/i.test(c) ||
+    /--index-url(\s|=)\S+/i.test(c) ||
+    /--extra-index-url(\s|=)\S+/i.test(c) ||
+    /GOPROXY=\s*"?(direct|off)/i.test(c)
+  );
+}
+
+/** Is this command acceptable under the LAN-only policy? */
+function lanOnlyShellCommandOk(c: string): boolean {
+  if (!EGRESS_RE.test(c)) return true; // not network-shaped → allow
+  const lower = c.toLowerCase();
+  if (
+    /\b(npm|pnpm|yarn|bun)\b/.test(lower) &&
+    /\b(add|install|i|ci|update|upgrade|dlx|exec|create)\b/.test(lower)
+  ) {
+    return hasLocalRegistryFlag(c);
+  }
+  if (/\b(pip|pip3|uv)\b/.test(lower) && /install|download/i.test(lower)) {
+    return hasLocalRegistryFlag(c);
+  }
+  if (/\bcargo\b/.test(lower) && /\b(install|update|publish)\b/.test(lower)) {
+    return hasLocalRegistryFlag(c);
+  }
+  // Everything else: every host literal in the command must be local.
+  const hosts = extractHostsFromCommand(c);
+  if (hosts.length === 0) {
+    // Egress client with no visible host — indistinguishable from policy
+    // evasion (config-file URL, alias) → deny.
+    return false;
+  }
+  return hosts.every(isLocalHostLiteral);
+}
+
+function lanOnlyDenyReason(c: string): string {
+  const hosts = extractHostsFromCommand(c);
+  const publicHost = hosts.find((h) => !isLocalHostLiteral(h));
+  if (publicHost) {
+    return `Refused: "LAN only" network policy is active (Settings → Security) and this command reaches the public internet (${publicHost}). Turn the policy off, or point it at a LAN address.`;
+  }
+  return 'Refused: "LAN only" network policy is active (Settings → Security) and this command can reach the internet (public registry or hidden host). Use a LAN/local registry or turn the policy off.';
 }
