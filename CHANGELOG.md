@@ -5,28 +5,24 @@ All notable changes to the KAI terminal emulator project are documented in this 
 ---
 ## [1.8.2]
 
-- Security: agent audit trail - append-only, credential-scrubbed JSONL under ~/.kai/audit/ (agent-unwritable); records tool exec, approval decisions, security denials, sandbox mode flips, and assistant turns. Fence coverage for subagents and the Telegram assistant; scoped approval allowlist ("always allow" for low-risk commands only, executed with a runtime re-check).
-- Models: first-class local/LAN OpenAI-compatible endpoints (base URL + model id), fenced from the SSRF proxy like every other provider.
-- Security: LAN-only agent network policy - model-chosen web tools and shell egress are denied to the public internet; provider/MCP/api-tester fetches are never restricted.
-- AI: bash_run no longer kills test runners mid-run (timeouts stopped reaping long compile/test processes).
-- Watch: dedup match-mode firings - no more chat replay and context refill on repeated identical polls.
+- Security: agent audit trail - append-only.
+- Security: LAN-only agent network policy.
+- AI: bash_run no longer terminates test runners mid-run.
+- Watch: dedup match-mode firings.
 - Settings: Security panel reachable from the menu + covered by the window-state denylist.
-- Assistant: searchable model picker with its own model override, decoupled from the project agent's model ("Follow default" rides the app default).
-- EOL: LF enforced repo-wide (.gitattributes + editorconfig + VS Code) - fixes byte-exact edit-tool match failures against CRLF working trees; the edit tools themselves are EOL-tolerant on any folder, git or not.
-- Settings: Assistant panel opens in ~1s instead of ~1min - the panel stopped statically importing the whole AI runtime (light prefs module + dynamic bridge imports).
-- Settings: Security panel "open audit folder" button works - opener open_path needed both the command permission and a scoped `$HOME/.kai/**` entry.
-- Security: approval audit events record the real tool name - the subject column no longer reads "Unknown" (the name lives in part.type, not toolName).
-- AI: pinned "always allow" commands now actually auto-approve in every auto-approve mode (the effect early-returned before the allowlist branch).
-- AI: "Approve all" now covers run commands too — the allowlist branch's unconditional continue made every bash_run prompt for review even with approve-all set.
-- AI: "Always allow" now appears for real-world commands — the pin gate required ONE simple invocation (no `&&`/`;`/`|`), which excluded nearly every command an agent actually issues; chains are now pin-eligible when every segment is low-risk, warning-free, and not write-shaped (rm/cp/tee/… excluded by construction).
+- Assistant: searchable model picker with its own model override.
+- EOL: LF enforced repo-wide (.gitattributes + editorconfig + VS Code).
+- Settings: Assistant panel.
+- Settings: Security panel "open audit folder" button.
+- Security: approval audit events record the tool name.
+- AI: pinned "always allow" commands now auto-approve in every mode.
 - Security: audit trail panel shows the last 5 events — Open folder for the full history.
-- Source Control: fixed the full-panel blink on refresh — the context path (active tab / terminal cwd) flickers during tab switches and every cross-repo change blanked the panel synchronously; the path now settles for 200ms before driving a git refresh, and transient git failures (index.lock contention, IPC hiccups) keep the last good snapshot instead of wiping to an error state.
-- AI: new `voice_settings` tool — the agent (main + Telegram assistant) can change the TTS engine (OpenAI/local/off), voice, and model on request ("use a female voice" resolves against the gender-annotated catalog; no gender parameter). Changes apply to the next spoken reply and are audited.
-- AI: "Always allow" no longer over-blocks `~` and `/tmp/` paths — the policy sensitive-path warning is scoped to system config/logs only; home-dir wipes stay blocked by the hard deny-list. Idiomatic pwsh listings (`Get-ChildItem ~/Downloads`) are pinnable again.
-- AI: the approval pill is two-state (Ask / Auto) — the "edits" middle mode was dropped (unused in practice; the pinned-commands allowlist covers the repeated-command case, "all" covers trust-a-lot sessions). Tooltips are honest about both: Ask still runs pinned commands; Auto still asks for elevation and signed commits.
-- AI: the `/goal` goal-loop feature removed — store, handler, automation, templates, panel, status pill, slash command, and prompt integration; nothing else referenced it.
-- Terminal: drag-and-drop hardening - explorer→terminal drags insert shell-literal quoted paths (single-quote per shell, so a filename like `x$(cmd)` can never execute on Enter), external text drops are sanitized (no newlines auto-executing, no control bytes), and a drop-target ring shows where the payload lands.
-- Terminal: drag-and-drop cross-platform fix - native drag-drop handler disabled on base + Linux configs too (it swallows HTML5 drag events on webkitgtk/WebView2; macOS inherits the base config).
+- Source Control: fixed the full-panel blink on refresh.
+- AI: new `voice_settings` tool — the agent can change the TTS engine (OpenAI/local/off), voice, and model on request.
+- AI: "Always allow" no longer over-blocks `~` and `/tmp/` paths.
+- AI: the approval pill is two-state (Ask / Auto).
+- AI: the `/goal` goal-loop feature removed.
+- Terminal: drag-and-drop cross-platform fix.
 
 ---
 
