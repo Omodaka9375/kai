@@ -129,6 +129,11 @@ interface WatchState extends WatchConfig {
   lastError: string | null;
   /** Previous stdout/exit_code for change detection. */
   lastResult: string | null;
+  /** Fingerprint of the last FIRED result (match-mode dedup): a condition
+   *  that keeps matching on IDENTICAL output must fire once, not once per
+   *  poll — each re-fire injected a fresh 2000-char chunk and woke a full
+   *  agent turn ("chat scrolling duplicates like a replay" + context fill). */
+  lastFired: string | null;
   /** How many times we've polled. */
   polls: number;
   /** Whether the watch has fired at least once (change detection needs baseline). */
@@ -142,8 +147,8 @@ interface WatchState extends WatchConfig {
 const watches = new Map<string, WatchState>();
 
 /** Create a watch and register it with the tick-driven scheduler. The first
- *  watch creation also (lazily) starts the Rust heartbeat. */
-async function startWatch(config: WatchConfig): Promise<WatchState> {
+ *  watch creation also (lazily) starts the Rust heartbeat. Exported for tests. */
+export async function startWatch(config: WatchConfig): Promise<WatchState> {
   const state: WatchState = {
     ...config,
     nextDue: Date.now(),
@@ -151,6 +156,7 @@ async function startWatch(config: WatchConfig): Promise<WatchState> {
     consecutiveFailures: 0,
     lastError: null,
     lastResult: null,
+    lastFired: null,
     polls: 0,
     hasBaseline: false,
     active: true,
@@ -223,7 +229,8 @@ function countPollFailure(w: WatchState, msg: string): void {
  *  poll path and the catch-path shell-reopen retry. Also resets the breaker
  *  counters on any successful run (shell-level success, regardless of exit
  *  code — the condition decides firing, not the exit code). */
-function handlePollResult(
+/** Exported for tests: the poll-result classifier/state machine. */
+export function handlePollResult(
   w: WatchState,
   result: { exit_code: number | null; stdout: string; stderr: string; timed_out: boolean },
 ): void {
@@ -250,8 +257,21 @@ function handlePollResult(
     w.consecutiveFailures = 0;
     w.lastError = null;
     if (check.value) {
-      injectWatchResult(w, result);
-      // Don't stop — the watch keeps running for subsequent matches.
+      // Replay dedup: a condition that keeps matching on IDENTICAL output
+      // fires ONCE, not once per poll. Each re-fire used to inject a fresh
+      // 2000-char chunk + trigger a full agent turn — every interval, forever
+      // — which scrolled the chat with duplicates and filled the context.
+      // Changed output still fires (log growth, new status lines). A
+      // non-matching poll CLEARS the dedup below so a flapping state
+      // (down → up → down with the same text) re-fires on re-entry.
+      const firedKey = firedResultKey(result);
+      if (w.lastFired !== firedKey) {
+        w.lastFired = firedKey;
+        injectWatchResult(w, result);
+      }
+      // Don't stop — the watch keeps running for subsequent (new) matches.
+    } else {
+      w.lastFired = null;
     }
   } else {
     // Change detection mode (no condition to evaluate).
@@ -361,6 +381,24 @@ export function evaluateCondition(
   result: { exit_code: number | null; stdout: string; stderr: string; timed_out: boolean },
 ): boolean {
   return evaluateConditionChecked(condition, result).value;
+}
+
+/** Fingerprint of exactly what a firing would INJECT (trimmed stdout/stderr
+ *  + exit code + timed-out): the conversation receives this content, so a
+ *  change beyond the trim is invisible to the model and counts as a
+ *  duplicate. Must mirror injectWatchResult's trim bounds. */
+function firedResultKey(result: {
+  exit_code: number | null;
+  stdout: string;
+  stderr: string;
+  timed_out: boolean;
+}): string {
+  return [
+    result.exit_code,
+    result.timed_out ? 1 : 0,
+    stripClixml(result.stdout ?? "").slice(0, 2000),
+    stripClixml(result.stderr ?? "").slice(0, 500),
+  ].join(":");
 }
 
 /**
@@ -733,10 +771,10 @@ export function buildWatchTools(ctx: ToolContext) {
         command: z.string().describe("Shell command to run periodically."),
         interval_secs: z.number().min(5).max(300).describe("Polling interval in seconds (5-300)."),
         condition: z.string().optional().describe(
-          "JavaScript expression evaluated against { exit_code, stdout, stderr, timed_out }. Must be boolean. E.g. 'exit_code !== 0', 'stdout.includes(\"MERGED\")'. If omitted, fires on every poll.",
+          "JavaScript expression evaluated against { exit_code, stdout, stderr, timed_out }. Must be boolean. E.g. 'exit_code !== 0', 'stdout.includes(\"MERGED\")'. If omitted, fires whenever the result differs from the last firing.",
         ),
         mode: z.enum(["fire_on_match", "fire_on_change"]).optional().default("fire_on_match").describe(
-          "fire_on_match: fire when condition is true. fire_on_change: fire when command output differs from the previous poll.",
+          "fire_on_match: fire when condition is true; a match on output identical to the last firing is suppressed (fires once per distinct result, not once per poll). fire_on_change: fire when command output differs from the previous poll.",
         ),
         label: z.string().optional().describe("Human-readable label for notifications."),
         notify_telegram: z.boolean().optional().describe(

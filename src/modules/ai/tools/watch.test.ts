@@ -13,8 +13,9 @@ vi.mock("../lib/native", () => ({
     watchHeartbeat: vi.fn(),
   },
 }));
+const { injectMessageMock } = vi.hoisted(() => ({ injectMessageMock: vi.fn() }));
 vi.mock("../store/chatStore", () => ({
-  useChatStore: { getState: () => ({ injectMessage: vi.fn() }) },
+  useChatStore: { getState: () => ({ injectMessage: injectMessageMock }) },
   flushAllPendingWatchWakes: vi.fn(),
 }));
 vi.mock("../lib/security", () => ({
@@ -252,6 +253,80 @@ describe("watch wake-up flush must not iterate the live pending set", () => {
       snap.add(id);
     }
     expect(visited2).toEqual(["a"]);
+  });
+});
+
+describe("match-mode replay dedup (chat scrolling duplicates / context fill)", () => {
+  // REGRESSION (user report): a fire_on_match condition that keeps matching
+  // on IDENTICAL output fired on EVERY poll — each firing injected a fresh
+  // 2000-char stdout chunk and woke a full agent turn, so the chat scrolled
+  // duplicate "Watch fired" blocks "like a replay" and the context filled.
+  // Fix: identical fired-result → suppressed; changed output → fires;
+  // a non-matching poll clears the dedup so flapping states re-fire.
+
+  const mkWatch = () =>
+    watchModule.startWatch({
+      id: `watch_test_${Math.random().toString(36).slice(2, 8)}`,
+      command: "Get-Status",
+      intervalSecs: 5,
+      mode: "fire_on_match",
+      label: "status",
+      shellId: 1,
+      cwd: null,
+      sessionId: "test-session",
+    });
+
+  beforeEach(() => {
+    injectMessageMock.mockClear();
+  });
+
+  it("fires ONCE for a persistent condition on identical output", async () => {
+    const w = await mkWatch();
+    const same = { exit_code: 0, stdout: "STATUS: OK", stderr: "", timed_out: false };
+    watchModule.handlePollResult(w, same);
+    watchModule.handlePollResult(w, same);
+    watchModule.handlePollResult(w, same);
+    expect(injectMessageMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-fires when the output changes (log growth, new status lines)", async () => {
+    const w = await mkWatch();
+    watchModule.handlePollResult(w, { exit_code: 0, stdout: "STATUS: OK", stderr: "", timed_out: false });
+    watchModule.handlePollResult(w, { exit_code: 0, stdout: "STATUS: OK\nNEW LINE", stderr: "", timed_out: false });
+    expect(injectMessageMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("clears the dedup when the condition stops matching — flapping states re-fire", async () => {
+    const w = await mkWatch();
+    w.condition = "exit_code !== 0";
+    const down = { exit_code: 1, stdout: "STATUS: DOWN", stderr: "", timed_out: false };
+    const ok = { exit_code: 0, stdout: "STATUS: OK", stderr: "", timed_out: false };
+    // down → fires; recovers → no match, dedup cleared; down again → re-fires.
+    watchModule.handlePollResult(w, down);
+    watchModule.handlePollResult(w, ok);
+    watchModule.handlePollResult(w, down);
+    expect(injectMessageMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("fires once for a condition-less watch while output is unchanged", async () => {
+    const w = await mkWatch();
+    w.condition = undefined; // no condition = always true
+    const same = { exit_code: 0, stdout: "tick", stderr: "", timed_out: false };
+    watchModule.handlePollResult(w, same);
+    watchModule.handlePollResult(w, same);
+    expect(injectMessageMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("survives the (stdout || \"\") coalesce style without bogus re-fires", async () => {
+    // The field-report condition shape: `(stdout || "").includes(...)`.
+    // stdout is always a string here, so coalescing must not perturb the
+    // fired fingerprint between polls.
+    const w = await mkWatch();
+    w.condition = '((stdout || "")).includes("ALL_EVALS_DONE")';
+    const res = { exit_code: 0, stdout: "… ALL_EVALS_DONE …", stderr: "", timed_out: false };
+    watchModule.handlePollResult(w, res);
+    watchModule.handlePollResult(w, res);
+    expect(injectMessageMock).toHaveBeenCalledTimes(1);
   });
 });
 
