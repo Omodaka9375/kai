@@ -17,6 +17,7 @@ import { buildWatchTools } from "./watch";
 import { buildScreenTools } from "./screen";
 import { buildMcpTools } from "./mcpTools";
 import { buildRadioTools } from "./radio";
+import { buildVoiceTools } from "./voice";
 
 export { resolvePath, type ToolContext } from "./context";
 
@@ -35,6 +36,7 @@ export function buildCoreTools(ctx: import("./context").ToolContext) {
     ...buildScreenTools(ctx),
     ...buildMcpTools(ctx),
     ...buildRadioTools(ctx),
+    ...buildVoiceTools(ctx),
   } as const;
 }
 

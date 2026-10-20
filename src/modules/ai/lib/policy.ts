@@ -125,6 +125,14 @@ export const TOOL_ACTION_CLASSIFIER: Record<string, ToolActionInfo> = {
     description: "List registered MCP servers and their status",
   },
 
+  // Voice preferences - low risk (reversible preference write)
+  voice_settings: {
+    category: "system",
+    riskLevel: "low",
+    requiresApproval: false,
+    description: "Get or change the text-to-speech voice settings",
+  },
+
   // Network operations - medium risk
   web_fetch: {
     category: "network",
