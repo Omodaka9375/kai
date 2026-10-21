@@ -5,9 +5,9 @@ All notable changes to the KAI terminal emulator project are documented in this 
 ---
 ## [1.8.5]
 
-- Security: hardened the agent against prompt injection from web pages and tool output (invisible-character stripping, hidden-DOM removal with visible redaction badges, forged fence/tool-call marker neutralization, memory-provenance tagging).
-- AI: fixed the agent silently stopping after a tool call (loop detectors no longer false-positive on normal log-tailing/retries, and now say why they stop).
-- AI: screenshots now always require your explicit approval - auto-approve never captures your screen - and "look at my terminal" no longer triggers one.
+- Security: hardened the agent against prompt injection from tool output.
+- AI: fixed the agent silently stopping after a tool call
+- AI: screenshots now always require your explicit approval
 - Settings: context-size pills for local models; search honors the LAN-only network policy.
 
 ---
