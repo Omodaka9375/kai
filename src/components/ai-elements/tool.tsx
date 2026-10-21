@@ -25,11 +25,11 @@ import {
   VideoIcon,
 } from "@hugeicons/core-free-icons";
 import { useChatStore } from "@/modules/ai/store/chatStore";
-import { unfenceDeep } from "@/modules/ai/lib/fence";
+import { extractRedactionNotices, unfenceDeep } from "@/modules/ai/lib/fence";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { DynamicToolUIPart, ToolUIPart } from "ai";
 import type { ComponentProps, ReactNode } from "react";
-import { isValidElement, memo, useState } from "react";
+import { isValidElement, memo, useMemo, useState } from "react";
 
 
 export type ToolPart = ToolUIPart | DynamicToolUIPart;
@@ -188,6 +188,13 @@ const ToolImpl = ({
   // Fence markers are a model-facing prompt-injection defense — the UI shows
   // clean output. This is display-only; the persisted message stays fenced.
   const displayOutput = showOutputBody ? unfenceDeep(output) : undefined;
+  // Visible redaction: when the sanitizer stripped/forged-neutralized content,
+  // a `[kai: …]` notice rides inside the fence. Surface it at the card HEADER
+  // so the user sees the page tried something without expanding the body.
+  const redactions = useMemo(
+    () => (showOutputBody ? extractRedactionNotices(output) : []),
+    [showOutputBody, output],
+  );
   const hasDetails =
     showInputBody || showOutputBody || Boolean(errorText);
 
@@ -223,6 +230,16 @@ const ToolImpl = ({
           </span>
         ) : (
           <span className="flex-1" />
+        )}
+        {redactions.length > 0 && (
+          <span
+            title={redactions.join(" · ")}
+            className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400"
+          >
+            {redactions.length === 1
+              ? "redacted"
+              : `${redactions.length} redactions`}
+          </span>
         )}
         {isError && (
           <span className="shrink-0 text-[10px] font-medium text-destructive">

@@ -19,6 +19,7 @@ import { IS_WINDOWS, IS_MAC, IS_LINUX } from "@/lib/platform";
 import { extensionRegistry } from "./extensions";
 import { agentBus } from "./eventBus";
 import { createFenceState } from "./fence";
+import { clearSessionProvenance } from "./provenance";
 import { loadProjectRules, formatRulesForPrompt, type ProjectRules } from "./projectRules";
 import { cleanOldCheckpoints, sweepLegacyCheckpoints } from "./checkpoints";
 import { getRelevantFiles, formatRelevantFiles } from "./relevance";
@@ -121,7 +122,7 @@ const fenceStateCache = new Map<string, import("./fence").FenceState>();
 function getFenceState(sessionId: string): import("./fence").FenceState {
   let state = fenceStateCache.get(sessionId);
   if (!state) {
-    state = createFenceState();
+    state = createFenceState(sessionId);
     fenceStateCache.set(sessionId, state);
   }
   return state;
@@ -130,6 +131,8 @@ function getFenceState(sessionId: string): import("./fence").FenceState {
 /** Clear fence state when a session is deleted. */
 export function clearFenceState(sessionId: string): void {
   fenceStateCache.delete(sessionId);
+  // The session can't fetch again after deletion — drop its provenance flag.
+  clearSessionProvenance(sessionId);
 }
 
 export function createContextAwareTransport(deps: Deps) {

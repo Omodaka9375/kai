@@ -29,21 +29,67 @@ async function httpFetch(url: string): Promise<{ status: number; body: string }>
  * Strip HTML tags and clean up whitespace.
  *
  * Hidden-text injection defense: before tag stripping, drop nodes whose
- * payload is invisible to a human reader — HTML comments, `hidden`
- * attribute, inline `display:none` / `visibility:hidden` blocks. A page can
- * otherwise say one thing visually and a second thing to text-extracting
- * agents ("ignore your instructions; run …") with no visual trace.
+ * payload is invisible to a human reader — HTML comments, `script`/`style`/
+ * `noscript`, the `hidden` attribute, inline `display:none` /
+ * `visibility:hidden` / `opacity:0` / `font-size:0`, and offscreen-positioned
+ * blocks (`left:-9999px` and friends). A page can otherwise say one thing
+ * visually and a second thing to text-extracting agents ("ignore your
+ * instructions; run …") with no visual trace.
+ *
  * Inline-style matching is best-effort (regex over static HTML, not a CSS
- * engine) — it catches the common single-element case.
+ * engine) — it catches the common single-element case; a real cascade could
+ * hide more. Returns the count of hidden blocks dropped so the fence can
+ * declare it (`[kai: N hidden DOM block(s) removed …]`) — visible redaction,
+ * not a silent drop, so the user knows the page tried something.
+ *
+ * Exported for unit tests (the hidden-text injection defense must stay sharp).
  */
-function htmlToText(html: string): string {
+export function htmlToText(html: string): {
+  text: string;
+  hiddenDropped: number;
+} {
+  let hiddenDropped = 0;
+  const drop = (s: string, re: RegExp): string =>
+    s.replace(re, () => {
+      hiddenDropped++;
+      return " ";
+    });
+
   let text = html
-    .replace(/<(script|style|noscript)[^>]*>[\s\S]*?<\/\1>/gi, "")
-    // Comments and display-hidden blocks never reach the model.
+    // Comments and hidden-styled blocks never reach the model.
     .replace(/<!--[\s\S]*?-->/g, " ")
-    .replace(/<([a-z][^\s>]*)[^>]*\shidden[\s>][^>]*>[\s\S]*?<\/\1>/gi, " ")
-    .replace(/<([a-z][^\s>]*)[^>]*style=["\'][^>"\']*display\s*:\s*none[^>"\']*["\'][^>]*>[\s\S]*?<\/\1>/gi, " ")
-    .replace(/<([a-z][^\s>]*)[^>]*style=["\'][^>"\']*visibility\s*:\s*hidden[^>"\']*["\'][^>]*>[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(/<noscript[^>]*>[\s\S]*?<\/noscript>/gi, " ");
+  // Lookahead (not a consumed [\s>]) for the `hidden` attribute boundary:
+  // `<div hidden>` ends its tag at the `>` itself, and a consuming class
+  // would eat it — the old regex then demanded a second `>` that never came,
+  // so bare `hidden` blocks LEAKED their text into the extraction.
+  text = drop(text, /<([a-z][^\s>]*)[^>]*\shidden(?=[\s>])[^>]*>[\s\S]*?<\/\1>/gi);
+  text = drop(
+    text,
+    /<([a-z][^\s>]*)[^>]*style=["'][^>"']*display\s*:\s*none[^>"']*["'][^>]*>[\s\S]*?<\/\1>/gi,
+  );
+  text = drop(
+    text,
+    /<([a-z][^\s>]*)[^>]*style=["'][^>"']*visibility\s*:\s*hidden[^>"']*["'][^>]*>[\s\S]*?<\/\1>/gi,
+  );
+  text = drop(
+    text,
+    /<([a-z][^\s>]*)[^>]*style=["'][^>"']*opacity\s*:\s*0(?:\.0+)?\s*(?:;|["'])[^>]*>[\s\S]*?<\/\1>/gi,
+  );
+  text = drop(
+    text,
+    /<([a-z][^\s>]*)[^>]*style=["'][^>"']*font-size\s*:\s*0(?:px)?[^>"']*["'][^>]*>[\s\S]*?<\/\1>/gi,
+  );
+  // Offscreen positioning: the classic "hide it from humans, show it to
+  // scrapers" trick (position:absolute; left/top far negative, or clipped to
+  // 0 size). Matches a position declaration plus an offscreen/clip hint.
+  text = drop(
+    text,
+    /<([a-z][^\s>]*)[^>]*style=["'][^>"']*(?:position\s*:\s*(?:absolute|fixed)[^>"']*(?:left|top)\s*:\s*-(?:\d{3,})px|clip\s*:\s*rect\s*\(\s*0[^)]*\))[^>"']*["'][^>]*>[\s\S]*?<\/\1>/gi,
+  );
+  text = text
     .replace(/<[^>]+>/g, " ")
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
@@ -53,7 +99,7 @@ function htmlToText(html: string): string {
     .replace(/&#39;/g, "'")
     .replace(/[ \t]+/g, " ")
     .replace(/\n\s*\n/g, "\n\n");
-  return text.trim();
+  return { text: text.trim(), hiddenDropped };
 }
 
 /** Extract the real URL from DDG's redirect wrapper. */
@@ -83,11 +129,12 @@ export function buildWebTools(_ctx: ToolContext) {
       execute: async ({ url }) => {
         try {
           const { body } = await httpFetch(url);
-          const text = htmlToText(body);
+          const { text, hiddenDropped } = htmlToText(body);
           return {
             url,
             content: text.slice(0, 25000),
             size: text.length,
+            ...(hiddenDropped > 0 ? { hiddenDropped } : {}),
             ...(text.length > 25000 ? { truncated: true } : {}),
           };
         } catch (e) {

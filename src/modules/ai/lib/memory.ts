@@ -135,19 +135,28 @@ export async function loadProjectMemory(
 /**
  * Append an entry to the memory file. Creates the file if it doesn't exist.
  * Each entry is timestamped with the session ID for traceability.
+ *
+ * `injectionExposed` (memory-provenance guard): when true, the entry is
+ * stamped `(injection-exposed session)` in its header. The write path sets
+ * this when the saving session had fetched remote content — so a human
+ * skimming MEMORY.md, and the model reading it in future sessions, can see
+ * the entry was written while untrusted web/MCP content was in flight and
+ * weigh it accordingly. See `provenance.ts`.
  */
 export async function appendToMemory(
   workspaceRoot: string,
   entry: string,
   sessionId?: string,
+  injectionExposed = false,
 ): Promise<void> {
   const dir = await ensureMemoryDir(workspaceRoot);
   const path = `${dir}/MEMORY.md`;
 
   const timestamp = new Date().toISOString();
-  const header = sessionId
-    ? `## ${timestamp} (session: ${sessionId})`
-    : `## ${timestamp}`;
+  const suffix =
+    (sessionId ? ` (session: ${sessionId})` : "") +
+    (injectionExposed ? " (injection-exposed session)" : "");
+  const header = `## ${timestamp}${suffix}`;
 
   // Neutralize injection markers before persisting — this entry will be loaded
   // into the trusted system prompt on every future session, so it must not

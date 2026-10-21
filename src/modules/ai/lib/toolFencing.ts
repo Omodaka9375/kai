@@ -10,12 +10,13 @@
  * Both guards run in a single wrapper so there's only one interception point.
  */
 
-import type { FenceState, FenceTag } from "./fence";
+import type { FenceOptions, FenceState, FenceTag } from "./fence";
 import { fence } from "./fence";
 import { type EffectStatus } from "./effectStatus";
 import { guardToolOutput, formatGuardWarning } from "./outputGuard";
 import { redactToolOutput } from "./redact";
 import { noteWrite } from "./autoVerify";
+import { noteRemoteSurfaceTouched } from "./provenance";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ToolDef = any;
@@ -72,6 +73,17 @@ const DEFAULT_EFFECT: Record<string, EffectStatus> = {
   display_image: "NONE",
   open_preview: "NONE",
 };
+
+/** Remote surfaces — content KAI does not control. Fencing one of these
+ *  tags the owning session in the provenance tracker so subsequent
+ *  save_memory entries are stamped "injection-exposed" (see provenance.ts).
+ *  MCP tools (server__name) are detected by the `__` separator separately. */
+const REMOTE_SURFACE_TOOLS: Set<string> = new Set([
+  "web_browse",
+  "web_fetch",
+  "web_search",
+  "youtube_transcript",
+]);
 
 /** Tools that should NOT be fenced (structural, no inline text output). */
 const NO_FENCE: Set<string> = new Set([
@@ -144,6 +156,11 @@ export function withToolGuard(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (wrapped as any).execute = async (...args: any[]) => {
       const raw = await (execute as (...a: unknown[]) => unknown)(...args);
+      // Provenance: a remote fetch happened — stamp the session so any memory
+      // entry written afterwards carries the injection-exposed marker.
+      if (doFence && (REMOTE_SURFACE_TOOLS.has(name) || name.includes("__"))) {
+        noteRemoteSurfaceTouched(fenceState.sessionId);
+      }
       const effect = resolveEffect(name, raw, baseEffect);
       let result = annotate(raw, effect);
       // Run output guard before fencing — the warnings are added to
@@ -264,9 +281,13 @@ function fenceToolOutput(
     fenceField(r, "bytes", "tool", state.nonces.tool);
   } else if (toolName === "web_browse" || toolName === "web_fetch") {
     // Remote surface: strip invisible/bidi chars + bind provenance.
+    // `hiddenDropped` (from the extractor) is declared in the fence header so
+    // the user sees the page tried to hide text from a naive scraper.
     fenceField(r, "content", "web", state.nonces.web, {
       sanitize: true,
       source: typeof r.url === "string" ? r.url : undefined,
+      droppedHidden:
+        typeof r.hiddenDropped === "number" ? r.hiddenDropped : undefined,
     });
     fenceField(r, "body", "web", state.nonces.web, { sanitize: true });
   } else if (toolName === "web_search") {
@@ -305,7 +326,7 @@ function fenceField(
   key: string,
   tag: FenceTag,
   nonce: string,
-  opts?: { sanitize?: boolean; source?: string },
+  opts?: FenceOptions,
 ): void {
   const v = r[key];
   if (typeof v !== "string" || v.length === 0) return;

@@ -6,6 +6,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { consumeEditedToolInput } from "../lib/toolInputOverrides";
 import { appendToMemory } from "../lib/memory";
+import { sessionTouchedRemoteContent } from "../lib/provenance";
 import { type ToolContext } from "./context";
 
 export function buildMemoryTools(ctx: ToolContext) {
@@ -39,11 +40,28 @@ export function buildMemoryTools(ctx: ToolContext) {
           ctx.getRealWorkspaceRoot?.() ?? ctx.getWorkspaceRoot();
         if (!root) return { error: "no workspace root — cannot save memory" };
         const sessionId = ctx.getSessionId();
+        // Provenance guard: if this session fetched remote (model-uncontrolled)
+        // content, stamp the entry injection-exposed so future sessions — and a
+        // human reading MEMORY.md — can weigh it accordingly. This is the
+        // backstop for the "save to memory: always auto-approve X" vector that
+        // survives the session via the trusted memory surface.
+        const injectionExposed = sessionTouchedRemoteContent(sessionId);
         try {
-          await appendToMemory(root, finalEntry, sessionId ?? undefined);
+          await appendToMemory(
+            root,
+            finalEntry,
+            sessionId ?? undefined,
+            injectionExposed,
+          );
           return {
             ok: true,
             saved_to: "~/.kai/memory/<hash>/MEMORY.md",
+            ...(injectionExposed
+              ? {
+                  provenance:
+                    "stamped (injection-exposed session) — this session fetched remote content before saving",
+                }
+              : {}),
             ...(edited ? { edited: true } : {}),
           };
         } catch (e) {
