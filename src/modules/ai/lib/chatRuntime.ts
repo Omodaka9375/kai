@@ -331,9 +331,21 @@ export function makeChatSync(
       // already left streaming/submitted.
       deps.abortRunController(sessionId);
       void chatRef.current?.stop();
+      // The `error` patch below is wiped the moment AgentRunBridge sees the
+      // chat settle to idle (chat.stop ends the stream cleanly, so status
+      // goes ready→idle, not error). Route the reason through `summaryNotice`
+      // too — it renders as a dismissable banner and SURVIVES the idle reset,
+      // so the user learns WHY the run stopped instead of watching it go
+      // silent right after a tool call (the "agent just stops" report).
       deps.patchAgentMeta({
         status: "error",
         error: info.suggestion ?? "Agent detected in a loop and was stopped.",
+        summaryNotice: {
+          at: Date.now(),
+          text: info.suggestion
+            ? `Loop detected — ${info.suggestion}`
+            : "Loop detected — the agent was stopped because it kept repeating the same action.",
+        },
       });
     },
     onFinishMeta: (info: { hitStepCap: boolean; finishReason: string }) => {

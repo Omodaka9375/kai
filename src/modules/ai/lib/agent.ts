@@ -45,7 +45,11 @@ import {
 export type { StackInfo };
 import { fenceSystemPrompt } from "./fence";
 import { withToolGuard, withToolRedaction } from "./toolFencing";
-import { getGlobalStreamGuard, type LoopDetectionResult } from "./streamGuard";
+import {
+  getGlobalStreamGuard,
+  toolLoopFingerprint,
+  type LoopDetectionResult,
+} from "./streamGuard";
 
 const localProxyFetch = createProxyFetch({ allowPrivateNetwork: true });
 
@@ -817,6 +821,9 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // "spam the same tool" loop. A single tool+args fingerprint repeated 3+ times
   // in a row is a runaway, not progress.
   const TOOL_LOOP_THRESHOLD = 3;
+  // Minimum step text length that may enter the repetition window (see the
+  // gate in onStepFinish — short procedural narration collides trivially).
+  const GUARD_MIN_STEP_TEXT = 300;
   let lastToolFingerprint: string | null = null;
   let toolRepeatCount = 0;
 
@@ -861,9 +868,18 @@ export async function runAgentStream(opts: RunAgentOptions) {
       // A "thinking loop" (model stuck re-deriving the same reasoning with no
       // visible text) is exactly the runaway case the user reported — reasoning
       // can blow past the context window while `step.text` stays empty.
+      // GATE: only substantive text enters the similarity window. Short step
+      // narrations ("Let me check that.") share almost their entire vocabulary,
+      // so word-set Jaccard collide at >=0.85 across unrelated steps and the
+      // guard killed healthy runs — which surfaced as "the agent just stops
+      // after a tool call" (the stop wipes the error patch, see chatRuntime).
       const loopCandidate =
         step.text || (step as { reasoningText?: string }).reasoningText;
-      if (loopCandidate && opts.onLoopDetected) {
+      if (
+        loopCandidate &&
+        loopCandidate.length >= GUARD_MIN_STEP_TEXT &&
+        opts.onLoopDetected
+      ) {
         const loopResult = streamGuard.check(loopCandidate);
         if (loopResult.isLooping) {
           opts.onLoopDetected(loopResult);
@@ -872,14 +888,11 @@ export async function runAgentStream(opts: RunAgentOptions) {
 
       // Detect repeated identical tool calls across steps (the "spamming" case
       // where the model re-issues the same command/file over and over). The
-      // text-based streamGuard can't see structured tool calls, so fingerprint
-      // them explicitly. Any *different* tool/args resets the counter.
-      const toolFingerprint = step.toolCalls?.length
-        ? step.toolCalls
-            .map((tc) => `${tc.toolName}:${JSON.stringify(tc.input ?? {})}`)
-            .sort()
-            .join("|")
-        : null;
+      // fingerprint includes tool OUTPUT digests, not just inputs — same args
+      // with new output (log tailing, CI polling, re-running a test after an
+      // edit) is progress, not a loop, and the old input-only check stopped
+      // exactly those runs. Any *different* fingerprint resets the counter.
+      const toolFingerprint = toolLoopFingerprint(step);
       if (toolFingerprint) {
         if (toolFingerprint === lastToolFingerprint) {
           toolRepeatCount++;
@@ -889,7 +902,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
               detectedPattern: `Repeated tool: ${step.toolCalls?.[0]?.toolName ?? "?"}`,
               confidence: 0.95,
               suggestion:
-                "Agent is repeatedly calling the same tool with identical inputs. The run was stopped to break the loop.",
+                "Agent is repeatedly calling the same tool and getting identical results back. The run was stopped to break the loop.",
             });
           }
         } else {

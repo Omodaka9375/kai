@@ -3,7 +3,72 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { StreamGuard, getGlobalStreamGuard, resetGlobalStreamGuard } from "./streamGuard";
+import {
+  StreamGuard,
+  getGlobalStreamGuard,
+  resetGlobalStreamGuard,
+  toolLoopFingerprint,
+} from "./streamGuard";
+
+describe("toolLoopFingerprint — output-aware repeat detection", () => {
+  const step = (
+    input: unknown,
+    output: unknown,
+  ): Parameters<typeof toolLoopFingerprint>[0] => ({
+    toolCalls: [{ toolName: "bash_logs", input }],
+    toolResults: [{ toolName: "bash_logs", output }],
+  });
+
+  it("returns null with no tool calls (resets the counter)", () => {
+    expect(toolLoopFingerprint({ toolCalls: [] })).toBeNull();
+    expect(toolLoopFingerprint({})).toBeNull();
+  });
+
+  it("SAME args but NEW output is NOT a repeat (progress, not a loop)", () => {
+    // This is the false positive that killed healthy log-tailing runs.
+    const a = toolLoopFingerprint(step({ handle: 1 }, "build step 1 done"))!;
+    const b = toolLoopFingerprint(step({ handle: 1 }, "build step 2 done"))!;
+    const c = toolLoopFingerprint(step({ handle: 1 }, "build step 3 done"))!;
+    expect(a).not.toBe(b);
+    expect(b).not.toBe(c);
+  });
+
+  it("SAME args AND identical output IS a repeat (a real loop)", () => {
+    const a = toolLoopFingerprint(step({ handle: 1 }, "unchanged"))!;
+    const b = toolLoopFingerprint(step({ handle: 1 }, "unchanged"))!;
+    expect(a).toBe(b);
+  });
+
+  it("different args are a different fingerprint", () => {
+    const a = toolLoopFingerprint(step({ handle: 1 }, "x"))!;
+    const b = toolLoopFingerprint(step({ handle: 2 }, "x"))!;
+    expect(a).not.toBe(b);
+  });
+
+  it("is order-insensitive within a step", () => {
+    const s1 = {
+      toolCalls: [
+        { toolName: "a", input: { n: 1 } },
+        { toolName: "b", input: { n: 2 } },
+      ],
+      toolResults: [
+        { toolName: "a", output: "ra" },
+        { toolName: "b", output: "rb" },
+      ],
+    };
+    const s2 = {
+      toolCalls: [
+        { toolName: "b", input: { n: 2 } },
+        { toolName: "a", input: { n: 1 } },
+      ],
+      toolResults: [
+        { toolName: "b", output: "rb" },
+        { toolName: "a", output: "ra" },
+      ],
+    };
+    expect(toolLoopFingerprint(s1)).toBe(toolLoopFingerprint(s2));
+  });
+});
 
 describe("StreamGuard", () => {
   describe("basic functionality", () => {

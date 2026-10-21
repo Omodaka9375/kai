@@ -224,3 +224,51 @@ export function getGlobalStreamGuard(): StreamGuard {
 export function resetGlobalStreamGuard(): void {
   globalStreamGuard = new StreamGuard();
 }
+
+// ── Tool-loop fingerprint (input + OUTPUT aware) ─────────────────────
+
+export type ToolLoopStep = {
+  toolCalls?: Array<{ toolName: string; input?: unknown }> | undefined;
+  toolResults?: Array<{ toolName: string; output?: unknown }> | undefined;
+};
+
+/** Cheap stable digest (FNV-1a) — the output fingerprint only needs to
+ *  distinguish "identical result again" from "something changed". */
+function fnv1a(s: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(36);
+}
+
+/**
+ * Fingerprint a step's tool calls for repeat detection. CRITICAL: the
+ * fingerprint includes a digest of every tool RESULT, not just inputs.
+ * Same arguments producing NEW output is progress, not a loop — a model
+ * tailing a build (`bash_logs`), polling CI, or re-running the same failing
+ * test after edits all reuse identical inputs legitimately. The old
+ * input-only fingerprint killed exactly those runs, which surfaced to the
+ * user as "the agent just stops after a tool call". A true stuck loop
+ * re-issues the same call AND gets byte-identical output back — that still
+ * counts. Returns null when the step has no tool calls (resets the counter).
+ */
+export function toolLoopFingerprint(step: ToolLoopStep): string | null {
+  const calls = step.toolCalls;
+  if (!calls || calls.length === 0) return null;
+  const inputs = calls
+    .map((tc) => `${tc.toolName}:${JSON.stringify(tc.input ?? {})}`)
+    .sort()
+    .join("|");
+  const outputs = (step.toolResults ?? [])
+    .map((tr) => {
+      const o = tr.output;
+      const s =
+        typeof o === "string" ? o : o === undefined ? "" : JSON.stringify(o);
+      return `${tr.toolName}:${fnv1a(s)}`;
+    })
+    .sort()
+    .join("|");
+  return `${inputs}#${outputs}`;
+}

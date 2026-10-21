@@ -276,7 +276,7 @@ export function AiChatView({
           ? "text-destructive"
           : "text-muted-foreground";
   const onContinue = useCallback(() => {
-    patchAgentMeta({ hitStepCap: false, finishReason: "" });
+    patchAgentMeta({ hitStepCap: false, finishReason: "", summaryNotice: null });
     void sendMessage(
       "Continue from where you stopped. Don't recap — just keep going.",
     );

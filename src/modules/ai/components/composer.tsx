@@ -436,6 +436,10 @@ export function AiComposerProvider({ children }: ProviderProps) {
       hitStepCap: false,
       finishReason: "",
       compactionNotice: null,
+      // A new run clears any end-of-run notice from the previous one (the
+      // stall-recovery breadcrumb, the loop-stopped reason) so a stale banner
+      // never sits above a fresh reply.
+      summaryNotice: null,
     });
     if (!store.mini.open) store.openMini();
     setValue("");
