@@ -1,4 +1,6 @@
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
+import { cn } from "@/lib/utils";
 import { newMcpServerId, type McpServerConfig } from "@/modules/ai/lib/mcp";
 import {
   fetchRegistryServers,
@@ -19,13 +21,17 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 export function ExtensionsView() {
+  /** Raw input value — committed to `query` on Enter (search-on-Enter). */
   const [search, setSearch] = useState("");
+  /** The query the visible results belong to. Changes ONLY on Enter/Escape. */
+  const [query, setQuery] = useState("");
   const [entries, setEntries] = useState<McpRegistryEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
-  const debounceRef = useRef(0);
+  /** Monotonic fetch id — a stale (out-of-order) response is dropped. */
+  const requestIdRef = useRef(0);
   const installedServers = useMcpStore((s) => s.servers);
   const addServer = useMcpStore((s) => s.addServer);
   const hydrate = useMcpStore((s) => s.hydrate);
@@ -35,15 +41,21 @@ export function ExtensionsView() {
   }, [hydrate]);
 
   const doFetch = useCallback(
-    async (query: string, nextCursor?: string) => {
+    async (q: string, nextCursor?: string) => {
+      // Pagination appends; a fresh query replaces. Only the newest request
+      // may commit either way — a slow older response landing late must
+      // never overwrite a newer one.
+      const id = (requestIdRef.current += 1);
+      const isPaged = nextCursor !== undefined;
       setLoading(true);
       setError(null);
       try {
         const resp = await fetchRegistryServers({
-          search: query || undefined,
+          search: q || undefined,
           cursor: nextCursor,
         });
-        if (nextCursor) {
+        if (id !== requestIdRef.current) return;
+        if (isPaged) {
           setEntries((prev) => [...prev, ...resp.servers]);
         } else {
           setEntries(resp.servers);
@@ -53,28 +65,35 @@ export function ExtensionsView() {
           resp.metadata.nextCursor !== null && resp.servers.length > 0,
         );
       } catch (e) {
+        if (id !== requestIdRef.current) return;
         setError(e instanceof Error ? e.message : String(e));
       } finally {
-        setLoading(false);
+        if (id === requestIdRef.current) setLoading(false);
       }
     },
     [],
   );
 
+  // One effect drives ALL fetches: `query` starts empty (initial full
+  // list) and changes ONLY when the user commits with Enter (or resets with
+  // Escape). No as-you-type debounce — typing never fires a request.
   useEffect(() => {
-    void doFetch("");
-  }, [doFetch]);
+    void doFetch(query);
+  }, [query, doFetch]);
 
-  useEffect(() => {
-    window.clearTimeout(debounceRef.current);
-    debounceRef.current = window.setTimeout(() => {
-      void doFetch(search);
-    }, 300);
-    return () => window.clearTimeout(debounceRef.current);
-  }, [search, doFetch]);
+  const commitSearch = () => {
+    const next = search.trim();
+    if (next === query) return;
+    setQuery(next);
+  };
+
+  const resetSearch = () => {
+    setSearch("");
+    if (query !== "") setQuery("");
+  };
 
   const loadMore = () => {
-    if (cursor && !loading) void doFetch(search, cursor);
+    if (cursor && !loading) void doFetch(query, cursor);
   };
 
   const isInstalled = (s: McpRegistryEntry["server"]) => {
@@ -116,38 +135,72 @@ export function ExtensionsView() {
         </span>
       </div>
       <div className="flex h-8 shrink-0 items-center gap-1.5 border-b border-border/60 px-2">
-        <HugeiconsIcon
-          icon={Search01Icon}
-          size={13}
-          strokeWidth={1.75}
-          className="shrink-0 text-muted-foreground/70"
-        />
+        {loading ? (
+          <Spinner className="size-3 shrink-0 text-muted-foreground" />
+        ) : (
+          <HugeiconsIcon
+            icon={Search01Icon}
+            size={13}
+            strokeWidth={1.75}
+            className="shrink-0 text-muted-foreground/70"
+          />
+        )}
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search MCP servers…"
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              commitSearch();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              resetSearch();
+            }
+          }}
+          placeholder="Search MCP servers (Enter)"
           spellCheck={false}
           className="w-full bg-transparent text-[12px] outline-none placeholder:text-muted-foreground/50"
         />
+        {/* Dirty state: typed but not committed — hint that Enter applies. */}
+        {search.trim() !== query && (
+          <kbd className="shrink-0 rounded border border-border/60 bg-muted/40 px-1 font-mono text-[9px] leading-4 text-muted-foreground">
+            ↵
+          </kbd>
+        )}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div
+        className={cn(
+          "min-h-0 flex-1 overflow-y-auto transition-opacity",
+          loading && "pointer-events-none opacity-50",
+        )}
+      >
         {error && (
           <div className="px-3 py-4 text-center text-[11px] text-destructive">
             {error}
           </div>
         )}
 
-        {entries.length === 0 && !loading && !error && (
+        {entries.length === 0 && !error && (
           <div className="flex flex-col items-center justify-center gap-2 px-4 py-10 text-center">
-            <HugeiconsIcon
-              icon={PuzzleIcon}
-              size={20}
-              strokeWidth={1.5}
-              className="text-muted-foreground/60"
-            />
+            {loading ? (
+              <Spinner className="size-4 text-muted-foreground/70" />
+            ) : (
+              <HugeiconsIcon
+                icon={PuzzleIcon}
+                size={20}
+                strokeWidth={1.5}
+                className="text-muted-foreground/60"
+              />
+            )}
             <span className="text-[11px] text-muted-foreground">
-              {search ? "No servers found." : "Loading registry…"}
+              {loading
+                ? query
+                  ? "Searching…"
+                  : "Loading registry…"
+                : query
+                  ? `No servers found for “${query}”.`
+                  : "No servers available."}
             </span>
           </div>
         )}
@@ -225,12 +278,6 @@ export function ExtensionsView() {
             );
           })}
         </ul>
-
-        {loading && (
-          <div className="px-3 py-3 text-center text-[11px] text-muted-foreground">
-            Loading…
-          </div>
-        )}
 
         {hasMore && !loading && (
           <button
