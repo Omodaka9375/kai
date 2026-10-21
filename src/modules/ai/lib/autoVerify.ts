@@ -98,16 +98,33 @@ export async function resolveVerifyCommand(root: string): Promise<string | null>
   return null;
 }
 
-/** Run the verify command in the project root. Returns null on pass. */
-async function runVerify(root: string, command: string): Promise<string | null> {
+/** Run the verify command in the project root.
+ *  null → pass. { fail } → the wake message. "timeout" → INCONCLUSIVE,
+ *  NEVER a failure: a timeout says nothing about correctness (the tail
+ *  may be all-green test output that simply didn't finish inside the
+ *  cap — seen in the wild: a slow vitest suite with green tails).
+ *  Reporting it as "Fix these failures" pressured the model into
+ *  chasing phantom failures, and keeping the dirty mark re-woke the
+ *  agent on EVERY subsequent run end — an endless wake loop that
+ *  relaunched the agent and re-loaded the whole conversation each time. */
+async function runVerify(
+  root: string,
+  command: string,
+): Promise<"timeout" | { fail: string } | null> {
   const { native } = await import("./native");
   try {
     const result = await native.runCommand(command, root, VERIFY_TIMEOUT_S);
+    if (result?.timed_out) {
+      console.info(
+        `[kai:verify] "${command}" timed out after ${VERIFY_TIMEOUT_S}s — inconclusive, not waking the agent`,
+      );
+      return "timeout";
+    }
+    const exit = Number(result?.exit_code ?? 0);
+    if (exit === 0) return null;
+
     const stdout = String(result?.stdout ?? "");
     const stderr = String(result?.stderr ?? "");
-    const exit = Number(result?.exit_code ?? 0);
-    if (exit === 0 && !result?.timed_out) return null;
-
     const combined = `${stdout}${stderr ? (stdout ? "\n" : "") + stderr : ""}`;
     const lines = combined.split("\n").filter((l) => l.trim());
     // Prefer the actual error lines; fall back to the output tail.
@@ -116,11 +133,9 @@ async function runVerify(root: string, command: string): Promise<string | null> 
     const clipped = tail.length > MAX_OUTPUT_CHARS
       ? `${tail.slice(0, MAX_OUTPUT_CHARS)} …[truncated]`
       : tail;
-    return result?.timed_out
-      ? `"${command}" TIMED OUT after ${VERIFY_TIMEOUT_S}s — last output:\n${clipped}`
-      : `"${command}" FAILED (exit ${exit}):\n${clipped}`;
+    return { fail: `"${command}" FAILED (exit ${exit}):\n${clipped}` };
   } catch (e) {
-    return `could not run "${command}" (${String(e).slice(0, 160)})`;
+    return { fail: `could not run "${command}" (${String(e).slice(0, 160)})` };
   }
 }
 
@@ -146,11 +161,19 @@ export async function verifyIfDirtyAtRunEnd(
       dirtyAt.delete(workspaceRoot); // nothing to verify with — don't re-check
       return;
     }
-    const failure = await runVerify(workspaceRoot, command);
-    if (failure === null) {
+    const outcome = await runVerify(workspaceRoot, command);
+    if (outcome === null) {
       dirtyAt.delete(workspaceRoot); // verified — run is done, clean
       return;
     }
+    if (outcome === "timeout") {
+      // Inconclusive: do NOT wake the agent with a phantom "fix these
+      // failures" turn, and clear the dirty mark so we don't re-verify
+      // (and re-timeout + re-wake) on every subsequent run end.
+      dirtyAt.delete(workspaceRoot);
+      return;
+    }
+    const failure = outcome.fail;
     // Failure: keep the dirty mark (the wake run's writes re-mark it anyway)
     // and wake the agent with the exact failure output.
     await injectMessage(
