@@ -257,7 +257,7 @@ export function AiInputBar() {
             <span className="truncate">
               {isCustom
                 ? `${runtimeModelName || selectedModelId} doesn't look like a vision model — it will receive extracted text (OCR). Set Settings → Models → Vision to On, or rename the model to include "vl"/"vision".`
-                : `${selectedModelId} can&apos;t see images — it will receive extracted
+                : `${selectedModelId} can't see images — it will receive extracted
               text (OCR) instead. Switch to a vision model to send the picture.`}
             </span>
           </div>
