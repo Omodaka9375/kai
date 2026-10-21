@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { sniffImageMime } from "./google-image";
 import type { VideoResult } from "./types";
 
 const POLL_INTERVAL_MS = 5000;
@@ -19,17 +20,24 @@ function clampDuration(d: number | undefined): number {
   return Math.min(8, Math.max(4, Math.round(d as number)));
 }
 
-/** Generate a video via Google Veo 3.1 (Gemini API). */
+/** Generate a video via Google Veo 3.1 (Gemini API).
+ *  `referenceImage` (base64) = IMAGE-TO-VIDEO: Veo animates that exact
+ *  image as the opening frame — `instances[0].image` — instead of
+ *  synthesizing a start frame from text. The prompt then describes the
+ *  MOTION ("pan left, rain begins") rather than the whole scene. */
 export async function generateGoogleVideo(
   apiKey: string,
-  opts: { prompt: string; duration?: number; aspectRatio?: string; signal?: AbortSignal },
+  opts: { prompt: string; duration?: number; aspectRatio?: string; referenceImage?: string; signal?: AbortSignal },
 ): Promise<VideoResult> {
   if (opts.signal?.aborted) throw abortError();
 
   const submitResp = await httpPost(
     `${BASE}/models/${MODEL}:predictLongRunning?key=${encodeURIComponent(apiKey)}`,
     JSON.stringify({
-      instances: [{ prompt: opts.prompt }],
+      // Image present → image-to-video; absent → pure text-to-video.
+      instances: [opts.referenceImage
+        ? { prompt: opts.prompt, image: { bytesBase64Encoded: opts.referenceImage, mimeType: sniffImageMime(opts.referenceImage) } }
+        : { prompt: opts.prompt }],
       parameters: {
         aspectRatio: opts.aspectRatio ?? "16:9",
         durationSeconds: clampDuration(opts.duration),

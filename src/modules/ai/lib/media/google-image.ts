@@ -5,6 +5,25 @@ import type { ImageGenerateOpts, ImageResult } from "./types";
 // id was long dead; this is the current image-gen workhorse.
 const MODEL = "gemini-3.1-flash-image";
 
+/** Sniff image/jpeg|png|webp|gif from magic bytes (base64-decoded head).
+ *  Gemini needs the true mimeType in inlineData; text/unknown gets the
+ *  request rejected. PNG/JPEG/WebP/GIF are the formats it accepts. */
+export function sniffImageMime(b64: string): string {
+  let head: Uint8Array;
+  try {
+    const bin = atob(b64.slice(0, 32));
+    head = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) head[i] = bin.charCodeAt(i);
+  } catch {
+    return "image/png";
+  }
+  if (head[0] === 0xff && head[1] === 0xd8) return "image/jpeg";
+  if (head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4e) return "image/png";
+  if (head[0] === 0x47 && head[1] === 0x49 && head[2] === 0x46) return "image/gif";
+  if (head[8] === 0x57 && head[9] === 0x45 && head[10] === 0x42) return "image/webp";
+  return "image/png";
+}
+
 /** Generate an image via Google Gemini (Nano Banana 2). */
 export async function generateGoogleImage(
   apiKey: string,
@@ -14,10 +33,22 @@ export async function generateGoogleImage(
 
   if (opts.signal?.aborted) throw new Error("Generation cancelled.");
 
+  // EDITING: Nano Banana 2 (Gemini image) is natively multimodal INPUT —
+  // a reference image rides as an inlineData part ahead of the text
+  // instruction ("put a red hat on this", multi-image composites, style
+  // transfer). No separate /edits endpoint; same generateContent call.
+  const reqParts: Record<string, unknown>[] = [];
+  if (opts.referenceImage) {
+    reqParts.push({
+      inlineData: { mimeType: sniffImageMime(opts.referenceImage), data: opts.referenceImage },
+    });
+  }
+  reqParts.push({ text: opts.prompt });
+
   const body = JSON.stringify({
     contents: [
       {
-        parts: [{ text: opts.prompt }],
+        parts: reqParts,
       },
     ],
     // Gemini image generation: ONLY responseModalities. responseMimeType
