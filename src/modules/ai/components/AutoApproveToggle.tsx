@@ -3,7 +3,7 @@ import { useChatStore, type AutoApproveMode } from "../store/chatStore";
 
 const LABELS: Record<AutoApproveMode, string> = {
   off: "Ask",
-  all: "Auto",
+  all: "Allow",
 };
 
 const DOTS: Record<AutoApproveMode, string> = {
@@ -13,10 +13,10 @@ const DOTS: Record<AutoApproveMode, string> = {
 
 const TOOLTIPS: Record<AutoApproveMode, string> = {
   off: "Ask before every tool call — except pinned \"Always allow\" commands, which run without asking",
-  all: "Auto-approve every tool call (elevation and signed commits still ask)",
+  all: "Allow every tool call without asking (elevation and signed commits still ask)",
 };
 
-/** Compact cycling toggle for auto-approve mode. Two states: Ask / Auto. */
+/** Compact cycling toggle for auto-approve mode. Two states: Ask / Allow. */
 export function AutoApproveToggle({ className }: { className?: string }) {
   const mode = useChatStore((s) => s.autoApprove);
   const cycle = useChatStore((s) => s.cycleAutoApprove);

@@ -647,10 +647,9 @@ export const SourceControlPanel = memo(function SourceControlPanel({
             {isSyncing ? (
               <span
                 title="Syncing with remote — showing the last known status"
-                className="inline-flex shrink-0 items-center gap-1 rounded bg-muted/55 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground"
+                className="inline-flex shrink-0 items-center"
               >
                 <Spinner className="size-2.5" />
-                syncing
               </span>
             ) : null}
           </div>
