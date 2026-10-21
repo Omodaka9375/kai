@@ -139,6 +139,11 @@ const HEAVY_CONTENT_TOOLS = new Set([
   "edit",
   "multi_edit",
   "todo_write",
+  // run_subagent prompts carry the whole task context (files, excerpts) —
+  // rendering the live stream re-lays out a huge text node per token and
+  // freezes the window until the run finishes. Skip the body while
+  // streaming; the final prompt renders once, capped.
+  "run_subagent",
 ]);
 
 /** Pretty display name for tool-call card headers. MCP tools arrive as
@@ -378,7 +383,7 @@ function renderInputPreview(
           </div>
         ) : null}
         {prompt ? (
-          <div className="whitespace-pre-wrap text-[12px] leading-relaxed text-foreground/90">
+          <div className="max-h-40 overflow-y-auto whitespace-pre-wrap text-[12px] leading-relaxed text-foreground/90">
             {prompt}
           </div>
         ) : null}
@@ -497,7 +502,7 @@ function renderToolOutput(toolName: string, output: unknown): ReactNode | null {
           {steps != null ? <span>· {steps} steps</span> : null}
           {ms != null ? <span>· {(ms / 1000).toFixed(1)}s</span> : null}
         </div>
-        <div className="whitespace-pre-wrap text-[12px] leading-relaxed text-foreground/90">
+        <div className="max-h-40 overflow-y-auto whitespace-pre-wrap text-[12px] leading-relaxed text-foreground/90">
           {summary}
         </div>
       </div>
