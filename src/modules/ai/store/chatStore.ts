@@ -203,6 +203,11 @@ export function resolveErrorDisplay(raw: unknown): string {
 
 export type MiniState = {
   open: boolean;
+  /** Maximized/extended — the window spans the workspace. Collapsed back
+   *  to the docked mini size when the user opens a file (it would otherwise
+   *  cover the editor). Preserved across open/close so re-opening restores
+   *  the user's last layout. */
+  expanded: boolean;
 };
 
 export type PendingSelection = {
@@ -260,6 +265,11 @@ type StoreState = {
   openMini: () => void;
   closeMini: () => void;
   toggleMini: () => void;
+  setMiniExpanded: (expanded: boolean) => void;
+  /** Collapse an expanded mini window back to its docked size (no-op when
+   *  already mini). Called on user file-opens so the editor isn't hidden
+   *  behind the expanded AI window. */
+  collapseMini: () => void;
 
   panelOpen: boolean;
   openPanel: () => void;
@@ -592,10 +602,14 @@ export const useChatStore = create<StoreState>((set, get) => ({
     agentBus.emit("model:change", { modelId: id });
   },
 
-  mini: { open: false },
-  openMini: () => set({ mini: { open: true } }),
-  closeMini: () => set({ mini: { open: false } }),
-  toggleMini: () => set((s) => ({ mini: { open: !s.mini.open } })),
+  mini: { open: false, expanded: false },
+  openMini: () => set((s) => ({ mini: { open: true, expanded: s.mini.expanded } })),
+  closeMini: () => set((s) => ({ mini: { open: false, expanded: s.mini.expanded } })),
+  toggleMini: () => set((s) => ({ mini: { open: !s.mini.open, expanded: s.mini.expanded } })),
+  setMiniExpanded: (expanded) =>
+    set((s) => ({ mini: { open: s.mini.open, expanded } })),
+  collapseMini: () =>
+    set((s) => ({ mini: { open: s.mini.open, expanded: false } })),
 
   panelOpen: false,
   openPanel: () => set({ panelOpen: true }),

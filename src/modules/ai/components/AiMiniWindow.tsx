@@ -34,7 +34,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { motion } from "motion/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SandboxBadge } from "./SandboxBadge";
 import { ShadowStrip, ShadowSessionMenuItem } from "./ShadowStrip";
 import { estimateCost, getModel, getModelContextLimit } from "../config";
@@ -75,7 +75,15 @@ const SUGGESTIONS = [
 
 export function AiMiniWindow() {
   const sessionId = useChatStore((s) => s.activeSessionId);
-  const [expanded, setExpanded] = useState(false);
+  // Expanded state lives in the store (not local useState) so App can
+  // collapse the window when the user opens a file — an expanded AI window
+  // covers the editor, and the file would open behind it invisibly.
+  const expanded = useChatStore((s) => s.mini.expanded);
+  const setMiniExpanded = useChatStore((s) => s.setMiniExpanded);
+  const toggleExpand = useCallback(
+    () => setMiniExpanded(!expanded),
+    [setMiniExpanded, expanded],
+  );
   const c = useComposer();
 
   useEffect(() => {
@@ -184,10 +192,10 @@ export function AiMiniWindow() {
       {sessionId ? (
         <Body
           sessionId={sessionId}
-          onExpand={() => setExpanded((v) => !v)}
+          onExpand={toggleExpand}
         />
       ) : (
-        <EmptyShell onExpand={() => setExpanded((v) => !v)} />
+        <EmptyShell onExpand={toggleExpand} />
       )}
       <PlanDiffReview />
     </motion.div>

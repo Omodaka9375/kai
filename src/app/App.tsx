@@ -1073,6 +1073,10 @@ export default function App() {
 
   const handleOpenFile = useCallback(
     (path: string, pin?: boolean, lineNum?: number) => {
+      // An expanded AI window covers the whole workspace — opening a file
+      // behind it would be invisible. Collapse to the docked mini window
+      // so the editor takes focus visibly.
+      useChatStore.getState().collapseMini();
       // Explorer defaults to preview (pin=false); explicit actions like
       // context-menu "Open" pass pin=true for a persistent tab.
       const tabId = openFileTab(path, pin ?? false);
