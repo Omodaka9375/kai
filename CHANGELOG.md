@@ -3,6 +3,14 @@
 All notable changes to the KAI terminal emulator project are documented in this file. KAI adheres to Semantic Versioning.
 
 ---
+## [1.8.5]
+
+- Security: hardened the agent against prompt injection from web pages and tool output (invisible-character stripping, hidden-DOM removal with visible redaction badges, forged fence/tool-call marker neutralization, memory-provenance tagging).
+- AI: fixed the agent silently stopping after a tool call (loop detectors no longer false-positive on normal log-tailing/retries, and now say why they stop).
+- AI: screenshots now always require your explicit approval - auto-approve never captures your screen - and "look at my terminal" no longer triggers one.
+- Settings: context-size pills for local models; search honors the LAN-only network policy.
+
+---
 ## [1.8.4]
 
 - Media: Nano Banana 2 image editing — `generate_image` accepts `imagePath` (Google only): the image rides as an inlineData part and the prompt describes the edits (restyle, add/remove objects, composites).
