@@ -131,3 +131,27 @@ describe("BUILTIN_SNIPPETS", () => {
     }
   });
 });
+
+describe("BUILTIN_SNIPPETS — #trends (Google Trends)", () => {
+  const trends = BUILTIN_SNIPPETS.find((s) => s.handle === "trends");
+
+  it("is registered as a builtin with unique id", () => {
+    expect(trends).toBeDefined();
+    expect(trends?.id).toBe("builtin-trends");
+    expect(trends?.builtin).toBe(true);
+    expect(trends?.name).toBe("Google Trends");
+  });
+
+  it("carries the pytrends working pattern", () => {
+    expect(trends?.content).toContain("pytrends");
+    expect(trends?.content).toContain("TrendReq");
+    expect(trends?.content).toContain("interest_over_time");
+    expect(trends?.content).toContain("build_payload");
+  });
+
+  it("carries the honesty caveats (index, rate limits, unofficial)", () => {
+    expect(trends?.content).toContain("0-100 INDEX");
+    expect(trends?.content).toContain("429");
+    expect(trends?.content).toContain("Unofficial");
+  });
+});
