@@ -558,10 +558,11 @@ pub async fn telegram_set_chat_action(
         Some(a @ ("typing" | "upload_document" | "upload_video")) => a,
         _ => "typing",
     };
+    // The action naturally expires after ~5s on Telegram's side; we keep
+    // re-sending it on an interval from the frontend for long turns.
     let body = serde_json::json!({
         "chat_id": chat_id,
         "action": action,
-        // Suppress the typing indicator for the ~5s it naturally lives.
     });
     match post_json::<serde_json::Value>(&token, "sendChatAction", &body).await {
         Ok(_) => Ok(()),

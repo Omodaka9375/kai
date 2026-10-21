@@ -61,11 +61,26 @@ export function htmlToText(html: string): {
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
     .replace(/<noscript[^>]*>[\s\S]*?<\/noscript>/gi, " ");
+  // ── Canonicalize the style surface BEFORE the drop regexes so legal HTML
+  // variants don't evade them: 'style  =  "..."' (whitespace around = is
+  // legal), unquoted values (style=display:none), and 'display: NONE' casing.
+  // One pass over each tag's style attribute: squeeze the =, quote an
+  // unquoted value, lowercase the declaration text. Best-effort (regex, not a
+  // CSS engine) — but it closes the trivial one-character evasions that each
+  // drop regex below would otherwise miss.
+  text = text.replace(
+    /(<[a-z][^>]*?\sstyle)\s*=\s*("[^"]*"|'[^']*'|[^\s"'>]+)(?=[\s>])/gi,
+    (_m: string, pre: string, css: string) => {
+      const quoted = /^["']/.test(css) ? css : `"${css}"`;
+      return `${pre}=${quoted.toLowerCase()}`;
+    },
+  );
   // Lookahead (not a consumed [\s>]) for the `hidden` attribute boundary:
   // `<div hidden>` ends its tag at the `>` itself, and a consuming class
   // would eat it — the old regex then demanded a second `>` that never came,
   // so bare `hidden` blocks LEAKED their text into the extraction.
-  text = drop(text, /<([a-z][^\s>]*)[^>]*\shidden(?=[\s>])[^>]*>[\s\S]*?<\/\1>/gi);
+  // `hidden=""` / `hidden=anything` hides the same way in HTML.
+  text = drop(text, /<([a-z][^\s>]*)[^>]*\shidden(?=[\s=>])[^>]*>[\s\S]*?<\/\1>/gi);
   text = drop(
     text,
     /<([a-z][^\s>]*)[^>]*style=["'][^>"']*display\s*:\s*none[^>"']*["'][^>]*>[\s\S]*?<\/\1>/gi,
@@ -74,13 +89,18 @@ export function htmlToText(html: string): {
     text,
     /<([a-z][^\s>]*)[^>]*style=["'][^>"']*visibility\s*:\s*hidden[^>"']*["'][^>]*>[\s\S]*?<\/\1>/gi,
   );
+  // `opacity:0` in any legal spelling: `0.0`, `.0`, trailing `!important`,
+  // or followed by another declaration — the old `\s*(?:;|["'])` demanded
+  // the value end immediately and missed `opacity:0 !important`. The
+  // lookahead `(?=[\s;"'])` is the boundary: `opacity:0.95` is VISIBLE and
+  // must NOT match (a bare `0` followed by a fraction). Same for font-size.
   text = drop(
     text,
-    /<([a-z][^\s>]*)[^>]*style=["'][^>"']*opacity\s*:\s*0(?:\.0+)?\s*(?:;|["'])[^>]*>[\s\S]*?<\/\1>/gi,
+    /<([a-z][^\s>]*)[^>]*style=["'][^>"']*opacity\s*:\s*(?:0(?:\.0+)?|\.0+)(?=[\s;"'])[^>]*>[\s\S]*?<\/\1>/gi,
   );
   text = drop(
     text,
-    /<([a-z][^\s>]*)[^>]*style=["'][^>"']*font-size\s*:\s*0(?:px)?[^>"']*["'][^>]*>[\s\S]*?<\/\1>/gi,
+    /<([a-z][^\s>]*)[^>]*style=["'][^>"']*font-size\s*:\s*0(?:\.0+)?(?:px)?(?=[\s;"'])[^>"']*["'][^>]*>[\s\S]*?<\/\1>/gi,
   );
   // Offscreen positioning: the classic "hide it from humans, show it to
   // scrapers" trick (position:absolute; left/top far negative, or clipped to
@@ -164,6 +184,13 @@ export function buildWebTools(_ctx: ToolContext) {
               },
               body: Array.from(new TextEncoder().encode(`q=${encodeURIComponent(query)}`)),
               allowPrivateNetwork: false,
+              // The query text is user content the user chose to search for —
+              // but the DESTINATION is still the public internet. Under the
+              // LAN-only network policy, web_search must not exfiltrate the
+              // query off-box any more than web_browse may fetch a page.
+              // web_browse and youtube pass requireLanOnly too; this was the
+              // one model-callable fetch that forgot it.
+              requireLanOnly: requireLanOnly(),
             },
           );
           const body = new TextDecoder().decode(new Uint8Array(resp.body));

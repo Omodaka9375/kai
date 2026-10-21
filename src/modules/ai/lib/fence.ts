@@ -71,9 +71,16 @@ export function createFenceState(sessionId: string | null = null): FenceState {
   return { nonces, sessionId };
 }
 
-/** Generate a short, collision-resistant nonce for fence markers. */
+/** Generate a short, collision-resistant nonce for fence markers.
+ *
+ *  IMPORTANT: the nonce alphabet is ALPHANUMERIC ONLY. The neutralizer
+ *  (FENCE_LIKE_RE) and the UI unfencers must recognize exactly what this
+ *  can emit — `generateId()` also produces `-`/`_`, which those regexes have
+ *  historically NOT matched (a forged `[start tool_ab-cd12]` was neither
+ *  neutralized nor counted). Stripping to [a-zA-Z0-9] keeps all three
+ *  surfaces in agreement. */
 function generateFenceNonce(): FenceNonce {
-  return generateId().slice(0, 8);
+  return generateId().replace(/[^a-zA-Z0-9]/g, "").slice(0, 8);
 }
 
 /** System prompt fragment declaring the active fence nonces. */
@@ -118,9 +125,14 @@ export function fenceSystemPrompt(state: FenceState): string {
   return lines.join("\n");
 }
 
-/** Regex matching any fence-marker-like pattern. */
+/** Regex matching any fence-marker-like pattern.
+ *
+ *  Nonce class is [A-Za-z0-9_-]: current nonces are alphanumeric-only
+ *  (see generateFenceNonce), but legacy/persisted markers may carry `-`/`_`
+ *  from the old generateId alphabet — those must still be neutralized and
+ *  COUNTED (an uncounted forged marker silently defeats visible redaction). */
 const FENCE_LIKE_RE =
-  /\[(start|end)\s+(tool|web|watch|mcp)_[a-zA-Z0-9]+\]/gi;
+  /\[(start|end)\s+(tool|web|watch|mcp)_[A-Za-z0-9_-]+\]/gi;
 
 /**
  * Neutralize fence-marker-like text inside untrusted content.
@@ -203,6 +215,9 @@ export function countInjectionMarkers(content: string): number {
  *     marker-like sequences past naive checks.
  *   - `\p{Cc}` control characters EXCEPT \n \r \t: ESC (ANSI escape
  *     smuggling), NUL, and friends.
+ *   - plus the invisible chars OUTSIDE those classes: variation selectors
+ *     U+FE00-FE0F (\p{Mn}, a known keyword-splitting smuggling primitive)
+ *     and the Hangul filler U+3164 (\p{Lo}, renders as blank).
  *
  * Deliberately NOT handled here: homoglyph confusables (needs a full
  * confusables table — out of scope; the prompt tells the model to treat
@@ -216,7 +231,7 @@ export function sanitizeUntrustedChars(
   content: string,
 ): { text: string; stripped: number } {
   let stripped = 0;
-  const text = content.replace(/[\p{Cf}\p{Cc}]/gu, (ch) => {
+  const text = content.replace(/[\p{Cf}\p{Cc}\uFE00-\uFE0F\u3164]/gu, (ch) => {
     if (ch === "\n" || ch === "\r" || ch === "\t") return ch;
     stripped++;
     return "";
@@ -360,47 +375,5 @@ export function unfenceDeep<T>(value: T): T {
     }
     return out as unknown as T;
   }
-  return value;
-}
-
-// ── Per-tool fencing helpers ──────────────────────────────────────────────
-
-/**
- * Wrap a tool result for a single tool call.
- * Handles the common output shapes: { stdout, stderr }, { content }, { data }, etc.
- */
-export function fenceToolResult(
-  state: FenceState,
-  toolName: string,
-  result: unknown,
-): unknown {
-  if (result == null) return result;
-  if (typeof result !== "object") return result;
-
-  const r = result as Record<string, unknown>;
-  const nonce = state.nonces.tool;
-
-  // Don't double-fence — check if already fenced.
-  if (typeof r.content === "string" && r.content.startsWith("[start")) {
-    return result;
-  }
-
-  // Primary text outputs to fence.
-  const fenceTargets = ["stdout", "stderr", "content", "text", "body"] as const;
-  const fenced = { ...r };
-
-  for (const key of fenceTargets) {
-    if (typeof fenced[key] === "string" && (fenced[key] as string).length > 0) {
-      fenced[key] = fence("tool", nonce, fenced[key] as string);
-    }
-  }
-
-  // Special: web fetch returns { content, ... }
-  if (toolName === "web_browse" || toolName === "web_fetch") {
-    if (typeof r.content === "string") {
-      fenced.content = fence("web", state.nonces.web, r.content);
-    }
-  }
-
-  return fenced;
+    return value;
 }

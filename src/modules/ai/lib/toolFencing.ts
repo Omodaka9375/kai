@@ -290,6 +290,15 @@ function fenceToolOutput(
         typeof r.hiddenDropped === "number" ? r.hiddenDropped : undefined,
     });
     fenceField(r, "body", "web", state.nonces.web, { sanitize: true });
+    // The catch path returns `{ error: String(e), url }` — an error string can
+    // embed attacker-influenced content (an echoed URL, an HTTP error body
+    // surfaced by the Rust proxy). Fence + sanitize it like any other remote
+    // payload, or the forger-marker/DSML defense silently skips the error
+    // path — exactly the shape a failed fetch of a hostile page produces.
+    fenceField(r, "error", "web", state.nonces.web, {
+      sanitize: true,
+      source: typeof r.url === "string" ? r.url : undefined,
+    });
   } else if (toolName === "web_search") {
     // Titles/snippets are attacker-influenced text — fence each result
     // (urls stay plain: metadata for the agent's browsing decision).
@@ -306,12 +315,17 @@ function fenceToolOutput(
       source: "youtube transcript",
     });
   } else if (toolName.includes("__")) {
-    const key = findTextKey(r);
-    if (key) {
-      fenceField(r, key, "mcp", state.nonces.mcp, {
-        sanitize: true,
-        source: toolName.slice(0, toolName.indexOf("__")),
-      });
+    // MCP server output: fence EVERY string field over the fence-entry
+    // threshold, not just the first text-ish key — a result like
+    // `{ summary, details }` would otherwise land `details` raw in the
+    // model's context while `summary` got the trust boundary.
+    for (const [k, v] of Object.entries(r)) {
+      if (typeof v === "string" && v.length > 0) {
+        fenceField(r, k, "mcp", state.nonces.mcp, {
+          sanitize: true,
+          source: toolName.slice(0, toolName.indexOf("__")),
+        });
+      }
     }
   } else {
     fenceField(r, "text", "tool", state.nonces.tool);
@@ -380,12 +394,3 @@ function fenceSearchResults(
   });
 }
 
-function findTextKey(obj: Record<string, unknown>): string | null {
-  for (const k of ["text", "content", "body", "result", "output", "data"]) {
-    if (typeof obj[k] === "string") return k;
-  }
-  for (const [k, v] of Object.entries(obj)) {
-    if (typeof v === "string" && v.length > 20) return k;
-  }
-  return null;
-}

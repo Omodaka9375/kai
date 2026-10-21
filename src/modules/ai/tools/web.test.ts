@@ -59,6 +59,21 @@ describe("htmlToText — hidden-text injection defense", () => {
     expect(text).not.toMatch(/css smuggling|js-injected|noscript hidden/);
   });
 
+  it("matches legal-HTML evasions: spaces around =, unquoted values, hidden=\"\", opacity:0 !important, casing", () => {
+    const html = `
+      <p>real content stays</p>
+      <div style = "display: NONE">evasion one</div>
+      <div style=display:none>evasion two</div>
+      <span hidden="">evasion three</span>
+      <span style="color:red; opacity:0 !important">evasion four</span>
+      <span STYLE="FONT-SIZE:0PX">evasion five</span>
+    `;
+    const { text, hiddenDropped } = htmlToText(html);
+    expect(text).toContain("real content stays");
+    expect(text).not.toMatch(/evasion (one|two|three|four|five)/);
+    expect(hiddenDropped).toBeGreaterThanOrEqual(5);
+  });
+
   it("leaves ordinary visible markup to be flattened as normal", () => {
     const html = `<h1>Title</h1><p>Some <b>bold</b> prose &amp; an entity.</p>`;
     const { text, hiddenDropped } = htmlToText(html);
