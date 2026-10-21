@@ -61,6 +61,16 @@ type ToolPartLike = ToolUIPart & {
 type AnyPart = UIMessagePart<Record<string, never>, Record<string, never>>;
 
 /**
+ * Tools whose approval card is a PRIVACY boundary — auto-approve never
+ * applies, even under autoApprove: "all". The user must click every time.
+ * `look_at_screen` reads the whole display; it joins elevated bash_run and
+ * signed commits (handled inline below) in the never-auto-approve set.
+ */
+const PRIVACY_APPROVAL_TOOLS: ReadonlySet<string> = new Set([
+  "look_at_screen",
+]);
+
+/**
  * Detect a `git commit` invocation inside a bash_run command, so we can force
  * an approval when commit signing is set to "ask for approval". Matches bare
  * `git commit`, `git commit -m ...`, and chained variants (`git add -A; git
@@ -356,6 +366,12 @@ function Bridge({
         const isElevated =
           toolName === "bash_run" && input?.elevated === true;
         if (isElevated) continue;
+        // Screen capture reads EVERYTHING visible on the monitor (other apps,
+        // documents, passwords). Its approval card IS the privacy boundary, so
+        // auto-approve — even "all" — must never silently take a screenshot.
+        // This is the enforcement half of the fix; the prompt rules only make
+        // the model less eager, they can't guarantee consent.
+        if (PRIVACY_APPROVAL_TOOLS.has(toolName)) continue;
         // Commit signing "ask for approval" — a `git commit` from the agent
         // must be reviewed before signing, even under autoApprove: "all".
         const isSignedCommit =

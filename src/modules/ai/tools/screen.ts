@@ -40,13 +40,21 @@ export function buildScreenTools(ctx: ToolContext) {
   return {
     look_at_screen: tool({
       description:
-        "Capture a screenshot of the user's screen/monitor and see what's on it. " +
-        "Use when the user asks you to look at their screen, check what's visible on " +
-        "a display, describe their desktop, or read UI text on screen. Displays are " +
-        'ordered left-to-right: display "0"/"left" is the leftmost monitor, "1"/' +
-        '"right" the rightmost on a 2-monitor setup. With one monitor, omit display. ' +
-        "Returns the monitor list when unsure which display to capture — call once " +
-        "without arguments to discover, then again with the selector.",
+        "Capture a screenshot of the user's whole display. PRIVACY-SENSITIVE: it " +
+        "sees EVERYTHING on the monitor (open docs, passwords, other apps), and the " +
+        "user must approve every capture. Use it ONLY when the user EXPLICITLY asks " +
+        "you to look at their screen / desktop / a monitor, or to read something " +
+        "that is only visible in a GUI window. " +
+        "Do NOT use it to read terminal output — for 'this error' / 'the last " +
+        "command' / recent terminal text use get_terminal_output (which reads the " +
+        "scrollback directly, no capture, no approval). " +
+        "Do NOT call it speculatively to 'see what's going on' while reasoning; " +
+        "reaching for a screenshot unprompted is a privacy violation. " +
+        "Displays are ordered left-to-right: display \"0\"/\"left\" is the leftmost " +
+        "monitor, \"1\"/\"right\" the rightmost on a 2-monitor setup. With one " +
+        "monitor, omit display. Returns the monitor list when unsure which display " +
+        "to capture — call once without arguments to discover, then again with the " +
+        "selector.",
       inputSchema: z.object({
         display: z
           .string()
@@ -59,8 +67,10 @@ export function buildScreenTools(ctx: ToolContext) {
           .string()
           .optional()
           .describe(
-            "What to look for in the screenshot (e.g. 'the error dialog', 'the " +
-              "terminal output'). Guides your own analysis of the image.",
+            "What to look for in the screenshot (e.g. 'the save dialog', 'the " +
+              "error popup in the IDE window'). Guides your own analysis of the " +
+              "image. Never use this to read terminal text — call " +
+              "get_terminal_output for that.",
           ),
       }),
       needsApproval: true,
