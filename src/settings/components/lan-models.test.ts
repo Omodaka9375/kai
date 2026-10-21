@@ -63,9 +63,15 @@ describe("Settings surfaces the LAN story", () => {
   it("compat block is labeled Local/LAN with LAN-shaped placeholders", () => {
     expect(modelsSection).toContain("Local / LAN — OpenAI-compatible endpoint");
     expect(modelsSection).toContain("http://192.168.1.50:11434/v1");
-    // http:// must be explicitly called out as fine — the old copy said
-    // "HTTPS endpoint", which read as a requirement.
-    expect(modelsSection).toMatch(/[Pp]lain http:\/\/ is fine on the LAN/);
+    // The explainer paragraph was removed (label + placeholders carry the
+    // story now); if copy is ever reintroduced it must still call out
+    // plain http:// as fine — "HTTPS endpoint" reads as a requirement.
+    const para = modelsSection.match(
+      /Local \/ LAN — OpenAI-compatible endpoint[\s\S]{0,600}?<\/div>/,
+    )?.[0];
+    if (para?.includes("http")) {
+      expect(para).toMatch(/plain http/i);
+    }
   });
 
   it("ships one-click presets for the common local servers", () => {

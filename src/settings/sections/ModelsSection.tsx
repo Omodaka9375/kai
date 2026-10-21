@@ -329,6 +329,7 @@ function ModelIdWithFetch({
 function LocalModelsBlock() {
   const baseURL = usePreferencesStore((s) => s.lmstudioBaseURL);
   const modelId = usePreferencesStore((s) => s.lmstudioModelId);
+  const ctxSize = usePreferencesStore((s) => s.lmstudioContextSize);
   const [urlDraft, setUrlDraft] = useState(baseURL);
   const [modelDraft, setModelDraft] = useState(modelId);
   const [testStatus, setTestStatus] = useState<
@@ -364,11 +365,6 @@ function LocalModelsBlock() {
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-0.5">
         <Label>Local / LAN — LM Studio</Label>
-        <span className="text-[10.5px] leading-relaxed text-muted-foreground">
-          Run any GGUF model via LM Studio's HTTP server — on this machine or
-          another box on your LAN. Enable the server in LM Studio → Developer
-          tab; the base URL below accepts LAN hosts too.
-        </span>
       </div>
 
       <div className="flex flex-col gap-2.5 rounded-lg border border-border/60 bg-card/60 px-3 py-2.5">
@@ -416,15 +412,9 @@ function LocalModelsBlock() {
         </FieldRow>
 
         <FieldRow label="Context (tokens)">
-          <Input
-            type="number"
-            defaultValue={usePreferencesStore.getState().lmstudioContextSize || ""}
-            onBlur={(e) => {
-              const v = parseInt(e.target.value, 10);
-              void setLmstudioContextSize(Number.isFinite(v) && v > 0 ? v : 0);
-            }}
-            placeholder="128000"
-            className="h-8 w-32 font-mono text-[11.5px]"
+          <ContextSizeRow
+            value={ctxSize}
+            onCommit={(v) => void setLmstudioContextSize(v)}
           />
         </FieldRow>
 
@@ -470,6 +460,7 @@ function OpenAICompatibleBlock({
   const baseURL = usePreferencesStore((s) => s.openaiCompatibleBaseURL);
   const modelId = usePreferencesStore((s) => s.openaiCompatibleModelId);
   const thinkingMode = usePreferencesStore((s) => s.openaiCompatibleThinkingMode);
+  const ctxSize = usePreferencesStore((s) => s.openaiCompatibleContextSize);
   const [urlDraft, setUrlDraft] = useState(baseURL);
   const [modelDraft, setModelDraft] = useState(modelId);
   const [keyDraft, setKeyDraft] = useState("");
@@ -506,14 +497,6 @@ function OpenAICompatibleBlock({
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-0.5">
         <Label>Local / LAN — OpenAI-compatible endpoint</Label>
-        <span className="text-[10.5px] leading-relaxed text-muted-foreground">
-          Any OpenAI-compatible server — on your LAN or remote. Perfect for
-          Ollama (http://192.168.1.50:11434/v1 — include the /v1), vLLM,
-          llama.cpp server, LM Studio on another machine, or a hosted
-          endpoint (Z.AI, Fireworks, …). Plain http:// is fine on the LAN;
-          self-signed certs are accepted for private addresses. API key
-          optional — leave empty for unauthenticated servers.
-        </span>
       </div>
 
       <div className="flex flex-col gap-2.5 rounded-lg border border-border/60 bg-card/60 px-3 py-2.5">
@@ -627,15 +610,9 @@ function OpenAICompatibleBlock({
         </FieldRow>
 
         <FieldRow label="Context (tokens)">
-          <Input
-            type="number"
-            defaultValue={usePreferencesStore.getState().openaiCompatibleContextSize || ""}
-            onBlur={(e) => {
-              const v = parseInt(e.target.value, 10);
-              void setOpenaiCompatibleContextSize(Number.isFinite(v) && v > 0 ? v : 0);
-            }}
-            placeholder="128000"
-            className="h-8 w-32 font-mono text-[11.5px]"
+          <ContextSizeRow
+            value={ctxSize}
+            onCommit={(v) => void setOpenaiCompatibleContextSize(v)}
           />
         </FieldRow>
 
@@ -682,6 +659,72 @@ function FieldRow({
         {label}
       </span>
       <div className="flex flex-1 items-center">{children}</div>
+    </div>
+  );
+}
+
+/** Context-size quick pills (16K / 32K / … / 1M) beside a numeric input.
+ *  Pills commit instantly; the input commits on blur/Enter. Values are exact
+ *  token counts — the pill labels are just short forms of the same numbers
+ *  the provider actually receives. Empty pill match (odd size like 200000)
+ *  highlights nothing; the input remains the source of truth. */
+const CONTEXT_PRESETS = [
+  { label: "16K", value: 16_384 },
+  { label: "32K", value: 32_768 },
+  { label: "64K", value: 65_536 },
+  { label: "128K", value: 131_072 },
+  { label: "200K", value: 200_000 },
+  { label: "256K", value: 262_144 },
+  { label: "1M", value: 1_048_576 },
+] as const;
+
+function ContextSizeRow({
+  value,
+  onCommit,
+}: {
+  value: number;
+  onCommit: (v: number) => void;
+}) {
+  const [draft, setDraft] = useState(value ? String(value) : "");
+  useEffect(() => setDraft(value ? String(value) : ""), [value]);
+  const commit = (raw: string) => {
+    const v = parseInt(raw.trim(), 10);
+    onCommit(Number.isFinite(v) && v > 0 ? v : 0);
+  };
+  return (
+    <div className="flex flex-1 items-center gap-2">
+      <Input
+        type="number"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={(e) => commit(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            commit(e.currentTarget.value);
+            e.currentTarget.blur();
+          }
+        }}
+        placeholder="auto"
+        className="h-8 w-24 font-mono text-[11.5px]"
+      />
+      <div className="flex flex-wrap items-center gap-1">
+        {CONTEXT_PRESETS.map((p) => (
+          <button
+            key={p.label}
+            type="button"
+            title={`${p.value.toLocaleString()} tokens`}
+            onClick={() => onCommit(p.value)}
+            className={cn(
+              "rounded-full border px-1.5 py-0.5 text-[10px] transition-colors",
+              value === p.value
+                ? "border-primary/50 bg-primary/10 text-foreground"
+                : "border-border/60 text-muted-foreground hover:border-border hover:text-foreground",
+            )}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
