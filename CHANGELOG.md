@@ -3,6 +3,19 @@
 All notable changes to the KAI terminal emulator project are documented in this file. KAI adheres to Semantic Versioning.
 
 ---
+## [1.8.4]
+
+- Media: Nano Banana 2 image editing — `generate_image` accepts `imagePath` (Google only): the image rides as an inlineData part and the prompt describes the edits (restyle, add/remove objects, composites).
+- Media: Veo image-to-video — `generate_video` accepts `imagePath`: Veo animates the image as the opening frame; the prompt describes the motion.
+- Assistant: Telegram photo edit/animate — attach a photo and ask ("make this watercolor" / "animate this, slow zoom"); the just-sent photo is the reference image, delivered straight back to the chat.
+- AI: fixed the whole-window freeze when clicking a running subagent card — its streamed prompt re-rendered per token with no height cap.
+- AI: verify timeouts are inconclusive — a slow-but-green suite no longer wakes the agent in an endless "fix these failures" loop that reloaded the conversation on every run end.
+- AI: fixed `can&apos;t` rendering literally in the non-vision paste notice.
+- Settings: local/LAN OpenAI-compatible endpoints are first-class — "Local / LAN" labeling, one-click presets (Ollama / llama.cpp / vLLM / LM Studio), LAN-shaped placeholders.
+- Installer: Explorer context menu reads "Open with KAI".
+
+---
+
 ## [1.8.3]
 
 - AI: opening a file collapses an expanded AI window so the editor is never hidden behind it.
