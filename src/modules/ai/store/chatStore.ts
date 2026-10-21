@@ -350,6 +350,25 @@ const CHATS_LRU_CAP = 8;
 const chats = new Map<string, Chat<UIMessage>>();
 
 /**
+ * Hydration single-flight serialization.
+ *
+ * hydrateSessions is async and swaps the sessions store scope (a module-level
+ * mutable in sessions.ts). Two overlapping runs — e.g. the App effect re-fires
+ * on a fast A→B project switch while A's hydration is still awaiting
+ * loadAll()/loadMessages() — interleave like this: B's setSessionsScope runs,
+ * then A's stale snapshot commits LAST (its await resolved after B's), and
+ * A's `set({ sessions, activeSessionId, lastHydratedWorkspace: A })` wins —
+ * the AI window keeps showing project A's conversation after switching to
+ * B. The guard has three parts, all keyed to a monotonic seq:
+ *   1. serialize starts (each run awaits the previous chain tail),
+ *   2. commit gate — a stale run's `set()` is dropped, latest run wins,
+ *   3. re-read the scope owner after awaits — if another run re-scoped the
+ *      sessions store mid-flight, this run must not touch store state.
+ */
+let hydrateSeq = 0;
+let hydrateChain: Promise<void> = Promise.resolve();
+
+/**
  * App-owned abort controllers for in-flight agent runs, keyed by session.
  *
  * `Chat.stop()` (the AI SDK) only aborts its internal request controller and
@@ -668,15 +687,31 @@ export const useChatStore = create<StoreState>((set, get) => ({
   activeSessionId: null,
 
   hydrateSessions: async (workspaceRoot?: string | null) => {
+    // Serialize starts: a run may only begin once the previous hydration has
+    // fully settled. This alone removes most of the interleave window.
+    const prior = hydrateChain;
+    let resolveChain!: () => void;
+    hydrateChain = new Promise((r) => (resolveChain = r));
+    await prior;
+
+    const seq = ++hydrateSeq;
+    // Latest-wins gate: after every await, the run must still be the newest.
+    const isStale = () => seq !== hydrateSeq;
+
     const root = workspaceRoot ?? get().live?.getWorkspaceRoot?.() ?? null;
     const norm = normalizeWorkspacePath;
     const normalizedRoot = norm(root);
 
+    try {
     // Scope the sessions store to this project's file before loading, so
     // concurrent instances on different projects read/write disjoint files.
     // Migration runs once per process, idempotent via a marker.
     await ensureMigratedOnce();
+    // Serialized start: by the time we're here, every earlier hydration has
+    // fully settled, so re-scoping can't interleave with another run's
+    // reads/writes. (No owner re-check needed — starts never overlap.)
     await setSessionsScope(root);
+    if (isStale()) return;
 
     // Skip only if we've already hydrated for this exact workspace.
     if (
@@ -689,6 +724,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
     let loadedActiveId: string | null = null;
     try {
       const loaded = await loadAll();
+      if (isStale()) return;
       sessions = loaded.sessions;
       loadedActiveId = loaded.activeId;
     } catch (err) {
@@ -809,6 +845,12 @@ export const useChatStore = create<StoreState>((set, get) => ({
         null;
     }
 
+    // Commit gate: only the newest hydration may commit store state. A
+    // stale run resolving after a newer one must not overwrite it — this
+    // is the exact interleave that kept the AI window on the previous
+    // project's conversation after a fast project switch.
+    if (isStale()) return;
+
     void saveActiveId(nextActiveId).catch((err) =>
       console.error("[hydrateSessions] Failed to persist activeId:", err),
     );
@@ -823,6 +865,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
       if (!chats.has(nextActiveId) && !seedMessages.has(nextActiveId)) {
         try {
           const m = await loadMessages(nextActiveId);
+          if (isStale()) return;
           if (
             m &&
             m.length > 0 &&
@@ -840,12 +883,19 @@ export const useChatStore = create<StoreState>((set, get) => ({
       }
     }
 
+    if (isStale()) return;
+
     set({
       sessions: nextSessions,
       activeSessionId: nextActiveId,
       sessionsHydrated: true,
       lastHydratedWorkspace: root,
     });
+    } finally {
+      // Release the chain slot this run held — the next queued hydration
+      // can start. Runs that early-returned above ALSO release here.
+      resolveChain();
+    }
   },
 
   newSession: () => {

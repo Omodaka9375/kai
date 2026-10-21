@@ -221,6 +221,41 @@ describe("chatStore exports", () => {
       await store.getState().hydrateSessions("D:/proj-a");
       expect(store.getState().activeSessionId).toBe(sessionA);
     });
+
+    it("a fast A→B switch while A's hydration is still in flight shows B (latest wins)", async () => {
+      // REGRESSION ("AI window shows the stale project's chat after a
+      // switch"): hydrateSessions is async and swaps the module-level
+      // sessions store scope. Without serialization + a latest-wins commit
+      // gate, a slow A hydration resolving AFTER B's would commit LAST and
+      // leave project A's conversation active under project B — random,
+      // timing-dependent, exactly "sometimes when I switch projects".
+      // The fix: starts serialize (each run awaits the prior chain tail)
+      // and every stale run's commit is dropped.
+      const store = mod.useChatStore;
+
+      // Fire both hydrations WITHOUT awaiting the first — the interleaved
+      // shape the App effect produces on a fast project switch.
+      const pA = store.getState().hydrateSessions("D:/race-a");
+      const pB = store.getState().hydrateSessions("D:/race-b");
+      await Promise.all([pA, pB]);
+
+      // Whichever is latest (B) must own the store; A's late commit must
+      // have been dropped by the latest-wins gate.
+      const active = store
+        .getState()
+        .sessions.find((s) => s.id === store.getState().activeSessionId);
+      expect(active?.workspaceRoot?.toLowerCase()).toBe("d:/race-b");
+      expect(store.getState().lastHydratedWorkspace?.toLowerCase()).toBe(
+        "d:/race-b",
+      );
+
+      // And the switch-back still resolves the right project.
+      const pA2 = store.getState().hydrateSessions("D:/race-a");
+      await pA2;
+      expect(
+        store.getState().lastHydratedWorkspace?.toLowerCase(),
+      ).toBe("d:/race-a");
+    });
   });
 });
 

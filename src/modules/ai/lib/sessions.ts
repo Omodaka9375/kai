@@ -64,11 +64,22 @@ export function partitionSessionsByWorkspace(
 }
 
 /**
+ * The root the sessions store is currently scoped to (as passed to
+ * setSessionsScope — unnormalized), or null when scoped to the legacy
+ * global file. Lets callers detect a mid-flight re-scope without poking
+ * module internals.
+ */
+export function sessionsScopeOwner(): string | null {
+  return currentScopePath === null ? null : scopeOwnerRoot;
+}
+
+/**
  * Point all subsequent session reads/writes at the store for `root`.
  * No-op if already scoped to that path. Called before hydration on boot and on
  * workspace switch. Flushes any pending autoSave before swapping so a debounced
  * write for the previous project isn't dropped.
  */
+let scopeOwnerRoot: string | null = null;
 export async function setSessionsScope(
   root: string | null | undefined,
 ): Promise<void> {
@@ -80,6 +91,7 @@ export async function setSessionsScope(
     // store may never have been written; ignore.
   }
   currentScopePath = path;
+  scopeOwnerRoot = root ?? null;
   store = new LazyStore(path, { defaults: {}, autoSave: 200 });
 }
 
