@@ -53,3 +53,37 @@ describe("useSourceControl context settle (panel blink)", () => {
     );
   });
 });
+
+describe("useSourceControl identity-preserving refresh (focus blink)", () => {
+  // REGRESSION: every window focus fires a debounced refresh. The refreshed
+  // snapshot is content-identical in the common case, but the old code
+  // replaced repo/status objects unconditionally — identity churn cascaded
+  // summary → panel reconcile effect → entry/row memos → the virtualized
+  // list and repainted the whole panel on every focus ("focus blink").
+  const src = read("./useSourceControl.ts");
+
+  it("has content-equality helpers for status/repo/changed-file", () => {
+    expect(src).toContain("function statusEqual(");
+    expect(src).toContain("function repoEqual(");
+    expect(src).toContain("function changedFileEquals(");
+  });
+
+  it("a settled, in-place refresh does not touch state identity", () => {
+    // The "refreshing in place" guard: same repo + data on screen + idle
+    // ⇒ return the SAME state object (no isLoading/isSyncing flip).
+    expect(src).toContain("reusableRoot &&");
+    expect(src).toMatch(/return current;\n\s*}\n\s*return \{ \.\.\.current, isLoading: true/);
+  });
+
+  it("landing identical snapshot data keeps previous object identities", () => {
+    expect(src).toMatch(/repo: sameRepo \? current\.repo : nextRepo/);
+    expect(src).toMatch(/status: sameStatus \? current\.status : status/);
+  });
+
+  it("a fetch that changes nothing keeps the previous status identity", () => {
+    // The post-fetch setState keeps current.status on equal content.
+    expect(src).toMatch(
+      /statusEqual\(current\.status, fresh\)\n?\s*\? current\.status\n?\s*: fresh/,
+    );
+  });
+});

@@ -1,5 +1,6 @@
 import {
   native,
+  type GitChangedFile,
   type GitRepoInfo,
   type GitStatusSnapshot,
 } from "@/modules/ai/lib/native";
@@ -13,6 +14,60 @@ const AUTO_FETCH_LRU_LIMIT = 16;
  * one or two frames); every cross-repo change blanks the panel
  * synchronously — the full-panel blink. */
 const CONTEXT_SETTLE_MS = 200;
+
+// ── Content equality (identity-preserving refresh) ──────────────────────────
+//
+// Every window focus triggers a refresh (400ms-debounced). The refreshed
+// snapshot is CONTENT-IDENTICAL in the common case, but it used to replace
+// repo/status objects unconditionally — new identities churned the summary
+// object, the panel reconcile effect, staged/unstaged entry memos and the
+// whole virtualized row list, repainting the panel on every focus for zero
+// visual change (the "focus blink"). These helpers let setState KEEP the
+// previous object identity when the content hasn't changed.
+
+function changedFileEquals(a: GitChangedFile, b: GitChangedFile): boolean {
+  return (
+    a.path === b.path &&
+    a.originalPath === b.originalPath &&
+    a.indexStatus === b.indexStatus &&
+    a.worktreeStatus === b.worktreeStatus &&
+    a.staged === b.staged &&
+    a.unstaged === b.unstaged &&
+    a.untracked === b.untracked &&
+    a.statusLabel === b.statusLabel
+  );
+}
+
+function statusEqual(a: GitStatusSnapshot, b: GitStatusSnapshot): boolean {
+  if (
+    a.repoRoot !== b.repoRoot ||
+    a.branch !== b.branch ||
+    a.upstream !== b.upstream ||
+    a.ahead !== b.ahead ||
+    a.behind !== b.behind ||
+    a.isDetached !== b.isDetached ||
+    a.defaultBranch !== b.defaultBranch ||
+    a.truncated !== b.truncated
+  ) {
+    return false;
+  }
+  const fa = a.changedFiles;
+  const fb = b.changedFiles;
+  if (fa.length !== fb.length) return false;
+  for (let i = 0; i < fa.length; i++) {
+    if (!changedFileEquals(fa[i], fb[i])) return false;
+  }
+  return true;
+}
+
+function repoEqual(a: GitRepoInfo, b: GitRepoInfo): boolean {
+  return (
+    a.repoRoot === b.repoRoot &&
+    a.branch === b.branch &&
+    a.upstream === b.upstream &&
+    a.isDetached === b.isDetached
+  );
+}
 
 export type SourceControlRefreshMode = "auto" | "always" | "never";
 export type SourceControlRemoteAction = "fetch" | "pull" | "push";
@@ -289,6 +344,21 @@ export function useSourceControl(
         // the panel and header never render the old branch/status under the
         // new context while the new snapshot loads.
         if (reusableRoot || !(current.repo || current.status || current.hasRepo)) {
+          // Refreshing in place (same repo, data already on screen): the
+          // panel keeps rendering the current snapshot, so isLoading (which
+          // gates the "Loading repository" center) must not flip, and
+          // isSyncing means a REMOTE fetch is in flight — decided after the
+          // snapshot lands, not here. Preserving the state identity avoids
+          // re-rendering the panel when nothing has changed (focus blink).
+          if (
+            reusableRoot &&
+            current.repo &&
+            current.status &&
+            !current.isLoading &&
+            !current.localError
+          ) {
+            return current;
+          }
           return { ...current, isLoading: true, isSyncing: true, localError: null };
         }
         return {
@@ -383,9 +453,8 @@ export function useSourceControl(
         // and refreshes ahead/behind when it lands (isSyncing stays true so
         // the header shows a syncing indicator meanwhile).
         if (requestId !== requestIdRef.current) return;
-        setState((current) => ({
-          ...current,
-          repo: {
+        setState((current) => {
+          const nextRepo: GitRepoInfo = {
             ...repo,
             // `status` is authoritative for identity fields — `repo` is loaded
             // once and cached per root (reusableRoot path), so its `branch`/
@@ -398,13 +467,39 @@ export function useSourceControl(
             branch: status?.branch ?? repo.branch,
             upstream: status?.upstream ?? repo.upstream,
             isDetached: status?.isDetached ?? repo.isDetached,
-          },
-          status,
-          hasRepo: true,
-          isLoading: false,
-          isSyncing: shouldAutoFetch,
-          localError: null,
-        }));
+          };
+          // Identity-preserving fast path: the refresh that lands
+          // content-identical data (the common case — every window focus)
+          // must not churn repo/status identities. Downstream consumers
+          // (summary → panel reconcile effect → entry/row memos → the
+          // virtualized list) key off object identity, so churn here
+          // repainted the whole panel with zero visual change.
+          const sameRepo = current.repo != null && repoEqual(current.repo, nextRepo);
+          const sameStatus =
+            current.status != null && status != null && statusEqual(current.status, status);
+          if (
+            sameRepo &&
+            sameStatus &&
+            current.hasRepo &&
+            !current.isLoading &&
+            !current.isSyncing &&
+            !shouldAutoFetch &&
+            current.localError == null
+          ) {
+            return current;
+          }
+          return {
+            ...current,
+            // Keep the old object identity on identical content so
+            // downstream memos don't recompute.
+            repo: sameRepo ? current.repo : nextRepo,
+            status: sameStatus ? current.status : status,
+            hasRepo: true,
+            isLoading: false,
+            isSyncing: shouldAutoFetch,
+            localError: null,
+          };
+        });
 
         if (shouldAutoFetch) {
           try {
@@ -415,7 +510,12 @@ export function useSourceControl(
             if (requestId !== requestIdRef.current) return;
             setState((current) => ({
               ...current,
-              status: fresh,
+              // Keep the previous status identity when the fetch changed
+              // nothing — only isSyncing clears, so no row re-render.
+              status:
+                current.status != null && statusEqual(current.status, fresh)
+                  ? current.status
+                  : fresh,
               lastRemoteError: null,
               isSyncing: false,
             }));
