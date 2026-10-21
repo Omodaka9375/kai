@@ -23,6 +23,14 @@ const googleSrc = readFileSync(new URL("./google-image.ts", import.meta.url), "u
 const toolSrc = readFileSync(new URL("../../tools/image-gen.ts", import.meta.url), "utf8");
 const videoSrc = readFileSync(new URL("./google-video.ts", import.meta.url), "utf8");
 const videoToolSrc = readFileSync(new URL("../../tools/video-gen.ts", import.meta.url), "utf8");
+const tgMediaSrc = readFileSync(
+  new URL("../../../assistant/media.ts", import.meta.url),
+  "utf8",
+);
+const tgIndexSrc = readFileSync(
+  new URL("../../../assistant/index.ts", import.meta.url),
+  "utf8",
+);
 
 describe("Veo 3.1 image-to-video wiring", () => {
   it("sends the reference image as instances[0].image", () => {
@@ -41,6 +49,26 @@ describe("Veo 3.1 image-to-video wiring", () => {
     );
     expect(videoToolSrc).toContain("referenceImage,");
     expect(videoToolSrc).toContain("native.readFileBytes(abs)");
+  });
+});
+
+describe("Telegram assistant edit/animate wiring", () => {
+  it("assistant media tools expose the attached-photo edit/animate path", () => {
+    // Schema flags (model-visible surface).
+    expect(tgMediaSrc).toContain("edit_attached_image");
+    expect(tgMediaSrc).toContain("animate_attached_image");
+    // The turn's photo rides as referenceImage (google-gated, explicit refusal).
+    expect(tgMediaSrc).toMatch(/referenceImage = edit_attached_image \? turnImage\?.base64/);
+    expect(tgMediaSrc).toMatch(/referenceImage = animate_attached_image \? turnImage\?.base64/);
+    // Both thread through to the underlying gens.
+    expect(tgMediaSrc).toContain("gen(p.key, { prompt, size, referenceImage })");
+    expect(tgMediaSrc).toContain("referenceImage,");
+  });
+
+  it("runAssistantTurn threads the turn's attached image into both tools", () => {
+    expect(tgIndexSrc).toContain("buildAssistantMediaTools(turnImage)");
+    expect(tgIndexSrc).toMatch(/turnImage = opts\?.imageBase64/);
+    expect((tgIndexSrc.match(/buildAssistantMediaTools\(turnImage\)/g) ?? []).length).toBe(2);
   });
 });
 

@@ -356,8 +356,14 @@ export async function runAssistantTurn(
   delete tools["generate_image"];
   delete tools["generate_video"];
   const mediaTools = await import("./media");
-  tools["generate_image"] = mediaTools.buildAssistantMediaTools()["generate_image"];
-  tools["generate_video"] = mediaTools.buildAssistantMediaTools()["generate_video"];
+  // The photo attached to THIS turn is the editing/animation source headless:
+  // no meaningful paths exist in the assistant scratch dir, so the just-sent
+  // photo rides as the reference image when the model asks to edit/animate it.
+  const turnImage = opts?.imageBase64
+    ? { base64: opts.imageBase64, mimeType: opts.imageMime }
+    : undefined;
+  tools["generate_image"] = mediaTools.buildAssistantMediaTools(turnImage)["generate_image"];
+  tools["generate_video"] = mediaTools.buildAssistantMediaTools(turnImage)["generate_video"];
   // Redact tool RESULTS (paths, env vars, secrets) before they reach the
   // provider — same guarantee as the project agent path. Then fence them:
   // the assistant reads web pages and arbitrary user files, so its tool
