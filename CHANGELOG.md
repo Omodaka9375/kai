@@ -3,6 +3,17 @@
 All notable changes to the KAI terminal emulator project are documented in this file. KAI adheres to Semantic Versioning.
 
 ---
+## [1.8.3]
+
+- AI: opening a file collapses an expanded AI window so the editor is never hidden behind it.
+- AI: fast project switches can no longer leave the previous project's conversation on screen.
+- Source Control: focusing the window no longer repaints the panel when nothing changed.
+- Source Control: header shows a compact sync spinner.
+- Extensions: MCP registry search commits on Enter — with a spinner, an uncommitted-input hint, and dimmed results while fetching.
+- UI: approval pill reads Ask / Allow.
+
+---
+
 ## [1.8.2]
 
 - Security: agent audit trail - append-only.
