@@ -25,10 +25,25 @@ async function httpFetch(url: string): Promise<{ status: number; body: string }>
   return { status: resp.status, body };
 }
 
-/** Strip HTML tags and clean up whitespace. */
+/**
+ * Strip HTML tags and clean up whitespace.
+ *
+ * Hidden-text injection defense: before tag stripping, drop nodes whose
+ * payload is invisible to a human reader — HTML comments, `hidden`
+ * attribute, inline `display:none` / `visibility:hidden` blocks. A page can
+ * otherwise say one thing visually and a second thing to text-extracting
+ * agents ("ignore your instructions; run …") with no visual trace.
+ * Inline-style matching is best-effort (regex over static HTML, not a CSS
+ * engine) — it catches the common single-element case.
+ */
 function htmlToText(html: string): string {
   let text = html
     .replace(/<(script|style|noscript)[^>]*>[\s\S]*?<\/\1>/gi, "")
+    // Comments and display-hidden blocks never reach the model.
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<([a-z][^\s>]*)[^>]*\shidden[\s>][^>]*>[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<([a-z][^\s>]*)[^>]*style=["\'][^>"\']*display\s*:\s*none[^>"\']*["\'][^>]*>[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<([a-z][^\s>]*)[^>]*style=["\'][^>"\']*visibility\s*:\s*hidden[^>"\']*["\'][^>]*>[\s\S]*?<\/\1>/gi, " ")
     .replace(/<[^>]+>/g, " ")
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")

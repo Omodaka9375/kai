@@ -550,6 +550,10 @@ pub async fn telegram_set_chat_action(
     action: Option<String>,
 ) -> Result<(), String> {
     // Only a fixed allowlist is forwarded — no arbitrary method passthrough.
+    // `Some(valid) => valid, _ => default` reads as manual unwrap_or to
+    // clippy, but the alternative chain doesn't typecheck with mixed
+    // literals — keep the match, silence the lint at the source.
+    #[allow(clippy::manual_unwrap_or)]
     let action = match action.as_deref() {
         Some(a @ ("typing" | "upload_document" | "upload_video")) => a,
         _ => "typing",

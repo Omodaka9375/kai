@@ -10,7 +10,7 @@
  * Both guards run in a single wrapper so there's only one interception point.
  */
 
-import type { FenceState } from "./fence";
+import type { FenceState, FenceTag } from "./fence";
 import { fence } from "./fence";
 import { type EffectStatus } from "./effectStatus";
 import { guardToolOutput, formatGuardWarning } from "./outputGuard";
@@ -258,27 +258,43 @@ function fenceToolOutput(
   const r = { ...result };
 
   if (toolName === "bash_run" || toolName === "shell_session_run") {
-    fenceField(r, "stdout", state.nonces.tool);
-    fenceField(r, "stderr", state.nonces.tool);
+    fenceField(r, "stdout", "tool", state.nonces.tool);
+    fenceField(r, "stderr", "tool", state.nonces.tool);
   } else if (toolName === "bash_logs") {
-    fenceField(r, "bytes", state.nonces.tool);
-  } else if (toolName === "web_browse" || toolName === "web_fetch" || toolName === "web_search") {
-    fenceField(r, "content", state.nonces.web);
-    fenceField(r, "body", state.nonces.web);
+    fenceField(r, "bytes", "tool", state.nonces.tool);
+  } else if (toolName === "web_browse" || toolName === "web_fetch") {
+    // Remote surface: strip invisible/bidi chars + bind provenance.
+    fenceField(r, "content", "web", state.nonces.web, {
+      sanitize: true,
+      source: typeof r.url === "string" ? r.url : undefined,
+    });
+    fenceField(r, "body", "web", state.nonces.web, { sanitize: true });
+  } else if (toolName === "web_search") {
+    // Titles/snippets are attacker-influenced text — fence each result
+    // (urls stay plain: metadata for the agent's browsing decision).
+    fenceSearchResults(r, state.nonces.web);
   } else if (toolName === "fs_search" || toolName === "fs_grep") {
     // Both tools return `{ root, hits[], truncated, files_scanned }` — there is
     // no top-level `content`/`text`, so the generic fallback below never fires.
     // Fence the `text`/`content` field of every hit in the `hits` array.
-    fenceHits(r, "hits", state.nonces.tool);
-    fenceField(r, "content", state.nonces.tool);
+    fenceHits(r, "hits", "tool", state.nonces.tool);
+    fenceField(r, "content", "tool", state.nonces.tool);
   } else if (toolName === "youtube_transcript") {
-    fenceField(r, "transcript", state.nonces.web);
+    fenceField(r, "transcript", "web", state.nonces.web, {
+      sanitize: true,
+      source: "youtube transcript",
+    });
   } else if (toolName.includes("__")) {
     const key = findTextKey(r);
-    if (key) fenceField(r, key, state.nonces.mcp);
+    if (key) {
+      fenceField(r, key, "mcp", state.nonces.mcp, {
+        sanitize: true,
+        source: toolName.slice(0, toolName.indexOf("__")),
+      });
+    }
   } else {
-    fenceField(r, "text", state.nonces.tool);
-    fenceField(r, "content", state.nonces.tool);
+    fenceField(r, "text", "tool", state.nonces.tool);
+    fenceField(r, "content", "tool", state.nonces.tool);
   }
 
   return r;
@@ -287,11 +303,13 @@ function fenceToolOutput(
 function fenceField(
   r: Record<string, unknown>,
   key: string,
+  tag: FenceTag,
   nonce: string,
+  opts?: { sanitize?: boolean; source?: string },
 ): void {
   const v = r[key];
   if (typeof v !== "string" || v.length === 0) return;
-  r[key] = fence("tool", nonce, v);
+  r[key] = fence(tag, nonce, v, opts);
 }
 
 /** Fence string fields (`text`, `content`, `body`) of every element in an
@@ -300,6 +318,7 @@ function fenceField(
 function fenceHits(
   r: Record<string, unknown>,
   key: string,
+  tag: FenceTag,
   nonce: string,
 ): void {
   const v = r[key];
@@ -310,7 +329,30 @@ function fenceHits(
     for (const field of ["text", "content", "body", "data"]) {
       const s = rec[field];
       if (typeof s === "string" && s.length > 0) {
-        rec[field] = fence("tool", nonce, s);
+        rec[field] = fence(tag, nonce, s);
+      }
+    }
+    return rec;
+  });
+}
+
+/** Fence the per-result text of a web_search result list: title + snippet are
+ *  attacker-influenced; the url stays plain (metadata the agent decides on).
+ *  Each result carries its own URL as the fence's `[source: …]`. */
+function fenceSearchResults(
+  r: Record<string, unknown>,
+  nonce: string,
+): void {
+  const v = r.results;
+  if (!Array.isArray(v)) return;
+  r.results = v.map((item) => {
+    if (item === null || typeof item !== "object") return item;
+    const rec = { ...(item as Record<string, unknown>) };
+    const source = typeof rec.url === "string" ? rec.url : undefined;
+    for (const field of ["title", "snippet"]) {
+      const s = rec[field];
+      if (typeof s === "string" && s.length > 0) {
+        rec[field] = fence("web", nonce, s, { sanitize: true, source });
       }
     }
     return rec;
