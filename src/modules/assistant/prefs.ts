@@ -90,6 +90,9 @@ export const telegramNative = {
     ),
   sendMessage: (token: string, chatId: number, text: string) =>
     invoke<void>("telegram_send_message", { token, chatId, text }),
+  /** Typing/upload indicator — best-effort; the Rust side never rejects. */
+  sendChatAction: (token: string, chatId: number, action?: "typing" | "upload_document" | "upload_video") =>
+    invoke<void>("telegram_set_chat_action", { token, chatId, action: action ?? "typing" }),
   sendVoice: (token: string, chatId: number, audioBase64: string) =>
     invoke<void>("telegram_send_voice", { token, chatId, audioBase64 }),
   sendPhoto: (token: string, chatId: number, photoBase64: string, caption?: string | null) =>

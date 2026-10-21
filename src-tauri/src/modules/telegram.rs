@@ -538,6 +538,35 @@ pub async fn telegram_test(token: String) -> Result<TelegramStatus, String> {
     Ok(s)
 }
 
+/// Show a "typing…" status in the chat. Telegram's sendChatAction lasts ~5s
+/// per call; the JS bridge repeats it every 4s while a turn is running so the
+/// owner sees life during long tool runs instead of silence. Best-effort:
+/// failures (rate limit, network) are logged and swallowed — a missing
+/// typing hint must never fail the turn itself.
+#[tauri::command]
+pub async fn telegram_set_chat_action(
+    token: String,
+    chat_id: i64,
+    action: Option<String>,
+) -> Result<(), String> {
+    // Only a fixed allowlist is forwarded — no arbitrary method passthrough.
+    let action = match action.as_deref() {
+        Some(a @ ("typing" | "upload_document" | "upload_video")) => a,
+        _ => "typing",
+    };
+    let body = serde_json::json!({
+        "chat_id": chat_id,
+        "action": action,
+        // Suppress the typing indicator for the ~5s it naturally lives.
+    });
+    match post_json::<serde_json::Value>(&token, "sendChatAction", &body).await {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            log::warn!("[kai:assistant] sendChatAction({action}) failed: {e}");
+            Ok(()) // never fail the turn over a status hint
+        }
+    }
+}
 /// Send a text message (agent reply). Errors are surfaced to the caller which
 /// logs them in the session — the user sees the assistant went quiet and why.
 #[tauri::command]

@@ -904,6 +904,34 @@ async function enqueueVideoMessage(chatId: number, fileId: string): Promise<void
   }
 }
 
+/**
+ * Repeating "typing…" indicator for the duration of an assistant turn.
+ *
+ * Telegram's sendChatAction shows the status for ~5s per call; a long agent
+ * run (tools, media generation) would go dark after that and the owner has
+ * no way to tell a slow turn from a dead bot. This repeats the action every
+ * 4s until cleared. Best-effort everywhere: fire-and-forget sends, timer
+ * errors swallowed, and an idempotent clear so the settle path can't double-
+ * clear or leak an interval.
+ */
+const TYPING_INTERVAL_MS = 4_000;
+let typingStop: (() => void) | null = null;
+function startTypingIndicator(token: string, chatId: number): void {
+  stopTypingIndicator();
+  void telegramNative.sendChatAction(token, chatId, "typing").catch(() => {});
+  const timer = setInterval(
+    () => void telegramNative.sendChatAction(token, chatId, "typing").catch(() => {}),
+    TYPING_INTERVAL_MS,
+  );
+  typingStop = () => {
+    clearInterval(timer);
+    typingStop = null;
+  };
+}
+function stopTypingIndicator(): void {
+  typingStop?.();
+  typingStop = null;
+}
 async function drainQueue(): Promise<void> {
   if (turnInFlight) return;
   const next = pendingQueue.shift();
@@ -918,6 +946,9 @@ async function drainQueue(): Promise<void> {
     return;
   }
   try {
+    // Tell the owner the message landed and work is happening — without
+    // this a long tool run is indistinguishable from a dead bot.
+    startTypingIndicator(token, next.chatId);
     const reply = await runAssistantTurn(next.text, {
       // Tool notices are progress, not conversation: sending one Telegram
       // message per tool step floods the chat. Log only — the final reply
@@ -942,6 +973,7 @@ async function drainQueue(): Promise<void> {
       .sendMessage(token, next.chatId, `⚠️ ${msg.slice(0, 300)}`)
       .catch(() => {});
   } finally {
+    stopTypingIndicator();
     turnInFlight = false;
     if (pendingQueue.length > 0) void drainQueue();
   }
