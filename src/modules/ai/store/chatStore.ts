@@ -378,6 +378,14 @@ const chats = new Map<string, Chat<UIMessage>>();
 let hydrateSeq = 0;
 let hydrateChain: Promise<void> = Promise.resolve();
 
+// The normalized root of the sessions store file the module is CURRENTLY
+// scoped to, set by hydrateSessions right after setSessionsScope. persistMessages
+// uses it to reject writes for a session that belongs to a different project
+// (see the scope-ownership guard). scopeGuardActive is false until the first
+// hydrate so cold-boot writes aren't filtered against a not-yet-set root.
+let scopeGuardRoot: string | null = null;
+let scopeGuardActive = false;
+
 /**
  * App-owned abort controllers for in-flight agent runs, keyed by session.
  *
@@ -717,6 +725,12 @@ export const useChatStore = create<StoreState>((set, get) => ({
     const normalizedRoot = norm(root);
 
     try {
+    // Flush every pending (debounced) message persist BEFORE the scope can
+    // swap. Any queued write still belongs to the previous project's store,
+    // so it must land there — flushing here (while `store` still points at
+    // the old file) prevents a late debounce from a torn-down Chat writing
+    // the previous conversation into the new project's file.
+    flushPersist();
     // Scope the sessions store to this project's file before loading, so
     // concurrent instances on different projects read/write disjoint files.
     // Migration runs once per process, idempotent via a marker.
@@ -725,6 +739,11 @@ export const useChatStore = create<StoreState>((set, get) => ({
     // fully settled, so re-scoping can't interleave with another run's
     // reads/writes. (No owner re-check needed — starts never overlap.)
     await setSessionsScope(root);
+    // `store` now points at THIS project's file — arm the persistMessages
+    // scope guard so a lingering persist for a different project's session
+    // cannot write into it.
+    scopeGuardRoot = normalizedRoot;
+    scopeGuardActive = true;
     if (isStale()) return;
 
     // Skip only if we've already hydrated for this exact workspace.
@@ -1076,6 +1095,22 @@ export const useChatStore = create<StoreState>((set, get) => ({
   },
 
   persistMessages: (id, messages) => {
+    // Scope-ownership guard. `saveMessages` writes into the CURRENTLY SCOPED
+    // sessions file, which belongs to exactly one project. But `sessions`
+    // (the in-memory list) is intentionally GLOBAL across projects, so a
+    // membership check would wrongly ALLOW an old-project session. Compare
+    // the session's own workspaceRoot against the scope we last switched to
+    // (scopeGuardRoot). On a project switch the outgoing Chat can still emit
+    // an empty/transient persist while being torn down; without this guard
+    // that write lands in the NEW project's file — the observed corruption
+    // (a real session blanking / another project's history appearing). The
+    // guard activates only once a hydrate has run, so cold-boot persists of
+    // the just-hydrated session are unaffected.
+    if (scopeGuardActive) {
+      const meta = get().sessions.find((s) => s.id === id);
+      const sRoot = normalizeWorkspacePath(meta?.workspaceRoot);
+      if (sRoot !== scopeGuardRoot) return;
+    }
     // Stamp createdAt on NEW messages (metadata) so the transcript can render
     // day separators + hover times. Mutates the LIVE array's message objects —
     // deliberate: the same objects render in AiChat and persist via the

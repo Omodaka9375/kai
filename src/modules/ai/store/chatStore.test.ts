@@ -256,6 +256,49 @@ describe("chatStore exports", () => {
         store.getState().lastHydratedWorkspace?.toLowerCase(),
       ).toBe("d:/race-a");
     });
+
+    it("a lingering persist for the previous project's session is NOT written into the new project's file", async () => {
+      // REGRESSION (data corruption on project switch): `saveMessages` writes
+      // into whichever sessions file is currently scoped, but the outgoing
+      // Chat can still emit a persist while being torn down after a switch.
+      // Without the scope-ownership guard that write lands in the NEW
+      // project's file — observed as a real session showing nothing, or the
+      // previous project's conversation bleeding into the new one.
+      const store = mod.useChatStore;
+      const { flushPersist } = mod;
+      const { loadMessages } = await import("../lib/sessions");
+
+      const msg = (text: string) =>
+        [{ id: "m1", role: "user", parts: [{ type: "text", text }] }] as never;
+
+      // Project A: capture the freshly-hydrated active session + persist real
+      // history to it.
+      await store.getState().hydrateSessions("D:/persist-a");
+      const sessionA = store.getState().activeSessionId!;
+      store.getState().persistMessages(sessionA, msg("ORIGINAL"));
+      flushPersist(sessionA);
+
+      // Switch to project B. The guard now scopes writes to B.
+      await store.getState().hydrateSessions("D:/persist-b");
+
+      // A torn-down Chat emitting a (possibly empty/corrupt) persist for the
+      // A session AFTER the scope moved to B must be dropped, not written
+      // into B's file.
+      store.getState().persistMessages(sessionA, msg("CORRUPT"));
+      flushPersist(sessionA);
+
+      // While scoped to B, reading the A session's blob from B's store must
+      // find nothing — the corrupt write never landed.
+      expect(await loadMessages(sessionA)).toBeNull();
+
+      // And the A session's real history survived: switch back and it's the
+      // ORIGINAL, not the corrupt payload.
+      await store.getState().hydrateSessions("D:/persist-a");
+      const restored = await loadMessages(sessionA);
+      expect(
+        (restored?.[0]?.parts?.[0] as { text?: string } | undefined)?.text,
+      ).toBe("ORIGINAL");
+    });
   });
 });
 
