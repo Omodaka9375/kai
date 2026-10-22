@@ -142,7 +142,7 @@ export function buildWebTools(_ctx: ToolContext) {
   return {
     web_browse: tool({
       description:
-        "Fetch and render a web page, returning its text content. Uses Camoufox (anti-detect browser) if installed, falls back to HTTP fetch. Useful for reading documentation, articles, READMEs, or any public URL. Auto-executes (read-only).",
+        "Fetch a web page over HTTP and return its readable text (HTML tags stripped). No JavaScript execution or browser rendering — client-side-rendered / SPA pages may come back empty or partial, and bot-protected endpoints can refuse the request. Best for static pages: documentation, articles, READMEs. Auto-executes (read-only).",
       inputSchema: z.object({
         url: z.string().url().describe("The URL to browse."),
       }),
