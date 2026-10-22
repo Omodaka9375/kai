@@ -8,7 +8,6 @@ import { buildSubagentTools } from "./subagent";
 import { buildTerminalTools } from "./terminal";
 import { buildTodoTools } from "./todo";
 import { buildWebTools } from "./web";
-import { buildYouTubeTools } from "./youtube";
 import { buildMemoryTools } from "./memory";
 import { buildBatchEditTools } from "./batchEdit";
 import { buildTerminalImageTools } from "./terminalImage";
@@ -47,7 +46,6 @@ export function buildExtendedTools(ctx: import("./context").ToolContext) {
     ...buildSubagentTools(ctx),
     ...buildTodoTools(ctx),
     ...buildWebTools(ctx),
-    ...buildYouTubeTools(ctx),
     ...buildImageGenTools(ctx),
     ...buildVideoGenTools(ctx),
   } as const;

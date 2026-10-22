@@ -10,7 +10,7 @@ import { checkShellCommand } from "./security";
  *   1. Rust proxy gate — ai_http_request/ai_http_stream accept
  *      require_lan_only and thread it into the IP filter (source contract;
  *      the classification math is pinned by Rust unit tests).
- *   2. Model-chosen web surfaces pass the flag — web.ts/youtube.ts read
+ *   2. Model-chosen web surfaces pass the flag — web.ts reads
  *      the live policy. Provider-class fetches (agent.ts localProxyFetch,
  *      MCP, TTS/STT) must NOT be gated: restricting those bricks the
  *      agent's ability to think.
@@ -20,7 +20,6 @@ import { checkShellCommand } from "./security";
  */
 
 const webSrc = readFileSync(new URL("../tools/web.ts", import.meta.url), "utf8");
-const youtubeSrc = readFileSync(new URL("../tools/youtube.ts", import.meta.url), "utf8");
 const netRs = readFileSync(
   new URL("../../../../src-tauri/src/modules/net.rs", import.meta.url),
   "utf8",
@@ -41,9 +40,8 @@ describe("Rust proxy gate (source contract)", () => {
 });
 
 describe("model-chosen surfaces are gated", () => {
-  it("web.ts and youtube.ts pass requireLanOnly()", () => {
+  it("web.ts passes requireLanOnly()", () => {
     expect(webSrc).toContain("requireLanOnly: requireLanOnly()");
-    expect(youtubeSrc).toContain("requireLanOnly: requireLanOnly()");
   });
 });
 

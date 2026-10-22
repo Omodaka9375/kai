@@ -57,7 +57,6 @@ const DEFAULT_EFFECT: Record<string, EffectStatus> = {
   web_browse: "NONE",
   web_fetch: "NONE",
   web_search: "NONE",
-  youtube_transcript: "NONE",
 
   // Structural tools.
   todo_write: "COMMITTED",
@@ -82,7 +81,6 @@ const REMOTE_SURFACE_TOOLS: Set<string> = new Set([
   "web_browse",
   "web_fetch",
   "web_search",
-  "youtube_transcript",
 ]);
 
 /** Tools that should NOT be fenced (structural, no inline text output). */
@@ -309,11 +307,6 @@ function fenceToolOutput(
     // Fence the `text`/`content` field of every hit in the `hits` array.
     fenceHits(r, "hits", "tool", state.nonces.tool);
     fenceField(r, "content", "tool", state.nonces.tool);
-  } else if (toolName === "youtube_transcript") {
-    fenceField(r, "transcript", "web", state.nonces.web, {
-      sanitize: true,
-      source: "youtube transcript",
-    });
   } else if (toolName.includes("__")) {
     // MCP server output: fence EVERY string field over the fence-entry
     // threshold, not just the first text-ish key — a result like

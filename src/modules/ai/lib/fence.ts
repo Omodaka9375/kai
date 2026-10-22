@@ -223,7 +223,7 @@ export function countInjectionMarkers(content: string): number {
  * confusables table — out of scope; the prompt tells the model to treat
  * look-alike domains in fenced content with suspicion).
  *
- * Applied ONLY to remote surfaces (web/search/youtube/MCP) — never to
+ * Applied ONLY to remote surfaces (web/search/MCP) — never to
  * local file contents, which round-trip through read → edit → write and
  * legitimately contain e.g. ZWNJ in Persian text or bidi in RTL code.
  */

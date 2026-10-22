@@ -243,7 +243,6 @@ export const IRREVERSIBILITY: Record<string, IrreversibilityLevel> = {
   web_browse: "read_only",
   web_fetch: "read_only",
   web_search: "read_only",
-  youtube_transcript: "read_only",
   bash_list: "read_only",
   bash_logs: "read_only",
   suggest_command: "read_only",

@@ -65,7 +65,7 @@ async function bodyToBase64(
  * (intranet hostnames, local model servers) but not the internet.
  *
  * Applies ONLY to model-callable fetches (web_browse / web_search /
- * youtube_transcript / media URL fetch). User-configured surfaces — MCP
+ * media URL fetch). User-configured surfaces — MCP
  * servers, api-tester, provider calls, LM Studio — are exempt BY DESIGN:
  * those endpoints were chosen by the human, not by the model.
  *
@@ -85,7 +85,7 @@ function lanOnlyActive(): boolean {
 }
 
 /** Model-callable fetch surfaces only — the gate the proxy layer consults.
- *  Exported for web.ts/youtube.ts, whose fixed-instance fetchers are
+ *  Exported for web.ts, whose fixed-instance fetchers are
  *  model-chosen destinations. */
 export function requireLanOnly(): boolean {
   return lanOnlyActive();

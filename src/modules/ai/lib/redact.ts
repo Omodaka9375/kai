@@ -266,7 +266,6 @@ const PAYLOAD_TOOLS: ReadonlySet<string> = new Set([
   "web_browse",
   "web_fetch",
   "web_search",
-  "youtube_transcript",
   "run_subagent",
 ]);
 

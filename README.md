@@ -83,7 +83,6 @@ Kai is a fast, cross-platform terminal built on **Tauri 2 + Rust** and **React 1
 - Voice input — OpenAI whisper-1 transcription with a no-key browser SpeechRecognition fallback
 - PDF/DOCX reading, image OCR (tesseract), ZIP/JAR listing, and audio metadata
 - Direct PDF export (`convert_to_pdf`) from Markdown/Word
-- YouTube transcript summarization
 - `Kai.md` project memory, context summarization, and auto-approve modes — plus save/red persistent memory tools the agent can use mid-session
 - Skills & snippets
 - Per-project **sandbox** (read-only or workspace-only) and a **detached-copy** workflow — work in an isolated copy, then merge or discard

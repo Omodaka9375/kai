@@ -15,7 +15,7 @@
  *    the behaviour.
  * 2. **Provenance tagging** (this module): the backstop that survives the
  *    first layer failing. While a session has fetched remote content
- *    (web_browse / web_search / youtube / MCP), every memory entry it
+ *    (web_browse / web_search / MCP), every memory entry it
  *    writes is stamped `(injection-exposed session)` in its header. The
  *    marker rides into future system prompts, so a human skimming
  *    MEMORY.md — and the model reading it — can see that the entry was

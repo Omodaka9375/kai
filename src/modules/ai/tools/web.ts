@@ -188,7 +188,7 @@ export function buildWebTools(_ctx: ToolContext) {
               // but the DESTINATION is still the public internet. Under the
               // LAN-only network policy, web_search must not exfiltrate the
               // query off-box any more than web_browse may fetch a page.
-              // web_browse and youtube pass requireLanOnly too; this was the
+              // web_browse passes requireLanOnly too; this was the
               // one model-callable fetch that forgot it.
               requireLanOnly: requireLanOnly(),
             },
