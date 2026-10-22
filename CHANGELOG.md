@@ -3,6 +3,16 @@
 All notable changes to the KAI terminal emulator project are documented in this file. KAI adheres to Semantic Versioning.
 
 ---
+## [1.9.0]
+
+- AI: switching projects no longer corrupts session history — late writes are re-routed to the session's own project file.
+- AI: fast project switches can no longer leave the previous project's conversation on screen.
+- AI: opening a file collapses an expanded AI window so the editor is never hidden behind it.
+- AI: removed the built-in `youtube_transcript` tool — brittle against YouTube's bot wall and duplicative of MCP servers users can opt into.
+- AI: `web_browse` description no longer claims a browser render — it's plain HTTP fetch, no JavaScript.
+
+---
+
 ## [1.8.5]
 
 - Security: hardened the agent against prompt injection from tool output.
