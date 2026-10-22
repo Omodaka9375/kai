@@ -282,22 +282,23 @@ describe("chatStore exports", () => {
       await store.getState().hydrateSessions("D:/persist-b");
 
       // A torn-down Chat emitting a (possibly empty/corrupt) persist for the
-      // A session AFTER the scope moved to B must be dropped, not written
-      // into B's file.
+      // A session AFTER the scope moved to B must be RE-ROUTED to A's own
+      // file (not dropped — that would lose A's message tail — and not
+      // written into B's file).
       store.getState().persistMessages(sessionA, msg("CORRUPT"));
       flushPersist(sessionA);
 
       // While scoped to B, reading the A session's blob from B's store must
-      // find nothing — the corrupt write never landed.
+      // find nothing — the re-routed write never landed in B's file.
       expect(await loadMessages(sessionA)).toBeNull();
 
-      // And the A session's real history survived: switch back and it's the
-      // ORIGINAL, not the corrupt payload.
+      // And the re-routed write landed in A's OWN file: switch back and the
+      // A session holds the LATEST (re-routed) content, not a stale copy.
       await store.getState().hydrateSessions("D:/persist-a");
       const restored = await loadMessages(sessionA);
       expect(
         (restored?.[0]?.parts?.[0] as { text?: string } | undefined)?.text,
-      ).toBe("ORIGINAL");
+      ).toBe("CORRUPT");
     });
   });
 });

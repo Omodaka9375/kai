@@ -26,7 +26,7 @@ const messagesKey = (id: string) => `messages:${id}`;
 // chat history — the store writes the whole JSON file on every save(), so a
 // shared file makes parallel sessions a last-writer-wins data race.
 let store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
-let currentScopePath: string | null = null;
+let currentScopePath: string = STORE_PATH;
 
 /** Stable 64-bit FNV-1a (base36) of a workspace path — compact, filename-safe. */
 function projectKey(root: string | null | undefined): string | null {
@@ -40,7 +40,7 @@ function projectKey(root: string | null | undefined): string | null {
   return h.toString(36);
 }
 
-function scopedPath(root: string | null | undefined): string {
+export function scopedPath(root: string | null | undefined): string {
   const key = projectKey(root);
   return key ? `kai-sessions-${key}.json` : STORE_PATH;
 }
@@ -70,9 +70,15 @@ export function partitionSessionsByWorkspace(
  * module internals.
  */
 export function sessionsScopeOwner(): string | null {
-  return currentScopePath === null ? null : scopeOwnerRoot;
+  return STORE_PATH === currentScopePath ? null : scopeOwnerRoot;
 }
 
+/** The store FILE path (e.g. `kai-sessions-<hash>.json`) currently scoped,
+ *  or the legacy global file name. Lets callers compare against a target
+ *  root's scoped path (via scopedPath) without touching module internals. */
+export function sessionsScopeFile(): string {
+  return currentScopePath;
+}
 /**
  * Point all subsequent session reads/writes at the store for `root`.
  * No-op if already scoped to that path. Called before hydration on boot and on
@@ -345,6 +351,34 @@ export async function saveMessages(
   id: string,
   messages: UIMessage[],
 ): Promise<void> {
+  const toStore = prepareMessagesForStore(messages);
+  if (!toStore) return;
+  await writePreparedMessages(currentScopePath, id, toStore);
+}
+
+/**
+ * Persist a session's message blob into the store file for an EXPLICIT
+ * workspace root, regardless of which file the module is currently scoped
+ * to. The cross-scope re-route for late/lingering writes after a project
+ * switch: the write belongs to the session's OWN project file, so it must
+ * land there (dropping it would silently lose the outgoing project's
+ * message tail). No-op when the target is the current scope (fast path).
+ */
+export async function saveMessagesForRoot(
+  root: string | null | undefined,
+  id: string,
+  messages: UIMessage[],
+): Promise<void> {
+  const toStore = prepareMessagesForStore(messages);
+  if (!toStore) return;
+  await writePreparedMessages(scopedPath(root), id, toStore);
+}
+
+/** JSON round-trip + image/tool-payload elision + size-trim + validity
+ *  check. Returns the prepared array, or null when the messages are not
+ *  persistable (unserializable / invalid JSON). Shared by saveMessages and
+ *  saveMessagesForRoot. */
+function prepareMessagesForStore(messages: UIMessage[]): unknown[] | null {
   // Deep-clone via JSON round-trip to strip any non-serializable values
   // (undefined, BigInt, Symbol, functions, circular refs) that would
   // produce corrupted or unreadable store data.
@@ -356,7 +390,7 @@ export async function saveMessages(
       "[saveMessages] Messages contain non-serializable data — skipping persist:",
       err,
     );
-    return;
+    return null;
   }
 
   // Strip image data-URLs and bulky tool payloads to keep the store file compact.
@@ -395,9 +429,25 @@ export async function saveMessages(
       "[saveMessages] Produced invalid JSON — skipping persist:",
       err,
     );
+    return null;
+  }
+  return toStore;
+}
+
+/** Write a prepared message blob into the store file at `path`. Uses the
+ *  module store when `path` is the current scope (the common case); opens a
+ *  short-lived LazyStore for the re-routed cross-scope case. */
+async function writePreparedMessages(
+  path: string,
+  id: string,
+  toStore: unknown[],
+): Promise<void> {
+  if (path !== currentScopePath) {
+    const s = new LazyStore(path, { defaults: {}, autoSave: 200 });
+    await s.set(messagesKey(id), toStore as UIMessage[]);
+    await s.save().catch(() => {});
     return;
   }
-
   await store.set(messagesKey(id), toStore as UIMessage[]);
 }
 
