@@ -1,4 +1,5 @@
 import { ensureMonoFontsLoaded } from "@/lib/fonts";
+import { invoke } from "@tauri-apps/api/core";
 import { IS_WINDOWS } from "@/lib/platform";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import type { SearchAddon } from "@xterm/addon-search";
@@ -87,9 +88,31 @@ const ATTACH_RETRY_BOUND = 40;
 const PTY_OPEN_TIMEOUT_MS = 20_000;
 
 /** Leaf-keyed lifecycle logging — `pty opened id=N` lines are unkeyed on the
- *  Rust side, so this is the only way to tell which tab a spawn belongs to. */
+ *  Rust side, so this is the only way to tell which tab a spawn belongs to.
+ *  ALSO appends to %APPDATA%/app.kai.terminal/term-debug.log (fire-and-forget,
+ *  ring-truncated) so a live repro in the packaged app can be read back
+ *  without devtools — the blank-first-terminal family has burned us three
+ *  times and console-only logs were never captured. Uses the app's own
+ *  fs_read_file/fs_write_file commands (the fs plugin isn't wired). */
 function logLeaf(leafId: number, msg: string): void {
+  const line = `[${new Date().toISOString()} leaf=${leafId}] ${msg}`;
   console.info(`[Kai-term leaf=${leafId}] ${msg}`);
+  void (async () => {
+    try {
+      const dir = await import("@tauri-apps/api/path").then((p) => p.appDataDir());
+      const file = `${dir.replace(/\\/g, "/")}/term-debug.log`;
+      const prev = await invoke<{ kind: string; content?: string }>("fs_read_file", {
+        path: file,
+        extract: false,
+      })
+        .then((r) => (r?.kind === "text" && typeof r.content === "string" ? r.content : ""))
+        .catch(() => "");
+      const kept = prev.length > 400_000 ? prev.slice(-200_000) : prev;
+      await invoke("fs_write_file", { path: file, content: kept + line + "\n" });
+    } catch {
+      /* diagnostics must never break the terminal */
+    }
+  })();
 }
 configureRendererPool({
   resolveLeaf(leafId) {
