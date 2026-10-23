@@ -504,9 +504,14 @@ function SessionPicker() {
   const deleteSession = useChatStore((s) => s.deleteSession);
   const workspaceRoot = useChatStore((s) => s.live.getWorkspaceRoot());
 
-  const active = sessions.find((s) => s.id === activeId) ?? null;
-  if (!active) return null;
-
+  // RULES OF HOOKS: every hook must run on every render. This component
+  // previously early-returned on `!active` BEFORE useMemo/useState below —
+  // whenever a re-render landed mid-transition with active == null (e.g.
+  // resolving an approval re-rendering the picker before activeSessionId
+  // settled), React threw #310 ("rendered fewer hooks"), the mini-window
+  // error boundary caught it and unmounted the whole window — the
+  // intermittent "approving collapses the AI window" bug. Compute everything,
+  // THEN branch in JSX.
   const filteredSessions = useMemo(() => {
     if (!workspaceRoot) return sessions;
     const normalized = normalizeWorkspacePath(workspaceRoot);
@@ -521,6 +526,9 @@ function SessionPicker() {
 
   const sorted = [...filteredSessions].sort((a, b) => b.updatedAt - a.updatedAt);
   const [menuOpen, setMenuOpen] = useState(false);
+
+  const active = sessions.find((s) => s.id === activeId) ?? null;
+  if (!active) return null;
 
   return (
     <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>

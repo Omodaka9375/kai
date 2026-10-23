@@ -19,13 +19,16 @@ type Props = {
 };
 
 export function WorkspaceEnvSelector({ onSelect }: Props) {
-  if (!IS_WINDOWS) return null;
-
+  // Hooks first — RULES OF HOOKS: the IS_WINDOWS early return used to sit
+  // above these five hooks. It's a module constant today so the order never
+  // flips, but any future runtime guard here would throw React #310.
   const env = useWorkspaceEnvStore((s) => s.env);
   const distros = useWorkspaceEnvStore((s) => s.distros);
   const loading = useWorkspaceEnvStore((s) => s.loading);
   const error = useWorkspaceEnvStore((s) => s.error);
   const refreshDistros = useWorkspaceEnvStore((s) => s.refreshDistros);
+
+  if (!IS_WINDOWS) return null;
 
   const handleOpenChange = (open: boolean) => {
     if (open && distros.length === 0 && !loading) {
