@@ -3,6 +3,19 @@
 All notable changes to the KAI terminal emulator project are documented in this file. KAI adheres to Semantic Versioning.
 
 ---
+## [1.9.1]
+
+- Security: update restart now works — `process:default` capability was missing, so relaunch failed in release builds.
+- Security: SSRF hardening — cross-host redirects on private-network endpoints are now blocked instead of followed unpinned.
+- Security: preview pane only loads http(s) URLs; other schemes can no longer reach the app origin.
+- AI: the agent now knows it can run elevated commands (`elevated: true`) — OS consent prompt with captured output; prefers silent installs.
+- AI: elevated command timeouts now kill the whole elevated process tree, not just the shell.
+- Preview: removed the Proxy URL setting and iframe workaround — local URLs open in the preview tab, everything else in the system browser.
+- Settings: GPG commit signing and the Default shell picker moved to the Security tab.
+- Cleanup: radio prefs now share the single settings store (no more lost updates); dead code and stale comments removed.
+
+---
+
 ## [1.9.0]
 
 - AI: switching projects no longer corrupts session history — late writes are re-routed to the session's own project file.
