@@ -25,7 +25,8 @@ import {
   type AuditEvent,
 } from "@/modules/ai/lib/audit";
 import { listCommands, unpinCommand, allowlistDirFor } from "@/modules/ai/lib/allowlist";
-import { setNetworkPolicy } from "@/modules/settings/store";
+import { setNetworkPolicy, setDefaultShell } from "@/modules/settings/store";
+import { IS_WINDOWS } from "@/lib/platform";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { SectionHeader } from "../components/SectionHeader";
 import { SettingRow } from "../components/SettingRow";
@@ -66,6 +67,7 @@ function formatTime(ts: number): string {
 
 export function SecuritySection() {
   const networkPolicy = usePreferencesStore((s) => s.networkPolicy);
+  const defaultShell = usePreferencesStore((s) => s.defaultShell);
 
   const onNetworkPolicy = (v: "full" | "lan") => {
     if (v === networkPolicy) return;
@@ -296,6 +298,59 @@ export function SecuritySection() {
       >
         <span />
       </SettingRow>
+
+      {IS_WINDOWS && (
+        <div className="flex flex-col gap-2">
+          <Label>Shell</Label>
+          <SettingRow
+            title="Default shell"
+            description="Shell for new terminal tabs. Restart tabs to apply."
+          >
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  className="h-8 justify-between gap-2 rounded-none px-2.5 text-[12px]"
+                >
+                  <span>
+                    {{
+                      auto: "Auto-detect",
+                      cmd: "Command Prompt",
+                      powershell: "PowerShell 5",
+                      pwsh: "PowerShell 7+",
+                    }[defaultShell] ?? defaultShell}
+                  </span>
+                  <HugeiconsIcon
+                    icon={ArrowDown01Icon}
+                    size={12}
+                    strokeWidth={2}
+                    className="opacity-70"
+                  />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-[220px]">
+                {(["auto", "cmd", "powershell", "pwsh"] as const).map((id) => (
+                  <DropdownMenuItem
+                    key={id}
+                    onSelect={() => void setDefaultShell(id)}
+                    className={cn(
+                      "text-[12px]",
+                      id === defaultShell && "bg-accent/50",
+                    )}
+                  >
+                    {{
+                      auto: "Auto-detect (pwsh → powershell → cmd)",
+                      cmd: "Command Prompt (cmd.exe)",
+                      powershell: "Windows PowerShell 5.1",
+                      pwsh: "PowerShell 7+ (pwsh.exe)",
+                    }[id]}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </SettingRow>
+        </div>
+      )}
 
       <CommitSigningBlock />
     </div>
