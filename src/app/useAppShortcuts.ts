@@ -126,6 +126,15 @@ export function useAppShortcuts(deps: AppShortcutDeps): {
         window.dispatchEvent(new Event("Kai:ai-voice-toggle"));
       },
       "ai.askSelection": askFromSelection,
+      "radio.mute": () => {
+        // The marquee owns the muted React state and lives under the status
+        // bar — a window event decouples the keymap from it (same pattern as
+        // ai.voice above and the explorer's Kai:ai-attach-file dispatch).
+        // radioControl is module-level state, so this works even when the
+        // marquee is unmounted (feature disabled in settings) — it's a no-op
+        // then (radioSetMuted guards on a null sharedAudio element).
+        window.dispatchEvent(new Event("Kai:radio-mute-toggle"));
+      },
       "editor.save": handleSave,
       "editor.saveAll": handleSaveAll,
       "shortcuts.open": () => setShortcutsOpen((v) => !v),

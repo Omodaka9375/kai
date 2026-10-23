@@ -27,6 +27,7 @@ export type ShortcutId =
   | "view.zoomReset"
   | "ai.toggle"
   | "ai.voice"
+  | "radio.mute"
   | "ai.askSelection"
   | "editor.save"
   | "editor.saveAll"
@@ -205,6 +206,14 @@ export const SHORTCUTS: Shortcut[] = [
     label: "Toggle file explorer",
     group: "View",
     defaultBindings: [{ [MOD_PROP]: true, key: "b" }],
+  },
+  {
+    id: "radio.mute",
+    label: "Mute / unmute radio",
+    group: "View",
+    // Shift-modified: keeps the chord out of the shell's readline namespace
+    // when the terminal is focused (see collidesWithTerminal).
+    defaultBindings: [{ [MOD_PROP]: true, shift: true, key: "m" }],
   },
   {
     id: "explorer.focus",

@@ -105,6 +105,19 @@ export function RadioMarquee() {
     radioSetMuted(next);
   };
 
+  // Global ⌘/Ctrl+Shift+M shortcut (radio.mute) — same decoupling pattern as
+  // ai.voice. Reads the controller's own muted state (not the React state)
+  // so a toggle race never double-flips, then syncs the UI.
+  useEffect(() => {
+    const onMuteToggle = () => {
+      const next = !radioGetMuted();
+      setMuted(next);
+      radioSetMuted(next);
+    };
+    window.addEventListener("Kai:radio-mute-toggle", onMuteToggle);
+    return () => window.removeEventListener("Kai:radio-mute-toggle", onMuteToggle);
+  }, []);
+
   const handleVolume = (v: number) => {
     setVolume(v);
     radioSetVolume(v);
