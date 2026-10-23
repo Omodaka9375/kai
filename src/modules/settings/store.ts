@@ -57,7 +57,6 @@ export type Preferences = {
   terminalWebglEnabled: boolean;
   terminalFontSize: number;
   terminalScrollback: number;
-  lastWslDistro: string | null;
   zoomLevel: number;
   shortcuts: Record<ShortcutId, KeyBinding[]>;
   /** Preferred shell on Windows: "auto", "cmd", "powershell", "pwsh", or a custom path. */
@@ -152,7 +151,6 @@ const LEGACY_KEY_SHOW_HIDDEN_DIRS = "showHiddenDirectories";
 const KEY_TERMINAL_WEBGL_ENABLED = "terminalWebglEnabled";
 const KEY_TERMINAL_FONT_SIZE = "terminalFontSize";
 const KEY_TERMINAL_SCROLLBACK = "terminalScrollback";
-const KEY_LAST_WSL_DISTRO = "lastWslDistro";
 const KEY_ZOOM_LEVEL = "zoomLevel";
 const KEY_SHORTCUTS = "shortcuts";
 const KEY_DEFAULT_SHELL = "defaultShell";
@@ -226,7 +224,6 @@ export const DEFAULT_PREFERENCES: Preferences = {
   terminalWebglEnabled: true,
   terminalFontSize: TERMINAL_FONT_SIZE_DEFAULT,
   terminalScrollback: TERMINAL_SCROLLBACK_DEFAULT,
-  lastWslDistro: null,
   zoomLevel: 1.0,
   shortcuts: {} as Record<ShortcutId, KeyBinding[]>,
   defaultShell: "auto",
@@ -327,9 +324,7 @@ export async function loadPreferences(): Promise<Preferences> {
       get<number>(KEY_TERMINAL_SCROLLBACK) ??
         DEFAULT_PREFERENCES.terminalScrollback,
     ),
-    lastWslDistro:
-      get<string | null>(KEY_LAST_WSL_DISTRO) ??
-      DEFAULT_PREFERENCES.lastWslDistro,
+
     zoomLevel: get<number>(KEY_ZOOM_LEVEL) ?? DEFAULT_PREFERENCES.zoomLevel,
     shortcuts:
       get<Record<ShortcutId, KeyBinding[]>>(KEY_SHORTCUTS) ??
@@ -589,9 +584,6 @@ export async function setTerminalScrollback(value: number): Promise<void> {
   await writePref(KEY_TERMINAL_SCROLLBACK, clampScrollback(value));
 }
 
-export async function setLastWslDistro(value: string | null): Promise<void> {
-  await writePref(KEY_LAST_WSL_DISTRO, value);
-}
 
 export async function setZoomLevel(value: number): Promise<void> {
   await writePref(KEY_ZOOM_LEVEL, value);
@@ -732,7 +724,6 @@ export async function onPreferencesChange(
     [KEY_TERMINAL_WEBGL_ENABLED]: "terminalWebglEnabled",
     [KEY_TERMINAL_FONT_SIZE]: "terminalFontSize",
     [KEY_TERMINAL_SCROLLBACK]: "terminalScrollback",
-    [KEY_LAST_WSL_DISTRO]: "lastWslDistro",
     [KEY_RECENT_PROJECTS]: "recentProjects",
     [KEY_ZOOM_LEVEL]: "zoomLevel",
     [KEY_SHORTCUTS]: "shortcuts",

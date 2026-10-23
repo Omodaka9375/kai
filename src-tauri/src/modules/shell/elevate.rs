@@ -152,7 +152,7 @@ mod platform {
 
     use windows_sys::Win32::Foundation::{CloseHandle, WAIT_TIMEOUT};
     use windows_sys::Win32::System::Threading::{
-        GetExitCodeProcess, TerminateProcess, WaitForSingleObject,
+        GetExitCodeProcess, GetProcessId, TerminateProcess, WaitForSingleObject,
     };
     use windows_sys::Win32::UI::Shell::{
         ShellExecuteExW, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW,
@@ -200,6 +200,25 @@ mod platform {
             }
         }
         (String::from_utf8_lossy(&buf).into_owned(), truncated)
+    }
+
+    /// Kill an elevated process tree: taskkill /T /F /PID <pid> via runas.
+    /// Fire-and-forget: if the user denies the UAC prompt (or it fails for
+    /// any reason) we have already fallen back to TerminateProcess at the
+    /// call site; this is purely to take the DESCENDANTS with the shell.
+    fn kill_tree_elevated(pid: u32) {
+        let verb = to_wide("runas");
+        let file = to_wide("taskkill.exe");
+        let params = to_wide(&format!("/T /F /PID {pid}"));
+        let mut sei: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
+        sei.cbSize = std::mem::size_of::<SHELLEXECUTEINFOW>() as u32;
+        sei.lpVerb = verb.as_ptr();
+        sei.lpFile = file.as_ptr();
+        sei.lpParameters = params.as_ptr();
+        sei.nShow = SW_HIDE;
+        unsafe {
+            ShellExecuteExW(&mut sei);
+        }
     }
 
     pub fn run(
@@ -286,6 +305,17 @@ mod platform {
 
         let mut exit_code: u32 = 1;
         let timed_out = if wait == WAIT_TIMEOUT {
+            // TerminateProcess on the shell handle kills ONLY the elevated
+            // pwsh/cmd: the elevated child was brokered by consent.exe under
+            // a different token, so it never joined our kill-on-close job and
+            // its descendants would survive. Kill the whole tree with an
+            // elevated taskkill /T against the shell PID (one extra UAC prompt
+            // on a rare path; leaving an admin tree running is worse), then
+            // fall back to the bare terminate.
+            let shell_pid = unsafe { GetProcessId(handle) };
+            if shell_pid != 0 {
+                kill_tree_elevated(shell_pid);
+            }
             unsafe { TerminateProcess(handle, 1) };
             true
         } else {
