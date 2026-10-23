@@ -426,7 +426,7 @@ export function buildEditTools(ctx: ToolContext) {
 
     multi_edit: tool({
       description:
-        "Apply several replacements to ONE file in a single atomic call. Same exact-match rules as edit: every old_string must be copied verbatim from the file's current content. Edits apply in order; an edit that fails to match is reported individually and the rest still land. Prefer this over repeated edit calls when changing several spots in the same file. Asks for user approval.",
+        "Apply several replacements to ONE file in a single atomic call. The file path goes in the TOP-LEVEL `path` field — do NOT put a `path` inside each edit object (an edit-level path is tolerated as a fallback but the top-level field is the contract). `line_hint` per edit is accepted and used to disambiguate repeated old_strings; never omit an edit because you fear it. Same exact-match rules as edit: every old_string must be copied verbatim from the file's current content. Edits apply in order; an edit that fails to match is reported individually and the rest still land. Prefer this over repeated edit calls when changing several spots in the same file. Asks for user approval.",
       inputSchema: z.object({
         path: z.string().optional(),
         edits: z

@@ -3,6 +3,20 @@
 All notable changes to the KAI terminal emulator project are documented in this file. KAI adheres to Semantic Versioning.
 
 ---
+
+## [1.9.2]
+
+- AI: watch fires render collapsed — a one-line pill (⏱ label · exit code) that expands on click, so a firing no longer scrolls the whole chat with raw stdout.
+- AI: watch fires that land mid-conversation are passive — they ride the next request instead of queueing a self-initiated wake that interrupted your exchange; idle fires still wake proactively.
+- AI: old watch firings are elided from model context (newest 2 stay verbatim) — a long monitoring session no longer re-sends every firing on every turn.
+- AI: fixed the "Ended after tool call" flash that self-resumed — an answered approval now suppresses the banner until the continuation stream actually starts.
+- AI: approving a tool no longer unmounts the mini window (React #310 hoisting violation in SessionPicker; same latent violation fixed in WorkspaceEnvSelector).
+- AI: multi_edit call shapes pinned by tests — top-level `path`, per-edit `path` fallback, and `line_hint` all validate and execute; description spells out the contract.
+- Sessions: project switches no longer re-pollute session metadata — meta-list and activeId writes are scope-filtered; shipped a re-homing repair script for already-corrupted store files.
+- Radio: global mute shortcut (Ctrl/Cmd+Shift+M).
+
+---
+
 ## [1.9.1]
 
 - Security: update restart now works — `process:default` capability was missing, so relaunch failed in release builds.
