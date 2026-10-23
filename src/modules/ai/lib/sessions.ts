@@ -258,11 +258,60 @@ export async function loadMessages(id: string): Promise<UIMessage[] | null> {
   }
 }
 
+/**
+ * Persist the sessions META LIST — PROJECT-SCOPED, not global.
+ *
+ * The in-memory `sessions` list is deliberately GLOBAL across projects
+ * (merge-in-memory hydration; SessionPicker filters for display). But the
+ * per-project store FILE must only contain its own project's metas — writing
+ * the global list into the scoped file was the cross-contamination bug:
+ * every newSession/deleteSession/rename in ANY project copied ~all other
+ * projects' session metas into whichever file was scoped, and loadAll() then
+ * restored a polluted activeId (a foreign session whose message blob wasn't
+ * in the file → "session doesn't load / looks corrupted").
+ *
+ * Filter to the CURRENT SCOPE OWNER's sessions before writing. Callers
+ * passing a hand-built local list still work (its entries are by
+ * construction for this project). Unscoped sessions (null root) stay in the
+ * legacy global file.
+ */
 export async function saveSessionsList(sessions: SessionMeta[]): Promise<void> {
-  await store.set(KEY_SESSIONS, sessions);
+  const owner = normalizeWorkspacePath(sessionsScopeOwner());
+  const scoped = sessions.filter((s) => {
+    if (!s) return false;
+    const r = normalizeWorkspacePath(s.workspaceRoot);
+    // Legacy global file keeps unscoped sessions; a project file keeps only
+    // its own root's sessions.
+    if (owner == null) return r == null;
+    return r === owner;
+  });
+  await store.set(KEY_SESSIONS, scoped);
 }
 
 export async function saveActiveId(id: string | null): Promise<void> {
+  // Scope invariant: a project file's `activeId` must reference a session
+  // that lives in THAT file. Writing a foreign id here was the second half
+  // of the cross-contamination bug — loadAll() then restored an active
+  // session whose message blob isn't in the file ("last session doesn't
+  // load / looks corrupted"). Look up the id's own root from the in-memory
+  // GLOBAL list (chatStore keeps all metas) and route the write to the id's
+  // OWN project file; null stays in the current scope (legacy/global).
+  if (id != null) {
+    const { getSessionsMetaById } = await import("../store/chatStore");
+    const meta = getSessionsMetaById(id);
+    const r = normalizeWorkspacePath(meta?.workspaceRoot);
+    const owner = normalizeWorkspacePath(sessionsScopeOwner());
+    if (r != null && owner != null && r !== owner) {
+      // Foreign id — write it to its own project file instead.
+      const s = new LazyStore(scopedPath(meta?.workspaceRoot), {
+        defaults: {},
+        autoSave: 200,
+      });
+      await s.set(KEY_ACTIVE, id);
+      await s.save().catch(() => {});
+      return;
+    }
+  }
   await store.set(KEY_ACTIVE, id);
 }
 

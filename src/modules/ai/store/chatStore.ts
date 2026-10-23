@@ -1472,6 +1472,13 @@ export function getChat(sessionId?: string): Chat<UIMessage> | undefined {
   return id ? chats.get(id) : undefined;
 }
 
+/** Session meta by id from the GLOBAL in-memory list (all projects). Exported
+ *  for saveActiveId's scope routing in sessions.ts — a file's `activeId` must
+ *  reference a session that lives in that file. */
+export function getSessionsMetaById(id: string): SessionMeta | undefined {
+  return useChatStore.getState().sessions.find((s) => s.id === id);
+}
+
 export async function sendMessage(text: string): Promise<boolean> {
   const state = useChatStore.getState();
   const sessionId = state.activeSessionId;
