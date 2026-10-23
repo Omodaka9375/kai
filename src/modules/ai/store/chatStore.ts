@@ -1496,6 +1496,28 @@ const COMPLETE_PART_STATES = new Set([
   "approval-responded",
 ]);
 
+/**
+ * True when a message's parts hold an approval that is pending OR just
+ * responded — i.e. the SDK is about to (or may) fire a continuation request
+ * for this turn. Used by the chat UI to suppress the "Ended after tool
+ * call" + Continue banner: responding to an approval moves the part from
+ * `approval-requested` to `approval-responded`, and the follow-up request
+ * then goes through transport prep (project rules, memory, summarization,
+ * MCP gathering) + network latency — a multi-second window in which the
+ * status is `ready` and the run LOOKS finished. The banner flashes, then
+ * "the agent continues on its own". A denied approval also continues (the
+ * model sees the denial), so ANY responded approval counts as pending
+ * continuation, not just approved ones.
+ */
+export function approvalContinuationPending(
+  parts: ReadonlyArray<unknown>,
+): boolean {
+  return parts.some((p) => {
+    const st = (p as { state?: string }).state ?? "";
+    return st === "approval-requested" || st === "approval-responded";
+  });
+}
+
 function hasPendingApprovals(chat: Chat<UIMessage>): boolean {
   for (const m of chat.messages) {
     if (m.role !== "assistant") continue;

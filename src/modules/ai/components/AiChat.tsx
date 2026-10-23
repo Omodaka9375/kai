@@ -34,7 +34,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { SLASH_COMMANDS, Kai_CMD_RE } from "../lib/slashCommands";
 import { Spinner } from "@/components/ui/spinner";
-import { useChatStore, sendMessage, respondToApprovalStandalone, resolveErrorDisplay } from "../store/chatStore";
+import { useChatStore, sendMessage, respondToApprovalStandalone, resolveErrorDisplay, approvalContinuationPending } from "../store/chatStore";
 import type {
   ChatStatus,
   DynamicToolUIPart,
@@ -234,13 +234,13 @@ export function AiChatView({
     if (!lastMessage || lastMessage.role !== "assistant") return false;
     const parts = lastMessage.parts;
     if (parts.length === 0) return false;
-    // Waiting on an approval: the accept/deny buttons in the approval card
-    // already convey both the stop and the next action, so suppress the
-    // redundant "Ended after tool call" line and its Continue button.
-    const awaitingApproval = parts.some(
-      (p) => ((p as { state?: string }).state ?? "") === "approval-requested",
-    );
-    if (awaitingApproval) return false;
+    // Waiting on an approval (or one just answered): the accept/deny card
+    // conveys the stop, and the SDK fires a continuation request that takes
+    // seconds of transport prep + network to appear — in that window the run
+    // LOOKS finished. Suppress both the "Ended after tool call" line and its
+    // Continue button until the follow-up stream actually starts (status
+    // leaves `ready`).
+    if (approvalContinuationPending(parts)) return false;
     const lastPart = parts[parts.length - 1];
     const type = (lastPart as { type?: string }).type ?? "";
     // If the last part is text, the agent already said something visible.
