@@ -726,7 +726,6 @@ app.manage(Mutex::new(None::<fs::env_probe::EnvInventory>));
             shell::shell_bg_reap,
             shell::shell_bg_list,
             workspace::wsl_list_distros,
-            workspace::wsl_default_distro,
             workspace::wsl_home,
             workspace::workspace_authorize,
             workspace::workspace_current_dir,

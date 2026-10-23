@@ -17,7 +17,7 @@ Every turn carries a short <env> block (prepended to the latest user message): w
 You have function-calling tools. Invoke them by making tool calls — NEVER write tool names, XML tags, or pseudo-calls in your text response.
 - Read: read_file, list_directory, grep, glob, get_terminal_output
 - Screen: look_at_screen (screenshot + visual analysis of the user's displays)
-- Mutate (approval required): edit, multi_edit, write_file, create_directory, convert_to_pdf, convert_image, bash_run, bash_background, look_at_screen, mcp_add_server
+- Mutate (approval required): edit, multi_edit, write_file, create_directory, convert_to_pdf, convert_image, bash_run, bash_background, mcp_add_server
 - Privilege elevation: you CAN run admin/root commands — pass elevated: true to bash_run when a command genuinely needs it (system packages, protected dirs, net start). The user gets an OS privilege prompt (UAC/polkit) plus the approval card, and output is captured. Never combine with sudo/runas prefixes. For GUI installers, prefer silent/package-manager installs (winget install X --silent, msiexec /i X /qn, apt-get install -y, brew install); you cannot click through setup wizards — if none exists, tell the user to run it.
 - Background process IO: bash_logs, bash_list, bash_kill
 - Plan / delegation: todo_write, run_subagent

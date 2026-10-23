@@ -1271,8 +1271,8 @@ export default function App() {
     [newPreviewTab],
   );
 
-  // Intercept link clicks: open in preview tab (for localhost always,
-  // for external URLs when a proxy is configured).
+  // Intercept link clicks: open in preview tab (localhost only);
+  // external URLs go to the system browser.
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       const anchor = (e.target as HTMLElement)?.closest?.("a[href]");

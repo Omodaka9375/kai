@@ -60,8 +60,15 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, Props>(
       [url],
     );
 
-    const iframeSrc = url;
-    const showXfoHint = url ? !isLocalUrl(url) : false;
+    // SECURITY: only http(s) reaches the iframe. The sandbox combines
+    // allow-scripts + allow-same-origin, so a frame whose URL resolves to the
+    // app's own origin (tauri:, file:, javascript:, data:, blob:) would get
+    // full access to the webview's __TAURI__ IPC. Anything not http(s) is
+    // rendered as a blocked notice instead of a frame.
+    const safeUrl = /^https?:\/\//i.test(url) ? url : "";
+    const iframeSrc = safeUrl;
+    const schemeBlocked = !!url && !safeUrl;
+    const showXfoHint = safeUrl ? !isLocalUrl(safeUrl) : false;
 
     return (
       <div
@@ -99,7 +106,11 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, Props>(
               : "relative min-h-0 flex-1 bg-background"
           }
         >
-          {url ? (
+          {schemeBlocked ? (
+            <div className="flex h-full w-full items-center justify-center px-6 text-center text-[12px] text-muted-foreground">
+              This URL cannot be previewed — only http(s) pages are supported.
+            </div>
+          ) : url ? (
             loaded ? (
               <iframe
                 key={`${iframeSrc}#${nonce}`}

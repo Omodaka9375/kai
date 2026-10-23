@@ -417,7 +417,7 @@ fn build_safe_client(
                 if require_lan_only && k == IpKind::Public {
                     return attempt.stop();
                 }
-            } else if !allow_private {
+            } else {
                 if let Some(prev) = attempt.previous().last() {
                     if prev.host_str() != Some(host) {
                         return attempt.stop();

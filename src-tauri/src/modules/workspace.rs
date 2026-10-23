@@ -306,27 +306,6 @@ pub async fn wsl_list_distros() -> Result<Vec<WslDistro>, String> {
 }
 
 #[tauri::command]
-pub async fn wsl_default_distro() -> Result<Option<String>, String> {
-    #[cfg(not(windows))]
-    {
-        Ok(None)
-    }
-    #[cfg(windows)]
-    {
-        tauri::async_runtime::spawn_blocking(|| {
-            let distros = list_distros_blocking()?;
-            Ok(distros
-                .iter()
-                .find(|d| d.default)
-                .map(|d| d.name.clone())
-                .or_else(|| distros.first().map(|d| d.name.clone())))
-        })
-        .await
-        .map_err(|e| e.to_string())?
-    }
-}
-
-#[tauri::command]
 pub fn wsl_home(distro: String) -> Result<String, String> {
     #[cfg(not(windows))]
     {

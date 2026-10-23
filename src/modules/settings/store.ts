@@ -60,7 +60,6 @@ export type Preferences = {
   lastWslDistro: string | null;
   zoomLevel: number;
   shortcuts: Record<ShortcutId, KeyBinding[]>;
-  /** Proxy URL for non-local web preview. `{url}` is replaced with the target. */
   /** Preferred shell on Windows: "auto", "cmd", "powershell", "pwsh", or a custom path. */
   defaultShell: string;
   /** Last workspace directory — restored on next launch if no launch dir. */
@@ -158,6 +157,7 @@ const KEY_ZOOM_LEVEL = "zoomLevel";
 const KEY_SHORTCUTS = "shortcuts";
 const KEY_DEFAULT_SHELL = "defaultShell";
 const KEY_LAST_WORKSPACE_CWD = "lastWorkspaceCwd";
+const KEY_RECENT_PROJECTS = "recentProjects";
 const KEY_LMSTUDIO_CTX_SIZE = "lmstudioContextSize";
 const KEY_COMPAT_CTX_SIZE = "openaiCompatibleContextSize";
 const KEY_COMPAT_THINKING = "openaiCompatibleThinkingMode";
@@ -419,7 +419,7 @@ export async function setTheme(value: ThemePref): Promise<void> {
 }
 
 export async function setRecentProjects(value: string[]): Promise<void> {
-  await writePref("recentProjects", value);
+  await writePref(KEY_RECENT_PROJECTS, value);
 }
 
 /** Bound on per-project model overrides. Projects are keyed by normalized root;
@@ -733,6 +733,7 @@ export async function onPreferencesChange(
     [KEY_TERMINAL_FONT_SIZE]: "terminalFontSize",
     [KEY_TERMINAL_SCROLLBACK]: "terminalScrollback",
     [KEY_LAST_WSL_DISTRO]: "lastWslDistro",
+    [KEY_RECENT_PROJECTS]: "recentProjects",
     [KEY_ZOOM_LEVEL]: "zoomLevel",
     [KEY_SHORTCUTS]: "shortcuts",
     [KEY_DEFAULT_SHELL]: "defaultShell",
