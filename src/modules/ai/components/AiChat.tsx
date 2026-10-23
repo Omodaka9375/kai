@@ -451,6 +451,57 @@ const CompactionNotice = memo(function CompactionNotice({
   );
 });
 
+/**
+ * Watch fire rendering — COLLAPSED by default.
+ *
+ * Watch injections carry up to 2000 chars of raw command stdout; rendered
+ * full-height they scroll the whole chat on every firing ("the chat jumps
+ * every time the watch fires"). The pill shows the one-line header (label,
+ * exit code, poll count) and expands to the full markdown body on click.
+ * Default-collapsed state is per-message, not persisted — fresh fires also
+ * start collapsed, which is the desired anti-scroll behavior.
+ */
+const WatchFireMessage = memo(function WatchFireMessage({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  // Header line: `**Watch fired**: `label` (exit: 0, poll #N)` — strip the
+  // markdown emphasis for the pill (the body keeps full markdown when open).
+  const header = useMemo(() => {
+    const m = /^\*\*Watch (?:fired|stopped)\*\*: (`.+?`) \((exit: [^)]+)\)/.exec(
+      text,
+    );
+    if (!m) return text.split("\n")[0].slice(0, 120) || "Watch notification";
+    const label = m[1].replace(/^`|`$/g, "");
+    return `⏱ Watch ${text.includes("**Watch stopped**") ? "stopped" : "fired"} · ${label} · ${m[2]}`;
+  }, [text]);
+  return (
+    <Message from="user">
+      <MessageContent>
+        <Collapsible open={open} onOpenChange={setOpen}>
+          <CollapsibleTrigger
+            className={cn(
+              "flex w-full items-center gap-1.5 rounded-lg border border-border/50 bg-muted/40 px-2.5 py-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground",
+            )}
+          >
+            <HugeiconsIcon
+              icon={ArrowRight01Icon}
+              size={12}
+              strokeWidth={1.8}
+              className={cn(
+                "shrink-0 text-muted-foreground/60 transition-transform",
+                open && "rotate-90",
+              )}
+            />
+            <span className="min-w-0 truncate text-left">{header}</span>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <MessageResponse>{text}</MessageResponse>
+          </CollapsibleContent>
+        </Collapsible>
+      </MessageContent>
+    </Message>
+  );
+});
+
 const SummaryNotice = memo(function SummaryNotice({
   onDismiss,
   text,
@@ -536,13 +587,7 @@ const RenderedMessage = memo(function RenderedMessage({
       ((message as { metadata?: { kind?: string } }).metadata?.kind ?? "") ===
       "watch";
     if (isWatchMessage) {
-      return (
-        <Message from="user">
-          <MessageContent>
-            <MessageResponse>{rawText}</MessageResponse>
-          </MessageContent>
-        </Message>
-      );
+      return <WatchFireMessage text={rawText} />;
     }
 
     const cmdMatch = rawText.match(Kai_CMD_RE);

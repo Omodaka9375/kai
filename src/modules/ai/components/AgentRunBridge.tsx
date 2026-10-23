@@ -6,7 +6,6 @@ import { checkReadable } from "../lib/security";
 import { resolvePath } from "../tools/tools";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
-  flushPendingWatchWakes,
   flushPersist,
   getOrCreateChat,
   useChatStore,
@@ -230,14 +229,12 @@ function Bridge({
   }, [approvalsPending, openMini]);
 
   // ---- Watch wake-up flush --------------------------------------------------
-  // A watch that fired while the agent was streaming/submitted (or paused on an
-  // approval) couldn't wake the model inline — the in-flight run had already
-  // snapshotted its messages. Once this session settles back to idle, flush any
-  // queued watch wake so the model reacts to the change it was told to watch.
-  useEffect(() => {
-    if (status === "submitted" || status === "streaming") return;
-    flushPendingWatchWakes(sessionId);
-  }, [status, sessionId]);
+  // (REMOVED) A watch that fired mid-run used to queue a self-initiated wake
+  // here that fired the moment the run settled — hijacking the user's
+  // conversation with an unsolicited narrated response mid-exchange.
+  // Mid-run fires are now PASSIVE: they sit in history and ride the next
+  // request (any next request carries the full history, fire included).
+  // Idle fires wake inline from injectMessage; nothing left to flush.
 
   // ---- End-of-run auto-verify -----------------------------------------------
   // Write tools only mark the project dirty (zero latency on the tool result);

@@ -22,7 +22,7 @@
  */
 
 import { native } from "../lib/native";
-import { useChatStore, flushAllPendingWatchWakes } from "../store/chatStore";
+import { useChatStore } from "../store/chatStore";
 import { tool, generateId } from "ai";
 import { z } from "zod";
 import type { ToolContext } from "./context";
@@ -724,14 +724,19 @@ function injectWatchResult(
   if (result.timed_out) {
     text += "\n\n⚠️ Command timed out.";
   }
+  // Brevity directive riding along with the firing: watches that fire
+  // repeatedly (CI/CD status polls) used to get a full narrated response
+  // per firing — the model restated the whole history each time. One line
+  // per firing is enough; the wake-up turn should evaluate and report the
+  // DELTA, not replay the conversation.
+  text += "\n\n(you created a watch for this — do not re-poll the command yourself, do not re-create watches, and keep your response to this firing brief: assess the result, act if needed, and end your turn)";
 
   // Inject as a system message so the model sees it as new information.
+  // Mid-run fires are PASSIVE (see chatStore injectMessage): the message
+  // rides the next request's history — no queued self-initiated wake to
+  // hijack the user's conversation. Idle fires wake inline (injectMessage).
   const sessionId = w.sessionId;
   void useChatStore.getState().injectMessage(sessionId, text);
-  // The injection may have queued a wake for a NON-active session (the
-  // bridge only flushes for the session it's mounted against) — flush all
-  // queued wakes so the background session reacts too.
-  flushAllPendingWatchWakes();
 
   // Optional Telegram ping: the same firing ALSO reaches the owner's phone
   // when the watch opted in. Fail-soft — no assistant → silent no-op.
@@ -757,7 +762,6 @@ function injectWatchFailure(w: WatchState): void {
     `and the watch was auto-stopped. Last error:\n\`\`\`\n${(w.lastError ?? "unknown").slice(0, 500)}\n\`\`\`\n` +
     `If this task still needs monitoring, create a new watch with watch_create.`;
   void useChatStore.getState().injectMessage(w.sessionId, text);
-  flushAllPendingWatchWakes();
 }
 
 // ── Tool implementations ──────────────────────────────────────────────────
@@ -766,7 +770,7 @@ export function buildWatchTools(ctx: ToolContext) {
   return {
     watch_create: tool({
       description:
-        "Create a periodic watch on a shell command. The command is polled every N seconds. When the condition matches (or output changes, in change-detection mode), the result is injected into the conversation as new information. Use for CI/CD monitoring, build status polling, process watching, and git change detection. Watches are automatically stopped when the session ends. Use watch_list to see active watches, watch_kill to stop one.",
+        "Create a periodic watch on a shell command. The command is polled every N seconds. When the condition matches (or output changes, in change-detection mode), the result is injected into the conversation as new information. Use for CI/CD monitoring, build status polling, process watching, and git change detection. Watches are automatically stopped when the session ends. IMPORTANT: while the watch is active, DO NOT poll the same thing yourself with sleep loops or repeated manual runs — the watch fires by itself and your turn blocks; end your turn and wait for the injection. Use watch_list to see active watches, watch_kill to stop one.",
       inputSchema: z.object({
         command: z.string().describe("Shell command to run periodically."),
         interval_secs: z.number().min(5).max(300).describe("Polling interval in seconds (5-300)."),

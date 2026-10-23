@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compactModelMessagesDetailed } from "./compact";
+import { compactModelMessagesDetailed, elideStaleWatchFires } from "./compact";
 import type { ModelMessage } from "ai";
 
 const b64 = (n: number) => "A".repeat(n);
@@ -204,5 +204,85 @@ describe("compactModelMessagesDetailed — screenshot dataUrl strip", () => {
     const result = (r.messages[1].content as { type: string; output: { image?: { dataUrl?: string } } }[])
       .find((p) => p.type === "tool-result")!;
     expect(result.output.image?.dataUrl).toBe("data:image/jpeg;base64,AAAA");
+  });
+});
+
+describe("elideStaleWatchFires", () => {
+  const fireMsg = (id: string, body: string): ModelMessage => ({
+    role: "user",
+    content: [{ type: "text", text: `**Watch fired**: \`ci\` (exit: 0, poll #${id})\n\n\`\`\`\n${body}\n\`\`\`` }],
+  });
+  const textMsg: ModelMessage = { role: "user", content: "hello" };
+
+  it("keeps the last 2 watch fires verbatim, elides older ones", () => {
+    const msgs: ModelMessage[] = [
+      fireMsg("1", "A".repeat(2000)),
+      fireMsg("2", "B".repeat(2000)),
+      fireMsg("3", "C".repeat(2000)),
+      textMsg,
+    ];
+    const { out, touched } = elideStaleWatchFires(msgs);
+    expect(touched).toBe(true);
+    const t = (i: number) => (out[i].content as { type: string; text: string }[])[0].text;
+    // Fire 1 (oldest) elided; fires 2,3 (newest 2) verbatim; text untouched.
+    expect(t(0)).toContain("elided to save context");
+    expect(t(1)).toBe((msgs[1].content as { type: string; text: string }[])[0].text);
+    expect(t(2)).toBe((msgs[2].content as { type: string; text: string }[])[0].text);
+    expect(out[3]).toBe(textMsg);
+  });
+
+  it("keeps ALL fires verbatim when there are 2 or fewer", () => {
+    const msgs: ModelMessage[] = [fireMsg("1", "A".repeat(2000)), fireMsg("2", "B".repeat(2000))];
+    const { out, touched } = elideStaleWatchFires(msgs);
+    expect(touched).toBe(false);
+    expect(out).toBe(msgs);
+  });
+
+  it("recognizes watch STOPPED self-reports too", () => {
+    const msgs: ModelMessage[] = [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: `**Watch stopped**: \`ci\` (id: w1) — its command failed 10 polls in a row...` },
+        ],
+      },
+      ...[1, 2].map((i) => fireMsg(String(i), "X".repeat(2000))),
+    ];
+    const { touched } = elideStaleWatchFires(msgs);
+    expect(touched).toBe(true);
+  });
+
+  it("ignores non-watch user messages entirely", () => {
+    const msgs: ModelMessage[] = [textMsg, textMsg];
+    const { out, touched } = elideStaleWatchFires(msgs);
+    expect(touched).toBe(false);
+    expect(out).toBe(msgs);
+  });
+
+  it("handles string-content user messages", () => {
+    const msgs: ModelMessage[] = [
+      { role: "user", content: `**Watch fired**: \`ci\` (exit: 0, poll #1)\n\n${"A".repeat(2000)}` },
+      fireMsg("2", "B".repeat(2000)),
+      fireMsg("3", "C".repeat(2000)),
+    ];
+    const { out, touched } = elideStaleWatchFires(msgs);
+    expect(touched).toBe(true);
+    expect(typeof out[0].content).toBe("string");
+    expect(out[0].content as string).toContain("elided to save context");
+  });
+
+  it("runs inside compactModelMessagesDetailed (wired into the pipeline)", () => {
+    const history: ModelMessage[] = [];
+    for (let i = 1; i <= 4; i++) {
+      history.push(fireMsg(String(i), "D".repeat(2000)));
+      history.push({ role: "assistant", content: "noted" });
+    }
+    const r = compactModelMessagesDetailed(history, 1_000_000);
+    expect(r.compacted).toBe(true);
+    const firstFire = (r.messages[0].content as { type: string; text: string }[])[0].text;
+    expect(firstFire).toContain("elided to save context");
+    const lastFire = (r.messages[r.messages.length - 2].content as { type: string; text: string }[])[0].text;
+    expect(lastFire).toContain("poll #4");
+    expect(lastFire).not.toContain("elided to save context");
   });
 });

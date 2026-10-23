@@ -155,6 +155,74 @@ export type CompactResult = {
   needsSummarization: boolean;
 };
 
+// ── Watch-fire elision ──────────────────────────────────────────────────
+//
+// Watch firings inject their result as a PERSISTENT user message (up to
+// 2000 chars of stdout). Unlike tool results, nothing elided them: a long
+// monitoring session (CI deploy polled every 10s for half an hour) stacked
+// fire on fire, and EVERY later agent turn re-sent the whole stack — the
+// model re-read (and often re-narrated) every firing since the watch began,
+// and each response got slower ("watch firing replays the conversation").
+//
+// Same rationale as tool-result elision: an old firing has already served
+// its purpose (the model reacted at fire time). Keep the last
+// WATCH_KEEP_VERBATIM firings verbatim — the model may still be acting on
+// them — and truncate older ones to a compact head (label + exit + poll
+// count survive; the bulky stdout body goes).
+const WATCH_MARKER_RE = /^\*\*Watch (?:fired|stopped)\*\*:/;
+const WATCH_KEEP_VERBATIM = 2;
+const WATCH_ELIDED_HEAD_CHARS = 240;
+
+function firstTextOf(m: ModelMessage): string | null {
+  if (typeof m.content === "string") return m.content;
+  if (!Array.isArray(m.content)) return null;
+  for (const part of m.content as ToolPart[]) {
+    if (part.type === "text" && typeof part.text === "string") return part.text;
+  }
+  return null;
+}
+
+/** Truncate a stale watch-fire message to its head, with a marker note. */
+function elideWatchFire(m: ModelMessage): ModelMessage {
+  const note =
+    "\n[...older watch firing elided to save context — label/exit/poll above; full output was already reacted to]";
+  if (typeof m.content === "string") {
+    const head = { ...m, content: m.content.slice(0, WATCH_ELIDED_HEAD_CHARS) + note };
+    return head as unknown as ModelMessage;
+  }
+  const parts = (m.content as ToolPart[]).map((part) => {
+    if (part.type !== "text" || typeof part.text !== "string") return part;
+    return { ...part, text: part.text.slice(0, WATCH_ELIDED_HEAD_CHARS) + note };
+  });
+  // Watch-fire injections are always user TEXT messages; the array form is
+  // TextPart[] after the map above, but the local ToolPart[] view needs the
+  // cast to satisfy ModelMessage's user-content union.
+  return { ...m, content: parts } as unknown as ModelMessage;
+}
+
+export function elideStaleWatchFires(messages: ModelMessage[]): {
+  out: ModelMessage[];
+  touched: boolean;
+} {
+  const fireIdx: number[] = [];
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (m.role !== "user") continue;
+    const t = firstTextOf(m);
+    if (t && WATCH_MARKER_RE.test(t)) fireIdx.push(i);
+  }
+  if (fireIdx.length <= WATCH_KEEP_VERBATIM) return { out: messages, touched: false };
+  const keepVerbatim = new Set(fireIdx.slice(-WATCH_KEEP_VERBATIM));
+  let touched = false;
+  const out = messages.map((m, i) => {
+    if (keepVerbatim.has(i)) return m; // newest fires stay verbatim
+    if (!fireIdx.includes(i)) return m; // not a watch fire
+    touched = true;
+    return elideWatchFire(m);
+  });
+  return { out, touched };
+}
+
 export function compactModelMessages(
   messages: ModelMessage[],
   contextLimit: number,
@@ -403,6 +471,17 @@ export function compactModelMessagesDetailed(
   }
 
   // ── Phase 2: truncate large tool results ──
+  // Also elide stale watch firings here (before truncation thresholds):
+  // watch fires are persistent USER messages nothing else elides, so a long
+  // monitoring session re-sends every firing on every turn.
+  {
+    const r = elideStaleWatchFires(working);
+    if (r.touched) {
+      working = r.out;
+      dropped++;
+      approxTokens = approxBytes(working) / 4;
+    }
+  }
   if (approxTokens >= 0.6 * effectiveLimit) {
     let localDropped = 0;
     working = working.map((m): ModelMessage => {

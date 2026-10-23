@@ -394,73 +394,18 @@ let hydrateChain: Promise<void> = Promise.resolve();
 const runControllers = new Map<string, AbortController>();
 
 /**
- * Sessions whose watch fired while the agent was still busy (streaming/
- * submitted) or awaiting an approval. The wake-up `sendMessage()` can't run
- * then — a mid-stream injection is lost because the in-flight `transport.run()`
- * already snapshotted its message list. Rather than dropping the wake (the
- * previous behavior — the model never reacted to a watch that fired during a
- * long agent turn), we record the session here and flush it once the agent
- * settles back to idle via `flushPendingWatchWakes`.
+ * WATCH WAKE POLICY (the pending-wake queue was removed):
+ *
+ * A watch fire that lands while the agent is mid-run (streaming/submitted)
+ * or paused on an approval card is PASSIVE — the injected message sits in
+ * history and rides the next request (the user's next message, a
+ * continuation, anything) rather than starting its own turn. The old
+ * behavior queued a self-initiated wake that fired the moment the run
+ * settled, hijacking the user's conversation with an unsolicited narrated
+ * response mid-exchange ("it fires in the middle of my conversation and
+ * messes everything up"). Idle fires (agent ready, nothing in flight) still
+ * wake proactively — that's the walk-away monitoring contract.
  */
-const pendingWatchWakes = new Set<string>();
-
-/** Add a session to the pending-wake set. Idempotent. */
-function queueWatchWake(sessionId: string): void {
-  pendingWatchWakes.add(sessionId);
-}
-
-/**
- * Flush queued watch wakes for a session once its run has settled to `ready`
- * (or `error`). Called from `AgentRunBridge` when `status` transitions out of
- * `submitted`/`streaming`. One wake per session — the injected watch message
- * is already in history, so a single `sendMessage()` re-runs over the current
- * (watch-terminated) history and lets the model react.
- */
-export function flushPendingWatchWakes(sessionId: string): void {
-  if (!pendingWatchWakes.delete(sessionId)) return;
-  const chat = chats.get(sessionId);
-  if (!chat) return;
-  if (
-    chat.status === "streaming" ||
-    chat.status === "submitted" ||
-    hasPendingApprovals(chat)
-  ) {
-    // Still busy OR paused on an approval card — re-queue and wait for the
-    // next settle. (The approvals path used to DROP the wake: a watch that
-    // fired while the user was deciding sat unanswered until the next user
-    // turn. Re-queueing keeps it one transition away from delivery; when the
-    // approval resolves, the continuation's history snapshot already
-    // includes the watch message, so at worst the wake is redundant.)
-    pendingWatchWakes.add(sessionId);
-    return;
-  }
-  void chat.sendMessage().catch((e) => {
-    console.error("[kai] watch wake-up failed:", e);
-  });
-}
-
-/**
- * Flush queued watch wakes for ALL sessions, not just the active one. The
- * AgentRunBridge effect only fires for the session it's mounted against —
- * a watch on a background session (the user switched chats mid-monitoring)
- * stayed queued forever: its wake sat in pendingWatchWakes until the user
- * happened to switch back, so "the watch fired but the agent never
- * reacted". Called whenever a watch injects a message, so every firing
- * gets its session a wake attempt regardless of which session is open.
- */
-export function flushAllPendingWatchWakes(): void {
-  // SNAPSHOT before iterating: `flushPendingWatchWakes` re-queues busy
-  // sessions back into this same Set, and a JS `for..of` over a Set visits
-  // items added mid-iteration — so iterating the live Set loops FOREVER
-  // whenever any queued session is busy (agent streaming/submitted or an
-  // approval pending): delete → busy → re-add → visit again → …
-  // Synchronously, on the webview main thread — the whole app froze and had
-  // to be killed from Task Manager. Iterating a copy visits each session
-  // at most once; busy ones keep their queue entry for the next flush.
-  for (const id of [...pendingWatchWakes]) {
-    flushPendingWatchWakes(id);
-  }
-}
 
 export function registerRunController(sessionId: string, c: AbortController): void {
   // A new run supersedes any stale controller for the session.
@@ -1225,18 +1170,28 @@ export const useChatStore = create<StoreState>((set, get) => ({
     // args: it makes a request over the current history — which now ends
     // with the watch message.
     //
-    // If the agent is mid-run (streaming/submitted) or a run's last assistant
-    // turn ended on a pending approval, DON'T drop the wake: the in-flight run
-    // has already snapshotted its message list (the injected watch message is
-    // invisible to it), and sending now would yank the paused agent out of its
-    // state. Queue the wake instead — AgentRunBridge flushes it as soon as the
-    // run settles back to idle.
+    // Mid-conversation fires are PASSIVE: if the agent is mid-run
+    // (streaming/submitted) or paused on an approval card, the injected fire
+    // lands in history but does NOT start (or queue) its own turn — the
+    // in-flight run already snapshotted its messages (invisible to it), and
+    // a self-initiated wake right after the run settles used to hijack the
+    // user's conversation with an unsolicited narrated response ("it fires in
+    // the middle of my conversation and messes everything up"). Instead the
+    // fire rides along: every LATER request — the user's next message, a
+    // continuation, anything — carries the full history, fire included, and
+    // the model reacts within the user's own thread.
+    //
+    // Idle fires (agent ready, nothing in flight) keep the proactive wake —
+    // that's the monitoring contract: watch the deploy while I'm away, act
+    // when it lands.
     if (
       chat.status === "streaming" ||
       chat.status === "submitted" ||
       hasPendingApprovals(chat)
     ) {
-      queueWatchWake(id);
+      // Passive ride-along: no wake, no queue. The message is already in
+      // chat.messages (appended above) and will be in the next request's
+      // history snapshot.
     } else {
       void chat.sendMessage().catch((e) => {
         console.error("[kai] watch wake-up failed:", e);
