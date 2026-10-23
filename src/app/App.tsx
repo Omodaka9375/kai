@@ -1296,9 +1296,7 @@ export default function App() {
           );
         } catch { return false; }
       })();
-      const hasProxy = !!usePreferencesStore.getState().previewProxyUrl;
-
-      if (isLocal || hasProxy) {
+      if (isLocal) {
         e.preventDefault();
         e.stopPropagation();
         openPreviewTab(href);

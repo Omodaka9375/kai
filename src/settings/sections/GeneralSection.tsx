@@ -22,7 +22,6 @@ import {
   TERMINAL_SCROLLBACK_PRESETS,
   setAutostart,
   setEditorTheme,
-  setPreviewProxyUrl,
   setRestoreWindowState,
   setShowHidden,
   setRadioEnabled,
@@ -44,7 +43,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { SectionHeader } from "../components/SectionHeader";
 import { SettingRow } from "../components/SettingRow";
 
@@ -370,10 +369,6 @@ export function GeneralSection() {
 
 
 
-      <div className="flex flex-col gap-2">
-        <Label>Web Preview</Label>
-        <ProxyUrlField />
-      </div>
 
       <div className="flex flex-col gap-2">
         <Label>Startup</Label>
@@ -398,41 +393,6 @@ export function GeneralSection() {
           </SettingRow>
         </div>
       </div>
-    </div>
-  );
-}
-
-function ProxyUrlField() {
-  const saved = usePreferencesStore((s) => s.previewProxyUrl);
-  const [draft, setDraft] = useState(saved);
-  useEffect(() => setDraft(saved), [saved]);
-  const dirty = draft !== saved;
-
-  return (
-    <div className="flex flex-col gap-1.5">
-      <SettingRow
-        title="Proxy URL"
-        description="Route non-local URLs through a proxy that strips X-Frame-Options. Use {url} as a placeholder. Leave empty to disable."
-      >
-        <div className="flex items-center gap-1.5">
-          <input
-            type="text"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder="https://proxy.example.com/?url={url}"
-            spellCheck={false}
-            className="h-8 w-64 rounded-md border border-border bg-background px-2 font-mono text-[11px] outline-none placeholder:text-muted-foreground/50 focus:ring-1 focus:ring-ring"
-          />
-          {dirty && (
-            <Button
-              size="xs"
-              onClick={() => void setPreviewProxyUrl(draft.trim())}
-            >
-              Save
-            </Button>
-          )}
-        </div>
-      </SettingRow>
     </div>
   );
 }

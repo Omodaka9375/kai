@@ -22,9 +22,7 @@ function smartOpenUrl(uri: string): void {
     const u = new URL(uri);
     isLocal = u.hostname === "localhost" || u.hostname === "127.0.0.1" || u.hostname === "[::1]";
   } catch { /* invalid URL — fall through to OS browser */ }
-  const hasProxy = !!usePreferencesStore.getState().previewProxyUrl;
-
-  if (isLocal || hasProxy) {
+  if (isLocal) {
     // Dispatch a custom event that App.tsx listens for.
     window.dispatchEvent(new CustomEvent<string>("Kai:open-in-preview", { detail: uri }));
   } else {

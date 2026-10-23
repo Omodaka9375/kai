@@ -61,7 +61,6 @@ export type Preferences = {
   zoomLevel: number;
   shortcuts: Record<ShortcutId, KeyBinding[]>;
   /** Proxy URL for non-local web preview. `{url}` is replaced with the target. */
-  previewProxyUrl: string;
   /** Preferred shell on Windows: "auto", "cmd", "powershell", "pwsh", or a custom path. */
   defaultShell: string;
   /** Last workspace directory — restored on next launch if no launch dir. */
@@ -157,7 +156,6 @@ const KEY_TERMINAL_SCROLLBACK = "terminalScrollback";
 const KEY_LAST_WSL_DISTRO = "lastWslDistro";
 const KEY_ZOOM_LEVEL = "zoomLevel";
 const KEY_SHORTCUTS = "shortcuts";
-const KEY_PREVIEW_PROXY_URL = "previewProxyUrl";
 const KEY_DEFAULT_SHELL = "defaultShell";
 const KEY_LAST_WORKSPACE_CWD = "lastWorkspaceCwd";
 const KEY_LMSTUDIO_CTX_SIZE = "lmstudioContextSize";
@@ -231,7 +229,6 @@ export const DEFAULT_PREFERENCES: Preferences = {
   lastWslDistro: null,
   zoomLevel: 1.0,
   shortcuts: {} as Record<ShortcutId, KeyBinding[]>,
-  previewProxyUrl: "",
   defaultShell: "auto",
   lastWorkspaceCwd: "",
   lmstudioContextSize: 0,
@@ -337,9 +334,6 @@ export async function loadPreferences(): Promise<Preferences> {
     shortcuts:
       get<Record<ShortcutId, KeyBinding[]>>(KEY_SHORTCUTS) ??
       DEFAULT_PREFERENCES.shortcuts,
-    previewProxyUrl:
-      get<string>(KEY_PREVIEW_PROXY_URL) ??
-      DEFAULT_PREFERENCES.previewProxyUrl,
     defaultShell:
       get<string>(KEY_DEFAULT_SHELL) ??
       DEFAULT_PREFERENCES.defaultShell,
@@ -603,10 +597,6 @@ export async function setZoomLevel(value: number): Promise<void> {
   await writePref(KEY_ZOOM_LEVEL, value);
 }
 
-export async function setPreviewProxyUrl(value: string): Promise<void> {
-  await writePref(KEY_PREVIEW_PROXY_URL, value);
-}
-
 export async function setDefaultShell(value: string): Promise<void> {
   await writePref(KEY_DEFAULT_SHELL, value);
 }
@@ -745,7 +735,6 @@ export async function onPreferencesChange(
     [KEY_LAST_WSL_DISTRO]: "lastWslDistro",
     [KEY_ZOOM_LEVEL]: "zoomLevel",
     [KEY_SHORTCUTS]: "shortcuts",
-    [KEY_PREVIEW_PROXY_URL]: "previewProxyUrl",
     [KEY_DEFAULT_SHELL]: "defaultShell",
     [KEY_LAST_WORKSPACE_CWD]: "lastWorkspaceCwd",
     [KEY_LMSTUDIO_CTX_SIZE]: "lmstudioContextSize",

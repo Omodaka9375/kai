@@ -1,11 +1,9 @@
-import { usePreferencesStore } from "@/modules/settings/preferences";
 import { Alert02Icon, Globe02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   forwardRef,
   useEffect,
   useImperativeHandle,
-  useMemo,
   useRef,
   useState,
 } from "react";
@@ -62,13 +60,8 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, Props>(
       [url],
     );
 
-    const proxyTemplate = usePreferencesStore((s) => s.previewProxyUrl);
-    const iframeSrc = useMemo(() => {
-      if (!url) return "";
-      if (isLocalUrl(url) || !proxyTemplate) return url;
-      return applyProxy(proxyTemplate, url);
-    }, [url, proxyTemplate]);
-    const showXfoHint = url ? !isLocalUrl(url) && !proxyTemplate : false;
+    const iframeSrc = url;
+    const showXfoHint = url ? !isLocalUrl(url) : false;
 
     return (
       <div
@@ -187,17 +180,6 @@ function EmptyState() {
       </div>
     </div>
   );
-}
-
-function applyProxy(template: string, targetUrl: string): string {
-  if (template.includes("{url}")) {
-    return template.replace("{url}", encodeURIComponent(targetUrl));
-  }
-  // If no placeholder, append the target URL. We always URL-encode the target
-  // URL to prevent query parameter collision with the proxy's own URL structure.
-  const sep = template.endsWith("/") || template.endsWith("=") ? "" : "/";
-  const encoded = encodeURIComponent(targetUrl);
-  return `${template}${sep}${encoded}`;
 }
 
 function isLocalUrl(url: string): boolean {
