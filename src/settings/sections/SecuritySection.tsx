@@ -1,7 +1,20 @@
 import { useCallback, useEffect, useState } from "react";
-import { Cancel01Icon } from "@hugeicons/core-free-icons";
+import { ArrowDown01Icon, Cancel01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { openPath } from "@tauri-apps/plugin-opener";
+import { openPath, openUrl } from "@tauri-apps/plugin-opener";
+import { Switch } from "@/components/ui/switch";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { native, type GpgKey, type GpgStatus } from "@/modules/ai/lib/native";
+import {
+  setCommitSigningEnabled,
+  setCommitSigningMode,
+  setCommitSigningKey,
+} from "@/modules/settings/store";
 import { Button } from "@/components/ui/button";
 import {
   auditAppend,
@@ -283,6 +296,233 @@ export function SecuritySection() {
       >
         <span />
       </SettingRow>
+
+      <CommitSigningBlock />
     </div>
+  );
+}
+
+function CommitSigningBlock() {
+  const enabled = usePreferencesStore((s) => s.commitSigningEnabled);
+  const mode = usePreferencesStore((s) => s.commitSigningMode);
+  const key = usePreferencesStore((s) => s.commitSigningKey);
+
+  const [status, setStatus] = useState<GpgStatus | null>(null);
+  const [keys, setKeys] = useState<GpgKey[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      const [s, k] = await Promise.all([native.gpgStatus(), native.gpgListKeys()]);
+      setStatus(s);
+      setKeys(k);
+    } catch (e) {
+      setError(String(e));
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const applyConfig = useCallback(
+    async (nextEnabled: boolean, nextMode: "auto" | "approval", nextKey: string) => {
+      setBusy(true);
+      setError(null);
+      setNotice(null);
+      try {
+        if (nextEnabled && nextMode === "auto" && nextKey) {
+          await native.gitConfigSet("commit.gpgsign", "true");
+          await native.gitConfigSet("user.signingkey", nextKey);
+          if (status?.program) {
+            await native.gitConfigSet("gpg.program", status.program);
+          }
+        } else {
+          await native.gitConfigUnset("commit.gpgsign");
+          await native.gitConfigUnset("user.signingkey");
+          await native.gitConfigUnset("gpg.program");
+        }
+        setNotice(nextEnabled && nextMode === "auto" ? "Auto-signing enabled." : null);
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [status],
+  );
+
+  const onToggle = async (v: boolean) => {
+    await setCommitSigningEnabled(v);
+    await applyConfig(v, mode, key);
+  };
+
+  const onPickMode = async (m: "auto" | "approval") => {
+    await setCommitSigningMode(m);
+    await applyConfig(enabled, m, key);
+  };
+
+  const onPickKey = async (fingerprint: string) => {
+    await setCommitSigningKey(fingerprint);
+    await applyConfig(enabled, mode, fingerprint);
+  };
+
+  const copyPublicKey = async () => {
+    if (!key) return;
+    try {
+      const armored = await native.gpgExportPublic(key);
+      await navigator.clipboard.writeText(armored);
+      setNotice("Public key copied to clipboard.");
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const gpgAvailable = status?.available ?? false;
+  const selectedKey = keys.find((k) => k.fingerprint === key);
+
+  return (
+    <div className="flex flex-col gap-2">
+      <Label>Commit signing</Label>
+      <SettingRow
+        title="Sign commits with GPG"
+        description="Add a GPG signing key so commits show GitHub's Verified badge. This is optional and off by default."
+      >
+        <Switch
+          checked={enabled}
+          onCheckedChange={(v) => void onToggle(v)}
+          disabled={busy}
+        />
+      </SettingRow>
+
+      {enabled && (
+        <>
+          {!gpgAvailable && (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-300">
+              {status?.error ?? "gpg not found. Install GnuPG (Gpg4win on Windows, `brew install gnupg` on macOS)."}
+            </div>
+          )}
+
+          <SettingRow
+            title="Mode"
+            description="Auto-sign sets global git config so terminal, panel and agent commits are all signed. Approval asks before each panel commit."
+          >
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  className="h-8 justify-between gap-2 rounded-none px-2.5 text-[12px]"
+                >
+                  <span>{mode === "auto" ? "Auto-sign" : "Approval needed"}</span>
+                  <HugeiconsIcon
+                    icon={ArrowDown01Icon}
+                    size={12}
+                    strokeWidth={2}
+                    className="opacity-70"
+                  />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-[160px]">
+                {(["auto", "approval"] as const).map((m) => (
+                  <DropdownMenuItem
+                    key={m}
+                    onSelect={() => void onPickMode(m)}
+                    className={cn("text-[12px]", m === mode && "bg-accent/50")}
+                  >
+                    {m === "auto" ? "Auto-sign" : "Approval needed"}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </SettingRow>
+
+          <SettingRow
+            title="Signing key"
+            description="Select a key already present in your GPG keyring."
+          >
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  className="h-8 justify-between gap-2 rounded-none px-2.5 text-[12px] max-w-[240px]"
+                >
+                  <span className="truncate">
+                    {selectedKey
+                      ? `${selectedKey.name} · ${selectedKey.fingerprint.slice(-8)}`
+                      : key
+                        ? key.slice(-8)
+                        : "No key selected"}
+                  </span>
+                  <HugeiconsIcon
+                    icon={ArrowDown01Icon}
+                    size={12}
+                    strokeWidth={2}
+                    className="opacity-70"
+                  />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-[220px] max-h-64 overflow-y-auto">
+                {keys.length === 0 ? (
+                  <DropdownMenuItem disabled className="text-[12px] text-muted-foreground">
+                    No secret keys found — generate one with `gpg --full-generate-key`.
+                  </DropdownMenuItem>
+                ) : (
+                  keys.map((k) => (
+                    <DropdownMenuItem
+                      key={k.fingerprint}
+                      onSelect={() => void onPickKey(k.fingerprint)}
+                      className={cn(
+                        "flex-col items-start gap-0.5 text-[12px]",
+                        k.fingerprint === key && "bg-accent/50",
+                      )}
+                    >
+                      <span className="font-medium">{k.name}</span>
+                      <span className="font-mono text-[10px] text-muted-foreground">
+                        {k.fingerprint}
+                      </span>
+                    </DropdownMenuItem>
+                  ))
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </SettingRow>
+
+          <SettingRow
+            title="Add to GitHub"
+            description="Copy the public key, then paste it into GitHub so commits verify."
+          >
+            <div className="flex items-center gap-1.5">
+              <Button size="xs" variant="secondary" onClick={() => void copyPublicKey()} disabled={!key || busy}>
+                Copy public key
+              </Button>
+              <Button size="xs" variant="outline" onClick={() => void openUrl("https://github.com/settings/gpg/new")}>
+                Open GitHub
+              </Button>
+            </div>
+          </SettingRow>
+
+          {notice && (
+            <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-700 dark:text-emerald-300">
+              {notice}
+            </div>
+          )}
+          {error && (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-[11px] text-destructive">
+              {error}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function Label({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="text-[11px] font-medium tracking-tight text-muted-foreground">
+      {children}
+    </span>
   );
 }
