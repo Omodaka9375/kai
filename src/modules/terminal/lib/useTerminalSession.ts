@@ -97,7 +97,17 @@ const PTY_OPEN_TIMEOUT_MS = 20_000;
 function logLeaf(leafId: number, msg: string): void {
   const line = `[${new Date().toISOString()} leaf=${leafId}] ${msg}`;
   console.info(`[Kai-term leaf=${leafId}] ${msg}`);
-  void (async () => {
+  // SERIALIZED appends. The first cut fired each line as an independent
+  // async read-modify-write — two logLeaf calls milliseconds apart (e.g.
+  // "binding renderer slot" then "slot #N bound", or the spawn/bind burst)
+  // both read the same previous content and the second write silently
+  // clobbered the first. That's why prod logs showed "renderer slot #N
+  // bound" with no preceding "binding renderer slot" anywhere — the
+  // instrumentation itself was lying by omission. A module-level promise
+  // chain makes each append wait for the previous one; reads still happen
+  // per-write so lines from another KAI process interleave instead of
+  // overwriting.
+  logChain = logChain.then(async () => {
     try {
       const dir = await import("@tauri-apps/api/path").then((p) => p.appDataDir());
       const file = `${dir.replace(/\\/g, "/")}/term-debug.log`;
@@ -112,8 +122,9 @@ function logLeaf(leafId: number, msg: string): void {
     } catch {
       /* diagnostics must never break the terminal */
     }
-  })();
+  });
 }
+let logChain: Promise<void> = Promise.resolve();
 configureRendererPool({
   resolveLeaf(leafId) {
     const s = sessions.get(leafId);
@@ -365,10 +376,14 @@ function openPtySession(
       if (watchdog) clearTimeout(watchdog);
       if (epoch !== s.spawnEpoch) return; // superseded by a newer attempt
       s.ptyOpening = false;
-      console.error(`[Kai-term leaf=${leafId}] openPty failed (attempt ${attempt}):`, e);
+      // logLeaf, NOT console: in the packaged app console is unreachable —
+      // the "pty_open timed out" (20s watchdog) and spawn-failure retry
+      // ladder were invisible exactly when they mattered.
+      logLeaf(leafId, `openPty failed (attempt ${attempt}): ${String(e)}`);
       if (attempt < 1 && !s.disposed) {
         s.spawnEpoch += 1; // invalidate the hung in-flight pty_open
         s.ptyOpening = true;
+        logLeaf(leafId, "openPty retry scheduled in 1s");
         setTimeout(() => {
           if (s.disposed) return;
           openPtySession(leafId, s, s.initialCwd, attempt + 1);
@@ -389,6 +404,7 @@ function openPtySession(
 function startPtyIfNeeded(leafId: number, s: Session): void {
   if (s.disposed || s.shellExited || s.pty || s.ptyOpening) return;
   s.ptyOpening = true;
+  logLeaf(leafId, "pty open starting");
   openPtySession(leafId, s, s.initialCwd, 0);
 }
 
@@ -656,11 +672,14 @@ export async function respawnSession(
   }
 
   s.ptyOpening = true;
+  logLeaf(leafId, "respawn: pty open starting");
   let pty: PtySession;
   try {
     pty = await openPtyForSession(leafId, s, cwd ?? s.initialCwd);
   } catch (e) {
     s.ptyOpening = false;
+    // logLeaf (not console) — packaged apps have no reachable console.
+    logLeaf(leafId, `respawn: openPty FAILED: ${String(e)}`);
     console.error("[Kai] respawn openPty failed:", e);
     if (slot) {
       slot.term.write(
