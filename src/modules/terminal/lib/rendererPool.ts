@@ -14,6 +14,7 @@ import { SerializeAddon } from "@xterm/addon-serialize";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
+import { describeRenderEnv, logLeaf } from "./leafLog";
 
 /** Open a URL, routing localhost / proxy-eligible links to the preview tab. */
 function smartOpenUrl(uri: string): void {
@@ -359,26 +360,57 @@ const UNHIDE_FALLBACK_MS = 400;
 
 function scheduleUnhide(slot: Slot): void {
   let finished = false;
-  const finish = () => {
+  const leafId = slot.currentLeafId;
+  const finish = (source: "raf" | "timer") => {
     if (finished) return;
     finished = true;
     slot.unhideRaf = null;
     slot.unhideTimer = null;
     slot.host.style.visibility = "";
-    console.info(
-      `[Kai-term leaf=${slot.currentLeafId ?? "?"}] slot unhidden ` +
-        `${slot.host.offsetWidth}x${slot.host.offsetHeight}px ` +
-        `connected=${slot.host.isConnected}`,
-    );
-    const leafId = slot.currentLeafId;
+    // Forced repaint on reveal — the prime blank-pane suspect. The webgl
+    // context and its atlases can be created while this host is BOTH
+    // offscreen in the recycler (createSlot attaches it at left:-99999px)
+    // AND visibility:hidden (bindSlot above) — WebView2 sometimes paints
+    // NOTHING on the first on-screen frame, streaming into a live-but-blank
+    // surface even though the buffer, layout and DOM are all correct. That is
+    // exactly what the render probe shows on a wedge (canvas sized, topAt=IN,
+    // hiddenAncestor=none — yet the user sees blank). Re-run the render pass
+    // now that the host is visible; if the addon is gone (context lost before
+    // it ever painted, or the load threw) re-attach it so the DOM renderer
+    // isn't silently the only path. Cheap: a no-op when the surface is
+    // already clean.
+    try {
+      slot.term.refresh(0, Math.max(0, slot.term.rows - 1));
+    } catch (e) {
+      console.debug("[Kai-pool] reveal refresh failed:", e);
+    }
+    if (usePreferencesStore.getState().terminalWebglEnabled && !slot.webglAddon) {
+      attachWebgl(slot);
+    }
+    // The blank-pane smoking gun, now in the FILE log (was console-only, so
+    // we could never tell rAF-reveal from timer-reveal from no-reveal in a
+    // packaged repro). source names who fired it; the host's own computed
+    // visibility is what describeRenderEnv(s.container) could NOT see (the
+    // host is a CHILD of the container, and bindSlot hides exactly this
+    // element).
+    if (leafId !== null) {
+      const hr = slot.host.getBoundingClientRect();
+      logLeaf(
+        leafId,
+        `slot unhidden via ${source} hostInline="${slot.host.style.visibility || "cleared"}" ` +
+          `hostComputed="${getComputedStyle(slot.host).visibility}" ` +
+          `hostRect=${Math.round(hr.width)}x${Math.round(hr.height)} ` +
+          describeRenderEnv(slot.host),
+      );
+    }
     if (leafId !== null && adapter?.isLeafFocused(leafId)) {
       slot.term.focus();
     }
   };
   slot.unhideRaf = requestAnimationFrame(() => {
-    slot.unhideRaf = requestAnimationFrame(() => finish());
+    slot.unhideRaf = requestAnimationFrame(() => finish("raf"));
   });
-  slot.unhideTimer = setTimeout(finish, UNHIDE_FALLBACK_MS);
+  slot.unhideTimer = setTimeout(() => finish("timer"), UNHIDE_FALLBACK_MS);
 }
 
 function cancelPendingUnhide(slot: Slot): void {
