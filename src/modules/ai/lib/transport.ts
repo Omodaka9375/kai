@@ -336,9 +336,42 @@ function formatEnvBlock(live: LiveSnapshot): string | null {
   return base ? `${base}${note}` : note;
 }
 
+/**
+ * A compact, unambiguous local-date string for the agent env block.
+ * Format: `YYYY-MM-DD (Weekday, UTC±HH:MM TZ-name)`.
+ *   - ISO date: no locale ambiguity (no 10/24 vs 24/10 confusion).
+ *   - Weekday: lets the model reason about "today/this week/weekend".
+ *   - UTC offset + IANA zone: enough to resolve time-of-day questions and
+ *     convert to/from the user's clock, without injecting a volatile wall
+ *     time that would churn the block every second.
+ * Exported for tests. Intl is always available in the WebView2/WebKit
+ * runtimes KAI targets; the try/catch degrades to a plain ISO date if a
+ * zone lookup ever throws (e.g. an exotic/missing ICU on a stripped build).
+ */
+export function envLocalDate(now: Date = new Date()): string {
+  const iso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  try {
+    const weekday = new Intl.DateTimeFormat("en-US", { weekday: "short" }).format(now);
+    const tzName = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "";
+    // UTC offset in ±HH:MM form.
+    const offsetMin = -now.getTimezoneOffset();
+    const sign = offsetMin >= 0 ? "+" : "-";
+    const abs = Math.abs(offsetMin);
+    const offset = `UTC${sign}${String(Math.floor(abs / 60)).padStart(2, "0")}:${String(abs % 60).padStart(2, "0")}`;
+    return tzName ? `${iso} (${weekday}, ${offset} ${tzName})` : `${iso} (${weekday}, ${offset})`;
+  } catch {
+    return iso;
+  }
+}
+
 function formatEnvBlockInner(live: LiveSnapshot): string | null {
   const lines: string[] = [];
   const os = IS_WINDOWS ? "windows" : IS_MAC ? "macos" : IS_LINUX ? "linux" : "unknown";
+  // Local date at snapshot time. LLMs have no clock and otherwise guess a
+  // stale training-cutoff date when asked "what day is it" or when a task is
+  // time-sensitive (cutoffs, "today", "this week"). Computed per build so a
+  // long-lived session's env block reflects the real current day.
+  lines.push(`local_date: ${envLocalDate()}`);
   // Verified shell from the Rust probe when available — falls back to the
   // old static guess only if the probe never ran.
   const inv = envInventoryCache;
