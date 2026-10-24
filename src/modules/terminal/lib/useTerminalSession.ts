@@ -543,6 +543,11 @@ function attachSession(
 
   startPtyIfNeeded(leafId, s);
 
+  logLeaf(
+    leafId,
+    `attach: container=${s.container ? `${s.container.clientWidth}x${s.container.clientHeight}px` : "null"} visible=${s.visibleNow} hasSlot=${s.hasSlot}`,
+  );
+
   // Watchdog: visible + attached but no slot → try again (idempotent guard in
   // bindLeafToSlot makes repeated attempts safe). Cleared on dispose so a
   // closed tab never fires a zombie bind.
@@ -558,9 +563,31 @@ function attachSession(
   // churn). Back off progressively; cap so a genuinely wedged session
   // (container removed but not disposed, etc.) doesn't retry forever.
   if (!s.watchdogTimer) {
-    s.watchdogTimer = setTimeout(() => {
+    const tick = () => {
       s.watchdogTimer = null;
-      if (s.disposed || !s.visibleNow || !s.container) return;
+      if (s.disposed) return;
+      if (!s.visibleNow || !s.container) {
+        // SILENT DEFUSE was the blind spot: a one-shot watchdog that
+        // returned here without logging OR re-arming left the pane blank
+        // forever with zero log evidence ("pty open ok" then nothing) —
+        // the first-terminal-from-StartPage wedge. Log the defuse AND
+        // re-arm (capped) so a session whose visible/container flags
+        // arrive late still gets a bind.
+        logLeaf(
+          leafId,
+          `renderer watchdog defused (visible=${s.visibleNow} container=${s.container != null}) — re-arming`,
+        );
+        if (s.watchdogAttempts < RENDER_WATCHDOG_MAX_ATTEMPTS) {
+          s.watchdogAttempts += 1;
+          s.watchdogTimer = setTimeout(tick, RENDER_WATCHDOG_MS);
+        } else {
+          logLeaf(
+            leafId,
+            `renderer watchdog: giving up after ${s.watchdogAttempts} defuse re-arms — pane stays unbound until the tab is switched or reopened`,
+          );
+        }
+        return;
+      }
       const slotExists = getSlotForLeaf(leafId) !== null;
       if (slotExists && s.hasSlot) return; // healthy — nothing to do
       if (s.hasSlot && !slotExists) {
@@ -593,7 +620,8 @@ function attachSession(
       s.pty?.resize(s.cols || 80, s.rows || 24);
       // Bound now — reset the attempt counter for any future unbind cycle.
       s.watchdogAttempts = 0;
-    }, RENDER_WATCHDOG_MS);
+    };
+    s.watchdogTimer = setTimeout(tick, RENDER_WATCHDOG_MS);
   }
 }
 
@@ -729,8 +757,9 @@ export function useTerminalSession({
         if (attempt < ATTACH_RETRY_BOUND) {
           retryTimer = setTimeout(() => bind(attempt + 1), ATTACH_RETRY_MS);
         } else {
-          console.warn(
-            `[Kai-term leaf=${leafId}] container never mounted after ${ATTACH_RETRY_BOUND} retries — renderer not bound`,
+          logLeaf(
+            leafId,
+            `container never mounted after ${ATTACH_RETRY_BOUND} retries — renderer not bound (pane will stay blank)`,
           );
         }
         return;
@@ -746,10 +775,7 @@ export function useTerminalSession({
         attachSession(leafId, node, callbacks);
         if (s.visibleNow && s.focusedNow) focusSlot(leafId);
       } catch (e) {
-        console.error(
-          `[Kai-term leaf=${leafId}] bind attempt ${attempt} threw — retrying:`,
-          e,
-        );
+        logLeaf(leafId, `bind attempt ${attempt} threw — retrying: ${String(e)}`);
         // Roll back any half-bound state so the retry starts clean.
         if (s.hasSlot) unbindLeafFromSlot(leafId, s);
         if (attempt < ATTACH_RETRY_BOUND) {
@@ -758,13 +784,13 @@ export function useTerminalSession({
       }
     };
     s.ready.then(
-      () => bind(0),
+      () => {
+        logLeaf(leafId, "font gate settled — binding renderer");
+        bind(0);
+      },
       (e) => {
         // The font gate must never be the reason a terminal stays blank.
-        console.error(
-          `[Kai-term leaf=${leafId}] font gate rejected — binding anyway:`,
-          e,
-        );
+        logLeaf(leafId, `font gate rejected — binding anyway: ${String(e)}`);
         bind(0);
       },
     );
