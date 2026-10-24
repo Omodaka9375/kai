@@ -64,6 +64,9 @@ export type Slot = {
   unhideRaf: number | null;
   unhideTimer: ReturnType<typeof setTimeout> | null;
   webglRecoveryTimer: ReturnType<typeof setTimeout> | null;
+  /** Once-per-bind: the first keystroke forwarded to the PTY is file-logged
+   *  (input-path proof — see term.onData in createSlot). */
+  sawKeystroke: boolean;
   lastCols: number;
   lastRows: number;
   lastW: number;
@@ -147,6 +150,7 @@ function createSlot(): Slot {
     unhideRaf: null,
     unhideTimer: null,
     webglRecoveryTimer: null,
+    sawKeystroke: false,
     lastCols: term.cols,
     lastRows: term.rows,
     lastW: 0,
@@ -177,6 +181,14 @@ function createSlot(): Slot {
   term.onData((data) => {
     const leafId = slot.currentLeafId;
     if (leafId === null) return;
+    // Once-per-bind input-path proof. If a blank pane logs this, keys reach
+    // xterm AND the slot→PTY bridge (the wedge is purely visual). If a blank
+    // pane NEVER logs it, input is blocked upstream — focus/pointer-events —
+    // which is a different bug than "renderer paints nothing".
+    if (!slot.sawKeystroke) {
+      slot.sawKeystroke = true;
+      logLeaf(leafId, `first keystroke forwarded to PTY (${data.length}B)`);
+    }
     adapter?.resolveLeaf(leafId)?.writeToPty(data);
   });
 
@@ -260,6 +272,7 @@ export function acquireSlot(params: AcquireParams): Slot {
 function bindSlot(slot: Slot, p: AcquireParams): void {
   slot.currentLeafId = p.leafId;
   slot.lastUsedAt = performance.now();
+  slot.sawKeystroke = false;
 
   cancelPendingUnhide(slot);
   slot.host.style.visibility = "hidden";
@@ -395,11 +408,30 @@ function scheduleUnhide(slot: Slot): void {
     // element).
     if (leafId !== null) {
       const hr = slot.host.getBoundingClientRect();
+      // Buffer state: separates "bytes never parsed into the buffer" (wrong
+      // slot / parser wedge) from "buffer has text, screen shows nothing"
+      // (renderer). cursorY=0,cursorX=0 + empty text at reveal means the
+      // prompt hasn't parsed yet — the first-output line is the pairing.
+      const b = slot.term.buffer.active;
+      const line = (b.getLine(b.cursorY)?.toString() ?? "")
+        .replace(/[\u0000-\u001f\u007f]/g, "")
+        .trimEnd()
+        .slice(-48);
+      // Focus + pointer-events: "can't type" with a healthy-looking DOM is
+      // either the xterm element not focused (clicks can't fix it if
+      // pointer-events:none) or input blocked elsewhere. elementFromPoint
+      // hit-tests pointer-events:auto elements only, so the topAt probe
+      // cannot see a pointer-events:none blocker — measure directly.
+      const pe = (el: Element | null) =>
+        el ? getComputedStyle(el).pointerEvents : "?";
       logLeaf(
         leafId,
         `slot unhidden via ${source} hostInline="${slot.host.style.visibility || "cleared"}" ` +
           `hostComputed="${getComputedStyle(slot.host).visibility}" ` +
           `hostRect=${Math.round(hr.width)}x${Math.round(hr.height)} ` +
+          `peHost=${pe(slot.host)} peParent=${pe(slot.host.parentElement)} ` +
+          `xtermFocus=${slot.term.element?.classList.contains("xterm-focus") ?? "?"} ` +
+          `bufCursor=${b.cursorX},${b.cursorY} bufLine="${line}" ` +
           describeRenderEnv(slot.host),
       );
     }
