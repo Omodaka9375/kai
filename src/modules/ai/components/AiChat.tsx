@@ -547,6 +547,112 @@ const ContinueRow = memo(function ContinueRow({
   );
 });
 
+/**
+ * User-role message rendering, isolated from RenderedMessage so the latter's
+ * hook list is unconditional (RULES OF HOOKS — the early return over
+ * message.role previously skipped two useMemo/useCallback dispatches; role
+ * never flips within an instance today, but one metadata/persistence change
+ * would have turned it into React #310 at best-effort reuse time).
+ */
+function UserMessageView({
+  message,
+  forkable,
+  messageIndex,
+  timeTitle,
+}: {
+  message: UIMessage;
+  forkable?: boolean;
+  messageIndex?: number;
+  timeTitle?: string;
+}) {
+  const rawText = message.parts
+    .filter((p): p is { type: "text"; text: string } => p.type === "text")
+    .map((p) => p.text)
+    .join("\n");
+
+  const isWatchMessage =
+    ((message as { metadata?: { kind?: string } }).metadata?.kind ?? "") ===
+    "watch";
+  if (isWatchMessage) {
+    return <WatchFireMessage text={rawText} />;
+  }
+
+  const cmdMatch = rawText.match(Kai_CMD_RE);
+  const commandName = cmdMatch?.[1] ?? null;
+  const withoutCmd = cmdMatch ? rawText.slice(cmdMatch[0].length) : rawText;
+  const stripped = stripUserContextBlocks(withoutCmd);
+
+  const imageParts = message.parts.filter(
+    (p): p is { type: "file"; url: string; mediaType: string; [k: string]: any } =>
+      p.type === "file" &&
+      typeof p.url === "string" &&
+      p.mediaType.startsWith("image/"),
+  );
+
+  return (
+    <Message from="user" title={timeTitle}>
+      <div className="flex items-center gap-1.5">
+        {forkable && messageIndex !== undefined && (
+          <ForkButton messageIndex={messageIndex} />
+        )}
+        <MessageContent>
+          {commandName ? <CommandSnippet name={commandName} /> : null}
+          {stripped.chips.length > 0 ? (
+            <ContextChips chips={stripped.chips} />
+          ) : null}
+          {imageParts.length > 0 && (
+            <UserImageParts parts={imageParts} />
+          )}
+          {stripped.text ? (
+            <p className="whitespace-pre-wrap break-words overflow-wrap-anywhere">
+              {stripped.text}
+            </p>
+          ) : null}
+        </MessageContent>
+      </div>
+    </Message>
+  );
+}
+
+/** Image attachments of a user message (split out of the JSX for readability). */
+function UserImageParts({
+  parts,
+}: {
+  parts: { type: "file"; url: string; mediaType: string }[];
+}) {
+  return (
+    <div className="flex flex-col gap-1.5 mb-2 max-w-sm">
+      {parts.map((p, idx) =>
+        // After a restart, persisted images are stripped to a bare
+        // After a restart, persisted images are stripped to a bare
+        // data-prefix (no payload) to keep the store compact — render a
+        // placeholder chip instead of a broken zero-size image.
+        p.url.split(",").length < 2 ? (
+          <div
+            key={idx}
+            className="flex h-12 items-center gap-2 rounded-lg border border-border/60 bg-muted/40 px-3 text-[11px] text-muted-foreground"
+          >
+            <HugeiconsIcon
+              icon={Image01Icon}
+              size={14}
+              strokeWidth={1.8}
+            />
+            Image attachment (not stored across restarts)
+          </div>
+        ) : (
+          <img
+            key={idx}
+            src={p.url}
+            alt="User upload"
+            className="rounded-lg max-h-48 object-contain"
+            draggable={false}
+          />
+        ),
+      )}
+    </div>
+  );
+}
+
 const RenderedMessage = memo(function RenderedMessage({
   message,
   onApproval,
@@ -563,6 +669,41 @@ const RenderedMessage = memo(function RenderedMessage({
   /** Per-message createdAt for hover tooltips; undefined = legacy/unknown. */
   timestamp?: number;
 }) {
+  // RULES OF HOOKS: RenderedMessage is now a hook-free dispatcher. The user
+  // and assistant paths live in DIFFERENT child components, so React can
+  // never reuse one instance across a role change — each child's hook list
+  // is unconditional within its own lifetime.
+  if (message.role === "user") {
+    return (
+      <UserMessageView
+        message={message}
+        forkable={forkable}
+        messageIndex={messageIndex}
+        timeTitle={timestamp ? absoluteTime(timestamp) : undefined}
+      />
+    );
+  }
+  return (
+    <AssistantMessageView
+      message={message}
+      onApproval={onApproval}
+      streaming={streaming}
+      timestamp={timestamp}
+    />
+  );
+});
+
+function AssistantMessageView({
+  message,
+  onApproval,
+  streaming,
+  timestamp,
+}: {
+  message: UIMessage;
+  onApproval: (id: string, approved: boolean) => void;
+  streaming: boolean;
+  timestamp?: number;
+}) {
   const timeTitle = timestamp ? absoluteTime(timestamp) : undefined;
   // Index of the trailing text part — only that one is \"live\" mid-stream.
   // Earlier text parts (separated by tool calls) are already finalized.
@@ -572,87 +713,6 @@ const RenderedMessage = memo(function RenderedMessage({
       lastTextIdx = i;
       break;
     }
-  }
-  if (message.role === "user") {
-    const rawText = message.parts
-      .filter((p): p is { type: "text"; text: string } => p.type === "text")
-      .map((p) => p.text)
-      .join("\n");
-
-    // Watch notifications are injected as user-role messages but carry
-    // markdown (`**Watch fired**: \`label\` …`, fenced code blocks). The
-    // plain-`<p>` branch renders that markdown as literal text, so route
-    // these through Streamdown instead.
-    const isWatchMessage =
-      ((message as { metadata?: { kind?: string } }).metadata?.kind ?? "") ===
-      "watch";
-    if (isWatchMessage) {
-      return <WatchFireMessage text={rawText} />;
-    }
-
-    const cmdMatch = rawText.match(Kai_CMD_RE);
-    const commandName = cmdMatch?.[1] ?? null;
-    const withoutCmd = cmdMatch ? rawText.slice(cmdMatch[0].length) : rawText;
-    const stripped = stripUserContextBlocks(withoutCmd);
-
-    const imageParts = message.parts.filter(
-      (p): p is { type: "file"; url: string; mediaType: string; [k: string]: any } =>
-        p.type === "file" &&
-        typeof p.url === "string" &&
-        p.mediaType.startsWith("image/"),
-    );
-
-    return (
-      <Message from="user" title={timeTitle}>
-        <div className="flex items-center gap-1.5">
-          {forkable && messageIndex !== undefined && (
-            <ForkButton messageIndex={messageIndex} />
-          )}
-          <MessageContent>
-            {commandName ? <CommandSnippet name={commandName} /> : null}
-            {stripped.chips.length > 0 ? (
-              <ContextChips chips={stripped.chips} />
-            ) : null}
-            {imageParts.length > 0 && (
-              <div className="flex flex-col gap-1.5 mb-2 max-w-sm">
-                {imageParts.map((p, idx) =>
-                  // After a restart, persisted images are stripped to a bare
-                  // `data:...;base64,` prefix (no payload) to keep the store
-                  // compact — render a placeholder chip instead of a broken
-                  // zero-size image.
-                  p.url.split(",").length < 2 ? (
-                    <div
-                      key={idx}
-                      className="flex h-12 items-center gap-2 rounded-lg border border-border/60 bg-muted/40 px-3 text-[11px] text-muted-foreground"
-                    >
-                      <HugeiconsIcon
-                        icon={Image01Icon}
-                        size={14}
-                        strokeWidth={1.8}
-                      />
-                      Image attachment (not stored across restarts)
-                    </div>
-                  ) : (
-                    <img
-                      key={idx}
-                      src={p.url}
-                      alt="User upload"
-                      className="rounded-lg max-h-48 object-contain"
-                      draggable={false}
-                    />
-                  ),
-                )}
-              </div>
-            )}
-            {stripped.text ? (
-              <p className="whitespace-pre-wrap break-words overflow-wrap-anywhere">
-                {stripped.text}
-              </p>
-            ) : null}
-          </MessageContent>
-        </div>
-      </Message>
-    );
   }
 
   const groups = useMemo(() => buildPartGroups(message.parts as AnyPart[]), [
@@ -770,7 +830,8 @@ const RenderedMessage = memo(function RenderedMessage({
       </div>
     </Message>
   );
-});
+}
+
 
 type Group =
   | { kind: "single"; part: AnyPart; idx: number; key: string }
