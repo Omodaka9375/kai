@@ -125,6 +125,63 @@ function logLeaf(leafId: number, msg: string): void {
   });
 }
 let logChain: Promise<void> = Promise.resolve();
+
+/**
+ * Compact "what is actually painted here" probe for the blank-pane case
+ * where the whole spawn→bind→output pipeline logged healthy: the pane is
+ * alive in the DOM and xterm's buffer has content, yet nothing shows.
+ * Only two layers can hide it: CSS (an `invisible`/opacity/display class
+ * on the pane or an ancestor — tab-hiding literally uses
+ * `invisible pointer-events-none`, and a React class/state desync would
+ * hide a healthy pane) or the renderer engine itself (webgl context lost
+ * in WebView2 paints nothing while the buffer streams).
+ *
+ * Reports: container rect; computed visibility/display/opacity of the
+ * container and the FIRST ancestor where any is non-normal (the culprit
+ * chain); xterm's data-engine (canvas|webgl|dom); the canvas size; and
+ * what document.elementFromPoint says is topmost at the pane's center —
+ * that is literally what the user sees at that pixel.
+ */
+function describeRenderEnv(container: HTMLElement | null): string {
+  if (!container) return "env(no container)";
+  try {
+    const r = container.getBoundingClientRect();
+    const styleOf = (el: Element) => {
+      const cs = getComputedStyle(el);
+      return `${cs.display}/${cs.visibility}/op${cs.opacity}`;
+    };
+    // Climb for the first ancestor that is itself hiding content.
+    let culprit = "";
+    let el: Element | null = container;
+    for (let d = 0; el && d < 8; d += 1) {
+      const cs = getComputedStyle(el);
+      const hidden =
+        cs.visibility !== "visible" ||
+        cs.display === "none" ||
+        parseFloat(cs.opacity) === 0;
+      if (hidden) {
+        culprit = `depth${d}:${el.tagName.toLowerCase()}.${(typeof el.className === "string" ? el.className : "").trim().split(/\s+/).slice(0, 3).join(".")}(${styleOf(el)})`;
+        break;
+      }
+      el = el.parentElement;
+    }
+    const screen = container.querySelector(".xterm-screen");
+    const engine = screen?.getAttribute("data-engine") ?? "?";
+    const canvases = Array.from(container.querySelectorAll("canvas"))
+      .map((c) => `${c.width}x${c.height}`)
+      .join(",") || "none";
+    let hit = "oob";
+    if (r.width > 0 && r.height > 0) {
+      const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      hit = top
+        ? `${container.contains(top) ? "IN" : "COVERED-BY"}:${top.tagName.toLowerCase()}.${(typeof top.className === "string" ? top.className : "").trim().split(/\s+/).slice(0, 2).join(".")}`
+        : "null";
+    }
+    return `env ${Math.round(r.width)}x${Math.round(r.height)} engine=${engine} canvas=${canvases} topAt=${hit} hiddenAncestor=${culprit || "none"}`;
+  } catch (e) {
+    return `env probe threw: ${String(e)}`;
+  }
+}
 configureRendererPool({
   resolveLeaf(leafId) {
     const s = sessions.get(leafId);
@@ -219,7 +276,11 @@ function deliverPtyBytes(leafId: number, bytes: Uint8Array): void {
   // term and the flag gets set). Bug was invisible in dev because the
   // dev webview's fonts are already warm.
   if (!s.receivedOutput) {
-    if (slot) logLeaf(leafId, "first output delivered to renderer");
+    if (slot)
+      logLeaf(
+        leafId,
+        `first output delivered to renderer — ${describeRenderEnv(s.container)}`,
+      );
     let preview = "";
     try {
       preview = new TextDecoder().decode(bytes.slice(0, 48));
@@ -514,7 +575,7 @@ function bindLeafToSlot(leafId: number, s: Session): void {
     leafId,
     `renderer slot #${slot.id} bound ` +
       `container=${s.container.clientWidth}x${s.container.clientHeight}px ` +
-      `cols=${slot.term.cols} rows=${slot.term.rows}`,
+      `cols=${slot.term.cols} rows=${slot.term.rows} — ${describeRenderEnv(s.container)}`,
   );
   if (s.lastCwd !== null) s.callbacks.onCwd?.(s.lastCwd);
   if (s.pendingExit !== null) {
