@@ -4,6 +4,15 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.9.3]
+
+- Terminal: fixed the blank first terminal — the renderer-bind watchdog silently defused itself when the tab's visible flag arrived late and never re-armed; it now logs and re-arms (capped), so the pane still binds.
+- Terminal: leaf lifecycle events (spawn, bind, nudges, watchdog) persist to `term-debug.log` in the app data dir — the next live repro of a blank pane is fully legible without devtools.
+- AI: fixed the mini window collapsing when approving a tool — React #310 (hooks after an early return whose guard flips when the approval queue advances) in the approval card; same latent violation restructured in the message renderer.
+- AI: local models (LM Studio / custom OpenAI-compatible endpoints) no longer get killed as "stream stalled — no data for 2 min" — the local stall budgets never applied because the provider-name check missed the SDK's dotted `provider` string; local engines now get the full 10-min prefill / 4-min inter-chunk budgets.
+
+---
+
 ## [1.9.2]
 
 - AI: watch fires render collapsed — a one-line pill (⏱ label · exit code) that expands on click, so a firing no longer scrolls the whole chat with raw stdout.
