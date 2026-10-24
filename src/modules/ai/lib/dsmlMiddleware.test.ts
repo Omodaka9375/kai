@@ -3,8 +3,45 @@ import {
   createDsmlMiddleware,
   isStallError,
   parseDsmlToolCalls,
+  stallBudgetsForProvider,
   stallMessageForBudgetMs,
 } from "./dsmlMiddleware";
+
+describe("stall budgets: local providers get LOCAL budgets", () => {
+  // REGRESSION (user report, local models): the SDK's model.provider for
+  // createOpenAICompatible models is DOTTED — "openai-compatible.chat",
+  // "lmstudio.chat" — because createOpenAICompatible builds it as
+  // `${name}.${modelType}`. The old `provider === "lmstudio"` strict compare
+  // never matched, so every LOCAL stream ran on CLOUD budgets: a 2-min
+  // inter-chunk kill against engines that can legitimately pause mid-decode,
+  // and a 5-min first-token kill against multi-minute local prefill. Users
+  // with custom endpoints saw "Model stream stalled — no data for 2 min"
+  // on engines that were still working.
+  it("openai-compatible.chat (dotted, real SDK shape) gets LOCAL budgets", () => {
+    const b = stallBudgetsForProvider("openai-compatible.chat");
+    expect(b.first).toBe(600_000);
+    expect(b.inter).toBe(240_000);
+  });
+
+  it("lmstudio.chat (dotted, real SDK shape) gets LOCAL budgets", () => {
+    const b = stallBudgetsForProvider("lmstudio.chat");
+    expect(b.first).toBe(600_000);
+    expect(b.inter).toBe(240_000);
+  });
+
+  it("bare legacy names still match (defense in depth)", () => {
+    expect(stallBudgetsForProvider("lmstudio").inter).toBe(240_000);
+    expect(stallBudgetsForProvider("openai-compatible").inter).toBe(240_000);
+  });
+
+  it("cloud providers keep cloud budgets — including dotted deepseek.chat", () => {
+    expect(stallBudgetsForProvider("deepseek.chat").inter).toBe(120_000);
+    expect(stallBudgetsForProvider("openai").inter).toBe(120_000);
+    expect(stallBudgetsForProvider("openai.chat").inter).toBe(120_000);
+    expect(stallBudgetsForProvider("anthropic.chat").inter).toBe(120_000);
+    expect(stallBudgetsForProvider("").inter).toBe(120_000);
+  });
+});
 
 describe("stall watchdog", () => {
   it("isStallError matches the watchdog's own message", () => {

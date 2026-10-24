@@ -50,11 +50,23 @@ const STALL_SIGNATURE = "Model stream stalled";
 type StallBudgets = { first: number; inter: number };
 
 function stallBudgetsFor(provider: string): StallBudgets {
-  const local =
-    provider === "lmstudio" || provider === "openai-compatible";
+  // `model.provider` from the SDK is DOTTED — createOpenAICompatible builds
+  // it as `${name}.${modelType}`: "openai-compatible.chat", "lmstudio.chat",
+  // "deepseek.chat", … The previous strict `===` NEVER matched those, so
+  // every local stream silently ran on cloud budgets (2-min inter-chunk kill
+  // against an engine that can legitimately pause 3+ min mid-decode, and a
+  // 5-min first-token kill against multi-minute local prefill). Compare the
+  // first dot-segment instead.
+  const head = (provider.split(".")[0] ?? "").trim();
+  const local = head === "lmstudio" || head === "openai-compatible";
   return local
     ? { first: STALL_FIRST_CHUNK_LOCAL_MS, inter: STALL_INTER_CHUNK_LOCAL_MS }
     : { first: STALL_FIRST_CHUNK_MS, inter: STALL_INTER_CHUNK_MS };
+}
+
+/** Exported for tests: the budget table for a raw model.provider string. */
+export function stallBudgetsForProvider(provider: string): StallBudgets {
+  return stallBudgetsFor(provider);
 }
 
 /** Human-readable stall error. Reports the budget that actually fired so
