@@ -360,7 +360,11 @@ export function buildEditTools(ctx: ToolContext) {
       needsApproval: true,
       execute: async ({ path: pathArg, old_string, new_string, replace_all, line_hint }) => {
         const path = pathArg ?? "";
-        if (!path) return { error: "path is required" };
+        if (!path)
+          return {
+            error:
+              'path is required — set the top-level "path" field to the file you are editing (absolute, or relative to the terminal cwd). Example: {"path":"src/app.ts","old_string":"...","new_string":"..."}',
+          };
         const reqPath = resolvePath(path, ctx.getCwd());
         const safety = await checkWritableCanonical(reqPath, native.canonicalize);
         if (!safety.ok) return { error: safety.reason, path: reqPath };
@@ -448,7 +452,11 @@ export function buildEditTools(ctx: ToolContext) {
       execute: async ({ path: pathArg, edits }) => {
         // Some models put `path` inside each edit instead of at the top level.
         const path = pathArg ?? edits[0]?.path ?? "";
-        if (!path) return { error: "path is required" };
+        if (!path)
+          return {
+            error:
+              'path is required — multi_edit applies edits to ONE file; set the top-level "path" field to it (a per-edit "path" is also accepted). Example: {"path":"src/app.ts","edits":[{"old_string":"...","new_string":"..."}]}',
+          };
         const reqPath = resolvePath(path, ctx.getCwd());
         const safety = await checkWritableCanonical(reqPath, native.canonicalize);
         if (!safety.ok) return { error: safety.reason, path: reqPath };

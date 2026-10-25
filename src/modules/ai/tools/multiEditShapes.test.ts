@@ -151,11 +151,20 @@ describe("multi_edit accepts every path/line_hint call shape (no token-burn retr
     expect(files.get("/ws/scratch.txt")).toContain("A1");
   });
 
-  it("gives the precise 'path is required' error when NO path is given anywhere", async () => {
+  it("gives a self-correctable 'path is required' error when NO path is given anywhere", async () => {
+    // The error must teach the model the fix, not just name the missing key.
+    // A bare "path is required" produced blind retries (the transcript this
+    // test was born from burned 3 re-calls inventing wrong folklore about the
+    // tool). Codex's apply_patch likewise returns RespondToModel guidance on
+    // parse failure. Assert the message names the field AND shows an example.
     const { result } = await tryShape({
       edits: [{ old_string: "x", new_string: "y" }],
     });
     expect(result.ok).toBeUndefined();
-    expect(result.error).toBe("path is required");
+    const msg = String(result.error);
+    expect(msg).toContain("path is required");
+    expect(msg).toContain('"path"');
+    expect(msg).toContain("Example:");
+    expect(msg).toContain("edits");
   });
 });
