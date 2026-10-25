@@ -19,52 +19,101 @@ function stripTrailingWs(s: string, filePath: string): string {
   return s.replace(/[^\S\n\r]+$/gm, "");
 }
 
-/**
- * Fuzzy-find `needle` in `haystack` by progressively relaxing whitespace
- * matching. Returns the start index in the original haystack, or -1.
- */
-function fuzzyFind(haystack: string, needle: string): number {
-  // Level 1: trim trailing whitespace per line.
-  const trimEnd = (s: string) => s.split("\n").map((l) => l.trimEnd()).join("\n");
-  const h1 = trimEnd(haystack);
-  const n1 = trimEnd(needle);
-  const i1 = h1.indexOf(n1);
-  if (i1 !== -1) return mapFuzzyIndex(haystack, h1, i1, n1);
+/** One relaxed replacement target: a TRUE region [index, index+length)
+ *  into the original text. `line` is the 1-based start line of the region,
+ *  for line_hint disambiguation. */
+type FuzzyHit = { index: number; length: number; line: number };
 
-  // Level 2: normalize all leading whitespace to consistent spaces
-  // (tabs → 2 spaces), then trim trailing.
-  const normIndent = (s: string) =>
-    s.split("\n").map((l) => l.replace(/\t/g, "  ").trimEnd()).join("\n");
-  const h2 = normIndent(haystack);
-  const n2 = normIndent(needle);
-  const i2 = h2.indexOf(n2);
-  if (i2 !== -1) return mapFuzzyIndex(haystack, h2, i2, n2);
+/** Cap for collected relaxed matches; beyond it a replace_all is too broad
+ *  to act on and single edits bounce as ambiguous anyway. */
+const MAX_FUZZY_HITS = 50;
 
-  // Level 3: collapse all runs of whitespace to single space, per line.
-  const collapseWs = (s: string) =>
-    s.split("\n").map((l) => l.trim().replace(/\s+/g, " ")).join("\n");
-  const h3 = collapseWs(haystack);
-  const n3 = collapseWs(needle);
-  const i3 = h3.indexOf(n3);
-  if (i3 !== -1) return mapFuzzyIndex(haystack, h3, i3, n3);
-
-  return -1;
+/** Escape a literal for RegExp source. */
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** Map a position from a normalized string back to the original by line count. */
-function mapFuzzyIndex(
-  original: string,
-  normalized: string,
-  normIndex: number,
-  normNeedle: string,
-): number {
-  const linesBefore = normalized.slice(0, normIndex).split("\n").length - 1;
-  const matchLines = normNeedle.split("\n").length;
-  const origLines = original.split("\n");
-  const matchedOriginal = origLines.slice(linesBefore, linesBefore + matchLines).join("\n");
-  const lineStart = origLines.slice(0, linesBefore).join("\n").length + (linesBefore > 0 ? 1 : 0);
-  const idx = original.indexOf(matchedOriginal, lineStart > 0 ? lineStart : 0);
-  return idx >= 0 ? idx : -1;
+/**
+ * Aider-style whitespace-tolerant find.
+ *
+ * The model usually gets the TOKENS right and the WHITESPACE wrong (tabs
+ * vs spaces, collapsed runs, re-wrapped spacing, trailing drift). Build a
+ * regex from old_string where every whitespace run becomes tolerant —
+ * intra-line runs match [ \t]* (the model may have eaten or added the
+ * space), inter-line runs require the newline (\n) to exist but absorb
+ * any indentation and blank-line drift around it — and return every match
+ * with its TRUE region in the original text.
+ *
+ * True regions are the whole point. The predecessor mapped a normalized
+ * match back to a START offset only and callers spliced old_string.length
+ * characters — for a relaxed match that is the wrong length: a
+ * spaces-indented needle against a tab-indented line silently ate the
+ * newline plus the next line's head. Corruption through the very fallback
+ * meant to prevent failure.
+ *
+ * When a match covers a whole line's non-whitespace content (nothing but
+ * whitespace before it on that line and after it to EOL), the region is
+ * EXTENDED to the full line(s) so the replacement carries the model's own
+ * indentation — models routinely send a fully re-indented new_string
+ * against a differently-indented old line. Partial-line matches keep the
+ * exact token region so surrounding text ("x = " before "= 1;") survives.
+ *
+ * Multi-hit is returned in full (capped) — the CALLER decides: single
+ * edits bounce unless line_hint disambiguates, replace_all consumes them.
+ */
+function fuzzyHits(
+  content: string,
+  needle: string,
+  maxHits = MAX_FUZZY_HITS,
+): FuzzyHit[] | null {
+  const trimmed = needle.replace(/^\s+|\s+$/g, "");
+  if (!trimmed) return null;
+  const parts = trimmed.split(/(\s+)/); // alternating non-ws / ws runs
+  let pattern = "";
+  for (const part of parts) {
+    if (part === "") continue;
+    if (/^\s+$/.test(part)) {
+      pattern += part.includes("\n") ? "[\\s]*\\n[\\s]*" : "[ \\t]*";
+    } else {
+      pattern += escapeRe(part);
+    }
+  }
+  if (!pattern) return null;
+  let re: RegExp;
+  try {
+    re = new RegExp(pattern, "g");
+  } catch {
+    return null;
+  }
+  const hits: FuzzyHit[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content)) !== null) {
+    if (m[0].length === 0) {
+      re.lastIndex += 1; // pathological empty match guard
+      continue;
+    }
+    let index = m.index;
+    let end = m.index + m[0].length;
+    // Whole-content-line coverage → extend to full lines (indent included).
+    const lineStart = content.lastIndexOf("\n", index - 1) + 1;
+    const lineEnd = content.indexOf("\n", end) === -1 ? content.length : content.indexOf("\n", end);
+    const before = content.slice(lineStart, index);
+    const after = content.slice(end, lineEnd);
+    if (before.trim() === "" && after.trim() === "") {
+      index = lineStart;
+      end = lineEnd;
+    }
+    hits.push({
+      index,
+      length: end - index,
+      // Newlines before `index` + 1. (NOT split("\n", index).length — the
+      // second arg is an array LIMIT, so it returned the total line count for
+      // every hit and made the line_hint nearest-pick degenerate to first-hit.)
+      line: content.slice(0, index).split("\n").length,
+    });
+    if (hits.length > maxHits) break;
+  }
+  return hits.length > 0 ? hits : null;
 }
 
 /** Normalize line endings to \n for comparison purposes only. */
@@ -189,29 +238,80 @@ async function applyEdits(
         if (n > 1000) break;
       }
       if (n === 0) {
-        return {
-          ok: false,
-          error: `old_string not found: ${JSON.stringify(oldNorm.slice(0, 80))}.${getDidYouMeanHint(content, oldNorm)}`,
-          path: abs,
-        };
+        // Exact pass found nothing — the relaxed levels get the same
+        // chance replace_all was asked for: duplicates are the point, so
+        // multi-hit is not ambiguity here. Replace back-to-front so earlier
+        // hit offsets stay valid.
+        const fz = fuzzyHits(content, oldNorm);
+        if (!fz) {
+          return {
+            ok: false,
+            error: `old_string not found: ${JSON.stringify(oldNorm.slice(0, 80))}.${getDidYouMeanHint(content, oldNorm)}`,
+            path: abs,
+          };
+        }
+        if (fz.length > MAX_FUZZY_HITS) {
+          return {
+            ok: false,
+            error: `old_string matched more than ${MAX_FUZZY_HITS} locations after whitespace relaxation — refusing to rewrite that broadly. Narrow old_string.`,
+            path: abs,
+          };
+        }
+        for (const h of [...fz].sort((a, b) => b.index - a.index)) {
+          content =
+            content.slice(0, h.index) + newNorm + content.slice(h.index + h.length);
+        }
+        n = fz.length;
       }
       totalReplacements += n;
     } else {
       let idx = content.indexOf(oldNorm);
+      // Length of the region being replaced IN THE FILE. Equals oldNorm.length
+      // on an exact match; on a whitespace-relaxed match the file's region has
+      // a DIFFERENT length (that is the whole point of relaxing) — splicing
+      // with oldNorm.length corrupted the file around the edit.
+      let matchLen = oldNorm.length;
       if (idx === -1) {
-        idx = fuzzyFind(content, oldNorm);
-      }
-      if (idx === -1) {
-        return {
-          ok: false,
-          error: `old_string not found: ${JSON.stringify(oldNorm.slice(0, 80))}.${getDidYouMeanHint(content, oldNorm)}`,
-          path: abs,
-        };
+        const fz = fuzzyHits(content, oldNorm);
+        if (!fz) {
+          return {
+            ok: false,
+            error: `old_string not found: ${JSON.stringify(oldNorm.slice(0, 80))}.${getDidYouMeanHint(content, oldNorm)}`,
+            path: abs,
+          };
+        }
+        let chosen = fz[0];
+        if (fz.length > 1) {
+          // A relaxed match hitting several places is never a coin flip:
+          // the exact text isn't in the file, so guessing risks rewriting
+          // the wrong code. line_hint picks nearest; otherwise bounce with
+          // the locations so the model can widen context.
+          if (rawEdit.line_hint) {
+            chosen = fz.reduce((best, cur) =>
+              Math.abs(cur.line - rawEdit.line_hint!) <
+              Math.abs(best.line - rawEdit.line_hint!)
+                ? cur
+                : best,
+            );
+          } else {
+            return {
+              ok: false,
+              error:
+                `old_string matched ${fz.length} locations (lines ${fz
+                  .slice(0, 8)
+                  .map((h) => h.line)
+                  .join(", ")}) only after whitespace relaxation — nothing was changed. Copy the block verbatim from the file (tabs vs spaces included), widen it with surrounding context, or pass line_hint to pick one.`,
+              path: abs,
+            };
+          }
+        }
+        idx = chosen.index;
+        matchLen = chosen.length;
       }
       // Check uniqueness: search for a second occurrence AFTER the first
       // match. Use exact matching only (not fuzzy whitespace) so indentation
       // variants aren't falsely flagged as duplicates.
-      const secondIdx = content.indexOf(oldNorm, idx + oldNorm.length);
+      const secondIdx = content.indexOf(oldNorm, idx + matchLen);
       if (secondIdx !== -1 && !rawEdit.line_hint) {
         return {
           ok: false,
@@ -242,7 +342,7 @@ async function applyEdits(
       content =
         content.slice(0, chosenIdx) +
         newNorm +
-        content.slice(chosenIdx + oldNorm.length);
+        content.slice(chosenIdx + matchLen);
       totalReplacements += 1;
     }
   }
