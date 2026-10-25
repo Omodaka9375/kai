@@ -413,10 +413,11 @@ function scheduleUnhide(slot: Slot): void {
       // (renderer). cursorY=0,cursorX=0 + empty text at reveal means the
       // prompt hasn't parsed yet — the first-output line is the pairing.
       const b = slot.term.buffer.active;
-      const line = (b.getLine(b.cursorY)?.toString() ?? "")
-        .replace(/[\u0000-\u001f\u007f]/g, "")
-        .trimEnd()
-        .slice(-48);
+      const lineText = (bb: typeof b) =>
+        (bb.getLine(bb.cursorY)?.translateToString(true) ?? "")
+          .replace(/[\u0000-\u001f\u007f]/g, "")
+          .trimEnd()
+          .slice(-48);
       // Focus + pointer-events: "can't type" with a healthy-looking DOM is
       // either the xterm element not focused (clicks can't fix it if
       // pointer-events:none) or input blocked elsewhere. elementFromPoint
@@ -431,9 +432,24 @@ function scheduleUnhide(slot: Slot): void {
           `hostRect=${Math.round(hr.width)}x${Math.round(hr.height)} ` +
           `peHost=${pe(slot.host)} peParent=${pe(slot.host.parentElement)} ` +
           `xtermFocus=${slot.term.element?.classList.contains("xterm-focus") ?? "?"} ` +
-          `bufCursor=${b.cursorX},${b.cursorY} bufLine="${line}" ` +
+          `bufCursor=${b.cursorX},${b.cursorY} bufLine="${lineText(b)}" ` +
           describeRenderEnv(slot.host),
       );
+      // Re-check after the shell has had time to emit its prompt. bufLine at
+      // reveal is routinely empty 1ms after the first bytes — only a delayed
+      // look separates "the prompt never parsed into this buffer" (wrong-slot
+      // / IPC-feed wedge: RENDER can't be blamed) from "buffer full, screen
+      // empty" (renderer wedge).
+      setTimeout(() => {
+        if (slot.currentLeafId !== leafId) return; // rebound/evicted since
+        const bb = slot.term.buffer.active;
+        logLeaf(
+          leafId,
+          `reveal+1s bufCursor=${bb.cursorX},${bb.cursorY} bufLine="${lineText(bb)}" ` +
+            `xtermFocus=${slot.term.element?.classList.contains("xterm-focus") ?? "?"} ` +
+            describeRenderEnv(slot.host),
+        );
+      }, 1000);
     }
     if (leafId !== null && adapter?.isLeafFocused(leafId)) {
       slot.term.focus();
