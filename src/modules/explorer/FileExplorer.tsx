@@ -30,13 +30,22 @@ import { InlineInput } from "./InlineInput";
 import { copyToClipboard, revealInFinder } from "./lib/contextActions";
 import { fileIconUrl, folderIconUrl } from "./lib/iconResolver";
 import { COMPACT_CONTENT, COMPACT_ITEM } from "./lib/menuItemClass";
-import { useFileTree } from "./lib/useFileTree";
+import { useFileTree, joinPath } from "./lib/useFileTree";
+import {
+  canonPath,
+  isDrivePath,
+  pathWithinRoot,
+  relativeSegments,
+} from "./lib/revealPath";
 import { useGlobalShortcuts } from "@/modules/shortcuts";
 import { cn } from "@/lib/utils";
 
 export type FileExplorerHandle = {
   focus: () => void;
   isFocused: () => boolean;
+  /** Expand + select + scroll the row for `path`, VSCode auto-reveal style.
+   *  No-op if `path` is outside the current tree root. */
+  revealFile: (path: string) => void;
 };
 
 type Props = {
@@ -161,6 +170,13 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(
   ) {
     const tree = useFileTree(rootPath, { onPathRenamed, onPathDeleted });
     const [selectedPath, setSelectedPath] = useState<string | null>(null);
+    // VSCode-style auto-reveal: when an editor tab becomes active, App calls
+    // revealFile(path). We stash the target and let two effects converge on
+    // it — one expands every ancestor directory (triggering async fetches),
+    // the other walks the loaded nodes to confirm the row now exists, then
+    // selects + scrolls it into view. Cleared once revealed, or abandoned if
+    // the path is outside the root / no longer on disk (deleted / renamed).
+    const [revealTarget, setRevealTarget] = useState<string | null>(null);
     const [selection, setSelection] = useState<Set<string>>(new Set());
     const anchorRef = useRef<string | null>(null);
     const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -310,6 +326,13 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(
             requestAnimationFrame(() => scrollEntryIntoView(first));
           }
         },
+        revealFile: (path: string) => {
+          if (!rootPath) return;
+          // A path outside the explorer root can't be revealed; VSCode
+          // silently does nothing (rather than switching roots) here too.
+          if (!pathWithinRoot(path, rootPath)) return;
+          setRevealTarget(canonPath(path));
+        },
         isFocused: () => {
           const c = containerRef.current;
           if (!c) return false;
@@ -317,8 +340,80 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(
           return active instanceof Node && c.contains(active);
         },
       }),
-      [entryPaths, scrollEntryIntoView, selectedPath, selectOnly],
+      [entryPaths, scrollEntryIntoView, selectedPath, selectOnly, rootPath],
     );
+
+    // Reveal state machine (drives revealFile). Descends from the root using
+    // REAL entry names read from loaded directory nodes, expanding each
+    // ancestor (which fires its async fetch) and re-running as nodes land,
+    // until the target's row exists — then selects + scrolls to it. Matching
+    // segments against disk names (case-insensitively on drive-letter roots)
+    // means a tab path with drifted casing or an agent-supplied lowercase
+    // path still lands on the right row; a segment missing from a loaded dir
+    // means the file was deleted/renamed/hidden, so the reveal is abandoned
+    // rather than leaving a stale highlight.
+    const expandDir = tree.expand;
+    const treeNodes = tree.nodes;
+    const treeExpanded = tree.expanded;
+    useEffect(() => {
+      if (!revealTarget || !rootPath) return;
+      const segs = relativeSegments(revealTarget, rootPath);
+      if (segs.length === 0) {
+        setRevealTarget(null);
+        return;
+      }
+      const drive = isDrivePath(rootPath);
+      let curDir = rootPath;
+      for (let i = 0; i < segs.length; i++) {
+        const want = segs[i];
+        const node = treeNodes[curDir];
+        if (!node || node.status !== "loaded") {
+          // Load this dir; the effect re-runs when its entries arrive.
+          expandDir(curDir);
+          return;
+        }
+        const match = node.entries.find((e) =>
+          drive
+            ? e.name.toLowerCase() === want.toLowerCase()
+            : e.name === want,
+        );
+        if (!match) {
+          setRevealTarget(null);
+          return;
+        }
+        const realChild = joinPath(curDir, match.name);
+        if (i === segs.length - 1) {
+          // `match` is the target itself: its parent must be expanded (root
+          // is always listed) and the row present before we can select it.
+          if (curDir !== rootPath && !treeExpanded.has(curDir)) {
+            expandDir(curDir);
+            return;
+          }
+          if (!entryIndexByPath.has(realChild)) {
+            expandDir(curDir);
+            return;
+          }
+          selectOnly(realChild);
+          requestAnimationFrame(() => scrollEntryIntoView(realChild));
+          setRevealTarget(null);
+          return;
+        }
+        // Intermediate directory: expand it (loads children) and descend.
+        if (!treeExpanded.has(realChild)) {
+          expandDir(realChild);
+        }
+        curDir = realChild;
+      }
+    }, [
+      revealTarget,
+      rootPath,
+      treeNodes,
+      treeExpanded,
+      expandDir,
+      entryIndexByPath,
+      selectOnly,
+      scrollEntryIntoView,
+    ]);
 
     useGlobalShortcuts({
       "explorer.search": () => {

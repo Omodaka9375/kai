@@ -511,6 +511,19 @@ export default function App() {
   const isGitHistoryTab = activeTab?.kind === "git-history";
   const isApiTesterTab = activeTab?.kind === "api-tester";
 
+  // VSCode-style auto-reveal: switching to an editor tab focuses that file in
+  // the tree (expand ancestors, select, scroll into view). Only while the
+  // explorer is the visible sidebar view — a reveal against a mounted-elsewhere
+  // or unmounted FileExplorer is pointless churn. Terminal/preview/diff tabs
+  // have no tree row to reveal, so their path is null and the effect no-ops.
+  useEffect(() => {
+    if (sidebarView !== "explorer") return;
+    if (activeTab?.kind !== "editor") return;
+    const path = activeTab.path;
+    if (!path) return;
+    explorerRef.current?.revealFile(path);
+  }, [activeTab, sidebarView]);
+
   // NOTE: editor reloads after agent writes are no longer driven from here.
   // Rust emits `fs-changed` on every fs_write_file/fs_write_file_bytes, and
   // each open editor listens (useDocument): clean buffers auto-reload, dirty
