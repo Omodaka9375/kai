@@ -4,6 +4,16 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.9.6]
+
+- AI: `/init` now builds a relationship-first codebase map — typed cross-file edges, EXTRACTED/INFERRED/AMBIGUOUS labels, data-flow paths, and central-node hotspots.
+- AI: fixed `/init` writing the wrong-cased `Kai.md` on Linux, so the map now actually loads there.
+- AI: tool-result cards no longer dump big text fields (web_browse, MCP output) as one escaped `\n` line; multi-line text prints readably.
+- Assistant: fixed the "messages do not match the ModelMessage schema" error that broke every Telegram photo upload.
+- Assistant: Telegram photos are stored as on-disk references and downscaled, not kept as inline base64 bloating history and every later request.
+
+---
+
 ## [1.9.3]
 
 - Terminal: the renderer-bind watchdog silently defused itself when the tab's visible flag arrived late and never re-armed.
