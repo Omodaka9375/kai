@@ -30,6 +30,12 @@ import type { UIMessage } from "@ai-sdk/react";
 import { generateText, stepCountIs, type ModelMessage } from "ai";
 import { getModel, type ModelId } from "@/modules/ai/config";
 import { buildLanguageModel } from "@/modules/ai/lib/agent";
+import {
+  downscalePhotoJpeg,
+  prunePhotoScratch,
+  rehydratePhotoPayloads,
+  stripPhotoPayloads,
+} from "./photos";
 import { getAllKeys, getKey } from "@/modules/ai/lib/keyring";
 import { withToolRedaction, withToolGuard } from "@/modules/ai/lib/toolFencing";
 import { createFenceState, fenceSystemPrompt } from "@/modules/ai/lib/fence";
@@ -306,6 +312,9 @@ export async function runAssistantTurn(
     /** Vision input: base64 image attached to this turn. */
     imageBase64?: string;
     imageMime?: string;
+    /** Scratch-dir path of the original photo; recorded on the persisted
+     *  file part so the image survives history reloads (photos.ts). */
+    imagePath?: string;
   },
 ): Promise<string> {
   const onNotice = opts?.onNotice;
@@ -381,6 +390,7 @@ export async function runAssistantTurn(
       type: "file",
       mediaType: opts.imageMime ?? "image/jpeg",
       data: opts.imageBase64,
+      ...(opts.imagePath ? { sourcePath: opts.imagePath } : {}),
     } as { type: string });
   }
   const userMsg: UIMessage = {
@@ -414,7 +424,10 @@ export async function runAssistantTurn(
     .filter(Boolean)
     .join("\n");
 
-  const modelMessages = [...history, userMsg].map(toModelMessage);
+  // Rehydrate the most recent persisted photos from their scratch files
+  // before replaying history (store keeps paths, not bytes — photos.ts).
+  const replay = await rehydratePhotoPayloads([...history, userMsg]);
+  const modelMessages = replay.map(toModelMessage);
 
   // Audit the turn BEFORE the model runs: a headless run the user can't see
   // must still land in the trail even if the provider call throws.
@@ -437,14 +450,19 @@ export async function runAssistantTurn(
   });
 
   const reply = result.text?.trim() || "…";
+  // Persist WITHOUT inline photo bytes: each file part keeps its mediaType +
+  // sourcePath and sheds `data` (megabyte payloads must not live in the
+  // prefs-store JSON, and history replay reads them back on demand).
   await persistHistory(
-    [...history, userMsg].concat(result.text
-      ? [{
-          id: `tg-a-${Date.now()}`,
-          role: "assistant",
-          parts: [{ type: "text", text: reply }],
-        } as UIMessage]
-      : []),
+    stripPhotoPayloads(
+      [...history, userMsg].concat(result.text
+        ? [{
+            id: `tg-a-${Date.now()}`,
+            role: "assistant",
+            parts: [{ type: "text", text: reply }],
+          } as UIMessage]
+        : []),
+    ),
     sessionId,
   );
   return reply;
@@ -482,6 +500,9 @@ export function toModelMessage(m: UIMessage): ModelMessage {
   }
   return { role: m.role === "assistant" ? "assistant" : "user", content: text };
 }
+
+// ── Photo intake helpers live in ./photos.ts (downscale / persist-strip /
+// context rehydrate / scratch prune) so they are unit-testable in isolation.
 
 // ── Voice pipeline ─────────────────────────────────────────────────────────
 
@@ -592,6 +613,8 @@ type QueueItem = {
   /** Vision input for this turn (photo message). */
   imageBase64?: string;
   imageMime?: string;
+  /** Scratch-dir path of the original bytes (the persisted reference). */
+  imagePath?: string;
 };
 const pendingQueue: QueueItem[] = [];
 
@@ -846,12 +869,25 @@ async function enqueuePhotoMessage(
   if (!token) return;
   try {
     const b64 = await telegramNative.downloadFile(token, fileId);
+    // Save the ORIGINAL bytes to the scratch dir — the same reference model
+    // the assistant already uses for documents/videos. History persists only
+    // this path (photos.ts explains why), and recent photos rehydrate from
+    // it. The model call itself gets a downscaled copy (≤1568px — Claude
+    // downscales beyond that server-side anyway), best-effort.
+    const root = await assistantRoot();
+    const sep = root.includes("\\") ? "\\" : "/";
+    const path = `${root}${sep}photo-${Date.now()}.jpg`;
+    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    await invoke("fs_write_file_bytes", { path, bytes: Array.from(bytes), workspace: null });
+    void prunePhotoScratch(root, sep);
+    const small = await downscalePhotoJpeg(b64);
     pendingQueue.push({
       chatId,
       text: caption?.trim() || "What's in this image?",
       isVoice: false,
-      imageBase64: b64,
+      imageBase64: small ?? b64,
       imageMime: "image/jpeg",
+      imagePath: path,
     });
     void drainQueue();
   } catch (e) {
@@ -966,6 +1002,7 @@ async function drainQueue(): Promise<void> {
       },
       imageBase64: next.imageBase64,
       imageMime: next.imageMime,
+      imagePath: next.imagePath,
     });
     const prefs = await loadAssistantPrefs();
     if (next.isVoice && prefs.voiceReplies) {
