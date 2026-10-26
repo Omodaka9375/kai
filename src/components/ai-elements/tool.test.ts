@@ -54,3 +54,47 @@ describe("Tool card streaming-input freeze guard", () => {
     );
   });
 });
+
+/**
+ * Big-text readability (the web_browse "one giant \n-escaped line" class).
+ *
+ * The default object renderer used to be JSON.stringify(output, null, 2).
+ * That pretty-prints the OUTER object but keeps every string VALUE a JSON
+ * literal, so a tool returning a large multi-line text field (web_browse's
+ * `content`, any MCP tool's `text`/`stdout`) rendered as a single kilobyte
+ * line of \n escapes — unreadable. The fix routes those through
+ * formatToolOutput, which splits big text fields out to print verbatim.
+ * These pins fail if someone reverts a generic branch to a raw stringify.
+ */
+describe("tool output big-text readability", () => {
+  it("formatToolOutput hoists any newline-bearing / long string field", () => {
+    const fn = src.split("function formatToolOutput")[1] ?? "";
+    // A field qualifies as "big text" by containing a newline OR exceeding
+    // a length threshold; both conditions must gate the split.
+    expect(fn).toMatch(/includes\("\\n"\)/);
+    expect(fn).toMatch(/BIG_TEXT_MIN/);
+    // When no big text exists it must fall back to the original pretty JSON
+    // (so small {ok,path,size} outputs are unchanged).
+    expect(fn).toContain("JSON.stringify(o, null, 2)");
+  });
+
+  it("every generic output branch routes through formatToolOutput (no raw dump)", () => {
+    // The body renderer (string-parsed + object) and the MCP structured/text
+    // branches all call the helper; none may call JSON.stringify(x, null, 2)
+    // directly on a tool result again.
+    const renderer =
+      src.split("function ToolOutput(")[1]?.split(
+        "function formatToolOutput",
+      )[0] ?? "";
+    const mcp =
+      src.split("function renderToolOutput")[1]?.split(
+        'toolName === "run_subagent"',
+      )[0] ?? "";
+    // 4 call sites: object output, parsed-string, MCP structured, MCP text.
+    const calls = [...(renderer + mcp).matchAll(/formatToolOutput\(/g)].length;
+    expect(calls).toBeGreaterThanOrEqual(4);
+    // And the raw dump is gone from these generic paths.
+    expect(renderer).not.toMatch(/JSON\.stringify\(\s*output\s*,\s*null\s*,\s*2\s*\)/);
+    expect(mcp).not.toMatch(/JSON\.stringify\(\s*structured\s*,\s*null\s*,\s*2/);
+  });
+});

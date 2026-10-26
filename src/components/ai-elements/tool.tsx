@@ -445,14 +445,15 @@ function ToolOutput({
     } catch {
       parsed = undefined;
     }
-    body =
-      parsed !== undefined && typeof parsed === "object"
-        ? <CodeBlockMini code={JSON.stringify(parsed, null, 2)} language="json" />
-        : <CodeBlockMini code={output} language="text" />;
+    if (parsed !== undefined && typeof parsed === "object") {
+      const f = formatToolOutput(parsed);
+      body = <CodeBlockMini code={f.code} language={f.language} />;
+    } else {
+      body = <CodeBlockMini code={output} language="text" />;
+    }
   } else if (typeof output === "object" && !isValidElement(output)) {
-    body = (
-      <CodeBlockMini code={JSON.stringify(output, null, 2)} language="json" />
-    );
+    const f = formatToolOutput(output);
+    body = <CodeBlockMini code={f.code} language={f.language} />;
   } else {
     body = <div className="text-[12px]">{output as ReactNode}</div>;
   }
@@ -467,6 +468,43 @@ function ToolOutput({
   );
 }
 
+/** A string long enough (or containing newlines) that dumping it through
+ *  JSON.stringify collapses a multi-paragraph body onto one escaped line. */
+const BIG_TEXT_MIN = 300;
+
+/**
+ * Render a tool-output object readably.
+ *
+ * The old default — JSON.stringify(obj, null, 2) — pretty-prints the OUTER
+ * object but keeps every string VALUE a JSON literal, so a big multi-line
+ * field (web_browse's `content`, any tool's `stdout`/`text`/`message`) renders
+ * as a single ~kilobyte line full of `\n` escapes: technically correct JSON,
+ * useless to read. Here, when the object carries such a field we split it
+ * out: the remaining (small/structured) keys form a compact JSON header and
+ * each big string prints VERBATIM — real newlines — under a labelled rule.
+ * Purely structured results with no big text keep the old pretty JSON, so
+ * small `{ok, path, size}` shapes look exactly as before. Display-only: the
+ * model still receives the raw output; this changes nothing it sees.
+ */
+function formatToolOutput(o: unknown): { code: string; language: string } {
+  if (Array.isArray(o) || o === null || typeof o !== "object")
+    return { code: JSON.stringify(o, null, 2), language: "json" };
+  const big: Array<[string, string]> = [];
+  const header: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(o as Record<string, unknown>)) {
+    if (typeof v === "string" && (v.includes("\n") || v.length > BIG_TEXT_MIN))
+      big.push([k, v]);
+    else header[k] = v;
+  }
+  if (big.length === 0)
+    return { code: JSON.stringify(o, null, 2), language: "json" };
+  let out = Object.keys(header).length > 0 ? JSON.stringify(header, null, 2) : "";
+  for (const [k, v] of big) {
+    out += `${out ? "\n" : ""}\n\u2500\u2500\u2500 ${k} (${v.length.toLocaleString()} chars) \u2500\u2500\u2500\n${v}`;
+  }
+  return { code: out, language: "text" };
+}
+
 function renderToolOutput(toolName: string, output: unknown): ReactNode | null {
   if (!output || typeof output !== "object") return null;
   const o = output as Record<string, unknown>;
@@ -478,12 +516,8 @@ function renderToolOutput(toolName: string, output: unknown): ReactNode | null {
   if (Array.isArray(o.content) && o.content.length > 0) {
     const structured = o.structuredContent;
     if (structured && typeof structured === "object") {
-      return (
-        <CodeBlockMini
-          code={JSON.stringify(structured, null, 2)}
-          language="json"
-        />
-      );
+      const f = formatToolOutput(structured);
+      return <CodeBlockMini code={f.code} language={f.language} />;
     }
     const texts = (o.content as unknown[])
       .map((c) =>
@@ -500,9 +534,11 @@ function renderToolOutput(toolName: string, output: unknown): ReactNode | null {
       } catch {
         parsed = undefined;
       }
-      return parsed !== undefined && typeof parsed === "object"
-        ? <CodeBlockMini code={JSON.stringify(parsed, null, 2)} language="json" />
-        : <CodeBlockMini code={joined} language="text" />;
+      if (parsed !== undefined && typeof parsed === "object") {
+        const f = formatToolOutput(parsed);
+        return <CodeBlockMini code={f.code} language={f.language} />;
+      }
+      return <CodeBlockMini code={joined} language="text" />;
     }
   }
 
