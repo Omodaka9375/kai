@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { modelMessageSchema } from "ai";
 
 /**
  * Assistant module tests — the pure logic surface: the fenced tool
@@ -84,11 +85,54 @@ describe("excluded tools stay off the assistant surface", () => {
 });
 
 describe("toModelMessage (history → generateText)", () => {
-  // Re-tested through the module boundary: runAssistantTurn is mocked-out
-  // territory, but the message conversion must preserve text parts only.
-  it("is not exported — exercised via runAssistantTurn with mocked generateText", () => {
-    // Placeholder contract test: the function is private by design.
-    expect(typeof assistant.runAssistantTurn).toBe("function");
+  // Its output is fed to generateText({ messages }), which safeParse-validated
+  // against modelMessageSchema BEFORE the provider is called — a mismatch
+  // throws "The messages do not match the ModelMessage[] schema". That is
+  // exactly what broke every Telegram photo upload: the image part was built
+  // with the *file* key `data` while type:"image" requires the key `image`.
+  // Validating against the REAL SDK schema (not a hand-rolled expectation)
+  // is what pins the contract.
+  const schema = modelMessageSchema as unknown as {
+    safeParseAsync: (v: unknown) => Promise<{ success: boolean }>;
+  };
+
+  it("text-only user message validates", async () => {
+    const mm = assistant.toModelMessage({
+      id: "u1",
+      role: "user",
+      parts: [{ type: "text", text: "hello" }],
+    } as never);
+    expect(await schema.safeParseAsync(mm)).toMatchObject({ success: true });
+  });
+
+  it("image user message validates AND carries the payload under `image`", async () => {
+    const mm = assistant.toModelMessage({
+      id: "u2",
+      role: "user",
+      // The UIMessage stores a `file` part (explorer/composer shape);
+      // toModelMessage converts it to a model image part.
+      parts: [
+        { type: "text", text: "what's in this?" },
+        { type: "file", mediaType: "image/jpeg", data: "aGVsbG8=" },
+      ],
+    } as never);
+    expect(await schema.safeParseAsync(mm)).toMatchObject({ success: true });
+    const content = (mm as { content: Array<Record<string, unknown>> }).content;
+    const img = content.find((p) => p.type === "image");
+    expect(img).toBeDefined();
+    expect(img!.image).toBe("aGVsbG8="); // the required key
+    expect(img!.data).toBeUndefined(); // the regression: `data` is file-only
+  });
+
+  it("PROOF the test bites: an image part keyed `data` (the old shape) fails the schema", async () => {
+    const bad = {
+      role: "user",
+      content: [
+        { type: "text", text: "x" },
+        { type: "image", mediaType: "image/jpeg", data: "aGVsbG8=" },
+      ],
+    };
+    expect(await schema.safeParseAsync(bad)).toMatchObject({ success: false });
   });
 });
 

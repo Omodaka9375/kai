@@ -451,8 +451,10 @@ export async function runAssistantTurn(
 }
 
 /** UIMessage → generateText model message. Text parts become text; image
- *  file parts become AI-SDK image parts (vision input survives history). */
-function toModelMessage(m: UIMessage): ModelMessage {
+ *  file parts become AI-SDK image parts (vision input survives history).
+ *  Exported for tests: its output must satisfy the SDK's modelMessageSchema,
+ *  and the exact payload key (`image`, not `data`) is a regression we pin. */
+export function toModelMessage(m: UIMessage): ModelMessage {
   const parts = m.parts as Array<{ type: string; text?: string; mediaType?: string; data?: string }>;
   const text = parts
     .filter((p) => p.type === "text" && typeof p.text === "string")
@@ -460,14 +462,20 @@ function toModelMessage(m: UIMessage): ModelMessage {
     .join("\n");
   const image = parts.find((p) => p.type === "file" && p.data);
   if (image && m.role === "user") {
+    // The model-message image part's payload key is `image` (z.union of
+    // dataContentSchema | URL), NOT `data` — `data` is the *file* part's key.
+    // Emitting { type:"image", data } failed modelMessageSchema's required
+    // `image` field and threw "The messages do not match the ModelMessage[]
+    // schema" on every Telegram photo. A raw base64 string is a valid
+    // dataContentSchema member, so image.data passes straight through.
     return {
       role: "user",
       content: [
         { type: "text", text },
         {
           type: "image",
+          image: image.data,
           mediaType: image.mediaType ?? "image/jpeg",
-          data: image.data,
         },
       ],
     } as ModelMessage;
