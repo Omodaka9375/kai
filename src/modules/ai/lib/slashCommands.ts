@@ -17,15 +17,48 @@ export type SlashOutcome =
   | { kind: "send-prompt"; prompt: string; commandName?: string }
   | { kind: "none" };
 
-const INIT_PROMPT = `Scan this workspace and produce Kai.md at the workspace root with:
+// Relationship-first rewrite (inspired by codebase knowledge-graph tools).
+// The map's whole value is letting a FUTURE session answer structural
+// questions without re-grepping, so it must capture cross-file EDGES and
+// data-flow PATHS, not prose summaries. Filename is KAI.md (uppercase) to
+// match projectRules.ts's `const KAI_MD = "KAI.md"` — the previous "Kai.md"
+// casing made /init write a file that's never loaded on case-sensitive
+// filesystems (Linux); Win/macOS hid the bug.
+const INIT_PROMPT = `You are building KAI's persistent codebase map: a file named exactly KAI.md at the workspace root. This file is auto-loaded into EVERY future session's context, so its job is to let a later agent answer "how does X connect to Y" / "where is Z" WITHOUT re-grepping the repo. Optimize for relationships, not narration — every line must earn its share of the context window.
 
-- One-paragraph project description.
-- Build / test / dev commands.
-- Architecture overview (subsystems, data flow, key dirs).
-- Conventions worth knowing (naming, patterns, gotchas).
-- Paths to entry points.
+STEP 1 — Refresh, don't clobber. read_file KAI.md first. If it already exists, UPDATE it: keep what's still true, fix what moved, PRESERVE any hand-written notes and anything marked AMBIGUOUS, and refresh the date stamp. If it doesn't exist, create it.
 
-Use grep/glob/list_directory/read_file to explore. Cap Kai.md under 200 lines. Use write_file to create it (will go through normal approval).`;
+STEP 2 — Explore, delegating the heavy sweep. For any non-trivial repo, call run_subagent(type="explore") once to map entry points, module boundaries, and the key cross-file symbols with their callers/callees; use grep/glob/list_directory/read_file only to spot-check. Read real code for every load-bearing node — do not invent APIs, paths, or edges.
+
+STEP 3 — write_file KAI.md (goes through normal approval) in this shape:
+
+# <project name>
+<generated: today's date · refresh with /init · re-verify a path before trusting it if the tree has moved>
+
+## What this is
+One short paragraph: purpose + primary language / framework / runtime.
+
+## Run it
+Exact build / dev / test / typecheck / lint command strings, copied verbatim from package.json / Cargo.toml / Makefile / CI.
+
+## Architecture map
+Group the code into subsystems (the natural clusters). One purpose-line per subsystem, then its key nodes. For each load-bearing node record the EDGES — this is the point:
+    <path>:<symbol>  — provides <what> · depends-on <who> · used-by <who>
+List a symbol edge only when it crosses a subsystem boundary or a future agent would otherwise have to hunt for it. Tag non-obvious edges (INFERRED) when deduced from naming/convention and (AMBIGUOUS) when unconfirmed, so later agents know what to re-check vs trust.
+
+## Data flow / entry points
+2–5 traversable paths from an entry point through the main stages (e.g. request → handler → service → store → response), each as an arrow-chain of real file:symbol references.
+
+## Central nodes
+The 3–8 highest fan-in modules/symbols (most depended-on). Editing these is risky — naming them front-and-center makes agents think twice.
+
+## Conventions & gotchas
+The non-obvious rules an agent must follow or gets bitten by: exact path forms, naming/pattern requirements, footguns, platform quirks. Phrase as "do X / never Y because Z".
+
+## Where to look
+A quick index for the questions agents actually ask ("where is auth", "how are tools registered", "where's persistence") → the file path(s), preferring path:symbol over vague descriptions.
+
+Ground every claim in code you read this session. Prefer real symbols and paths over prose descriptions of them.`;
 
 export type SlashCommandMeta = {
   name: string;
