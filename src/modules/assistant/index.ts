@@ -37,11 +37,16 @@ import {
   stripPhotoPayloads,
 } from "./photos";
 import { getAllKeys, getKey } from "@/modules/ai/lib/keyring";
+import {
+  hasInlineImageParts,
+  swapImagePartsToText,
+} from "@/modules/ai/extraction";
 import { withToolRedaction, withToolGuard } from "@/modules/ai/lib/toolFencing";
 import { createFenceState, fenceSystemPrompt } from "@/modules/ai/lib/fence";
 import { auditAppend, AUDIT_KINDS } from "@/modules/ai/lib/audit";
 import { buildTools } from "@/modules/ai/tools/tools";
 import type { ToolContext } from "@/modules/ai/tools/context";
+import { isToolAllowed } from "./toolCatalog";
 import { BUILTIN_AGENTS } from "@/modules/ai/lib/agents";
 import { toSpeechText, splitForSpeech, transcribeLocal } from "@/modules/ai/lib/voiceTts";
 import { proxyFetch } from "@/modules/ai/lib/proxyFetch";
@@ -285,25 +290,74 @@ export function assistantPersona(): { name: string; instructions: string } {
 
 const ASSISTANT_MAX_STEPS = 24;
 
-/** Tools excluded from the assistant surface: interactive-UI-only tools that
- *  make no sense headless (terminal tabs, screen, radio, subagents, media
- *  rendering into terminals, plan-mode edits). */
-const EXCLUDED_TOOLS = new Set([
-  "display_image",
-  "display_video",
-  "get_terminal_output",
-  "look_at_screen",
-  "open_preview",
-  "play_radio",
-  "stop_radio",
-  "radio_list_stations",
-  "radio_now_playing",
-  "suggest_command",
-  "run_subagent",
-  "checkpoint_undo",
-  "mcp_add_server",
-  "mcp_list_servers",
-]);
+// The assistant's usable-tool set is owned by toolCatalog.ts (HARD_EXCLUDED
+// for desktop-coupled tools, tier-grouped SELECTABLE tools gated by the
+// owner's prefs.allowedTools + prefs.mcpAllowedServers). runAssistantTurn
+// filters buildTools() through isToolAllowed().
+
+/** One-line capability summary for the system prompt, derived from the
+ *  ALLOWLIST — never from the full catalog. Telling the model it has shell
+ *  access it doesn't have just produces failed tool attempts; telling it what
+ *  it CAN do focuses attempts that work. */
+export function describeAssistantCapabilities(
+  allowed: ReadonlySet<string>,
+  mcpCount: number,
+): string {
+  const groups: string[] = [];
+  if (allowed.has("web_search") || allowed.has("web_browse"))
+    groups.push("web search/fetch");
+  if (allowed.has("read_file") || allowed.has("list_directory") || allowed.has("grep") || allowed.has("glob"))
+    groups.push("reading files in your scratch dir");
+  if (allowed.has("write_file") || allowed.has("edit") || allowed.has("multi_edit") || allowed.has("batch_edit") || allowed.has("create_directory"))
+    groups.push("writing files in your scratch dir");
+  if (allowed.has("bash_run") || allowed.has("bash_background"))
+    groups.push("shell commands in your scratch dir");
+  if (allowed.has("watch_create")) groups.push("periodic watches");
+  if (allowed.has("generate_image")) groups.push("image generation");
+  if (allowed.has("generate_video")) groups.push("video generation");
+  if (mcpCount > 0) groups.push(`${mcpCount} MCP server toolset(s)`);
+  if (groups.length === 0)
+    return "You currently have NO tools enabled — answer from the conversation and say so when a task would need one.";
+  return `Your enabled capabilities this conversation: ${groups.join(", ")}. Do not attempt tools outside this list.`;
+}
+
+/**
+ * Resolve the assistant's model endpoint, honoring its OWN custom-endpoint
+ * overrides so it stays isolated from the desktop's Settings → Models config.
+ *
+ * For a custom provider (lmstudio-local / openai-compatible-custom) the model
+ * NAME and BASE URL come from prefs.customModelId / prefs.customBaseUrl when
+ * set, else fall back to the global Settings → Models value. That means: leave
+ * them blank → "inherit the global endpoint"; set them → the assistant is
+ * pinned no matter how the user flips the desktop chat between models.
+ * Non-custom models ignore both. Pure + exported for unit tests.
+ */
+export function resolveAssistantEndpoint(
+  modelId: string,
+  prefs: { customModelId?: string | null; customBaseUrl?: string | null },
+  global: {
+    lmstudioModelId?: string;
+    lmstudioBaseURL: string;
+    openaiCompatibleModelId?: string;
+    openaiCompatibleBaseURL: string;
+  },
+): { resolvedModelId: string; lmstudioBaseURL: string; openaiCompatibleBaseURL: string } {
+  const ownModel = prefs.customModelId?.trim() || null;
+  const ownUrl = prefs.customBaseUrl?.trim() || null;
+  const out = {
+    resolvedModelId: modelId,
+    lmstudioBaseURL: global.lmstudioBaseURL,
+    openaiCompatibleBaseURL: global.openaiCompatibleBaseURL,
+  };
+  if (modelId === "lmstudio-local") {
+    out.resolvedModelId = ownModel || global.lmstudioModelId?.trim() || modelId;
+    if (ownUrl) out.lmstudioBaseURL = ownUrl;
+  } else if (modelId === "openai-compatible-custom") {
+    out.resolvedModelId = ownModel || global.openaiCompatibleModelId?.trim() || modelId;
+    if (ownUrl) out.openaiCompatibleBaseURL = ownUrl;
+  }
+  return out;
+}
 
 export async function runAssistantTurn(
   userText: string,
@@ -333,26 +387,27 @@ export async function runAssistantTurn(
   const custom = usePreferencesStore.getState().customInstructions;
 
   const m = getModel(modelId);
-  let resolvedModelId = m.id;
-  if (m.id === "lmstudio-local") {
-    resolvedModelId = usePreferencesStore.getState().lmstudioModelId?.trim() || resolvedModelId;
-  } else if (m.id === "openai-compatible-custom") {
-    resolvedModelId =
-      usePreferencesStore.getState().openaiCompatibleModelId?.trim() || resolvedModelId;
-  }
-  const model = await buildLanguageModel(m.provider, keys, resolvedModelId, {
-    lmstudioBaseURL: usePreferencesStore.getState().lmstudioBaseURL,
-    openaiCompatibleBaseURL: usePreferencesStore.getState().openaiCompatibleBaseURL,
+  const ep = resolveAssistantEndpoint(m.id, prefs, usePreferencesStore.getState());
+  const model = await buildLanguageModel(m.provider, keys, ep.resolvedModelId, {
+    lmstudioBaseURL: ep.lmstudioBaseURL,
+    openaiCompatibleBaseURL: ep.openaiCompatibleBaseURL,
   });
 
   // Build the full toolset, filter to the assistant surface, add MCP.
   const all = buildTools(toolContext) as Record<string, unknown>;
+  // The owner's allowlist (READ tier by default) — a tool reaches the model
+  // only if selected here. isToolAllowed also enforces the hard-excluded set,
+  // so a stale/edited allowedTools can't re-enable a desktop-only tool.
+  const allowed = new Set(prefs.allowedTools);
   const tools: Record<string, unknown> = {};
   for (const [id, tool] of Object.entries(all)) {
-    if (EXCLUDED_TOOLS.has(id)) continue;
+    if (!isToolAllowed(id, allowed)) continue;
     tools[id] = tool;
   }
-  const mcpTools = mcpManager.getActiveTools();
+  // MCP: per-server grant. getToolsForServers returns tools ONLY for the
+  // allowed ids (and only connected servers), so an ungranted server's tools
+  // never surface even if the model was told about them.
+  const mcpTools = mcpManager.getToolsForServers(prefs.mcpAllowedServers);
   for (const [id, tool] of Object.entries(mcpTools)) {
     tools[id] = tool;
   }
@@ -362,17 +417,26 @@ export async function runAssistantTurn(
   // synchronously in-step and deliver straight to Telegram. Avoid the
   // module-level circular import: media.ts statically imports index.ts
   // (getTelegramToken/loadAssistantPrefs), so index must load it lazily.
+  // Drop the desktop media tools unconditionally (they patch a chat-UI part
+  // that doesn't exist headless); re-attach the assistant-native versions
+  // ONLY if the owner's allowlist grants them (both are WRITE tier, off by
+  // default — so a default assistant can't spend image/video API credits).
   delete tools["generate_image"];
   delete tools["generate_video"];
-  const mediaTools = await import("./media");
-  // The photo attached to THIS turn is the editing/animation source headless:
-  // no meaningful paths exist in the assistant scratch dir, so the just-sent
-  // photo rides as the reference image when the model asks to edit/animate it.
-  const turnImage = opts?.imageBase64
-    ? { base64: opts.imageBase64, mimeType: opts.imageMime }
-    : undefined;
-  tools["generate_image"] = mediaTools.buildAssistantMediaTools(turnImage)["generate_image"];
-  tools["generate_video"] = mediaTools.buildAssistantMediaTools(turnImage)["generate_video"];
+  if (allowed.has("generate_image") || allowed.has("generate_video")) {
+    const mediaTools = await import("./media");
+    // The photo attached to THIS turn is the editing/animation source headless:
+    // no meaningful paths exist in the assistant scratch dir, so the just-sent
+    // photo rides as the reference image when the model asks to edit/animate it.
+    const turnImage = opts?.imageBase64
+      ? { base64: opts.imageBase64, mimeType: opts.imageMime }
+      : undefined;
+    const assistantMedia = mediaTools.buildAssistantMediaTools(turnImage);
+    if (allowed.has("generate_image"))
+      tools["generate_image"] = assistantMedia["generate_image"];
+    if (allowed.has("generate_video"))
+      tools["generate_video"] = assistantMedia["generate_video"];
+  }
   // Redact tool RESULTS (paths, env vars, secrets) before they reach the
   // provider — same guarantee as the project agent path. Then fence them:
   // the assistant reads web pages and arbitrary user files, so its tool
@@ -405,7 +469,7 @@ export async function runAssistantTurn(
     "\n\n## CONVERSATION SURFACE — TELEGRAM",
     "You are chatting with the owner over Telegram. Replies are plain text (Telegram Markdown).",
     "Keep replies conversational and SHORT — a chat message, not a document. Bullet points over essays.",
-    "You have tools (web, files in your scratch dir, shell in your scratch dir, MCP, image/video generation). Use them when asked.",
+    describeAssistantCapabilities(allowed, prefs.mcpAllowedServers.length),
     "Do NOT use code fences with language tags unless the user asks for code — Telegram renders them as monospace blocks.",
     "This is a general personal-assistant conversation, not a coding session.",
     "## EXECUTION CLARITY PROTOCOL (critical):",
@@ -437,17 +501,27 @@ export async function runAssistantTurn(
     userText.slice(0, 160),
     "",
   );
-  const result = await generateText({
-    model,
-    system,
-    messages: modelMessages,
-    tools: guardedTools as Parameters<typeof generateText>[0]["tools"],
-    stopWhen: stepCountIs(ASSISTANT_MAX_STEPS),
-    onStepFinish: (step) => {
-      const last = step.toolCalls?.[step.toolCalls.length - 1];
-      if (last && onNotice) onNotice(`⚙ ${last.toolName}`);
-    },
-  });
+  // IMAGE-FIRST, then reactive OCR. Local models are overwhelmingly
+  // multimodal and detection-by-name misfires ("Qwen3.8-Flash-Next" looks
+  // text-only to the heuristic but isn't), so we send real pixels whenever
+  // a photo is present. If the provider rejects the image (a genuinely
+  // text-only model errors on the content part), swap image parts for
+  // extracted text and retry ONCE — the turn degrades to an OCR'd image
+  // description instead of the warning hard failure the owner saw before.
+  // Extraction is best-effort even without an OCR engine (it still yields
+  // format/dimensions), so the retry cannot itself throw on the image.
+  let result: Awaited<ReturnType<typeof generateText>>;
+  try {
+    result = await runAssistantGenerate(model, system, modelMessages, guardedTools, onNotice);
+  } catch (e) {
+    if (!hasInlineImageParts(modelMessages)) throw e;
+    console.warn(
+      "[kai:assistant] image request rejected — retrying with image text-extracted:",
+      e,
+    );
+    const textOnly = await swapImagePartsToText(modelMessages);
+    result = await runAssistantGenerate(model, system, textOnly, guardedTools, onNotice);
+  }
 
   const reply = result.text?.trim() || "…";
   // Persist WITHOUT inline photo bytes: each file part keeps its mediaType +
@@ -466,6 +540,26 @@ export async function runAssistantTurn(
     sessionId,
   );
   return reply;
+}
+
+async function runAssistantGenerate(
+  model: Parameters<typeof generateText>[0]["model"],
+  system: string,
+  messages: ModelMessage[],
+  guardedTools: Record<string, unknown>,
+  onNotice?: (msg: string) => void,
+) {
+  return generateText({
+    model,
+    system,
+    messages,
+    tools: guardedTools as Parameters<typeof generateText>[0]["tools"],
+    stopWhen: stepCountIs(ASSISTANT_MAX_STEPS),
+    onStepFinish: (step) => {
+      const last = step.toolCalls?.[step.toolCalls.length - 1];
+      if (last && onNotice) onNotice(`⚙ ${last.toolName}`);
+    },
+  });
 }
 
 /** UIMessage → generateText model message. Text parts become text; image

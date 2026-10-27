@@ -58,19 +58,32 @@ describe("assistant history", () => {
   });
 });
 
-describe("excluded tools stay off the assistant surface", () => {
-  // The exclusion list is module-internal; assert the contract via the
-  // surface behavior: runAssistantTurn never builds these tools. Here we
-  // test the LIST itself is stable — if someone removes an exclusion, this
-  // fails and they must consciously accept the widened surface.
-  it("exports no terminal-only tools", async () => {
-    // The exclusion is internal, but the toolset builder is exercised via
-    // runAssistantTurn's internals — we assert indirectly: the module must
-    // import buildTools and filter it. Simplest stable contract: the
-    // module source must contain the exclusions (grep-style test).
-    const src = await import("node:fs").then((fs) =>
-      fs.readFileSync(new URL("./index.ts", import.meta.url), "utf8"),
+describe("assistant capability summary (prompt honesty)", () => {
+  it("advertises only granted capabilities", async () => {
+    // The prompt line is derived from the SAME allowlist set the filter uses.
+    const { describeAssistantCapabilities } = await import("./index");
+    const line = describeAssistantCapabilities(
+      new Set(["web_search", "read_file", "bash_run"]),
+      2,
     );
+    expect(line).toContain("web search/fetch");
+    expect(line).toContain("shell commands");
+    expect(line).toContain("2 MCP server toolset");
+    // A capability that is NOT granted must not be advertised.
+    expect(line).not.toContain("image generation");
+  });
+
+  it("says NO TOOLS when the allowlist is empty (model told the truth)", async () => {
+    const { describeAssistantCapabilities } = await import("./index");
+    expect(describeAssistantCapabilities(new Set(), 0)).toContain("NO tools");
+  });
+});
+
+describe("assistant tool catalog", () => {
+  // The exclusion + allowlist logic moved to toolCatalog.ts (pure, so it is
+  // imported directly rather than grep-asserted against index.ts).
+  it("hard-excludes every desktop-coupled tool", async () => {
+    const { HARD_EXCLUDED_TOOLS } = await import("./toolCatalog");
     for (const banned of [
       "display_image",
       "look_at_screen",
@@ -78,8 +91,17 @@ describe("excluded tools stay off the assistant surface", () => {
       "radio_list_stations",
       "get_terminal_output",
       "mcp_add_server",
+      "checkpoint_undo",
+      "todo_write",
     ]) {
-      expect(src).toContain(`"${banned}"`);
+      expect(HARD_EXCLUDED_TOOLS.has(banned)).toBe(true);
+    }
+  });
+
+  it("no tool is both selectable and hard-excluded", async () => {
+    const { TOOL_CATALOG, HARD_EXCLUDED_TOOLS } = await import("./toolCatalog");
+    for (const t of TOOL_CATALOG) {
+      expect(HARD_EXCLUDED_TOOLS.has(t.name)).toBe(false);
     }
   });
 });
@@ -247,5 +269,59 @@ describe("telegram IPC contract", () => {
     // camelCase keys Tauri maps onto snake_case Rust params.
     const sendArgs = vi.mocked(invoke).mock.calls[4]![1] as Record<string, unknown>;
     expect(sendArgs).toEqual({ token: "tok", chatId: 1, text: "hi" });
+  });
+});
+
+describe("resolveAssistantEndpoint (assistant endpoint isolation)", () => {
+  const globals = {
+    lmstudioModelId: "global-lm-name",
+    lmstudioBaseURL: "http://localhost:1234/v1",
+    openaiCompatibleModelId: "global-compat-name",
+    openaiCompatibleBaseURL: "http://sparky.local:8888/v1",
+  };
+
+  it("custom model with NO assistant overrides inherits the global endpoint", () => {
+    const r = assistant.resolveAssistantEndpoint("openai-compatible-custom", {}, globals);
+    expect(r.resolvedModelId).toBe("global-compat-name");
+    expect(r.openaiCompatibleBaseURL).toBe("http://sparky.local:8888/v1");
+  });
+
+  it("assistant customModelId + customBaseUrl WIN over the global endpoint", () => {
+    const r = assistant.resolveAssistantEndpoint(
+      "openai-compatible-custom",
+      { customModelId: " my-pinned-model ", customBaseUrl: "http://other:9/v1" },
+      globals,
+    );
+    expect(r.resolvedModelId).toBe("my-pinned-model");
+    expect(r.openaiCompatibleBaseURL).toBe("http://other:9/v1");
+  });
+
+  it("blank/whitespace overrides fall back to global (not empty string)", () => {
+    const r = assistant.resolveAssistantEndpoint(
+      "lmstudio-local",
+      { customModelId: "   ", customBaseUrl: "" },
+      globals,
+    );
+    expect(r.resolvedModelId).toBe("global-lm-name");
+    expect(r.lmstudioBaseURL).toBe("http://localhost:1234/v1");
+  });
+
+  it("lmstudio override sets the lmstudio URL, not the compat one", () => {
+    const r = assistant.resolveAssistantEndpoint(
+      "lmstudio-local",
+      { customBaseUrl: "http://lm:1234/v1" },
+      globals,
+    );
+    expect(r.lmstudioBaseURL).toBe("http://lm:1234/v1");
+    expect(r.openaiCompatibleBaseURL).toBe("http://sparky.local:8888/v1"); // untouched
+  });
+
+  it("a non-custom cloud model ignores the assistant overrides entirely", () => {
+    const r = assistant.resolveAssistantEndpoint(
+      "gpt-5.4-mini",
+      { customModelId: "should-not-apply", customBaseUrl: "http://nope/v1" },
+      globals,
+    );
+    expect(r.resolvedModelId).toBe("gpt-5.4-mini");
   });
 });

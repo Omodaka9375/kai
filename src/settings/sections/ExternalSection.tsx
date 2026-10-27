@@ -19,6 +19,7 @@ import {
 import { SectionHeader } from "../components/SectionHeader";
 import { SettingRow } from "../components/SettingRow";
 import { SearchableModelPicker } from "../components/SearchableModelPicker";
+import { ToolAllowlistPicker } from "../components/ToolAllowlistPicker";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { cn } from "@/lib/utils";
 
@@ -36,6 +37,7 @@ import { cn } from "@/lib/utils";
  */
 export function ExternalSection() {
   const ttsMode = usePreferencesStore((s) => s.voiceTtsMode);
+  const globalDefaultModelId = usePreferencesStore((s) => s.defaultModelId);
   const [prefs, setPrefs] = useState<AssistantPrefs | null>(null);
   const [token, setToken] = useState("");
   const [tokenSet, setTokenSet] = useState(false);
@@ -236,6 +238,50 @@ export function ExternalSection() {
           />
         </SettingRow>
 
+        {(prefs.modelId ?? globalDefaultModelId) === "openai-compatible-custom" ||
+        (prefs.modelId ?? globalDefaultModelId) === "lmstudio-local" ? (
+          <>
+            <SettingRow
+              title="Assistant model name"
+              description="Overrides the model id sent to the endpoint for the ASSISTANT only. Blank = inherit Settings → Models. Set it to stop the assistant drifting when you switch the desktop chat between local models."
+            >
+              <Input
+                value={prefs.customModelId ?? ""}
+                placeholder="inherit global"
+                onChange={(e) =>
+                  void patch({ customModelId: e.target.value.trim() || null })
+                }
+                className="w-56 font-mono text-xs"
+              />
+            </SettingRow>
+            <SettingRow
+              title="Assistant base URL"
+              description="Overrides the OpenAI-compatible / LM Studio base URL for the ASSISTANT only. Blank = inherit Settings → Models (e.g. http://localhost:1234/v1)."
+            >
+              <Input
+                value={prefs.customBaseUrl ?? ""}
+                placeholder="inherit global"
+                onChange={(e) =>
+                  void patch({ customBaseUrl: e.target.value.trim() || null })
+                }
+                className="w-56 font-mono text-xs"
+              />
+            </SettingRow>
+          </>
+        ) : null}
+
+        <SettingRow
+          title="Allowed tools"
+          description="What the assistant may call on your behalf. Read-only is on by default; shell, file-writing and API-cost tools stay off until you grant them."
+        >
+          <ToolAllowlistPicker
+            allowedTools={prefs.allowedTools}
+            mcpAllowedServers={prefs.mcpAllowedServers}
+            disabled={busy}
+            onChange={(next) => void patch(next)}
+          />
+        </SettingRow>
+
         <SettingRow
           title="Owner"
           description={
@@ -297,10 +343,14 @@ export function ExternalSection() {
           <li>Chat by text or voice notes. /new resets the conversation.</li>
         </ol>
         <div className="mt-2">
-          The assistant uses the general Assistant persona, the model picked above
-          (or your default model), your MCP servers, and web tools. File and shell tools are fenced to a scratch folder
-          (~/.kai/assistant) — not your projects. The app must be running (tray is fine)
-          for the bot to answer.
+          The assistant uses the general Assistant persona and the model picked
+          above. What it may do is set under <span className="text-foreground">Allowed tools</span>
+          {" "}— read-only by default (web search + file reads); write and shell
+          tools stay off until you grant them, and when on are fenced to a
+          scratch folder (~/.kai/assistant), never your projects. Note: calling
+          any tool requires a model with <span className="text-foreground">function-calling</span> support — many
+          small / local models reply conversationally but will run nothing.
+          The app must be running (tray is fine) for the bot to answer.
         </div>
       </div>
     </div>

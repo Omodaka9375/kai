@@ -15,6 +15,7 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { LazyStore } from "@tauri-apps/plugin-store";
 import { KEYRING_SERVICE } from "@/modules/ai/config";
+import { DEFAULT_ALLOWED_TOOLS } from "./toolCatalog";
 
 // ── Preferences ────────────────────────────────────────────────────────────
 
@@ -26,15 +27,39 @@ export type AssistantPrefs = {
   ownerChatId: number | null;
   /** Model override for the assistant (null = default model). */
   modelId: string | null;
+  /**
+   * Assistant's OWN custom-endpoint identity. When the resolved model is a
+   * custom endpoint (lmstudio-local / openai-compatible-custom) these win over
+   * the app-wide Settings → Models endpoint, so flipping the DESKTOP chat
+   * between local/cloud models can never silently move the assistant. null /
+   * empty = inherit the global endpoint (the pre-isolation behavior).
+   */
+  customModelId: string | null;
+  customBaseUrl: string | null;
   /** Reply with voice notes when the user sent voice. */
   voiceReplies: boolean;
+  /**
+   * Selectable tools the assistant may call (see toolCatalog.ts). Names are
+   * tool keys; hard-excluded + MCP tools are not in this set. Defaults to the
+   * READ tier — the assistant can look things up but not run shell / write
+   * files / spend API credits until the owner grants those tiers.
+   */
+  allowedTools: string[];
+  /** MCP server ids whose tools the assistant may call (empty = no MCP). */
+  mcpAllowedServers: string[];
 };
 
 const DEFAULT_PREFS: AssistantPrefs = {
   enabled: false,
   ownerChatId: null,
   modelId: null,
+  customModelId: null,
+  customBaseUrl: null,
   voiceReplies: true,
+  // Fresh spread: the defaults array is never mutated (saveAssistantPrefs
+  // writes a copy), but a new list per default keeps references independent.
+  allowedTools: [...DEFAULT_ALLOWED_TOOLS],
+  mcpAllowedServers: [],
 };
 
 /** Shared store instance — sessions/history (index.ts) use the same one. */

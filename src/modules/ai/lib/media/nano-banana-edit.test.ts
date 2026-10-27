@@ -68,7 +68,10 @@ describe("Telegram assistant edit/animate wiring", () => {
   it("runAssistantTurn threads the turn's attached image into both tools", () => {
     expect(tgIndexSrc).toContain("buildAssistantMediaTools(turnImage)");
     expect(tgIndexSrc).toMatch(/turnImage = opts\?.imageBase64/);
-    expect((tgIndexSrc.match(/buildAssistantMediaTools\(turnImage\)/g) ?? []).length).toBe(2);
+    // Built once and both keys read from it (allowlist-gated), rather than
+    // building twice. The photo must reach both the image and video tool.
+    expect(tgIndexSrc).toContain(`assistantMedia["generate_image"]`);
+    expect(tgIndexSrc).toContain(`assistantMedia["generate_video"]`);
   });
 });
 
