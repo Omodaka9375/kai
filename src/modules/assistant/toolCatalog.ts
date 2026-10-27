@@ -54,7 +54,7 @@ export const HARD_EXCLUDED_TOOLS: ReadonlySet<string> = new Set([
 /** Every selectable tool, grouped by tier. Order here is the picker order. */
 export const TOOL_CATALOG: readonly ToolEntry[] = [
   // ── READ: no side effects — the safe default surface. ──────────────────
-  { name: "web_search", tier: "read", blurb: "Search the web (DuckDuckGo)." },
+  { name: "web_search", tier: "read", blurb: "Search the web (Bing, DDG fallback)." },
   { name: "web_browse", tier: "read", blurb: "Fetch a web page's text." },
   { name: "read_file", tier: "read", blurb: "Read a file (scratch dir only)." },
   { name: "list_directory", tier: "read", blurb: "List a directory." },

@@ -138,6 +138,95 @@ function extractDdgUrl(raw: string): string {
   }
 }
 
+// ── Web search engines: Bing RSS (primary) + DuckDuckGo (fallback) ─────────
+//
+// DuckDuckGo's scrapable endpoints (lite + html) now answer anonymous
+// programmatic requests with an HTTP 202 "anomaly" interstitial — zero result
+// links in the body — so scraping harder cannot help; the ENGINE must change.
+// Bing exposes a stable RSS serializer (`&format=rss`) that returns real
+// machine-readable <item> entries to a plain GET, no JS, no bot-wall;
+// `&setlang=en` keeps results locale-stable. DDG stays as the fallback in case
+// Bing's RSS shape ever changes (the web_search tool tries Bing, then DDG).
+
+/** XML entity decoder for RSS text (named + numeric entities). */
+export function decodeXml(s: string): string {
+  // XML has only 5 predefined entities, but Bing/RSS titles carry the common
+  // HTML typographic ones too — an undecoded `&mdash;` shows up verbatim.
+  const named: Record<string, string> = {
+    amp: "&",
+    lt: "<",
+    gt: ">",
+    quot: '"',
+    apos: "'",
+    nbsp: " ",
+    mdash: "—",
+    ndash: "–",
+    hellip: "…",
+    lsquo: "‘",
+    rsquo: "’",
+    ldquo: "“",
+    rdquo: "”",
+    middot: "·",
+    bull: "•",
+    times: "×",
+    deg: "°",
+    laquo: "«",
+    raquo: "»",
+    euro: "€",
+    pound: "£",
+    copy: "©",
+    reg: "®",
+    trade: "™",
+  };
+  return s
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h: string) =>
+      String.fromCodePoint(parseInt(h, 16)),
+    )
+    .replace(/&#(\d+);/g, (_, d: string) => String.fromCodePoint(parseInt(d, 10)))
+    .replace(/&([a-zA-Z]+);/g, (m, e: string) => named[e] ?? m);
+}
+
+/** CDATA / tag / whitespace cleanup for one RSS field. */
+function rssField(inner: string): string {
+  return decodeXml(inner.replace(/<!\[CDATA\[|\]\]>/g, "").replace(/<[^>]+>/g, ""))
+    .replace(/\u00a0/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export type WebSearchResult = { title: string; url: string; snippet?: string };
+
+/** Parse Bing's `search?...&format=rss` XML into results (pure, unit-tested).
+ *  Items without an absolute http(s) link are dropped (nav/ad stubs). */
+export function parseBingRss(xml: string): WebSearchResult[] {
+  const out: WebSearchResult[] = [];
+  for (const m of xml.matchAll(/<item>([\s\S]*?)<\/item>/g)) {
+    const block = m[1];
+    const field = (tag: string): string => {
+      const mm = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`).exec(block);
+      return mm ? rssField(mm[1]) : "";
+    };
+    const title = field("title");
+    const link = field("link");
+    const snippet = field("description");
+    if (title && /^https?:\/\//i.test(link))
+      out.push({ title, url: link, ...(snippet ? { snippet } : {}) });
+  }
+  return out.slice(0, 10);
+}
+
+/** Bing RSS search through the SSRF-hardened proxy GET. An empty array on a
+ *  non-200 / item-less body signals "fall back to DDG" to the caller. */
+async function bingSearch(query: string): Promise<WebSearchResult[]> {
+  const url =
+    "https://www.bing.com/search?q=" +
+    encodeURIComponent(query) +
+    "&format=rss&count=10&setlang=en";
+  const { status, body } = await httpFetch(url);
+  if (status !== 200 || !body || !body.includes("<item>")) return [];
+  return parseBingRss(body);
+}
+
 export function buildWebTools(_ctx: ToolContext) {
   return {
     web_browse: tool({
@@ -165,14 +254,23 @@ export function buildWebTools(_ctx: ToolContext) {
 
     web_search: tool({
       description:
-        "Search the web using DuckDuckGo and return the top results with titles, URLs, and snippets. Useful for finding documentation, answers, or current information. Auto-executes (read-only).",
+        "Search the web and return the top results with titles, URLs, and snippets (backed by Bing, with a DuckDuckGo fallback). Useful for finding documentation, answers, or current information. Auto-executes (read-only).",
       inputSchema: z.object({
         query: z.string().describe("The search query."),
       }),
       execute: async ({ query }) => {
         try {
-          // Use DDG lite endpoint with POST. The Accept-Encoding is handled
-          // by Rust reqwest (gzip/deflate enabled in Cargo.toml).
+          // Primary: Bing's RSS serializer (reliable, not bot-walled). If it
+          // yields nothing (shape change / block / non-200), fall through to
+          // the legacy DDG scraper below.
+          const bing = await bingSearch(query);
+          if (bing.length > 0) return { query, engine: "bing", results: bing };
+
+          // ── Fallback: DDG lite endpoint with POST. The Accept-Encoding is
+          // handled by Rust reqwest (gzip/deflate enabled in Cargo.toml).
+          // NOTE: DDG currently returns a 202 "anomaly" interstitial to
+          // anonymous programmatic requests, so this path usually yields 0 —
+          // kept only in case Bing also degrades.
           const resp = await invoke<{ status: number; headers: Record<string, string>; body: number[] }>(
             "ai_http_request",
             {
@@ -253,7 +351,19 @@ export function buildWebTools(_ctx: ToolContext) {
             }
             i++;
           }
-          return { query, results: results.slice(0, 10) };
+          return {
+            query,
+            engine: "duckduckgo",
+            results: results.slice(0, 10),
+            ...(results.length === 0
+              ? {
+                  note:
+                    "Both search engines returned no results — Bing RSS was " +
+                    "empty and DuckDuckGo is currently bot-walled. Try " +
+                    "rephrasing the query, or web_browse a URL directly.",
+                }
+              : {}),
+          };
         } catch (e) {
           return { error: String(e), query };
         }
