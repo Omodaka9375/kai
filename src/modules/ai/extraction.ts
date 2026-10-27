@@ -8,6 +8,7 @@
 
 import { getModel, type VisionOverride } from "./config";
 import { native } from "./lib/native";
+import type { ModelMessage } from "ai";
 
 export type FileAttachment = {
   id: string;
@@ -104,6 +105,107 @@ export async function extractAttachmentText(
  *  user attached an image without inventing content. */
 export function attachmentFallbackText(name: string): string {
   return `[attachment "${name}" — image could not be extracted to text; the selected model has no vision support]`;
+}
+
+// ── Image → text swap for non-vision models (shared: desktop + assistant) ──
+//
+// A single implementation used by BOTH callers so the two never drift. It
+// accepts either shape a converted ModelMessage can carry an image in: the
+// desktop path's `{type:"file", mediaType:"image/…", data}` and the assistant
+// path's `{type:"image", image}`. Extraction runs once per payload (cached by
+// the base64 body) because agent steps / history replay re-convert every turn.
+//
+// Extraction is best-effort and NEVER throws: with no OCR engine the primitive
+// still yields format/size/dimensions, and a total failure falls back to
+// attachmentFallbackText — so a text-only model degrades to "there was an
+// image," never a hard request error.
+
+const imageTextCache = new Map<string, string | null>();
+
+type SwapPart = {
+  type: string;
+  mediaType?: unknown;
+  data?: unknown;
+  image?: unknown;
+  [k: string]: unknown;
+};
+
+/** Base64 payload of an image part, or null when this part is not an image
+ *  with an inline (string) payload (e.g. a URL reference — left untouched). */
+function inlineImageBase64(part: SwapPart): string | null {
+  if (part.type === "image") {
+    return typeof part.image === "string" && part.image.length > 0
+      ? part.image
+      : null;
+  }
+  if (
+    part.type === "file" &&
+    typeof part.mediaType === "string" &&
+    part.mediaType.startsWith("image/") &&
+    typeof part.data === "string" &&
+    part.data.length > 0
+  ) {
+    return part.data;
+  }
+  return null;
+}
+
+/** True when any message carries an inline image part (so a failed request is
+ *  worth an OCR retry). */
+export function hasInlineImageParts(messages: ModelMessage[]): boolean {
+  return messages.some((m) => {
+    if (!Array.isArray(m.content)) return false;
+    return (m.content as SwapPart[]).some((p) => inlineImageBase64(p) != null);
+  });
+}
+
+/** Replace every inline image part with its extracted text. Messages with no
+ *  image parts are returned by identity (no needless clones). */
+export async function swapImagePartsToText(
+  messages: ModelMessage[],
+): Promise<ModelMessage[]> {
+  const out: ModelMessage[] = [];
+  for (const m of messages) {
+    if (!Array.isArray(m.content)) {
+      out.push(m);
+      continue;
+    }
+    const parts = m.content as SwapPart[];
+    if (!parts.some((p) => inlineImageBase64(p) != null)) {
+      out.push(m);
+      continue;
+    }
+    const content: SwapPart[] = [];
+    for (const part of parts) {
+      const b64 = inlineImageBase64(part);
+      if (b64 != null) content.push({ type: "text", text: await cachedImageText(b64) });
+      else content.push(part);
+    }
+    out.push({ ...m, content } as ModelMessage);
+  }
+  return out;
+}
+
+/** Cached extraction for one base64 image payload. */
+async function cachedImageText(base64: string): Promise<string> {
+  if (imageTextCache.has(base64)) {
+    return imageTextCache.get(base64) ?? attachmentFallbackText("image");
+  }
+  const dataUrl = `data:image/png;base64,${base64}`;
+  let text: string | null = null;
+  try {
+    text = await extractAttachmentText({ url: dataUrl, mediaType: "image/png" });
+  } catch (e) {
+    console.warn("[kai] image extraction failed:", e);
+  }
+  const finalText = text ?? attachmentFallbackText("image");
+  // Bound the cache: payloads are large; a session rarely exceeds a handful.
+  if (imageTextCache.size >= 16) {
+    const first = imageTextCache.keys().next().value;
+    if (first !== undefined) imageTextCache.delete(first);
+  }
+  imageTextCache.set(base64, text);
+  return finalText;
 }
 
 function metaText(meta: [string, string][]): string {
