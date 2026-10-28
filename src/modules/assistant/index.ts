@@ -511,10 +511,19 @@ export async function runAssistantTurn(
   // Extraction is best-effort even without an OCR engine (it still yields
   // format/dimensions), so the retry cannot itself throw on the image.
   let result: Awaited<ReturnType<typeof generateText>>;
+  // A text-only provider rejects the image on the FIRST model call — before
+  // ANY tool executes — so a pre-step failure is safe to retry with OCR. If a
+  // step already finished, side-effecting tools may have run; replaying the
+  // turn would double-execute them (a second `git commit`, a re-charged image
+  // generation, …) AND the image clearly was not the blocker (the turn got
+  // several steps in WITH it). So retry ONLY when nothing has run yet.
+  let stepsFinished = 0;
   try {
-    result = await runAssistantGenerate(model, system, modelMessages, guardedTools, onNotice);
+    result = await runAssistantGenerate(model, system, modelMessages, guardedTools, onNotice, () => {
+      stepsFinished++;
+    });
   } catch (e) {
-    if (!hasInlineImageParts(modelMessages)) throw e;
+    if (stepsFinished > 0 || !hasInlineImageParts(modelMessages)) throw e;
     console.warn(
       "[kai:assistant] image request rejected — retrying with image text-extracted:",
       e,
@@ -548,6 +557,7 @@ async function runAssistantGenerate(
   messages: ModelMessage[],
   guardedTools: Record<string, unknown>,
   onNotice?: (msg: string) => void,
+  onStepFinished?: () => void,
 ) {
   return generateText({
     model,
@@ -556,6 +566,9 @@ async function runAssistantGenerate(
     tools: guardedTools as Parameters<typeof generateText>[0]["tools"],
     stopWhen: stepCountIs(ASSISTANT_MAX_STEPS),
     onStepFinish: (step) => {
+      // Counted BEFORE the notice so the retry guard sees "a step ran" even
+      // if the model errored on the next call.
+      onStepFinished?.();
       const last = step.toolCalls?.[step.toolCalls.length - 1];
       if (last && onNotice) onNotice(`⚙ ${last.toolName}`);
     },
