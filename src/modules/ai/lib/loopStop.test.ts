@@ -47,4 +47,42 @@ describe("loop-detector false-positive gates (agent.ts)", () => {
       /step\.toolCalls[\s\S]{0,160}JSON\.stringify\(tc\.input[^\n]*\n[\s\S]{0,80}\.sort\(\)/,
     );
   });
+
+  it("an identical repeat earns a nudge BEFORE the hard stop", () => {
+    // dsh's repeat-tool-reminder: nudge at TOOL_LOOP_NUDGE, kill only at
+    // TOOL_LOOP_THRESHOLD. Both constants must exist and the nudge must
+    // fire strictly below the threshold.
+    expect(src).toMatch(/const TOOL_LOOP_THRESHOLD = (\d+);/);
+    expect(src).toMatch(/const TOOL_LOOP_NUDGE = (\d+);/);
+    const threshold = Number(src.match(/const TOOL_LOOP_THRESHOLD = (\d+);/)![1]);
+    const nudge = Number(src.match(/const TOOL_LOOP_NUDGE = (\d+);/)![1]);
+    expect(nudge).toBeLessThan(threshold);
+    expect(src).toContain("toolRepeatCount === TOOL_LOOP_NUDGE");
+    expect(src).toContain("loopNudgeMessage");
+  });
+
+  it("the nudge rides the NEXT request via prepareStep and is consumed once", () => {
+    // Injected into the model call only (prepareStep messages override),
+    // never persisted; cleared on read so it can't repeat every step.
+    const prepIdx = src.indexOf("prepareStep:");
+    expect(prepIdx).toBeGreaterThan(-1);
+    const block = src.slice(prepIdx, prepIdx + 600);
+    expect(block).toContain("loopNudgeMessage");
+    expect(block).toMatch(/loopNudgeMessage = null;/);
+    expect(block).toContain('role: "user"');
+    // onStepFinish sets it; prepareStep must be the only consumer.
+    // (\s*= so a wrapped `loopNudgeMessage =\n  \`…\`` setter still matches.)
+    expect((src.match(/loopNudgeMessage\s*=/g) ?? []).length).toBe(2);
+  });
+
+  it("the central guard wrapper is applied on BOTH the fenced and unfenced paths", () => {
+    // Phase-A bug pin: the no-fenceState branch once fell back to
+    // redactedTools, silently bypassing withCentralToolGuards.
+    const ternary = src.slice(
+      src.indexOf("const fencedTools = opts.fenceState"),
+      src.indexOf("return streamText"),
+    );
+    expect(ternary).toMatch(/:\s*guardedTools;/);
+    expect(ternary).not.toMatch(/:\s*redactedTools;/);
+  });
 });

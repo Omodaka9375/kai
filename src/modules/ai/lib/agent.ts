@@ -768,13 +768,24 @@ export async function runAgentStream(opts: RunAgentOptions) {
   let stepsSeen = 0;
   // Track consecutive identical tool invocations to catch a model stuck in a
   // "spam the same tool" loop. A single tool+args fingerprint repeated 3+ times
-  // in a row is a runaway, not progress.
+  // in a row is a runaway, not progress. Before the hard stop, the 2nd
+  // identical call (same args AND identical output) earns the model a nudge —
+  // dsh's repeat-tool-reminder pattern: give it one chance to change approach
+  // instead of silently killing a run that may just be unlucky.
   const TOOL_LOOP_THRESHOLD = 3;
+  const TOOL_LOOP_NUDGE = 2;
   // Minimum step text length that may enter the repetition window (see the
   // gate in onStepFinish — short procedural narration collides trivially).
   const GUARD_MIN_STEP_TEXT = 300;
   let lastToolFingerprint: string | null = null;
   let toolRepeatCount = 0;
+  // Set by onStepFinish at TOOL_LOOP_NUDGE, consumed (and cleared) by
+  // prepareStep on the next step. The nudge is injected into THAT request
+  // only — it rides the model call without being committed to the persisted
+  // transcript (same model-visible-ephemeral contract as the <env> block).
+  // If the model ignores it and repeats once more, the count reaches
+  // TOOL_LOOP_THRESHOLD and the run stops as before.
+  let loopNudgeMessage: string | null = null;
 
   // Build and optionally fence tools for prompt-injection defense.
   //
@@ -805,7 +816,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
         opts.fenceState,
         opts.toolContext.getWorkspaceRoot,
       )
-    : redactedTools;
+    : guardedTools;
 
   return streamText({
     model: wrappedModel,
@@ -813,6 +824,16 @@ export async function runAgentStream(opts: RunAgentOptions) {
     tools: fencedTools,
     stopWhen: stepCountIs(MAX_AGENT_STEPS),
     abortSignal: opts.abortSignal,
+    // Inject a pending loop nudge into the immediate next request only.
+    // Returning undefined leaves the step untouched (the common case).
+    prepareStep: ({ messages: stepMessages }) => {
+      const nudge = loopNudgeMessage;
+      if (!nudge) return undefined;
+      loopNudgeMessage = null;
+      return {
+        messages: [...stepMessages, { role: "user", content: nudge }],
+      };
+    },
     ...(hasProviderOpts ? { providerOptions: thinkingProviderOpts } : {}),
     onChunk: (chunk) => {
       // Live token-rate source for providers that don't report usage. A chunk
@@ -857,6 +878,14 @@ export async function runAgentStream(opts: RunAgentOptions) {
       if (toolFingerprint) {
         if (toolFingerprint === lastToolFingerprint) {
           toolRepeatCount++;
+          // One advisory before the kill: the model already got byte-identical
+          // output from a byte-identical call. Tell it to change approach,
+          // summarize what it has, or stop — the very next repeat hard-stops.
+          if (toolRepeatCount === TOOL_LOOP_NUDGE) {
+            const toolName = step.toolCalls?.[0]?.toolName ?? "the same tool";
+            loopNudgeMessage =
+              `[kai loop guard] You have now called "${toolName}" ${toolRepeatCount} times in a row with identical arguments and received identical results back. Repeating the exact same call again will not change the outcome. Either change your approach (different arguments, a different tool, or read the result you already have), tell the user what you found and why you are stuck, or finish your turn. The next identical repetition stops this run.`;
+          }
           if (toolRepeatCount >= TOOL_LOOP_THRESHOLD && opts.onLoopDetected) {
             opts.onLoopDetected({
               isLooping: true,

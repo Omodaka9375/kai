@@ -3,6 +3,7 @@ import { z } from "zod";
 import { native } from "../lib/native";
 import { checkShellCommand } from "../lib/security";
 import { checkShellSandbox, sandboxExecRoot } from "../lib/sandbox";
+import { withExclusiveLock } from "../lib/mutationLock";
 import type { ToolContext } from "./context";
 import { currentWorkspaceEnv, workspaceScopeKey } from "@/modules/workspace";
 
@@ -221,7 +222,8 @@ export function buildShellTools(ctx: ToolContext) {
         if (!sid) return { error: "no active chat session" };
         try {
           const cwd = ctx.getCwd();
-          const shellId = await getSessionShell(workspaceSessionKey(sid), cwd);
+          const shellKey = workspaceSessionKey(sid);
+          const shellId = await getSessionShell(shellKey, cwd);
           const effectiveTimeout =
             timeout_secs ?? slowCommandTimeout(command);
 
@@ -283,12 +285,26 @@ export function buildShellTools(ctx: ToolContext) {
             };
           }
 
-          const r = await native.shellSessionRun(
-            shellId,
-            command,
-            cwd,
-            effectiveTimeout,
-            await sandboxExecRoot(ctx.getSandboxOverride?.() ?? null),
+          const sandboxRoot = await sandboxExecRoot(
+            ctx.getSandboxOverride?.() ?? null,
+          );
+          // Serialize on the shared per-session shell. The AI SDK runs
+          // sibling tool calls from one step CONCURRENTLY, and two bash_run
+          // commands would otherwise interleave on the SAME PTY — garbled
+          // output and a cwd race (same corruption class as the clobbered
+          // terminal logger). The RUN is the critical section (the PTY is
+          // busy for its whole duration), not the post-processing, so only
+          // the native call is locked. Elevated runs spawn a separate
+          // one-shot process and take no lock; watch tools own a DIFFERENT
+          // shell session, so they never contend for this key.
+          const r = await withExclusiveLock(shellKey, () =>
+            native.shellSessionRun(
+              shellId,
+              command,
+              cwd,
+              effectiveTimeout,
+              sandboxRoot,
+            ),
           );
           // Bound each stream before it reaches the model's context; flip the
           // truncated flag if we elided anything so the result says so.

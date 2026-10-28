@@ -29,6 +29,52 @@ function keyFor(path: string): string {
  * Overlapping calls (any shared path) are serialized; disjoint paths run
  * concurrently.
  */
+/**
+ * Independent tails map for named exclusive resources (agent shells, etc.)
+ * — kept separate from the file-path map so a raw key can never collide
+ * with a path key.
+ */
+const exclusiveTails = new Map<string, Promise<void>>();
+
+/**
+ * Run `fn` while holding an exclusive lock identified by an opaque verbatim
+ * key (NO path normalization here — the caller's key IS the identity).
+ * Concurrent holders of the same key serialize in arrival order; different
+ * keys run in parallel.
+ *
+ * Use for any shared stateful resource the AI SDK may dispatch concurrently
+ * within one step: notably the per-session persistent agent shell — two
+ * `bash_run` calls issued in one step would otherwise interleave on one PTY
+ * (output corruption + cwd races).
+ */
+export function withExclusiveLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const prev = exclusiveTails.get(key) ?? Promise.resolve();
+
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  const tail = prev.then(() => gate);
+  exclusiveTails.set(key, tail);
+  tail.then(() => {
+    if (exclusiveTails.get(key) === tail) exclusiveTails.delete(key);
+  });
+
+  return prev.then(async () => {
+    try {
+      return await fn();
+    } finally {
+      release();
+    }
+  });
+}
+
+/**
+ * Serialize file mutations across ALL calls touching a given path, matching
+ * withExclusiveLock semantics but with canonical path keys (forward slashes,
+ * case-folded; see keyFor).
+ */
 export function withFileMutationLock<T>(
   paths: string[],
   fn: () => Promise<T>,
