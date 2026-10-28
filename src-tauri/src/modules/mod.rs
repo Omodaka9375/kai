@@ -13,6 +13,7 @@ pub mod radio_proxy;
 pub mod sandbox;
 pub mod screen;
 pub mod secrets;
+pub mod session_journal;
 pub mod shell;
 pub mod telegram;
 pub mod voice;

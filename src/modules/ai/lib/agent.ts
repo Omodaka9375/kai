@@ -32,6 +32,7 @@ import { compactModelMessagesDetailed } from "./compact";
 import {
   modelCanSee,
   swapImagePartsToText,
+  countInlineImageParts,
 } from "../extraction";
 import type { ProviderKeys } from "./keyring";
 import { createProxyFetch } from "./proxyFetch";
@@ -46,6 +47,7 @@ export type { StackInfo };
 import { fenceSystemPrompt } from "./fence";
 import { stripInternalMeta, withToolGuard, withToolRedaction } from "./toolFencing";
 import { presentationFor } from "./toolPresentations";
+import { appendSessionEvent, buildTurnEvent } from "./sessionEvents";
 import { withCentralToolGuards } from "./toolGuards";
 import { auditAppend, AUDIT_KINDS } from "./audit";
 import {
@@ -369,6 +371,9 @@ export type RunAgentOptions = {
   mcpSummary?: { name: string; tools: string[]; instructions: string | null }[];
   /** Fence state for prompt-injection defense. Created per session. */
   fenceState?: import("./fence").FenceState;
+  /** Current auto-approve setting ("off"|"all"), journaled with the turn so
+   *  "did the agent run unattended?" is answerable from the event log. */
+  autoApprove?: string;
 };
 
 /**
@@ -655,12 +660,22 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // Swap image parts for extracted text (dimensions + OCR) AFTER conversion —
   // the UI messages keep the image so the transcript still shows it. `canSee`
   // was resolved above (shared with prompt assembly).
+  let swappedImageParts = 0;
   const history = normalizeForProvider(
     canSee
       ? rawHistory
       : await swapImagePartsToText(rawHistory),
     provider,
   );
+  if (!canSee) {
+    swappedImageParts = countInlineImageParts(rawHistory);
+    if (swappedImageParts > 0) {
+      appendSessionEvent(opts.toolContext.getSessionId() ?? "", {
+        kind: "vision-ocr",
+        swappedParts: swappedImageParts,
+      });
+    }
+  }
   const compact = compactModelMessagesDetailed(
     history,
     getModelContextLimit(getModel(modelId).id),
@@ -668,6 +683,13 @@ export async function runAgentStream(opts: RunAgentOptions) {
   const compactedHistory = compact.messages;
   if (compact.compacted) {
     opts.onCompact?.({ droppedCount: compact.droppedCount });
+    // Journal the elision — the transcript stores the UN-elided history, so
+    // without this line "what did the model actually see" is unrecoverable.
+    appendSessionEvent(opts.toolContext.getSessionId() ?? "", {
+      kind: "compact",
+      droppedCount: compact.droppedCount,
+      contextLimit: getModelContextLimit(getModel(modelId).id),
+    });
   }
 
   const systemContent = opts.planMode
@@ -830,6 +852,25 @@ export async function runAgentStream(opts: RunAgentOptions) {
       )
     : guardedTools;
 
+  // Per-turn journal: the assembled context identity (system prompt hash,
+  // vision decision, admitted tool names, model+flags). Append-only sidecar
+  // evidence for "model-visible ⟺ logged" — see sessionEvents.ts.
+  appendSessionEvent(
+    opts.toolContext.getSessionId() ?? "",
+    buildTurnEvent({
+      modelId,
+      provider,
+      canSee,
+      planMode: opts.planMode === true,
+      autoApprove: opts.autoApprove ?? "off",
+      thinkingMode: String(thinkingMode),
+      systemPrompt: systemContent,
+      toolNames: Object.keys(fencedTools).sort(),
+      mcpServerCount: opts.mcpSummary?.length ?? 0,
+      messageCount: finalMessages.length,
+    }),
+  );
+
   return streamText({
     model: wrappedModel,
     messages: finalMessages,
@@ -895,6 +936,11 @@ export async function runAgentStream(opts: RunAgentOptions) {
           // summarize what it has, or stop — the very next repeat hard-stops.
           if (toolRepeatCount === TOOL_LOOP_NUDGE) {
             const toolName = step.toolCalls?.[0]?.toolName ?? "the same tool";
+            appendSessionEvent(opts.toolContext.getSessionId() ?? "", {
+              kind: "loop-nudge",
+              toolName,
+              repeatCount: toolRepeatCount,
+            });
             loopNudgeMessage =
               `[kai loop guard] You have now called "${toolName}" ${toolRepeatCount} times in a row with identical arguments and received identical results back. Repeating the exact same call again will not change the outcome. Either change your approach (different arguments, a different tool, or read the result you already have), tell the user what you found and why you are stuck, or finish your turn. The next identical repetition stops this run.`;
           }

@@ -39,6 +39,7 @@ import { reapSessionWatches, closeWatchSessionShell } from "../tools/watch";
 import { agentBus } from "../lib/eventBus";
 import { auditAppend, AUDIT_KINDS } from "../lib/audit";
 import { isApprovalDenied, noteApprovalDenied } from "../lib/approvalLatch";
+import { appendSessionEvent } from "../lib/sessionEvents";
 import { createShadow, getShadow } from "../lib/shadow";
 import {
   disposeSessionToolContext,
@@ -1072,6 +1073,12 @@ export const useChatStore = create<StoreState>((set, get) => ({
     // persists it on the next messages-change effect, the same path the
     // automatic summarizer uses.
     const dropped = chat.messages.length - next.length;
+    appendSessionEvent(id, {
+      kind: "summarize",
+      trigger: "manual",
+      fromCount: chat.messages.length,
+      toCount: next.length,
+    });
     chat.messages = next;
     set({ _tick: Date.now() });
     // lastInputTokens reflected the pre-compact request size; the next run

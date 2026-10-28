@@ -180,6 +180,20 @@ export function hasInlineImageParts(messages: ModelMessage[]): boolean {
   });
 }
 
+/** How many inline image parts a model-bound history carries. Used to journal
+ *  the vision→OCR swap (event: how many images the model did NOT actually
+ *  see as pixels). Mirrors hasInlineImageParts' probe exactly. */
+export function countInlineImageParts(messages: ModelMessage[]): number {
+  let n = 0;
+  for (const m of messages) {
+    if (!Array.isArray(m.content)) continue;
+    for (const p of m.content as SwapPart[]) {
+      if (inlineImageBase64(p) != null) n++;
+    }
+  }
+  return n;
+}
+
 /** Replace every inline image part with its extracted text. Messages with no
  *  image parts are returned by identity (no needless clones). */
 export async function swapImagePartsToText(

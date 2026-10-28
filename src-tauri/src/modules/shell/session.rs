@@ -339,7 +339,7 @@ mod tests {
     #[test]
     fn strip_sentinel_still_works_on_the_new_shape() {
         // Front of a captured session stdout, mimic the real emitted tail.
-        let stdout = format!("hi\r\n\r\n__KAI_CWD_x__D:\\Code\\KAI\r\n");
+        let stdout = "hi\r\n\r\n__KAI_CWD_x__D:\\Code\\KAI\r\n".to_string();
         let (clean, cwd) = strip_cwd_sentinel(&stdout, "__KAI_CWD_x__");
         assert_eq!(cwd.as_deref(), Some("D:\\Code\\KAI"));
         assert!(!clean.contains("__KAI_CWD_x__"));

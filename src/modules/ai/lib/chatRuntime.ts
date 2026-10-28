@@ -27,6 +27,7 @@ import type { StackInfo } from "../lib/stackDetector";
 import { detectStack } from "../lib/stackDetector";
 import { createContextAwareTransport } from "../lib/transport";
 import { isStallError } from "../lib/dsmlMiddleware";
+import { appendSessionEvent } from "../lib/sessionEvents";
 import { loadShadow, withShadowRedirect } from "../lib/shadow";
 import { FileTracker } from "../lib/fileTracker";
 import { type ProviderKeys } from "../lib/keyring";
@@ -466,6 +467,14 @@ export function makeChatSync(
           const minimal = outcome.includes("already minimal");
           if (compacted || minimal) {
             stallRetriesRef.current += 1;
+            // Retry lineage: the discarded partial assistant message + the
+            // fact this request was re-issued are otherwise unreconstructable
+            // from the persisted transcript (regenerate() drops the partial).
+            appendSessionEvent(sessionId, {
+              kind: "retry",
+              reason: compacted ? "stall-compacted" : "stall-minimal",
+              attempt: stallRetriesRef.current,
+            });
             const notice = compacted
               ? `${outcome} Retrying automatically.`
               : "Stream stalled — history is already minimal. Retrying with a fresh connection.";

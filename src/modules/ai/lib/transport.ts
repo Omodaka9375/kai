@@ -11,6 +11,7 @@ import { compactModelMessagesDetailed } from "./compact";
 import type { ProviderKeys } from "./keyring";
 import { mcpManager } from "./mcpManager";
 import { buildSessionState } from "./sessionState";
+import { appendSessionEvent, sessionEventsClear } from "./sessionEvents";
 import type { FileSnapshot } from "./fileTracker";
 import type { ToolContext } from "../tools/tools";
 import { useChatStore, registerRunController } from "../store/chatStore";
@@ -133,6 +134,9 @@ export function clearFenceState(sessionId: string): void {
   fenceStateCache.delete(sessionId);
   // The session can't fetch again after deletion — drop its provenance flag.
   clearSessionProvenance(sessionId);
+  // …and remove its event journal (per-session data dies with the session).
+  // Both delete paths route through here, so one call covers them.
+  sessionEventsClear(sessionId);
 }
 
 export function createContextAwareTransport(deps: Deps) {
@@ -242,6 +246,7 @@ export function createContextAwareTransport(deps: Deps) {
       thinkingMode: deps.getThinkingMode?.() ?? "off",
       uiMessages: messagesForRun,
       abortSignal: effectiveSignal,
+      autoApprove,
       mcpTools: Object.keys(mcpTools).length > 0 ? mcpTools : undefined,
       mcpSummary: mcpSummary.length > 0 ? mcpSummary : undefined,
       fenceState: getFenceState(sessionId),
@@ -531,6 +536,17 @@ async function maybeSummarize(
     // only runs past the token gates above, so null would mean the tail
     // already covers everything. Keep the original in that case.
     const out = trimmed ?? messages;
+    // Journal the compaction: the summarized-away originals are GONE from
+    // the store, so fromCount→toCount is the only surviving proof of what
+    // the model no longer sees (dsh: model-visible ⟺ logged).
+    if (sessionId && out !== messages) {
+      appendSessionEvent(sessionId, {
+        kind: "summarize",
+        trigger: "auto",
+        fromCount: messages.length,
+        toCount: out.length,
+      });
+    }
 
     useChatStore.getState().patchAgentMeta({
       summarizing: false,

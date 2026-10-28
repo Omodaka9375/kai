@@ -71,7 +71,7 @@ fn now_ms() -> i64 {
 /// Neutralize newlines/control chars so a hostile value can't split one
 /// event into two forged lines (a newline inside `summary` would let
 /// injected text impersonate an audit record) or corrupt the JSONL.
-fn one_line(s: &str) -> String {
+pub(crate) fn one_line(s: &str) -> String {
     s.chars()
         .map(|c| match c {
             '\n' | '\r' | '\u{0}' => ' ',
@@ -92,7 +92,7 @@ fn is_hex(c: char) -> bool {
 /// disk. Hand-rolled scanner (no regex dep) mirroring the frontend's secret
 /// patterns: token prefixes (sk-, ghp_, AKIA…), long hex, and
 /// `key=value` assignments for common secret key names.
-fn scrub(input: &str) -> String {
+pub(crate) fn scrub(input: &str) -> String {
     let chars: Vec<char> = input.chars().collect();
     let mut out = String::with_capacity(input.len());
     let key_names = [
