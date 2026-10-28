@@ -408,7 +408,7 @@ async function ensureReadCache(
   ctx: ToolContext,
 ): Promise<{ error: string; path: string } | null> {
   if (ctx.readCache.has(abs)) return null;
-  const safety = await checkReadableCanonical(abs, native.canonicalize);
+  const safety = await checkReadableCanonical(abs, native.canonicalize, ctx.getSandboxOverride?.() ?? null);
   if (!safety.ok) return { error: safety.reason, path: abs };
   try {
     const r = await native.readFile(safety.canonical);
@@ -466,7 +466,7 @@ export function buildEditTools(ctx: ToolContext) {
               'path is required — set the top-level "path" field to the file you are editing (absolute, or relative to the terminal cwd). Example: {"path":"src/app.ts","old_string":"...","new_string":"..."}',
           };
         const reqPath = resolvePath(path, ctx.getCwd());
-        const safety = await checkWritableCanonical(reqPath, native.canonicalize);
+        const safety = await checkWritableCanonical(reqPath, native.canonicalize, ctx.getSandboxOverride?.() ?? null);
         if (!safety.ok) return { error: safety.reason, path: reqPath };
         const abs = safety.canonical;
         const guard = await ensureReadCache(abs, ctx);
@@ -558,7 +558,7 @@ export function buildEditTools(ctx: ToolContext) {
               'path is required — multi_edit applies edits to ONE file; set the top-level "path" field to it (a per-edit "path" is also accepted). Example: {"path":"src/app.ts","edits":[{"old_string":"...","new_string":"..."}]}',
           };
         const reqPath = resolvePath(path, ctx.getCwd());
-        const safety = await checkWritableCanonical(reqPath, native.canonicalize);
+        const safety = await checkWritableCanonical(reqPath, native.canonicalize, ctx.getSandboxOverride?.() ?? null);
         if (!safety.ok) return { error: safety.reason, path: reqPath };
         const abs = safety.canonical;
         const guard = await ensureReadCache(abs, ctx);

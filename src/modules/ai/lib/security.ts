@@ -29,7 +29,7 @@
  */
 
 import { auditAppend, AUDIT_KINDS } from "./audit";
-import { checkSandbox } from "./sandbox";
+import { checkSandbox, type SandboxOverride } from "./sandbox";
 
 const SECRET_BASENAME_PATTERNS: RegExp[] = [
   // Match `.env` and `.env.<suffix>` with no required tail anchor — Windows
@@ -329,6 +329,7 @@ function auditDeny(op: "read" | "write", path: string, reason: string): void {
 export async function checkReadableCanonical(
   path: string,
   canonicalize: (p: string) => Promise<string>,
+  override?: SandboxOverride | null,
 ): Promise<{ ok: true; canonical: string } | { ok: false; reason: string }> {
   const initial = checkReadable(path);
   if (!initial.ok) {
@@ -351,8 +352,9 @@ export async function checkReadableCanonical(
     return recheck;
   }
   // Project sandbox (see lib/sandbox.ts): workspaceOnly confines reads to
-  // the project root. No-op when the sandbox is off.
-  const sandbox = await checkSandbox("read", canonical);
+  // the project root. No-op when the sandbox is off. `override` (assistant
+  // scratch confinement) replaces the global root+mode for this call.
+  const sandbox = await checkSandbox("read", canonical, override);
   if (!sandbox.ok) {
     auditDeny("read", canonical, sandbox.reason);
     return sandbox;
@@ -368,6 +370,7 @@ export async function checkReadableCanonical(
 export async function checkWritableCanonical(
   path: string,
   canonicalize: (p: string) => Promise<string>,
+  override?: SandboxOverride | null,
 ): Promise<{ ok: true; canonical: string } | { ok: false; reason: string }> {
   const initial = checkWritable(path);
   if (!initial.ok) {
@@ -384,8 +387,9 @@ export async function checkWritableCanonical(
       return recheck;
     }
     // Project sandbox: readOnly + workspaceBoth confine writes to the
-    // project root. No-op when the sandbox is off.
-    const sandbox = await checkSandbox("write", canonical);
+    // project root. No-op when the sandbox is off. `override` (assistant
+    // scratch confinement) replaces the global root+mode for this call.
+    const sandbox = await checkSandbox("write", canonical, override);
     if (!sandbox.ok) {
       auditDeny("write", canonical, sandbox.reason);
       return sandbox;
@@ -405,7 +409,7 @@ export async function checkWritableCanonical(
           auditDeny("write", canonParent + tail, recheckParent.reason);
           return recheckParent;
         }
-        const sandbox = await checkSandbox("write", canonParent + tail);
+        const sandbox = await checkSandbox("write", canonParent + tail, override);
         if (!sandbox.ok) {
           auditDeny("write", canonParent + tail, sandbox.reason);
           return sandbox;

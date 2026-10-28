@@ -21,7 +21,7 @@ export function buildTerminalTools(ctx: ToolContext) {
       execute: async ({ command, explanation }) => {
         const safety = checkShellCommand(command);
         if (!safety.ok) return { error: safety.reason };
-        const sandbox = await checkShellSandbox(command);
+        const sandbox = await checkShellSandbox(command, ctx.getSandboxOverride?.() ?? null);
         if (!sandbox.ok) return { error: sandbox.reason };
         // Reject control bytes — the user inserts via click, but the rendered
         // command must reflect exactly what will land at the prompt.

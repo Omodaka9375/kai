@@ -50,6 +50,28 @@ function isWithin(abs: string, root: string): boolean {
 export type SandboxDecision = { ok: true } | { ok: false; reason: string };
 
 /**
+ * A per-call confinement override that replaces the module-global sandbox
+ * root + per-project mode. The Telegram assistant uses it to force
+ * workspaceOnly confinement to its own scratch dir regardless of the
+ * desktop's Settings → Sandbox — the global `currentRoot` is owned by
+ * App.tsx for the active desktop project, and a single global can't safely
+ * serve a headless assistant turn interleaved with a desktop agent at every
+ * await point. The desktop path passes no override and behaves exactly as
+ * before (global root + `.kai/sandbox.json`).
+ */
+export type SandboxOverride = { root: string; mode: SandboxMode };
+
+/** Resolve (root, mode) for a check: an explicit override wins, else the
+ *  global root + its per-project mode. `null` root = confinement is a no-op. */
+async function effectiveSandbox(
+  override?: SandboxOverride | null,
+): Promise<{ root: string | null; mode: SandboxMode }> {
+  if (override) return { root: normPath(override.root), mode: override.mode };
+  if (!currentRoot) return { root: null, mode: "off" };
+  return { root: currentRoot, mode: await loadSandboxMode(currentRoot) };
+}
+
+/**
  * Confinement check applied on canonicalized paths by the security layer
  * (checkReadableCanonical / checkWritableCanonical) so every fs tool inherits
  * it. Semantics:
@@ -57,21 +79,25 @@ export type SandboxDecision = { ok: true } | { ok: false; reason: string };
  *   readOnly       — reads allowed anywhere the security layer permits;
  *                    writes must be inside the project root.
  *   workspaceOnly  — reads AND writes must be inside the project root.
+ *
+ * `override` (see {@link SandboxOverride}) substitutes the root + mode for
+ * this one call; omit it to use the global sandbox (desktop behavior).
  */
 export async function checkSandbox(
   kind: "read" | "write",
   abs: string,
+  override?: SandboxOverride | null,
 ): Promise<SandboxDecision> {
-  const root = currentRoot;
+  const { root, mode } = await effectiveSandbox(override);
   if (!root) return { ok: true };
-  const mode = await loadSandboxMode(root);
   if (mode === "off") return { ok: true };
   if (mode === "readOnly" && kind === "read") return { ok: true };
   if (isWithin(abs, root)) return { ok: true };
   const label = mode === "readOnly" ? "read-only" : "workspace-only";
+  const area = override ? "the allowed root" : "the project";
   return {
     ok: false,
-    reason: `Blocked by sandbox (${label}): ${kind}s outside the project are not allowed. Ask the user to change the sandbox mode in Settings > Sandbox if this is intended. Path: ${abs}`,
+    reason: `Blocked by sandbox (${label}): ${kind}s outside ${area} are not allowed. Ask the user to change the sandbox mode in Settings > Sandbox if this is intended. Path: ${abs}`,
   };
 }
 
@@ -173,10 +199,10 @@ function pathClaim(tok: string): string | null {
  */
 export async function checkShellSandbox(
   command: string,
+  override?: SandboxOverride | null,
 ): Promise<SandboxDecision> {
-  const root = currentRoot;
+  const { root, mode } = await effectiveSandbox(override);
   if (!root) return { ok: true };
-  const mode = await loadSandboxMode(root);
   if (mode === "off") return { ok: true };
 
   const writeShaped =
@@ -199,9 +225,10 @@ export async function checkShellSandbox(
     return { ok: true };
   }
   const label = mode === "readOnly" ? "read-only" : "workspace-only";
+  const area = override ? "the allowed root" : "the project";
   return {
     ok: false,
-    reason: `Blocked by sandbox (${label}): the command names path(s) outside the project:\n  ${outside.slice(0, 5).join("\n  ")}\nRun it inside the project, or ask the user to change the sandbox mode in Settings > Sandbox.`,
+    reason: `Blocked by sandbox (${label}): the command names path(s) outside ${area}:\n  ${outside.slice(0, 5).join("\n  ")}\nRun it inside ${area}, or ask the user to change the sandbox mode in Settings > Sandbox.`,
   };
 }
 
@@ -247,9 +274,10 @@ export const SANDBOX_LABELS: Record<SandboxMode, string> = {
  * the plain command when the platform runner (bwrap / sandbox-exec) is
  * missing.
  */
-export async function sandboxExecRoot(): Promise<string | null> {
-  const root = currentRoot;
+export async function sandboxExecRoot(
+  override?: SandboxOverride | null,
+): Promise<string | null> {
+  const { root, mode } = await effectiveSandbox(override);
   if (!root) return null;
-  const mode = await loadSandboxMode(root);
   return mode === "workspaceOnly" ? root : null;
 }

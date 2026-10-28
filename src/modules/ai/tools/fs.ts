@@ -43,7 +43,7 @@ export function buildFsTools(ctx: ToolContext) {
       }),
       execute: async ({ path, offset, limit, force }) => {
         const reqPath = resolvePath(path, ctx.getCwd());
-        const safety = await checkReadableCanonical(reqPath, native.canonicalize);
+        const safety = await checkReadableCanonical(reqPath, native.canonicalize, ctx.getSandboxOverride?.() ?? null);
         if (!safety.ok) return { error: safety.reason, path: reqPath };
         const abs = safety.canonical;
 
@@ -220,7 +220,7 @@ export function buildFsTools(ctx: ToolContext) {
       }),
       execute: async ({ path }) => {
         const reqPath = resolvePath(path, ctx.getCwd());
-        const safety = await checkReadableCanonical(reqPath, native.canonicalize);
+        const safety = await checkReadableCanonical(reqPath, native.canonicalize, ctx.getSandboxOverride?.() ?? null);
         if (!safety.ok) return { error: safety.reason, path: reqPath };
         const abs = safety.canonical;
         try {
@@ -245,7 +245,7 @@ export function buildFsTools(ctx: ToolContext) {
       needsApproval: true,
       execute: async ({ path, content }) => {
         const reqPath = resolvePath(path, ctx.getCwd());
-        const safety = await checkWritableCanonical(reqPath, native.canonicalize);
+        const safety = await checkWritableCanonical(reqPath, native.canonicalize, ctx.getSandboxOverride?.() ?? null);
         if (!safety.ok) return { error: safety.reason, path: reqPath };
         const abs = safety.canonical;
 
@@ -334,7 +334,7 @@ export function buildFsTools(ctx: ToolContext) {
       needsApproval: true,
       execute: async ({ path }) => {
         const reqPath = resolvePath(path, ctx.getCwd());
-        const safety = await checkWritableCanonical(reqPath, native.canonicalize);
+        const safety = await checkWritableCanonical(reqPath, native.canonicalize, ctx.getSandboxOverride?.() ?? null);
         if (!safety.ok) return { error: safety.reason, path: reqPath };
         const abs = safety.canonical;
         if (usePlanStore.getState().active) {
@@ -374,7 +374,7 @@ export function buildFsTools(ctx: ToolContext) {
       needsApproval: true,
       execute: async ({ sourcePath, targetPath }) => {
         const absSource = resolvePath(sourcePath, ctx.getCwd());
-        const safetySource = await checkReadableCanonical(absSource, native.canonicalize);
+        const safetySource = await checkReadableCanonical(absSource, native.canonicalize, ctx.getSandboxOverride?.() ?? null);
         if (!safetySource.ok) return { error: safetySource.reason, path: absSource };
         const resolvedSource = safetySource.canonical;
 
@@ -382,7 +382,7 @@ export function buildFsTools(ctx: ToolContext) {
         let resolvedTarget = "";
         if (targetPath) {
           const absTarget = resolvePath(targetPath, ctx.getCwd());
-          const safetyTarget = await checkWritableCanonical(absTarget, native.canonicalize);
+          const safetyTarget = await checkWritableCanonical(absTarget, native.canonicalize, ctx.getSandboxOverride?.() ?? null);
           if (!safetyTarget.ok) return { error: safetyTarget.reason, path: absTarget };
           resolvedTarget = safetyTarget.canonical;
         } else {
@@ -390,7 +390,7 @@ export function buildFsTools(ctx: ToolContext) {
           const lastDot = resolvedSource.lastIndexOf(".");
           const base = lastDot !== -1 ? resolvedSource.slice(0, lastDot) : resolvedSource;
           resolvedTarget = `${base}.pdf`;
-          const safetyTarget = await checkWritableCanonical(resolvedTarget, native.canonicalize);
+          const safetyTarget = await checkWritableCanonical(resolvedTarget, native.canonicalize, ctx.getSandboxOverride?.() ?? null);
           if (!safetyTarget.ok) return { error: safetyTarget.reason, path: resolvedTarget };
           resolvedTarget = safetyTarget.canonical;
         }
@@ -659,14 +659,14 @@ export function buildFsTools(ctx: ToolContext) {
       needsApproval: true,
       execute: async ({ sourcePath, targetPath, quality, operations, maxWidth, maxHeight }) => {
         const absSource = resolvePath(sourcePath, ctx.getCwd());
-        const safetySource = await checkReadableCanonical(absSource, native.canonicalize);
+        const safetySource = await checkReadableCanonical(absSource, native.canonicalize, ctx.getSandboxOverride?.() ?? null);
         if (!safetySource.ok) return { error: safetySource.reason, path: absSource };
         const resolvedSource = safetySource.canonical;
 
         let resolvedTarget = "";
         if (targetPath) {
           const absTarget = resolvePath(targetPath, ctx.getCwd());
-          const safetyTarget = await checkWritableCanonical(absTarget, native.canonicalize);
+          const safetyTarget = await checkWritableCanonical(absTarget, native.canonicalize, ctx.getSandboxOverride?.() ?? null);
           if (!safetyTarget.ok) return { error: safetyTarget.reason, path: absTarget };
           resolvedTarget = safetyTarget.canonical;
         } else {
@@ -678,7 +678,7 @@ export function buildFsTools(ctx: ToolContext) {
           const srcExt = lastDot !== -1 ? resolvedSource.slice(lastDot + 1).toLowerCase() : "";
           const keepExt = ["png", "jpg", "jpeg", "webp", "bmp", "gif"].includes(srcExt);
           resolvedTarget = `${base}.${keepExt ? srcExt : "jpg"}`;
-          const safetyTarget = await checkWritableCanonical(resolvedTarget, native.canonicalize);
+          const safetyTarget = await checkWritableCanonical(resolvedTarget, native.canonicalize, ctx.getSandboxOverride?.() ?? null);
           if (!safetyTarget.ok) return { error: safetyTarget.reason, path: resolvedTarget };
           resolvedTarget = safetyTarget.canonical;
         }

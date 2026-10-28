@@ -27,7 +27,7 @@ import { tool, generateId } from "ai";
 import { z } from "zod";
 import type { ToolContext } from "./context";
 import { checkShellCommand } from "../lib/security";
-import { checkShellSandbox, sandboxExecRoot } from "../lib/sandbox";
+import { checkShellSandbox, sandboxExecRoot, type SandboxOverride } from "../lib/sandbox";
 
 // ── Heartbeat (Rust-driven scheduler tick) ─────────────────────────────────
 //
@@ -116,6 +116,14 @@ export interface WatchConfig {
   cwd: string | null;
   /** Owning chat session ID (reaped on close). */
   sessionId: string;
+  /** Sandbox confinement captured at CREATE time from the invoking context
+   *  (see SandboxOverride in lib/sandbox.ts). pollWatch's `sandboxExecRoot`
+   *  calls live outside buildWatchTools so ctx is not in scope there — the
+   *  override rides on the watch. Undefined = use the global sandbox (desktop
+   *  behavior). The Telegram assistant stamps its scratch-dir workspaceOnly
+   *  override here so recurring polls stay inside ~/.kai/assistant even if
+   *  the user's desktop sandbox changes between polls. */
+  sandboxOverride?: SandboxOverride | null;
 }
 
 interface WatchState extends WatchConfig {
@@ -300,7 +308,7 @@ async function poll(w: WatchState): Promise<void> {
       w.command,
       w.cwd,
       pollTimeoutSecsFor(w.intervalSecs),
-      await sandboxExecRoot(),
+      await sandboxExecRoot(w.sandboxOverride),
     );
 
     // Self-heal: the cached shell session can die while the chat session
@@ -318,7 +326,7 @@ async function poll(w: WatchState): Promise<void> {
             w.command,
             w.cwd,
             pollTimeoutSecsFor(w.intervalSecs),
-            await sandboxExecRoot(),
+            await sandboxExecRoot(w.sandboxOverride),
           );
         } catch (retryErr) {
           // Retry also failed — count it like any other poll failure (do NOT
@@ -349,7 +357,7 @@ async function poll(w: WatchState): Promise<void> {
             w.command,
             w.cwd,
             pollTimeoutSecsFor(w.intervalSecs),
-            await sandboxExecRoot(),
+            await sandboxExecRoot(w.sandboxOverride),
           );
           // Retry succeeded — treat this poll as clean (reset counters,
           // run the normal match/change logic once, no breaker count).
@@ -789,7 +797,7 @@ export function buildWatchTools(ctx: ToolContext) {
       execute: async ({ command, interval_secs, condition, mode, label, notify_telegram }, options) => {
         const safety = checkShellCommand(command);
         if (!safety.ok) return { error: safety.reason };
-        const sandbox = await checkShellSandbox(command);
+        const sandbox = await checkShellSandbox(command, ctx.getSandboxOverride?.() ?? null);
         if (!sandbox.ok) return { error: sandbox.reason };
         if (options?.abortSignal?.aborted) return { error: "Cancelled." };
 
@@ -815,6 +823,7 @@ export function buildWatchTools(ctx: ToolContext) {
           shellId,
           cwd: ctx.getCwd(),
           sessionId,
+          sandboxOverride: ctx.getSandboxOverride?.() ?? null,
         };
 
         await startWatch(config);

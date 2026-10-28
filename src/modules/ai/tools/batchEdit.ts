@@ -56,6 +56,7 @@ export function buildBatchEditTools(ctx: ToolContext) {
           const safety = await checkWritableCanonical(
             reqPath,
             native.canonicalize,
+            ctx.getSandboxOverride?.() ?? null,
           );
           if (!safety.ok)
             return { ok: false, error: safety.reason, file: reqPath };

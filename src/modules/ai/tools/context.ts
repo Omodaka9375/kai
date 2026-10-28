@@ -59,6 +59,16 @@ export type ToolContext = {
    * fall back to OCR text. Absent = true (first-party providers).
    */
   supportsToolResultImages?: () => boolean;
+  /**
+   * Per-context sandbox confinement that OVERRIDES the module-global
+   * Settings → Sandbox (which is owned by App.tsx for the active desktop
+   * project). Returns null/undefined = use the global sandbox (normal desktop
+   * behavior). The Telegram assistant returns `{ root: <~/.kai/assistant>,
+   * mode: "workspaceOnly" }` so its file + shell tools stay inside its scratch
+   * dir no matter the desktop's setting — and so a headless turn can't race
+   * the desktop agent over the shared global root.
+   */
+  getSandboxOverride?: () => import("../lib/sandbox").SandboxOverride | null;
 };
 
 /**

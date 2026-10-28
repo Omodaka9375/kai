@@ -173,7 +173,7 @@ export function buildShellTools(ctx: ToolContext) {
       execute: async ({ command, timeout_secs, elevated }, options) => {
         const safety = checkShellCommand(command);
         if (!safety.ok) return { error: safety.reason };
-        const sandbox = await checkShellSandbox(command);
+        const sandbox = await checkShellSandbox(command, ctx.getSandboxOverride?.() ?? null);
         if (!sandbox.ok) return { error: sandbox.reason };
         // Check abort before any work — agent was stopped before we started.
         if (options?.abortSignal?.aborted) {
@@ -259,7 +259,7 @@ export function buildShellTools(ctx: ToolContext) {
             command,
             cwd,
             effectiveTimeout,
-            await sandboxExecRoot(),
+            await sandboxExecRoot(ctx.getSandboxOverride?.() ?? null),
           );
           const stdout = stripAnsi(r.stdout);
           const stderr = stripAnsi(r.stderr);
@@ -309,7 +309,7 @@ export function buildShellTools(ctx: ToolContext) {
       execute: async ({ command, cwd }) => {
         const safety = checkShellCommand(command);
         if (!safety.ok) return { error: safety.reason };
-        const sandbox = await checkShellSandbox(command);
+        const sandbox = await checkShellSandbox(command, ctx.getSandboxOverride?.() ?? null);
         if (!sandbox.ok) return { error: sandbox.reason };
         const effectiveCwd = cwd ?? ctx.getCwd();
         try {
@@ -322,7 +322,7 @@ export function buildShellTools(ctx: ToolContext) {
             effectiveCwd,
             owner,
             label,
-            await sandboxExecRoot(),
+            await sandboxExecRoot(ctx.getSandboxOverride?.() ?? null),
           );
           return { handle, command, cwd: effectiveCwd, ok: true };
         } catch (e) {

@@ -241,6 +241,18 @@ async function makeAssistantToolContext(): Promise<ToolContext> {
       markRead: () => {},
       markModified: () => {},
     },
+    // Confine every assistant file+shell tool call to the scratch dir,
+    // regardless of the desktop's Settings → Sandbox. The global
+    // `currentRoot` in lib/sandbox.ts belongs to App.tsx / the active
+    // desktop project and isn't something a headless turn should ride
+    // (nor mutate — a concurrent desktop agent would race us). Passing an
+    // override per call is both a safety boundary and an isolation one:
+    // it makes "scratch dir only" (what the tool blurb promises) actually
+    // enforced on absolute paths, home paths, `..` traversals, AND output
+    // redirections from the shell side. `security.ts`'s deny-list still
+    // applies first (defense-in-depth), so even files inside scratch are
+    // blocked if they match the secret patterns (.env, .pem, id_rsa, …).
+    getSandboxOverride: () => ({ root, mode: "workspaceOnly" }),
     // Live desktop context deliberately NOT wired — no terminal, no
     // cross-project file access from the phone. The assistant is fenced.
     writeToActiveTerminalDisplay: () => false,
