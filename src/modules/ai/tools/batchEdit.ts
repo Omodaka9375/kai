@@ -33,7 +33,7 @@ export function buildBatchEditTools(ctx: ToolContext) {
   return {
     batch_edit: tool({
       description:
-        "Apply edits to MULTIPLE files atomically. All edits succeed or all are rolled back. Each edit entry has { path, old_string, new_string }. Use this instead of multiple separate edit calls when changes span several files (e.g. renaming a function across its definition, call sites, and tests). Asks for user approval — shows all diffs at once.",
+        "Apply edits to MULTIPLE files atomically. All edits succeed or all are rolled back. Each edit entry has { path, old_string, new_string }. Use this instead of multiple separate edit calls when changes span several files (e.g. renaming a function across its definition, call sites, and tests). Asks for user approval — shows all diffs at once. The prior content is auto-checkpointed — revert the whole batch with `checkpoint_undo`.",
       inputSchema: z.object({
         edits: z
           .array(

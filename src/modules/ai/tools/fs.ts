@@ -20,7 +20,7 @@ export function buildFsTools(ctx: ToolContext) {
   return {
     read_file: tool({
       description:
-        "Read a file's text content. Supports UTF-8 text files, plus PDF, DOCX, ZIP/JAR archives, audio (mp3/flac/m4a/ogg/wav), and images (png/jpg/webp/gif/tiff; OCR only when a tesseract binary is installed on the user's system — otherwise dimensions only). DOCX/PDF are handled by JS parsers; the rest are extracted server-side by format. Returns first 2000 lines (max 25KB). Refuses oversized or sensitive files (.env, keys, credentials). If unchanged since last read, returns a short preview. Pass `force: true` to re-fetch.",
+        "Read a KNOWN file's content (page large files with offset/limit; max 2000 lines / 25KB per call). To locate code, use `grep` (contents) or `glob` (paths) FIRST — do not read files one-by-one across a tree you haven't narrowed. Also handles PDF, DOCX, ZIP/JAR, audio, and images (png/jpg/webp/gif/tiff; OCR only if a tesseract binary is installed, otherwise dimensions only). Returns a short preview if unchanged since your last read; pass `force: true` to re-fetch in full. Refuses oversized files and secrets (.env, keys, credentials).",
       inputSchema: z.object({
         path: z
           .string()
@@ -212,7 +212,7 @@ export function buildFsTools(ctx: ToolContext) {
 
     list_directory: tool({
       description:
-        "List immediate entries (files + directories) in a directory. Hidden entries are omitted.",
+        "List the immediate entries (files + dirs) of ONE directory — non-recursive, hidden omitted. For 'what files anywhere match pattern X' use `glob`; for 'where is string Y' use `grep`. Use this only to see a specific folder's contents.",
       inputSchema: z.object({
         path: z
           .string()
@@ -237,7 +237,7 @@ export function buildFsTools(ctx: ToolContext) {
 
     write_file: tool({
       description:
-        "Write the ENTIRE content of a file. Use ONLY when: (a) creating a brand-new file, or (b) deliberately replacing the whole file. Parent directories are created automatically. Do NOT use it to change part of an existing file — use edit or multi_edit for that (write_file overwrites everything). Always asks the user before running.",
+        "Write the ENTIRE content of a file. Use ONLY when: (a) creating a brand-new file, or (b) deliberately replacing the whole file. Parent directories are created automatically. Do NOT use it to change part of an existing file — use edit or multi_edit for that (write_file overwrites everything). Always asks the user before running. The prior content is auto-checkpointed — revert a bad write with `checkpoint_undo`.",
       inputSchema: z.object({
         path: z.string(),
         content: z.string(),

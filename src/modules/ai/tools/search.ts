@@ -49,7 +49,7 @@ export function buildSearchTools(ctx: ToolContext) {
   return {
     grep: tool({
       description:
-        "Search file contents in the workspace using a regular expression. Honors .gitignore. Returns up to `max_results` (default 30, max 500) `{path, line, text}` hits, with a `truncated` flag when more existed. Long match lines are clipped to 160 chars. Use this for code navigation — do NOT brute-force read_file across the tree. Narrow with `glob` when you can; raise `max_results` only if the first batch truly isn't enough.",
+        "Search file CONTENTS across the workspace with a regex (ripgrep; honors .gitignore). This is the right tool for \"where is X defined/used?\" and the Windows-safe replacement for Select-String/findstr — it auto-executes with NO approval card, so prefer it over a `bash_run` search pipeline every time. Returns up to `max_results` (default 30, max 500) `{path, line, text}` hits with a `truncated` flag; match lines clip to 160 chars. Narrow with the `glob` arg; raise `max_results` only if the first batch clearly isn't enough. One focused grep beats reading many files — do NOT brute-force read_file across the tree.",
       inputSchema: z.object({
         pattern: z
           .string()

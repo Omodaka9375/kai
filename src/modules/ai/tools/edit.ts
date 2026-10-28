@@ -444,7 +444,7 @@ export function buildEditTools(ctx: ToolContext) {
   return {
     edit: tool({
       description:
-        "Replace text in an existing file. HOW IT WORKS: the tool searches the file for old_string and swaps it for new_string. RULES: (1) old_string must be copied EXACTLY from the file — every character, space, and indent; never invent or paraphrase it. (2) To INSERT without deleting, set old_string to the line before/after the spot and repeat that line inside new_string with your addition. (3) If old_string appears more than once, either widen it with surrounding lines to make it unique, or pass line_hint. (4) To create a NEW file use write_file instead. (5) If you need multiple changes to the SAME file, use multi_edit — it applies edits sequentially inside one atomic write. Never emit separate edit calls for the same file in one step (they race each other). Asks for user approval.",
+        "Replace text in an existing file. HOW IT WORKS: the tool searches the file for old_string and swaps it for new_string. RULES: (1) old_string must be copied EXACTLY from the file — every character, space, and indent; never invent or paraphrase it. (2) To INSERT without deleting, set old_string to the line before/after the spot and repeat that line inside new_string with your addition. (3) If old_string appears more than once, either widen it with surrounding lines to make it unique, or pass line_hint. (4) To create a NEW file use write_file instead. (5) If you need multiple changes to the SAME file, use multi_edit — it applies edits sequentially inside one atomic write. Never emit separate edit calls for the same file in one step (they race each other). Asks for user approval. The prior content is auto-checkpointed — revert a bad edit with `checkpoint_undo`.",
       inputSchema: z.object({
         path: z.string().optional(),
         old_string: z
@@ -530,7 +530,7 @@ export function buildEditTools(ctx: ToolContext) {
 
     multi_edit: tool({
       description:
-        "Apply several replacements to ONE file in a single atomic call. The file path goes in the TOP-LEVEL `path` field — do NOT put a `path` inside each edit object (an edit-level path is tolerated as a fallback but the top-level field is the contract). `line_hint` per edit is accepted and used to disambiguate repeated old_strings; never omit an edit because you fear it. Same exact-match rules as edit: every old_string must be copied verbatim from the file's current content. Edits apply in order; an edit that fails to match is reported individually and the rest still land. Prefer this over repeated edit calls when changing several spots in the same file. Asks for user approval.",
+        "Apply several replacements to ONE file in a single atomic call. The file path goes in the TOP-LEVEL `path` field — do NOT put a `path` inside each edit object (an edit-level path is tolerated as a fallback but the top-level field is the contract). `line_hint` per edit is accepted and used to disambiguate repeated old_strings; never omit an edit because you fear it. Same exact-match rules as edit: every old_string must be copied verbatim from the file's current content. Edits apply in order; an edit that fails to match is reported individually and the rest still land. Prefer this over repeated edit calls when changing several spots in the same file. Asks for user approval. The prior content is auto-checkpointed — revert a bad batch with `checkpoint_undo`.",
       inputSchema: z.object({
         path: z.string().optional(),
         edits: z
@@ -700,7 +700,7 @@ export function buildEditTools(ctx: ToolContext) {
 
     checkpoint_undo: tool({
       description:
-        "Restore files from the last AI edit checkpoint. Reverts the most recent batch of write_file/edit/multi_edit operations. Use this to undo AI changes when the result isn't what you expected.",
+        "Revert the last AI-write batch (write_file / edit / multi_edit / batch_edit) to its pre-write snapshot — every one of those tools auto-checkpoints before mutating, so this is always available after a write. Call it when an edit produced an unexpected result, when the user says 'undo that' / 'revert', or when you need to abandon a partial change set and retry a different approach. Takes no arguments; reverts the most recent batch only.",
       inputSchema: z.object({}),
       needsApproval: true,
       execute: async () => {
