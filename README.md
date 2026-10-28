@@ -57,6 +57,7 @@ Kai is a fast, cross-platform terminal built on **Tauri 2 + Rust** and **React 1
 - Universal file extraction — zip, audio, image, and video read locally as text
 - Interactive todo toggling with auto-closing completion lists
 - Per-model thinking control — a toggle on each reasoning model cycles effort off/low/medium/high
+- Resizable model picker — drag its left edge to set the width (persisted); descriptions hide automatically at narrower widths
 - Multi-step goals with automation, plan mode (queue edits for review as one diff), and sub-agents (explore / code-review / security / research)
 - Conversation forking and merging — branch any message into a parallel thread, then merge it back or into another thread
 - Watch monitoring — the agent polls any shell command on an interval and reports back when it matches (`watch_create`), with optional Telegram pings when you're away
@@ -83,7 +84,7 @@ Kai is a fast, cross-platform terminal built on **Tauri 2 + Rust** and **React 1
 - Voice input — OpenAI whisper-1 transcription with a no-key browser SpeechRecognition fallback
 - PDF/DOCX reading, image OCR (tesseract), ZIP/JAR listing, and audio metadata
 - Direct PDF export (`convert_to_pdf`) from Markdown/Word
-- `Kai.md` project memory, context summarization, and auto-approve modes — plus save/red persistent memory tools the agent can use mid-session
+- `KAI.md` project memory, context summarization, and auto-approve modes — plus persistent memory tools the agent can use mid-session
 - Skills & snippets
 - Per-project **sandbox** (read-only or workspace-only) and a **detached-copy** workflow — work in an isolated copy, then merge or discard
 
@@ -96,7 +97,8 @@ Kai is a fast, cross-platform terminal built on **Tauri 2 + Rust** and **React 1
 - Send photos the model can see, or files it can work on (saved to a scratch folder)
 - Generated images and videos are delivered straight to your chat
 - `watch_create` with `notify_telegram` pings your phone when a long-running job finishes
-- **Fenced by design** — file and shell tools are limited to a scratch folder (`~/.kai/assistant`), never your projects or home directory; the desktop app must be running (tray is fine) for the bot to answer
+- **Fenced by design** — file and shell tools are limited to a scratch folder (`~/.kai/assistant`), never your projects or home directory; read-only tools are enabled by default, with write/execute/MCP access controlled in Settings → External
+- Optional dedicated assistant model or OpenAI-compatible endpoint, independent of the desktop chat model; the desktop app must be running (tray is fine) for the bot to answer
 
 ## Agent Personas
 
@@ -164,12 +166,12 @@ Extend your AI agent's capabilities with custom tools via the Model Context Prot
 2. Browse or search for official MCP servers (e.g. `Filesystem`, `PostgreSQL`, or `GitHub`).
 3. Click **Install** — KAI downloads and connects the server in the background, making its tools immediately available to the active agent.
 
-### 3. Project Memory with Kai.md
+### 3. Project Memory with KAI.md
 
-Define custom guidelines, development standards, architectural context, and preferred workflows on a per-project basis. Create a file named `Kai.md` at the project root and KAI automatically injects its contents (up to 32KB) into the agent's instruction prompt on every message.
+Define custom guidelines, development standards, architectural context, and preferred workflows on a per-project basis. Create a file named `KAI.md` at the project root and KAI automatically injects its contents (up to 32KB) into the agent's instruction prompt on every message.
 
-- **Case sensitivity** — the filename must be exactly `Kai.md` on case-sensitive filesystems (Linux). On Windows/macOS, `KAI.md` / `kai.md` are also recognized.
-- **Zero-write safe** — KAI only reads this file; it never writes to it.
+- **Filename** — use uppercase `KAI.md` everywhere; the exact case is required on case-sensitive filesystems such as Linux.
+- **Create or refresh with `/init`** — the agent writes/updates the map through the normal write-approval flow. Outside `/init`, project memory is read-only.
 - **What to include** — tech stack, formatting guidelines, database schemas, directory mappings, or preferred test commands.
 
 ### 4. Anthropic models on a Claude subscription (in the terminal)
@@ -194,7 +196,7 @@ KAI can run a personal-assistant bot on your Telegram account — the same agent
 
 Notes:
 
-- **Safety**: file and shell tools are fenced to a scratch folder (`~/.kai/assistant`) — your projects and home directory are off-limits. Web search/browse and MCP tools work normally.
+- **Safety**: file and shell tools are fenced to a scratch folder (`~/.kai/assistant`) — your projects and home directory are off-limits. Read-only tools are enabled by default; write/execute tools and individual MCP servers require explicit grants in Settings → External.
 - **Voice**: voice notes are transcribed with your configured STT engine and answered with TTS (Settings → Voice). [ffmpeg](https://ffmpeg.org) must be on PATH for Telegram's audio format.
 - **Media**: send photos and the model sees them; ask it to generate images or videos and they arrive in the chat.
 - **Watches**: `watch_create` with `notify_telegram: true` pings your phone when the watch fires.
