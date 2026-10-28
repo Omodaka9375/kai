@@ -33,7 +33,8 @@ import { FileTracker } from "../lib/fileTracker";
 import { type ProviderKeys } from "../lib/keyring";
 import type { LoopDetectionResult } from "../lib/streamGuard";
 import type { ToolContext } from "../tools/tools";
-import { TOOL_RESULT_IMAGE_PROVIDERS } from "../tools/context";
+import { canDeliverToolResultImages } from "../tools/context";
+import { modelCanSee } from "../extraction";
 
 /** Store/ambient state the runtime reads or writes, injected by chatStore. */
 export type ChatRuntimeDeps = {
@@ -219,14 +220,30 @@ export function makeChatSync(
         const used = tokens.inputTokens + tokens.outputTokens;
         return Math.max(0, limit - used);
       },
-      // Provider-dependent image delivery for tool results (look_at_screen):
-      // the openai-compatible family stringifies content parts — those get
-      // OCR text instead of an image part. Read lazily so mid-session model
-      // switches are honored.
-      supportsToolResultImages: () =>
-        TOOL_RESULT_IMAGE_PROVIDERS.has(
-          getModel(deps.getSelectedModelId()).provider,
-        ),
+      // Tool-result images need BOTH a provider wire format that preserves
+      // image parts AND a model that can understand them. Resolve lazily so
+      // mid-session model switches honor the same runtime-name/override
+      // rules as the request-history vision gate.
+      supportsToolResultImages: () => {
+        const selectedModelId = deps.getSelectedModelId();
+        const prefs = usePreferencesStore.getState();
+        const runtimeModelName =
+          selectedModelId === "lmstudio-local"
+            ? prefs.lmstudioModelId
+            : selectedModelId === "openai-compatible-custom"
+              ? prefs.openaiCompatibleModelId
+              : null;
+        const visionOverride =
+          selectedModelId === "lmstudio-local"
+            ? (prefs.lmstudioVision ?? "auto")
+            : selectedModelId === "openai-compatible-custom"
+              ? (prefs.openaiCompatibleVision ?? "auto")
+              : null;
+        return canDeliverToolResultImages(
+          getModel(selectedModelId).provider,
+          modelCanSee(selectedModelId, runtimeModelName, visionOverride),
+        );
+      },
     };
   })();
 

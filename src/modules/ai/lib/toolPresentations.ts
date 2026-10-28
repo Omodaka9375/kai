@@ -266,7 +266,98 @@ const REGISTRY: Record<string, ToolPresentation> = {
   },
   generate_image: { effect: "NONE", fence: false, remoteSurface: false },
   generate_video: { effect: "NONE", fence: false, remoteSurface: false },
+
+  // ── Conversion / scheduled work / MCP management ──────────────────────
+  convert_to_pdf: {
+    label: "Convert PDF",
+    summary: (a) => str(a, "targetPath") ?? str(a, "sourcePath"),
+    effect: "COMMITTED",
+    fence: true,
+    remoteSurface: false,
+  },
+  convert_image: {
+    label: "Convert img",
+    summary: (a) => str(a, "targetPath") ?? str(a, "sourcePath"),
+    effect: "COMMITTED",
+    fence: true,
+    remoteSurface: false,
+  },
+  watch_create: {
+    label: "Watch",
+    approvalLabel: "Create watch",
+    status: (a) => `Watching ${ellipsize(String(a.command ?? ""), 50)}`,
+    summary: (a) => str(a, "label") ?? str(a, "command"),
+    effect: "COMMITTED",
+    fence: true,
+    remoteSurface: false,
+  },
+  watch_list: {
+    label: "Watches",
+    effect: "NONE",
+    fence: true,
+    remoteSurface: false,
+  },
+  watch_kill: {
+    label: "Unwatch",
+    summary: (a) => str(a, "watch_id"),
+    effect: "COMMITTED",
+    fence: true,
+    remoteSurface: false,
+  },
+  mcp_add_server: {
+    label: "Add MCP",
+    approvalLabel: "Register MCP server",
+    summary: (a) => str(a, "name"),
+    effect: "COMMITTED",
+    fence: true,
+    remoteSurface: false,
+  },
+  mcp_list_servers: {
+    label: "MCP servers",
+    effect: "NONE",
+    fence: true,
+    remoteSurface: false,
+  },
+
+  // ── Voice / radio ─────────────────────────────────────────────────────
+  voice_settings: {
+    label: "Voice",
+    effect: "NONE", // read/list calls have no effect; changed[] → COMMITTED
+    fence: true,
+    remoteSurface: false,
+  },
+  play_radio: {
+    label: "Radio",
+    summary: (a) => str(a, "station"),
+    effect: "COMMITTED",
+    fence: true,
+    remoteSurface: false,
+  },
+  stop_radio: {
+    label: "Stop radio",
+    effect: "COMMITTED",
+    fence: true,
+    remoteSurface: false,
+  },
+  radio_list_stations: {
+    label: "Stations",
+    effect: "NONE",
+    fence: true,
+    remoteSurface: false,
+  },
+  radio_now_playing: {
+    label: "Now playing",
+    summary: (a) => str(a, "station"),
+    effect: "NONE",
+    fence: true,
+    remoteSurface: false,
+  },
 };
+
+/** Every registered tool name, exported for inventory/coverage gates. */
+export function registeredToolPresentations(): readonly string[] {
+  return Object.keys(REGISTRY);
+}
 
 /** Resolve the presentation for a tool name, applying safe defaults. */
 export function presentationFor(toolName: string): ToolPresentation {

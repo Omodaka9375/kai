@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { presentationFor, type ToolPresentation } from "./toolPresentations";
+import {
+  presentationFor,
+  registeredToolPresentations,
+  type ToolPresentation,
+} from "./toolPresentations";
 import { EFFECT_LABELS } from "./effectStatus";
+import { readdirSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 /**
  * The toolPresentations registry is the SINGLE source of truth for per-tool
@@ -87,10 +93,26 @@ describe("presentationFor — safe defaults for unknown tools", () => {
   });
 });
 
+describe("registry live-inventory coverage", () => {
+  it("every tool declared in tools/*.ts has an explicit registry row", () => {
+    const toolsDir = fileURLToPath(new URL("../tools/", import.meta.url));
+    const live = new Set<string>();
+    for (const file of readdirSync(toolsDir)) {
+      if (!file.endsWith(".ts") || file.endsWith(".test.ts")) continue;
+      const src = readFileSync(new URL(`../tools/${file}`, import.meta.url), "utf8");
+      for (const match of src.matchAll(/^ {2,4}([a-z_0-9]+):\s*tool\(/gm)) {
+        live.add(match[1]!);
+      }
+    }
+    const registered = new Set(registeredToolPresentations());
+    const missing = [...live].filter((name) => !registered.has(name));
+    expect(missing, `tools missing from toolPresentations: ${missing.join(", ")}`).toEqual([]);
+  });
+});
+
 describe("registry well-formedness", () => {
-  // Walk the registry directly via known names is not exported; instead
-  // assert the invariants hold for a broad sample by checking each resolved
-  // presentation's effect is a legal EffectStatus.
+  // The inventory coverage test above catches missing rows; this checks the
+  // resolved rows' fields are valid (including unknown-tool defaults).
   it("every sampled row's effect is a valid EffectStatus", () => {
     const sample = [
       "read_file", "write_file", "edit", "multi_edit", "batch_edit",

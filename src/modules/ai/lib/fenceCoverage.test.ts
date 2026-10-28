@@ -56,10 +56,16 @@ describe("subagent fence coverage", () => {
 describe("assistant fence coverage", () => {
   const src = read("./../../../modules/assistant/index.ts");
 
-  it("guards assistant tool results with withToolGuard", () => {
+  it("applies the central guard before fencing assistant tool results", () => {
     expect(src).toContain(
-      "withToolGuard(redactedTools, fenceState, null)",
+      "withToolGuard(centrallyGuardedTools, fenceState, null)",
     );
+    const redactIdx = src.indexOf("withToolRedaction(tools)");
+    const centralIdx = src.indexOf("withCentralToolGuards(");
+    const fenceIdx = src.indexOf("withToolGuard(centrallyGuardedTools");
+    expect(redactIdx).toBeGreaterThan(-1);
+    expect(centralIdx).toBeGreaterThan(redactIdx);
+    expect(fenceIdx).toBeGreaterThan(centralIdx);
   });
 
   it("includes the fence protocol in the system prompt", () => {

@@ -83,6 +83,12 @@ export function withToolGuard(
     const doFence = pres.fence;
     const baseEffect = pres.effect;
 
+    const originalToModelOutput = (
+      toolDef as {
+        toModelOutput?: (opts: { output?: unknown }) => unknown;
+      }
+    ).toModelOutput;
+
     const wrapped = { ...toolDef };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (wrapped as any).execute = async (...args: any[]) => {
@@ -123,14 +129,19 @@ export function withToolGuard(
       // cannot consult toModelOutput).
       return result;
     };
-    // Provider-facing serialization: copy minus the internal fields,
-    // EXACTLY mirroring the SDK default shape (string → text part; else
-    // json with undefined → null) so the only observable difference from
-    // before is the stripped `_effect/_outputWarning*` keys.
+    // Provider-facing serialization: strip internal fields, then preserve a
+    // tool-owned serializer when one exists. look_at_screen needs this to
+    // emit its vision content part (or OCR fallback); MCP tools may need it
+    // to emit structured content. Overwriting those serializers would turn
+    // images into base64-bearing JSON. Only use the SDK-default text/json
+    // shape when the tool did not define its own projection.
     (wrapped as Record<string, unknown>)["toModelOutput"] = (
       opts: { output?: unknown },
-    ): { type: "text"; value: string } | { type: "json"; value: unknown } => {
+    ): unknown => {
       const cleaned = stripInternalMeta(opts?.output);
+      if (originalToModelOutput) {
+        return originalToModelOutput.call(wrapped, { ...opts, output: cleaned });
+      }
       return typeof cleaned === "string"
         ? { type: "text", value: cleaned }
         : { type: "json", value: cleaned === undefined ? null : cleaned };
@@ -201,6 +212,15 @@ function resolveEffect(
   if (toolName === "write_file") {
     if (typeof r.error === "string") return "ROLLED_BACK";
     return "COMMITTED";
+  }
+
+  // voice_settings doubles as a read/list tool: only a changed setting is a
+  // committed mutation. Its `changed` array is null when nothing changed.
+  if (toolName === "voice_settings") {
+    if (r.error != null) return "ROLLED_BACK";
+    return Array.isArray(r.changed) && r.changed.length > 0
+      ? "COMMITTED"
+      : "NONE";
   }
 
   // bash_kill: exit status may tell us.

@@ -42,6 +42,7 @@ import {
   swapImagePartsToText,
 } from "@/modules/ai/extraction";
 import { withToolRedaction, withToolGuard } from "@/modules/ai/lib/toolFencing";
+import { withCentralToolGuards } from "@/modules/ai/lib/toolGuards";
 import { createFenceState, fenceSystemPrompt } from "@/modules/ai/lib/fence";
 import { auditAppend, AUDIT_KINDS } from "@/modules/ai/lib/audit";
 import { buildTools } from "@/modules/ai/tools/tools";
@@ -455,7 +456,22 @@ export async function runAssistantTurn(
   // output gets the same nonce trust-boundary the desktop agent has.
   const fenceState = createFenceState();
   const redactedTools = withToolRedaction(tools);
-  const guardedTools = withToolGuard(redactedTools, fenceState, null);
+  // The assistant auto-executes without approval cards, so the same central
+  // deny-only floor as the desktop path is mandatory here — especially for
+  // granted MCP tools, which have no inline KAI security checks.
+  const centrallyGuardedTools = withCentralToolGuards(
+    redactedTools,
+    undefined,
+    (name, reason) => {
+      auditAppend(
+        AUDIT_KINDS.securityDeny,
+        "tool-guard",
+        `${name}: ${reason}`.slice(0, 200),
+        "",
+      );
+    },
+  );
+  const guardedTools = withToolGuard(centrallyGuardedTools, fenceState, null);
 
   const history = await loadHistory(sessionId);
   const userParts: Array<{ type: string; text?: string }> = [

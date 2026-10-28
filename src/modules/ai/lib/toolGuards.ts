@@ -130,9 +130,10 @@ export function evaluateToolGuards(
     try {
       reason = g(call);
     } catch {
-      // A crashing guard must never grant permission: treat as silence and
-      // keep walking the stack (other guards still apply).
-      continue;
+      // Fail closed. Continuing would execute the tool when this was the
+      // only guard (or when every later guard stayed silent), turning a
+      // broken security check into permission.
+      return "Blocked by central tool guard: a guard failed while evaluating the call; refusing to execute.";
     }
     if (reason) return reason;
   }

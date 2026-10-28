@@ -208,4 +208,17 @@ describe("KAI.md tool inventory matches the live registry", () => {
       `tools marked needsApproval:true but missing from KAI.md inventory: ${undocumented.join(", ")}`,
     ).toEqual([]);
   });
+
+  it("every auto-execute tool in code is listed too (both directions)", () => {
+    const live = liveToolApproval();
+    const { auto } = docLists();
+    const undocumented = [...live.entries()]
+      .filter(([, needs]) => !needs)
+      .map(([n]) => n)
+      .filter((n) => !auto.includes(n));
+    expect(
+      undocumented,
+      `auto-execute tools missing from KAI.md inventory: ${undocumented.join(", ")}`,
+    ).toEqual([]);
+  });
 });

@@ -98,13 +98,16 @@ describe("evaluateToolGuards — monotonicity", () => {
     expect(evaluateToolGuards({ name: "t", args: {} }, [ignoreEverything, deny])).toBe("nope");
   });
 
-  it("a crashing guard is treated as silence, not a grant — later guards still run", () => {
+  it("a crashing guard FAILS CLOSED even when it is the only guard", () => {
     const boom: ToolGuard = () => {
       throw new Error("guard crashed");
     };
     const deny: ToolGuard = () => "denied-by-second";
-    expect(evaluateToolGuards({ name: "t", args: {} }, [boom, deny])).toBe(
-      "denied-by-second",
+    expect(evaluateToolGuards({ name: "t", args: {} }, [boom, deny])).toMatch(
+      /guard failed.*refusing to execute/i,
+    );
+    expect(evaluateToolGuards({ name: "t", args: {} }, [boom])).toMatch(
+      /guard failed.*refusing to execute/i,
     );
   });
 });
