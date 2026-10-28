@@ -27,6 +27,10 @@ describe("approval responses flow through the denial latch", () => {
     const sdkCalls = bridge.match(/addToolApprovalResponse\(/g) ?? [];
     expect(sdkCalls.length).toBe(1);
     expect(bridge).toMatch(/respond\(id, true\);/);
+    // No persistent per-command grants: compound shell commands cannot
+    // create an invisible bypass around per-call review.
+    expect(bridge).not.toContain("isCommandAllowed");
+    expect(bridge).toContain('if (autoApprove !== "all") return;');
   });
 
   it("respond() checks the latch at CALL time (both directions)", () => {
@@ -55,9 +59,4 @@ describe("approval responses flow through the denial latch", () => {
     expect(respond).toContain("isApprovalDenied");
   });
 
-  it("allowlist auto-approve keeps its inline deny-list re-check", () => {
-    // Defense-in-depth: the latch does NOT replace the security floor for
-    // pinned commands — both must be present.
-    expect(bridge).toMatch(/checkShellCommand\(cmd\)\.ok/);
-  });
 });

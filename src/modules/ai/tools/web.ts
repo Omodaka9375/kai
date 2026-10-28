@@ -48,13 +48,14 @@ export function htmlToText(html: string): {
   text: string;
   hiddenDropped: number;
 } {
+  // In the webview, remove hidden DOM subtrees rather than trying to match
+  // balanced HTML with regexes (nested same-name elements defeat those).
+  // Keep the tested static fallback below for Node/unit tests and unusual
+  // non-DOM callers.
+  if (typeof DOMParser !== "undefined") {
+    return htmlToTextDom(html);
+  }
   let hiddenDropped = 0;
-  const drop = (s: string, re: RegExp): string =>
-    s.replace(re, () => {
-      hiddenDropped++;
-      return " ";
-    });
-
   let text = html
     // Comments and hidden-styled blocks never reach the model.
     .replace(/<!--[\s\S]*?-->/g, " ")
@@ -75,40 +76,9 @@ export function htmlToText(html: string): {
       return `${pre}=${quoted.toLowerCase()}`;
     },
   );
-  // Lookahead (not a consumed [\s>]) for the `hidden` attribute boundary:
-  // `<div hidden>` ends its tag at the `>` itself, and a consuming class
-  // would eat it — the old regex then demanded a second `>` that never came,
-  // so bare `hidden` blocks LEAKED their text into the extraction.
-  // `hidden=""` / `hidden=anything` hides the same way in HTML.
-  text = drop(text, /<([a-z][^\s>]*)[^>]*\shidden(?=[\s=>])[^>]*>[\s\S]*?<\/\1>/gi);
-  text = drop(
-    text,
-    /<([a-z][^\s>]*)[^>]*style=["'][^>"']*display\s*:\s*none[^>"']*["'][^>]*>[\s\S]*?<\/\1>/gi,
-  );
-  text = drop(
-    text,
-    /<([a-z][^\s>]*)[^>]*style=["'][^>"']*visibility\s*:\s*hidden[^>"']*["'][^>]*>[\s\S]*?<\/\1>/gi,
-  );
-  // `opacity:0` in any legal spelling: `0.0`, `.0`, trailing `!important`,
-  // or followed by another declaration — the old `\s*(?:;|["'])` demanded
-  // the value end immediately and missed `opacity:0 !important`. The
-  // lookahead `(?=[\s;"'])` is the boundary: `opacity:0.95` is VISIBLE and
-  // must NOT match (a bare `0` followed by a fraction). Same for font-size.
-  text = drop(
-    text,
-    /<([a-z][^\s>]*)[^>]*style=["'][^>"']*opacity\s*:\s*(?:0(?:\.0+)?|\.0+)(?=[\s;"'])[^>]*>[\s\S]*?<\/\1>/gi,
-  );
-  text = drop(
-    text,
-    /<([a-z][^\s>]*)[^>]*style=["'][^>"']*font-size\s*:\s*0(?:\.0+)?(?:px)?(?=[\s;"'])[^>"']*["'][^>]*>[\s\S]*?<\/\1>/gi,
-  );
-  // Offscreen positioning: the classic "hide it from humans, show it to
-  // scrapers" trick (position:absolute; left/top far negative, or clipped to
-  // 0 size). Matches a position declaration plus an offscreen/clip hint.
-  text = drop(
-    text,
-    /<([a-z][^\s>]*)[^>]*style=["'][^>"']*(?:position\s*:\s*(?:absolute|fixed)[^>"']*(?:left|top)\s*:\s*-(?:\d{3,})px|clip\s*:\s*rect\s*\(\s*0[^)]*\))[^>"']*["'][^>]*>[\s\S]*?<\/\1>/gi,
-  );
+  text = dropHiddenHtmlBlocks(text, () => {
+    hiddenDropped++;
+  });
   text = text
     .replace(/<[^>]+>/g, " ")
     .replace(/&amp;/g, "&")
@@ -120,6 +90,144 @@ export function htmlToText(html: string): {
     .replace(/[ \t]+/g, " ")
     .replace(/\n\s*\n/g, "\n\n");
   return { text: text.trim(), hiddenDropped };
+}
+
+/** Non-DOM fallback: scan tags with a depth counter instead of pairing open
+ *  and close tags with regexes. Handles nested same-name elements and quoted
+ *  `>` characters without backtracking. */
+function dropHiddenHtmlBlocks(html: string, onDrop: () => void): string {
+  type Tag = { name: string; start: number; end: number; closing: boolean; selfClosing: boolean; hidden: boolean };
+  const tags: Tag[] = [];
+  let cursor = 0;
+  while (cursor < html.length) {
+    const start = html.indexOf("<", cursor);
+    if (start < 0) break;
+    let quote = "";
+    let end = start + 1;
+    for (; end < html.length; end++) {
+      const ch = html[end]!;
+      if (quote) {
+        if (ch === quote) quote = "";
+      } else if (ch === '"' || ch === "'") {
+        quote = ch;
+      } else if (ch === ">") {
+        break;
+      }
+    }
+    if (end >= html.length) break;
+    const inside = html.slice(start + 1, end);
+    const match = /^(\/?)\s*([a-zA-Z][\w:-]*)/.exec(inside);
+    if (match) {
+      const closing = match[1] === "/";
+      const name = match[2]!.toLowerCase();
+      const selfClosing = /\/\s*$/.test(inside) || name === "br" || name === "img" || name === "input" || name === "meta" || name === "link" || name === "hr";
+      const attrs = inside.slice(match[0].length);
+      const style = /(?:^|\s)style\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/i.exec(attrs);
+      const css = (style?.[1] ?? style?.[2] ?? style?.[3] ?? "").toLowerCase();
+      const hidden =
+        /(?:^|\s)hidden(?=\s|=|\/|$)/i.test(attrs) ||
+        /display\s*:\s*none/i.test(css) ||
+        /visibility\s*:\s*hidden/i.test(css) ||
+        /opacity\s*:\s*(?:0(?:\.0+)?|\.0+)(?=\s|;|!|$)/i.test(css) ||
+        /font-size\s*:\s*0(?:\.0+)?(?:px)?(?=\s|;|!|$)/i.test(css) ||
+        (/position\s*:\s*(?:absolute|fixed)/i.test(css) && /(?:left|top)\s*:\s*-\d{3,}px/i.test(css)) ||
+        /clip\s*:\s*rect\s*\(\s*0/i.test(css);
+      tags.push({ name, start, end: end + 1, closing, selfClosing, hidden });
+    }
+    cursor = end + 1;
+  }
+
+  // Record excluded RANGES rather than reconstructing from the visible
+  // parent stack. A hidden child inside a visible parent is removed without
+  // suppressing the parent's other visible children.
+  const excluded: Array<{ start: number; end: number }> = [];
+  const stack: Array<{ name: string; start: number; hidden: boolean }> = [];
+  for (const tag of tags) {
+    if (!tag.closing) {
+      if (!tag.selfClosing) {
+        stack.push({ name: tag.name, start: tag.start, hidden: tag.hidden });
+      } else if (tag.hidden) {
+        excluded.push({ start: tag.start, end: tag.end });
+        onDrop();
+      }
+      continue;
+    }
+    let openIndex = -1;
+    for (let i = stack.length - 1; i >= 0; i--) {
+      if (stack[i]!.name === tag.name) {
+        openIndex = i;
+        break;
+      }
+    }
+    if (openIndex < 0) continue;
+    const removed = stack.splice(openIndex);
+    if (removed.some((entry) => entry.hidden)) {
+      excluded.push({ start: removed[0]!.start, end: tag.end });
+      onDrop();
+    }
+  }
+  if (stack.some((entry) => entry.hidden)) {
+    excluded.push({ start: stack[0]!.start, end: html.length });
+    onDrop();
+  }
+  // Inner hidden elements close before their outer parent, producing nested
+  // ranges. Sort + merge first, or the outer range is skipped and its secrets
+  // leak back into the visible reconstruction.
+  const merged: Array<{ start: number; end: number }> = [];
+  for (const range of [...excluded].sort((a, b) => a.start - b.start || a.end - b.end)) {
+    const previous = merged[merged.length - 1];
+    if (previous && range.start <= previous.end) {
+      previous.end = Math.max(previous.end, range.end);
+    } else {
+      merged.push({ ...range });
+    }
+  }
+  let out = "";
+  let cursorOut = 0;
+  for (const range of merged) {
+    out += html.slice(cursorOut, range.start);
+    cursorOut = range.end;
+  }
+  return out + html.slice(cursorOut);
+}
+
+/** DOM implementation for the browser: hidden elements are removed as whole
+ *  subtrees, so a nested <div> cannot terminate the match early and leak the
+ *  remainder of a hidden parent into model-visible text. */
+function htmlToTextDom(html: string): { text: string; hiddenDropped: number } {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  let hiddenDropped = 0;
+  for (const element of Array.from(doc.querySelectorAll("script, style, noscript"))) {
+    element.remove();
+  }
+  const candidates = Array.from(
+    doc.querySelectorAll<HTMLElement>("[hidden], [style]"),
+  );
+  for (const element of candidates) {
+    const style = element.style;
+    const css = element.getAttribute("style")?.toLowerCase() ?? "";
+    const left = Number.parseInt(style.left, 10);
+    const top = Number.parseInt(style.top, 10);
+    const positioned = style.position === "absolute" || style.position === "fixed";
+    const offscreen = positioned && ((left <= -100 || top <= -100) || /clip\s*:\s*rect\s*\(\s*0/i.test(css));
+    const hidden =
+      element.hasAttribute("hidden") ||
+      style.display === "none" ||
+      style.visibility === "hidden" ||
+      Number.parseFloat(style.opacity) === 0 ||
+      Number.parseFloat(style.fontSize) === 0 ||
+      offscreen;
+    if (!hidden) continue;
+    // An ancestor already removed takes its descendants with it.
+    if (!element.isConnected) continue;
+    element.remove();
+    hiddenDropped++;
+  }
+  const text = (doc.body?.textContent ?? "")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n\s*\n/g, "\n\n")
+    .trim();
+  return { text, hiddenDropped };
 }
 
 /** Extract the real URL from DDG's redirect wrapper. */
@@ -259,12 +367,16 @@ export function buildWebTools(_ctx: ToolContext) {
         query: z.string().describe("The search query."),
       }),
       execute: async ({ query }) => {
+        let bingError: unknown = null;
         try {
-          // Primary: Bing's RSS serializer (reliable, not bot-walled). If it
-          // yields nothing (shape change / block / non-200), fall through to
-          // the legacy DDG scraper below.
-          const bing = await bingSearch(query);
-          if (bing.length > 0) return { query, engine: "bing", results: bing };
+          // Primary: Bing's RSS serializer (reliable, not bot-walled). Empty
+          // results AND request/parser failures both fall through to DDG.
+          try {
+            const bing = await bingSearch(query);
+            if (bing.length > 0) return { query, engine: "bing", results: bing };
+          } catch (error) {
+            bingError = error;
+          }
 
           // ── Fallback: DDG lite endpoint with POST. The Accept-Encoding is
           // handled by Rust reqwest (gzip/deflate enabled in Cargo.toml).
@@ -365,7 +477,13 @@ export function buildWebTools(_ctx: ToolContext) {
               : {}),
           };
         } catch (e) {
-          return { error: String(e), query };
+          return {
+            error: String(e),
+            query,
+            ...(bingError
+              ? { note: `Bing RSS also failed: ${String(bingError)}` }
+              : {}),
+          };
         }
       },
     }),

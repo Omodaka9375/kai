@@ -201,11 +201,16 @@ describe("checkShellSandbox - shell command gating", () => {
     ).toBe(true);
   });
 
-  it("output redirection outside blocked", async () => {
+  it("output redirection outside blocked, including attached and fd forms", async () => {
     setSandboxRoot(ROOT);
     __setSandboxModeForTests(ROOT, "readOnly");
-    const r = await checkShellSandbox(`echo hi > /tmp/x.log`);
-    expect(r.ok).toBe(false);
+    expect((await checkShellSandbox(`echo hi > /tmp/x.log`)).ok).toBe(false);
+    expect((await checkShellSandbox(`echo hi>/tmp/x.log`)).ok).toBe(false);
+    expect((await checkShellSandbox(`echo hi 2>/tmp/x.log`)).ok).toBe(false);
+    expect((await checkShellSandbox(`echo hi 2>>/tmp/x.log`)).ok).toBe(false);
+    // A quoted greater-than is text, not redirection, even with more args.
+    expect((await checkShellSandbox(`echo ">"`)).ok).toBe(true);
+    expect((await checkShellSandbox(`cat ">" /etc/hosts`)).ok).toBe(true);
   });
 
   it("off mode = allow everything", async () => {
@@ -267,6 +272,10 @@ describe("checkShellSandbox — real-world command regressions (issue: substring
     __setSandboxModeForTests("D:/Code/Proj", "workspaceOnly");
     expect((await checkShellSandbox("cat C:/Windows/win.ini")).ok).toBe(false);
     expect((await checkShellSandbox("cat D:/Code/Proj/src/a.ts")).ok).toBe(true);
+  });
+
+  it("does not treat an absolute path inside a quoted concatenation as a standalone path", async () => {
+    expect((await checkShellSandbox('echo pre"/tmp/x"')).ok).toBe(true);
   });
 
   it("quoted paths classify like unquoted ones", async () => {

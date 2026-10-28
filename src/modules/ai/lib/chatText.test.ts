@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { stripLeakedTokens, isBlankMarkdown } from "./chatText";
+import { stripLeakedTokens, isBlankMarkdown, splitThinkingBlocks } from "./chatText";
 
 describe("stripLeakedTokens", () => {
   it("passes plain paragraphs through unchanged", () => {
@@ -53,6 +53,16 @@ describe("stripLeakedTokens", () => {
   it("strips <|channel|> protocol wrappers", () => {
     const s = "<|channel|>junk<|channel|>real text";
     expect(stripLeakedTokens(s)).toContain("real text");
+  });
+});
+
+describe("splitThinkingBlocks", () => {
+  it("preserves Markdown paragraph boundaries around thinking blocks", () => {
+    const parts = splitThinkingBlocks("<thinking>x</thinking>One\n\nTwo");
+    expect(parts.filter((p) => !p.thinking).map((p) => p.text).join(""))
+      .toContain("One\n\nTwo");
+    expect(parts.filter((p) => !p.thinking).map((p) => p.text).join(""))
+      .not.toBe("OneTwo");
   });
 });
 

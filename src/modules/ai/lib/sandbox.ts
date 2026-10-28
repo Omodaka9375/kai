@@ -131,13 +131,26 @@ const SHELL_ALLOW_OUTSIDE: string[] = [];
  * literal text and simply fail to classify as paths.
  */
 export function splitShellArgs(command: string): string[] {
-  const out: string[] = [];
+  return splitShellTokens(command).map((token) => token.value);
+}
+
+/** Small quote-aware shell lexer used by both path classification and
+ *  redirection detection. Operators stay separate so `echo hi>/tmp/x`
+ *  cannot masquerade as a read, while quoted ">" remains ordinary text. */
+function splitShellTokens(command: string): Array<{ value: string; operator: boolean }> {
+  const out: Array<{ value: string; operator: boolean }> = [];
   let cur = "";
+  let curHasUnquoted = false;
   let quote: '"' | "'" | null = null;
   const push = () => {
     if (cur) {
-      out.push(cur);
+      out.push({
+        value: cur,
+        // Operators must consist entirely of unquoted shell characters.
+        operator: curHasUnquoted && /^(?:\d+)?(?:>>?|<<?)$/.test(cur),
+      });
       cur = "";
+      curHasUnquoted = false;
     }
   };
   for (const ch of command) {
@@ -147,18 +160,38 @@ export function splitShellArgs(command: string): string[] {
       continue;
     }
     if (ch === '"' || ch === "'") {
-      push();
+      // Do NOT push: shell concatenates quoted/unquoted fragments into one
+      // argument (`pre"/tmp/x"` is one word, not `/tmp/x` as a bare path).
       quote = ch;
       continue;
     }
-    if (/[\s;|&()<>]/.test(ch)) {
+    if (/[\s;|&()]/.test(ch)) {
       push();
       continue;
     }
+    if (ch === "<" || ch === ">") {
+      push();
+      out.push({ value: ch, operator: true });
+      curHasUnquoted = false;
+      continue;
+    }
     cur += ch;
+    curHasUnquoted = true;
   }
   push();
   return out;
+}
+
+/** True when the command redirects output (including fd-prefixed and
+ *  whitespace-free forms: >, >>, 2>, 2>>). */
+function hasOutputRedirection(command: string): boolean {
+  const tokens = splitShellTokens(command);
+  return tokens.some(
+    (token, index) =>
+      token.operator &&
+      token.value.includes(">") &&
+      tokens[index + 1]?.value,
+  );
 }
 
 /** True when a token contains a `..` path segment — relative traversal
@@ -208,7 +241,7 @@ export async function checkShellSandbox(
   const writeShaped =
     /\b(cp|mv|rm|rmdir|mkdir|tee|touch|truncate|shred|install|rsync|dd)\b/i.test(
       command,
-    ) || /(?:^|\s)>{1,2}\s/.test(command);
+    ) || hasOutputRedirection(command);
 
   const outside: string[] = [];
   for (const tok of splitShellArgs(command)) {

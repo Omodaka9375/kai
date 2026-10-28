@@ -22,7 +22,6 @@ import { abortSession } from "../store/chatStore";
 import { setEditedToolInput } from "../lib/toolInputOverrides";
 import { getToolActionInfo, analyzeShellCommand } from "../lib/policy";
 import { presentationFor } from "../lib/toolPresentations";
-import { isAllowlistable, pinCommand } from "../lib/allowlist";
 
 type Props = {
   part: Extract<ToolUIPart, { state: "approval-requested" }>;
@@ -101,31 +100,6 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue }: Props) {
     }
   }, [isMemory, isShell, isEditing, editedCommand, commandText, part.toolCallId, onRespond]);
 
-  // RULES OF HOOKS — the #310 collapse-on-approve bug (React "rendered
-  // fewer hooks"): the onAlwaysAllow useCallback used to sit AFTER the
-  // queue?.queued early return. A queued card rendered 6 hooks; when the
-  // first approval resolved and the queue advanced (queued true -> false),
-  // the SAME instance re-rendered past the early return and dispatched a
-  // 7th hook with no slot -> throw at the useCallback -> the mini-window
-  // error boundary unmounted the whole window. Every hook must run on
-  // every render — compute everything, THEN branch in JSX.
-
-  // Scoped allowlist: offer "Always allow" for low-risk commands whose every
-  // segment is warning-free and non-write-shaped — never for elevated,
-  // destructive, or substitution-bearing ones.
-  const canPin =
-    toolName === "bash_run" &&
-    !isElevated &&
-    typeof input.command === "string" &&
-    isAllowlistable(input.command);
-  const onAlwaysAllow = useCallback(() => {
-    const root = useChatStore.getState().live.getWorkspaceRoot();
-    const cmd = typeof input.command === "string" ? input.command : "";
-    if (!root || !cmd) return;
-    void pinCommand(root, cmd).then((ok) => {
-      if (ok) onRespond(true);
-    });
-  }, [input.command, onRespond]);
   // Queued behind an earlier approval — compact placeholder, no actions.
   if (queue?.queued) {
     return (
@@ -341,17 +315,6 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue }: Props) {
               <HugeiconsIcon icon={Cancel01Icon} size={12} strokeWidth={2} />
               Deny
             </Button>
-            {canPin ? (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={onAlwaysAllow}
-                title="Run this now and auto-approve this exact command in this project from now on"
-                className="h-7 gap-1 text-[11px]"
-              >
-                Always allow
-              </Button>
-            ) : null}
             <Button
               size="sm"
               variant={isElevated ? "destructive" : "default"}

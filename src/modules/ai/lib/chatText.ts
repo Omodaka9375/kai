@@ -50,10 +50,10 @@ export function stripUserContextBlocks(text: string): {
   return { text: out.trim(), chips };
 }
 
-const THINKING_BOUNDARY_RE = new RegExp(
-  "<\\/?thinking>|<\\|\\/?thinking\\|>|\\n{2}\\s* response|\\n{2}\\s*",
-  "gi",
-);
+// Only actual thinking markers are stripped. An earlier `\\n{2}\\s*`
+// alternative treated EVERY Markdown paragraph boundary as a marker and
+// concatenated adjacent paragraphs ("One\\n\\nTwo" → "OneTwo").
+const THINKING_BOUNDARY_RE = /<\/?thinking>|<\|\/?thinking\|>/gi;
 
 /**
  * Strip orphaned thinking markers from visible text. These can leak when

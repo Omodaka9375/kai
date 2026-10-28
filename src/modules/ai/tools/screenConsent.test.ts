@@ -32,10 +32,10 @@ describe("auto-approve must never bypass a screen capture", () => {
     expect(bridge).toContain(
       "if (PRIVACY_APPROVAL_TOOLS.has(toolName)) continue;",
     );
-    // And it must run BEFORE the generic `autoApprove === "all"` branch,
+    // And it must run BEFORE the generic deferred approval response,
     // otherwise the early-exempt is dead code.
     const exemptIdx = bridge.indexOf("PRIVACY_APPROVAL_TOOLS.has(toolName)");
-    const genericIdx = bridge.indexOf('const shouldApprove = autoApprove === "all"');
+    const genericIdx = bridge.indexOf("autoApprovedRef.current.add(id)");
     expect(exemptIdx).toBeGreaterThan(-1);
     expect(genericIdx).toBeGreaterThan(exemptIdx);
   });

@@ -12,8 +12,8 @@ const DOTS: Record<AutoApproveMode, string> = {
 };
 
 const TOOLTIPS: Record<AutoApproveMode, string> = {
-  off: "Ask before every tool call — except pinned \"Always allow\" commands, which run without asking",
-  all: "Allow every tool call without asking (elevation and signed commits still ask)",
+  off: "Ask before every approval-required tool call",
+  all: "Allow every tool call without asking (elevation, screen capture, and signed commits still ask)",
 };
 
 /** Compact cycling toggle for auto-approve mode. Two states: Ask / Allow. */

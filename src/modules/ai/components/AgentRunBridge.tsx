@@ -12,8 +12,6 @@ import {
   type AgentRunStatus,
 } from "../store/chatStore";
 import { verifyIfDirtyAtRunEnd } from "../lib/autoVerify";
-import { isCommandAllowed } from "../lib/allowlist";
-import { checkShellCommand } from "../lib/security";
 import { isApprovalDenied, noteApprovalDenied } from "../lib/approvalLatch";
 import { speakText } from "../lib/voiceTts";
 
@@ -358,11 +356,9 @@ function Bridge({
   );
 
   useEffect(() => {
-    // NOTE: no early return on autoApprove === "off" — the scoped-allowlist
-    // branch below must run in every mode (a pinned "always allow" command
-    // auto-approves even with auto-approve off). The generic branch self-gates:
-    // shouldApprove is false for "off", so only the allowlist path fires.
-    let cancelled = false;
+    // Approvals are per-call in Ask mode; Allow auto-approves the session,
+    // with the stronger consent boundaries below always kept manual.
+    if (autoApprove !== "all") return;
     for (const m of messages) {
       if (m.role !== "assistant") continue;
       for (const p of m.parts as AnyPart[]) {
@@ -392,39 +388,6 @@ function Bridge({
           signingApprovalRequired &&
           isGitCommitCommand(input?.command as string | undefined);
         if (isSignedCommit) continue;
-        // Scoped allowlist (approval-fatigue fix): a command the user pinned
-        // as "always allow" for THIS project auto-approves even with
-        // autoApprove off. Guards above already ran, and isCommandAllowed
-        // re-checks the hard deny-list — a pinned command can never be
-        // elevated, signed, destructive, or high-risk in any segment.
-        if (toolName === "bash_run" && typeof input?.command === "string") {
-          const cmd = input.command;
-          // The hard deny-list must still pass (it always would —
-          // isAllowlistable required it at pin time — but check anyway:
-          // defense in depth against a tampered store).
-          if (!checkShellCommand(cmd).ok) continue;
-          const root = useChatStore.getState().live.getWorkspaceRoot();
-          void isCommandAllowed(cmd, root).then((allowed) => {
-            if (!allowed || cancelled) return;
-            if (autoApprovedRef.current.has(id)) return;
-            autoApprovedRef.current.add(id);
-            markAutoApproved(id);
-            setTimeout(() => {
-              // Route through respond so the denial latch is checked at FIRE
-              // time: a human Deny landing between scheduling and firing
-              // drops this auto-approve instead of overriding it.
-              respond(id, true);
-            }, 0);
-          });
-          // FALL THROUGH — do NOT continue here. A command that is NOT
-          // pinned must still auto-approve under autoApprove "all" via the
-          // generic branch below. (The .then is guarded by autoApprovedRef,
-          // so a pinned command responds exactly once.)
-          // The unconditional `continue` that used to live here made EVERY
-          // bash_run prompt for review even with approve-all set.
-        }
-        const shouldApprove = autoApprove === "all";
-        if (!shouldApprove) continue;
         autoApprovedRef.current.add(id);
         markAutoApproved(id);
         // Defer each response to its own macrotask. Approving N pending tool
@@ -437,15 +400,12 @@ function Bridge({
         // React a full commit between approvals — depth resets per task —
         // while auto-approve still completes within milliseconds.
         setTimeout(() => {
-          // Latch-checked at fire time (see the allowlist branch above): a
-          // Deny that arrived after this was scheduled must win.
+          // Latch-checked at fire time: a Deny that arrived after this was
+          // scheduled must win over session-level auto-approve.
           respond(id, true);
         }, 0);
       }
     }
-    return () => {
-      cancelled = true;
-    };
   }, [messages, autoApprove, respond, markAutoApproved, signingApprovalRequired]);
 
   // ---- AI diff tab management ----------------------------------------------

@@ -206,6 +206,7 @@ function deriveLabel(id: string, name: string | undefined): string {
 function deriveCapabilities(
   ctx: number | undefined,
   desc: string,
+  isFree = false,
 ): { intelligence: 1 | 2 | 3 | 4 | 5; speed: 1 | 2 | 3 | 4 | 5; cost: 1 | 2 | 3 | 4 | 5 } {
   const d = desc.toLowerCase();
   // Intelligence: flag "frontier", "flagship", "state-of-the-art" → 5
@@ -226,6 +227,9 @@ function deriveCapabilities(
   let cost: 1 | 2 | 3 | 4 | 5 = 4;
   if (/\b(free|cheap|low.cost|affordable)\b/.test(d)) cost = 5;
   if (/\b(frontier|flagship|premium|enterprise)\b/.test(d)) cost = 3;
+  // Pricing is authoritative: a free model must show maximum affordability
+  // even when its prose description is empty or says "frontier".
+  if (isFree) cost = 5;
 
   return { intelligence, speed, cost };
 }
@@ -279,7 +283,7 @@ function shouldSkip(id: string): boolean {
   return false;
 }
 
-function parseOpenRouterModels(rawJson: string): { models: ModelInfo[]; contextLimits: Record<string, number>; pricing: Record<string, ModelPricing> } {
+export function parseOpenRouterModels(rawJson: string): { models: ModelInfo[]; contextLimits: Record<string, number>; pricing: Record<string, ModelPricing> } {
   let data: OpenRouterModelRaw[];
   try {
     const parsed: OpenRouterResponse = JSON.parse(rawJson);
@@ -306,7 +310,11 @@ function parseOpenRouterModels(rawJson: string): { models: ModelInfo[]; contextL
     const freeTag: ModelTag[] = isFree ? ["free"] : [];
     // Deduplicate tags.
     const tags = [...new Set([...modalityTags, ...heuristicTags, ...freeTag])];
-    const capabilities = deriveCapabilities(m.context_length, m.description ?? "");
+    const capabilities = deriveCapabilities(
+      m.context_length,
+      m.description ?? "",
+      isFree,
+    );
 
     out.push({
       id: m.id,

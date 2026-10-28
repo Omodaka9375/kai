@@ -208,6 +208,12 @@ describe("checkShellCommand — Trojan Source / bidi defense", () => {
       ok: false,
     });
   });
+
+  it("blocks home deletion with the conventional trailing slash", () => {
+    expect(checkShellCommand("rm -rf ~/")).toMatchObject({ ok: false });
+    expect(checkShellCommand("rm -rf $HOME/")).toMatchObject({ ok: false });
+    expect(checkShellCommand("rm -rf ~")).toMatchObject({ ok: false });
+  });
 });
 
 describe("checkWritable — shell-init / credential-file deny-list", () => {

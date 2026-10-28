@@ -705,15 +705,6 @@ function AssistantMessageView({
   timestamp?: number;
 }) {
   const timeTitle = timestamp ? absoluteTime(timestamp) : undefined;
-  // Index of the trailing text part — only that one is \"live\" mid-stream.
-  // Earlier text parts (separated by tool calls) are already finalized.
-  let lastTextIdx = -1;
-  for (let i = message.parts.length - 1; i >= 0; i -= 1) {
-    if (message.parts[i]?.type === "text") {
-      lastTextIdx = i;
-      break;
-    }
-  }
 
   const groups = useMemo(() => buildPartGroups(message.parts as AnyPart[]), [
     message.parts,
@@ -797,8 +788,9 @@ function AssistantMessageView({
                       onApproval={onApproval}
                       streaming={
                         streaming &&
-                        (g.idx === lastTextIdx ||
-                          partType(g.part) === "reasoning")
+                        (partType(g.part) === "text" ||
+                          partType(g.part) === "reasoning") &&
+                        (g.part as { state?: string }).state === "streaming"
                       }
                       approvalQueue={
                         gApprovalId && queueIndex > 0

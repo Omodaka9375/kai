@@ -31,7 +31,7 @@ import {
   Tick01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getModel,
   providerNeedsKey,
@@ -46,7 +46,14 @@ import { useOpenRouterModelsStore } from "../store/openrouterModelsStore";
 import { toggleFavoriteModel } from "../lib/modelPrefs";
 import { useChatStore } from "../store/chatStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import { setModelThinkingMode } from "@/modules/settings/store";
+import {
+  clampModelPickerWidth,
+  MODEL_PICKER_DESCRIPTION_MIN,
+  MODEL_PICKER_WIDTH_DEFAULT,
+  setModelPickerWidth,
+  setModelThinkingMode,
+  setOpenaiCompatibleThinkingMode,
+} from "@/modules/settings/store";
 const PROVIDER_ICON = {
   openai: ChatGptIcon,
   anthropic: ClaudeIcon,
@@ -112,6 +119,57 @@ function ModelDropdown() {
   const recentIds = usePreferencesStore((s) => s.recentModelIds);
   const thinkingMode = usePreferencesStore((s) => s.thinkingMode);
   const modelThinkingModes = usePreferencesStore((s) => s.modelThinkingModes);
+  const compatThinkingMode = usePreferencesStore(
+    (s) => s.openaiCompatibleThinkingMode,
+  );
+  const storedPickerWidth = usePreferencesStore((s) => s.modelPickerWidth);
+  const [pickerWidth, setPickerWidth] = useState(storedPickerWidth);
+  useEffect(() => {
+    if (!resizeRef.current) setPickerWidth(storedPickerWidth);
+  }, [storedPickerWidth]);
+  const resizeRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startWidth: number;
+    target: HTMLElement;
+  } | null>(null);
+  const stopResize = useCallback(() => {
+    const active = resizeRef.current;
+    if (!active) return;
+    if (active.target.hasPointerCapture(active.pointerId)) {
+      active.target.releasePointerCapture(active.pointerId);
+    }
+    resizeRef.current = null;
+    setPickerWidth((width) => {
+      void setModelPickerWidth(width);
+      return width;
+    });
+  }, []);
+  const startResize = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      resizeRef.current = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startWidth: pickerWidth,
+        target: event.currentTarget,
+      };
+    },
+    [pickerWidth],
+  );
+  const moveResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const active = resizeRef.current;
+    if (!active || active.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    // align="end" anchors the right edge; drag left to widen.
+    setPickerWidth(
+      clampModelPickerWidth(active.startWidth - (event.clientX - active.startX)),
+    );
+  }, []);
   const current = getModel(selected);
   // For custom endpoints, show the actual model ID instead of generic label.
   const lmModelId = usePreferencesStore((s) => s.lmstudioModelId);
@@ -210,11 +268,29 @@ function ModelDropdown() {
 
       <DropdownMenuContent
         align="end"
-        className="w-[34rem] p-0 overflow-hidden rounded-xl border border-border/70 shadow-xl"
+        style={{ width: pickerWidth }}
+        className="relative p-0 overflow-hidden rounded-xl border border-border/70 shadow-xl"
         onFocusCapture={(e) => {
           if (e.target !== inputRef.current) inputRef.current?.focus();
         }}
       >
+        <div
+          role="separator"
+          aria-label="Resize model picker"
+          aria-orientation="vertical"
+          title="Drag to resize · double-click to reset"
+          className="absolute inset-y-0 left-0 z-20 w-2 cursor-ew-resize touch-none hover:bg-accent/60"
+          onPointerDown={startResize}
+          onPointerMove={moveResize}
+          onPointerUp={stopResize}
+          onPointerCancel={stopResize}
+          onDoubleClick={(event) => {
+            event.preventDefault();
+            setPickerWidth(MODEL_PICKER_WIDTH_DEFAULT);
+            void setModelPickerWidth(MODEL_PICKER_WIDTH_DEFAULT);
+          }}
+        />
+
         {/* Search */}
         <div className="flex items-center gap-2.5 border-b border-border/70 px-3 py-2.5">
           <HugeiconsIcon
@@ -285,7 +361,7 @@ function ModelDropdown() {
           </div>
 
           {/* Models list */}
-          <div className="flex-1 overflow-y-auto py-1 max-h-[26rem]">
+          <div className="min-w-0 flex-1 overflow-y-auto py-1 max-h-[26rem]">
             {activeProvider !== null ? (
               <ProviderHeader providerId={activeProvider} />
             ) : null}
@@ -309,8 +385,10 @@ function ModelDropdown() {
                   hasKey={hasKeyFor(m.provider)}
                   favorite={favoriteIds.includes(m.id)}
                   showProviderIcon={activeProvider === null}
+                  showDescription={pickerWidth >= MODEL_PICKER_DESCRIPTION_MIN}
                   thinkingMode={thinkingMode}
                   modelThinkingModes={modelThinkingModes}
+                  compatThinkingMode={compatThinkingMode}
                   onPick={() => {
                     if (!hasKeyFor(m.provider)) {
                       void openSettingsWindow("models");
@@ -319,14 +397,18 @@ function ModelDropdown() {
                     setSelected(m.id as ModelId);
                   }}
                   onToggleFavorite={() => void toggleFavoriteModel(m.id)}
-                  onToggleThinking={(modelId) =>
-                    void setModelThinkingMode(
-                      modelId,
-                      cycleThinkingMode(
-                        modelThinkingModes[modelId] ?? thinkingMode,
-                      ),
-                    )
-                  }
+                  onToggleThinking={(modelId) => {
+                    const next = cycleThinkingMode(
+                      modelId === "openai-compatible-custom"
+                        ? compatThinkingMode
+                        : (modelThinkingModes[modelId] ?? thinkingMode),
+                    );
+                    if (modelId === "openai-compatible-custom") {
+                      void setOpenaiCompatibleThinkingMode(next);
+                    } else {
+                      void setModelThinkingMode(modelId, next);
+                    }
+                  }}
                 />
               ))
             )}
@@ -445,8 +527,10 @@ function ModelRow({
   hasKey,
   favorite,
   showProviderIcon,
+  showDescription,
   thinkingMode,
   modelThinkingModes,
+  compatThinkingMode,
   onPick,
   onToggleFavorite,
   onToggleThinking,
@@ -456,17 +540,28 @@ function ModelRow({
   hasKey: boolean;
   favorite: boolean;
   showProviderIcon: boolean;
+  showDescription: boolean;
   thinkingMode: ThinkingMode;
   modelThinkingModes: Record<string, ThinkingMode>;
+  compatThinkingMode: ThinkingMode;
   onPick: () => void;
   onToggleFavorite: () => void;
   onToggleThinking: (modelId: string) => void;
 }) {
-  const isReasoning = model.tags?.includes("reasoning");
+  // Runtime enables thinking for reasoning-tagged models AND both custom
+  // endpoints. OpenAI-compatible has a dedicated preference, not the
+  // per-model override map (mirrors chatRuntime.ts).
+  const isReasoning =
+    model.tags?.includes("reasoning") ||
+    model.id === "openai-compatible-custom" ||
+    model.id === "lmstudio-local";
   const hasOverride = isReasoning && model.id in modelThinkingModes;
-  const effective = hasOverride
-    ? modelThinkingModes[model.id]
-    : thinkingMode;
+  const effective =
+    model.id === "openai-compatible-custom"
+      ? compatThinkingMode
+      : hasOverride
+        ? modelThinkingModes[model.id]
+        : thinkingMode;
 
   return (
     <DropdownMenuItem
@@ -521,9 +616,11 @@ function ModelRow({
             Free
           </span>
         ) : null}
-        <span className="truncate text-[10.5px] leading-none text-muted-foreground">
-          {model.description}
-        </span>
+        {showDescription ? (
+          <span className="truncate text-[10.5px] leading-none text-muted-foreground">
+            {model.description}
+          </span>
+        ) : null}
       </div>
 
       <CapabilityBars caps={model.capabilities} />
@@ -553,7 +650,7 @@ function ModelRow({
 
 function CapabilityBars({ caps }: { caps: ModelCapabilities }) {
   return (
-    <div className="ml-auto flex items-center gap-1.5">
+    <div className="ml-auto flex shrink-0 items-center gap-1.5">
       <CapBar icon={BrainIcon} value={caps.intelligence} label="Intelligence" />
       <CapBar icon={FlashIcon} value={caps.speed} label="Speed" />
       <CapBar

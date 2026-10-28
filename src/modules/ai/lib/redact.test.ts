@@ -7,6 +7,37 @@ import {
 
 // ── Value-shaped patterns: stripped in BOTH tiers ──────────────────────────
 
+describe("redactSensitive — assignment scanner", () => {
+  it("redacts quoted values containing whitespace and preserves other text", () => {
+    const out = redactSensitive(
+      'before PASSWORD="correct horse battery staple" after',
+    );
+    expect(out).toBe("before PASSWORD=<REDACTED:quoted> after");
+    expect(redactSensitive("TOKEN='two words'")).toBe("TOKEN=<REDACTED:quoted>");
+    expect(redactSensitive("TOKEN=bare-value")).toBe("TOKEN=<REDACTED:bare>");
+  });
+
+  it("handles escaped quotes and all secret-name words case-insensitively", () => {
+    expect(redactSensitive('TOKEN="abc\\"def"')).toBe("TOKEN=<REDACTED:quoted>");
+    expect(redactSensitive("Password=horse")).toBe("Password=<REDACTED:bare>");
+    expect(redactSensitive("AUTH=letmein")).toBe("AUTH=<REDACTED:bare>");
+  });
+
+  it("redacts a suffix left after a value-shaped match instead of treating it as complete", () => {
+    const out = redactSensitive("API_KEY=sk-abcdefghijklmnopqrst:remaining-secret");
+    expect(out).not.toContain("remaining-secret");
+    expect(out).toContain("<REDACTED:");
+  });
+
+  it("does not rewrite ordinary assignments or existing redactions", () => {
+    expect(redactSensitive("PORT=3000 NODE_ENV=production")).toBe(
+      "PORT=3000 NODE_ENV=production",
+    );
+    const already = "TOKEN=<REDACTED:bare>";
+    expect(redactSensitive(already)).toBe(already);
+  });
+});
+
 describe("redactSourceText — value-shaped secrets", () => {
   it("strips OpenAI keys", () => {
     expect(redactSourceText('key = "sk-proj-abcdefghij0123456789XYZ"')).toContain(

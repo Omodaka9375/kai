@@ -226,10 +226,8 @@ export type ApprovalResponder = (
   approved: boolean,
 ) => void;
 
-/** Auto-approve modes: off = manual, edits = file mutations only, all = everything. */
-/** Two-state approval mode (2026-10: "edits" dropped — nobody used it in
- * practice; pinned allowlist commands cover the repeated-shell-command case,
- * and "all" covers trust-a-lot sessions). */
+/** Two-state approval mode: Ask reviews each approval-required call; Allow
+ * auto-approves the session except for explicit consent carve-outs. */
 export type AutoApproveMode = "off" | "all";
 
 /** Tool names that are file mutations (auto-approved in 'edits' mode). */

@@ -103,35 +103,67 @@ const PATTERNS: Pattern[] = [
     re: /\b[Bb]earer\s+[A-Za-z0-9._-]{20,}/g,
     tier: "source",
   },
-  {
-    // Name-based heuristic — payload tier only. See the header comment.
-    // Preserves the original name + separator (`:` or `=`); drops the value.
-    // The value class excludes `<`/`>` so an already-redacted
-    // `FOO=<REDACTED:openai-key>` is not re-matched — terminal scrollback is
-    // redacted once by App.tsx and again by the tool layer, and that has to be
-    // a no-op rather than a nested rewrite.
-    kind: "env-assign",
-    probe: [
-      "KEY", "key", "SECRET", "secret", "TOKEN", "token",
-      "PASSWORD", "password", "PASSWD", "passwd",
-    ],
-    // Matches ANY `identifier := value` and decides in the replacer whether the
-    // name looks secret. Two reasons not to bake the name list into the regex:
-    //   1. An alternation has to enumerate every name — GITHUB_TOKEN,
-    //      NPM_TOKEN, GITLAB_TOKEN… — and the list is unbounded. (A test for
-    //      GITHUB_TOKEN is exactly what caught this.)
-    //   2. A long alternation of nested character classes invites backtracking.
-    // The identifier shape here is a single chain of alnum runs separated by one
-    // `_`/`-`, so each repetition consumes a mandatory separator — no
-    // `(a*a*)*` blowup.
-    re: /\b([A-Za-z][A-Za-z0-9]*(?:[_-][A-Za-z0-9]+)*)\s*([:=])\s*("?)[^\s"';|&<>]+\3/g,
-    tier: "payload",
-    replacer: (m, name, _sep, quote) =>
-      SECRET_NAME_RE.test(name)
-        ? `${name}=<REDACTED:${quote ? "quoted" : "bare"}>`
-        : m,
-  },
 ];
+
+// Name-based env assignments are handled by the scanner below, not the
+// regex pattern table (quoted values may contain whitespace).
+
+const ASSIGNMENT_RE = /\b[A-Za-z][A-Za-z0-9]*(?:[_-][A-Za-z0-9]+)*\s*[:=]\s*/g;
+
+/** Scan env-style assignments without a nested/backtracking regex. Supports
+ *  bare values plus single/double-quoted values containing whitespace. Only
+ *  secret-shaped names are replaced; existing <REDACTED:…> values are left
+ *  alone so terminal/tool redaction remains idempotent. */
+function redactEnvAssignments(text: string): string {
+  ASSIGNMENT_RE.lastIndex = 0;
+  let out = "";
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+  while ((match = ASSIGNMENT_RE.exec(text)) !== null) {
+    const prefix = match[0];
+    const name = prefix.split(/\s*[:=]/, 1)[0]!;
+    const valueStart = match.index + prefix.length;
+    if (!SECRET_NAME_RE.test(name)) continue;
+    const quote = text[valueStart] === '"' || text[valueStart] === "'" ? text[valueStart]! : "";
+    let valueEnd = valueStart;
+    if (quote) {
+      valueEnd++;
+      while (valueEnd < text.length && text[valueEnd] !== "\n") {
+        if (text[valueEnd] === "\\") {
+          valueEnd += 2; // escaped quote/backslash is part of the value
+          continue;
+        }
+        if (text[valueEnd] === quote) break;
+        valueEnd++;
+      }
+      if (text[valueEnd] === quote) valueEnd++;
+    } else {
+      // Stop only at an existing WHOLE redaction marker; a source-tier
+      // replacement followed by `:suffix` still contains secret material.
+      if (text.startsWith("<REDACTED:", valueStart)) {
+        const close = text.indexOf(">", valueStart);
+        if (close >= 0) {
+          const after = close + 1;
+          if (after >= text.length || /[\s"';|&]/.test(text[after]!)) {
+            ASSIGNMENT_RE.lastIndex = after;
+            continue;
+          }
+          // A marker followed by `:` or another suffix is not a complete
+          // value. Skip the marker but keep scanning the suffix; the whole
+          // assignment is replaced below so no secret tail survives.
+          valueEnd = after;
+        }
+      }
+      while (valueEnd < text.length && /[^\s"';|&<>]/.test(text[valueEnd]!)) valueEnd++;
+    }
+    const value = text.slice(valueStart, valueEnd);
+    if (!value) continue;
+    out += text.slice(cursor, valueStart) + `<REDACTED:${quote ? "quoted" : "bare"}>`;
+    cursor = valueEnd;
+    ASSIGNMENT_RE.lastIndex = valueEnd;
+  }
+  return out + text.slice(cursor);
+}
 
 /**
  * Name test for the `env-assign` heuristic. Case-insensitive.
@@ -149,9 +181,20 @@ function hasAny(haystack: string, needles: string[]): boolean {
 }
 
 function applyPatterns(text: string, tier: RedactMode): string {
+  // Value-shaped secrets run FIRST even in payload mode: an AWS key gets
+  // its precise label instead of the generic env-assignment redaction.
+  let out = applyPatternTier(text, "source");
+  if (tier === "source") return out;
+  // Assignment scanning is one linear pass; SECRET_NAME_RE inside it is the
+  // filter. A second literal probe list would drift from accepted names.
+  out = redactEnvAssignments(out);
+  return applyPatternTier(out, "payload");
+}
+
+function applyPatternTier(text: string, tier: RedactMode): string {
   let out = text;
   for (const p of PATTERNS) {
-    if (tier === "source" && p.tier !== "source") continue;
+    if (p.tier !== tier) continue;
     if (!hasAny(out, p.probe)) continue;
     // Clone per use: `lastIndex` on a shared /g regex leaks between calls if
     // a replace is ever interrupted.

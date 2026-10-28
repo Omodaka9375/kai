@@ -97,6 +97,8 @@ export type Preferences = {
   commitSigningKey: string;
   /** Sidebar width in pixels (persisted across launches). */
   sidebarWidth: number;
+  /** Model-picker popover width in pixels (persisted across launches). */
+  modelPickerWidth: number;
   /** Active sidebar panel view. */
   sidebarView: "explorer" | "source-control" | "extensions";
   /** Timestamp (ms) of the last automatic update check. */
@@ -169,6 +171,7 @@ const KEY_COMMIT_SIGNING_ENABLED = "commitSigningEnabled";
 const KEY_COMMIT_SIGNING_MODE = "commitSigningMode";
 const KEY_COMMIT_SIGNING_KEY = "commitSigningKey";
 const KEY_SIDEBAR_WIDTH = "sidebarWidth";
+const KEY_MODEL_PICKER_WIDTH = "modelPickerWidth";
 const KEY_SIDEBAR_VIEW = "sidebarView";
 
 const KEY_UPDATER_LAST_CHECK = "updaterLastCheck";
@@ -243,6 +246,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   commitSigningMode: "auto",
   commitSigningKey: "",
   sidebarWidth: 200,
+  modelPickerWidth: 544,
   sidebarView: "explorer",
 
   updaterLastCheck: 0,
@@ -374,6 +378,9 @@ export async function loadPreferences(): Promise<Preferences> {
       DEFAULT_PREFERENCES.commitSigningKey,
     sidebarWidth: clampSidebarWidth(
       get<number>(KEY_SIDEBAR_WIDTH) ?? DEFAULT_PREFERENCES.sidebarWidth,
+    ),
+    modelPickerWidth: clampModelPickerWidth(
+      get<number>(KEY_MODEL_PICKER_WIDTH) ?? DEFAULT_PREFERENCES.modelPickerWidth,
     ),
     sidebarView: validSidebarView(get(KEY_SIDEBAR_VIEW)),
 
@@ -569,6 +576,19 @@ export function clampSidebarWidth(value: number): number {
   );
 }
 
+export const MODEL_PICKER_WIDTH_DEFAULT = 544;
+export const MODEL_PICKER_WIDTH_MIN = 360;
+export const MODEL_PICKER_WIDTH_MAX = 800;
+export const MODEL_PICKER_DESCRIPTION_MIN = 480;
+
+export function clampModelPickerWidth(value: number): number {
+  if (!Number.isFinite(value)) return MODEL_PICKER_WIDTH_DEFAULT;
+  return Math.min(
+    MODEL_PICKER_WIDTH_MAX,
+    Math.max(MODEL_PICKER_WIDTH_MIN, Math.round(value)),
+  );
+}
+
 function validSidebarView(value: unknown): Preferences["sidebarView"] {
   if (
     value === "explorer" ||
@@ -669,6 +689,12 @@ export async function setSidebarWidth(value: number): Promise<void> {
   // No event emit — sidebar layout is main-window-only.
 }
 
+export async function setModelPickerWidth(value: number): Promise<void> {
+  await store.set(KEY_MODEL_PICKER_WIDTH, clampModelPickerWidth(value));
+  await store.save();
+  // Main-window-only UI preference, like sidebar layout.
+}
+
 export async function setSidebarView(
   value: Preferences["sidebarView"],
 ): Promise<void> {
@@ -743,6 +769,7 @@ export async function onPreferencesChange(
     [KEY_COMMIT_SIGNING_MODE]: "commitSigningMode",
     [KEY_COMMIT_SIGNING_KEY]: "commitSigningKey",
     [KEY_SIDEBAR_WIDTH]: "sidebarWidth",
+    [KEY_MODEL_PICKER_WIDTH]: "modelPickerWidth",
     [KEY_SIDEBAR_VIEW]: "sidebarView",
     [KEY_UPDATER_LAST_CHECK]: "updaterLastCheck",
     [KEY_RADIO_ENABLED]: "radioEnabled",

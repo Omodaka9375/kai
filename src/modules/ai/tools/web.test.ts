@@ -74,6 +74,32 @@ describe("htmlToText — hidden-text injection defense", () => {
     expect(hiddenDropped).toBeGreaterThanOrEqual(5);
   });
 
+  it("drops an entire hidden parent even when it contains nested same-name elements", () => {
+    const html = `<div hidden><div>visible child</div>SECRET</div><p>ok</p>`;
+    const { text, hiddenDropped } = htmlToText(html);
+    expect(text).toContain("ok");
+    expect(text).not.toContain("SECRET");
+    expect(text).not.toContain("visible child");
+    expect(hiddenDropped).toBeGreaterThanOrEqual(1);
+  });
+
+  it("removes hidden children without dropping visible siblings or parent text", () => {
+    const html = `<div>ok<span hidden>secret</span>still visible</div><p>after</p>`;
+    const { text, hiddenDropped } = htmlToText(html);
+    expect(text).toContain("ok");
+    expect(text).toContain("still visible");
+    expect(text).toContain("after");
+    expect(text).not.toContain("secret");
+    expect(hiddenDropped).toBeGreaterThanOrEqual(1);
+  });
+
+  it("merges nested hidden ranges so an outer parent's secrets cannot leak", () => {
+    const html = `<div hidden>SECRET1<span hidden>SECRET2</span>SECRET3</div><p>safe</p>`;
+    const { text } = htmlToText(html);
+    expect(text).toContain("safe");
+    expect(text).not.toMatch(/SECRET[123]/);
+  });
+
   it("leaves ordinary visible markup to be flattened as normal", () => {
     const html = `<h1>Title</h1><p>Some <b>bold</b> prose &amp; an entity.</p>`;
     const { text, hiddenDropped } = htmlToText(html);

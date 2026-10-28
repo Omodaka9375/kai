@@ -456,7 +456,7 @@ export function checkShellCommand(cmd: string): SafetyResult {
   }
   // rm -rf ~ / $HOME — wiping the user's home dir
   if (
-    /\brm\s+-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*\s+(['"]?(~|\$HOME)['"]?)(\s|$|;|&|\|)/.test(
+    /\brm\s+-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*\s+(['"]?(~|\$HOME)\/?['"]?)(\s|$|;|&|\|)/.test(
       c,
     )
   ) {
@@ -525,18 +525,49 @@ function isLanOnlyPolicyActive(): boolean {
   }
 }
 
+/** Exact dotted-quad IPv4 parsing. Domain prefixes such as
+ *  `127.0.0.1.evil.com` are NOT IP literals and must never inherit the
+ *  loopback trust of their first octet. */
+function parseIpv4(host: string): number[] | null {
+  const parts = host.split(".");
+  if (parts.length !== 4) return null;
+  const out: number[] = [];
+  for (const part of parts) {
+    if (!/^\d{1,3}$/.test(part)) return null;
+    const n = Number(part);
+    if (n < 0 || n > 255) return null;
+    out.push(n);
+  }
+  return out;
+}
+
 /** Hosts that are unambiguously local. */
 function isLocalHostLiteral(h: string): boolean {
-  const s = h.toLowerCase().replace(/^[[]|[]]$/g, "");
-  if (s === "localhost" || s.endsWith(".local") || s.endsWith(".internal")) return true;
-  if (/^(127\.|10\.|192\.168\.|169\.254\.|0\.)/.test(s)) return true;
-  if (/^172\.(1[6-9]|2\d|3[01])\./.test(s)) return true;
-  if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(s)) return true;
-  if (/^(::1|fe80:|fc|fd)/.test(s)) return true;
-  if (/^::ffff:/.test(s)) return isLocalHostLiteral(s.slice(7));
+  const s = h.toLowerCase().replace(/^\[|\]$/g, "");
+  if (s === "localhost") return true;
+  const ip = parseIpv4(s);
+  if (ip) {
+    const [a, b] = ip;
+    if (a === 127 || a === 10 || a === 0 || (a === 192 && b === 168) || (a === 169 && b === 254)) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true;
+    return false;
+  }
+  // Private suffixes are explicit, not inferred from an IP-looking prefix.
+  // Other dotted, non-IPv4 strings are public DNS names (including deceptive
+  // `127.0.0.1.evil.com`), never local IP-prefix matches.
+  if (s.endsWith(".local") || s.endsWith(".internal") || s.endsWith(".lan")) return true;
+  if (s.includes(".")) return false;
+  if (s.includes(":")) {
+    // Colon-containing values are IPv6 literals, not single-label hostnames.
+    // Only loopback/link-local/unique-local (and mapped local IPv4) pass.
+    if (s === "::1" || s.startsWith("fe80:") || s.startsWith("fc") || s.startsWith("fd")) return true;
+    if (s.startsWith("::ffff:")) return isLocalHostLiteral(s.slice(7));
+    return false;
+  }
   // Unqualified single-label hostname (nas, printer): resolvable only via
   // LAN search domains in practice — treat as local.
-  return !s.includes(".") && s.length > 0;
+  return s.length > 0;
 }
 
 /** Host-carrying tokens in the command: URLs and scp-style user@host:path. */
@@ -554,31 +585,43 @@ function extractHostsFromCommand(c: string): string[] {
 const EGRESS_RE =
   /\b(curl|wget|Invoke-WebRequest|Invoke-RestMethod|iwr|irm|nc|ncat|netcat|socat|ssh|scp|sftp|rsync|telnet|ftp|git\s+(clone|fetch|pull|push|remote|ls-remote|submodule)|npm|pnpm|yarn|bun|pip|pip3|uv\s+pip|cargo\s+(install|update|publish)|go\s+(get|install|mod)|gem|composer|dotnet\s+(add|restore|install)|brew|apt|apt-get|dnf|yum|winget|choco|scoop)\b/i;
 
-/** Package installs: allowed ONLY when a local registry/index is pinned. */
+/** Package installs: allowed ONLY when a local registry/index is pinned.
+ *  Parse the VALUE — a public registry flag must not count as a local one. */
 function hasLocalRegistryFlag(c: string): boolean {
-  return (
-    /--registry(\s|=)\S+/i.test(c) ||
-    /--index-url(\s|=)\S+/i.test(c) ||
-    /--extra-index-url(\s|=)\S+/i.test(c) ||
-    /GOPROXY=\s*"?(direct|off)/i.test(c)
-  );
+  const flagRe = /--(?:registry|index-url|extra-index-url)(?:=|\s+)("[^"]*"|'[^']*'|\S+)/gi;
+  let match: RegExpExecArray | null;
+  let found = false;
+  while ((match = flagRe.exec(c)) !== null) {
+    found = true;
+    const raw = (match[1] ?? "").replace(/^['"]|['"]$/g, "");
+    try {
+      const url = new URL(raw);
+      if (!isLocalHostLiteral(url.hostname)) return false;
+    } catch {
+      return false;
+    }
+  }
+  return found;
 }
 
 /** Is this command acceptable under the LAN-only policy? */
 function lanOnlyShellCommandOk(c: string): boolean {
   if (!EGRESS_RE.test(c)) return true; // not network-shaped → allow
   const lower = c.toLowerCase();
-  if (
-    /\b(npm|pnpm|yarn|bun)\b/.test(lower) &&
-    /\b(add|install|i|ci|update|upgrade|dlx|exec|create)\b/.test(lower)
-  ) {
-    return hasLocalRegistryFlag(c);
-  }
-  if (/\b(pip|pip3|uv)\b/.test(lower) && /install|download/i.test(lower)) {
-    return hasLocalRegistryFlag(c);
-  }
-  if (/\bcargo\b/.test(lower) && /\b(install|update|publish)\b/.test(lower)) {
-    return hasLocalRegistryFlag(c);
+  const goNetwork = /\bgo\s+(?:get|install|mod)\b/i.test(lower);
+  const otherPackageNetwork =
+    (/\b(npm|pnpm|yarn|bun)\b/.test(lower) &&
+      /\b(add|install|i|ci|update|upgrade|dlx|exec|create)\b/.test(lower)) ||
+    (/\b(pip|pip3|uv)\b/.test(lower) && /install|download/i.test(lower)) ||
+    (/\bcargo\b/.test(lower) && /\b(install|update|publish)\b/.test(lower));
+  // GOPROXY=off is an OFFLINE guarantee for Go commands only, never proof
+  // that npm/pip/cargo in the same compound command has a local registry.
+  if (goNetwork && !otherPackageNetwork && /GOPROXY=\s*"?off\b/i.test(c)) return true;
+  const packageNetwork = otherPackageNetwork || goNetwork;
+  if (packageNetwork) {
+    // A local registry does not make a SECOND public package URL safe.
+    if (!hasLocalRegistryFlag(c)) return false;
+    return extractHostsFromCommand(c).every(isLocalHostLiteral);
   }
   // Everything else: every host literal in the command must be local.
   const hosts = extractHostsFromCommand(c);
