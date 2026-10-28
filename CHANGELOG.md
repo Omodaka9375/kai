@@ -4,6 +4,18 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [1.9.7]
+
+- Assistant: tool allowlists, isolated model endpoint, scratch-dir sandboxing, and shared image→text extraction with no duplicate tool runs on OCR retries.
+- AI: web_search works again via Bing RSS with DuckDuckGo fallback; local reasoning options use the correct provider key.
+- Shell: robust PowerShell execution, clearer parse-error hints, capped output, and better tool guidance.
+- AI: hardened approvals, central tool guards, vision-aware behavior, MCP timeouts, loop nudges, and serialized shell runs.
+- AI: unified tool presentation, session-event journal, KAI.md drift checks, and frontend tests now run in CI.
+- AI: completed text/code renders progressively; model picker is resizable and persistent with corrected capability controls.
+- Approvals: removed persistent command pins; hardened LAN policy, shell parsing, secret redaction, and hidden-HTML extraction.
+
+---
+
 ## [1.9.6]
 
 - AI: `/init` now builds a relationship-first codebase map — typed cross-file edges, EXTRACTED/INFERRED/AMBIGUOUS labels, data-flow paths, and central-node hotspots.
