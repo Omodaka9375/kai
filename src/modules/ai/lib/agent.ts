@@ -44,7 +44,8 @@ import {
 } from "./stackDetector";
 export type { StackInfo };
 import { fenceSystemPrompt } from "./fence";
-import { withToolGuard, withToolRedaction } from "./toolFencing";
+import { stripInternalMeta, withToolGuard, withToolRedaction } from "./toolFencing";
+import { presentationFor } from "./toolPresentations";
 import { withCentralToolGuards } from "./toolGuards";
 import { auditAppend, AUDIT_KINDS } from "./audit";
 import {
@@ -74,44 +75,8 @@ const cloudFetch: typeof fetch = async (input, init) => {
   }
 };
 
-const TOOL_LABELS: Record<string, (input: Record<string, unknown>) => string> =
-  {
-    read_file: (i) => `Reading ${shortPath(i.path)}`,
-    list_directory: (i) => `Listing ${shortPath(i.path)}`,
-    grep: (i) => `Grepping ${ellipsize(String(i.pattern ?? ""), 40)}`,
-    glob: (i) => `Globbing ${ellipsize(String(i.pattern ?? ""), 40)}`,
-    edit: (i) => `Editing ${shortPath(i.path)}`,
-    multi_edit: (i) => `Editing ${shortPath(i.path)}`,
-    write_file: (i) => `Writing ${shortPath(i.path)}`,
-    create_directory: (i) => `Creating ${shortPath(i.path)}`,
-    bash_run: (i) => `Running ${ellipsize(String(i.command ?? ""), 60)}`,
-    bash_background: (i) =>
-      `Spawning ${ellipsize(String(i.command ?? ""), 60)}`,
-    bash_logs: () => `Reading logs`,
-    bash_list: () => `Listing background processes`,
-    bash_kill: () => `Stopping background process`,
-    suggest_command: (i) =>
-      `Suggesting ${ellipsize(String(i.command ?? ""), 60)}`,
-    todo_write: (i) =>
-      `Updating plan (${Array.isArray(i.todos) ? i.todos.length : 0} items)`,
-    run_subagent: (i) => `Spawning ${String(i.type ?? "subagent")} subagent`,
-    checkpoint_undo: () => `Undoing last AI edits`,
-    save_memory: (i) =>
-      `Saving to memory: ${ellipsize(String(i.entry ?? ""), 40)}`,
-    batch_edit: (i) =>
-      `Batch editing ${Array.isArray(i.edits) ? i.edits.length : 0} files`,
-    display_image: () => `Displaying image in terminal`,
-  };
-
-function shortPath(p: unknown): string {
-  if (typeof p !== "string") return "";
-  const i = p.lastIndexOf("/");
-  return i === -1 ? p : p.slice(i + 1);
-}
-
-function ellipsize(s: string, max: number): string {
-  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
-}
+// Live step status labels come from the toolPresentations registry
+// (`status` field) — no more TOOL_LABELS duplicated alongside the card label.
 
 export type BuildModelOptions = {
   modelIdOverride?: string;
@@ -465,6 +430,52 @@ function stripIncompleteToolCalls(messages: UIMessage[]): UIMessage[] {
 }
 
 /**
+ * Remove persisted internal tool metadata (`_effect`, `_outputWarning*`)
+ * from tool-result parts before history reaches the model.
+ *
+ * `withToolGuard` KEEPS these fields on the transcript so a finished card
+ * can re-render its outcome (COMMITTED / PARTIAL / ROLLED_BACK) from
+ * persisted data alone. Fresh calls are serialized through the per-tool
+ * `toModelOutput`, which strips them — but HISTORY replay converts with
+ * `convertToModelMessages` WITHOUT tool defs, so the SDK would otherwise
+ * resend the raw persisted object. This mirrors that strip at the UI layer.
+ */
+function stripModelInternalMeta(messages: UIMessage[]): UIMessage[] {
+  let touched = false;
+  const out = messages.map((m) => {
+    if (m.role !== "assistant") return m;
+    let partsTouched = false;
+    const parts = m.parts.map((p) => {
+      const ptype = (p as { type?: string }).type ?? "";
+      if (!ptype.startsWith("tool-") && ptype !== "dynamic-tool") return p;
+      const state = (p as { state?: string }).state;
+      if (state !== "output-available") return p;
+      const output = (p as { output?: unknown }).output;
+      if (
+        output == null ||
+        typeof output !== "object" ||
+        Array.isArray(output)
+      )
+        return p;
+      const keys = output as Record<string, unknown>;
+      if (
+        !("_effect" in keys) &&
+        !("_outputWarnings" in keys) &&
+        !("_outputWarningNote" in keys)
+      )
+        return p;
+      partsTouched = true;
+      const cleaned = stripInternalMeta(output);
+      return { ...(p as object), output: cleaned } as typeof p;
+    });
+    if (!partsTouched) return m;
+    touched = true;
+    return { ...m, parts } as UIMessage;
+  });
+  return touched ? out : messages;
+}
+
+/**
  * Strip `data:<mediaType>;base64,` prefixes from file parts in model messages.
  *
  * `convertToModelMessages` copies `FileUIPart.url` (a data-URL) into
@@ -634,9 +645,10 @@ export async function runAgentStream(opts: RunAgentOptions) {
 
   const rawHistory = sanitizeModelMessages(
     stripDataUrlPrefixes(
-      await convertToModelMessages(stripIncompleteToolCalls(opts.uiMessages), {
-        ignoreIncompleteToolCalls: true,
-      }),
+      await convertToModelMessages(
+        stripModelInternalMeta(stripIncompleteToolCalls(opts.uiMessages)),
+        { ignoreIncompleteToolCalls: true },
+      ),
     ),
   );
   // Text-only models (DeepSeek-class, GLM base, …) reject `file` parts.
@@ -907,10 +919,10 @@ export async function runAgentStream(opts: RunAgentOptions) {
       if (opts.onStep) {
         const last = step.toolCalls?.[step.toolCalls.length - 1];
         if (last) {
-          const label = TOOL_LABELS[last.toolName];
+          const status = presentationFor(last.toolName).status;
           opts.onStep(
-            label
-              ? label((last.input ?? {}) as Record<string, unknown>)
+            status
+              ? status((last.input ?? {}) as Record<string, unknown>)
               : `Calling ${last.toolName}`,
           );
         } else if (step.text) {

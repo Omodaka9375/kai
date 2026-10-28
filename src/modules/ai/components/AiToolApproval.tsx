@@ -21,6 +21,7 @@ import { useChatStore } from "../store/chatStore";
 import { abortSession } from "../store/chatStore";
 import { setEditedToolInput } from "../lib/toolInputOverrides";
 import { getToolActionInfo, analyzeShellCommand } from "../lib/policy";
+import { presentationFor } from "../lib/toolPresentations";
 import { isAllowlistable, pinCommand } from "../lib/allowlist";
 
 type Props = {
@@ -31,21 +32,22 @@ type Props = {
   queue?: { queued: boolean; position: number; total: number } | null;
 };
 
-const TOOL_META: Record<string, { label: string; icon: typeof FilePlusIcon }> =
-  {
-    write_file: { label: "Write file", icon: FilePlusIcon },
-    edit: { label: "Edit file", icon: FileEditIcon },
-    multi_edit: { label: "Edit file (batch)", icon: Edit02Icon },
-    create_directory: { label: "Create directory", icon: FolderAddIcon },
-    bash_run: { label: "Run shell command", icon: TerminalIcon },
-    bash_background: { label: "Spawn background process", icon: TerminalIcon },
-    save_memory: { label: "Save memory", icon: AiBrain03Icon },
-  };
+// Icons only (UI-layer). Approval-card LABELS come from the toolPresentations
+// registry's `approvalLabel` — the single source shared with the result card.
+const TOOL_ICON: Record<string, typeof FilePlusIcon> = {
+  write_file: FilePlusIcon,
+  edit: FileEditIcon,
+  multi_edit: Edit02Icon,
+  create_directory: FolderAddIcon,
+  bash_run: TerminalIcon,
+  bash_background: TerminalIcon,
+  save_memory: AiBrain03Icon,
+};
 
 function AiToolApprovalImpl({ part, toolName, onRespond, queue }: Props) {
-  const meta = TOOL_META[toolName];
-  const label = meta?.label ?? toolName;
-  const Icon = meta?.icon ?? ToolsIcon;
+  const meta = TOOL_ICON[toolName];
+  const label = presentationFor(toolName).approvalLabel ?? toolName;
+  const Icon = meta ?? ToolsIcon;
   const input = part.input as Record<string, unknown>;
   const autoApprovedIds = useChatStore((s) => s.autoApprovedIds);
   const wasAutoApproved = autoApprovedIds.has(part.approval.id);

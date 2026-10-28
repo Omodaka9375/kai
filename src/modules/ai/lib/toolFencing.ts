@@ -17,83 +17,15 @@ import { guardToolOutput, formatGuardWarning } from "./outputGuard";
 import { redactToolOutput } from "./redact";
 import { noteWrite } from "./autoVerify";
 import { noteRemoteSurfaceTouched } from "./provenance";
+import { presentationFor } from "./toolPresentations";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ToolDef = any;
 
-/**
- * Default effect status per tool name. Overridden by result inspection
- * for tools like bash_run (timed_out → UNKNOWN) and multi_edit (partial
- * failures → PARTIAL).
- */
-const DEFAULT_EFFECT: Record<string, EffectStatus> = {
-  // Mutating tools — side effects are visible and committed.
-  write_file: "COMMITTED",
-  edit: "COMMITTED",
-  multi_edit: "COMMITTED",
-  batch_edit: "COMMITTED",
-  create_directory: "COMMITTED",
-  fs_delete: "COMMITTED",
-  fs_rename: "COMMITTED",
-  fs_create_file: "COMMITTED",
-
-  // Shell tools — outcome varies.
-  bash_run: "COMMITTED",
-  shell_session_run: "COMMITTED",
-  bash_background: "UNKNOWN",
-  bash_kill: "UNKNOWN",
-  bash_logs: "NONE",
-
-  // Read-only tools — no side effects.
-  read_file: "NONE",
-  list_directory: "NONE",
-  grep: "NONE",
-  glob: "NONE",
-  fs_search: "NONE",
-  fs_grep: "NONE",
-  get_terminal_output: "NONE",
-
-  // Web tools — fetch is read-only from our perspective.
-  web_browse: "NONE",
-  web_fetch: "NONE",
-  web_search: "NONE",
-
-  // Structural tools.
-  todo_write: "COMMITTED",
-  checkpoint_undo: "ROLLED_BACK",
-  run_subagent: "NONE",
-
-  // Media generation.
-  generate_image: "NONE",
-  generate_video: "NONE",
-
-  // Terminal interaction.
-  suggest_command: "NONE",
-  display_image: "NONE",
-  open_preview: "NONE",
-};
-
-/** Remote surfaces — content KAI does not control. Fencing one of these
- *  tags the owning session in the provenance tracker so subsequent
- *  save_memory entries are stamped "injection-exposed" (see provenance.ts).
- *  MCP tools (server__name) are detected by the `__` separator separately. */
-const REMOTE_SURFACE_TOOLS: Set<string> = new Set([
-  "web_browse",
-  "web_fetch",
-  "web_search",
-]);
-
-/** Tools that should NOT be fenced (structural, no inline text output). */
-const NO_FENCE: Set<string> = new Set([
-  "bash_background",
-  "bash_list",
-  "bash_kill",
-  "todo_write",
-  "checkpoint_undo",
-  "run_subagent",
-  "generate_image",
-  "generate_video",
-]);
+// Effect status / fence / remote-surface classification all live in the
+// toolPresentations registry now (single source of truth shared with the
+// result card + status line). presentationFor(name) resolves an unknown tool
+// to the safe default: fence = true, remoteSurface = (name includes "__").
 
 /**
  * Wrap every tool's `execute` so its result is scrubbed of credential-shaped
@@ -147,8 +79,9 @@ export function withToolGuard(
       continue;
     }
 
-    const doFence = !NO_FENCE.has(name);
-    const baseEffect = DEFAULT_EFFECT[name] ?? "NONE";
+    const pres = presentationFor(name);
+    const doFence = pres.fence;
+    const baseEffect = pres.effect;
 
     const wrapped = { ...toolDef };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -156,7 +89,7 @@ export function withToolGuard(
       const raw = await (execute as (...a: unknown[]) => unknown)(...args);
       // Provenance: a remote fetch happened — stamp the session so any memory
       // entry written afterwards carries the injection-exposed marker.
-      if (doFence && (REMOTE_SURFACE_TOOLS.has(name) || name.includes("__"))) {
+      if (doFence && pres.remoteSurface) {
         noteRemoteSurfaceTouched(fenceState.sessionId);
       }
       const effect = resolveEffect(name, raw, baseEffect);
@@ -179,18 +112,47 @@ export function withToolGuard(
       if (effect === "COMMITTED") {
         noteWrite(name, getWorkspaceRoot?.() ?? null);
       }
-      // Strip internal metadata before it reaches the model. The model
-      // has no explanation for _effect (e.g. "COMMITTED") and may
-      // misinterpret it as a stop/completion signal.
-      delete (result as Record<string, unknown>)._effect;
-      delete (result as Record<string, unknown>)._outputWarnings;
-      delete (result as Record<string, unknown>)._outputWarningNote;
+      // Internal metadata (_effect / guard warnings) is KEPT on the result
+      // so it persists into the transcript — a finished tool part can be
+      // re-rendered from (args, output) alone, including whether its side
+      // effects COMMITTED / PARTIAL / ROLLED_BACK. The model never sees it:
+      // the SDK serializes provider-bound content through the toModelOutput
+      // installed below, and the history-replay path strips it via
+      // stripModelInternalMeta in agent.ts (belt and braces —
+      // convertToModelMessages runs there WITHOUT the tool defs, so it
+      // cannot consult toModelOutput).
       return result;
+    };
+    // Provider-facing serialization: copy minus the internal fields,
+    // EXACTLY mirroring the SDK default shape (string → text part; else
+    // json with undefined → null) so the only observable difference from
+    // before is the stripped `_effect/_outputWarning*` keys.
+    (wrapped as Record<string, unknown>)["toModelOutput"] = (
+      opts: { output?: unknown },
+    ): { type: "text"; value: string } | { type: "json"; value: unknown } => {
+      const cleaned = stripInternalMeta(opts?.output);
+      return typeof cleaned === "string"
+        ? { type: "text", value: cleaned }
+        : { type: "json", value: cleaned === undefined ? null : cleaned };
     };
     out[name] = wrapped;
   }
 
   return out;
+}
+
+/** Copy of a tool result with the internal metadata keys removed. The
+ *  fields persist into the transcript for replay-accurate rendering, so
+ *  every MODEL-bound path (toModelOutput above; stripModelInternalMeta in
+ *  agent.ts for history replay) must use this instead of sending the raw
+ *  object. Only top-level keys are affected — annotate() never nests them. */
+export function stripInternalMeta(v: unknown): unknown {
+  if (v == null || typeof v !== "object" || Array.isArray(v)) return v;
+  const r = { ...(v as Record<string, unknown>) };
+  delete r._effect;
+  delete r._outputWarnings;
+  delete r._outputWarningNote;
+  return r;
 }
 
 // ── Effect resolution ─────────────────────────────────────────────────────

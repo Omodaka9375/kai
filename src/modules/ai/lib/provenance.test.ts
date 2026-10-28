@@ -44,9 +44,17 @@ describe("provenance wiring — source contract", () => {
   it("the tool guard stamps the session on a remote-surface fetch", () => {
     const guard = read("./toolFencing.ts");
     expect(guard).toContain("noteRemoteSurfaceTouched(fenceState.sessionId)");
-    // Remote surfaces are enumerated (web tools) + MCP is caught by `__`.
-    expect(guard).toMatch(/REMOTE_SURFACE_TOOLS[^)]*"web_browse"/);
-    expect(guard).toContain("name.includes(\"__\")");
+    // The stamp now keys off the registry's `remoteSurface` flag (B3
+    // consolidation — the inline REMOTE_SURFACE_TOOLS set is gone). The
+    // provenance chain is intact: guard reads the flag → stamps.
+    expect(guard).toMatch(/if \(doFence && pres\.remoteSurface\)/);
+    // Remote surfaces are enumerated in toolPresentations (web tools), and
+    // MCP tools are caught by the `__` default in presentationFor.
+    const pres = read("./toolPresentations.ts");
+    expect(pres).toMatch(/web_browse:\s*\{[^}]*remoteSurface:\s*true/);
+    expect(pres).toMatch(/web_fetch:\s*\{[^}]*remoteSurface:\s*true/);
+    expect(pres).toMatch(/web_search:\s*\{[^}]*remoteSurface:\s*true/);
+    expect(pres).toContain('toolName.includes("__")');
   });
 
   it("transport binds the live session id into the fence state", () => {
