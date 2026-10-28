@@ -570,7 +570,7 @@ pub fn sweep_stale_shell_scripts(dir: &Path) {
 /// backslash is literal dead weight inside a PS string, and the bare `"`
 /// would terminate it, truncating the child's argument.
 #[cfg(windows)]
-fn repair_bash_style_quotes(command: &str) -> String {
+pub(crate) fn repair_bash_style_quotes(command: &str) -> String {
     let chars: Vec<char> = command.chars().collect();
     let mut out = String::with_capacity(command.len() + 8);
     let mut i = 0;

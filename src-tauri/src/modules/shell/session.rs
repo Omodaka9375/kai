@@ -6,6 +6,9 @@ use std::time::Duration;
 
 use serde::Serialize;
 
+#[cfg(windows)]
+use base64::Engine as _;
+
 use crate::modules::lock::mutex_lock;
 use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 
@@ -129,20 +132,28 @@ impl ShellSession {
         }
         let resolved_cwd = self.current_cwd().replace('\\', "/");
 
-        // Backstop for dialect mangling: if PowerShell couldn't even parse
-        // the script, the agent wrote bash-style escapes that survived the
-        // transport repair (or real PS syntax errors). Point at the fix in
-        // one line instead of leaving a bare parse dump.
-        let parse_failed = raw
-            .exit_code
-            .map(|c| c != 0)
-            .unwrap_or(false)
-            && (raw.stderr.to_lowercase().contains("parsererror")
-                || raw.stderr.to_lowercase().contains("missing the terminator"));
+        // Backstop for dialect mangling. With the user command deferred to
+        // Invoke-Expression (see wrap_with_sentinel), the WRAPPER can no longer
+        // fail to parse — a syntax error in the agent's command now surfaces as
+        // the command's own error on stderr while the sentinel + `exit` still
+        // run, so cwd and exit code stay honest. We still coach the most common
+        // root cause: bash-style escaping / unterminated strings that survive
+        // repair_bash_style_quotes, or genuine PowerShell syntax the model got
+        // wrong. Match both the classic ParserError surface and the iex-wrapped
+        // forms, and don't trust exit_code alone (iex errors set $? false).
+        let lower = raw.stderr.to_lowercase();
+        let parse_failed = raw.exit_code.map(|c| c != 0).unwrap_or(false)
+            && (lower.contains("parsererror")
+                || lower.contains("parse error")
+                || lower.contains("unexpected token")
+                || lower.contains("unexpectedtoken")
+                || lower.contains("missing the terminator")
+                || lower.contains("an expression was expected")
+                || lower.contains("you must provide a value"));
         let stderr = if parse_failed
         {
             format!(
-                "{}\n[Kai hint: PowerShell failed to parse this script - it was written as a .ps1 file, so use PowerShell syntax: backtick-quote (`\") for a literal quote inside a string, doubled backtick for a literal backtick, never bash \\\" or \\` escapes. Unterminated strings from this are the usual cause.]",
+                "{}\n[Kai hint: PowerShell failed to parse the command. It runs under PowerShell, NOT bash: use PowerShell syntax (backtick-quote (`\") for a literal quote in a double-quoted string, a doubled backtick for a literal backtick; never bash \\\" or \\` escapes — that is the usual cause). Prefer single-quoted strings, keep each command to one responsibility instead of chaining long ;/&& pipelines, and use the grep/glob/edit tools instead of PowerShell text-wrangling.]",
                 raw.stderr
             )
         } else {
@@ -174,9 +185,50 @@ fn wrap_with_sentinel(command: &str, workspace: &WorkspaceEnv, sentinel: &str) -
     }
     #[cfg(windows)]
     {
+        // Parse-isolation. The user command is base64-embedded and executed
+        // at RUNTIME via Invoke-Expression, so the wrapper's OWN static parse
+        // never sees a bad token. Previously the command was spliced in as
+        // literal top-level script, so an unterminated string / stray pipe in
+        // a model-written pipeline (very common in long "combined" Windows
+        // commands) made the ENTIRE file — cwd sentinel and exit-code epilogue
+        // included — fail to parse: the agent got a `ParserError` pointing at
+        // lines it never wrote, AND lost cwd tracking + the exit code. With the
+        // command deferred to runtime, a malformed command raises its OWN
+        // error on stderr while the sentinel + `exit` still run, so the result
+        // is honest and the next command still starts in the right directory.
+        //
+        // Invoke-Expression runs in the CURRENT scope, so `cd` and variable
+        // assignment behave exactly as the old inline top-level form (a
+        // scriptblock call operator `& {}` would run the body in a child
+        // scope, silently breaking cwd persistence). A bad command raises a
+        // TERMINATING parse error, so the iex is wrapped in try/catch: the
+        // error is written to stderr (the model sees exactly what broke in
+        // ITS command) and $__KAI_err forces rc=1 — but crucially the sentinel
+        // line + `exit` still run, so cwd tracking and the exit code survive a
+        // malformed command instead of the whole script dying. Non-terminating
+        // errors (a normal failing external command) aren't caught; $? /
+        // $LASTEXITCODE compute rc for those as before.
+        //
+        // `| Out-Default` is load-bearing, not decoration: a command that
+        // leaves a pending Format-Table pipeline (Get-Location, Get-ChildItem,
+        // Select-Object …) is buffered by the formatter, and PowerShell's
+        // `exit` truncates that un-rendered output. Without the explicit flush,
+        // BOTH the command's own results AND the following cwd-sentinel line
+        // vanish (silently losing the agent's tracked directory). Piping to
+        // Out-Default forces the formatter to render before the sentinel. This
+        // latent bug predated the iex change (the old top-level splice hit it
+        // too) — verified empirically across 7 cases including cd-persistence.
+        //
+        // repair_bash_style_quotes is applied BEFORE encoding — the same
+        // bash→PS escape coaching the `-File` path applies (see
+        // write_shell_script in mod.rs), so double-escaped `\"` still becomes
+        // the PS literal-quote form. The sentinel line keeps its leading
+        // newline so strip_cwd_sentinel still isolates the cwd cleanly.
+        let repaired = super::repair_bash_style_quotes(command);
+        let b64 = base64::engine::general_purpose::STANDARD.encode(repaired.as_bytes());
         format!(
-        "{command}\n$__KAI_rc = if ($null -ne $LASTEXITCODE) {{ $LASTEXITCODE }} elseif ($?) {{ 0 }} else {{ 1 }}\n\"`n{sentinel}$($PWD.Path)\"\nexit $__KAI_rc\n",
-    )
+            "$__KAI_s = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{b64}'))\n$__KAI_err = $false\ntry {{ Invoke-Expression $__KAI_s | Out-Default }}\ncatch {{ $__KAI_err = $true; Write-Error ($_.Exception.Message + \"`n\" + $_.InvocationInfo.PositionMessage) }}\nif ($__KAI_err) {{ $__KAI_rc = 1 }}\nelseif ($null -ne $LASTEXITCODE) {{ $__KAI_rc = $LASTEXITCODE }}\nelseif ($?) {{ $__KAI_rc = 0 }}\nelse {{ $__KAI_rc = 1 }}\n\"`n{sentinel}$($PWD.Path)\"\nexit $__KAI_rc\n",
+        )
     }
 }
 
@@ -189,4 +241,87 @@ fn strip_cwd_sentinel(stdout: &str, sentinel: &str) -> (String, Option<String>) 
         return (cleaned, Some(cwd_line.to_string()));
     }
     (stdout.to_string(), None)
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    // The Windows sentinel wrapper is load-bearing for parse-isolation +
+    // cwd/output survival. These pin its SHAPE so a refactor can't silently
+    // regress the behavior verified empirically against real pwsh (see
+    // commit history): a malformed command must not take down the sentinel.
+    fn windows_wrap(cmd: &str) -> String {
+        wrap_with_sentinel(cmd, &WorkspaceEnv::Local, "__KAI_CWD_x__")
+    }
+
+    #[test]
+    fn wrapper_defers_parse_via_iex_and_flushes_via_out_default() {
+        let w = windows_wrap("Get-Location");
+        // Base64-embedded command (parse deferred to runtime).
+        assert!(w.contains("[Convert]::FromBase64String("), "{w}");
+        assert!(w.contains("Invoke-Expression"), "{w}");
+        // The formatter flush — WITHOUT this, `exit` swallows table output AND
+        // the cwd sentinel (the latent bug). Non-negotiable.
+        assert!(w.contains("Invoke-Expression $__KAI_s | Out-Default"), "{w}");
+        // try/catch so a terminating parse error still reaches the sentinel.
+        assert!(w.contains("try {") && w.contains("catch {"), "{w}");
+        // The command text never appears raw on the top level (it's encoded).
+        assert!(!w.contains("Get-Location\n"), "raw command leaked into wrapper: {w}");
+    }
+
+    #[test]
+    fn wrapper_emits_exit_and_sentinel_after_the_body() {
+        let w = windows_wrap("Write-Output hi");
+        assert!(w.contains("__KAI_CWD_x__$($PWD.Path)"), "{w}");
+        assert!(w.contains("exit $__KAI_rc"), "{w}");
+        // rc precedence: parse-error flag > native exit > $? success.
+        assert!(w.contains("if ($__KAI_err) { $__KAI_rc = 1 }"), "{w}");
+        assert!(w.contains("$null -ne $LASTEXITCODE"), "{w}");
+    }
+
+    #[test]
+    fn repair_runs_before_encoding_so_specials_are_safe() {
+        // A bash-style \" must be repaired to the PS literal-quote form, and
+        // the whole (repaired) string base64'd — so no raw quote ever sits on
+        // the wrapper's top-level parse path.
+        let w = windows_wrap("python -c \"print(1)\"");
+        assert!(w.contains("[Convert]::FromBase64String("), "{w}");
+        // The literal double-quote of the child's arg must NOT appear raw.
+        let top = w.split_once("FromBase64String('").unwrap().1;
+        let embedded = top.split_once("')").unwrap().0;
+        assert!(
+            !embedded.contains('"'),
+            "wrapper substitution line should carry only base64: {embedded}"
+        );
+        // Base64 alphabet only.
+        assert!(
+            embedded
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '='),
+            "not base64: {embedded}"
+        );
+    }
+
+    #[test]
+    fn strip_sentinel_still_works_on_the_new_shape() {
+        // Front of a captured session stdout, mimic the real emitted tail.
+        let stdout = format!("hi\r\n\r\n__KAI_CWD_x__D:\\Code\\KAI\r\n");
+        let (clean, cwd) = strip_cwd_sentinel(&stdout, "__KAI_CWD_x__");
+        assert_eq!(cwd.as_deref(), Some("D:\\Code\\KAI"));
+        assert!(!clean.contains("__KAI_CWD_x__"));
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn posix_wrapper_unchanged() {
+        let w = wrap_posix_with_sentinel("ls", "__KAI_CWD_x__");
+        assert!(w.contains("__KAI_CWD_x__"));
+        assert!(w.contains("exit $__KAI_rc"));
+        assert!(w.contains("ls\n__KAI_rc=$?"));
+    }
 }
