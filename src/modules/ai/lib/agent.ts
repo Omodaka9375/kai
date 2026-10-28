@@ -703,9 +703,13 @@ export async function runAgentStream(opts: RunAgentOptions) {
         // OpenAI-compatible endpoints accept `reasoning_effort` natively
         // (vLLM, Ollama, Z.AI, Fireworks, ...). CRITICAL: @ai-sdk's
         // openai-compatible provider reads providerOptions under the NAME
-        // passed to createOpenAICompatible ("openai-compatible"/"lmstudio")
-        // — a "openai" key is silently dropped and the param never sent.
-        thinkingProviderOpts[provider] = {
+        // passed to createOpenAICompatible (camelCase per v6 — SDK v6
+        // still merges the hyphenated "openai-compatible" but warns it is
+        // deprecated and will drop it; "lmstudio" is single-token so
+        // unchanged) — any other key is silently dropped and the param
+        // never sent. See the four-key merge in
+        // @ai-sdk/openai-compatible/dist getArgs().
+        thinkingProviderOpts[provider === "openai-compatible" ? "openaiCompatible" : provider] = {
           reasoningEffort: THINKING_EFFORT_OPENAI[thinkingMode],
         };
         break;
