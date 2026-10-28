@@ -137,27 +137,25 @@ impl ShellSession {
         // fail to parse — a syntax error in the agent's command now surfaces as
         // the command's own error on stderr while the sentinel + `exit` still
         // run, so cwd and exit code stay honest. We still coach the most common
-        // root cause: bash-style escaping / unterminated strings that survive
-        // repair_bash_style_quotes, or genuine PowerShell syntax the model got
-        // wrong. Match both the classic ParserError surface and the iex-wrapped
-        // forms, and don't trust exit_code alone (iex errors set $? false).
-        let lower = raw.stderr.to_lowercase();
-        let parse_failed = raw.exit_code.map(|c| c != 0).unwrap_or(false)
-            && (lower.contains("parsererror")
-                || lower.contains("parse error")
-                || lower.contains("unexpected token")
-                || lower.contains("unexpectedtoken")
-                || lower.contains("missing the terminator")
-                || lower.contains("an expression was expected")
-                || lower.contains("you must provide a value"));
-        let stderr = if parse_failed
-        {
-            format!(
-                "{}\n[Kai hint: PowerShell failed to parse the command. It runs under PowerShell, NOT bash: use PowerShell syntax (backtick-quote (`\") for a literal quote in a double-quoted string, a doubled backtick for a literal backtick; never bash \\\" or \\` escapes — that is the usual cause). Prefer single-quoted strings, keep each command to one responsibility instead of chaining long ;/&& pipelines, and use the grep/glob/edit tools instead of PowerShell text-wrangling.]",
-                raw.stderr
-            )
-        } else {
-            raw.stderr
+        // root cause: bash-style escaping / unterminated strings / 5.1's
+        // rejection of `&&`, all of which survive repair_bash_style_quotes or
+        // reflect genuine PowerShell grammar the model got wrong.
+        //
+        // Two variants of coaching matter and are not interchangeable:
+        //  - `not a valid statement separator` is Windows PowerShell 5.1's
+        //    ONLY way to say "install pwsh 7 or use `;` to chain"; the general
+        //    bash-vs-PS hint doesn't help there (5.1 has no `&&` in any form).
+        //  - Everything else (ParserError / unexpected-token / missing-
+        //    terminator / etc.) is the general bash-escape/syntax case.
+        //
+        // Verified empirically against real 5.1 + 7.7 (see the commit history):
+        // iex+catch turns 5.1's && parse error into a NON-terminating error,
+        // so CategoryInfo is NotSpecified, not ParserError — the plain
+        // "parsererror" substring would MISS the && case. Detect it by its
+        // unique message instead.
+        let stderr = match parse_failure_hint(raw.exit_code, &raw.stderr) {
+            Some(hint) => format!("{}\n{}", raw.stderr, hint),
+            None => raw.stderr,
         };
 
         Ok(SessionRunOutput {
@@ -169,6 +167,41 @@ impl ShellSession {
             cwd_after: resolved_cwd,
         })
     }
+}
+
+/// Coach the two PowerShell dialect failures the deferred-iex wrapper still
+/// lets the MODEL see (the wrapper itself can no longer fail to parse).
+/// Returns the hint to append to stderr, or None when the command failed for
+/// some ordinary reason (a real nonzero exit, an application error) that must
+/// NOT be relabeled a syntax problem.
+///
+/// Only meaningful on a failed exit (Some(nonzero)); a timed-out run (None
+/// exit_code) gets no hint. Verified empirically against real Windows
+/// PowerShell 5.1 + pwsh 7.7 (see commit history): iex + our catch turns 5.1's
+/// `&&` error into a NON-terminating error, so CategoryInfo is `NotSpecified`,
+/// NOT `ParserError` — the plain "parsererror" substring would MISS the &&
+/// case, which is why it's matched by its unique "not a valid statement
+/// separator" message and given a distinct, actionable hint (5.1 has no `&&`
+/// in any form; the fix is `;` / split / `if ($?)`, not quoting).
+fn parse_failure_hint(exit_code: Option<i32>, stderr: &str) -> Option<&'static str> {
+    if !exit_code.map(|c| c != 0).unwrap_or(false) {
+        return None;
+    }
+    let lower = stderr.to_lowercase();
+    if lower.contains("not a valid statement separator") {
+        return Some("[Kai hint: this is Windows PowerShell 5.1, which does not support `&&` or `||` as statement separators (pwsh 7+ does). Rewrite the chained command as either: (a) separate statements with `;` — but that runs the second command UNCONDITIONALLY (no short-circuit on failure), or (b) split into multiple bash_run calls, checking the first's exit_code before the second, or (c) `if ($?) { <next> }` to emulate short-circuit. Do NOT try to quote your way around it.]");
+    }
+    let general = lower.contains("parsererror")
+        || lower.contains("parse error")
+        || lower.contains("unexpected token")
+        || lower.contains("unexpectedtoken")
+        || lower.contains("missing the terminator")
+        || lower.contains("an expression was expected")
+        || lower.contains("you must provide a value");
+    if general {
+        return Some("[Kai hint: PowerShell failed to parse the command. It runs under PowerShell, NOT bash: use PowerShell syntax (backtick-quote (`\") for a literal quote in a double-quoted string, a doubled backtick for a literal backtick; never bash \\\" or \\` escapes — that is the usual cause). Prefer single-quoted strings, keep each command to one responsibility instead of chaining long ;/&& pipelines, and use the grep/glob/edit tools instead of PowerShell text-wrangling.]");
+    }
+    None
 }
 
 fn wrap_posix_with_sentinel(command: &str, sentinel: &str) -> String {
@@ -323,5 +356,58 @@ mod tests {
         assert!(w.contains("__KAI_CWD_x__"));
         assert!(w.contains("exit $__KAI_rc"));
         assert!(w.contains("ls\n__KAI_rc=$?"));
+    }
+}
+
+// parse_failure_hint is a platform-independent pure function (string
+// classification + &'static str pick), so its tests run on every OS — not just
+// the platform that spawns the shell. These pin the dialect-failure taxonomy
+// the wrapper depends on.
+#[cfg(test)]
+mod hint_tests {
+    use super::parse_failure_hint;
+
+    #[test]
+    fn parse_failure_hint_51_and_chain() {
+        let stderr = "At line:1 char:8\n+ echo a && echo b\n+        ~~\nThe token '&&' is not a valid statement separator in this version.";
+        let h = parse_failure_hint(Some(1), stderr).expect("hint");
+        assert!(h.contains("5.1"), "{h}");
+        assert!(h.contains("`&&`"), "{h}");
+        assert!(!h.contains("backtick-quote"), "5.1 hint must be distinct from general bash-escape coaching: {h}");
+    }
+
+    #[test]
+    fn parse_failure_hint_bash_escape() {
+        let h = parse_failure_hint(
+            Some(1),
+            "The string is missing the terminator: \".",
+        )
+        .expect("hint");
+        assert!(h.contains("backtick-quote"), "{h}");
+        assert!(h.contains("PowerShell, NOT bash"), "{h}");
+    }
+
+    #[test]
+    fn parse_failure_hint_unexpected_token_iex_variant() {
+        // iex+catch turns 5.1's ParserError into a non-terminating error with
+        // the phrase "An expression was expected"; verify the detection still
+        // catches it so the coaching fires.
+        let h = parse_failure_hint(
+            Some(1),
+            "An expression was expected after '('.",
+        )
+        .expect("hint");
+        assert!(h.contains("PowerShell failed to parse"), "{h}");
+    }
+
+    #[test]
+    fn parse_failure_hint_ignores_normal_failures() {
+        // Nonzero from a real application (tsc, cargo) is NOT a parse error.
+        assert!(parse_failure_hint(Some(2), "test suite failed: 3 tests").is_none());
+        // A zero exit never triggers, even with scary-looking text.
+        assert!(parse_failure_hint(Some(0), "unexpected token nonsense").is_none());
+        // Timed-out runs (None) skip coaching entirely — a truncated command
+        // may have coincidentally emitted "parse error" in output.
+        assert!(parse_failure_hint(None, "The token '&&' is not a valid statement separator").is_none());
     }
 }
