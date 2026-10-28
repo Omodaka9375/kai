@@ -157,6 +157,33 @@ function stripAnsi(s: string): string {
   return s.replace(ANSI_RE, "");
 }
 
+/**
+ * Bound how much of a stream actually reaches the model's context. The Rust
+ * capture cap (MAX_OUTPUT_BYTES = 256 KiB) protects the host's memory, but
+ * streaming even a fraction of that into a turn is what "the agent eats a
+ * huge amount of context/time on a verbose command" really is. A failed
+ * build's useful signal is at the HEAD (the command + first error) and the
+ * TAIL (the summary / final error), never the middle — so keep both ends and
+ * elide the centre with an explicit marker (same head+tail discipline as
+ * grep/read_file truncation). `elided` reports how many chars were dropped so
+ * callers can flip the `truncated` flag and say so honestly.
+ *
+ * Defaults: 8 KiB head + 8 KiB tail per stream (~4k tokens worst case),
+ * well above any normal `git status` / single test file yet far below a
+ * runaway `cat` of a generated bundle.
+ */
+export function capOutputForContext(
+  s: string,
+  head = 8192,
+  tail = 8192,
+): { text: string; elided: number } {
+  if (s.length <= head + tail) return { text: s, elided: 0 };
+  const elided = s.length - head - tail;
+  const marker =
+    `\n\n[… ${elided.toLocaleString("en-US")} characters elided (${s.length.toLocaleString("en-US")} total) — showing the first ${head.toLocaleString("en-US")} and last ${tail.toLocaleString("en-US")}. Re-run redirecting to a file (e.g. \`<cmd> > out.log 2>&1\`) then grep/read_file it to inspect the middle.]\n\n`;
+  return { text: s.slice(0, head) + marker + s.slice(s.length - tail), elided };
+}
+
 export function buildShellTools(ctx: ToolContext) {
   return {
     bash_run: tool({
@@ -243,14 +270,16 @@ export function buildShellTools(ctx: ToolContext) {
           // new cwd. Branch separately to keep both result shapes precise.
           if (elevated) {
             const r = await native.runElevatedCommand(command, cwd, effectiveTimeout);
+            const so = capOutputForContext(stripAnsi(r.stdout));
+            const se = capOutputForContext(stripAnsi(r.stderr));
             return {
               command,
               elevated: true,
-              stdout: stripAnsi(r.stdout),
-              stderr: stripAnsi(r.stderr),
+              stdout: so.text,
+              stderr: se.text,
               exit_code: r.exit_code,
               timed_out: r.timed_out,
-              truncated: r.truncated,
+              truncated: r.truncated || so.elided > 0 || se.elided > 0,
             };
           }
 
@@ -261,8 +290,13 @@ export function buildShellTools(ctx: ToolContext) {
             effectiveTimeout,
             await sandboxExecRoot(ctx.getSandboxOverride?.() ?? null),
           );
-          const stdout = stripAnsi(r.stdout);
-          const stderr = stripAnsi(r.stderr);
+          // Bound each stream before it reaches the model's context; flip the
+          // truncated flag if we elided anything so the result says so.
+          const stdoutCapped = capOutputForContext(stripAnsi(r.stdout));
+          const stderrCapped = capOutputForContext(stripAnsi(r.stderr));
+          const stdout = stdoutCapped.text;
+          const stderr = stderrCapped.text;
+          const outTruncated = r.truncated || stdoutCapped.elided > 0 || stderrCapped.elided > 0;
           if (r.timed_out) {
             // A timeout kills the whole process tree (Job Object) — the
             // runner dies mid-run with no exit code, and the agent sees only
@@ -277,7 +311,7 @@ export function buildShellTools(ctx: ToolContext) {
               stderr,
               exit_code: r.exit_code,
               timed_out: true,
-              truncated: r.truncated,
+              truncated: outTruncated,
               cwd_after: r.cwd_after,
               hint: `Command exceeded the ${effectiveTimeout}s timeout and was force-killed (partial output above). To finish the run: re-spawn it via bash_background and poll bash_logs — background processes are not subject to the foreground timeout. Or pass a larger timeout_secs (max 1000) when the command legitimately needs longer.`,
             };
@@ -289,7 +323,7 @@ export function buildShellTools(ctx: ToolContext) {
             stderr,
             exit_code: r.exit_code,
             timed_out: false,
-            truncated: r.truncated,
+            truncated: outTruncated,
             cwd_after: r.cwd_after,
           };
         } catch (e) {

@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { capOutputForContext } from "./shell";
 
 /**
  * Source-contract tests for the bash_run timeout behavior (project pattern:
@@ -45,5 +46,48 @@ describe("timeout result is actionable for the agent", () => {
     // Non-timeout path must stay a clean result WITHOUT the hint field.
     const nonTimeout = src.split("if (r.timed_out) {")[1] ?? "";
     expect(nonTimeout).toContain("timed_out: false");
+  });
+});
+
+describe("capOutputForContext — stream reaches the model, not the whole capture", () => {
+  it("passes short output through untouched (no marker, no elision)", () => {
+    const s = "hello\nworld";
+    const r = capOutputForContext(s);
+    expect(r.text).toBe(s);
+    expect(r.elided).toBe(0);
+  });
+
+  it("keeps the head and tail and elides only the middle when over budget", () => {
+    const head = "H".repeat(8192);
+    const mid = "M".repeat(50_000);
+    const tail = "T".repeat(8192);
+    const r = capOutputForContext(head + mid + tail, 8192, 8192);
+    expect(r.elided).toBe(50_000);
+    expect(r.text.startsWith(head)).toBe(true);
+    expect(r.text.endsWith(tail)).toBe(true);
+    expect(r.text).toContain("50,000 characters elided");
+    // The middle must NOT be present verbatim (that's the context sink).
+    expect(r.text).not.toContain(mid);
+    // Marker carries an actionable escape route.
+    expect(r.text).toContain("> out.log");
+  });
+
+  it("is an identity at the exact budget boundary", () => {
+    const s = "x".repeat(8192 + 8192);
+    expect(capOutputForContext(s).elided).toBe(0);
+    expect(capOutputForContext(s + "y").elided).toBe(1);
+  });
+
+  it("bash_run wires the cap into every return branch (source contract)", () => {
+    // stdout/stderr are capped once at the source and `truncated` reflects
+    // elision via outTruncated, so a verbose command can't silently fill
+    // context on either the normal or timed_out path.
+    expect(src).toContain("const stdoutCapped = capOutputForContext(stripAnsi(r.stdout));");
+    expect(src).toContain("const stderrCapped = capOutputForContext(stripAnsi(r.stderr));");
+    expect(src).toContain("const outTruncated = r.truncated || stdoutCapped.elided > 0");
+    // No session-path return still passes the raw r.truncated through.
+    expect(src).toContain("truncated: outTruncated,");
+    // Elevated branch caps independently.
+    expect(src).toContain("const so = capOutputForContext(stripAnsi(r.stdout));");
   });
 });
