@@ -22,7 +22,17 @@ export type McpServerConfig = {
   headers?: Record<string, string>;
   /** Whether the server is enabled (connected on agent runs). */
   enabled: boolean;
+  /** Per-tool-call timeout (ms). A hung MCP server tool otherwise wedges
+   *  the agent step until the user hits Stop — the stream watchdog covers
+   *  model streams, NOT tool execution (deliberately). Defaults to
+   *  DEFAULT_MCP_TOOL_TIMEOUT_MS when unset; set 0 to disable. */
+  toolTimeoutMs?: number;
 };
+
+/** Default MCP tool-call budget: generous enough for a slow real API,
+ *  short enough that a dead server returns a clean error to the model well
+ *  before the user reaches for Stop. */
+export const DEFAULT_MCP_TOOL_TIMEOUT_MS = 120_000;
 
 const STORE_PATH = "kai-mcp.json";
 const KEY_SERVERS = "servers";

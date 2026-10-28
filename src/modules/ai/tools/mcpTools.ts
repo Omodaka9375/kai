@@ -60,6 +60,14 @@ export function buildMcpTools(_ctx: ToolContext) {
           .boolean()
           .optional()
           .describe("Connect on register (default true)."),
+        toolTimeoutMs: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe(
+            "Per-tool-call timeout in ms (default 120000; 0 disables). Bound slow servers without wedging agent steps.",
+          ),
       }),
       needsApproval: true,
       execute: async (input, _options) => {
@@ -93,6 +101,9 @@ export function buildMcpTools(_ctx: ToolContext) {
           ...(input.url ? { url: input.url } : {}),
           ...(input.headers
             ? { headers: input.headers as Record<string, string> }
+            : {}),
+          ...(input.toolTimeoutMs !== undefined || existing?.toolTimeoutMs !== undefined
+            ? { toolTimeoutMs: input.toolTimeoutMs ?? existing?.toolTimeoutMs }
             : {}),
           enabled: input.enabled ?? true,
         };

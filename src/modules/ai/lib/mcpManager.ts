@@ -3,6 +3,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { isMainWindow } from "@/lib/windowRole";
 import type { McpServerConfig } from "./mcp";
+import { DEFAULT_MCP_TOOL_TIMEOUT_MS } from "./mcp";
 import { ensureAuthorization } from "./mcpOAuth";
 import { createProxyFetch } from "./proxyFetch";
 
@@ -421,7 +422,7 @@ class McpClientManager {
         // the description so it stays discoverable.
         const safeSuffix = sanitizeToolName(name);
         const key = `${prefix}__${safeSuffix}`;
-        const wrapped = wrapMcpTool(tool, name);
+        const wrapped = wrapMcpTool(tool, name, managed.config);
         if (merged[key] === undefined) merged[key] = wrapped;
         else merged[`${serverKey}:${key}`.replace(/[^a-zA-Z0-9_-]/g, "_")] = wrapped;
       }
@@ -438,7 +439,11 @@ class McpClientManager {
       if (managed.status.status !== "connected") continue;
       const prefix = sanitizeName(managed.config.name);
       for (const [name, tool] of Object.entries(managed.tools)) {
-        merged[`${prefix}__${sanitizeToolName(name)}`] = wrapMcpTool(tool, name);
+        merged[`${prefix}__${sanitizeToolName(name)}`] = wrapMcpTool(
+          tool,
+          name,
+          managed.config,
+        );
       }
     }
     return merged;
@@ -514,16 +519,95 @@ function sanitizeToolName(name: string): string {
 }
 
 /**
- * Wrap an MCP tool so its description carries the original (possibly
+ * Wrap an MCP tool so (a) its description carries the original (possibly
  * dot-containing) name — the sanitized key is what the model calls it by,
- * the description keeps the real identity discoverable.
+ * the description keeps the real identity discoverable — and (b) its execute
+ * is bounded by the server's per-call timeout. A hung server call returns a
+ * clean timeout error to the model instead of wedging the agent step until
+ * the user hits Stop (the stream watchdog covers model streams, NOT tool
+ * execution).
  */
-function wrapMcpTool(tool: unknown, originalName: string): unknown {
+function wrapMcpTool(
+  tool: unknown,
+  originalName: string,
+  config: McpServerConfig,
+): unknown {
   if (!tool || typeof tool !== "object") return tool;
-  const t = tool as { description?: unknown };
+  const t = tool as { description?: unknown; execute?: unknown };
   const base = typeof t.description === "string" ? t.description : "";
   const desc = `${base} (MCP tool: ${originalName})`.trim();
-  return { ...(t as Record<string, unknown>), description: desc };
+  const wrapped: Record<string, unknown> = {
+    ...(t as Record<string, unknown>),
+    description: desc,
+  };
+  if (typeof t.execute === "function") {
+    const timeoutMs =
+      config.toolTimeoutMs ?? DEFAULT_MCP_TOOL_TIMEOUT_MS;
+    wrapped["execute"] = mcpToolExecuteWithTimeout(
+      t.execute as (...a: unknown[]) => unknown,
+      originalName,
+      config.name,
+      timeoutMs,
+    );
+  }
+  return wrapped;
+}
+
+/**
+ * An execute that races the MCP server call against a timeout. Cooperative
+ * with the caller's abort signal: a Stop mid-call settles as the abort's
+ * error (not a spurious timeout), and the timer is always cleared. The
+ * timeout rejects with a model-readable message naming the escape hatch.
+ */
+function mcpToolExecuteWithTimeout(
+  inner: (...a: unknown[]) => unknown,
+  toolName: string,
+  serverName: string,
+  timeoutMs: number,
+): (...a: unknown[]) => Promise<unknown> {
+  // timeoutMs <= 0 disables the budget (trust the server).
+  if (!(timeoutMs > 0)) return async (...a) => inner(...a);
+  return (...a: unknown[]) =>
+    new Promise<unknown>((resolve, reject) => {
+      const opts = a[1] as { abortSignal?: AbortSignal } | undefined;
+      const signal = opts?.abortSignal;
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        signal?.removeEventListener("abort", onAbort);
+        reject(
+          new Error(
+            `MCP tool "${toolName}" (server "${serverName}") did not respond within ${Math.round(
+              timeoutMs / 1000,
+            )}s. It may be hung or overloaded. Raise the server's toolTimeoutMs in Settings → MCP, or pick a shorter per-request path.`,
+          ),
+        );
+      }, timeoutMs);
+      const onAbort = (): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(signal?.reason ?? new Error("Aborted"));
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
+      Promise.resolve(inner(...a)).then(
+        (v) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          signal?.removeEventListener("abort", onAbort);
+          resolve(v);
+        },
+        (e) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          signal?.removeEventListener("abort", onAbort);
+          reject(e);
+        },
+      );
+    });
 }
 
 /** Race a promise against a timeout. */

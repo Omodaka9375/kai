@@ -1,6 +1,6 @@
 import { useChat, type UIMessage } from "@ai-sdk/react";
 import type { ToolUIPart, UIMessagePart } from "ai";
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { native } from "../lib/native";
 import { checkReadable } from "../lib/security";
 import { resolvePath } from "../tools/tools";
@@ -14,6 +14,7 @@ import {
 import { verifyIfDirtyAtRunEnd } from "../lib/autoVerify";
 import { isCommandAllowed } from "../lib/allowlist";
 import { checkShellCommand } from "../lib/security";
+import { isApprovalDenied, noteApprovalDenied } from "../lib/approvalLatch";
 import { speakText } from "../lib/voiceTts";
 
 /**
@@ -112,16 +113,31 @@ function Bridge({
   // approval card opening and the user clicking Accept/Reject, the Chat
   // may no longer have the tool call (stripped by stripIncompleteToolCalls)
   // and addToolApprovalResponse throws "Tool call not found". Swallow it.
-  useEffect(() => {
-    setApprovalResponder((id, approved) => {
+  // Single choke-point for EVERY approval decision (human click, diff-tab
+  // accept/reject, and — via `respond` below — the deferred auto-approve
+  // paths). Denial is monotonic: a deny is latched so a later `approved:true`
+  // on the same id is dropped, and an `approved:true` is dropped if that id
+  // was already denied. This removes the last-writer race between a scheduled
+  // auto-approve and a human Deny — order can only reduce permission.
+  const respond = useCallback(
+    (id: string, approved: boolean) => {
+      if (!approved) noteApprovalDenied(id);
+      else if (isApprovalDenied(id)) return;
       try {
         addToolApprovalResponse({ id, approved });
       } catch (e) {
         console.debug("[kai] stale approval ignored:", id, e);
       }
-    });
+    },
+    [addToolApprovalResponse],
+  );
+  useEffect(() => {
+    setApprovalResponder(respond);
     return () => setApprovalResponder(null);
-  }, [setApprovalResponder, addToolApprovalResponse]);
+    // respond is recreated each render but its deps (addToolApprovalResponse)
+    // are stable; keep the responder identity tied to that so the SDK call is
+    // always current.
+  }, [setApprovalResponder, respond]);
 
   useEffect(() => {
     persistMessages(sessionId, messages);
@@ -394,11 +410,10 @@ function Bridge({
             autoApprovedRef.current.add(id);
             markAutoApproved(id);
             setTimeout(() => {
-              try {
-                addToolApprovalResponse({ id, approved: true });
-              } catch {
-                // Stale call — ignore.
-              }
+              // Route through respond so the denial latch is checked at FIRE
+              // time: a human Deny landing between scheduling and firing
+              // drops this auto-approve instead of overriding it.
+              respond(id, true);
             }, 0);
           });
           // FALL THROUGH — do NOT continue here. A command that is NOT
@@ -422,19 +437,16 @@ function Bridge({
         // React a full commit between approvals — depth resets per task —
         // while auto-approve still completes within milliseconds.
         setTimeout(() => {
-          try {
-            addToolApprovalResponse({ id, approved: true });
-          } catch {
-            // Tool call may have been cleaned up already (stop/restart
-            // between scheduling and firing).
-          }
+          // Latch-checked at fire time (see the allowlist branch above): a
+          // Deny that arrived after this was scheduled must win.
+          respond(id, true);
         }, 0);
       }
     }
     return () => {
       cancelled = true;
     };
-  }, [messages, autoApprove, addToolApprovalResponse, markAutoApproved, signingApprovalRequired]);
+  }, [messages, autoApprove, respond, markAutoApproved, signingApprovalRequired]);
 
   // ---- AI diff tab management ----------------------------------------------
   // We track which approvalIds have already opened a tab so re-renders don't

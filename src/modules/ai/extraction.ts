@@ -50,6 +50,27 @@ export function modelTextOnly(
   return true;
 }
 
+/**
+ * Positive framing of {@link modelTextOnly}: can this model receive actual
+ * image content? Use this at capability sites (what to tell the model it can
+ * do); keep using modelTextOnly at the swap site in agent.ts (what to strip
+ * from the request).
+ *
+ * NOT the same question as `supportsToolResultImages` (chatRuntime.ts): that
+ * one asks whether the PROVIDER WIRE can serialize image parts inside a tool
+ * result — openai-compatible-family endpoints stringify them, so even a
+ * vision model on those endpoints gets OCR text from look_at_screen. A model
+ * can pass this check and fail that one; a predicate that merged them would
+ * either lie to the model or strip images a capable wire could deliver.
+ */
+export function modelCanSee(
+  modelId: string,
+  runtimeModelName?: string | null,
+  visionOverride?: VisionOverride | null,
+): boolean {
+  return !modelTextOnly(modelId, runtimeModelName, visionOverride);
+}
+
 /** Heuristic: does the runtime model name look like a vision-capable family?
  *  Deliberately permissive — false positives (claiming vision on a text model)
  *  only surface as a provider error on that one request; false negatives

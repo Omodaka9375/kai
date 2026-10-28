@@ -13,6 +13,7 @@ import {
   getModelContextLimit,
   LMSTUDIO_DEFAULT_BASE_URL,
   MAX_AGENT_STEPS,
+  NO_VISION_NOTICE,
   providerNeedsKey,
   SYSTEM_PROMPT,
   THINKING_BUDGET_ANTHROPIC,
@@ -29,7 +30,7 @@ import {
 import { buildTools, type ToolContext } from "../tools/tools";
 import { compactModelMessagesDetailed } from "./compact";
 import {
-  modelTextOnly,
+  modelCanSee,
   swapImagePartsToText,
 } from "../extraction";
 import type { ProviderKeys } from "./keyring";
@@ -44,6 +45,8 @@ import {
 export type { StackInfo };
 import { fenceSystemPrompt } from "./fence";
 import { withToolGuard, withToolRedaction } from "./toolFencing";
+import { withCentralToolGuards } from "./toolGuards";
+import { auditAppend, AUDIT_KINDS } from "./audit";
 import {
   getGlobalStreamGuard,
   toolLoopFingerprint,
@@ -602,13 +605,32 @@ export async function runAgentStream(opts: RunAgentOptions) {
 
   const fencePrompt = opts.fenceState ? fenceSystemPrompt(opts.fenceState) : "";
 
+  // Resolve vision capability ONCE, before both prompt assembly and the
+  // history transform, so the model is never told it can see when the
+  // request will strip images (and vice versa). For custom endpoints the
+  // registry entry is a placeholder — consult the RUNTIME model name
+  // (opts.lmstudioModelId / opts.openaiCompatibleModelId) so a locally-hosted
+  // vision model actually receives the image. A user-set override
+  // (Settings → Models → Vision) wins over both.
+  const runtimeModelName =
+    modelId === "lmstudio-local"
+      ? opts.lmstudioModelId
+      : modelId === "openai-compatible-custom"
+        ? opts.openaiCompatibleModelId
+        : null;
+  const canSee = modelCanSee(
+    modelId,
+    runtimeModelName,
+    opts.customVisionOverride,
+  );
+
   const stableSystem = buildStableSystem(
     modelId,
     opts.agentPersona ?? null,
     opts.customInstructions,
     opts.projectMemory ?? null,
     opts.stackInfo ?? null,
-  ) + mcpBlock + fencePrompt;
+  ) + mcpBlock + fencePrompt + (canSee ? "" : `\n\n${NO_VISION_NOTICE}`);
 
   const rawHistory = sanitizeModelMessages(
     stripDataUrlPrefixes(
@@ -619,19 +641,10 @@ export async function runAgentStream(opts: RunAgentOptions) {
   );
   // Text-only models (DeepSeek-class, GLM base, …) reject `file` parts.
   // Swap image parts for extracted text (dimensions + OCR) AFTER conversion —
-  // the UI messages keep the image so the transcript still shows it.
-  // For custom endpoints the registry entry is a placeholder — consult the
-  // RUNTIME model name (opts.lmstudioModelId / opts.openaiCompatibleModelId)
-  // so a locally-hosted vision model actually receives the image. A
-  // user-set override (Settings → Models → Vision) wins over both.
-  const runtimeModelName =
-    modelId === "lmstudio-local"
-      ? opts.lmstudioModelId
-      : modelId === "openai-compatible-custom"
-        ? opts.openaiCompatibleModelId
-        : null;
+  // the UI messages keep the image so the transcript still shows it. `canSee`
+  // was resolved above (shared with prompt assembly).
   const history = normalizeForProvider(
-    !modelTextOnly(modelId, runtimeModelName, opts.customVisionOverride)
+    canSee
       ? rawHistory
       : await swapImagePartsToText(rawHistory),
     provider,
@@ -770,13 +783,25 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // credentials never leave the machine. Order: redact → annotate → fence.
   const tools = buildTools(opts.toolContext, opts.mcpTools);
   const redactedTools = withToolRedaction(tools as Record<string, unknown>);
+  // Central deny-only guard: the backstop for any tool that skipped its
+  // inline security check — notably MCP tools, whose inputs we never see
+  // server-side. It wraps the redaction layer so a denial short-circuits
+  // BEFORE the real tool body runs; withToolGuard (outermost) then annotates
+  // the returned {error} as ROLLED_BACK and fences it like any other result.
+  const guardedTools = withCentralToolGuards(
+    redactedTools as Record<string, Record<string, unknown>>,
+    undefined,
+    (name, reason) => {
+      auditAppend(AUDIT_KINDS.securityDeny, "tool-guard", `${name}: ${reason}`.slice(0, 200), "");
+    },
+  );
   // Auto-verify uses getWorkspaceRoot (NOT getRealWorkspaceRoot): in a shadow
   // session the agent's edits land in the detached copy, and verification
   // must run against what the agent actually wrote — not the real tree it
   // hasn't touched yet.
   const fencedTools = opts.fenceState
     ? withToolGuard(
-        redactedTools,
+        guardedTools,
         opts.fenceState,
         opts.toolContext.getWorkspaceRoot,
       )

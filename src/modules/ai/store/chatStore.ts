@@ -38,6 +38,7 @@ import { clearFenceState, summarizeMessagesNow } from "../lib/transport";
 import { reapSessionWatches, closeWatchSessionShell } from "../tools/watch";
 import { agentBus } from "../lib/eventBus";
 import { auditAppend, AUDIT_KINDS } from "../lib/audit";
+import { isApprovalDenied, noteApprovalDenied } from "../lib/approvalLatch";
 import { createShadow, getShadow } from "../lib/shadow";
 import {
   disposeSessionToolContext,
@@ -568,6 +569,11 @@ export const useChatStore = create<StoreState>((set, get) => ({
   approvalResponder: null,
   setApprovalResponder: (fn) => set({ approvalResponder: fn }),
   respondToApproval: (approvalId, approved) => {
+    // Denial is monotonic: latch it so no deferred auto-approve/allowlist
+    // callback can re-permit this exact call afterward. An approve that
+    // arrives after a denial is dropped (the SDK is otherwise last-writer).
+    if (!approved) noteApprovalDenied(approvalId);
+    else if (isApprovalDenied(approvalId)) return;
     const fn = get().approvalResponder;
     if (fn) fn(approvalId, approved);
     // Do NOT abort on denial — the agent should see the "tool call denied"
@@ -1516,7 +1522,13 @@ function releaseStaleApprovalsOnly(chat: Chat<UIMessage>): void {
     const kept = m.parts.filter((p) => {
       const ptype = (p as { type?: string }).type ?? "";
       if (!ptype.startsWith("tool-") && ptype !== "dynamic-tool") return true;
-      return (p as { state?: string }).state !== "approval-requested";
+      if ((p as { state?: string }).state !== "approval-requested") return true;
+      // Absence of a decision is not permission: latch the reaped approval
+      // id as denied so a deferred auto-approve callback already in flight
+      // for this exact call cannot resurrect it.
+      const ap = (p as { approval?: { id?: string } }).approval;
+      if (ap?.id) noteApprovalDenied(ap.id);
+      return false;
     });
     if (kept.length === m.parts.length) return m;
     changed = true;

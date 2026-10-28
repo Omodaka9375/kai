@@ -30,6 +30,13 @@ jobs:
       - name: Type-check
         run: pnpm exec tsc --noEmit
 
+      # The suite is the merge gate for the security wiring pinned by
+      # source-contract tests (fenceCoverage, approvalWiring, toolGuards,
+      # allowlist, loopStop…). It must run BEFORE the build so a test failure
+      # surfaces without burning a Vite build minute.
+      - name: Test
+        run: pnpm test
+
       - name: Build frontend
         run: pnpm build
 

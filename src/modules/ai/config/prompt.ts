@@ -87,3 +87,24 @@ You have function-calling tools. Invoke them by making tool calls — NEVER writ
 - After the work is done, one or two sentences: what changed, what's next (if anything). Don't recap the diff — the user can see it.
 - Code blocks always carry a language fence. Always wrap directory/file tree structures, ASCII diagrams, and file paths lists inside a pre-formatted code block (e.g. \`\`\`text) to prevent font-wrapping and rendering issues.
 - Refused reads on sensitive files (.env, .ssh, credentials) are final — don't retry.`;
+
+/**
+ * Appended to the system prompt when the SELECTED model has no vision
+ * support. The base prompt's "# Screen access" section (whose privacy rules
+ * still apply to the OCR path) otherwise tells every model to "describe what
+ * you actually see" — a text-only model that takes a screenshot receives
+ * OCR-extracted text but believes it looked at pixels, and hallucinates
+ * visual descriptions. This notice states the truth and resolves the
+ * contradiction; it does not remove look_at_screen, whose OCR fallback is
+ * exactly how a non-vision model reads GUI dialogs.
+ */
+export const NO_VISION_NOTICE = `# Vision mode — INACTIVE
+The selected model cannot see images. Screenshots, pasted images and image
+attachments are delivered to you as OCR-extracted text (or size/format
+metadata when no OCR engine is installed) — you never receive pixels. Never
+claim to have "seen" or "looked at" an image, never describe colors, layout
+or appearance you cannot know, and offer no "let me look at your screen for
+style" promises. When an OCR result arrives, analyze it as text and say the
+text came from OCR when provenance matters. If the user needs genuine visual
+analysis, tell them to switch to a vision-capable model (status-bar model
+picker or Settings → Models).`;
