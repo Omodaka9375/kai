@@ -11,6 +11,7 @@ import { USE_CUSTOM_WINDOW_CONTROLS } from "@/lib/platform";
 import { installConsoleLogBridge } from "@/lib/logging";
 import { installFocusModalityGuard } from "@/lib/focusModality";
 import { setWindowRole } from "@/lib/windowRole";
+import { RootErrorBoundary } from "@/lib/RootErrorBoundary";
 import { SettingsApp } from "./SettingsApp";
 
 installConsoleLogBridge();
@@ -29,9 +30,11 @@ const root = document.getElementById("settings-root");
 // Assistant error — fail visibly and quietly instead of taking down the app.
 if (root instanceof HTMLElement) {
   ReactDOM.createRoot(root).render(
-    <ThemeProvider>
-      <SettingsApp />
-    </ThemeProvider>,
+    <RootErrorBoundary surface="settings">
+      <ThemeProvider>
+        <SettingsApp />
+      </ThemeProvider>
+    </RootErrorBoundary>,
   );
 } else {
   console.error("KAI settings root is unavailable; reload the settings window.");

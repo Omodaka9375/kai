@@ -8,6 +8,7 @@ import "./styles/globals.css";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import ReactDOM from "react-dom/client";
 import App from "./app/AppShell";
+import { RootErrorBoundary } from "./lib/RootErrorBoundary";
 import { initLaunchDir } from "./lib/launchDir";
 import { installConsoleLogBridge } from "./lib/logging";
 import { installFocusModalityGuard } from "./lib/focusModality";
@@ -32,7 +33,11 @@ const root = document.getElementById("root");
 if (!(root instanceof HTMLElement)) {
   throw new Error("KAI app root is unavailable");
 }
-ReactDOM.createRoot(root).render(<App />);
+ReactDOM.createRoot(root).render(
+  <RootErrorBoundary surface="main">
+    <App />
+  </RootErrorBoundary>,
+);
 
 // Window starts hidden (per tauri.conf.json) so users never see a transparent
 // shadow-only frame before React paints. Use setTimeout — rAF is throttled

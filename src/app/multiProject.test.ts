@@ -57,4 +57,19 @@ describe("multi-project workspace ownership", () => {
     expect(input).toContain("c.submit({ background: e.altKey })");
     expect(composer).toContain("setSessionPreferences(sessionId, { draft:");
   });
+
+  it("wraps window roots in a visible RootErrorBoundary so a render crash is never a silent blank", () => {
+    const main = readFileSync(new URL("../main.tsx", import.meta.url), "utf8");
+    const settings = readFileSync(new URL("../settings/main.tsx", import.meta.url), "utf8");
+    expect(main).toContain('<RootErrorBoundary surface="main">');
+    expect(settings).toContain('<RootErrorBoundary surface="settings">');
+  });
+
+  it("renders the switcher with only the original project props and guards session wiring", () => {
+    const header = readFileSync(new URL("../modules/header/Header.tsx", import.meta.url), "utf8");
+    const switcher = readFileSync(new URL("../modules/workspace/ProjectsSwitcher.tsx", import.meta.url), "utf8");
+    expect(header).toContain("onSwitchProject && onAddProject && onCloseProject ?");
+    expect(header).not.toContain("onSwitchProject && onSwitchSession &&");
+    expect(switcher).toContain("Array.isArray(sessions) ? sessions : []");
+  });
 });

@@ -65,6 +65,10 @@ export function ProjectsSwitcher({
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(projects.map((p) => p.id)));
   const [showArchived, setShowArchived] = useState(false);
+  // Sessions arrive via the projects-menu context; guard against a wiring
+  // that hasn't supplied them yet (mid-HMR, missed provider prop). Crashing
+  // here takes out the header.
+  const safeSessions = Array.isArray(sessions) ? sessions : [];
   const running = projects.filter((p) => p.status === "running").length;
   const waiting = projects.filter((p) => p.status === "awaiting").length;
   const customAgents = useAgentsStore((s) => s.customAgents);
@@ -105,7 +109,7 @@ export function ProjectsSwitcher({
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         {projects.map((project) => {
-          const projectSessions = sessions.filter((session) => {
+          const projectSessions = safeSessions.filter((session) => {
             const preferences = getSessionPreferences(session.id);
             return preferences.projectId === project.id &&
               (showArchived || !preferences.archivedAt || getSessionAgentMeta(session.id).status !== "idle");

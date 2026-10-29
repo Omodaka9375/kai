@@ -197,15 +197,15 @@ export function Header({
       }`}
     >
       <div className="flex shrink-0 items-center gap-0.5">
-        {onSwitchProject && onSwitchSession && onNewSession && onArchiveSession && onRestoreSession && onAddProject && onCloseProject ? (
+        {onSwitchProject && onAddProject && onCloseProject ? (
           <ProjectsSwitcher
             projects={projects}
             sessions={sessions}
             onSwitch={onSwitchProject}
-            onSwitchSession={onSwitchSession}
-            onNewSession={onNewSession}
-            onArchiveSession={onArchiveSession}
-            onRestoreSession={onRestoreSession}
+            onSwitchSession={onSwitchSession ?? (() => {})}
+            onNewSession={onNewSession ?? (() => {})}
+            onArchiveSession={onArchiveSession ?? (() => {})}
+            onRestoreSession={onRestoreSession ?? (() => {})}
             onAdd={onAddProject}
             onClose={onCloseProject}
           />
