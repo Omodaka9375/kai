@@ -626,7 +626,15 @@ function sessionIsGroupLive(sessionId: string): boolean {
 
 // LRU pinner registration (inversion: chatStore cannot import this module).
 // Pins the chat instances of live-group participant + coordinator sessions.
-if (typeof setChatPinner === "function") setChatPinner(sessionIsGroupLive);
+// Deferred to a microtask so registration happens only AFTER every module in
+// the graph has finished evaluating — if a future import cycle pulls this
+// module into chatStore's eval (any cycle back into chatStore), a synchronous
+// call here would hit chatStore's `let chatPinner` TDZ and crash the boot.
+// The chatPinner seam stays: chatStore evaluates fully before this microtask
+// runs, and LRU eviction never happens during module init anyway.
+if (typeof setChatPinner === "function") {
+  queueMicrotask(() => setChatPinner(sessionIsGroupLive));
+}
 
 /** session:delete re-resolution. chatStore deletes sessions for many
  *  reasons (user deletes a chat, LRU-adjacent cleanup, project reset). When

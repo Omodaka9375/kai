@@ -14,7 +14,12 @@ import {
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { useAgentsStore } from "./agentsStore";
 import { setProjectAgentStatus } from "./projectStatus";
-import { projectIdFor } from "@/modules/workspace";
+// Deep import, NOT the workspace barrel: the barrel re-exports ProjectRail (a
+// React component that imports groupChatStore), and this module is imported
+// before groupChatStore in the app's eval order — pulling the barrel here made
+// groupChatStore evaluate mid-chatStore, whose top-level setChatPinner(...)
+// then hit this module's `let chatPinner` TDZ and crashed the whole boot.
+import { projectIdFor } from "@/modules/workspace/projectRuntime";
 import { useTodosStore } from "./todoStore";
 import {
   getSessionPreferences,

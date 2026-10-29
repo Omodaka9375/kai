@@ -289,6 +289,28 @@ function Bridge({
     });
   }, [steeringMessage, status, chat, setSteeringMessage]);
 
+  // ── Group chat: delegation preamble (Phase 2) ─────────────────────────
+  // When this session becomes the group's AGENT coordinator (user action in
+  // the panel), inject the coordination preamble as its next user message.
+  // Runs once per delegation (keyed by group id); re-delegation after a
+  // reclaim re-injects. Idle-gated: a busy agent gets it via the queue
+  // (injectMessage's passive ride-along) rather than a hijack wake.
+  //
+  // TOP LEVEL on purpose: this block previously lived INSIDE the status-patch
+  // effect below — hooks called from an effect callback hit a null dispatcher
+  // ("Invalid hook call", minified React #321) and crashed the app on mount.
+  const preambleGivenRef = useRef<string | null>(null);
+  useEffect(() => {
+    const coordGroup = coordinatorGroupForSession(sessionId);
+    if (!coordGroup) {
+      preambleGivenRef.current = null;
+      return;
+    }
+    if (preambleGivenRef.current === coordGroup.id) return;
+    preambleGivenRef.current = coordGroup.id;
+    void useChatStore.getState().injectMessage(sessionId, coordinatorPreamble(coordGroup));
+  }, [sessionId, status]);
+
   useEffect(() => {
     let runStatus: AgentRunStatus;
     if (approvalsPending > 0) runStatus = "awaiting-approval";
@@ -304,23 +326,6 @@ function Bridge({
         : {}),
       ...(runStatus === "idle" ? { error: null } : {}),
     });
-  // ── Group chat: delegation preamble (Phase 2) ─────────────────────────
-  // When this session becomes the group's AGENT coordinator (user action in
-  // the panel), inject the coordination preamble as its next user message.
-  // Runs once per delegation (keyed by group id); re-delegation after a
-  // reclaim re-injects. Idle-gated: a busy agent gets it via the queue
-  // (injectMessage's passive ride-along) rather than a hijack wake.
-  const preambleGivenRef = useRef<string | null>(null);
-  useEffect(() => {
-    const coordGroup = coordinatorGroupForSession(sessionId);
-    if (!coordGroup) {
-      preambleGivenRef.current = null;
-      return;
-    }
-    if (preambleGivenRef.current === coordGroup.id) return;
-    preambleGivenRef.current = coordGroup.id;
-    void useChatStore.getState().injectMessage(sessionId, coordinatorPreamble(coordGroup));
-  }, [sessionId, status]);
 
   // ── Group chat hooks ──────────────────────────────────────────────────
   // Two responsibilities, both driven off the same status transition:

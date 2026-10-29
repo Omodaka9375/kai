@@ -5,7 +5,11 @@ import { checkShellCommand } from "../lib/security";
 import { checkShellSandbox, sandboxExecRoot } from "../lib/sandbox";
 import { withExclusiveLock } from "../lib/mutationLock";
 import { nativeForContext, sandboxOverrideForContext, type ToolContext } from "./context";
-import { currentWorkspaceEnv, workspaceScopeKey } from "@/modules/workspace";
+// Deep import, not the workspace barrel (chatStore imports this module; the
+// barrel drags ProjectRail -> groupChatStore into chatStore's eval before its
+// own module bindings are initialized — TDZ boot crash. See chatStore.ts).
+import { currentWorkspaceEnv } from "@/modules/workspace/env";
+import { workspaceScopeKey } from "@/modules/workspace/env";
 
 /**
  * Per-session lazy shell-session id. The agent gets one persistent shell per

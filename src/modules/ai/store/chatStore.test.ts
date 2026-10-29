@@ -319,7 +319,12 @@ describe("chatStore exports", () => {
 
     it("captures the target runtime so A→B→A restores A, not the foreground project", async () => {
       const store = mod.useChatStore;
-      const { createProjectRuntime, projectIdFor, LOCAL_WORKSPACE } = await import("@/modules/workspace");
+      // Deep import — same modules chatStore itself imports. The barrel drags
+      // in ProjectRail (+ its whole React/component graph), which costs several
+      // seconds of first-transform inside this test's 5s budget.
+      const { createProjectRuntime } = await import("@/modules/workspace/projectRuntime");
+      const { projectIdFor } = await import("@/modules/workspace/projectRuntime");
+      const { LOCAL_WORKSPACE } = await import("@/modules/workspace/env");
       const { setSessionPreferences } = await import("./sessionPreferences");
       const a = createProjectRuntime("D:/owned-a", LOCAL_WORKSPACE);
       const b = createProjectRuntime("D:/owned-b", LOCAL_WORKSPACE);
