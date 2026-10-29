@@ -239,7 +239,11 @@ export function useSourceControl(
   enabled: boolean = true,
 ): SourceControlSummary {
   const runtime = useProjectRuntime();
-  const workspaceEnv = runtime?.env ?? useWorkspaceEnvStore((s) => s.env);
+  // Unconditional hook (see AgentRunBridge): the store fallback must not be
+  // gated on `runtime?.env` being present or the hook order can shift between
+  // renders of a live component.
+  const storeEnv = useWorkspaceEnvStore((s) => s.env);
+  const workspaceEnv = runtime?.env ?? storeEnv;
   const workspaceKey = workspaceScopeKey(workspaceEnv);
   const [state, setState] = useState<SourceControlSummaryState>({
     repo: null,

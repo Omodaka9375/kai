@@ -329,7 +329,14 @@ function Bridge({
   // and speaks the PREVIOUS turn's reply (always one turn behind). Phase 1
   // (the transition) only arms runEndedRef; phase 2 — re-entered when the
   // final messages land — actually speaks.
-  const ttsActive = isActive && usePreferencesStore((s) => s.voiceTtsMode !== "off");
+  // Hooks must be UNCONDITIONAL: `isActive` flips when this workspace moves
+  // between background and foreground (project switch) while the component
+  // stays mounted. A conditional hook shifts every later hook's position;
+  // React's production deps comparison then reads a non-effect hook's
+  // memoizedState (deps === undefined) → TypeError reading 'length' inside
+  // areHookInputsEqual → the whole tree unmounts (themed blank window).
+  const voiceTtsEnabled = usePreferencesStore((s) => s.voiceTtsMode !== "off");
+  const ttsActive = isActive && voiceTtsEnabled;
   const spokenForRef = useRef<string | null>(null);
   const prevStatusRef = useRef(status);
   const prevSessionRef = useRef(sessionId);
