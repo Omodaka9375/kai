@@ -21,6 +21,67 @@
         } catch (e) {}
       })();
     </script>
+    <script>
+      // Boot trap — runs BEFORE the module graph, so it catches module-eval
+      // errors (import cycles / TDZ / failed imports) that main.tsx's own
+      // handlers can never see (main.tsx body only executes AFTER all static
+      // imports evaluate). Paints the failure onto the page so a dead boot is
+      // visible in the window itself, no devtools required.
+      (function () {
+        var errors = [];
+        function paint() {
+          var el = document.getElementById("kai-boot-trap");
+          if (!el) {
+            el = document.createElement("div");
+            el.id = "kai-boot-trap";
+            el.style.cssText =
+              "position:fixed;inset:16px;z-index:2147483647;overflow:auto;" +
+              "padding:16px;border-radius:8px;font:12px/1.6 monospace;" +
+              "color:#fca5a5;background:rgba(10,10,10,.95);white-space:pre-wrap;";
+            document.body.appendChild(el);
+          }
+          el.textContent = errors.join("\n\n");
+        }
+        function add(msg) {
+          errors.push(msg);
+          if (document.body) paint();
+          document.title = "KAI boot error";
+        }
+        window.addEventListener("error", function (e) {
+          add(
+            "Unhandled error: " +
+              (e.message || "unknown") +
+              "\n  at " +
+              (e.filename || "?") +
+              ":" +
+              (e.lineno || 0) +
+              ":" +
+              (e.colno || 0)
+          );
+        });
+        window.addEventListener("unhandledrejection", function (e) {
+          var r = e.reason;
+          add(
+            "Unhandled rejection: " +
+              (r && r.stack
+                ? r.stack
+                : String(r && r.message ? r.message : r))
+          );
+        });
+        setTimeout(function () {
+          // main.tsx sets this as its first statement — i.e. only after the
+          // entire static import graph evaluated successfully.
+          if (!window.__kaiBooted) {
+            add(
+              "KAI frontend did not finish starting within 10s.\n" +
+                (errors.length
+                  ? "Errors captured above."
+                  : "No error captured — the module graph hung (a top-level await or an infinite module-init loop), or the entry chunk never loaded.")
+            );
+          }
+        }, 10000);
+      })();
+    </script>
   </head>
 
   <body>

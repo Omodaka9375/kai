@@ -529,6 +529,37 @@ pub fn run() {
             #[cfg(target_os = "windows")]
             crate::modules::pty::job::install_process_wide_kill_on_close();
 
+            // Dev builds navigate the (hidden) main window to devUrl. If no
+            // server is listening there, the webview loads an error page into
+            // an INVISIBLE window — the frontend never runs, never calls
+            // show(), and the process sits in the taskbar forever with zero
+            // errors (a bare `cargo run` skips the tauri CLI's devUrl probe).
+            // Probe the configured dev server and say so loudly. Bounded to
+            // 1s per resolved address; release builds don't use a devUrl at
+            // all, so this is debug-only.
+            #[cfg(debug_assertions)]
+            if let Some(url) = app.config().build.dev_url.as_ref() {
+                use std::net::{TcpStream, ToSocketAddrs};
+                let host = url.host_str().unwrap_or("localhost").to_string();
+                let port = url.port().unwrap_or(80);
+                let reachable = (host.as_str(), port)
+                    .to_socket_addrs()
+                    .map(|mut addrs| {
+                        addrs.any(|addr| {
+                            TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(1000))
+                                .is_ok()
+                        })
+                    })
+                    .unwrap_or(false);
+                if reachable {
+                    log::info!("dev server probe OK: {url}");
+                } else {
+                    log::error!(
+                        "DEV SERVER NOT REACHABLE at {url} - the window will load an error page and stay hidden. Start it first: pnpm dev (or launch via pnpm tauri dev)"
+                    );
+                }
+            }
+
             // Build the main window manually so we control the WebView2 user-data
             // dir (per-instance, in setup where we can compute the instance id).
             // The app has no `create: true` windows — otherwise Tauri would have
@@ -566,7 +597,16 @@ pub fn run() {
                     // comment explains the shared-UDF invariant.
                     #[cfg(target_os = "windows")]
                     let b = b.additional_browser_args(WINDOWS_BROWSER_ARGS);
-                    b.build()
+                    // Log navigations so a failed page load is diagnosable
+                    // from the log file instead of a silent invisible window.
+                    b.on_page_load(|_webview, payload| {
+                        log::info!(
+                            "main window page load {:?}: {}",
+                            payload.event(),
+                            payload.url()
+                        );
+                    })
+                    .build()
                 })
                 .map_err(|e| format!("failed to build main window: {e}"))?;
 
@@ -578,6 +618,32 @@ pub fn run() {
             // above; keep the binding live on every platform.
             #[cfg(not(target_os = "windows"))]
             let _ = &window;
+
+            // Ghost-window watchdog. The main window starts hidden and is
+            // only shown by the frontend after first paint (no transparent-
+            // frame flash). If the page never loads — dev server down, webview
+            // crash, or a JS exception before show() — the process would sit
+            // in the taskbar forever with zero errors. After 10s force the
+            // window visible and log why: a visible window (even a blank one
+            // with the dev error page) beats a silent ghost process.
+            {
+                let watchdog = handle.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(10));
+                    let Some(win) = watchdog.get_webview_window("main") else {
+                        return;
+                    };
+                    // If visibility can't be determined, assume shown — never
+                    // fight the frontend for the window.
+                    if win.is_visible().unwrap_or(true) {
+                        return;
+                    }
+                    log::warn!(
+                        "main window still hidden 10s after launch - frontend never called show(); forcing visible. Page load likely failed (dev: is the vite server up?)"
+                    );
+                    let _ = win.show();
+                });
+            }
 
             // Resolve the log dir once and install the crash-snapshot panic
             // hook + record the dir for diagnostics_collect.

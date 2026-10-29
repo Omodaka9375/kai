@@ -14,6 +14,12 @@ import { installConsoleLogBridge } from "./lib/logging";
 import { installFocusModalityGuard } from "./lib/focusModality";
 import { USE_CUSTOM_WINDOW_CONTROLS } from "./lib/platform";
 
+// First statement AFTER the static import graph evaluated (imports hoist and
+// run before module body). The index.html boot trap watches for this flag —
+// if it stays unset 10s in, the import graph itself hung/threw and the trap
+// shows why on the page.
+(window as unknown as Record<string, unknown>).__kaiBooted = true;
+
 installConsoleLogBridge();
 installFocusModalityGuard();
 

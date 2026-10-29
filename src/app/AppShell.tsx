@@ -30,8 +30,42 @@ import {
 import { ProjectWorkspace } from "./App";
 import { ProjectsMenuContext } from "./projectsMenu";
 import { LazyStore } from "@tauri-apps/plugin-store";
+import { Spinner } from "@/components/ui/spinner";
 
 const openProjectsStore = new LazyStore("kai-open-projects.json", { defaults: {}, autoSave: 200 });
+
+/** Race a boot-critical promise with a timeout + rejection guard so a wedged
+ * IPC call can never wedge the WHOLE boot: on failure or timeout, log loudly
+ * (the console bridge forwards into kai-<pid>.log) and continue with the
+ * fallback. main.tsx's pre-render race covers the same wedge class for
+ * ReactDOM.render; this covers AppShell's ready gate — before this, a single
+ * hung await left a permanently blank, themed window with zero diagnostics. */
+async function bootAwait<T>(
+  p: Promise<T>,
+  fallback: () => T,
+  label: string,
+  ms = 10_000,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const guarded = p.then(
+    (value) => value,
+    (err) => {
+      console.error(`[boot] ${label} failed:`, err);
+      return fallback();
+    },
+  );
+  const timed = new Promise<T>((resolve) => {
+    timer = setTimeout(() => {
+      console.error(`[boot] ${label} stuck for ${ms}ms - continuing with fallback (IPC wedged?)`);
+      resolve(fallback());
+    }, ms);
+  });
+  try {
+    return await Promise.race([guarded, timed]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 /** App-level owner of retained project workspaces. Project switches are
  * visibility changes, NOT destructive `resetWorkspace` calls: terminals,
@@ -41,6 +75,9 @@ export default function App() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [statusVersion, setStatusVersion] = useState(0);
+  /** Human-readable boot phase - rendered by the pre-ready placeholder so a
+   * stuck boot is diagnosable from the window itself, no devtools needed. */
+  const [bootStep, setBootStep] = useState("starting");
   /** Pending close confirmation (rail X) - null when none. */
   const [closeConfirm, setCloseConfirm] = useState<{
     id: string;
@@ -59,14 +96,29 @@ export default function App() {
 
   useEffect(() => {
     void (async () => {
+      // Every IPC here is boot-critical and hangs (not rejects) when the
+      // channel wedges - guard each with bootAwait so one stuck call can't
+      // leave a permanently blank window. The phase label shows in the
+      // placeholder, making the wedge visible in the window itself.
       const launch = getLaunchDir();
-      await usePreferencesStore.getState().init().catch(() => undefined);
+      setBootStep("loading preferences");
+      await bootAwait(usePreferencesStore.getState().init(), () => undefined, "preferences.init");
       const prefs = usePreferencesStore.getState();
-      const home = await homeDir().then((p) => p.replace(/\\/g, "/")).catch(() => "");
-      const saved = await openProjectsStore.get<{
-        roots?: Array<string | { root: string; env: WorkspaceEnv }>;
-        activeId?: string;
-      }>("workspaces").catch(() => null);
+      setBootStep("resolving home directory");
+      const home = await bootAwait(
+        homeDir().then((p) => p.replace(/\\/g, "/")),
+        () => "",
+        "homeDir",
+      );
+      setBootStep("restoring open projects");
+      const saved = await bootAwait(
+        openProjectsStore.get<{
+          roots?: Array<string | { root: string; env: WorkspaceEnv }>;
+          activeId?: string;
+        }>("workspaces"),
+        () => null,
+        "openProjectsStore.get(workspaces)",
+      );
       const savedProjects = (saved?.roots ?? []).map((entry) =>
         typeof entry === "string" ? { root: entry, env: LOCAL_WORKSPACE } : entry,
       );
@@ -181,7 +233,18 @@ export default function App() {
     });
   }, [projects, activeId, ready]);
 
-  if (!ready) return null;
+  if (!ready) {
+    // Diagnosable boot placeholder instead of a blank themed window: shows
+    // the exact phase (and that the frontend is alive) if a boot IPC wedges.
+    return (
+      <div className="flex h-screen w-full items-center justify-center">
+        <div className="flex flex-col items-center gap-2 text-muted-foreground">
+          <Spinner className="size-5" />
+          <span className="text-sm">Starting KAI ({bootStep})…</span>
+        </div>
+      </div>
+    );
+  }
   return (
     <ProjectsMenuContext.Provider value={{
       items,
