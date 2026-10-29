@@ -186,44 +186,49 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
   const sidebarWidthWriteTimerRef = useRef(0);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarView, setSidebarViewState] = useState<SidebarViewId>("explorer");
-  // Per-project sidebar collapsed state. Each workspace keeps its own
-  // tree-open/tree-closed preference; switching projects must not force the
-  // new project's sidebar open (which left the expanded AI mini-window
-  // floating over space the tree no longer occupies).
-  const projectSidebarCollapsed = useRef<Map<string, boolean>>(new Map());
-  const lastSidebarProjectRef = useRef<string | null>(null);
   const persistSidebarView = useCallback((view: SidebarViewId) => {
     setSidebarViewState(view);
     void setSidebarView(view);
   }, []);
+
+  // ── Expanded-AI-window left offset ──────────────────────────────────────
+  // `--kai-workspace-left` (rail 48px + sidebar + handle) is a document-global
+  // var the expanded AiMiniWindow positions its left edge against. Every
+  // ProjectWorkspace mounts its OWN sidebar panel, and background panels fire
+  // onResize on mount — without a gate, the var tracked whichever project
+  // mounted or resized last, not the foreground one. And a project switch
+  // resizes nothing, so a stale value from the outgoing project made the
+  // incoming project's expanded window render over its file tree (or leave a
+  // gap past it). Two rules keep it correct:
+  //   1. only the foreground instance writes the var (onResize gate below);
+  //   2. the foreground instance re-syncs the var on every activation.
+  // Width and collapsed state are naturally per-project — each instance owns
+  // its panel for its whole mounted life, so there is nothing to save/restore
+  // across switches beyond the var itself.
+  const writeWorkspaceLeft = useCallback((inPixels: number) => {
+    const handleW = inPixels > 0 ? 1 : 0;
+    document.documentElement.style.setProperty(
+      "--kai-workspace-left",
+      `${inPixels + handleW + 48}px`,
+    );
+  }, []);
+  useEffect(() => {
+    if (!isActive) return;
+    const panel = sidebarRef.current;
+    const px = panel
+      ? panel.getSize().inPixels
+      : sidebarCollapsed
+        ? 0
+        : sidebarWidthRef.current;
+    writeWorkspaceLeft(px);
+  }, [isActive, sidebarCollapsed, writeWorkspaceLeft]);
+
   const toggleSidebar = useCallback(() => {
     const p = sidebarRef.current;
     if (!p) return;
     if (p.getSize().asPercentage <= 0) p.expand();
     else p.collapse();
   }, []);
-  // Save/restore the sidebar collapsed state across project switches.
-  // Runs on every foreground flip: record the OUTGOING project's state, then
-  // apply the INCOMING project's remembered state (default: open).
-  useEffect(() => {
-    const projectId = runtime?.id ?? null;
-    if (!projectId) return;
-    if (lastSidebarProjectRef.current && lastSidebarProjectRef.current !== projectId) {
-      projectSidebarCollapsed.current.set(lastSidebarProjectRef.current, sidebarCollapsed);
-    }
-    if (lastSidebarProjectRef.current !== projectId) {
-      const remembered = projectSidebarCollapsed.current.get(projectId) ?? false;
-      const panel = sidebarRef.current;
-      if (panel) {
-        const isCollapsedNow = panel.getSize().asPercentage <= 0;
-        if (remembered !== isCollapsedNow) {
-          if (remembered) panel.collapse();
-          else panel.resize(`${sidebarWidthRef.current}px`);
-        }
-      }
-      lastSidebarProjectRef.current = projectId;
-    }
-  }, [runtime?.id, sidebarCollapsed]);
   const cycleSidebarView = useCallback(
     (view: SidebarViewId) => {
       const panel = sidebarRef.current;
@@ -1927,11 +1932,10 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
                   setSidebarCollapsed(size.inPixels === 0);
                   // Track the workspace left edge (project rail + sidebar +
                   // handle) for the expanded agent window positioning.
-                  const handleW = size.inPixels > 0 ? 1 : 0;
-                  document.documentElement.style.setProperty(
-                    "--kai-workspace-left",
-                    `${size.inPixels + handleW + 48}px`,
-                  );
+                  // FOREGROUND ONLY: background project panels fire onResize
+                  // on mount/resizes of their hidden subtree — an ungated
+                  // write raced the var to whichever instance mounted last.
+                  if (isActive) writeWorkspaceLeft(size.inPixels);
                 }}
               >
                 <div className="flex h-full min-h-0 flex-col border-r border-border/60 bg-card">

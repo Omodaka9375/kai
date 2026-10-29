@@ -82,14 +82,19 @@ describe("multi-project workspace ownership", () => {
     expect(rowEnd).toBeLessThan(statusBar);
   });
 
-  it("remembers the sidebar collapsed state per project across foreground switches", () => {
-    // Switching projects must not force the incoming project's sidebar open
-    // (the expanded mini-window then floats over space the tree vacated).
-    // The save/restore block records the OUTGOING project's state and applies
-    // the INCOMING project's remembered state on every foreground flip.
-    expect(workspace).toContain("projectSidebarCollapsed.current.set(lastSidebarProjectRef.current, sidebarCollapsed)");
-    expect(workspace).toContain("const remembered = projectSidebarCollapsed.current.get(projectId) ?? false;");
-    expect(workspace).toContain("if (remembered) panel.collapse();");
+  it("positions the expanded AI window from the FOREGROUND project's sidebar only", () => {
+    // --kai-workspace-left is document-global, but every project mounts its
+    // own sidebar panel and background panels fire onResize on mount. The var
+    // must therefore be written ONLY by the active instance's onResize and
+    // re-synced on every activation — otherwise the expanded window renders
+    // at the outgoing/stale offset and covers the incoming project's tree.
+    const miniWindow = readFileSync(new URL("../modules/ai/components/AiMiniWindow.tsx", import.meta.url), "utf8");
+    expect(miniWindow).toContain("--kai-workspace-left");
+    // Foreground-only gate inside onResize…
+    expect(workspace).toContain("if (isActive) writeWorkspaceLeft(size.inPixels);");
+    // …and an activation re-sync (a project switch resizes nothing, so
+    // without this the var would keep the outgoing project's width).
+    expect(workspace).toMatch(/useEffect\(\(\) => \{\s*if \(!isActive\) return;[\s\S]*?writeWorkspaceLeft\(px\);/);
   });
 
   it("keeps session and archive controls in the AI window, not the project rail", () => {
