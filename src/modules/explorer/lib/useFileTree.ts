@@ -53,7 +53,16 @@ export function useFileTree(rootPath: string | null, options?: Options) {
     showHiddenRef.current = showHidden;
   }, [showHidden]);
 
+  const nodesRef = useRef<TreeState>({});
+  const rootRef = useRef(rootPath);
+  const refreshGenerationRef = useRef(0);
+
+  useEffect(() => {
+    nodesRef.current = nodes;
+  }, [nodes]);
+
   const fetchChildren = useCallback(async (path: string) => {
+    const generation = refreshGenerationRef.current;
     setNodes((s) => ({ ...s, [path]: { status: "loading" } }));
     try {
       const entries = await invoke<DirEntry[]>("fs_read_dir", {
@@ -61,8 +70,12 @@ export function useFileTree(rootPath: string | null, options?: Options) {
         showHidden: showHiddenRef.current,
         workspace: currentWorkspaceEnv(),
       });
+      // A project switch / reset invalidates any in-flight directory read;
+      // otherwise a late response can resurrect entries from the old root.
+      if (generation !== refreshGenerationRef.current) return;
       setNodes((s) => ({ ...s, [path]: { status: "loaded", entries } }));
     } catch (e) {
+      if (generation !== refreshGenerationRef.current) return;
       setNodes((s) => ({
         ...s,
         [path]: { status: "error", message: String(e) },
@@ -72,18 +85,14 @@ export function useFileTree(rootPath: string | null, options?: Options) {
 
   // Root change → reset state.
   useEffect(() => {
-    if (!rootPath) {
-      setNodes({});
-      setExpanded(new Set());
-      setPendingCreate(null);
-      setRenaming(null);
-      return;
-    }
+    rootRef.current = rootPath;
+    refreshGenerationRef.current += 1;
+    nodesRef.current = {};
     setPendingCreate(null);
     setRenaming(null);
     setExpanded(new Set());
     setNodes({});
-    void fetchChildren(rootPath);
+    if (rootPath) void fetchChildren(rootPath);
   }, [rootPath, fetchChildren]);
 
   useEffect(() => {
@@ -138,6 +147,48 @@ export function useFileTree(rootPath: string | null, options?: Options) {
     },
     [fetchChildren],
   );
+
+  /** Refresh every visible directory, not just the root. External deletions
+   *  inside expanded folders otherwise remain visible forever because their
+   *  parent listing is never requested again. Reads are issued from one
+   *  snapshot; new folders are still lazy-loaded when expanded. */
+  const refreshAll = useCallback(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const generation = ++refreshGenerationRef.current;
+    const paths = new Set<string>([root]);
+    for (const [path, state] of Object.entries(nodesRef.current)) {
+      if (state.status === "loaded") paths.add(path);
+    }
+    void Promise.all(
+      [...paths].map(async (path) => {
+        try {
+          const entries = await invoke<DirEntry[]>("fs_read_dir", {
+            path,
+            showHidden: showHiddenRef.current,
+            workspace: currentWorkspaceEnv(),
+          });
+          return { path, entries } as const;
+        } catch (error) {
+          return { path } as const;
+        }
+      }),
+    ).then((results) => {
+      if (generation !== refreshGenerationRef.current) return;
+      setNodes((current) => {
+        const next = { ...current };
+        for (const result of results) {
+          // A transient refresh failure must not blank a previously loaded
+          // directory. The next focus/manual refresh retries the listing.
+          if (result.entries !== undefined) {
+            next[result.path] = { status: "loaded", entries: result.entries };
+          }
+        }
+        nodesRef.current = next;
+        return next;
+      });
+    });
+  }, []);
 
   // --- mutations ---
 
@@ -256,6 +307,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
     toggle,
     expand,
     refresh,
+    refreshAll,
     beginCreate,
     cancelCreate,
     commitCreate,

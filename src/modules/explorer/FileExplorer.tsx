@@ -272,6 +272,38 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(
       if (changed) setSelection(next);
     }, [entryIndexByPath, selection]);
 
+    // Refresh all VISIBLE directories. Manual refresh used to re-list only
+    // the root, so external deletions in expanded folders stayed visible.
+    // There is no OS watcher here yet: coalesce focus/visibility/terminal
+    // changes into one snapshot refresh instead of polling every few seconds.
+    const refreshAllRef = useRef(tree.refreshAll);
+    refreshAllRef.current = tree.refreshAll;
+    useEffect(() => {
+      if (!rootPath) return;
+      let timer = 0;
+      let disposed = false;
+      const schedule = () => {
+        if (timer) window.clearTimeout(timer);
+        timer = window.setTimeout(() => {
+          timer = 0;
+          if (!disposed) refreshAllRef.current();
+        }, 150);
+      };
+      const onVisibility = () => {
+        if (document.visibilityState === "visible") schedule();
+      };
+      window.addEventListener("focus", schedule);
+      window.addEventListener("Kai:term-command-end", schedule);
+      document.addEventListener("visibilitychange", onVisibility);
+      return () => {
+        disposed = true;
+        if (timer) window.clearTimeout(timer);
+        window.removeEventListener("focus", schedule);
+        window.removeEventListener("Kai:term-command-end", schedule);
+        document.removeEventListener("visibilitychange", onVisibility);
+      };
+    }, [rootPath]);
+
     // Auto-refresh when the AI agent creates/writes files.
     useEffect(() => {
       const handler = (e: Event) => {
@@ -619,7 +651,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(
             variant="ghost"
             size="icon"
             className="size-6 text-muted-foreground hover:text-foreground"
-            onClick={() => tree.refresh(rootPath)}
+            onClick={() => tree.refreshAll()}
             title="Refresh"
           >
             <HugeiconsIcon icon={Refresh01Icon} size={12} strokeWidth={2} />
@@ -755,7 +787,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(
               </ContextMenuItem>
               <ContextMenuItem
                 className={COMPACT_ITEM}
-                onSelect={() => tree.refresh(rootPath)}
+                onSelect={() => tree.refreshAll()}
               >
                 Refresh
               </ContextMenuItem>
