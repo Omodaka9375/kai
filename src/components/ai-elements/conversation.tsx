@@ -14,8 +14,11 @@ export type ConversationProps = ComponentProps<typeof StickToBottom>;
 export const Conversation = ({ className, ...props }: ConversationProps) => (
   <StickToBottom
     className={cn("relative flex-1 overflow-y-auto", className)}
-    initial="smooth"
-    resize="smooth"
+    // Restored chats and retained project workspaces must land directly on
+    // the current line. Smooth initial/resize scrolling replays the entire
+    // conversation every time the mini-window changes session or visibility.
+    initial="instant"
+    resize="instant"
     role="log"
     {...props}
   />

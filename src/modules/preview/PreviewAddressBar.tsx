@@ -22,6 +22,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { findPreviewServerHandle } from "./serverProcess";
 
 type PortPreset = {
   port: number;
@@ -100,28 +101,18 @@ export const PreviewAddressBar = forwardRef<PreviewAddressBarHandle, Props>(
       if (!port) { setServerHandle(null); return; }
 
       let cancelled = false;
-      void native.shellBgList().then((list) => {
-        if (cancelled) return;
-        const match = list.find((p) => {
-          if (p.exited) return false;
-          const cmd = p.command.toLowerCase();
-          // Match various server command patterns
-          const portPatterns = [
-            `:${port}`,           // :3000, :5173
-            `--port ${port}`,     // --port 3000
-            `--port=${port}`,     // --port=3000
-            `-p ${port}`,         // -p 3000
-            `-p=${port}`,         // -p=3000
-            `port:${port}`,       // port:3000 (JSON config)
-            `port=${port}`,       // port=3000 (env var style)
-            `localhost:${port}`,  // localhost:3000
-            `127.0.0.1:${port}`,  // 127.0.0.1:3000
-            `0.0.0.0:${port}`,    // 0.0.0.0:3000
-            `:::${port}`,         // :::3000 (IPv6)
-          ];
-          return portPatterns.some(pattern => cmd.includes(pattern));
-        });
-        setServerHandle(match?.handle ?? null);
+      void native.shellBgList().then(async (list) => {
+        const handle = await findPreviewServerHandle(
+          list,
+          port,
+          async (processHandle) => {
+            const logs = await native.shellBgLogs(processHandle);
+            return logs.bytes;
+          },
+        );
+        if (!cancelled) setServerHandle(handle);
+      }).catch(() => {
+        if (!cancelled) setServerHandle(null);
       });
       return () => { cancelled = true; };
     }, [url]);

@@ -81,8 +81,7 @@ export function SidebarRail({
 
   return (
     <div
-      style={{ height: SIDEBAR_RAIL_HEIGHT }}
-      className="flex shrink-0 items-center justify-around border-t border-border/60 bg-card/85 px-1.5 backdrop-blur"
+      className="flex h-full items-center justify-around border-t border-border/60 bg-card/85 px-1.5 backdrop-blur"
     >
       {slots.map((slot) => {
         const isActive = slot.kind === "view" && slot.id === activeView;

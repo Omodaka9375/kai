@@ -324,7 +324,7 @@ type StoreState = {
   lastHydratedWorkspace: string | null;
   sessions: SessionMeta[];
   activeSessionId: string | null;
-  hydrateSessions: (workspaceRoot?: string | null) => Promise<void>;
+  hydrateSessions: (workspaceRoot?: string | null, runtime?: import("@/modules/workspace").ProjectRuntime) => Promise<void>;
   newSession: () => string;
   switchSession: (id: string) => void;
   /** Archive hides a session from the active list without stopping its run
@@ -616,12 +616,13 @@ export function getProjectActiveSession(projectId: string): string | null {
   return projectActiveSessions.get(projectId) ?? null;
 }
 export function projectIdForSession(sessionId: string): string | null {
-  const recorded = getSessionPreferences(sessionId).projectId;
-  if (recorded) return recorded;
   const session = useChatStore.getState().sessions.find((s) => s.id === sessionId);
   const root = normalizeWorkspacePath(session?.workspaceRoot);
-  if (!root) return null;
-  return projectIdFor(root, session?.workspaceEnv ?? { kind: "local" });
+  // Root+environment is canonical. A foreground switch can briefly expose
+  // the previous project's active id; a preference written during that
+  // window must never reassign the session to the incoming project.
+  if (root) return projectIdFor(root, session?.workspaceEnv ?? { kind: "local" });
+  return getSessionPreferences(sessionId).projectId ?? null;
 }
 
 export function setProjectActiveSession(projectId: string, sessionId: string | null): void {
@@ -900,7 +901,10 @@ export const useChatStore = create<StoreState>((set, get) => ({
   cycleAutoApprove: () => {
     const cur = get().autoApprove;
     const next: AutoApproveMode = cur === "off" ? "all" : "off";
-    set({ autoApprove: next });
+    // The bridge reads the SESSION-scoped mode, not this legacy presentation
+    // field. Route cycling through the same action as an explicit set so the
+    // visible Allow/Ask control and actual approval behavior cannot diverge.
+    get().setAutoApprove(next);
   },
   autoApprovedIds: new Set<string>(),
   markAutoApproved: (id) => {
@@ -914,7 +918,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
   sessions: [],
   activeSessionId: null,
 
-  hydrateSessions: async (workspaceRoot?: string | null) => {
+  hydrateSessions: async (workspaceRoot?: string | null, runtime?: import("@/modules/workspace").ProjectRuntime) => {
     // Serialize starts: a run may only begin once the previous hydration has
     // fully settled. This alone removes most of the interleave window.
     const prior = hydrateChain;
@@ -927,6 +931,10 @@ export const useChatStore = create<StoreState>((set, get) => ({
     const isStale = () => seq !== hydrateSeq;
 
     const root = workspaceRoot ?? get().live?.getWorkspaceRoot?.() ?? null;
+    // Capture the owning project ONCE. The foreground runtime can change
+    // while this hydration awaits storage (A → B → A); reading the mutable
+    // global below would restore B's active session into A's workspace.
+    const hydrationRuntime = runtime ?? activeProjectRuntime;
     const norm = normalizeWorkspacePath;
     const normalizedRoot = norm(root);
 
@@ -944,7 +952,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
     // Serialized start: by the time we're here, every earlier hydration has
     // fully settled, so re-scoping can't interleave with another run's
     // reads/writes. (No owner re-check needed — starts never overlap.)
-    await     setSessionsScope(root, activeProjectRuntime?.env);
+    await setSessionsScope(root, hydrationRuntime?.env);
     if (isStale()) return;
 
     // Skip only if we've already hydrated for this exact workspace.
@@ -957,8 +965,8 @@ export const useChatStore = create<StoreState>((set, get) => ({
     let sessions: SessionMeta[] = [];
     let loadedActiveId: string | null = null;
     try {
-      const loaded = activeProjectRuntime
-        ? await loadAllForRoot(activeProjectRuntime.root, activeProjectRuntime.env)
+      const loaded = hydrationRuntime
+        ? await loadAllForRoot(hydrationRuntime.root, hydrationRuntime.env)
         : await loadAll();
       if (isStale()) return;
       sessions = loaded.sessions;
@@ -1003,8 +1011,8 @@ export const useChatStore = create<StoreState>((set, get) => ({
     }
 
     const belongsToTarget = (session: SessionMeta) =>
-      activeProjectRuntime
-        ? projectIdForSession(session.id) === activeProjectRuntime.id
+      hydrationRuntime
+        ? projectIdForSession(session.id) === hydrationRuntime.id
         : norm(session.workspaceRoot) === normalizedRoot ||
           (!session.workspaceRoot && normalizedRoot == null);
 
@@ -1017,7 +1025,12 @@ export const useChatStore = create<StoreState>((set, get) => ({
     const currentActiveId = get().activeSessionId;
     // On cold start, restore the persisted last-active session before
     // falling back to a fresh/reusable one.
-    const restoredActiveId = loadedActiveId ?? null;
+    // Prefer the LIVE last-active selection for this project (what the AI
+    // window's session picker last set). Disk activeId lags behind it.
+    const liveActiveId = hydrationRuntime
+      ? getProjectActiveSession(hydrationRuntime.id)
+      : null;
+    const restoredActiveId = liveActiveId ?? loadedActiveId ?? null;
 
     // A real project switch (File > Open Project / StartPage recent /
     // local↔WSL) is the ONLY way the workspace root changes — plain terminal
@@ -1027,9 +1040,9 @@ export const useChatStore = create<StoreState>((set, get) => ({
     const isWorkspaceSwitch =
       get().sessionsHydrated &&
       currentActiveId != null &&
-      (activeProjectRuntime
+      (hydrationRuntime
         ? (get().lastHydratedWorkspace
-          ? projectIdFor(get().lastHydratedWorkspace!, activeProjectRuntime.env) !== activeProjectRuntime.id
+          ? projectIdFor(get().lastHydratedWorkspace!, hydrationRuntime.env) !== hydrationRuntime.id
           : true)
         : norm(get().lastHydratedWorkspace) !== normalizedRoot);
 
@@ -1049,7 +1062,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
       // Prefer the project's persisted last-active session, then its newest.
       nextActiveId =
         restoredActiveId != null &&
-        allSessions.some((s) => s.id === restoredActiveId)
+        workspaceMatched.some((s) => s.id === restoredActiveId)
           ? restoredActiveId
           : (workspaceMatched[0]?.id ?? null);
     } else if (!currentActiveId) {
@@ -1060,9 +1073,13 @@ export const useChatStore = create<StoreState>((set, get) => ({
           : null;
     }
 
-    if (reusable) {
+    const canRestoreTarget = nextActiveId != null &&
+      workspaceMatched.some((session) => session.id === nextActiveId);
+    if (reusable || canRestoreTarget) {
+      // Do not manufacture a placeholder when this project already has a
+      // session to restore. Repeated A→B→A switches must be idempotent.
       nextSessions = allSessions;
-      if (!nextActiveId) nextActiveId = reusable.id;
+      if (!nextActiveId) nextActiveId = reusable!.id;
     } else {
       const freshId = newSessionId();
       const fresh: SessionMeta = {
@@ -1071,14 +1088,14 @@ export const useChatStore = create<StoreState>((set, get) => ({
         createdAt: Date.now(),
         updatedAt: Date.now(),
         workspaceRoot: root,
-        workspaceEnv: activeProjectRuntime?.env,
+        workspaceEnv: hydrationRuntime?.env,
       };
       nextSessions = [fresh, ...allSessions];
       // Nothing from the target workspace to activate — the fresh session
       // (stamped with this root) becomes active.
       if (!nextActiveId) nextActiveId = freshId;
-      void (activeProjectRuntime
-        ? saveSessionsListForRoot(activeProjectRuntime.root, nextSessions, activeProjectRuntime.env)
+      void (hydrationRuntime
+        ? saveSessionsListForRoot(hydrationRuntime.root, nextSessions, hydrationRuntime.env)
         : saveSessionsList(nextSessions)).catch((err) =>
         console.error("[hydrateSessions] Failed to persist sessions:", err),
       );
@@ -1100,8 +1117,8 @@ export const useChatStore = create<StoreState>((set, get) => ({
     // project's conversation after a fast project switch.
     if (isStale()) return;
 
-    void (activeProjectRuntime
-      ? saveActiveIdForRoot(activeProjectRuntime.root, nextActiveId, activeProjectRuntime.env)
+    void (hydrationRuntime
+      ? saveActiveIdForRoot(hydrationRuntime.root, nextActiveId, hydrationRuntime.env)
       : saveActiveId(nextActiveId)).catch((err) =>
       console.error("[hydrateSessions] Failed to persist activeId:", err),
     );
@@ -1115,8 +1132,8 @@ export const useChatStore = create<StoreState>((set, get) => ({
     if (nextActiveId) {
       if (!chats.has(nextActiveId) && !seedMessages.has(nextActiveId)) {
         try {
-          const m = activeProjectRuntime
-            ? await loadMessagesForRoot(activeProjectRuntime.root, nextActiveId, activeProjectRuntime.env)
+          const m = hydrationRuntime
+            ? await loadMessagesForRoot(hydrationRuntime.root, nextActiveId, hydrationRuntime.env)
             : await loadMessages(nextActiveId);
           if (isStale()) return;
           if (
@@ -1138,9 +1155,12 @@ export const useChatStore = create<StoreState>((set, get) => ({
 
     if (isStale()) return;
 
+    if (hydrationRuntime) setProjectActiveSession(hydrationRuntime.id, nextActiveId);
     set({
       sessions: nextSessions,
       activeSessionId: nextActiveId,
+      agentMeta: nextActiveId ? getSessionAgentMeta(nextActiveId) : IDLE_META,
+      autoApprove: nextActiveId ? getSessionAutoApprove(nextActiveId) : "off",
       sessionsHydrated: true,
       lastHydratedWorkspace: root,
     });

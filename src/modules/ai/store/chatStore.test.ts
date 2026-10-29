@@ -180,6 +180,22 @@ describe("chatStore exports", () => {
     const state = mod.useChatStore.getState();
     expect(typeof state.releaseStaleApprovals).toBe("function");
     expect(typeof state.setSteeringMessage).toBe("function");
+
+    // The toggle drives the SAME session-scoped value the approval bridge
+    // reads. Previously it only changed the visible global label, so Allow
+    // continued behaving like Ask until another action happened to sync it.
+    const approvalSession = "approval-mode-test";
+    mod.useChatStore.setState({
+      activeSessionId: approvalSession,
+      autoApprove: "off",
+    });
+    expect(mod.getSessionAutoApprove(approvalSession)).toBe("off");
+    mod.useChatStore.getState().cycleAutoApprove();
+    expect(mod.useChatStore.getState().autoApprove).toBe("all");
+    expect(mod.getSessionAutoApprove(approvalSession)).toBe("all");
+    mod.useChatStore.getState().cycleAutoApprove();
+    expect(mod.getSessionAutoApprove(approvalSession)).toBe("off");
+
     // Steering message now carries parts, not text
     state.setSteeringMessage([
       { type: "text", text: "hi" } as never,
@@ -299,6 +315,57 @@ describe("chatStore exports", () => {
       expect(
         (restored?.[0]?.parts?.[0] as { text?: string } | undefined)?.text,
       ).toBe("CORRUPT");
+    });
+
+    it("captures the target runtime so A→B→A restores A, not the foreground project", async () => {
+      const store = mod.useChatStore;
+      const { createProjectRuntime, projectIdFor, LOCAL_WORKSPACE } = await import("@/modules/workspace");
+      const { setSessionPreferences } = await import("./sessionPreferences");
+      const a = createProjectRuntime("D:/owned-a", LOCAL_WORKSPACE);
+      const b = createProjectRuntime("D:/owned-b", LOCAL_WORKSPACE);
+      const aSession = {
+        id: "owned-a-session",
+        title: "A session",
+        createdAt: 1,
+        updatedAt: 1,
+        workspaceRoot: a.root,
+        workspaceEnv: a.env,
+      };
+      const bSession = { ...aSession, id: "owned-b-session", title: "B session", workspaceRoot: b.root };
+      store.setState({ sessions: [aSession, bSession], sessionsHydrated: true });
+      setSessionPreferences(aSession.id, { projectId: a.id });
+      setSessionPreferences(bSession.id, { projectId: b.id });
+
+      // The hydration must retain A even after the foreground flips to B
+      // during its first await. The captured runtime also determines which
+      // project's active session is restored. This test runs last because it
+      // deliberately changes the process-wide foreground runtime.
+      expect(projectIdFor(a.root, a.env)).toBe(a.id);
+      const hydration = store.getState().hydrateSessions(a.root, a);
+      mod.setActiveProjectRuntime(b);
+      await hydration;
+      expect(store.getState().lastHydratedWorkspace?.toLowerCase()).toBe("d:/owned-a");
+      const active = store.getState().sessions.find((s) => s.id === store.getState().activeSessionId);
+      expect(active?.workspaceRoot?.toLowerCase()).toBe("d:/owned-a");
+      expect(mod.getProjectActiveSession(a.id)).toBe(store.getState().activeSessionId);
+
+      const sessionCount = store.getState().sessions.length;
+      await store.getState().hydrateSessions(b.root, b);
+      const activeB = store.getState().activeSessionId;
+      expect(activeB).toBe(bSession.id);
+      expect(store.getState().sessions).toHaveLength(sessionCount);
+
+      // Repeated switches must restore the SAME chat objects. No fresh
+      // placeholder is allowed just because the incoming root has no title
+      // exactly equal to "New chat".
+      await store.getState().hydrateSessions(a.root, a);
+      expect(store.getState().activeSessionId).toBe(aSession.id);
+      expect(store.getState().sessions).toHaveLength(sessionCount);
+      await store.getState().hydrateSessions(b.root, b);
+      expect(store.getState().activeSessionId).toBe(activeB);
+      expect(store.getState().sessions).toHaveLength(sessionCount);
+      expect(mod.projectIdForSession(aSession.id)).toBe(a.id);
+      expect(mod.projectIdForSession(bSession.id)).toBe(b.id);
     });
   });
 });

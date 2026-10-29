@@ -16,6 +16,17 @@ const src = (rel: string): string =>
 describe("approval responses flow through the denial latch", () => {
   const bridge = src("../components/AgentRunBridge.tsx");
 
+  it("Allow/Ask cycling updates the session mode consumed by the bridge", () => {
+    const store = src("../store/chatStore.ts");
+    const toggle = store.slice(
+      store.indexOf("cycleAutoApprove: () => {"),
+      store.indexOf("autoApprovedIds:", store.indexOf("cycleAutoApprove: () => {")),
+    );
+    expect(toggle).toContain("get().setAutoApprove(next)");
+    expect(toggle).not.toContain("set({ autoApprove: next })");
+    expect(store).toContain("autoApprove: nextActiveId ? getSessionAutoApprove(nextActiveId) : \"off\"");
+  });
+
   it("AgentRunBridge imports the latch", () => {
     expect(bridge).toMatch(/from "\.\.\/lib\/approvalLatch"/);
   });

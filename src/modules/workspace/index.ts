@@ -18,4 +18,4 @@ export {
   requireProjectRuntime,
   useProjectRuntime,
 } from "./runtimeContext";
-export { ProjectsSwitcher, type ProjectSwitcherItem } from "./ProjectsSwitcher";
+export { ProjectRail, type ProjectSwitcherItem } from "./ProjectRail";

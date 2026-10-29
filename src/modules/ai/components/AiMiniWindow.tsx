@@ -39,7 +39,7 @@ import { SandboxBadge } from "./SandboxBadge";
 import { ShadowStrip, ShadowSessionMenuItem } from "./ShadowStrip";
 import { estimateCost, getModel, getModelContextLimit } from "../config";
 import { effectiveContextLimit, SYSTEM_OVERHEAD_TOKENS } from "../lib/compact";
-import { saveSessionsList, type SessionMeta } from "../lib/sessions";
+import { type SessionMeta } from "../lib/sessions";
 import { absoluteTime, relativeTime } from "../lib/relativeTime";
 import { normalizeWorkspacePath } from "../lib/workspacePath";
 import { getOrCreateChat, useChatStore } from "../store/chatStore";
@@ -117,55 +117,6 @@ export function AiMiniWindow() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [c.isBusy, c.stop]);
-
-  const sessions = useChatStore((s) => s.sessions);
-  const switchSession = useChatStore((s) => s.switchSession);
-  const newSession = useChatStore((s) => s.newSession);
-  const workspaceRoot = useChatStore((s) => s.live.getWorkspaceRoot());
-
-  useEffect(() => {
-    if (!workspaceRoot || !sessionId || sessions.length === 0) return;
-    const activeSession = sessions.find((s) => s.id === sessionId);
-    if (!activeSession) return;
-
-    // Normalize paths (case-insensitive identity — see normalizeWorkspacePath).
-    // workspaceRoot is truthy-guarded above, so this is never null here.
-    const normalized = normalizeWorkspacePath(workspaceRoot)!;
-    const activeRoot = normalizeWorkspacePath(activeSession.workspaceRoot);
-
-    // If the active session doesn't have a workspaceRoot associated yet, associate it with the current project!
-    if (!activeSession.workspaceRoot) {
-      const next = sessions.map((s) =>
-        s.id === sessionId ? { ...s, workspaceRoot } : s,
-      );
-      useChatStore.setState({ sessions: next });
-      void saveSessionsList(next);
-      return;
-    }
-
-    // If the active session is from a different project, auto-switch or create.
-    // "Different project" means normalized is neither equal to activeRoot nor a
-    // subdirectory of it — cd-ing into a subfolder must not trigger a reset.
-    const isSubfolderOrSame =
-      activeRoot &&
-      (normalized === activeRoot || normalized.startsWith(activeRoot + "/"));
-
-    if (activeRoot && !isSubfolderOrSame) {
-      const projectSessions = sessions.filter((s) => {
-        if (!s.workspaceRoot) return false; // Don't auto-switch back to legacy empty ones
-        const sRoot = normalizeWorkspacePath(s.workspaceRoot);
-        // Match sessions whose root is a parent of (or equal to) normalized
-        return normalized === sRoot || normalized.startsWith(sRoot + "/");
-      });
-
-      if (projectSessions.length > 0) {
-        const sortedProject = [...projectSessions].sort((a, b) => b.updatedAt - a.updatedAt);
-        switchSession(sortedProject[0].id);
-      } else {
-        newSession();
-      }
-    }
-  }, [workspaceRoot, sessionId, sessions, switchSession, newSession]);
 
   return (
     <motion.div

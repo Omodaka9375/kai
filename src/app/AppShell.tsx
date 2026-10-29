@@ -2,9 +2,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { homeDir } from "@tauri-apps/api/path";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getLaunchDir } from "@/lib/launchDir";
+import { cn } from "@/lib/utils";
 import { useChatStore } from "@/modules/ai";
-import { projectIdForSession, setActiveProjectRuntime, setProjectActiveSession, subscribeSessionAgentMeta } from "@/modules/ai/store/chatStore";
-import { hydrateSessionPreferences, setSessionPreferences, subscribeSessionPreferences } from "@/modules/ai/store/sessionPreferences";
+import { subscribeSessionAgentMeta } from "@/modules/ai/store/chatStore";
+import { hydrateSessionPreferences, subscribeSessionPreferences } from "@/modules/ai/store/sessionPreferences";
 import { getProjectAgentStatus, subscribeProjectAgentStatus } from "@/modules/ai/store/projectStatus";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
@@ -105,36 +106,6 @@ export default function App() {
     if (activeId === id) setActiveId(next.id);
   }, [activeId, projects]);
 
-  const switchSession = useCallback((projectId: string, sessionId: string) => {
-    setProjectActiveSession(projectId, sessionId);
-    setSessionPreferences(sessionId, { projectId });
-    if (projectId !== activeId) {
-      setActiveId(projectId);
-      return;
-    }
-    const project = projects.find((item) => item.id === projectId);
-    if (project) setActiveProjectRuntime(project);
-    useChatStore.getState().switchSession(sessionId);
-  }, [activeId, projects]);
-
-  const newSession = useCallback((projectId: string) => {
-    const project = projects.find((item) => item.id === projectId);
-    if (project) setActiveProjectRuntime(project);
-    if (projectId !== activeId) setActiveId(projectId);
-    useChatStore.getState().newSession();
-  }, [activeId, projects]);
-
-  const restoreSession = useCallback((projectId: string, sessionId: string) => {
-    setProjectActiveSession(projectId, sessionId);
-    if (projectId !== activeId) {
-      setActiveId(projectId);
-      return;
-    }
-    const project = projects.find((item) => item.id === projectId);
-    if (project) setActiveProjectRuntime(project);
-    useChatStore.getState().restoreSession(sessionId);
-  }, [activeId, projects]);
-
   const closeProject = useCallback((id: string) => {
     const project = projects.find((p) => p.id === id);
     if (!project) return;
@@ -176,34 +147,35 @@ export default function App() {
   return (
     <ProjectsMenuContext.Provider value={{
       items,
-      sessions,
       addProject,
       closeProject,
       switchProject: setActiveId,
-      switchSession,
-      newSession,
-      archiveSession: (id) => {
-        const owner = sessions.find((session) => session.id === id);
-        if (owner) setSessionPreferences(id, { projectId: projectIdForSession(id) ?? undefined });
-        useChatStore.getState().archiveSession(id);
-      },
-      restoreSession,
       changeEnvironment,
     }}>
-      <div className="relative h-screen w-full">
-        {projects.map((project) => (
-          <div key={project.id} className="absolute inset-0">
-            <ProjectRuntimeProvider value={project}>
-              <ProjectWorkspace isActive={project.id === activeId} />
-            </ProjectRuntimeProvider>
-          </div>
-        ))}
-        {activeId === null ? (
-          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-            No projects open.
-            <button type="button" className="ml-2 underline" onClick={() => void addProject()}>Open project</button>
-          </div>
-        ) : null}
+      <div className="flex h-screen w-full">
+        <div className="relative min-w-0 flex-1">
+          {projects.map((project) => (
+            <div
+              key={project.id}
+              className={cn(
+                "absolute inset-0",
+                project.id !== activeId && "invisible pointer-events-none",
+              )}
+              aria-hidden={project.id !== activeId}
+              inert={project.id !== activeId ? true : undefined}
+            >
+              <ProjectRuntimeProvider value={project}>
+                <ProjectWorkspace isActive={project.id === activeId} />
+              </ProjectRuntimeProvider>
+            </div>
+          ))}
+          {activeId === null ? (
+            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+              No projects open.
+              <button type="button" className="ml-2 underline" onClick={() => void addProject()}>Open project</button>
+            </div>
+          ) : null}
+        </div>
       </div>
     </ProjectsMenuContext.Provider>
   );

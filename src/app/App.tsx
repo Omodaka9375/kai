@@ -4,6 +4,8 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { Button } from "@/components/ui/button";
+import { FileMenuTriggerProvider } from "./fileMenu";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -31,7 +33,7 @@ import { AiComposerProvider } from "@/modules/ai/components/composer";
 import { AiErrorBoundary } from "@/modules/ai/components/AiErrorBoundary";
 import { redactSensitive } from "@/modules/ai/lib/redact";
 import { setSandboxRoot } from "@/modules/ai/lib/sandbox";
-import { registerProjectRuntime, setActiveProjectRuntime, setProjectLive, setProjectModel, setProjectActiveSession, getProjectActiveSession, stopSession } from "@/modules/ai/store/chatStore";
+import { registerProjectRuntime, setActiveProjectRuntime, setProjectLive, setProjectModel, setProjectActiveSession, getProjectActiveSession, projectIdForSession, stopSession } from "@/modules/ai/store/chatStore";
 import { setSessionPreferences } from "@/modules/ai/store/sessionPreferences";
 import { native } from "@/modules/ai/lib/native";
 import { useAgentsStore } from "@/modules/ai/store/agentsStore";
@@ -56,6 +58,7 @@ import { useZoom } from "@/lib/useZoom";
 import { FileExplorer, type FileExplorerHandle } from "@/modules/explorer";
 import {
   Header,
+  FileMenu,
   type SearchInlineHandle,
   type SearchTarget,
 } from "@/modules/header";
@@ -69,6 +72,7 @@ import { useProjectsMenu } from "./projectsMenu";
 import {
   ExtensionsView,
   SidebarRail,
+  SIDEBAR_RAIL_HEIGHT,
   type SidebarViewId,
 } from "@/modules/sidebar";
 import {
@@ -96,6 +100,7 @@ import {
   type WorkspaceEnv,
   createProjectRuntime,
   useProjectRuntime,
+  ProjectRail,
 } from "@/modules/workspace";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
@@ -679,7 +684,7 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
     const saved = root ? projectModelIds[root] : undefined;
     const model = (saved ?? prefDefaultModel) as ModelId;
     if (isActive) {
-      // Activate BEFORE setting the legacy global selection: its setter
+        // Activate BEFORE setting the legacy global selection: its setter
       // mirrors into the currently active project's captured config.
       setActiveProjectRuntime(projectRuntime);
       setProjectModel(projectRuntime.id, model, useAgentsStore.getState().activeId);
@@ -693,9 +698,7 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
   useEffect(() => {
     if (!isActive || !launchCwdResolved) return;
     const root = explorerRoot ?? launchCwd ?? home ?? null;
-    void hydrateSessions(root).then(() => {
-      setProjectActiveSession(projectRuntime.id, useChatStore.getState().activeSessionId);
-    });
+      void hydrateSessions(root, projectRuntime);
     void useAgentsStore.getState().hydrate();
     void useSnippetsStore.getState().hydrate();
     void useMcpStore.getState().hydrate();
@@ -709,7 +712,7 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
     void import("@/modules/ai/store/openrouterModelsStore").then((m) =>
       m.useOpenRouterModelsStore.getState().fetch(),
     );
-  }, [isActive, hydrateSessions, launchCwdResolved, explorerRoot, launchCwd, home]);
+  }, [isActive, hydrateSessions, launchCwdResolved, explorerRoot, launchCwd, home, projectRuntime]);
 
   // Personal assistant (Telegram bridge) — ONCE per app launch.
   //
@@ -1685,9 +1688,34 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
   }, [projectRuntime.root]);
 
   useEffect(() => {
-    if (activeChatSessionId) setSessionPreferences(activeChatSessionId, { projectId: projectRuntime.id });
-    if (isActive) setProjectActiveSession(projectRuntime.id, activeChatSessionId);
+    if (!isActive || !activeChatSessionId) return;
+    // The global active id briefly still names the OUTGOING project's chat
+    // when the foreground changes. Never stamp that id onto this project.
+    if (projectIdForSession(activeChatSessionId) !== projectRuntime.id) return;
+    setSessionPreferences(activeChatSessionId, { projectId: projectRuntime.id });
+    setProjectActiveSession(projectRuntime.id, activeChatSessionId);
   }, [isActive, projectRuntime.id, activeChatSessionId]);
+
+  const fileMenuTrigger = (
+    <FileMenu
+      activeTab={activeTab}
+      dirtyCount={dirtyEditorTabs.length}
+      onSave={handleSave}
+      onSaveAll={handleSaveAll}
+    >
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        className="size-9 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-0 focus-visible:border-transparent focus:outline-none"
+        title="File"
+        aria-label="File"
+      >
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M2.5 4h11M2.5 8h11M2.5 12h11" />
+        </svg>
+      </Button>
+    </FileMenu>
+  );
 
   const workspaceSurface = (
     <div className="relative h-full min-h-0">
@@ -1822,11 +1850,15 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
   const shell = (
     <ThemeProvider>
       <TooltipProvider>
-        <div
-          className={cn("relative flex h-screen flex-col overflow-hidden bg-background text-foreground", !isActive && "invisible pointer-events-none")}
-          aria-hidden={!isActive}
-          inert={!isActive ? true : undefined}
-        >
+        <FileMenuTriggerProvider value={isActive ? fileMenuTrigger : null}>
+        <div className="relative flex h-screen overflow-hidden bg-background text-foreground">
+          <ProjectRail
+            projects={projectsMenu?.items ?? []}
+            onSwitch={(id) => projectsMenu?.switchProject(id)}
+            onAdd={() => projectsMenu?.addProject()}
+            onClose={(id) => projectsMenu?.closeProject(id)}
+          />
+          <div className="flex h-full min-w-0 flex-1 flex-col">
           <Header
             tabs={tabs}
             activeId={activeId}
@@ -1846,20 +1878,7 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
             onOpenShortcuts={() => setShortcutsOpen(true)}
             searchTarget={searchTarget}
             searchRef={searchInlineRef}
-            onOpenProject={onOpenProject}
-            onSave={handleSave}
-            onSaveAll={handleSaveAll}
-            dirtyCount={dirtyEditorTabs.length}
             projectName={projectName}
-            projects={projectsMenu?.items}
-            onSwitchProject={projectsMenu?.switchProject}
-            onSwitchSession={projectsMenu?.switchSession}
-            onNewSession={projectsMenu?.newSession}
-            onArchiveSession={projectsMenu?.archiveSession}
-            onRestoreSession={projectsMenu?.restoreSession}
-            sessions={projectsMenu?.sessions}
-            onAddProject={projectsMenu?.addProject}
-            onCloseProject={projectsMenu?.closeProject}
           />
 
           <main className="zoom-content flex min-h-0 flex-1 flex-col">
@@ -1878,12 +1897,12 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
                 onResize={(size) => {
                   if (size.inPixels > 0) persistSidebarWidth(size.inPixels);
                   setSidebarCollapsed(size.inPixels === 0);
-                  // Track the workspace left edge (sidebar + handle) for the
-                  // expanded agent window positioning.
+                  // Track the workspace left edge (project rail + sidebar +
+                  // handle) for the expanded agent window positioning.
                   const handleW = size.inPixels > 0 ? 1 : 0;
                   document.documentElement.style.setProperty(
                     "--kai-workspace-left",
-                    `${size.inPixels + handleW}px`,
+                    `${size.inPixels + handleW + 48}px`,
                   );
                 }}
               >
@@ -1911,12 +1930,17 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
                       <ExtensionsView />
                     )}
                   </div>
-                  <SidebarRail
-                    activeView={sidebarView}
-                    onSelectView={persistSidebarView}
-                    changedCount={sourceControl.changedCount}
-                    onOpenGitGraph={openGitGraphFromContext}
-                  />
+                  <div style={{ height: SIDEBAR_RAIL_HEIGHT }} className="shrink-0">
+                    <SidebarRail
+                      activeView={sidebarView}
+                      onSelectView={persistSidebarView}
+                      changedCount={sourceControl.changedCount}
+                      onOpenGitGraph={openGitGraphFromContext}
+                    />
+                  </div>
+                  {/* Matches the project rail's status-bar spacer so both
+                      bottom-left controls share the same baseline. */}
+                  <div className="h-9 shrink-0 border-t border-border/60" />
                 </div>
               </ResizablePanel>
               <ResizableHandle withHandle />
@@ -2227,7 +2251,9 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
+          </div>
         </div>
+        </FileMenuTriggerProvider>
       </TooltipProvider>
     </ThemeProvider>
   );
