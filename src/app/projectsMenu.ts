@@ -3,9 +3,14 @@ import type { ProjectSwitcherItem } from "@/modules/workspace";
 
 export type ProjectsMenu = {
   items: ProjectSwitcherItem[];
+  sessions: import("@/modules/ai/lib/sessions").SessionMeta[];
   addProject: (path?: string) => void | Promise<void>;
   closeProject: (id: string) => void;
   switchProject: (id: string) => void;
+  switchSession: (projectId: string, sessionId: string) => void;
+  newSession: (projectId: string) => void;
+  archiveSession: (sessionId: string) => void;
+  restoreSession: (projectId: string, sessionId: string) => void;
   changeEnvironment: (id: string, env: import("@/modules/workspace").WorkspaceEnv, home: string | null) => void;
 };
 

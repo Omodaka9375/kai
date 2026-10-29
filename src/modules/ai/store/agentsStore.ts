@@ -11,6 +11,7 @@ import {
   type Agent,
 } from "../lib/agents";
 import { setProjectModel, getActiveProjectRuntime, useChatStore } from "./chatStore";
+import { setSessionPreferences } from "./sessionPreferences";
 
 const CHANGED_EVENT = "Kai://ai-agents-changed";
 
@@ -78,6 +79,8 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
     });
   },
   setActiveId: (id) => {
+    const sessionId = useChatStore.getState().activeSessionId;
+    if (sessionId) setSessionPreferences(sessionId, { personaId: id });
     set({ activeId: id });
     const project = getActiveProjectRuntime();
     if (project) {

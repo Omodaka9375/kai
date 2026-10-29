@@ -29,6 +29,11 @@ import {
   useChatStore,
 } from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
+import {
+  getSessionPreferences,
+  hydrateSessionPreferences,
+  setSessionPreferences,
+} from "../store/sessionPreferences";
 import { currentWorkspaceEnv, useProjectRuntime } from "@/modules/workspace";
 
 export type FileAttachment = {
@@ -71,7 +76,8 @@ type ComposerCtx = {
   addCommand: (c: SlashCommandMeta) => void;
   removeCommand: (name: string) => void;
   isBusy: boolean;
-  submit: (options?: { text?: string }) => void;
+  /** Alt+Enter / background start leaves the current surface untouched. */
+  submit: (options?: { text?: string; background?: boolean }) => void;
   stop: () => void;
   voice: Voice;
   canSend: boolean;
@@ -104,7 +110,29 @@ export function AiComposerProvider({ children }: ProviderProps) {
     status === "streaming" ||
     status === "awaiting-approval";
 
-  const [value, setValue] = useState("");
+  const [value, setValue] = useState(() => sessionId ? getSessionPreferences(sessionId).draft ?? "" : "");
+  const draftSessionRef = useRef(sessionId);
+  useEffect(() => {
+    void hydrateSessionPreferences();
+  }, []);
+  useEffect(() => {
+    if (draftSessionRef.current !== sessionId) {
+      draftSessionRef.current = sessionId;
+      setValue(sessionId ? getSessionPreferences(sessionId).draft ?? "" : "");
+      return;
+    }
+    if (!sessionId) return;
+    const timer = setTimeout(() => {
+      // Hydration is app-owned; the composer must not replace a persisted
+      // draft with its initial empty value before the store has loaded.
+      void hydrateSessionPreferences().then(() => {
+        if (draftSessionRef.current === sessionId) {
+          setSessionPreferences(sessionId, { draft: value || undefined });
+        }
+      });
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [sessionId, value]);
   const [files, setFiles] = useState<FileAttachment[]>([]);
   const [pickedSnippets, setPickedSnippets] = useState<Snippet[]>([]);
   const [pickedCommands, setPickedCommands] = useState<SlashCommandMeta[]>([]);
@@ -303,7 +331,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
     }
   };
 
-  const submit = async (options?: { text?: string }) => {
+  const submit = async (options?: { text?: string; background?: boolean }) => {
     // `text` overrides the field value — used by hands-free voice: the
     // transcript arrives via callback before the field's setState flushes,
     // so reading `value` there would miss it.
@@ -436,7 +464,8 @@ export function AiComposerProvider({ children }: ProviderProps) {
       // never sits above a fresh reply.
       summaryNotice: null,
     });
-    if (!store.mini.open) store.openMini();
+    if (!options?.background && !store.mini.open) store.openMini();
+    if (options?.background) showNotice("Agent started in background");
     setValue("");
     setFiles([]);
     setPickedSnippets([]);

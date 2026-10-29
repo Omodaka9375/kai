@@ -21,6 +21,7 @@ import {
 import { verifyIfDirtyAtRunEnd } from "../lib/autoVerify";
 import { isApprovalDenied, noteApprovalDenied } from "../lib/approvalLatch";
 import { speakText } from "../lib/voiceTts";
+import { notifyBackgroundAgent } from "../lib/backgroundNotifications";
 import { useProjectRuntime } from "@/modules/workspace";
 
 /**
@@ -123,6 +124,8 @@ function Bridge({
   const patch = useCallback((next: Partial<AgentMeta>) => {
     patchSessionAgentMeta(sessionId, next);
   }, [sessionId]);
+  const notifiedRef = useRef<"approval" | "done" | null>(null);
+  const backgroundActiveRef = useRef(false);
   const openMini = useChatStore((s) => s.openMini);
   const persistMessages = useChatStore((s) => s.persistMessages);
   const setApprovalResponder = useChatStore((s) => s.setApprovalResponder);
@@ -189,6 +192,29 @@ function Bridge({
     }
     return n;
   }, [messages]);
+
+  useEffect(() => {
+    if (isActive) {
+      backgroundActiveRef.current = false;
+      notifiedRef.current = null;
+      return;
+    }
+    if (status === "submitted" || status === "streaming") {
+      backgroundActiveRef.current = true;
+      notifiedRef.current = null;
+    }
+    if (backgroundActiveRef.current && approvalsPending > 0 && notifiedRef.current !== "approval") {
+      notifiedRef.current = "approval";
+      const name = runtime?.root.split(/[\\/]/).filter(Boolean).pop() ?? "Project";
+      void notifyBackgroundAgent(name, "Agent needs your approval");
+    }
+    if (backgroundActiveRef.current && approvalsPending === 0 && status === "ready" && notifiedRef.current !== "done") {
+      notifiedRef.current = "done";
+      backgroundActiveRef.current = false;
+      const name = runtime?.root.split(/[\\/]/).filter(Boolean).pop() ?? "Project";
+      void notifyBackgroundAgent(name, "Agent finished its task");
+    }
+  }, [isActive, status, approvalsPending, runtime]);
 
   // ── Stale-approval reaper ─────────────────────────────────────────────
   // `approval-requested` parts can outlive their run: an aborted or errored
@@ -260,10 +286,9 @@ function Bridge({
         : {}),
       ...(runStatus === "idle" ? { error: null } : {}),
     });
-    // Auto-open the mini chat window when the agent is thinking or streaming!
-    if (isActive && (runStatus === "thinking" || runStatus === "streaming")) {
-      openMini();
-    }
+    // Background starts keep the current surface; the composer explicitly
+    // opens the transcript for ordinary sends. Background notifications use
+    // the same session-scoped status updates without stealing focus.
   }, [isActive, status, approvalsPending, patch, openMini]);
 
   useEffect(() => {

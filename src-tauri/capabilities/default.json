@@ -29,6 +29,7 @@
     "autostart:allow-is-enabled",
     "updater:default",
     "dialog:default",
+    "notification:default",
     "process:default"
   ]
 }

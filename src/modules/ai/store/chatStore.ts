@@ -16,6 +16,11 @@ import { useAgentsStore } from "./agentsStore";
 import { setProjectAgentStatus } from "./projectStatus";
 import { projectIdFor } from "@/modules/workspace";
 import { useTodosStore } from "./todoStore";
+import {
+  getSessionPreferences,
+  removeSessionPreferences,
+  setSessionPreferences,
+} from "./sessionPreferences";
 import { EMPTY_PROVIDER_KEYS, type ProviderKeys } from "../lib/keyring";
 import {
   deleteSessionData,
@@ -322,6 +327,10 @@ type StoreState = {
   hydrateSessions: (workspaceRoot?: string | null) => Promise<void>;
   newSession: () => string;
   switchSession: (id: string) => void;
+  /** Archive hides a session from the active list without stopping its run
+   *  or deleting its transcript. Restoring it makes it the active session. */
+  archiveSession: (id: string) => void;
+  restoreSession: (id: string) => void;
   deleteSession: (id: string) => void;
   renameSession: (id: string, title: string) => void;
   /** Persist messages of a session and bump its updatedAt + auto-title. */
@@ -607,6 +616,8 @@ export function getProjectActiveSession(projectId: string): string | null {
   return projectActiveSessions.get(projectId) ?? null;
 }
 export function projectIdForSession(sessionId: string): string | null {
+  const recorded = getSessionPreferences(sessionId).projectId;
+  if (recorded) return recorded;
   const session = useChatStore.getState().sessions.find((s) => s.id === sessionId);
   const root = normalizeWorkspacePath(session?.workspaceRoot);
   if (!root) return null;
@@ -640,6 +651,9 @@ export function setProjectModel(projectId: string, model: ModelId, personaId: st
 }
 export function getProjectModel(projectId: string, fallback: ModelId = DEFAULT_MODEL_ID): ModelId {
   return projectModels.get(projectId) ?? fallback;
+}
+export function getProjectPersona(projectId: string): string | undefined {
+  return projectPersonas.get(projectId);
 }
 
 const runtimeDeps: ChatRuntimeDeps = {
@@ -721,10 +735,15 @@ function makeChatSync(sessionId: string): Chat<UIMessage> {
       projectRuntime: project,
       live: live ?? runtimeDeps.live,
       patchAgentMeta: (patch) => patchSessionAgentMeta(sessionId, patch),
-      getSelectedModelId: () => project
-        ? (projectModels.get(project.id) ?? runtimeDeps.getSelectedModelId())
-        : runtimeDeps.getSelectedModelId(),
-      getAgentPersonaId: () => project ? projectPersonas.get(project.id) : undefined,
+      getSelectedModelId: () => getSessionPreferences(sessionId).modelId ?? (project
+        ? (projectModels.get(project.id) ?? useChatStore.getState().selectedModelId)
+        : runtimeDeps.getSelectedModelId()),
+      getAgentPersonaId: () => getSessionPreferences(sessionId).personaId ??
+        (project
+          ? projectIdForSession(sessionId) === project.id
+            ? projectPersonas.get(project.id)
+            : useAgentsStore.getState().activeId
+          : undefined),
     },
     seedMessages,
     resolveErrorDisplay,
@@ -765,6 +784,8 @@ export const useChatStore = create<StoreState>((set, get) => ({
 
   selectedModelId: DEFAULT_MODEL_ID,
   setSelectedModelId: (id) => {
+    const sessionId = get().activeSessionId;
+    if (sessionId) setSessionPreferences(sessionId, { modelId: id });
     set({ selectedModelId: id });
     if (activeProjectRuntime) {
       setProjectModel(activeProjectRuntime.id, id, useAgentsStore.getState().activeId);
@@ -1140,6 +1161,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
       workspaceRoot: get().live?.getWorkspaceRoot?.(),
       workspaceEnv: activeProjectRuntime?.env,
     };
+    if (activeProjectRuntime) setSessionPreferences(id, { projectId: activeProjectRuntime.id });
     const next = [meta, ...get().sessions];
     set({
       sessions: next,
@@ -1156,6 +1178,8 @@ export const useChatStore = create<StoreState>((set, get) => ({
   switchSession: (id) => {
     if (get().activeSessionId === id) return;
     if (!get().sessions.some((s) => s.id === id)) return;
+    const prefs = getSessionPreferences(id);
+    if (prefs.archivedAt) return;
     const fromId = get().activeSessionId;
     agentBus.emit("session:switch", { fromId, toId: id });
 
@@ -1167,7 +1191,12 @@ export const useChatStore = create<StoreState>((set, get) => ({
       // back to this session.
       if (get().activeSessionId !== fromId) return;
       if (!get().sessions.some((s) => s.id === id)) return;
-      set({ activeSessionId: id, agentMeta: IDLE_META });
+      set({
+        activeSessionId: id,
+        agentMeta: getSessionAgentMeta(id),
+        autoApprove: getSessionAutoApprove(id),
+        selectedModelId: prefs.modelId ?? get().selectedModelId,
+      });
       if (activeProjectRuntime) setProjectActiveSession(activeProjectRuntime.id, id);
       persistActiveSessionId(id);
     };
@@ -1186,7 +1215,27 @@ export const useChatStore = create<StoreState>((set, get) => ({
     });
   },
 
+  archiveSession: (id) => {
+    // Archiving is a VIEW operation, not Stop. An active run continues in
+    // the background and can still surface approval/completion notifications.
+    setSessionPreferences(id, { archivedAt: Date.now() });
+    if (get().activeSessionId === id) {
+      const owner = projectIdForSession(id);
+      const next = get().sessions
+        .filter((s) => s.id !== id && projectIdForSession(s.id) === owner && !getSessionPreferences(s.id).archivedAt)
+        .sort((a, b) => b.updatedAt - a.updatedAt)[0];
+      if (next) get().switchSession(next.id);
+      else get().newSession();
+    }
+  },
+
+  restoreSession: (id) => {
+    setSessionPreferences(id, { archivedAt: undefined });
+    get().switchSession(id);
+  },
+
   deleteSession: (id) => {
+    removeSessionPreferences(id);
     const remaining = get().sessions.filter((s) => s.id !== id);
     abortRunController(id);
     chats.get(id)?.stop();

@@ -3,6 +3,8 @@ import { homeDir } from "@tauri-apps/api/path";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getLaunchDir } from "@/lib/launchDir";
 import { useChatStore } from "@/modules/ai";
+import { projectIdForSession, setActiveProjectRuntime, setProjectActiveSession, subscribeSessionAgentMeta } from "@/modules/ai/store/chatStore";
+import { hydrateSessionPreferences, setSessionPreferences, subscribeSessionPreferences } from "@/modules/ai/store/sessionPreferences";
 import { getProjectAgentStatus, subscribeProjectAgentStatus } from "@/modules/ai/store/projectStatus";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
@@ -26,8 +28,13 @@ export default function App() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [statusVersion, setStatusVersion] = useState(0);
+  const sessions = useChatStore((s) => s.sessions);
+  const activeSessionId = useChatStore((s) => s.activeSessionId);
 
   useEffect(() => subscribeProjectAgentStatus(() => setStatusVersion((v) => v + 1)), []);
+  useEffect(() => { void hydrateSessionPreferences(); }, []);
+  useEffect(() => subscribeSessionAgentMeta(() => setStatusVersion((v) => v + 1)), []);
+  useEffect(() => subscribeSessionPreferences(() => setStatusVersion((v) => v + 1)), []);
 
   useEffect(() => {
     void (async () => {
@@ -98,11 +105,41 @@ export default function App() {
     if (activeId === id) setActiveId(next.id);
   }, [activeId, projects]);
 
+  const switchSession = useCallback((projectId: string, sessionId: string) => {
+    setProjectActiveSession(projectId, sessionId);
+    setSessionPreferences(sessionId, { projectId });
+    if (projectId !== activeId) {
+      setActiveId(projectId);
+      return;
+    }
+    const project = projects.find((item) => item.id === projectId);
+    if (project) setActiveProjectRuntime(project);
+    useChatStore.getState().switchSession(sessionId);
+  }, [activeId, projects]);
+
+  const newSession = useCallback((projectId: string) => {
+    const project = projects.find((item) => item.id === projectId);
+    if (project) setActiveProjectRuntime(project);
+    if (projectId !== activeId) setActiveId(projectId);
+    useChatStore.getState().newSession();
+  }, [activeId, projects]);
+
+  const restoreSession = useCallback((projectId: string, sessionId: string) => {
+    setProjectActiveSession(projectId, sessionId);
+    if (projectId !== activeId) {
+      setActiveId(projectId);
+      return;
+    }
+    const project = projects.find((item) => item.id === projectId);
+    if (project) setActiveProjectRuntime(project);
+    useChatStore.getState().restoreSession(sessionId);
+  }, [activeId, projects]);
+
   const closeProject = useCallback((id: string) => {
     const project = projects.find((p) => p.id === id);
     if (!project) return;
-    const running = useChatStore.getState().agentMeta.status !== "idle";
-    const detail = running ? " Its running agent and terminals will be stopped." : "";
+    const running = getProjectAgentStatus(id) !== "idle";
+    const detail = running ? " Its running agents and terminals will be stopped." : "";
     if (!window.confirm(`Close ${project.root}?${detail}`)) return;
     // Unmounting the retained workspace triggers its own project-scoped
     // terminal/session cleanup; never use the foreground session here.
@@ -125,7 +162,7 @@ export default function App() {
         : "running" as const;
     })(),
     active: project.id === activeId,
-  })), [projects, activeId, statusVersion]);
+  })), [projects, activeId, sessions, activeSessionId, statusVersion]);
 
   useEffect(() => {
     if (!ready) return;
@@ -137,7 +174,22 @@ export default function App() {
 
   if (!ready) return null;
   return (
-    <ProjectsMenuContext.Provider value={{ items, addProject, closeProject, switchProject: setActiveId, changeEnvironment }}>
+    <ProjectsMenuContext.Provider value={{
+      items,
+      sessions,
+      addProject,
+      closeProject,
+      switchProject: setActiveId,
+      switchSession,
+      newSession,
+      archiveSession: (id) => {
+        const owner = sessions.find((session) => session.id === id);
+        if (owner) setSessionPreferences(id, { projectId: projectIdForSession(id) ?? undefined });
+        useChatStore.getState().archiveSession(id);
+      },
+      restoreSession,
+      changeEnvironment,
+    }}>
       <div className="relative h-screen w-full">
         {projects.map((project) => (
           <div key={project.id} className="absolute inset-0">

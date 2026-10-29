@@ -32,6 +32,7 @@ import { AiErrorBoundary } from "@/modules/ai/components/AiErrorBoundary";
 import { redactSensitive } from "@/modules/ai/lib/redact";
 import { setSandboxRoot } from "@/modules/ai/lib/sandbox";
 import { registerProjectRuntime, setActiveProjectRuntime, setProjectLive, setProjectModel, setProjectActiveSession, getProjectActiveSession, stopSession } from "@/modules/ai/store/chatStore";
+import { setSessionPreferences } from "@/modules/ai/store/sessionPreferences";
 import { native } from "@/modules/ai/lib/native";
 import { useAgentsStore } from "@/modules/ai/store/agentsStore";
 import { useMcpStore } from "@/modules/ai/store/mcpStore";
@@ -682,6 +683,7 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
       // mirrors into the currently active project's captured config.
       setActiveProjectRuntime(projectRuntime);
       setProjectModel(projectRuntime.id, model, useAgentsStore.getState().activeId);
+      setSelectedModelId(model);
       // Only the visible project changes the legacy global presentation
       // selection; the captured project value remains independently stable.
       useAgentsStore.getState().setRoot(root);
@@ -1683,6 +1685,7 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
   }, [projectRuntime.root]);
 
   useEffect(() => {
+    if (activeChatSessionId) setSessionPreferences(activeChatSessionId, { projectId: projectRuntime.id });
     if (isActive) setProjectActiveSession(projectRuntime.id, activeChatSessionId);
   }, [isActive, projectRuntime.id, activeChatSessionId]);
 
@@ -1850,6 +1853,11 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
             projectName={projectName}
             projects={projectsMenu?.items}
             onSwitchProject={projectsMenu?.switchProject}
+            onSwitchSession={projectsMenu?.switchSession}
+            onNewSession={projectsMenu?.newSession}
+            onArchiveSession={projectsMenu?.archiveSession}
+            onRestoreSession={projectsMenu?.restoreSession}
+            sessions={projectsMenu?.sessions}
             onAddProject={projectsMenu?.addProject}
             onCloseProject={projectsMenu?.closeProject}
           />

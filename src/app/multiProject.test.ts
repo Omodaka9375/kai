@@ -46,4 +46,15 @@ describe("multi-project workspace ownership", () => {
     expect(switcher).not.toContain("onClick={onAdd}");
     expect(switcher).not.toContain("onSelect={onAdd}");
   });
+
+  it("groups sessions under projects with archive and background controls", () => {
+    const switcher = readFileSync(new URL("../modules/workspace/ProjectsSwitcher.tsx", import.meta.url), "utf8");
+    const input = readFileSync(new URL("../modules/ai/components/AiInputBar.tsx", import.meta.url), "utf8");
+    expect(switcher).toContain("onSwitchSession");
+    expect(switcher).toContain("onArchiveSession");
+    expect(switcher).toContain("New agent session");
+    expect(bridge).toContain("notifyBackgroundAgent");
+    expect(input).toContain("c.submit({ background: e.altKey })");
+    expect(composer).toContain("setSessionPreferences(sessionId, { draft:");
+  });
 });

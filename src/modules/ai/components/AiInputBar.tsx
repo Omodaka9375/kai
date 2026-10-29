@@ -417,7 +417,7 @@ export function AiInputBar() {
                   }
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
-                    c.submit();
+                    c.submit({ background: e.altKey });
                   }
                 }}
                 placeholder={

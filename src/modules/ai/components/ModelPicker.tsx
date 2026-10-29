@@ -45,6 +45,7 @@ import {
 import { useOpenRouterModelsStore } from "../store/openrouterModelsStore";
 import { toggleFavoriteModel } from "../lib/modelPrefs";
 import { useChatStore } from "../store/chatStore";
+import { getSessionPreferences } from "../store/sessionPreferences";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   clampModelPickerWidth,
@@ -112,7 +113,9 @@ function ThinkingToggle({
 }
 
 function ModelDropdown() {
-  const selected = useChatStore((s) => s.selectedModelId);
+  const sessionId = useChatStore((s) => s.activeSessionId);
+  const projectSelected = useChatStore((s) => s.selectedModelId);
+  const selected = (sessionId ? getSessionPreferences(sessionId).modelId : undefined) ?? projectSelected;
   const apiKeys = useChatStore((s) => s.apiKeys);
   const setSelected = useChatStore((s) => s.setSelectedModelId);
   const favoriteIds = usePreferencesStore((s) => s.favoriteModelIds);

@@ -22,6 +22,8 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { AgentIconId } from "../lib/agents";
 import { useAgentsStore } from "../store/agentsStore";
+import { useChatStore } from "../store/chatStore";
+import { getSessionPreferences } from "../store/sessionPreferences";
 
 const ICONS: Record<AgentIconId, typeof CodeIcon> = {
   coder: CodeIcon,
@@ -35,7 +37,9 @@ const ICONS: Record<AgentIconId, typeof CodeIcon> = {
 export function AgentSwitcher({ isMiniWindow }: { isMiniWindow?: boolean }) {
   // Subscribe to customAgents + activeId so the trigger updates live.
   const customAgents = useAgentsStore((s) => s.customAgents);
-  const activeId = useAgentsStore((s) => s.activeId);
+  const projectActiveId = useAgentsStore((s) => s.activeId);
+  const sessionId = useChatStore((s) => s.activeSessionId);
+  const activeId = (sessionId ? getSessionPreferences(sessionId).personaId : undefined) ?? projectActiveId;
   const setActiveId = useAgentsStore((s) => s.setActiveId);
 
   const list = useAgentsStore.getState().all();

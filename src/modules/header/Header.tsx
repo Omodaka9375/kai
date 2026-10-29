@@ -20,6 +20,7 @@ import {
   type ShortcutId,
 } from "@/modules/shortcuts/shortcuts";
 import type { Tab } from "@/modules/tabs";
+import type { SessionMeta } from "@/modules/ai/lib/sessions";
 import { TabBar } from "@/modules/tabs";
 import {
   FloppyDiskIcon,
@@ -66,7 +67,12 @@ type Props = {
   /** Current workspace folder name, shown next to the sidebar toggle. */
   projectName: string | null;
   projects?: ProjectSwitcherItem[];
+  sessions?: SessionMeta[];
   onSwitchProject?: (id: string) => void;
+  onSwitchSession?: (projectId: string, sessionId: string) => void;
+  onNewSession?: (projectId: string) => void;
+  onArchiveSession?: (sessionId: string) => void;
+  onRestoreSession?: (projectId: string, sessionId: string) => void;
   onAddProject?: (path?: string) => void | Promise<void>;
   onCloseProject?: (id: string) => void;
 };
@@ -98,7 +104,12 @@ export function Header({
   dirtyCount,
   projectName,
   projects = [],
+  sessions = [],
   onSwitchProject,
+  onSwitchSession,
+  onNewSession,
+  onArchiveSession,
+  onRestoreSession,
   onAddProject,
   onCloseProject,
 }: Props) {
@@ -186,10 +197,15 @@ export function Header({
       }`}
     >
       <div className="flex shrink-0 items-center gap-0.5">
-        {onSwitchProject && onAddProject && onCloseProject ? (
+        {onSwitchProject && onSwitchSession && onNewSession && onArchiveSession && onRestoreSession && onAddProject && onCloseProject ? (
           <ProjectsSwitcher
             projects={projects}
+            sessions={sessions}
             onSwitch={onSwitchProject}
+            onSwitchSession={onSwitchSession}
+            onNewSession={onNewSession}
+            onArchiveSession={onArchiveSession}
+            onRestoreSession={onRestoreSession}
             onAdd={onAddProject}
             onClose={onCloseProject}
           />
