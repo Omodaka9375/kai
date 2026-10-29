@@ -44,8 +44,11 @@ export function registerPromptTracker(
   state?: ShellIntegrationState,
   /** Fires on OSC 133 D — a command finished in this shell. Used by the
    *  host to refresh file-derived UI (source control) since a command
-   * may have touched the worktree. */
+   *  may have touched the worktree. */
   onCommandEnd?: () => void,
+  /** Fires on OSC 133 B/C — a command started in this shell. Used by the
+   *  host to light the project rail's "terminal running" dot. */
+  onCommandBegin?: () => void,
 ): PromptTracker {
   let marker: IMarker | null = null;
   // Soft cap on markers: older ones are disposed but xterm may retain
@@ -71,9 +74,11 @@ export function registerPromptTracker(
       // OSC 133 B — command begins. From here on, treat all output as
       // untrusted until we see D (command exit) or the next A (new prompt).
       if (state) state.inCommand = true;
+      onCommandBegin?.();
     } else if (data.startsWith("C")) {
       // OSC 133 C — command pre-execution marker; still inside command.
       if (state) state.inCommand = true;
+      onCommandBegin?.();
     } else if (data.startsWith("D")) {
       // OSC 133 D — command ends.
       if (state) state.inCommand = false;

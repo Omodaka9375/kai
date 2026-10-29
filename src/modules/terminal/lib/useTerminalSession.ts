@@ -12,6 +12,7 @@ import {
   registerCwdHandler,
   registerPromptTracker,
 } from "./osc-handlers";
+import { markTerminalActive, markTerminalIdle } from "./terminalActivity";
 import { registerOscImageHandler } from "./oscImage";
 import { openPty, type PtySession } from "./pty-bridge";
 import {
@@ -32,6 +33,10 @@ type Callbacks = {
   onExit?: (code: number) => void;
   onCwd?: (cwd: string) => void;
 };
+
+/** Owning project id for the leaf's rail-dot activity. Written once per
+ *  session in useTerminalSession; read by the OSC 133 tracker closure. */
+const leafProjectOwners = new Map<number, { projectId: string | null }>();
 
 type Session = {
   pty: PtySession | null;
@@ -398,6 +403,7 @@ async function openPtyForSession(
       onExit: (code) => {
         s.shellExited = true;
         s.pty = null;
+        markTerminalIdle(leafId);
         const slot = getSlotForLeaf(leafId);
         if (slot) slot.term.options.disableStdin = true;
         if (s.callbacks.onExit) s.callbacks.onExit(code);
@@ -444,13 +450,26 @@ function bindLeafToSlot(leafId: number, s: Session): void {
         // 7 emitted by untrusted command output (remote SSH, `cat` of an
         // attacker file, etc.).
         const shellState = createShellIntegrationState();
-        // OSC 133 D (command finished) → notify the host. A command may have
-        // touched the worktree (git, build, codegen); App listens and
-        // refreshes file-derived UI (source control). Window event keeps
-        // this module decoupled — same pattern as Kai:ai-attach-file.
-        const prompt = registerPromptTracker(term, shellState, () => {
-          window.dispatchEvent(new Event("Kai:term-command-end"));
-        });
+        // Command-running indicator for the project rail dot: flip the leaf
+        // active while a command runs (OSC 133 B/C) and idle when it ends
+        // (133 D/A). The owner ref (set in useTerminalSession) resolves the
+        // owning project; a null owner keeps the dot dark without erroring.
+        const owner = leafProjectOwners.get(leafId) ?? null;
+        const prompt = registerPromptTracker(
+          term,
+          shellState,
+          () => {
+            // OSC 133 D (command finished) → notify the host. A command may have
+            // touched the worktree (git, build, codegen); App listens and
+            // refreshes file-derived UI (source control). Window event keeps
+            // this module decoupled — same pattern as Kai:ai-attach-file.
+            window.dispatchEvent(new Event("Kai:term-command-end"));
+            if (owner?.projectId) markTerminalIdle(leafId);
+          },
+          () => {
+            if (owner?.projectId) markTerminalActive(leafId, owner.projectId);
+          },
+        );
         const cwd = registerCwdHandler(
           term,
           (next) => {
@@ -672,6 +691,8 @@ export function disposeSession(leafId: number): void {
   const s = sessions.get(leafId);
   if (!s) return;
   s.disposed = true;
+  markTerminalIdle(leafId);
+  leafProjectOwners.delete(leafId);
   for (const t of s.nudgeTimers) clearTimeout(t);
   s.nudgeTimers = [];
   if (s.watchdogTimer) {
@@ -720,6 +741,10 @@ export function useTerminalSession({
   useEffect(() => {
     let cancelled = false;
     const s = ensureSession(leafId, initialCwdRef.current, runtime?.env);
+    // Record the owning project so OSC 133 command-running markers can
+    // light the correct project's rail dot. Written once per session; the
+    // ref object identity stays stable for the tracker closure.
+    leafProjectOwners.set(leafId, { projectId: runtime?.id ?? null });
     const callbacks: Callbacks = {
       onSearchReady: (a) => cbRef.current.onSearchReady?.(a),
       onExit: (c) => cbRef.current.onExit?.(c),

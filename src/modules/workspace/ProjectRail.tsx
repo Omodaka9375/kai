@@ -13,6 +13,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useFileMenuTrigger } from "@/app/fileMenu";
 import { SIDEBAR_RAIL_HEIGHT } from "@/modules/sidebar";
+import { useProjectRunningTerminals } from "@/modules/terminal/lib/terminalActivity";
 
 export type ProjectSwitcherItem = {
   id: string;
@@ -40,6 +41,32 @@ function StatusDot({ status }: { status: ProjectSwitcherItem["status"] }) {
         status === "idle" && "bg-muted-foreground/30",
       )}
     />
+  );
+}
+
+/** Live "a command is running" dot, independent of the AI status dot.
+ *  Lights for ANY foreground or background terminal of this project —
+ *  projects with no terminals simply never show it. */
+function TerminalActivityDot({ projectId }: { projectId: string }) {
+  const running = useProjectRunningTerminals(projectId);
+  if (running === 0) return null;
+  return (
+    <span
+      title={`${running} terminal ${running === 1 ? "command is" : "commands are"} running`}
+      className="absolute bottom-1 left-1 size-1.5 animate-pulse rounded-full bg-sky-500 ring-2 ring-card"
+    />
+  );
+}
+
+/** Tooltip companion to the dot: appends the running-command count. */
+function TerminalRunningText({ projectId }: { projectId: string }) {
+  const running = useProjectRunningTerminals(projectId);
+  if (running === 0) return null;
+  return (
+    <span className="text-sky-400">
+      {" · "}
+      {running} terminal {running === 1 ? "command" : "commands"} running
+    </span>
   );
 }
 
@@ -90,6 +117,7 @@ export function ProjectRail({
                     ) : null}
                     <HugeiconsIcon icon={Folder01Icon} size={17} strokeWidth={project.active ? 2 : 1.75} />
                     <StatusDot status={project.status} />
+                    <TerminalActivityDot projectId={project.id} />
                   </button>
                 </TooltipTrigger>
                 <TooltipContent
@@ -103,6 +131,7 @@ export function ProjectRail({
                   </div>
                   <div className="w-full whitespace-nowrap border-t border-background/15 pt-1.5 text-[10px] text-background/70">
                     {STATUS_LABEL[project.status]}
+                    <TerminalRunningText projectId={project.id} />
                   </div>
                 </TooltipContent>
               </Tooltip>
