@@ -17,6 +17,7 @@ import { buildScreenTools } from "./screen";
 import { buildMcpTools } from "./mcpTools";
 import { buildRadioTools } from "./radio";
 import { buildVoiceTools } from "./voice";
+import { buildGroupTools } from "./group";
 
 export { resolvePath, type ToolContext } from "./context";
 
@@ -36,6 +37,7 @@ export function buildCoreTools(ctx: import("./context").ToolContext) {
     ...buildMcpTools(ctx),
     ...buildRadioTools(ctx),
     ...buildVoiceTools(ctx),
+    ...buildGroupTools(ctx),
   } as const;
 }
 

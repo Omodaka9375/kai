@@ -448,16 +448,30 @@ function touchChat(id: string, c: Chat<UIMessage>) {
     const chat = chats.get(oldest);
     // Never kill background work to satisfy an in-memory cache budget.
     // Busy/approval-paused chats stay pinned; idle ones may be evicted.
+    // External subsystems may ALSO pin a chat: cross-project group chats
+    // pin their live participants so a mid-round delegation is never
+    // evicted and rehydrated from a stale snapshot. Registered via
+    // setChatPinner (chatStore cannot import the group store - cycle).
     if (
       useChatStore.getState().activeSessionId === oldest ||
       chat?.status === "streaming" ||
       chat?.status === "submitted" ||
-      (chat ? hasPendingApprovals(chat) : false)
+      (chat ? hasPendingApprovals(chat) : false) ||
+      chatPinner?.(oldest)
     ) break;
     flushPersistEntry(oldest);
     void chat?.stop();
     chats.delete(oldest);
   }
+}
+
+/** Externally-registered LRU pin predicate (returns true = never evict).
+ *  Used by the group-chat store to pin live-group participant/coordinator
+ *  chats. Single-slot inversion: chatStore cannot import the group store
+ *  (module cycle); the group store registers at module init. */
+let chatPinner: ((id: string) => boolean) | null = null;
+export function setChatPinner(fn: ((id: string) => boolean) | null): void {
+  chatPinner = fn;
 }
 
 // Initial messages for a session, populated at hydration time and consumed

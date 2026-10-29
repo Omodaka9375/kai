@@ -7,6 +7,8 @@ import { useChatStore } from "@/modules/ai";
 import { subscribeSessionAgentMeta } from "@/modules/ai/store/chatStore";
 import { hydrateSessionPreferences, subscribeSessionPreferences } from "@/modules/ai/store/sessionPreferences";
 import { getProjectAgentStatus, subscribeProjectAgentStatus } from "@/modules/ai/store/projectStatus";
+import { hydrateGroups, removeProjectFromGroups } from "@/modules/ai/store/groupChatStore";
+import { GroupChatPanel } from "@/modules/ai/components/GroupChatPanel";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   createProjectRuntime,
@@ -34,6 +36,7 @@ export default function App() {
 
   useEffect(() => subscribeProjectAgentStatus(() => setStatusVersion((v) => v + 1)), []);
   useEffect(() => { void hydrateSessionPreferences(); }, []);
+  useEffect(() => { void hydrateGroups(); }, []);
   useEffect(() => subscribeSessionAgentMeta(() => setStatusVersion((v) => v + 1)), []);
   useEffect(() => subscribeSessionPreferences(() => setStatusVersion((v) => v + 1)), []);
 
@@ -112,8 +115,10 @@ export default function App() {
     const running = getProjectAgentStatus(id) !== "idle";
     const detail = running ? " Its running agents and terminals will be stopped." : "";
     if (!window.confirm(`Close ${project.root}?${detail}`)) return;
-    // Unmounting the retained workspace triggers its own project-scoped
-    // terminal/session cleanup; never use the foreground session here.
+    // Drop the project from any cross-project group chats first (arcs and
+    // pending queues must not dangle); unmounting the retained workspace
+    // then triggers its own project-scoped terminal/session cleanup.
+    void removeProjectFromGroups(id);
     setProjects((current) => current.filter((p) => p.id !== id));
     if (activeId === id) {
       const remaining = projects.filter((p) => p.id !== id);
@@ -154,6 +159,7 @@ export default function App() {
     }}>
       <div className="flex h-screen w-full">
         <div className="relative min-w-0 flex-1">
+          <GroupChatPanel projects={items} activeProjectId={activeId} />
           {projects.map((project) => (
             <div
               key={project.id}

@@ -23,6 +23,17 @@ import { isApprovalDenied, noteApprovalDenied } from "../lib/approvalLatch";
 import { speakText } from "../lib/voiceTts";
 import { notifyBackgroundAgent } from "../lib/backgroundNotifications";
 import { useProjectRuntime } from "@/modules/workspace";
+import {
+  appendGroupMessage,
+  coordinatorGroupForSession,
+  coordinatorPreamble,
+  getGroupForSession,
+  noteCoordinatorRoundDone,
+  noteParticipantReply,
+  noteSessionBusy,
+  noteSessionIdle,
+  takeReplyProvision,
+} from "../store/groupChatStore";
 
 /**
  * Headless bridge that mirrors chat lifecycle into the store, so the status
@@ -105,6 +116,10 @@ function Bridge({
   isActive = true,
 }: BridgeProps) {
   const runtime = useProjectRuntime();
+  // Group-mirror plumbing: latest messages + last mirrored assistant id.
+  // Separate refs (not the TTS ones) so the two concerns stay independent.
+  const messagesRefForGroup = useRef<UIMessage[]>([]);
+  const lastMirroredIdRef = useRef<string | null>(null);
   // getOrCreateChat returns a cached Chat instance per session id. On fast
   // session switches the useMemo swaps the reference, but since Chat instances
   // are long-lived and keyed by id, useChat simply reconnects to the existing
@@ -121,6 +136,9 @@ function Bridge({
     // edge guarantees the final state lands.
     experimental_throttle: 50,
   });
+  // Group mirror reads the settled messages — keep the ref current every
+  // render (cheap; the effect only dereferences it on idle transitions).
+  messagesRefForGroup.current = messages;
   const patch = useCallback((next: Partial<AgentMeta>) => {
     patchSessionAgentMeta(sessionId, next);
   }, [sessionId]);
@@ -336,6 +354,81 @@ function Bridge({
         : {}),
       ...(runStatus === "idle" ? { error: null } : {}),
     });
+  // ── Group chat: delegation preamble (Phase 2) ─────────────────────────
+  // When this session becomes the group's AGENT coordinator (user action in
+  // the panel), inject the coordination preamble as its next user message.
+  // Runs once per delegation (keyed by group id); re-delegation after a
+  // reclaim re-injects. Idle-gated: a busy agent gets it via the queue
+  // (injectMessage's passive ride-along) rather than a hijack wake.
+  const preambleGivenRef = useRef<string | null>(null);
+  useEffect(() => {
+    const coordGroup = coordinatorGroupForSession(sessionId);
+    if (!coordGroup) {
+      preambleGivenRef.current = null;
+      return;
+    }
+    if (preambleGivenRef.current === coordGroup.id) return;
+    preambleGivenRef.current = coordGroup.id;
+    void useChatStore.getState().injectMessage(sessionId, coordinatorPreamble(coordGroup));
+  }, [sessionId, status]);
+
+  // ── Group chat hooks ──────────────────────────────────────────────────
+  // Two responsibilities, both driven off the same status transition:
+  //  1. When THIS session belongs to a group and a run just settled to
+  //     idle, mirror its last assistant reply into the group transcript
+  //     (the bridge is the only place that sees message transitions per
+  //     session — the group store itself has no Chat subscription).
+  //  2. Flush any group messages that queued while the agent was busy —
+  //     deliver-on-idle is the group's no-interruption contract.
+    if (runStatus === "idle") {
+      // MIRROR GATE: a reply is mirrored into the group transcript ONLY
+      // when this session had a group delivery awaiting an answer. Without
+      // the gate, any idle reply from a member session — e.g. the user
+      // chatting with that same project's agent locally — would leak into
+      // the group transcript (and relay to the coordinator) uninvited.
+      const provisionedGroupId = takeReplyProvision(sessionId);
+      const group = provisionedGroupId ? getGroupForSession(sessionId) : null;
+      const coordGroup = coordinatorGroupForSession(sessionId);
+      const lastAssistant = [...messagesRefForGroup.current].reverse().find((m) => m.role === "assistant");
+      const lastText = lastAssistant
+        ? (lastAssistant.parts ?? [])
+            .filter((p): p is { type: "text"; text: string } => p.type === "text")
+            .map((p) => p.text)
+            .join("\n")
+            .trim()
+        : "";
+      // 1a. PARTICIPANT mirror: this session's reply lands in the transcript.
+      if (group && lastText && lastAssistant && lastAssistant.id !== lastMirroredIdRef.current) {
+        lastMirroredIdRef.current = lastAssistant.id;
+        void appendGroupMessage(group.id, {
+          from: "agent",
+          projectId: group.participants.find((p) => p.sessionId === sessionId)?.projectId ?? "",
+          sessionId,
+          text: lastText,
+        });
+        // 1b. RELAY (Phase 2): if an agent-coordinator is waiting on this
+        // participant, feed the reply to the coalescing buffer. When all
+        // expected participants answered, the store returns ONE merged wake
+        // message — injected here, the yield-and-resume contract (no polling).
+        if (coordGroup && coordGroup.coordinator.kind === "agent") {
+          const myProjectId =
+            group.participants.find((p) => p.sessionId === sessionId)?.projectId ?? "";
+          const wake = noteParticipantReply(coordGroup.id, myProjectId, lastText);
+          if (wake) {
+            void useChatStore.getState().injectMessage(
+              coordGroup.coordinator.sessionId,
+              wake,
+            );
+          }
+        }
+      }
+      // 2. COORDINATOR round bookkeeping: its own run settled — reset hop
+      // depth for the next round.
+      if (coordGroup) noteCoordinatorRoundDone(sessionId);
+      noteSessionIdle(sessionId);
+    } else {
+      noteSessionBusy(sessionId);
+    }
     // Background starts keep the current surface; the composer explicitly
     // opens the transcript for ordinary sends. Background notifications use
     // the same session-scoped status updates without stealing focus.

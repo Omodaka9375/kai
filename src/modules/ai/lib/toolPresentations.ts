@@ -223,6 +223,23 @@ const REGISTRY: Record<string, ToolPresentation> = {
     fence: false,
     remoteSurface: false,
   },
+  send_to_project: {
+    label: "Group send",
+    approvalLabel: "Send to project agent",
+    status: (a) => `Delegating to ${String(a.project ?? "project")}`,
+    summary: (a) => str(a, "message"),
+    effect: "NONE",
+    fence: true,
+    remoteSurface: false,
+  },
+  project_status: {
+    label: "Group status",
+    status: (a) => `Checking ${String(a.project ?? "project")}`,
+    summary: (a) => str(a, "project"),
+    effect: "NONE",
+    fence: false,
+    remoteSurface: false,
+  },
   save_memory: {
     approvalLabel: "Save memory",
     status: (a) =>

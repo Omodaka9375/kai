@@ -14,6 +14,13 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useFileMenuTrigger } from "@/app/fileMenu";
 import { SIDEBAR_RAIL_HEIGHT } from "@/modules/sidebar";
 import { useProjectRunningTerminals } from "@/modules/terminal/lib/terminalActivity";
+import { getProjectAgentStatus } from "@/modules/ai/store/projectStatus";
+import {
+  getGroupStoreVersion,
+  getGroups,
+  subscribeGroupChats,
+} from "@/modules/ai/store/groupChatStore";
+import { useSyncExternalStore } from "react";
 
 export type ProjectSwitcherItem = {
   id: string;
@@ -78,11 +85,14 @@ export function ProjectRail({
   onSwitch,
   onAdd,
   onClose,
+  onOpenGroup,
 }: {
   projects: ProjectSwitcherItem[];
   onSwitch: (id: string) => void;
   onAdd: () => void | Promise<void>;
   onClose: (id: string) => void;
+  /** Open the group-chat panel for a group the arcs reference. */
+  onOpenGroup: (groupId: string) => void;
 }) {
   const fileMenuTrigger = useFileMenuTrigger();
   return (
@@ -94,7 +104,15 @@ export function ProjectRail({
         <div className="flex h-10 shrink-0 items-center justify-center border-b border-border/60">
           {fileMenuTrigger}
         </div>
-        <div className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto p-1.5">
+        <div className="relative flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto p-1.5">
+          {/* Cross-project group-chat connector arcs — thin lines between
+              participant tiles, one arc per (group, other-project) edge.
+              Rendered inside the scroll container so they scroll with tiles.
+              Clicking an arc opens the group panel (via the parent). */}
+          <GroupArcs
+            projects={projects}
+            onOpenGroup={onOpenGroup}
+          />
           {projects.map((project) => (
             <div key={project.id} className="group relative w-full">
               <Tooltip>
@@ -171,3 +189,105 @@ export function ProjectRail({
     </TooltipProvider>
   );
 }
+
+/**
+ * SVG connector arcs between tiles of projects that share a group chat.
+ * Purely derived from the group store + rail item order; each arc is a
+ * leftward bulging curve hugging the rail's left edge between two tiles.
+ * Click opens the group panel; the arc animates while either endpoint's
+ * agent is busy.
+ */
+function GroupArcs({
+  projects,
+  onOpenGroup,
+}: {
+  projects: ProjectSwitcherItem[];
+  onOpenGroup: (groupId: string) => void;
+}) {
+  const version = useSyncExternalStore(subscribeGroupChats, getGroupStoreVersion, getGroupStoreVersion);
+  void version; // re-render on every group-store change
+  // Compute edges: for every live group, for every participant pair present
+  // in the rail, one edge keyed by the two tile indexes.
+  const tileIndexOf = new Map(projects.map((p, i) => [p.id, i]));
+  type Edge = { key: string; groupId: string; name: string; a: number; b: number; busy: boolean };
+  const edges: Edge[] = [];
+  for (const group of getGroups()) {
+    if (group.endedAt !== null) continue;
+    const idxs = group.participants
+      .map((p) => tileIndexOf.get(p.projectId))
+      .filter((v): v is number => v !== undefined)
+      .sort((x, y) => x - y);
+    if (idxs.length < 2) continue;
+    const first = idxs[0]!;
+    const last = idxs[idxs.length - 1]!;
+    const busy = group.participants.some(
+      (p) => tileIndexOf.has(p.projectId) && isProjectAgentBusy(p.projectId),
+    );
+    edges.push({
+      key: `${group.id}:${first}-${last}`,
+      groupId: group.id,
+      name: group.name,
+      a: first,
+      b: last,
+      busy,
+    });
+  }
+  if (edges.length === 0) return null;
+  // Tile geometry: p-1.5 (6px) + gap-1 (4px between tiles) + size-9 (36px).
+  const TILE = 36;
+  const GAP = 4;
+  const PAD = 6;
+  const yFor = (i: number) => PAD + i * (TILE + GAP) + TILE / 2;
+  return (
+    <svg
+      aria-hidden
+      className="pointer-events-none absolute inset-0 h-full w-full"
+      style={{ width: 12 }}
+    >
+      {edges.map((e) => {
+        const y1 = yFor(e.a);
+        const y2 = yFor(e.b);
+        const mid = (y1 + y2) / 2;
+        const d = `M 11 ${y1} C 2 ${mid}, 2 ${mid}, 11 ${y2}`;
+        return (
+          <g key={e.key} className="pointer-events-auto cursor-pointer">
+            <title>{`${e.name} — group chat`}</title>
+            <path
+              d={d}
+              fill="none"
+              strokeWidth={1.5}
+              stroke={groupArcColor(e.groupId)}
+              strokeOpacity={e.busy ? 0.95 : 0.55}
+              className="transition-[stroke-opacity,stroke-dasharray] duration-300"
+              strokeDasharray={e.busy ? "3 3" : undefined}
+            />
+            {/* Wider invisible hit area */}
+            <path
+              d={d}
+              fill="none"
+              strokeWidth={9}
+              stroke="transparent"
+              onClick={() => onOpenGroup(e.groupId)}
+            />
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+function isProjectAgentBusy(projectId: string): boolean {
+  const s = getProjectAgentStatus(projectId);
+  return s === "streaming" || s === "thinking";
+}
+
+/** Deterministic arc hue per group id: hash -> hsl(h, 70%, 55%) so concurrent
+ *  groups get visually distinct connector colors without a stored palette. */
+function groupArcColor(groupId: string): string {
+  let h = 0;
+  for (let i = 0; i < groupId.length; i++) {
+    h = (h * 31 + groupId.charCodeAt(i)) >>> 0;
+  }
+  return `hsl(${h % 360} 70% 55%)`;
+}
+
