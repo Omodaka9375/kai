@@ -77,11 +77,6 @@ type Row =
 const ROW_HEIGHT = 24;
 const OVERSCAN = 8;
 
-function basename(path: string): string {
-  const parts = path.split(/[\\/]/).filter(Boolean);
-  return parts.length ? parts[parts.length - 1] : path;
-}
-
 function buildRows(
   rootPath: string,
   tree: ReturnType<typeof useFileTree>,
@@ -607,20 +602,6 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(
         onKeyDown={handleKeyDown}
       >
         <div className="flex h-8 shrink-0 items-center gap-1 border-b border-border/60 px-2">
-          <span
-            className="flex flex-1 items-center truncate text-xs font-medium text-foreground/80"
-            title={rootPath}
-          >
-            <img
-              src={folderIconUrl(basename(rootPath), false)}
-              alt=""
-              height={15}
-              width={15}
-              className="mx-1.5"
-            />
-            {basename(rootPath)}
-          </span>
-
           <Button
             variant="ghost"
             size="icon"

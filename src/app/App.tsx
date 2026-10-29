@@ -1722,7 +1722,6 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
       {tabs.length === 0 && (
         <StartPage
           onNewTerminal={() => newTab(inheritedCwdForNewTab())}
-          onOpenProject={onOpenProject}
         />
       )}
       <div
@@ -1851,7 +1850,8 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
     <ThemeProvider>
       <TooltipProvider>
         <FileMenuTriggerProvider value={isActive ? fileMenuTrigger : null}>
-        <div className="relative flex h-screen overflow-hidden bg-background text-foreground">
+        <div className="relative flex h-screen flex-col overflow-hidden bg-background text-foreground">
+          <div className="flex min-h-0 flex-1">
           <ProjectRail
             projects={projectsMenu?.items ?? []}
             onSwitch={(id) => projectsMenu?.switchProject(id)}
@@ -1938,9 +1938,6 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
                       onOpenGitGraph={openGitGraphFromContext}
                     />
                   </div>
-                  {/* Matches the project rail's status-bar spacer so both
-                      bottom-left controls share the same baseline. */}
-                  <div className="h-9 shrink-0 border-t border-border/60" />
                 </div>
               </ResizablePanel>
               <ResizableHandle withHandle />
@@ -2060,6 +2057,8 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
               </ResizablePanel>
             </ResizablePanelGroup>
           </main>
+          </div>
+          </div>
 
           <StatusBar
             cwd={activeCwd}
@@ -2251,7 +2250,6 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
-          </div>
         </div>
         </FileMenuTriggerProvider>
       </TooltipProvider>

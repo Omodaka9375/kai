@@ -138,8 +138,6 @@ export function ProjectRail({
             <TooltipContent side="right" sideOffset={8}>Open another project</TooltipContent>
           </Tooltip>
         </div>
-        {/* The workspace's status bar owns the final bottom row. */}
-        <div className="h-9 shrink-0 border-t border-border/60" />
       </aside>
     </TooltipProvider>
   );

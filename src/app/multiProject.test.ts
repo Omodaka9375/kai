@@ -67,12 +67,19 @@ describe("multi-project workspace ownership", () => {
     expect(projectRail).toBeGreaterThan(provider);
   });
 
-  it("aligns both bottom-left control rows above the status-bar row", () => {
+  it("places a full-width status bar directly beneath the left control rows", () => {
     const rail = readFileSync(new URL("../modules/workspace/ProjectRail.tsx", import.meta.url), "utf8");
     expect(workspace).toContain("<div style={{ height: SIDEBAR_RAIL_HEIGHT }} className=\"shrink-0\">");
     expect(rail).toContain("style={{ height: SIDEBAR_RAIL_HEIGHT }}");
-    expect(rail).toContain("className=\"h-9 shrink-0 border-t border-border/60\"");
-    expect(workspace).toContain("className=\"h-9 shrink-0 border-t border-border/60\"");
+    expect(rail).not.toContain("h-9");
+    expect(workspace).not.toContain("className=\"h-9 shrink-0 border-t border-border/60\"");
+    // The footer is a sibling of the flex ROW containing the project rail
+    // and workspace, not inside the workspace column beside the rail.
+    const projectRail = workspace.indexOf("<ProjectRail");
+    const rowEnd = workspace.indexOf("</main>");
+    const statusBar = workspace.indexOf("<StatusBar");
+    expect(projectRail).toBeLessThan(rowEnd);
+    expect(rowEnd).toBeLessThan(statusBar);
   });
 
   it("keeps session and archive controls in the AI window, not the project rail", () => {
