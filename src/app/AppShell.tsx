@@ -11,6 +11,16 @@ import { hydrateGroups, removeProjectFromGroups } from "@/modules/ai/store/group
 import { GroupChatPanel } from "@/modules/ai/components/GroupChatPanel";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   createProjectRuntime,
   LOCAL_WORKSPACE,
   ProjectRuntimeProvider,
@@ -31,6 +41,13 @@ export default function App() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [statusVersion, setStatusVersion] = useState(0);
+  /** Pending close confirmation (rail X) - null when none. */
+  const [closeConfirm, setCloseConfirm] = useState<{
+    id: string;
+    name: string;
+    root: string;
+    running: boolean;
+  } | null>(null);
   const sessions = useChatStore((s) => s.sessions);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
 
@@ -112,19 +129,35 @@ export default function App() {
   const closeProject = useCallback((id: string) => {
     const project = projects.find((p) => p.id === id);
     if (!project) return;
+    // The WebView's native confirm() is a SILENT NO-OP under Tauri — the
+    // rail's X used to close a project instantly with no confirmation at
+    // all. Arm the themed AlertDialog below instead and let the user
+    // decide; performClose only runs from its destructive action.
     const running = getProjectAgentStatus(id) !== "idle";
-    const detail = running ? " Its running agents and terminals will be stopped." : "";
-    if (!window.confirm(`Close ${project.root}?${detail}`)) return;
+    setCloseConfirm({
+      id,
+      name: project.root.split(/[\\/]/).filter(Boolean).pop() ?? project.root,
+      root: project.root,
+      running,
+    });
+  }, [projects]);
+
+  const performClose = useCallback(() => {
+    const pending = closeConfirm;
+    setCloseConfirm(null);
+    if (!pending) return;
+    const id = pending.id;
     // Drop the project from any cross-project group chats first (arcs and
     // pending queues must not dangle); unmounting the retained workspace
     // then triggers its own project-scoped terminal/session cleanup.
     void removeProjectFromGroups(id);
     setProjects((current) => current.filter((p) => p.id !== id));
-    if (activeId === id) {
+    setActiveId((current) => {
+      if (current !== id) return current;
       const remaining = projects.filter((p) => p.id !== id);
-      setActiveId(remaining[0]?.id ?? null);
-    }
-  }, [activeId, projects]);
+      return remaining[0]?.id ?? null;
+    });
+  }, [closeConfirm, projects]);
 
   const items = useMemo(() => projects.map((project) => ({
     id: project.id,
@@ -181,6 +214,29 @@ export default function App() {
               <button type="button" className="ml-2 underline" onClick={() => void addProject()}>Open project</button>
             </div>
           ) : null}
+          <AlertDialog
+            open={closeConfirm !== null}
+            onOpenChange={(open) => {
+              if (!open) setCloseConfirm(null);
+            }}
+          >
+            <AlertDialogContent size="sm">
+              <AlertDialogHeader>
+                <AlertDialogTitle>Close {closeConfirm?.name}?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  {closeConfirm?.running
+                    ? "Its running agents and terminals will be stopped."
+                    : "This closes the project workspace. Terminals and editors are cleaned up."}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction variant="destructive" onClick={performClose}>
+                  Close project
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       </div>
     </ProjectsMenuContext.Provider>

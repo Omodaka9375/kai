@@ -132,4 +132,15 @@ describe("multi-project workspace ownership", () => {
     expect(main).toContain('<RootErrorBoundary surface="main">');
     expect(settings).toContain('<RootErrorBoundary surface="settings">');
   });
+
+  it("closing a project asks via the themed dialog — never window.confirm (a Tauri WebView no-op)", () => {
+    // window.confirm() returns false SILENTLY in the Tauri WebView, so a
+    // confirm guard there is dead code — the rail X either never closed
+    // anything or closed instantly with no confirmation. The X must go
+    // through the AlertDialog state machine (arm -> user -> perform).
+    expect(shell).not.toContain("window.confirm");
+    expect(shell).toContain('<AlertDialogContent size="sm">');
+    expect(shell).toContain('AlertDialogAction variant="destructive" onClick={performClose}');
+    expect(shell).toContain("setCloseConfirm({");
+  });
 });
