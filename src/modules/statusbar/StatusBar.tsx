@@ -9,7 +9,8 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { IncognitoIcon } from "@hugeicons/core-free-icons";
+import { useProjectsMenu } from "@/app/projectsMenu";
+import { IncognitoIcon, UserMultiple02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { CwdBreadcrumb } from "./CwdBreadcrumb";
 import { WorkspaceEnvSelector } from "./WorkspaceEnvSelector";
@@ -42,6 +43,9 @@ export function StatusBar({
   const togglePanel = useChatStore((s) => s.togglePanel);
   const openMini = useChatStore((s) => s.openMini);
   const closeMini = useChatStore((s) => s.closeMini);
+  // Cross-project group chats need at least two open projects to exist.
+  const projectsMenu = useProjectsMenu();
+  const canStartGroup = (projectsMenu?.items.length ?? 0) >= 2;
 
   const handleOpenAgent = useCallback(() => {
     if (panelOpen) {
@@ -78,6 +82,17 @@ export function StatusBar({
         {radioEnabled ? <RadioMarquee /> : null}
       </div>
       <div className="flex min-w-0 items-center justify-end gap-1.5">
+        {canStartGroup ? (
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent("Kai:new-group-chat"))}
+            title="Start a cross-project group chat"
+            aria-label="Start a cross-project group chat"
+            className="flex h-6 w-6 items-center justify-center rounded-md border border-border/60 bg-card text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-foreground"
+          >
+            <HugeiconsIcon icon={UserMultiple02Icon} size={13} strokeWidth={1.75} />
+          </button>
+        ) : null}
         {panelOpen && hasComposer ? (
           <AiStatusBarControls />
         ) : (

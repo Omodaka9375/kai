@@ -37,35 +37,31 @@ const STATUS_LABEL: Record<ProjectSwitcherItem["status"], string> = {
   error: "Agent error",
 };
 
-function StatusDot({ status }: { status: ProjectSwitcherItem["status"] }) {
+function TileStatusDot({
+  status,
+  projectId,
+}: {
+  status: ProjectSwitcherItem["status"];
+  projectId: string;
+}) {
+  const runningTerminals = useProjectRunningTerminals(projectId);
   return (
     <span
       className={cn(
         "absolute bottom-1 right-1 size-1.5 rounded-full ring-2 ring-card",
-        // Steady emerald: work happening, no action needed. Calm in the
-        // periphery — the user glances when they choose to.
-        status === "running" && "bg-emerald-500",
         // NEEDS YOUR INPUT — the only attention-demanding state. Unique
         // violet + pulse so it can't be missed in peripheral vision.
         // This (plus the error dot) replaces the removed OS popups.
         status === "awaiting" && "animate-pulse bg-violet-500",
         status === "error" && "bg-destructive",
-        status === "idle" && "bg-muted-foreground/30",
+        // Steady emerald: agent work happening, no action needed.
+        status === "running" && "bg-emerald-500",
+        // Idle agent but terminals producing output — sky pulse. ONE dot per
+        // tile: terminal activity surfaces only when there is no agent state
+        // to show; the tooltip always carries the running-command count.
+        status === "idle" && runningTerminals > 0 && "animate-pulse bg-sky-500",
+        status === "idle" && runningTerminals === 0 && "bg-muted-foreground/30",
       )}
-    />
-  );
-}
-
-/** Live "a command is running" dot, independent of the AI status dot.
- *  Lights for ANY foreground or background terminal of this project —
- *  projects with no terminals simply never show it. */
-function TerminalActivityDot({ projectId }: { projectId: string }) {
-  const running = useProjectRunningTerminals(projectId);
-  if (running === 0) return null;
-  return (
-    <span
-      title={`${running} terminal ${running === 1 ? "command is" : "commands are"} running`}
-      className="absolute bottom-1 left-1 size-1.5 animate-pulse rounded-full bg-sky-500 ring-2 ring-card"
     />
   );
 }
@@ -139,8 +135,7 @@ export function ProjectRail({
                       <span className="absolute -left-1.5 h-4 w-0.5 rounded-r bg-foreground/70" />
                     ) : null}
                     <HugeiconsIcon icon={Folder01Icon} size={17} strokeWidth={project.active ? 2 : 1.75} />
-                    <StatusDot status={project.status} />
-                    <TerminalActivityDot projectId={project.id} />
+                    <TileStatusDot status={project.status} projectId={project.id} />
                   </button>
                 </TooltipTrigger>
                 <TooltipContent

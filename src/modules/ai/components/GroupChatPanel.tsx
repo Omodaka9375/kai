@@ -14,10 +14,10 @@ import {
   Cancel01Icon,
   Link01Icon,
   SentIcon,
-  UserMultiple02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { getProjectAgentStatus } from "../store/projectStatus";
+import { useChatStore } from "../store/chatStore";
 import {
   addParticipants,
   createGroupChat,
@@ -60,6 +60,9 @@ export function GroupChatPanel({
   );
   const [openGroupId, setOpenGroupId] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  // The group tray sits under the AI mini window when that is open — don't
+  // render it into a covered zone (the panel itself still renders on top).
+  const miniOpen = useChatStore((s) => s.mini.open);
   const groups = useMemo(() => getGroups(), [version]);
   const active = useMemo(
     () => (openGroupId ? getGroup(openGroupId) : null),
@@ -73,16 +76,22 @@ export function GroupChatPanel({
     if (!getGroup(openGroupId)) setOpenGroupId(null);
   }, [openGroupId, version]);
 
-  // Rail arcs open groups via a window event (the rail is inside project
-  // workspaces; the panel is app-level — the event keeps them decoupled,
-  // same pattern as Kai:term-command-end).
+  // Cross-surface entries via window events (the rail and the status bar
+  // live inside project workspaces; the panel is app-level — events keep
+  // them decoupled, same pattern as Kai:term-command-end).
   useEffect(() => {
     const onOpen = (e: Event) => {
       const id = (e as CustomEvent<string>).detail;
       if (typeof id === "string" && getGroup(id)) setOpenGroupId(id);
     };
+    // Status-bar "start group chat" button → open the invite picker here.
+    const onNew = () => setPickerOpen(true);
     window.addEventListener("Kai:open-group-chat", onOpen);
-    return () => window.removeEventListener("Kai:open-group-chat", onOpen);
+    window.addEventListener("Kai:new-group-chat", onNew);
+    return () => {
+      window.removeEventListener("Kai:open-group-chat", onOpen);
+      window.removeEventListener("Kai:new-group-chat", onNew);
+    };
   }, []);
 
   const onCreate = useCallback(
@@ -107,18 +116,10 @@ export function GroupChatPanel({
     [projects, activeProjectId],
   );
 
-  if (groups.length === 0 && !pickerOpen) {
-    return (
-      <button
-        type="button"
-        onClick={() => setPickerOpen(true)}
-        title="Start a cross-project group chat"
-        className="absolute bottom-16 right-2 z-30 flex size-9 items-center justify-center rounded-lg border border-border/60 bg-card text-muted-foreground shadow-md transition-colors hover:bg-accent hover:text-foreground"
-      >
-        <HugeiconsIcon icon={UserMultiple02Icon} size={16} strokeWidth={1.75} />
-      </button>
-    );
-  }
+  // No groups and no picker open — nothing to render. Starting a group lives
+  // in the status bar (next to the AI panel toggle): a floating entry point
+  // here sat underneath the AI mini window (z-30 vs. its fixed z-40).
+  if (groups.length === 0 && !pickerOpen) return null;
 
   return (
     <>
@@ -150,12 +151,8 @@ export function GroupChatPanel({
           </motion.div>
         ) : null}
       </AnimatePresence>
-      {!active && groups.length > 0 ? (
-        <GroupListTray
-          groups={groups}
-          onOpen={(id) => setOpenGroupId(id)}
-          onNew={() => setPickerOpen(true)}
-        />
+      {!active && !miniOpen && groups.length > 0 ? (
+        <GroupListTray groups={groups} onOpen={(id) => setOpenGroupId(id)} />
       ) : null}
     </>
   );
@@ -378,11 +375,9 @@ function Composer({ group }: { group: GroupChat }) {
 function GroupListTray({
   groups,
   onOpen,
-  onNew,
 }: {
   groups: GroupChat[];
   onOpen: (id: string) => void;
-  onNew: () => void;
 }) {
   return (
     <div className="absolute bottom-16 right-2 z-30 flex flex-col items-end gap-1.5">
@@ -401,14 +396,6 @@ function GroupListTray({
           <span className="truncate">{g.name}</span>
         </button>
       ))}
-      <button
-        type="button"
-        onClick={onNew}
-        title="Start a cross-project group chat"
-        className="flex size-9 items-center justify-center rounded-lg border border-border/60 bg-card text-muted-foreground shadow-md transition-colors hover:bg-accent hover:text-foreground"
-      >
-        <HugeiconsIcon icon={UserMultiple02Icon} size={16} strokeWidth={1.75} />
-      </button>
     </div>
   );
 }
