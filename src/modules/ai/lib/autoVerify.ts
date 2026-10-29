@@ -28,7 +28,7 @@
  *   4. nothing → no verification
  */
 
-import { invoke } from "@tauri-apps/api/core";
+import { native as ambientNative, type NativeClient } from "./native";
 
 /** Tools whose success marks the project dirty for end-of-run verification. */
 export const WRITE_TOOLS = new Set([
@@ -57,11 +57,9 @@ export function noteWrite(toolName: string, workspaceRoot: string | null): void 
 type PkgJson = { verify?: string; scripts?: Record<string, string> } | null;
 
 /** Read package.json at the root; tolerant of missing/malformed files. */
-async function readPkgJson(root: string): Promise<PkgJson> {
+async function readPkgJson(root: string, client: NativeClient): Promise<PkgJson> {
   try {
-    const r = await invoke<{ kind: string; content?: string }>("fs_read_file", {
-      path: `${root}/package.json`,
-    });
+    const r = await client.readFile(`${root}/package.json`);
     if (r?.kind === "text" && r.content) {
       return JSON.parse(r.content) as PkgJson;
     }
@@ -71,9 +69,9 @@ async function readPkgJson(root: string): Promise<PkgJson> {
   return null;
 }
 
-async function fileExists(path: string): Promise<boolean> {
+async function fileExists(path: string, client: NativeClient): Promise<boolean> {
   try {
-    await invoke("fs_stat", { path });
+    await client.readFile(path);
     return true;
   } catch {
     return false;
@@ -81,8 +79,8 @@ async function fileExists(path: string): Promise<boolean> {
 }
 
 /** Pick the verify command for a project root. `null` = no verification. */
-export async function resolveVerifyCommand(root: string): Promise<string | null> {
-  const pkg = await readPkgJson(root);
+export async function resolveVerifyCommand(root: string, client: NativeClient = ambientNative): Promise<string | null> {
+  const pkg = await readPkgJson(root, client);
   if (pkg) {
     const explicit = pkg.verify ?? pkg.scripts?.["verify:changed"] ?? pkg.scripts?.verify;
     if (typeof explicit === "string" && explicit.trim()) return explicit;
@@ -92,7 +90,7 @@ export async function resolveVerifyCommand(root: string): Promise<string | null>
     );
     if (tscScript) return tscScript;
   }
-  if (await fileExists(`${root}/src-tauri/Cargo.toml`)) {
+  if (await fileExists(`${root}/src-tauri/Cargo.toml`, client)) {
     return "cargo check";
   }
   return null;
@@ -110,10 +108,10 @@ export async function resolveVerifyCommand(root: string): Promise<string | null>
 async function runVerify(
   root: string,
   command: string,
+  client: NativeClient,
 ): Promise<"timeout" | { fail: string } | null> {
-  const { native } = await import("./native");
   try {
-    const result = await native.runCommand(command, root, VERIFY_TIMEOUT_S);
+    const result = await client.runCommand(command, root, VERIFY_TIMEOUT_S);
     if (result?.timed_out) {
       console.info(
         `[kai:verify] "${command}" timed out after ${VERIFY_TIMEOUT_S}s — inconclusive, not waking the agent`,
@@ -149,6 +147,7 @@ export async function verifyIfDirtyAtRunEnd(
   sessionId: string,
   workspaceRoot: string | null,
   injectMessage: (sessionId: string, text: string) => Promise<void>,
+  client: NativeClient = ambientNative,
 ): Promise<void> {
   if (!workspaceRoot) return;
   const lastWrite = dirtyAt.get(workspaceRoot);
@@ -156,12 +155,12 @@ export async function verifyIfDirtyAtRunEnd(
   if (inFlight.has(workspaceRoot)) return; // a verification is already running
   inFlight.add(workspaceRoot);
   try {
-    const command = await resolveVerifyCommand(workspaceRoot);
+    const command = await resolveVerifyCommand(workspaceRoot, client);
     if (!command) {
       dirtyAt.delete(workspaceRoot); // nothing to verify with — don't re-check
       return;
     }
-    const outcome = await runVerify(workspaceRoot, command);
+    const outcome = await runVerify(workspaceRoot, command, client);
     if (outcome === null) {
       dirtyAt.delete(workspaceRoot); // verified — run is done, clean
       return;

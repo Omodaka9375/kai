@@ -4,7 +4,7 @@ import {
   type GitRepoInfo,
   type GitStatusSnapshot,
 } from "@/modules/ai/lib/native";
-import { useWorkspaceEnvStore, workspaceScopeKey } from "@/modules/workspace";
+import { useWorkspaceEnvStore, useProjectRuntime, workspaceScopeKey } from "@/modules/workspace";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const AUTO_FETCH_THROTTLE_MS = 5 * 60_000;
@@ -238,7 +238,8 @@ export function useSourceControl(
   contextPath: string | null,
   enabled: boolean = true,
 ): SourceControlSummary {
-  const workspaceEnv = useWorkspaceEnvStore((s) => s.env);
+  const runtime = useProjectRuntime();
+  const workspaceEnv = runtime?.env ?? useWorkspaceEnvStore((s) => s.env);
   const workspaceKey = workspaceScopeKey(workspaceEnv);
   const [state, setState] = useState<SourceControlSummaryState>({
     repo: null,

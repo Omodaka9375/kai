@@ -8,6 +8,7 @@ import { leafIds } from "./lib/panes";
 type Props = {
   tabs: Tab[];
   activeId: number;
+  projectVisible?: boolean;
   /** Register/unregister handle by leaf id (not tab id). */
   registerHandle: (leafId: number, handle: TerminalPaneHandle | null) => void;
   onSearchReady: (leafId: number, addon: SearchAddon) => void;
@@ -27,6 +28,7 @@ type Bundle = {
 export function TerminalStack({
   tabs,
   activeId,
+  projectVisible = true,
   registerHandle,
   onSearchReady,
   onCwd,
@@ -82,7 +84,7 @@ export function TerminalStack({
   return (
     <div className="relative h-full w-full">
       {terminals.map((t) => {
-        const tabVisible = t.id === activeId;
+        const tabVisible = projectVisible && t.id === activeId;
         return (
           <div
             key={t.id}

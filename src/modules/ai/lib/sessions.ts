@@ -1,6 +1,7 @@
 import type { UIMessage } from "@ai-sdk/react";
 import { LazyStore } from "@tauri-apps/plugin-store";
 import { normalizeWorkspacePath } from "./workspacePath";
+import { workspaceScopeKey, type WorkspaceEnv } from "@/modules/workspace/env";
 
 export type SessionMeta = {
   id: string;
@@ -10,6 +11,8 @@ export type SessionMeta = {
   parentId?: string;
   forkMessageIndex?: number;
   workspaceRoot?: string | null;
+  /** Execution environment (local/WSL distro) for full project identity. */
+  workspaceEnv?: WorkspaceEnv;
   /** Last observed message count, used to bump `updatedAt` only on real growth. */
   lastMessageCount?: number;
 };
@@ -29,8 +32,9 @@ let store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
 let currentScopePath: string = STORE_PATH;
 
 /** Stable 64-bit FNV-1a (base36) of a workspace path — compact, filename-safe. */
-function projectKey(root: string | null | undefined): string | null {
-  const n = normalizeWorkspacePath(root);
+function projectKey(root: string | null | undefined, env?: WorkspaceEnv): string | null {
+  const scope = env?.kind === "wsl" ? `${workspaceScopeKey(env)}:` : "";
+  const n = normalizeWorkspacePath(scope ? `${scope}${root}` : root);
   if (!n) return null;
   let h = 0xcbf29ce484222325n;
   for (let i = 0; i < n.length; i++) {
@@ -40,8 +44,8 @@ function projectKey(root: string | null | undefined): string | null {
   return h.toString(36);
 }
 
-export function scopedPath(root: string | null | undefined): string {
-  const key = projectKey(root);
+export function scopedPath(root: string | null | undefined, env?: WorkspaceEnv): string {
+  const key = projectKey(root, env);
   return key ? `kai-sessions-${key}.json` : STORE_PATH;
 }
 
@@ -55,7 +59,7 @@ export function partitionSessionsByWorkspace(
 ): Map<string, SessionMeta[]> {
   const groups = new Map<string, SessionMeta[]>();
   for (const s of sessions) {
-    const key = projectKey(s.workspaceRoot) ?? "";
+    const key = projectKey(s.workspaceRoot, s.workspaceEnv) ?? "";
     const arr = groups.get(key);
     if (arr) arr.push(s);
     else groups.set(key, [s]);
@@ -86,10 +90,15 @@ export function sessionsScopeFile(): string {
  * write for the previous project isn't dropped.
  */
 let scopeOwnerRoot: string | null = null;
+let scopeOwnerEnv: WorkspaceEnv | undefined;
+export function sessionsScopeEnv(): WorkspaceEnv | undefined {
+  return scopeOwnerEnv;
+}
 export async function setSessionsScope(
   root: string | null | undefined,
+  env?: WorkspaceEnv,
 ): Promise<void> {
-  const path = scopedPath(root);
+  const path = scopedPath(root, env);
   if (path === currentScopePath) return;
   try {
     await store.save();
@@ -98,6 +107,7 @@ export async function setSessionsScope(
   }
   currentScopePath = path;
   scopeOwnerRoot = root ?? null;
+  scopeOwnerEnv = env;
   store = new LazyStore(path, { defaults: {}, autoSave: 200 });
 }
 
@@ -229,6 +239,43 @@ export async function loadAll(): Promise<LoadedSessions> {
   return { sessions, activeId };
 }
 
+export async function loadAllForRoot(root: string | null | undefined, env?: WorkspaceEnv): Promise<LoadedSessions> {
+  if (scopedPath(root, env) === currentScopePath) return loadAll();
+  const scoped = new LazyStore(scopedPath(root, env), { defaults: {}, autoSave: 200 });
+  const sessions = (await scoped.get<SessionMeta[]>(KEY_SESSIONS).catch(() => [])) ?? [];
+  let activeId = (await scoped.get<string | null>(KEY_ACTIVE).catch(() => null)) ?? null;
+  if (activeId && !sessions.some((s) => s.id === activeId)) activeId = null;
+  return { sessions, activeId };
+}
+
+export async function loadMessagesForRoot(root: string | null | undefined, id: string, env?: WorkspaceEnv): Promise<UIMessage[] | null> {
+  if (scopedPath(root, env) === currentScopePath) return loadMessages(id);
+  const scoped = new LazyStore(scopedPath(root, env), { defaults: {}, autoSave: 200 });
+  const raw = await scoped.get<unknown>(messagesKey(id)).catch(() => null);
+  if (!Array.isArray(raw)) return null;
+  return raw as UIMessage[];
+}
+
+export async function saveSessionsListForRoot(root: string | null | undefined, sessions: SessionMeta[], env?: WorkspaceEnv): Promise<void> {
+  if (scopedPath(root, env) === currentScopePath) return saveSessionsList(sessions);
+  const scoped = new LazyStore(scopedPath(root, env), { defaults: {}, autoSave: 200 });
+  const owner = normalizeWorkspacePath(root);
+  const own = sessions.filter((s) =>
+    normalizeWorkspacePath(s.workspaceRoot) === owner &&
+    (s.workspaceEnv?.kind ?? "local") === (env?.kind ?? "local") &&
+    (s.workspaceEnv?.kind !== "wsl" || s.workspaceEnv.distro === (env?.kind === "wsl" ? env.distro : "")),
+  );
+  await scoped.set(KEY_SESSIONS, own);
+  await scoped.save().catch(() => {});
+}
+
+export async function saveActiveIdForRoot(root: string | null | undefined, id: string | null, env?: WorkspaceEnv): Promise<void> {
+  if (scopedPath(root, env) === currentScopePath) return saveActiveId(id);
+  const scoped = new LazyStore(scopedPath(root, env), { defaults: {}, autoSave: 200 });
+  await scoped.set(KEY_ACTIVE, id);
+  await scoped.save().catch(() => {});
+}
+
 export async function loadMessages(id: string): Promise<UIMessage[] | null> {
   try {
     const raw = await store.get<unknown>(messagesKey(id));
@@ -283,7 +330,10 @@ export async function saveSessionsList(sessions: SessionMeta[]): Promise<void> {
     // Legacy global file keeps unscoped sessions; a project file keeps only
     // its own root's sessions.
     if (owner == null) return r == null;
-    return r === owner;
+    const env = sessionsScopeEnv();
+    return r === owner &&
+      (s.workspaceEnv?.kind ?? "local") === (env?.kind ?? "local") &&
+      (env?.kind !== "wsl" || s.workspaceEnv?.kind === "wsl" && s.workspaceEnv.distro === env.distro);
   });
   await store.set(KEY_SESSIONS, scoped);
 }
@@ -301,9 +351,12 @@ export async function saveActiveId(id: string | null): Promise<void> {
     const meta = getSessionsMetaById(id);
     const r = normalizeWorkspacePath(meta?.workspaceRoot);
     const owner = normalizeWorkspacePath(sessionsScopeOwner());
-    if (r != null && owner != null && r !== owner) {
+    const ownerEnv = sessionsScopeEnv();
+    const sameEnv = (meta?.workspaceEnv?.kind ?? "local") === (ownerEnv?.kind ?? "local") &&
+      (ownerEnv?.kind !== "wsl" || meta?.workspaceEnv?.kind === "wsl" && meta.workspaceEnv.distro === ownerEnv.distro);
+    if (r != null && owner != null && (r !== owner || !sameEnv)) {
       // Foreign id — write it to its own project file instead.
-      const s = new LazyStore(scopedPath(meta?.workspaceRoot), {
+      const s = new LazyStore(scopedPath(meta?.workspaceRoot, meta?.workspaceEnv), {
         defaults: {},
         autoSave: 200,
       });
@@ -417,10 +470,11 @@ export async function saveMessagesForRoot(
   root: string | null | undefined,
   id: string,
   messages: UIMessage[],
+  env?: WorkspaceEnv,
 ): Promise<void> {
   const toStore = prepareMessagesForStore(messages);
   if (!toStore) return;
-  await writePreparedMessages(scopedPath(root), id, toStore);
+  await writePreparedMessages(scopedPath(root, env), id, toStore);
 }
 
 /** JSON round-trip + image/tool-payload elision + size-trim + validity

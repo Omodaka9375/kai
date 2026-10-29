@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { currentWorkspaceEnv } from "@/modules/workspace";
+import { currentWorkspaceEnv, useProjectRuntime } from "@/modules/workspace";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 
 export type DirEntry = {
@@ -40,6 +40,8 @@ type Options = {
 };
 
 export function useFileTree(rootPath: string | null, options?: Options) {
+  const runtime = useProjectRuntime();
+  const workspaceEnv = () => runtime?.env ?? currentWorkspaceEnv();
   const showHidden = usePreferencesStore((s) => s.showHidden);
   const showHiddenRef = useRef(showHidden);
   const [nodes, setNodes] = useState<TreeState>({});
@@ -68,7 +70,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
       const entries = await invoke<DirEntry[]>("fs_read_dir", {
         path,
         showHidden: showHiddenRef.current,
-        workspace: currentWorkspaceEnv(),
+        workspace: workspaceEnv(),
       });
       // A project switch / reset invalidates any in-flight directory read;
       // otherwise a late response can resurrect entries from the old root.
@@ -166,7 +168,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
           const entries = await invoke<DirEntry[]>("fs_read_dir", {
             path,
             showHidden: showHiddenRef.current,
-            workspace: currentWorkspaceEnv(),
+            workspace: workspaceEnv(),
           });
           return { path, entries } as const;
         } catch (error) {
@@ -227,7 +229,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
       const cmd =
         pendingCreate.kind === "dir" ? "fs_create_dir" : "fs_create_file";
       try {
-        await invoke(cmd, { path, workspace: currentWorkspaceEnv() });
+        await invoke(cmd, { path, workspace: workspaceEnv() });
         await fetchChildren(pendingCreate.parentPath);
       } catch (e) {
         console.error(`${cmd} failed:`, e);
@@ -260,7 +262,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
         await invoke("fs_rename", {
           from: renaming,
           to,
-          workspace: currentWorkspaceEnv(),
+          workspace: workspaceEnv(),
         });
         options?.onPathRenamed?.(renaming, to);
         await fetchChildren(parent);
@@ -287,7 +289,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
       const parents = new Set<string>();
       for (const path of roots) {
         try {
-          await invoke("fs_delete", { path, workspace: currentWorkspaceEnv() });
+          await invoke("fs_delete", { path, workspace: workspaceEnv() });
           options?.onPathDeleted?.(path);
           parents.add(dirname(path));
         } catch (e) {

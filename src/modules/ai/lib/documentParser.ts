@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { currentWorkspaceEnv } from "@/modules/workspace";
+import { native as ambientNative, type NativeClient } from "./native";
 import type { SpreadsheetData } from "@/modules/ai/lib/native";
 
 /**
@@ -40,11 +40,11 @@ export async function pdfTextFromBytes(data: Uint8Array): Promise<string> {
  * Parse a PDF file and extract its text content.
  * Uses pdfjs-dist (Mozilla PDF.js) — pure JS, no native deps.
  */
-export async function parsePdf(path: string): Promise<string> {
+export async function parsePdf(path: string, client: NativeClient = ambientNative): Promise<string> {
   // Read the raw binary bytes via Rust.
   const bytes = await invoke<number[]>("fs_read_file_bytes", {
     path,
-    workspace: currentWorkspaceEnv(),
+    workspace: client.env,
   }).catch(() => null);
 
   if (!bytes) {
@@ -59,10 +59,10 @@ export async function parsePdf(path: string): Promise<string> {
  * Parse a DOCX file and extract its text content.
  * Uses mammoth — pure JS, no native deps.
  */
-export async function parseDocx(path: string): Promise<string> {
+export async function parseDocx(path: string, client: NativeClient = ambientNative): Promise<string> {
   const bytes = await invoke<number[]>("fs_read_file_bytes", {
     path,
-    workspace: currentWorkspaceEnv(),
+    workspace: client.env,
   }).catch(() => null);
 
   if (!bytes) {
@@ -99,11 +99,11 @@ export const EMPTY_DOCUMENT_TEXT =
   "[No extractable text — this document appears to contain scanned images. Attach page screenshots as images instead.]";
 
 /** Parse any supported document file. */
-export async function parseDocument(path: string): Promise<string> {
+export async function parseDocument(path: string, client: NativeClient = ambientNative): Promise<string> {
   const type = isDocumentFile(path);
-  if (type === "pdf") return parsePdf(path);
-  if (type === "docx") return parseDocx(path);
-  if (type === "spreadsheet") return parseSpreadsheet(path);
+  if (type === "pdf") return parsePdf(path, client);
+  if (type === "docx") return parseDocx(path, client);
+  if (type === "spreadsheet") return parseSpreadsheet(path, client);
   if (type === "doc") {
     throw new Error(
       "Legacy .doc format is not supported. Please convert to .docx first.",
@@ -131,10 +131,10 @@ export function spreadsheetToText(data: SpreadsheetData): string {
   return parts.join("\n\n");
 }
 
-export async function parseSpreadsheet(path: string): Promise<string> {
+export async function parseSpreadsheet(path: string, client: NativeClient = ambientNative): Promise<string> {
   const data = await invoke<SpreadsheetData>("fs_parse_spreadsheet", {
     path,
-    workspace: currentWorkspaceEnv(),
+    workspace: client.env,
   });
   return spreadsheetToText(data);
 }

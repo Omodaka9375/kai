@@ -1,6 +1,7 @@
 import { ensureMonoFontsLoaded } from "@/lib/fonts";
 import { logLeaf, describeRenderEnv } from "./leafLog";
 import { IS_WINDOWS } from "@/lib/platform";
+import { useProjectRuntime } from "@/modules/workspace";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import type { SearchAddon } from "@xterm/addon-search";
 import { useCallback, useEffect, useMemo, useRef } from "react";
@@ -36,6 +37,7 @@ type Session = {
   pty: PtySession | null;
   ptyOpening: boolean;
   initialCwd: string | undefined;
+  env?: import("@/modules/workspace").WorkspaceEnv;
   lastCwd: string | null;
   pendingExit: number | null;
   shellExited: boolean;
@@ -114,7 +116,7 @@ configureRendererPool({
   },
 });
 
-function ensureSession(leafId: number, initialCwd?: string): Session {
+function ensureSession(leafId: number, initialCwd?: string, env?: Session["env"]): Session {
   const existing = sessions.get(leafId);
   if (existing) return existing;
 
@@ -122,6 +124,7 @@ function ensureSession(leafId: number, initialCwd?: string): Session {
     pty: null,
     ptyOpening: false,
     initialCwd,
+    env,
     lastCwd: null,
     pendingExit: null,
     shellExited: false,
@@ -403,6 +406,7 @@ async function openPtyForSession(
     },
     cwd,
     shell,
+    s.env,
   );
 }
 
@@ -703,6 +707,7 @@ export function useTerminalSession({
   onExit,
   onCwd,
 }: Options) {
+  const runtime = useProjectRuntime();
   const cbRef = useRef({ onSearchReady, onExit, onCwd });
   cbRef.current = { onSearchReady, onExit, onCwd };
   // `initialCwd` (== the leaf's live cwd via OSC 7) changes on every `cd`.
@@ -714,7 +719,7 @@ export function useTerminalSession({
 
   useEffect(() => {
     let cancelled = false;
-    const s = ensureSession(leafId, initialCwdRef.current);
+    const s = ensureSession(leafId, initialCwdRef.current, runtime?.env);
     const callbacks: Callbacks = {
       onSearchReady: (a) => cbRef.current.onSearchReady?.(a),
       onExit: (c) => cbRef.current.onExit?.(c),

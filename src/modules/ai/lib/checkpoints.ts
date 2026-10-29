@@ -118,10 +118,11 @@ function checkpointPath(
 
 async function ensureCheckpointsDir(
   workspaceRoot: string,
+  client: Pick<typeof native, "createDir"> = native,
 ): Promise<string | null> {
   try {
     const dir = await getKaiStateDir(workspaceRoot, "checkpoints");
-    await native.createDir(dir).catch(() => {
+    await client.createDir(dir).catch(() => {
       // Directory already exists — fine.
     });
     return dir;
@@ -194,9 +195,51 @@ function validateRecord(raw: unknown): CheckpointRecord | null {
  * the caller aggregates files and calls `commitCheckpoint` once before the
  * batch of edits.
  */
+export type CheckpointBatch = {
+  files: Map<string, string | null>;
+  root: string;
+  sessionId: string;
+  native: Pick<typeof native, "readFile" | "writeFile" | "createDir">;
+};
 let pendingCheckpoint: Map<string, string | null> | null = null;
 let pendingWorkspaceRoot: string | null = null;
 let pendingSessionId: string | null = null;
+
+/** Invocation-local checkpoint state. Concurrent project agents must never
+ * aggregate snapshots into one global batch. */
+export function createCheckpointBatch(
+  workspaceRoot: string,
+  sessionId: string,
+  client: Pick<typeof native, "readFile" | "writeFile" | "createDir"> = native,
+): CheckpointBatch {
+  return { files: new Map(), root: workspaceRoot, sessionId, native: client };
+}
+
+export async function snapshotFileForBatch(batch: CheckpointBatch, absPath: string): Promise<void> {
+  try {
+    const r = await batch.native.readFile(absPath);
+    batch.files.set(absPath, r.kind === "text" ? r.content : null);
+  } catch {
+    batch.files.set(absPath, null);
+  }
+}
+
+export async function commitCheckpointBatch(batch: CheckpointBatch): Promise<void> {
+  if (batch.files.size === 0 || !batch.root || !batch.sessionId) return;
+  const record: CheckpointRecord = {
+    timestamp: nextCheckpointTs(),
+    sessionId: batch.sessionId,
+    files: Object.fromEntries(batch.files),
+  };
+  const dir = await ensureCheckpointsDir(batch.root, batch.native);
+  if (!dir) return;
+  const path = checkpointPath(dir, record.timestamp, batch.sessionId);
+  try {
+    await batch.native.writeFile(path, JSON.stringify(record, null, 2));
+  } catch (e) {
+    console.debug("checkpoint: failed to write", path, e);
+  }
+}
 
 export function beginCheckpointBatch(
   workspaceRoot: string | null,

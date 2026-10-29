@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { currentWorkspaceEnv } from "@/modules/workspace";
+import { currentWorkspaceEnv, useProjectRuntime } from "@/modules/workspace";
 
 type ReadResult =
   | { kind: "text"; content: string; size: number }
@@ -34,6 +34,8 @@ function samePath(a: string, b: string): boolean {
 }
 
 export function useDocument({ path, onDirtyChange }: Options) {
+  const runtime = useProjectRuntime();
+  const workspaceEnv = () => runtime?.env ?? currentWorkspaceEnv();
   const [doc, setDoc] = useState<DocumentState>({ status: "loading" });
   const [dirty, setDirty] = useState(false);
   /** Set when the file changed on disk WHILE the buffer had unsaved edits.
@@ -69,7 +71,7 @@ export function useDocument({ path, onDirtyChange }: Options) {
     setDirty(false);
     setConflict(false);
 
-    invoke<ReadResult>("fs_read_file", { path, workspace: currentWorkspaceEnv() })
+    invoke<ReadResult>("fs_read_file", { path, workspace: workspaceEnv() })
       .then((res) => {
         if (cancelled) return;
         if (res.kind === "text") {
@@ -166,7 +168,7 @@ export function useDocument({ path, onDirtyChange }: Options) {
     try {
       const res = await invoke<ReadResult>("fs_read_file", {
         path,
-        workspace: currentWorkspaceEnv(),
+        workspace: workspaceEnv(),
       });
       if (res.kind === "text") disk = res.content;
     } catch {
@@ -185,7 +187,7 @@ export function useDocument({ path, onDirtyChange }: Options) {
       await invoke("fs_write_file", {
         path,
         content,
-        workspace: currentWorkspaceEnv(),
+        workspace: workspaceEnv(),
       });
     } catch (e) {
       selfWriteRef.current = false;
@@ -212,7 +214,7 @@ export function useDocument({ path, onDirtyChange }: Options) {
       await invoke("fs_write_file", {
         path,
         content,
-        workspace: currentWorkspaceEnv(),
+        workspace: workspaceEnv(),
       });
     } catch (e) {
       selfWriteRef.current = false;

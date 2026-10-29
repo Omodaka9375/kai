@@ -107,7 +107,7 @@ export function AiMiniWindow() {
         if (target?.closest(".xterm")) return;
         if (c.isBusy) {
           e.preventDefault();
-          cancelAllShellSessions();
+          cancelAllShellSessions(useChatStore.getState().activeSessionId ?? undefined);
           c.stop();
         }
         // Intentionally do NOT close the mini-window on Escape —
@@ -247,7 +247,7 @@ function Body({
         sessionId={sessionId}
         isBusy={c.isBusy}
         onStop={() => {
-          cancelAllShellSessions();
+          cancelAllShellSessions(useChatStore.getState().activeSessionId ?? undefined);
           c.stop();
         }}
       />

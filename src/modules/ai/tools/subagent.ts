@@ -4,6 +4,7 @@ import { runSubagent } from "../agents/runSubagent";
 import { SUBAGENTS, type SubagentType } from "../agents/registry";
 import { useChatStore } from "../store/chatStore";
 import type { ToolContext } from "./context";
+import { getProjectModel } from "../store/chatStore";
 
 const TYPE_KEYS = Object.keys(SUBAGENTS) as [SubagentType, ...SubagentType[]];
 
@@ -33,6 +34,9 @@ Asks for user approval unless auto-approve is enabled (subagents are read-only b
         const abortSignal = options?.abortSignal;
         const { apiKeys, selectedModelId, patchAgentMeta } =
           useChatStore.getState();
+        const parentModel = ctx.projectId
+          ? getProjectModel(ctx.projectId, selectedModelId)
+          : selectedModelId;
         const prefs = await import("@/modules/settings/preferences").then(
           (m) => m.usePreferencesStore.getState(),
         );
@@ -41,7 +45,7 @@ Asks for user approval unless auto-approve is enabled (subagents are read-only b
             type,
             prompt,
             keys: apiKeys,
-            modelId: selectedModelId,
+            modelId: parentModel,
             toolContext: ctx,
             lmstudioBaseURL: prefs.lmstudioBaseURL || undefined,
             openaiCompatibleBaseURL: prefs.openaiCompatibleBaseURL || undefined,

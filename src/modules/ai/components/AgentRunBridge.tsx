@@ -1,6 +1,6 @@
 import { useChat, type UIMessage } from "@ai-sdk/react";
 import type { ToolUIPart, UIMessagePart } from "ai";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { native } from "../lib/native";
 import { checkReadable } from "../lib/security";
 import { resolvePath } from "../tools/tools";
@@ -8,12 +8,22 @@ import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   flushPersist,
   getOrCreateChat,
+  getProjectActiveSession,
+  subscribeProjectActiveSessions,
   useChatStore,
+  getSessionAutoApprove,
+  getSessionAgentMeta,
+  subscribeSessionAgentMeta,
+  patchSessionAgentMeta,
+  type AgentMeta,
+  getSessionSteeringMessage,
+  setSessionSteeringMessage,
   type AgentRunStatus,
 } from "../store/chatStore";
 import { verifyIfDirtyAtRunEnd } from "../lib/autoVerify";
 import { isApprovalDenied, noteApprovalDenied } from "../lib/approvalLatch";
 import { speakText } from "../lib/voiceTts";
+import { useProjectRuntime } from "@/modules/workspace";
 
 /**
  * Headless bridge that mirrors chat lifecycle into the store, so the status
@@ -39,10 +49,20 @@ export type DiffOpenInput = {
 export type AgentRunBridgeProps = {
   openAiDiffTab: (input: DiffOpenInput) => number | null;
   closeAiDiffTab: (approvalId: string) => void;
+  /** Only the foreground project may open windows, previews, or speak. */
+  isActive?: boolean;
 };
 
 export function AgentRunBridge(props: AgentRunBridgeProps) {
-  const sessionId = useChatStore((s) => s.activeSessionId);
+  const runtime = useProjectRuntime();
+  const foregroundId = useChatStore((s) => s.activeSessionId);
+  const projectSessionId = useSyncExternalStore(
+    subscribeProjectActiveSessions,
+    () => runtime ? getProjectActiveSession(runtime.id) : foregroundId,
+  );
+  // Each workspace stays bound to ITS OWN session. A background bridge must
+  // never follow the foreground chat or duplicate its approvals/diff effects.
+  const sessionId = runtime ? projectSessionId : foregroundId;
   if (!sessionId) return null;
   return <Bridge sessionId={sessionId} {...props} />;
 }
@@ -83,13 +103,19 @@ function Bridge({
   sessionId,
   openAiDiffTab,
   closeAiDiffTab,
+  isActive = true,
 }: BridgeProps) {
+  const runtime = useProjectRuntime();
   // getOrCreateChat returns a cached Chat instance per session id. On fast
   // session switches the useMemo swaps the reference, but since Chat instances
   // are long-lived and keyed by id, useChat simply reconnects to the existing
   // subscription — no state is lost.
   const chat = useMemo(() => getOrCreateChat(sessionId), [sessionId]);
-  const { status, messages, addToolApprovalResponse } = useChat<UIMessage>({
+  const sessionMeta = useSyncExternalStore(
+    subscribeSessionAgentMeta,
+    () => getSessionAgentMeta(sessionId),
+  );
+  const { status: chatStatus, messages, addToolApprovalResponse } = useChat<UIMessage>({
     chat,
     // Cap message-notification re-renders at ~20fps. During thinking bursts
     // the SDK fires replaceMessage (with a structuredClone of the whole
@@ -100,10 +126,14 @@ function Bridge({
     // edge guarantees the final state lands.
     experimental_throttle: 50,
   });
-  const patch = useChatStore((s) => s.patchAgentMeta);
+  const status = sessionMeta.status === "idle" ? chatStatus : sessionMeta.status;
+  const patch = useCallback((next: Partial<AgentMeta>) => {
+    patchSessionAgentMeta(sessionId, next);
+  }, [sessionId]);
   const openMini = useChatStore((s) => s.openMini);
   const persistMessages = useChatStore((s) => s.persistMessages);
   const setApprovalResponder = useChatStore((s) => s.setApprovalResponder);
+  const setSessionResponder = useChatStore((s) => s.setApprovalResponderForSession);
 
   // Expose the approval responder so the diff tab can resolve approvals.
   // We keep it in a ref-stable closure so identity is stable per render.
@@ -130,12 +160,16 @@ function Bridge({
     [addToolApprovalResponse],
   );
   useEffect(() => {
-    setApprovalResponder(respond);
-    return () => setApprovalResponder(null);
+    setSessionResponder(sessionId, respond);
+    if (isActive) setApprovalResponder(respond);
+    return () => {
+      setSessionResponder(sessionId, null);
+      if (isActive) setApprovalResponder(null);
+    };
     // respond is recreated each render but its deps (addToolApprovalResponse)
     // are stable; keep the responder identity tied to that so the SDK call is
     // always current.
-  }, [setApprovalResponder, respond]);
+  }, [sessionId, isActive, setSessionResponder, setApprovalResponder, respond]);
 
   useEffect(() => {
     persistMessages(sessionId, messages);
@@ -191,7 +225,7 @@ function Bridge({
   // stripIncompleteToolCalls in the transport), then inject the steering
   // message once the status settles to idle. The queued payload is full
   // message PARTS (text + image files) — attachments survive the redirect.
-  const steeringMessage = useChatStore((s) => s.steeringMessage);
+  const steeringMessage = getSessionSteeringMessage(sessionId);
   const setSteeringMessage = useChatStore((s) => s.setSteeringMessage);
   // Keep a ref so the send callback always sees the latest value without
   // being a reactive dep (avoids the cleanup-cancels-timeout race).
@@ -209,6 +243,7 @@ function Bridge({
     // Consume the message before sending: reading `steeringRef.current` first
     // and clearing the store second keeps the value stable across the
     // re-render that setSteeringMessage(null) triggers.
+    setSessionSteeringMessage(sessionId, null);
     setSteeringMessage(null);
     const parts = steeringRef.current ?? steeringMessage;
     void chat.sendMessage({
@@ -233,14 +268,14 @@ function Bridge({
       ...(runStatus === "idle" ? { error: null } : {}),
     });
     // Auto-open the mini chat window when the agent is thinking or streaming!
-    if (runStatus === "thinking" || runStatus === "streaming") {
+    if (isActive && (runStatus === "thinking" || runStatus === "streaming")) {
       openMini();
     }
-  }, [status, approvalsPending, patch, openMini]);
+  }, [isActive, status, approvalsPending, patch, openMini]);
 
   useEffect(() => {
-    if (approvalsPending > 0) openMini();
-  }, [approvalsPending, openMini]);
+    if (isActive && approvalsPending > 0) openMini();
+  }, [isActive, approvalsPending, openMini]);
 
   // ---- Watch wake-up flush --------------------------------------------------
   // (REMOVED) A watch that fired mid-run used to queue a self-initiated wake
@@ -258,10 +293,9 @@ function Bridge({
   const injectMessage = useChatStore((s) => s.injectMessage);
   useEffect(() => {
     if (status === "submitted" || status === "streaming") return;
-    const live = useChatStore.getState().live;
-    const root = live.getWorkspaceRoot();
-    void verifyIfDirtyAtRunEnd(sessionId, root, injectMessage);
-  }, [status, sessionId, injectMessage]);
+    const root = runtime?.root ?? useChatStore.getState().live.getWorkspaceRoot();
+    void verifyIfDirtyAtRunEnd(sessionId, root, injectMessage, runtime?.native);
+  }, [runtime, status, sessionId, injectMessage]);
 
   // ---- Auto-speak finished replies (Voice settings) -----------------------
   // When a run settles to idle after streaming, read the last assistant text
@@ -277,7 +311,7 @@ function Bridge({
   // and speaks the PREVIOUS turn's reply (always one turn behind). Phase 1
   // (the transition) only arms runEndedRef; phase 2 — re-entered when the
   // final messages land — actually speaks.
-  const ttsActive = usePreferencesStore((s) => s.voiceTtsMode !== "off");
+  const ttsActive = isActive && usePreferencesStore((s) => s.voiceTtsMode !== "off");
   const spokenForRef = useRef<string | null>(null);
   const prevStatusRef = useRef(status);
   const prevSessionRef = useRef(sessionId);
@@ -341,7 +375,7 @@ function Bridge({
   }, [status, ttsActive, messages, sessionId]);
 
   // ---- Auto-approve effect --------------------------------------------------
-  const autoApprove = useChatStore((s) => s.autoApprove);
+  const autoApprove = getSessionAutoApprove(sessionId);
   const markAutoApproved = useChatStore((s) => s.markAutoApproved);
   const autoApprovedRef = useRef<Set<string>>(new Set());
   useEffect(() => {
@@ -492,7 +526,7 @@ function Bridge({
 
     let cancelled = false;
     void (async () => {
-      const cwd = useChatStore.getState().live.getCwd();
+      const cwd = runtime?.root ?? useChatStore.getState().live.getCwd();
       for (const p of pending) {
         if (cancelled) return;
         // Mark as opened up-front so a re-render mid-await doesn't double-open.
@@ -503,7 +537,7 @@ function Bridge({
         } catch {
           abs = p.path;
         }
-        const original = await readOriginal(abs);
+        const original = await readOriginal(abs, runtime?.native);
         if (cancelled) return;
         let proposed = "";
         if (p.derive.kind === "literal") {
@@ -638,13 +672,14 @@ function applyEditsLocally(
 
 async function readOriginal(
   abs: string,
+  client?: import("../lib/native").NativeClient,
 ): Promise<{ content: string; isNewFile: boolean }> {
   // The fs guard rejects sensitive paths even on read; mirror that here so
   // the user sees an empty "before" rather than an error tab.
   const safety = checkReadable(abs);
   if (!safety.ok) return { content: "", isNewFile: false };
   try {
-    const r = await native.readFile(abs);
+    const r = await (client ?? native).readFile(abs);
     if (r.kind === "text") return { content: r.content, isNewFile: false };
     // Binary or oversized — we can't render the original sensibly. Show the
     // proposed content as a "new" view; the user can still cancel.

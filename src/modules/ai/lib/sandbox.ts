@@ -11,7 +11,7 @@ import type { SandboxMode } from "./native";
 import { native } from "./native";
 import { IS_WINDOWS } from "@/lib/platform";
 
-export type SandboxCache = { root: string; mode: SandboxMode } | null;
+export type SandboxCache = { root: string; mode: SandboxMode; client?: unknown } | null;
 
 let cached: SandboxCache = null;
 
@@ -66,7 +66,12 @@ export type SandboxOverride = { root: string; mode: SandboxMode };
 async function effectiveSandbox(
   override?: SandboxOverride | null,
 ): Promise<{ root: string | null; mode: SandboxMode }> {
-  if (override) return { root: normPath(override.root), mode: override.mode };
+  if (override) {
+    const root = normPath(override.root);
+    // Legacy/project override: `off` is the sentinel for this root's stored
+    // config. Explicit non-off overrides (assistant scratch) stay mandatory.
+    return { root, mode: override.mode === "off" ? await loadSandboxMode(root) : override.mode };
+  }
   if (!currentRoot) return { root: null, mode: "off" };
   return { root: currentRoot, mode: await loadSandboxMode(currentRoot) };
 }
@@ -268,12 +273,13 @@ export async function checkShellSandbox(
 /** Load the sandbox mode for a workspace root (cached per root). */
 export async function loadSandboxMode(
   root: string | null | undefined,
+  client: Pick<typeof native, "sandboxLoadConfig"> = native,
 ): Promise<SandboxMode> {
   if (!root) return "off";
-  if (cached?.root === root) return cached.mode;
+  if (cached?.root === root && (cached.client === undefined || cached.client === client)) return cached.mode;
   try {
-    const c = await native.sandboxLoadConfig(root);
-    cached = { root, mode: c.mode };
+    const c = await client.sandboxLoadConfig(root);
+    cached = { root, mode: c.mode, client };
     return c.mode;
   } catch {
     return "off";

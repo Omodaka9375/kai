@@ -7,12 +7,12 @@ import { generateXAIImage } from "../lib/media/xai-image";
 import { spawnMediaTask } from "../lib/media/task";
 import type { ImageResult } from "../lib/media/types";
 import { resolvePath } from "./context";
-import { native } from "../lib/native";
-import type { ToolContext } from "./context";
+import { nativeForContext, type ToolContext } from "./context";
 
 const PROVIDER_ENUM = ["openai", "google", "xai"] as const;
 
-export function buildImageGenTools(_ctx: ToolContext) {
+export function buildImageGenTools(ctx: ToolContext) {
+  const native = nativeForContext(ctx);
   return {
     generate_image: tool({
       description: `Generate an image from a text prompt using AI. Returns the image inline in the conversation.
@@ -67,7 +67,7 @@ Auto-executes — no approval needed.`,
             };
           }
           try {
-            const cwd = _ctx.getCwd();
+            const cwd = ctx.getCwd();
             const abs = resolvePath(imagePath, cwd);
             const bytes = await native.readFileBytes(abs);
             // Chunked btoa — large images would blow the call stack.
@@ -89,7 +89,7 @@ Auto-executes — no approval needed.`,
           };
         }
 
-        spawnMediaTask(_ctx.getSessionId(), options.toolCallId, signal, () =>
+        spawnMediaTask(ctx.getSessionId(), options.toolCallId, signal, () =>
           callProvider(provider as "openai" | "google" | "xai", key, {
             prompt,
             size,

@@ -8,3 +8,14 @@ export {
   type WorkspaceEnv,
   type WslDistro,
 } from "./env";
+export {
+  createProjectRuntime,
+  projectIdFor,
+  type ProjectRuntime,
+} from "./projectRuntime";
+export {
+  ProjectRuntimeProvider,
+  requireProjectRuntime,
+  useProjectRuntime,
+} from "./runtimeContext";
+export { ProjectsSwitcher, type ProjectSwitcherItem } from "./ProjectsSwitcher";

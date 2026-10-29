@@ -26,20 +26,23 @@ import { cleanOldCheckpoints, sweepLegacyCheckpoints } from "./checkpoints";
 import { getRelevantFiles, formatRelevantFiles } from "./relevance";
 import { loadProjectMemoryCached } from "./memory";
 import { getShadow } from "./shadow";
+import { nativeForContext } from "../tools/context";
+import { workspaceScopeKey } from "@/modules/workspace/env";
 
 type RulesCacheEntry = { rules: ProjectRules | null; mtime: number };
 const projectRulesCache = new Map<string, RulesCacheEntry>();
 
-async function readProjectRules(workspaceRoot: string | null): Promise<ProjectRules | null> {
+async function readProjectRules(workspaceRoot: string | null, client: ReturnType<typeof nativeForContext>): Promise<ProjectRules | null> {
   if (!workspaceRoot) return null;
-  const cached = projectRulesCache.get(workspaceRoot);
+  const key = `${workspaceScopeKey(client.env)}:${workspaceRoot}`;
+  const cached = projectRulesCache.get(key);
   if (cached && Date.now() - cached.mtime < 30_000) return cached.rules;
   try {
-    const rules = await loadProjectRules(workspaceRoot);
-    projectRulesCache.set(workspaceRoot, { rules, mtime: Date.now() });
+    const rules = await loadProjectRules(workspaceRoot, client);
+    projectRulesCache.set(key, { rules, mtime: Date.now() });
     return rules;
   } catch {
-    projectRulesCache.set(workspaceRoot, { rules: null, mtime: Date.now() });
+    projectRulesCache.set(key, { rules: null, mtime: Date.now() });
     return null;
   }
 }
@@ -164,10 +167,11 @@ export function createContextAwareTransport(deps: Deps) {
     let extensionStepCount = 0;
 
     const live = deps.getLive();
-    const projectRules = await readProjectRules(live.workspaceRoot);
+    const projectNative = nativeForContext(deps.toolContext);
+    const projectRules = await readProjectRules(live.workspaceRoot, projectNative);
     const projectMemory = projectRules ? formatRulesForPrompt(projectRules) : null;
     // Load auto-memory (agent-written persistent project knowledge).
-    const autoMemory = await loadProjectMemoryCached(live.workspaceRoot);
+    const autoMemory = await loadProjectMemoryCached(live.workspaceRoot, projectNative);
     const autoMemoryBlock = autoMemory?.trim()
       ? `\n\n## AUTO MEMORY — Agent-written project knowledge\n${autoMemory.trim()}`
       : "";

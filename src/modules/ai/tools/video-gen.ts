@@ -3,9 +3,8 @@ import { z } from "zod";
 import { getKey } from "../lib/keyring";
 import { generateGoogleVideo } from "../lib/media/google-video";
 import { resolvePath } from "./context";
-import { native } from "../lib/native";
 import { spawnMediaTask } from "../lib/media/task";
-import type { ToolContext } from "./context";
+import { nativeForContext, type ToolContext } from "./context";
 
 const DEFAULT_DURATION = 8;
 
@@ -16,7 +15,8 @@ const DEFAULT_DURATION = 8;
  * Native integrations were removed because both required bespoke auth
  * (Kling's JWT ak/sk, Volcengine Ark onboarding) we couldn't maintain.
  */
-export function buildVideoGenTools(_ctx: ToolContext) {
+export function buildVideoGenTools(ctx: ToolContext) {
+  const native = nativeForContext(ctx);
   return {
     generate_video: tool({
       description: `Generate a video from a text prompt using Google Veo 3.1 (audio-native) — or ANIMATE an existing image (imagePath: Veo animates it as the opening frame; the prompt then describes motion). Uses the configured Google API key — no provider choice needed. Returns the video inline in the conversation.
@@ -61,7 +61,7 @@ If the user asks for a different video engine (Kling, Seedance, …), tell them 
         let referenceImage: string | undefined;
         if (imagePath) {
           try {
-            const cwd = _ctx.getCwd();
+            const cwd = ctx.getCwd();
             const abs = resolvePath(imagePath, cwd);
             const bytes = await native.readFileBytes(abs);
             let bin = "";
@@ -76,7 +76,7 @@ If the user asks for a different video engine (Kling, Seedance, …), tell them 
           }
         }
 
-        spawnMediaTask(_ctx.getSessionId(), options.toolCallId, signal, () =>
+        spawnMediaTask(ctx.getSessionId(), options.toolCallId, signal, () =>
           generateGoogleVideo(key, {
             prompt,
             duration: effectiveDuration,

@@ -1,8 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { native } from "../lib/native";
 import { checkReadable, checkReadableCanonical } from "../lib/security";
-import { resolvePath, type ToolContext } from "./context";
+import { nativeForContext, sandboxOverrideForContext, resolvePath, type ToolContext } from "./context";
 
 /**
  * Per-result secret check. `checkReadableCanonical` is only applied to the
@@ -46,6 +45,7 @@ function clipLine(s: string): string {
 }
 
 export function buildSearchTools(ctx: ToolContext) {
+  const native = nativeForContext(ctx);
   return {
     grep: tool({
       description:
@@ -80,7 +80,7 @@ export function buildSearchTools(ctx: ToolContext) {
       }) => {
         const r = resolveRoot(root, ctx);
         if (!r.ok) return { error: r.error };
-        const safety = await checkReadableCanonical(r.path, native.canonicalize, ctx.getSandboxOverride?.() ?? null);
+        const safety = await checkReadableCanonical(r.path, native.canonicalize, await sandboxOverrideForContext(ctx));
         if (!safety.ok) return { error: safety.reason, root: r.path };
         r.path = safety.canonical;
         const cap = Math.min(max_results ?? 30, 500);
@@ -122,7 +122,7 @@ export function buildSearchTools(ctx: ToolContext) {
       execute: async ({ pattern, root, max_results }) => {
         const r = resolveRoot(root, ctx);
         if (!r.ok) return { error: r.error };
-        const safety = await checkReadableCanonical(r.path, native.canonicalize, ctx.getSandboxOverride?.() ?? null);
+        const safety = await checkReadableCanonical(r.path, native.canonicalize, await sandboxOverrideForContext(ctx));
         if (!safety.ok) return { error: safety.reason, root: r.path };
         r.path = safety.canonical;
         try {

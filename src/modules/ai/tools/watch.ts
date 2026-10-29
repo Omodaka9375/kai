@@ -25,7 +25,7 @@ import { native } from "../lib/native";
 import { useChatStore } from "../store/chatStore";
 import { tool, generateId } from "ai";
 import { z } from "zod";
-import type { ToolContext } from "./context";
+import { nativeForContext, sandboxOverrideForContext, type ToolContext } from "./context";
 import { checkShellCommand } from "../lib/security";
 import { checkShellSandbox, sandboxExecRoot, type SandboxOverride } from "../lib/sandbox";
 
@@ -116,6 +116,8 @@ export interface WatchConfig {
   cwd: string | null;
   /** Owning chat session ID (reaped on close). */
   sessionId: string;
+  /** Project-bound execution client, captured with the watch. */
+  native?: ReturnType<typeof nativeForContext>;
   /** Sandbox confinement captured at CREATE time from the invoking context
    *  (see SandboxOverride in lib/sandbox.ts). pollWatch's `sandboxExecRoot`
    *  calls live outside buildWatchTools so ctx is not in scope there — the
@@ -190,11 +192,17 @@ export function stopWatchById(id: string): boolean {
 
 /** Reap all watches owned by a session. */
 export function reapSessionWatches(sessionId: string): void {
+  const client = [...watches.values()].find((w) => w.sessionId === sessionId)?.native ?? native;
   for (const [id, w] of watches) {
     if (w.sessionId === sessionId) {
       w.active = false;
       watches.delete(id);
     }
+  }
+  const shellId = sessionShellIds.get(sessionId);
+  if (shellId != null) {
+    sessionShellIds.delete(sessionId);
+    void client.shellSessionClose(shellId).catch(() => {});
   }
 }
 
@@ -303,7 +311,8 @@ async function poll(w: WatchState): Promise<void> {
   w.inFlight = true;
   w.polls++;
   try {
-    let result = await native.shellSessionRun(
+    const client = w.native ?? native;
+    let result = await client.shellSessionRun(
       w.shellId,
       w.command,
       w.cwd,
@@ -321,7 +330,7 @@ async function poll(w: WatchState): Promise<void> {
       if (fresh != null) {
         w.shellId = fresh;
         try {
-          result = await native.shellSessionRun(
+          result = await client.shellSessionRun(
             w.shellId,
             w.command,
             w.cwd,
@@ -352,7 +361,7 @@ async function poll(w: WatchState): Promise<void> {
       if (fresh != null) {
         w.shellId = fresh;
         try {
-          const result = await native.shellSessionRun(
+          const result = await (w.native ?? native).shellSessionRun(
             w.shellId,
             w.command,
             w.cwd,
@@ -797,14 +806,14 @@ export function buildWatchTools(ctx: ToolContext) {
       execute: async ({ command, interval_secs, condition, mode, label, notify_telegram }, options) => {
         const safety = checkShellCommand(command);
         if (!safety.ok) return { error: safety.reason };
-        const sandbox = await checkShellSandbox(command, ctx.getSandboxOverride?.() ?? null);
+        const sandbox = await checkShellSandbox(command, await sandboxOverrideForContext(ctx));
         if (!sandbox.ok) return { error: sandbox.reason };
         if (options?.abortSignal?.aborted) return { error: "Cancelled." };
 
         const sessionId = ctx.getSessionId();
         if (!sessionId) return { error: "No active chat session." };
 
-        const existing = listWatches();
+        const existing = listWatches().filter((w) => w.sessionId === sessionId);
         if (existing.length >= 5) {
           return { error: "Maximum 5 active watches per session." };
         }
@@ -823,7 +832,8 @@ export function buildWatchTools(ctx: ToolContext) {
           shellId,
           cwd: ctx.getCwd(),
           sessionId,
-          sandboxOverride: ctx.getSandboxOverride?.() ?? null,
+          sandboxOverride: await sandboxOverrideForContext(ctx),
+          native: nativeForContext(ctx),
         };
 
         await startWatch(config);
@@ -843,7 +853,7 @@ export function buildWatchTools(ctx: ToolContext) {
       description: "List all active watches for this session.",
       inputSchema: z.object({}),
       execute: async () => {
-        const all = listWatches();
+        const all = listWatches().filter((w) => w.sessionId === ctx.getSessionId());
         if (all.length === 0) return { watches: [], note: "No active watches." };
         return {
           watches: all.map((w) => ({
@@ -863,7 +873,9 @@ export function buildWatchTools(ctx: ToolContext) {
         watch_id: z.string().describe("Watch ID from watch_create or watch_list."),
       }),
       execute: async ({ watch_id }) => {
-        const ok = stopWatch(watch_id);
+        const sessionId = ctx.getSessionId();
+        const owned = listWatches().some((w) => w.id === watch_id && w.sessionId === sessionId);
+        const ok = owned && stopWatch(watch_id);
         if (!ok) return { error: `Watch not found: ${watch_id}` };
         return { ok: true, watch_id };
       },
@@ -878,7 +890,7 @@ const sessionShellIds = new Map<string, number>();
 async function getOrCreateShell(ctx: ToolContext, sessionId: string): Promise<number> {
   const existing = sessionShellIds.get(sessionId);
   if (existing) return existing;
-  const id = await native.shellSessionOpen(ctx.getCwd());
+  const id = await nativeForContext(ctx).shellSessionOpen(ctx.getCwd());
   sessionShellIds.set(sessionId, id);
   return id;
 }
@@ -893,13 +905,14 @@ async function getOrCreateShell(ctx: ToolContext, sessionId: string): Promise<nu
  */
 async function reopenShell(sessionId: string): Promise<number | null> {
   const old = sessionShellIds.get(sessionId);
+  const client = [...watches.values()].find((w) => w.sessionId === sessionId)?.native ?? native;
   if (old != null) {
     // Best-effort close of the husk; ignore errors (it may already be gone).
-    void native.shellSessionClose(old).catch(() => {});
+    void client.shellSessionClose(old).catch(() => {});
     sessionShellIds.delete(sessionId);
   }
   try {
-    const id = await native.shellSessionOpen(null);
+    const id = await client.shellSessionOpen(null);
     sessionShellIds.set(sessionId, id);
     return id;
   } catch (e) {

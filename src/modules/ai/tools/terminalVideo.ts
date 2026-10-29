@@ -1,6 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
-import type { ToolContext } from "./context";
+import { nativeForContext, type ToolContext } from "./context";
 import { buildOsc1337 } from "./terminalImage";
 import { checkReadable, checkWritable } from "../lib/security";
 
@@ -99,6 +99,7 @@ function bytesToBase64(bytes: number[] | Uint8Array): string {
 }
 
 export function buildTerminalVideoTools(ctx: ToolContext) {
+  const native = nativeForContext(ctx);
   return {
     display_video: tool({
       description:
@@ -199,7 +200,6 @@ export function buildTerminalVideoTools(ctx: ToolContext) {
                 .process?.env?.TEMP ?? "C:\\Windows\\Temp"
             : "/tmp";
           const tmp = `${tmpBase}${sep}kai-video-${Date.now()}.mp4`;
-          const { native } = await import("../lib/native");
           await native.writeFileBytes(tmp, Array.from(buf));
           localPath = tmp;
           if (!name) label = url.split("/").pop()?.slice(0, 40) ?? "video";

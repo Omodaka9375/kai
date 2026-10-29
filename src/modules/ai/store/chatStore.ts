@@ -12,6 +12,9 @@ import {
   type ProviderId,
 } from "../config";
 import { usePreferencesStore } from "@/modules/settings/preferences";
+import { useAgentsStore } from "./agentsStore";
+import { setProjectAgentStatus } from "./projectStatus";
+import { projectIdFor } from "@/modules/workspace";
 import { useTodosStore } from "./todoStore";
 import { EMPTY_PROVIDER_KEYS, type ProviderKeys } from "../lib/keyring";
 import {
@@ -20,12 +23,16 @@ import {
   ensureMigratedOnce,
   forkSession as forkSessionFromStore,
   loadAll,
+  loadAllForRoot,
   loadMessages,
+  loadMessagesForRoot,
   newSessionId,
   saveActiveId,
+  saveActiveIdForRoot,
   saveMessages,
   saveMessagesForRoot,
   saveSessionsList,
+  saveSessionsListForRoot,
   scopedPath,
   sessionsScopeFile,
   setSessionsScope,
@@ -255,6 +262,7 @@ type StoreState = {
    */
   approvalResponder: ApprovalResponder | null;
   setApprovalResponder: (fn: ApprovalResponder | null) => void;
+  setApprovalResponderForSession: (sessionId: string, fn: ApprovalResponder | null) => void;
   respondToApproval: (approvalId: string, approved: boolean) => void;
 
   apiKeys: ProviderKeys;
@@ -428,9 +436,17 @@ function touchChat(id: string, c: Chat<UIMessage>) {
   while (chats.size > CHATS_LRU_CAP) {
     const oldest = chats.keys().next().value;
     if (!oldest || oldest === id) break;
-    if (useChatStore.getState().activeSessionId === oldest) break;
+    const chat = chats.get(oldest);
+    // Never kill background work to satisfy an in-memory cache budget.
+    // Busy/approval-paused chats stay pinned; idle ones may be evicted.
+    if (
+      useChatStore.getState().activeSessionId === oldest ||
+      chat?.status === "streaming" ||
+      chat?.status === "submitted" ||
+      (chat ? hasPendingApprovals(chat) : false)
+    ) break;
     flushPersistEntry(oldest);
-    void chats.get(oldest)?.stop();
+    void chat?.stop();
     chats.delete(oldest);
   }
 }
@@ -480,18 +496,20 @@ function noteSessionRoot(id: string, root: string | null | undefined) {
  * project, so the fallback is safe.
  */
 function saveMessagesRerouted(id: string, messages: UIMessage[]): void {
-  const root = sessionRoots.get(id);
+    const session = useChatStore.getState().sessions.find((s) => s.id === id);
+    const root = sessionRoots.get(id) ?? session?.workspaceRoot ?? activeProjectRuntime?.root;
+    const env = session?.workspaceEnv ?? (session ? { kind: "local" as const } : activeProjectRuntime?.env);
   // Unknown session → current scope (cold-start fast path).
   if (root === undefined) {
     void saveMessages(id, messages);
     return;
   }
-  const targetFile = scopedPath(root);
+  const targetFile = scopedPath(root, env);
   if (targetFile !== sessionsScopeFile()) {
     console.warn(
       `[saveMessages] re-routing cross-scope write for session ${id} to its own project file (scope moved on)`,
     );
-    void saveMessagesForRoot(root, id, messages);
+    void saveMessagesForRoot(root, id, messages, env);
     return;
   }
   void saveMessages(id, messages);
@@ -523,7 +541,110 @@ export function flushPersist(id?: string): void {
  * callbacks is routed through these accessors, preserving the pre-
  * extraction behavior (including the active-session guard).
  */
+/** Active-window runtime for legacy/global callers. Each project installs
+ * its own runtime while its chats are being created/hydrated. */
+let activeProjectRuntime: import("@/modules/workspace").ProjectRuntime | undefined;
+const projectRuntimes = new Map<string, import("@/modules/workspace").ProjectRuntime>();
+const projectLive = new Map<string, ChatRuntimeDeps["live"]>();
+const projectModels = new Map<string, ModelId>();
+const projectPersonas = new Map<string, string>();
+const approvalResponders = new Map<string, ApprovalResponder>();
+const sessionAgentMeta = new Map<string, AgentMeta>();
+const sessionMetaListeners = new Set<() => void>();
+export function subscribeSessionAgentMeta(listener: () => void): () => void {
+  sessionMetaListeners.add(listener);
+  return () => sessionMetaListeners.delete(listener);
+}
+const sessionAutoApprove = new Map<string, "off" | "all">();
+export function getSessionAgentMeta(sessionId: string): AgentMeta {
+  return sessionAgentMeta.get(sessionId) ?? IDLE_META;
+}
+export function getSessionAutoApprove(sessionId: string): "off" | "all" {
+  return sessionAutoApprove.get(sessionId) ?? "off";
+}
+export function patchSessionAgentMeta(sessionId: string, patch: Partial<AgentMeta>): void {
+  const next = { ...getSessionAgentMeta(sessionId), ...patch };
+  sessionAgentMeta.set(sessionId, next);
+  const ownerId = projectIdForSession(sessionId);
+  if (ownerId) setProjectAgentStatus(ownerId, next.status);
+  if (useChatStore.getState().activeSessionId === sessionId) {
+    useChatStore.setState({ agentMeta: next });
+  }
+  for (const listener of sessionMetaListeners) listener();
+}
+const sessionSteeringMessages = new Map<string, LoosePart[] | null>();
+export function setSessionSteeringMessage(sessionId: string, parts: LoosePart[] | null): void {
+  if (parts) sessionSteeringMessages.set(sessionId, parts);
+  else sessionSteeringMessages.delete(sessionId);
+  useChatStore.setState({ steeringMessage: parts });
+}
+export function getSessionSteeringMessage(sessionId: string): LoosePart[] | null {
+  return sessionSteeringMessages.get(sessionId) ?? null;
+}
+export function getApprovalResponder(sessionId: string): ApprovalResponder | null {
+  return approvalResponders.get(sessionId) ?? null;
+}
+
+const projectActiveSessions = new Map<string, string | null>();
+const projectActiveSessionListeners = new Set<() => void>();
+export function subscribeProjectActiveSessions(listener: () => void): () => void {
+  projectActiveSessionListeners.add(listener);
+  return () => projectActiveSessionListeners.delete(listener);
+}
+
+function persistActiveSessionsList(sessions: SessionMeta[]): void {
+  void (activeProjectRuntime
+    ? saveSessionsListForRoot(activeProjectRuntime.root, sessions, activeProjectRuntime.env)
+    : saveSessionsList(sessions));
+}
+function persistActiveSessionId(id: string | null): void {
+  void (activeProjectRuntime
+    ? saveActiveIdForRoot(activeProjectRuntime.root, id, activeProjectRuntime.env)
+    : saveActiveId(id));
+}
+
+export function getProjectActiveSession(projectId: string): string | null {
+  return projectActiveSessions.get(projectId) ?? null;
+}
+export function projectIdForSession(sessionId: string): string | null {
+  const session = useChatStore.getState().sessions.find((s) => s.id === sessionId);
+  const root = normalizeWorkspacePath(session?.workspaceRoot);
+  if (!root) return null;
+  return projectIdFor(root, session?.workspaceEnv ?? { kind: "local" });
+}
+
+export function setProjectActiveSession(projectId: string, sessionId: string | null): void {
+  if (projectActiveSessions.get(projectId) === sessionId) return;
+  projectActiveSessions.set(projectId, sessionId);
+  for (const listener of projectActiveSessionListeners) listener();
+}
+
+export function setActiveProjectRuntime(runtime: import("@/modules/workspace").ProjectRuntime): void {
+  activeProjectRuntime = runtime;
+  projectRuntimes.set(runtime.id, runtime);
+}
+export function getActiveProjectRuntime(): import("@/modules/workspace").ProjectRuntime | undefined {
+  return activeProjectRuntime;
+}
+export function registerProjectRuntime(runtime: import("@/modules/workspace").ProjectRuntime): void {
+  projectRuntimes.set(runtime.id, runtime);
+}
+
+/** Bind live UI handles to their owning project, not the foreground window. */
+export function setProjectLive(projectId: string, live: ChatRuntimeDeps["live"]): void {
+  projectLive.set(projectId, live);
+}
+export function setProjectModel(projectId: string, model: ModelId, personaId: string): void {
+  projectModels.set(projectId, model);
+  projectPersonas.set(projectId, personaId);
+}
+export function getProjectModel(projectId: string, fallback: ModelId = DEFAULT_MODEL_ID): ModelId {
+  return projectModels.get(projectId) ?? fallback;
+}
+
 const runtimeDeps: ChatRuntimeDeps = {
+  projectRuntime: undefined,
+  getAgentPersonaId: () => undefined,
   getTokens: () => useChatStore.getState().agentMeta.tokens,
   live: {
     getCwd: () => useChatStore.getState().live.getCwd(),
@@ -540,12 +661,30 @@ const runtimeDeps: ChatRuntimeDeps = {
   },
   getKeys: () => useChatStore.getState().apiKeys,
   getSelectedModelId: () => useChatStore.getState().selectedModelId,
-  isActiveSession: (sessionId) =>
-    useChatStore.getState().activeSessionId === sessionId,
-  patchAgentMeta: (patch) => useChatStore.getState().patchAgentMeta(patch),
+  isActiveSession: (sessionId) => {
+    const meta = useChatStore.getState().sessions.find((s) => s.id === sessionId);
+    const root = normalizeWorkspacePath(meta?.workspaceRoot);
+    // Background projects run independently: their stream callbacks must
+    // update their own status/persistence even when another project is visible.
+    if (activeProjectRuntime && root && root !== normalizeWorkspacePath(activeProjectRuntime.root)) {
+      return true;
+    }
+    return useChatStore.getState().activeSessionId === sessionId;
+  },
+  patchAgentMeta: (patch) => {
+    const id = useChatStore.getState().activeSessionId;
+    if (id) patchSessionAgentMeta(id, patch);
+  },
   abortRunController,
   compactActiveSession: () =>
     useChatStore.getState().compactActiveSession(),
+  compactSession: (sessionId) => {
+    const previous = useChatStore.getState().activeSessionId;
+    if (previous !== sessionId) useChatStore.getState().switchSession(sessionId);
+    const result = useChatStore.getState().compactActiveSession();
+    if (previous !== sessionId && previous) useChatStore.getState().switchSession(previous);
+    return result;
+  },
 };
 
 /**
@@ -554,9 +693,39 @@ const runtimeDeps: ChatRuntimeDeps = {
  * via the getStackInfo callback.
  */
 function makeChatSync(sessionId: string): Chat<UIMessage> {
+  const session = useChatStore.getState().sessions.find((s) => s.id === sessionId);
+  const sessionRoot = session?.workspaceRoot;
+  // A session belongs to its recorded project, not whichever workspace is
+  // currently visible (watch/LRU recreation can happen in the background).
+  const project = sessionRoot
+    ? [...projectRuntimes.values()].find((candidate) =>
+      normalizeWorkspacePath(candidate.root) === normalizeWorkspacePath(sessionRoot) &&
+      (candidate.env.kind === (session?.workspaceEnv?.kind ?? "local")) &&
+      (candidate.env.kind !== "wsl" || session?.workspaceEnv?.kind === "wsl" && candidate.env.distro === session.workspaceEnv.distro))
+    : activeProjectRuntime;
+  const fallback = (projectLive.get(project?.id ?? "") ?? runtimeDeps.live) as unknown as Live;
+  const live: Live = {
+    getCwd: () => (project ? projectLive.get(project.id) : undefined)?.getCwd() ?? fallback.getCwd(),
+    getTerminalContext: () => (project ? projectLive.get(project.id) : undefined)?.getTerminalContext() ?? fallback.getTerminalContext(),
+    getWorkspaceRoot: () => (project ? projectLive.get(project.id) : undefined)?.getWorkspaceRoot() ?? fallback.getWorkspaceRoot(),
+    getActiveFile: () => (project ? projectLive.get(project.id) as unknown as Live : undefined)?.getActiveFile() ?? fallback.getActiveFile(),
+    openPreview: (url: string) => (project ? projectLive.get(project.id) : undefined)?.openPreview(url) ?? fallback.openPreview(url),
+    isActiveTerminalPrivate: () => (project ? projectLive.get(project.id) : undefined)?.isActiveTerminalPrivate() ?? fallback.isActiveTerminalPrivate(),
+    injectIntoActivePty: (text: string) => (project ? projectLive.get(project.id) : undefined)?.injectIntoActivePty(text) ?? fallback.injectIntoActivePty(text),
+    writeToActiveTerminalDisplay: (data: string) => (project ? projectLive.get(project.id) : undefined)?.writeToActiveTerminalDisplay(data) ?? fallback.writeToActiveTerminalDisplay(data),
+  };
   return makeChatSyncRuntime(
     sessionId,
-    runtimeDeps,
+    {
+      ...runtimeDeps,
+      projectRuntime: project,
+      live: live ?? runtimeDeps.live,
+      patchAgentMeta: (patch) => patchSessionAgentMeta(sessionId, patch),
+      getSelectedModelId: () => project
+        ? (projectModels.get(project.id) ?? runtimeDeps.getSelectedModelId())
+        : runtimeDeps.getSelectedModelId(),
+      getAgentPersonaId: () => project ? projectPersonas.get(project.id) : undefined,
+    },
     seedMessages,
     resolveErrorDisplay,
   );
@@ -567,6 +736,11 @@ export const useChatStore = create<StoreState>((set, get) => ({
 
   approvalResponder: null,
   setApprovalResponder: (fn) => set({ approvalResponder: fn }),
+  setApprovalResponderForSession: (sessionId, fn) => {
+    if (fn) approvalResponders.set(sessionId, fn);
+    else approvalResponders.delete(sessionId);
+    if (get().activeSessionId === sessionId) set({ approvalResponder: fn });
+  },
   respondToApproval: (approvalId, approved) => {
     // Denial is monotonic: latch it so no deferred auto-approve/allowlist
     // callback can re-permit this exact call afterward. An approve that
@@ -592,6 +766,9 @@ export const useChatStore = create<StoreState>((set, get) => ({
   selectedModelId: DEFAULT_MODEL_ID,
   setSelectedModelId: (id) => {
     set({ selectedModelId: id });
+    if (activeProjectRuntime) {
+      setProjectModel(activeProjectRuntime.id, id, useAgentsStore.getState().activeId);
+    }
     void pushRecentModel(id);
     // live.getWorkspaceRoot() may be null during startup before setLive()
     // runs — fall back to lastWorkspaceCwd so the model is always persisted.
@@ -650,8 +827,19 @@ export const useChatStore = create<StoreState>((set, get) => ({
 
   agentMeta: IDLE_META,
   _tick: 0,
-  patchAgentMeta: (patch) =>
-    set((s) => ({ agentMeta: { ...s.agentMeta, ...patch } })),
+  patchAgentMeta: (patch) => {
+    const sessionId = get().activeSessionId;
+    const next = sessionId
+      ? { ...getSessionAgentMeta(sessionId), ...patch }
+      : { ...get().agentMeta, ...patch };
+    if (sessionId) {
+      sessionAgentMeta.set(sessionId, next);
+      const ownerId = projectIdForSession(sessionId);
+      if (ownerId) setProjectAgentStatus(ownerId, next.status);
+    }
+    // Only the owning foreground session drives this workspace's composer.
+    set({ agentMeta: next });
+  },
   resetAgentMeta: () => set({ agentMeta: IDLE_META }),
 
   resolveMedia: (sessionId, toolCallId, output) => {
@@ -683,7 +871,11 @@ export const useChatStore = create<StoreState>((set, get) => ({
   },
 
   autoApprove: "off" as AutoApproveMode,
-  setAutoApprove: (mode) => set({ autoApprove: mode }),
+  setAutoApprove: (mode) => {
+    const sessionId = get().activeSessionId;
+    if (sessionId) sessionAutoApprove.set(sessionId, mode);
+    set({ autoApprove: mode });
+  },
   cycleAutoApprove: () => {
     const cur = get().autoApprove;
     const next: AutoApproveMode = cur === "off" ? "all" : "off";
@@ -731,7 +923,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
     // Serialized start: by the time we're here, every earlier hydration has
     // fully settled, so re-scoping can't interleave with another run's
     // reads/writes. (No owner re-check needed — starts never overlap.)
-    await setSessionsScope(root);
+    await     setSessionsScope(root, activeProjectRuntime?.env);
     if (isStale()) return;
 
     // Skip only if we've already hydrated for this exact workspace.
@@ -744,7 +936,9 @@ export const useChatStore = create<StoreState>((set, get) => ({
     let sessions: SessionMeta[] = [];
     let loadedActiveId: string | null = null;
     try {
-      const loaded = await loadAll();
+      const loaded = activeProjectRuntime
+        ? await loadAllForRoot(activeProjectRuntime.root, activeProjectRuntime.env)
+        : await loadAll();
       if (isStale()) return;
       sessions = loaded.sessions;
       loadedActiveId = loaded.activeId;
@@ -787,13 +981,16 @@ export const useChatStore = create<StoreState>((set, get) => ({
       ];
     }
 
+    const belongsToTarget = (session: SessionMeta) =>
+      activeProjectRuntime
+        ? projectIdForSession(session.id) === activeProjectRuntime.id
+        : norm(session.workspaceRoot) === normalizedRoot ||
+          (!session.workspaceRoot && normalizedRoot == null);
+
     // Find an existing untitled "New chat" session for this workspace so
     // we don't stack empty placeholders on every launch.
     const reusable = allSessions.find(
-      (s) =>
-        s.title === "New chat" &&
-        (norm(s.workspaceRoot) === normalizedRoot ||
-          (!s.workspaceRoot && normalizedRoot == null)),
+      (s) => s.title === "New chat" && belongsToTarget(s),
     );
 
     const currentActiveId = get().activeSessionId;
@@ -809,15 +1006,18 @@ export const useChatStore = create<StoreState>((set, get) => ({
     const isWorkspaceSwitch =
       get().sessionsHydrated &&
       currentActiveId != null &&
-      norm(get().lastHydratedWorkspace) !== normalizedRoot;
+      (activeProjectRuntime
+        ? (get().lastHydratedWorkspace
+          ? projectIdFor(get().lastHydratedWorkspace!, activeProjectRuntime.env) !== activeProjectRuntime.id
+          : true)
+        : norm(get().lastHydratedWorkspace) !== normalizedRoot);
 
     // Sessions belonging to the target workspace, newest first. Falls back
     // to unscoped sessions when hydrating the unscoped store.
     const workspaceMatched = allSessions
       .filter(
         (s) =>
-          norm(s.workspaceRoot) === normalizedRoot ||
-          (!s.workspaceRoot && normalizedRoot == null),
+          belongsToTarget(s),
       )
       .sort((a, b) => b.updatedAt - a.updatedAt);
 
@@ -850,12 +1050,15 @@ export const useChatStore = create<StoreState>((set, get) => ({
         createdAt: Date.now(),
         updatedAt: Date.now(),
         workspaceRoot: root,
+        workspaceEnv: activeProjectRuntime?.env,
       };
       nextSessions = [fresh, ...allSessions];
       // Nothing from the target workspace to activate — the fresh session
       // (stamped with this root) becomes active.
       if (!nextActiveId) nextActiveId = freshId;
-      void saveSessionsList(nextSessions).catch((err) =>
+      void (activeProjectRuntime
+        ? saveSessionsListForRoot(activeProjectRuntime.root, nextSessions, activeProjectRuntime.env)
+        : saveSessionsList(nextSessions)).catch((err) =>
         console.error("[hydrateSessions] Failed to persist sessions:", err),
       );
     }
@@ -876,7 +1079,9 @@ export const useChatStore = create<StoreState>((set, get) => ({
     // project's conversation after a fast project switch.
     if (isStale()) return;
 
-    void saveActiveId(nextActiveId).catch((err) =>
+    void (activeProjectRuntime
+      ? saveActiveIdForRoot(activeProjectRuntime.root, nextActiveId, activeProjectRuntime.env)
+      : saveActiveId(nextActiveId)).catch((err) =>
       console.error("[hydrateSessions] Failed to persist activeId:", err),
     );
 
@@ -889,7 +1094,9 @@ export const useChatStore = create<StoreState>((set, get) => ({
     if (nextActiveId) {
       if (!chats.has(nextActiveId) && !seedMessages.has(nextActiveId)) {
         try {
-          const m = await loadMessages(nextActiveId);
+          const m = activeProjectRuntime
+            ? await loadMessagesForRoot(activeProjectRuntime.root, nextActiveId, activeProjectRuntime.env)
+            : await loadMessages(nextActiveId);
           if (isStale()) return;
           if (
             m &&
@@ -931,6 +1138,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
       createdAt: Date.now(),
       updatedAt: Date.now(),
       workspaceRoot: get().live?.getWorkspaceRoot?.(),
+      workspaceEnv: activeProjectRuntime?.env,
     };
     const next = [meta, ...get().sessions];
     set({
@@ -940,8 +1148,8 @@ export const useChatStore = create<StoreState>((set, get) => ({
       autoApprove: "off" as AutoApproveMode,
       autoApprovedIds: new Set<string>(),
     });
-    void saveSessionsList(next);
-    void saveActiveId(id);
+    persistActiveSessionsList(next);
+    persistActiveSessionId(id);
     return id;
   },
 
@@ -960,7 +1168,8 @@ export const useChatStore = create<StoreState>((set, get) => ({
       if (get().activeSessionId !== fromId) return;
       if (!get().sessions.some((s) => s.id === id)) return;
       set({ activeSessionId: id, agentMeta: IDLE_META });
-      void saveActiveId(id);
+      if (activeProjectRuntime) setProjectActiveSession(activeProjectRuntime.id, id);
+      persistActiveSessionId(id);
     };
     if (chats.has(id) || seedMessages.has(id)) {
       flip();
@@ -1003,10 +1212,11 @@ export const useChatStore = create<StoreState>((set, get) => ({
         createdAt: Date.now(),
         updatedAt: Date.now(),
         workspaceRoot: get().live?.getWorkspaceRoot?.(),
+      workspaceEnv: activeProjectRuntime?.env,
       };
       set({ sessions: [fresh], activeSessionId: fresh.id });
-      void saveSessionsList([fresh]);
-      void saveActiveId(fresh.id);
+      persistActiveSessionsList([fresh]);
+      persistActiveSessionId(fresh.id);
       return;
     }
 
@@ -1015,10 +1225,10 @@ export const useChatStore = create<StoreState>((set, get) => ({
       ? remaining[0].id
       : get().activeSessionId;
     set({ sessions: remaining, activeSessionId: nextActive });
-    void saveSessionsList(remaining);
+    persistActiveSessionsList(remaining);
     if (wasActive && nextActive) {
       const next = nextActive;
-      void saveActiveId(next);
+      persistActiveSessionId(next);
       // Route the fallback activation through the same lazy load/seed path
       // as a normal switch, so the newly active session's persisted history
       // is hydrated instead of being overwritten with an empty chat.
@@ -1040,7 +1250,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
       s.id === id ? { ...s, title, updatedAt: Date.now() } : s,
     );
     set({ sessions: next });
-    void saveSessionsList(next);
+    persistActiveSessionsList(next);
   },
 
   // ── User-driven compaction (/compact) ─────────────────────────────
@@ -1148,7 +1358,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
         : s,
     );
     set({ sessions: next });
-    void saveSessionsList(next);
+    persistActiveSessionsList(next);
   },
   injectMessage: async (id, text) => {
     // Hydrate persisted history BEFORE constructing a chat, so evicting a
@@ -1156,7 +1366,9 @@ export const useChatStore = create<StoreState>((set, get) => ({
     // inactive can't instantiate an empty Chat and clobber the real history.
     const hasChat = chats.has(id);
     if (!hasChat && !seedMessages.has(id)) {
-      const m = await loadMessages(id);
+      const session = get().sessions.find((s) => s.id === id);
+      const root = session?.workspaceRoot;
+      const m = root ? await loadMessagesForRoot(root, id, session?.workspaceEnv ?? { kind: "local" }) : await loadMessages(id);
       if (m && m.length > 0 && !chats.has(id) && !seedMessages.has(id)) {
         seedMessages.set(id, stripIncompleteToolMessages(m));
       }
@@ -1250,12 +1462,13 @@ export const useChatStore = create<StoreState>((set, get) => ({
         parentId: activeId,
         forkMessageIndex: atMessageIndex,
         workspaceRoot: get().live?.getWorkspaceRoot?.(),
+      workspaceEnv: activeProjectRuntime?.env,
       };
       const next = [meta, ...get().sessions];
       set({ sessions: next, activeSessionId: newId, agentMeta: IDLE_META });
       seedMessages.set(newId, messages);
-      void saveSessionsList(next);
-      void saveActiveId(newId);
+      persistActiveSessionsList(next);
+      persistActiveSessionId(newId);
       return newId;
     } catch (err) {
       console.error("[forkSession] failed:", err);
@@ -1292,12 +1505,13 @@ export const useChatStore = create<StoreState>((set, get) => ({
         parentId: activeId,
         forkMessageIndex: Math.max(0, messages.length - 1),
         workspaceRoot: root,
+        workspaceEnv: activeProjectRuntime?.env,
       };
       const next = [meta, ...get().sessions];
       set({ sessions: next, activeSessionId: newId, agentMeta: IDLE_META });
       seedMessages.set(newId, messages);
-      void saveSessionsList(next);
-      void saveActiveId(newId);
+      persistActiveSessionsList(next);
+      persistActiveSessionId(newId);
       return newId;
     } catch (err) {
       console.error("[startShadowMode] failed:", err);
@@ -1368,8 +1582,8 @@ export const useChatStore = create<StoreState>((set, get) => ({
           : s,
       );
       set({ sessions: next, activeSessionId: targetId });
-      void saveSessionsList(next);
-      void saveActiveId(targetId);
+      persistActiveSessionsList(next);
+      persistActiveSessionId(targetId);
 
       // Clean up the source's in-memory chat + any pending persistence.
       abortRunController(sourceId);
@@ -1593,7 +1807,7 @@ function releasePendingApprovals(chat: Chat<UIMessage>): void {
  * an explicit approval response so we don't race the response application.
  */
 export function abortSession(sessionId: string): void {
-  cancelAllShellSessions();
+  cancelAllShellSessions(sessionId);
   // Abort our own controller FIRST — this works even when Chat.stop() is a
   // no-op because the SDK's status is no longer streaming/submitted.
   abortRunController(sessionId);
@@ -1692,7 +1906,7 @@ function describeApproval(
  * `approvalsPending` back to 0 and frees the session.
  */
 export function stopSession(sessionId: string): void {
-  cancelAllShellSessions();
+  cancelAllShellSessions(sessionId);
   // Abort our own controller unconditionally — the Stop button must work even
   // when the model is stuck in a reasoning/tool loop where `Chat.stop()` is a
   // silent no-op (SDK status is neither streaming nor submitted).

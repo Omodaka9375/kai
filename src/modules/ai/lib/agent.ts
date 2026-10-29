@@ -51,7 +51,7 @@ import { appendSessionEvent, buildTurnEvent } from "./sessionEvents";
 import { withCentralToolGuards } from "./toolGuards";
 import { auditAppend, AUDIT_KINDS } from "./audit";
 import {
-  getGlobalStreamGuard,
+  StreamGuard,
   toolLoopFingerprint,
   type LoopDetectionResult,
 } from "./streamGuard";
@@ -798,7 +798,9 @@ export async function runAgentStream(opts: RunAgentOptions) {
   });
 
   // Initialize stream guard for loop detection
-  const streamGuard = getGlobalStreamGuard();
+  // Loop detection belongs to THIS run. Concurrent project agents must not
+  // share a fingerprint history or reset one another on completion.
+  const streamGuard = new StreamGuard();
   let stepsSeen = 0;
   // Track consecutive identical tool invocations to catch a model stuck in a
   // "spam the same tool" loop. A single tool+args fingerprint repeated 3+ times

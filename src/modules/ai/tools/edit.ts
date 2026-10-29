@@ -4,8 +4,8 @@ import { djb2, readCacheEntry } from "../lib/hash";
 import { native } from "../lib/native";
 import { checkReadableCanonical, checkWritableCanonical } from "../lib/security";
 import { newQueuedEditId, usePlanStore } from "../store/planStore";
-import { resolvePath, type ToolContext } from "./context";
-import { snapshotFile, beginCheckpointBatch, commitCheckpoint, discardCheckpoint } from "../lib/checkpoints";
+import { nativeForContext, sandboxOverrideForContext, resolvePath, type ToolContext } from "./context";
+import { createCheckpointBatch, snapshotFileForBatch, commitCheckpointBatch } from "../lib/checkpoints";
 import { withFileMutationLock } from "../lib/mutationLock";
 
 type EditResult =
@@ -179,8 +179,9 @@ async function applyEdits(
   edits: { old_string: string; new_string: string; replace_all?: boolean; line_hint?: number }[],
   kind: "edit" | "multi_edit",
   readCache: Map<string, { size: number; hash: number }>,
+  client: typeof native = native,
 ): Promise<EditResult> {
-  const r = await native.readFile(abs);
+  const r = await client.readFile(abs);
   if (r.kind === "binary")
     return { ok: false, error: "binary file refused", path: abs };
   if (r.kind === "toolarge")
@@ -382,7 +383,7 @@ async function applyEdits(
   }
 
   try {
-    await native.writeFile(abs, content);
+    await client.writeFile(abs, content);
     readCache.set(abs, readCacheEntry(content));
     window.dispatchEvent(new CustomEvent("Kai:fs-changed", { detail: abs }));
 
@@ -406,12 +407,13 @@ async function applyEdits(
 async function ensureReadCache(
   abs: string,
   ctx: ToolContext,
+  client: typeof native = native,
 ): Promise<{ error: string; path: string } | null> {
   if (ctx.readCache.has(abs)) return null;
-  const safety = await checkReadableCanonical(abs, native.canonicalize, ctx.getSandboxOverride?.() ?? null);
+  const safety = await checkReadableCanonical(abs, client.canonicalize, await sandboxOverrideForContext(ctx));
   if (!safety.ok) return { error: safety.reason, path: abs };
   try {
-    const r = await native.readFile(safety.canonical);
+    const r = await client.readFile(safety.canonical);
     if (r.kind === "binary") return { error: "binary file refused", path: abs };
     if (r.kind === "toolarge")
       return { error: `file too large (${r.size} bytes)`, path: abs };
@@ -441,6 +443,7 @@ function getEditFailures(ctx: ToolContext): Map<string, number> {
 }
 
 export function buildEditTools(ctx: ToolContext) {
+  const native = nativeForContext(ctx);
   return {
     edit: tool({
       description:
@@ -466,10 +469,10 @@ export function buildEditTools(ctx: ToolContext) {
               'path is required — set the top-level "path" field to the file you are editing (absolute, or relative to the terminal cwd). Example: {"path":"src/app.ts","old_string":"...","new_string":"..."}',
           };
         const reqPath = resolvePath(path, ctx.getCwd());
-        const safety = await checkWritableCanonical(reqPath, native.canonicalize, ctx.getSandboxOverride?.() ?? null);
+        const safety = await checkWritableCanonical(reqPath, native.canonicalize, await sandboxOverrideForContext(ctx));
         if (!safety.ok) return { error: safety.reason, path: reqPath };
         const abs = safety.canonical;
-        const guard = await ensureReadCache(abs, ctx);
+        const guard = await ensureReadCache(abs, ctx, native);
         if (guard) return guard;
         const failures = getEditFailures(ctx).get(abs) ?? 0;
         if (failures >= MAX_EDIT_RETRIES) {
@@ -483,17 +486,18 @@ export function buildEditTools(ctx: ToolContext) {
         // tool calls from one step don't clobber each other via stale reads.
         return withFileMutationLock([abs], async () => {
           // Snapshot before mutation for checkpoint undo.
-          beginCheckpointBatch(
-            ctx.getRealWorkspaceRoot?.() ?? ctx.getWorkspaceRoot(),
-            ctx.getSessionId(),
+          const checkpoint = createCheckpointBatch(
+            ctx.getRealWorkspaceRoot?.() ?? ctx.getWorkspaceRoot() ?? "",
+            ctx.getSessionId() ?? "",
+            native,
           );
-          await snapshotFile(abs);
+          await snapshotFileForBatch(checkpoint, abs);
           const edits = [{ old_string, new_string, replace_all, line_hint }];
-          const result = await applyEdits(abs, edits, "edit", ctx.readCache);
+          const result = await applyEdits(abs, edits, "edit", ctx.readCache, native);
           if (result.ok) {
             getEditFailures(ctx).delete(abs);
             ctx.fileTracker.markModified(abs);
-            await commitCheckpoint();
+            await commitCheckpointBatch(checkpoint);
             return result;
           }
           // If old_string wasn't found, re-read the file (a prior concurrent
@@ -503,17 +507,16 @@ export function buildEditTools(ctx: ToolContext) {
           if (retryable) {
             // Force cache refresh so applyEdits re-reads from disk.
             ctx.readCache.delete(abs);
-            const retry = await applyEdits(abs, edits, "edit", ctx.readCache);
+            const retry = await applyEdits(abs, edits, "edit", ctx.readCache, native);
             if ("ok" in retry) {
               getEditFailures(ctx).delete(abs);
               ctx.fileTracker.markModified(abs);
-              await commitCheckpoint();
+              await commitCheckpointBatch(checkpoint);
               return retry;
             }
             // Retry also failed — the target was consumed by a racing edit.
             // Append a hint so the model recovers instead of giving up.
             getEditFailures(ctx).set(abs, failures + 1);
-            discardCheckpoint();
             return {
               ...result,
               error:
@@ -522,7 +525,6 @@ export function buildEditTools(ctx: ToolContext) {
             };
           }
           getEditFailures(ctx).set(abs, failures + 1);
-          discardCheckpoint();
           return result;
         });
       },
@@ -558,10 +560,10 @@ export function buildEditTools(ctx: ToolContext) {
               'path is required — multi_edit applies edits to ONE file; set the top-level "path" field to it (a per-edit "path" is also accepted). Example: {"path":"src/app.ts","edits":[{"old_string":"...","new_string":"..."}]}',
           };
         const reqPath = resolvePath(path, ctx.getCwd());
-        const safety = await checkWritableCanonical(reqPath, native.canonicalize, ctx.getSandboxOverride?.() ?? null);
+        const safety = await checkWritableCanonical(reqPath, native.canonicalize, await sandboxOverrideForContext(ctx));
         if (!safety.ok) return { error: safety.reason, path: reqPath };
         const abs = safety.canonical;
-        const guard = await ensureReadCache(abs, ctx);
+        const guard = await ensureReadCache(abs, ctx, native);
         if (guard) return guard;
         const failures = getEditFailures(ctx).get(abs) ?? 0;
         if (failures >= MAX_EDIT_RETRIES) {
@@ -596,17 +598,19 @@ export function buildEditTools(ctx: ToolContext) {
           }
         }
         return withFileMutationLock([abs], async () => {
-          beginCheckpointBatch(
-            ctx.getRealWorkspaceRoot?.() ?? ctx.getWorkspaceRoot(),
-            ctx.getSessionId(),
+          const checkpoint = createCheckpointBatch(
+            ctx.getRealWorkspaceRoot?.() ?? ctx.getWorkspaceRoot() ?? "",
+            ctx.getSessionId() ?? "",
+            native,
           );
-          await snapshotFile(abs);
+          await snapshotFileForBatch(checkpoint, abs);
           // Try batch first — fast path when all old_strings match.
           let result = await applyEdits(
             abs,
             edits,
             "multi_edit",
             ctx.readCache,
+            native,
           );
           // Retry once if old_string wasn't found (concurrent same-file edit
           // shifted content). Re-read from disk fresh.
@@ -620,12 +624,13 @@ export function buildEditTools(ctx: ToolContext) {
               edits,
               "multi_edit",
               ctx.readCache,
+              native,
             );
           }
           if (result.ok) {
             getEditFailures(ctx).delete(abs);
             ctx.fileTracker.markModified(abs);
-            await commitCheckpoint();
+            await commitCheckpointBatch(checkpoint);
             return result;
           }
           // Batch failed — retry each edit individually so correct edits
@@ -645,6 +650,7 @@ export function buildEditTools(ctx: ToolContext) {
               [e],
               "edit",
               ctx.readCache,
+              native,
             );
             if ("ok" in r && r.ok) {
               succeeded.push({
@@ -661,7 +667,6 @@ export function buildEditTools(ctx: ToolContext) {
           }
           if (succeeded.length === 0) {
             getEditFailures(ctx).set(abs, failures + 1);
-            discardCheckpoint();
             return {
               ok: false,
               error:
@@ -680,7 +685,7 @@ export function buildEditTools(ctx: ToolContext) {
           // NEXT tool call's checkpoint instead.
           getEditFailures(ctx).delete(abs);
           ctx.fileTracker.markModified(abs);
-          await commitCheckpoint();
+          await commitCheckpointBatch(checkpoint);
           return {
             ok: true as const,
             replacements: succeeded.reduce((sum, s) => sum + s.replacements, 0),

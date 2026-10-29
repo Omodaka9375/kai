@@ -6,6 +6,7 @@ import { PreviewPane, type PreviewPaneHandle } from "./PreviewPane";
 type Props = {
   tabs: Tab[];
   activeId: number;
+  projectVisible?: boolean;
   onUrlChange: (id: number, url: string) => void;
   registerHandle: (id: number, handle: PreviewPaneHandle | null) => void;
   onCloseTab?: (id: number) => void;
@@ -14,6 +15,7 @@ type Props = {
 export function PreviewStack({
   tabs,
   activeId,
+  projectVisible = true,
   onUrlChange,
   registerHandle,
   onCloseTab,
@@ -65,7 +67,7 @@ export function PreviewStack({
   return (
     <div className="relative h-full w-full">
       {previews.map((t) => {
-        const visible = t.id === activeId;
+        const visible = projectVisible && t.id === activeId;
         return (
           <div
             key={t.id}

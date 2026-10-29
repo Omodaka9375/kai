@@ -14,7 +14,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { invoke } from "@tauri-apps/api/core";
-import { currentWorkspaceEnv } from "@/modules/workspace";
+import { currentWorkspaceEnv, useProjectRuntime } from "@/modules/workspace";
 import { motion } from "motion/react";
 import {
   forwardRef,
@@ -72,6 +72,8 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(function E
 }: Props,
   ref,
 ) {
+  const runtime = useProjectRuntime();
+  const workspaceEnv = () => runtime?.env ?? currentWorkspaceEnv();
   const showHidden = usePreferencesStore((s) => s.showHidden);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchHit[]>([]);
@@ -124,7 +126,7 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(function E
             // silently ignored, so the match-case toggle never did anything.
             caseInsensitive: !matchCase,
             maxResults: 200,
-            workspace: currentWorkspaceEnv(),
+            workspace: workspaceEnv(),
           });
           if (alive) {
             const mapped: SearchHit[] = res.hits.map((h) => ({
@@ -145,7 +147,7 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(function E
             query: q,
             limit: 200,
             showHidden,
-            workspace: currentWorkspaceEnv(),
+            workspace: workspaceEnv(),
           });
           if (alive) {
             setResults(res.hits);

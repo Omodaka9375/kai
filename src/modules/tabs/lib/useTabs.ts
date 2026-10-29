@@ -12,6 +12,7 @@ import {
   type SplitDir,
 } from "@/modules/terminal/lib/panes";
 import { disposeSession } from "@/modules/terminal/lib/useTerminalSession";
+import { allocateWorkspaceTabIds } from "./idAllocator";
 
 // Matches the renderer slot pool size — over this we'd evict an active leaf.
 export const MAX_PANES_PER_TAB = 4;
@@ -156,7 +157,6 @@ export function useTabs(initial?: Partial<TerminalTab> & { defer?: boolean }) {
     ];
   });
   const [activeId, setActiveId] = useState(initial?.defer ? 0 : 1);
-  const nextIdRef = useRef(3);
   const tabsRef = useRef(tabs);
 
   useEffect(() => {
@@ -164,8 +164,8 @@ export function useTabs(initial?: Partial<TerminalTab> & { defer?: boolean }) {
   }, [tabs]);
 
   const newTab = useCallback((cwd?: string) => {
-    const tabId = nextIdRef.current++;
-    const leafId = nextIdRef.current++;
+    const tabId = allocateWorkspaceTabIds();
+    const leafId = allocateWorkspaceTabIds();
     setTabs((t) => [
       ...t,
       {
@@ -182,8 +182,8 @@ export function useTabs(initial?: Partial<TerminalTab> & { defer?: boolean }) {
   }, []);
 
   const newPrivateTab = useCallback((cwd?: string) => {
-    const tabId = nextIdRef.current++;
-    const leafId = nextIdRef.current++;
+    const tabId = allocateWorkspaceTabIds();
+    const leafId = allocateWorkspaceTabIds();
     setTabs((t) => [
       ...t,
       {
@@ -227,7 +227,7 @@ export function useTabs(initial?: Partial<TerminalTab> & { defer?: boolean }) {
           }
           return curr;
         }
-        const id = nextIdRef.current++;
+        const id = allocateWorkspaceTabIds();
         targetId = id;
         return [
           ...curr,
@@ -263,7 +263,7 @@ export function useTabs(initial?: Partial<TerminalTab> & { defer?: boolean }) {
         const previewIdx = curr.findIndex(
           (t) => t.kind === "editor" && (t as EditorTab).preview,
         );
-        const id = nextIdRef.current++;
+        const id = allocateWorkspaceTabIds();
         targetId = id;
         const tab: EditorTab = {
           id,
@@ -312,7 +312,7 @@ export function useTabs(initial?: Partial<TerminalTab> & { defer?: boolean }) {
           targetId = existing.id;
           return curr;
         }
-        const id = nextIdRef.current++;
+        const id = allocateWorkspaceTabIds();
         targetId = id;
         const title = `${basename(input.path)} (AI diff)`;
         return [
@@ -370,7 +370,7 @@ export function useTabs(initial?: Partial<TerminalTab> & { defer?: boolean }) {
   }, []);
 
   const newPreviewTab = useCallback((url: string) => {
-    const id = nextIdRef.current++;
+    const id = allocateWorkspaceTabIds();
     setTabs((t) => [
       ...t,
       { id, kind: "preview", title: titleFromUrl(url), url },
@@ -411,7 +411,7 @@ export function useTabs(initial?: Partial<TerminalTab> & { defer?: boolean }) {
         return existing.id;
       }
 
-      const id = nextIdRef.current++;
+      const id = allocateWorkspaceTabIds();
       const nextTabs = [
         ...curr,
         {
@@ -450,7 +450,7 @@ export function useTabs(initial?: Partial<TerminalTab> & { defer?: boolean }) {
         setActiveId(existing.id);
         return existing.id;
       }
-      const id = nextIdRef.current++;
+      const id = allocateWorkspaceTabIds();
       const nextTabs = [
         ...curr,
         {
@@ -502,7 +502,7 @@ export function useTabs(initial?: Partial<TerminalTab> & { defer?: boolean }) {
         setActiveId(existing.id);
         return existing.id;
       }
-      const id = nextIdRef.current++;
+      const id = allocateWorkspaceTabIds();
       const nextTabs = [
         ...curr,
         {
@@ -526,7 +526,7 @@ export function useTabs(initial?: Partial<TerminalTab> & { defer?: boolean }) {
   );
 
   const newApiTesterTab = useCallback(() => {
-    const id = nextIdRef.current++;
+    const id = allocateWorkspaceTabIds();
     setTabs((t) => [
       ...t,
       { id, kind: "api-tester", title: "API Tester" } satisfies ApiTesterTab,
@@ -545,7 +545,7 @@ export function useTabs(initial?: Partial<TerminalTab> & { defer?: boolean }) {
         targetId = existing.id;
         return curr;
       }
-      const id = nextIdRef.current++;
+      const id = allocateWorkspaceTabIds();
       targetId = id;
       return [
         ...curr,
@@ -709,8 +709,8 @@ export function useTabs(initial?: Partial<TerminalTab> & { defer?: boolean }) {
         curr.map((t) => {
           if (t.id !== tabId || t.kind !== "terminal") return t;
           if (leafIds(t.paneTree).length >= MAX_PANES_PER_TAB) return t;
-          const splitId = nextIdRef.current++;
-          const leafId = nextIdRef.current++;
+          const splitId = allocateWorkspaceTabIds();
+          const leafId = allocateWorkspaceTabIds();
           newLeafId = leafId;
           const paneTree = splitLeaf(
             t.paneTree,

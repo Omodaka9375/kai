@@ -4,7 +4,7 @@ import { native } from "../lib/native";
 import { checkShellCommand } from "../lib/security";
 import { checkShellSandbox, sandboxExecRoot } from "../lib/sandbox";
 import { withExclusiveLock } from "../lib/mutationLock";
-import type { ToolContext } from "./context";
+import { nativeForContext, sandboxOverrideForContext, type ToolContext } from "./context";
 import { currentWorkspaceEnv, workspaceScopeKey } from "@/modules/workspace";
 
 /**
@@ -15,15 +15,20 @@ import { currentWorkspaceEnv, workspaceScopeKey } from "@/modules/workspace";
  * `cancelAllShellSessions` can never close a replacement session that got
  * the same numeric Rust id.
  */
-const sessionShells = new Map<string, { promise: Promise<number>; generation: number }>();
+const sessionShells = new Map<string, {
+  promise: Promise<number>;
+  generation: number;
+  native: ReturnType<typeof nativeForContext>;
+}>();
 let shellGeneration = 0;
 
 /** Cancel all running shell session commands. Called on agent stop. */
-export function cancelAllShellSessions(): void {
+export function cancelAllShellSessions(sessionId?: string): void {
   for (const [key, entry] of sessionShells) {
+    if (sessionId && key !== sessionId && !key.startsWith(`${sessionId}:`)) continue;
     const gen = entry.generation;
     void entry.promise.then((id) => {
-      native.shellSessionCancel(id);
+      void entry.native.shellSessionCancel(id);
       // If the cancel flag didn't take effect (e.g. the child process is
       // unkillable or stuck in a blocking syscall), close the entire session
       // after a grace period so the next run gets a fresh shell.
@@ -32,14 +37,20 @@ export function cancelAllShellSessions(): void {
         // getSessionShell call may have replaced the entry by now.
         const cur = sessionShells.get(key);
         if (cur && cur.generation === gen) {
-          native.shellSessionClose(id);
+          void entry.native.shellSessionClose(id);
         }
       }, 3000);
     }).catch((e) => { console.debug("shellSessionCancel failed during cancelAllShellSessions:", e); });
   }
   // Also clear the session map so the next agent run creates a fresh shell
   // instead of reusing the stuck one.
-  sessionShells.clear();
+  if (sessionId) {
+    for (const key of sessionShells.keys()) {
+      if (key === sessionId || key.startsWith(`${sessionId}:`)) sessionShells.delete(key);
+    }
+  } else {
+    sessionShells.clear();
+  }
 }
 
 /** Cancel the ACTIVE foreground command in this chat session. Safe when no
@@ -51,7 +62,7 @@ export async function stopCommand(sessionId: string): Promise<void> {
   const entry = sessionShells.get(key);
   if (!entry) return;
   const id = await entry.promise;
-  await native.shellSessionCancel(id);
+  await entry.native.shellSessionCancel(id);
   // Same fallback as agent-wide stop: if native cancellation cannot reap a
   // wedged child, retire the persistent session rather than leaving the next
   // command stuck behind it. Never close a replacement shell id by accident.
@@ -59,7 +70,7 @@ export async function stopCommand(sessionId: string): Promise<void> {
     const current = sessionShells.get(key);
     if (current?.generation === entry.generation) {
       sessionShells.delete(key);
-      void native.shellSessionClose(id).catch((error) => {
+      void entry.native.shellSessionClose(id).catch((error) => {
         console.debug("shellSessionClose after stop failed:", error);
       });
     }
@@ -72,7 +83,7 @@ export function closeShellSession(sessionId: string): void {
   // session id since we don't know the workspace scope at deletion time.
   for (const [key, entry] of sessionShells) {
     if (key === sessionId || key.startsWith(`${sessionId}:`)) {
-      void entry.promise.then((id) => native.shellSessionClose(id)).catch((e) => { console.debug("shellSessionClose failed during closeShellSession:", e); });
+      void entry.promise.then((id) => entry.native.shellSessionClose(id)).catch((e) => { console.debug("shellSessionClose failed during closeShellSession:", e); });
       sessionShells.delete(key);
     }
   }
@@ -83,18 +94,19 @@ export function closeShellSession(sessionId: string): void {
 async function getSessionShell(
   sessionId: string,
   cwd: string | null,
+  client: ReturnType<typeof nativeForContext> = native,
 ): Promise<number> {
   const existing = sessionShells.get(sessionId);
   if (existing) return existing.promise;
-  const promise = native.shellSessionOpen(cwd);
+  const promise = client.shellSessionOpen(cwd);
   // `existing` is falsy here (we returned above if truthy), so create new.
     const generation = ++shellGeneration;
-  sessionShells.set(sessionId, { promise, generation });
+  sessionShells.set(sessionId, { promise, generation, native: client });
   return promise;
 }
 
-function workspaceSessionKey(sessionId: string): string {
-  return `${sessionId}:${workspaceScopeKey(currentWorkspaceEnv())}`;
+function workspaceSessionKey(sessionId: string, env = currentWorkspaceEnv()): string {
+  return `${sessionId}:${workspaceScopeKey(env)}`;
 }
 
 /**
@@ -210,6 +222,7 @@ export function capOutputForContext(
 }
 
 export function buildShellTools(ctx: ToolContext) {
+  const native = nativeForContext(ctx);
   return {
     bash_run: tool({
       description:
@@ -225,7 +238,7 @@ export function buildShellTools(ctx: ToolContext) {
       execute: async ({ command, timeout_secs, elevated }, options) => {
         const safety = checkShellCommand(command);
         if (!safety.ok) return { error: safety.reason };
-        const sandbox = await checkShellSandbox(command, ctx.getSandboxOverride?.() ?? null);
+        const sandbox = await checkShellSandbox(command, await sandboxOverrideForContext(ctx));
         if (!sandbox.ok) return { error: sandbox.reason };
         // Check abort before any work — agent was stopped before we started.
         if (options?.abortSignal?.aborted) {
@@ -246,8 +259,8 @@ export function buildShellTools(ctx: ToolContext) {
         if (!sid) return { error: "no active chat session" };
         try {
           const cwd = ctx.getCwd();
-          const shellKey = workspaceSessionKey(sid);
-          const shellId = await getSessionShell(shellKey, cwd);
+          const shellKey = workspaceSessionKey(sid, ctx.workspaceEnv);
+          const shellId = await getSessionShell(shellKey, cwd, native);
           const effectiveTimeout =
             timeout_secs ?? slowCommandTimeout(command);
 
@@ -310,7 +323,7 @@ export function buildShellTools(ctx: ToolContext) {
           }
 
           const sandboxRoot = await sandboxExecRoot(
-            ctx.getSandboxOverride?.() ?? null,
+            await sandboxOverrideForContext(ctx),
           );
           // Serialize on the shared per-session shell. The AI SDK runs
           // sibling tool calls from one step CONCURRENTLY, and two bash_run
@@ -396,7 +409,7 @@ export function buildShellTools(ctx: ToolContext) {
       execute: async ({ command, cwd }) => {
         const safety = checkShellCommand(command);
         if (!safety.ok) return { error: safety.reason };
-        const sandbox = await checkShellSandbox(command, ctx.getSandboxOverride?.() ?? null);
+        const sandbox = await checkShellSandbox(command, await sandboxOverrideForContext(ctx));
         if (!sandbox.ok) return { error: sandbox.reason };
         const effectiveCwd = cwd ?? ctx.getCwd();
         try {
@@ -409,7 +422,7 @@ export function buildShellTools(ctx: ToolContext) {
             effectiveCwd,
             owner,
             label,
-            await sandboxExecRoot(ctx.getSandboxOverride?.() ?? null),
+            await sandboxExecRoot(await sandboxOverrideForContext(ctx)),
           );
           return { handle, command, cwd: effectiveCwd, ok: true };
         } catch (e) {

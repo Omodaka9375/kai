@@ -1,5 +1,5 @@
 import { invoke, Channel } from "@tauri-apps/api/core";
-import { currentWorkspaceEnv } from "@/modules/workspace";
+import { currentWorkspaceEnv, type WorkspaceEnv } from "@/modules/workspace";
 
 export type PtyHandlers = {
   onData: (bytes: Uint8Array) => void;
@@ -19,6 +19,7 @@ export async function openPty(
   handlers: PtyHandlers,
   cwd?: string,
   shell?: string,
+  env?: WorkspaceEnv,
 ): Promise<PtySession> {
   // Raw bytes — no base64/JSON round-trip; messages arrive as ArrayBuffer.
   const onData = new Channel<ArrayBuffer>();
@@ -43,7 +44,7 @@ export async function openPty(
     cols,
     rows,
     cwd: cwd ?? null,
-    workspace: currentWorkspaceEnv(),
+    workspace: env ?? currentWorkspaceEnv(),
     shell: shell && shell !== "auto" ? shell : null,
     onData,
     onExit,

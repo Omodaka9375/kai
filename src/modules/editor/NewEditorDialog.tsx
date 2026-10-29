@@ -12,7 +12,7 @@ import { File02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
-import { currentWorkspaceEnv } from "@/modules/workspace";
+import { currentWorkspaceEnv, useProjectRuntime } from "@/modules/workspace";
 
 type Props = {
   open: boolean;
@@ -32,6 +32,7 @@ export function NewEditorDialog({
   rootPath,
   onCreated,
 }: Props) {
+  const runtime = useProjectRuntime();
   const [name, setName] = useState("untitled.txt");
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -69,7 +70,7 @@ export function NewEditorDialog({
       ? trimmed
       : joinPath(rootPath, trimmed);
     try {
-      await invoke("fs_create_file", { path, workspace: currentWorkspaceEnv() });
+      await invoke("fs_create_file", { path, workspace: runtime?.env ?? currentWorkspaceEnv() });
       onCreated(path);
       onOpenChange(false);
     } catch (e) {

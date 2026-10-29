@@ -1,6 +1,27 @@
 import type { FileTracker } from "../lib/fileTracker";
+import type { NativeClient } from "../lib/native";
+import type { WorkspaceEnv } from "@/modules/workspace/env";
+import { native as ambientNative } from "../lib/native";
+
+export function nativeForContext(ctx: ToolContext): NativeClient {
+  return ctx.native ?? ambientNative;
+}
+
+export async function sandboxOverrideForContext(ctx: ToolContext) {
+  if (ctx.getSandboxOverrideAsync) return await ctx.getSandboxOverrideAsync();
+  return ctx.getSandboxOverride?.() ?? null;
+}
 
 export type ToolContext = {
+  /** Captured owning project identity. Never follows the visible workspace. */
+  projectId?: string;
+  workspaceEnv?: WorkspaceEnv;
+  /** Project-bound native client. Prefer this over the ambient global client
+   * for work initiated by an agent or background scheduler. */
+  native?: NativeClient;
+  /** Resolve this project's configured sandbox without reading the visible
+   * project's global root. */
+  getSandboxOverrideAsync?: () => Promise<import("../lib/sandbox").SandboxOverride | null>;
   /** Active terminal tab cwd, used to resolve relative paths. Null = home. */
   getCwd: () => string | null;
   /** Workspace root (explorer root). Used by tools that operate over the project. */

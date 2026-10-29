@@ -52,8 +52,13 @@ export type ChatRuntimeDeps = {
   };
   /** Keys read lazily per request (key rotation needs no chat rebuild). */
   getKeys: () => ProviderKeys;
+  /** Captured owning project. Optional for legacy/test contexts; normal App
+   * runtimes always provide it so background work never follows the UI. */
+  projectRuntime?: import("@/modules/workspace").ProjectRuntime;
   /** Currently selected model id. */
   getSelectedModelId: () => ModelId;
+  /** Persona selected for this project, not whichever project is visible. */
+  getAgentPersonaId?: () => string | undefined;
   /** True when this session is the active one (stream-callback guard). */
   isActiveSession: (sessionId: string) => boolean;
   /** Patch agent meta — only called when the session is active. */
@@ -64,6 +69,7 @@ export type ChatRuntimeDeps = {
    *  outcome string; "Context compacted…" prefix means it succeeded.
    *  Injected (not imported) so the runtime stays store-cycle-free. */
   compactActiveSession: () => string;
+  compactSession?: (sessionId: string) => string;
 };
 
 export type AgentRunStatus =
@@ -201,6 +207,17 @@ export function makeChatSync(
     void loadShadow(base.getWorkspaceRoot()).catch(() => undefined);
     return {
       ...redirected,
+      projectId: deps.projectRuntime?.id,
+      workspaceEnv: deps.projectRuntime?.env,
+      native: deps.projectRuntime?.native,
+      getSandboxOverrideAsync: async () => {
+        if (!deps.projectRuntime) return null;
+        const root = redirected.getWorkspaceRoot();
+        if (!root) return null;
+        const { loadSandboxMode } = await import("./sandbox");
+        const mode = await loadSandboxMode(root, deps.projectRuntime.native);
+        return { root, mode };
+      },
       // Real root — vs the shadow-redirected `getWorkspaceRoot` above.
       // Memory/checkpoints key off this so knowledge survives merge/discard.
       getRealWorkspaceRoot: () => deps.live.getWorkspaceRoot(),
@@ -255,9 +272,10 @@ export function makeChatSync(
       usePreferencesStore.getState().customInstructions,
     getAgentPersona: () => {
       const { activeId, customAgents } = useAgentsStore.getState();
-      if (activeId === "__none__") return null;
+      const selectedId = deps.getAgentPersonaId?.() ?? activeId;
+      if (selectedId === "__none__") return null;
       const all = [...BUILTIN_AGENTS, ...customAgents];
-      const a = all.find((x) => x.id === activeId) ?? BUILTIN_AGENTS[0];
+      const a = all.find((x) => x.id === selectedId) ?? BUILTIN_AGENTS[0];
       return { name: a.name, instructions: a.instructions };
     },
     getLive: () => {
@@ -479,7 +497,7 @@ export function makeChatSync(
       if (isStallError(e) && isActive()) {
         const MAX_STALL_RETRIES = 2;
         if (stallRetriesRef.current < MAX_STALL_RETRIES) {
-          const outcome = deps.compactActiveSession();
+          const outcome = deps.compactSession?.(sessionId) ?? deps.compactActiveSession();
           const compacted = outcome.startsWith("Context compacted");
           const minimal = outcome.includes("already minimal");
           if (compacted || minimal) {

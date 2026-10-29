@@ -31,6 +31,7 @@ import { AiComposerProvider } from "@/modules/ai/components/composer";
 import { AiErrorBoundary } from "@/modules/ai/components/AiErrorBoundary";
 import { redactSensitive } from "@/modules/ai/lib/redact";
 import { setSandboxRoot } from "@/modules/ai/lib/sandbox";
+import { registerProjectRuntime, setActiveProjectRuntime, setProjectLive, setProjectModel, setProjectActiveSession, getProjectActiveSession, stopSession } from "@/modules/ai/store/chatStore";
 import { native } from "@/modules/ai/lib/native";
 import { useAgentsStore } from "@/modules/ai/store/agentsStore";
 import { useMcpStore } from "@/modules/ai/store/mcpStore";
@@ -63,6 +64,7 @@ import { usePreferencesStore } from "@/modules/settings/preferences";
 import { onKeysChanged, setLastWorkspaceCwd, setRecentProjects, setSidebarView, setSidebarWidth, SIDEBAR_WIDTH_DEFAULT, SIDEBAR_WIDTH_MIN, SIDEBAR_WIDTH_MAX } from "@/modules/settings/store";
 import { ShortcutsDialog } from "@/modules/shortcuts";
 import { useAppShortcuts } from "./useAppShortcuts";
+import { useProjectsMenu } from "./projectsMenu";
 import {
   ExtensionsView,
   SidebarRail,
@@ -91,6 +93,8 @@ import {
   LOCAL_WORKSPACE,
   useWorkspaceEnvStore,
   type WorkspaceEnv,
+  createProjectRuntime,
+  useProjectRuntime,
 } from "@/modules/workspace";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
@@ -113,7 +117,10 @@ function dirname(path: string | null): string | null {
 // Initialize agent bus event handlers once.
 initBusHandlers();
 
-export default function App() {
+export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
+  const runtime = useProjectRuntime();
+  const projectsMenu = useProjectsMenu();
+  const activeChatSessionId = useChatStore((s) => s.activeSessionId);
   const {
     tabs,
     activeId,
@@ -332,9 +339,13 @@ export default function App() {
           // Non-fatal — git panel will surface "not authorized" if needed.
         }
       }
+      if (runtime && projectsMenu) {
+        projectsMenu.changeEnvironment(runtime.id, env, nextHome);
+        return;
+      }
       resetWorkspace();
     },
-    [workspaceEnv, setWorkspaceEnv, resetWorkspace],
+    [runtime, projectsMenu, workspaceEnv, setWorkspaceEnv, resetWorkspace],
   );
   // On launch, resolve the workspace root ONLY — no auto-spawned terminal.
   // A mount-time PTY raced the first paint / window-state restore / the
@@ -343,8 +354,9 @@ export default function App() {
   // We intentionally skip `workspaceCurrentDir()` as the Tauri process cwd
   // is the app data directory on Windows, which is not a useful default.
   useEffect(() => {
+    if (!isActive) return;
     const resolveCwd = async (): Promise<string | null> => {
-      const launch = getLaunchDir();
+      const launch = runtime?.root ?? getLaunchDir();
       if (launch) return launch;
       // A prefs-init failure (corrupt/locked store under a second concurrent
       // instance) must not block root resolution — fall through to home.
@@ -398,7 +410,7 @@ export default function App() {
         setRootRef.current(home ?? "");
       });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [isActive, runtime]);
 
   // ── Workspace split ────────────────────────────────────────────────
   // When non-null, the workspace splits into two side-by-side panels.
@@ -537,6 +549,10 @@ export default function App() {
   ) as ReturnType<typeof useWorkspaceCwd> & { _setRoot: (cwd: string) => void };
   const setRootRef = useRef(_setRoot);
   setRootRef.current = _setRoot;
+  const projectRuntime = useMemo(
+    () => runtime ?? createProjectRuntime(explorerRoot ?? launchCwd ?? home ?? "", workspaceEnv),
+    [runtime, explorerRoot, launchCwd, home, workspaceEnv],
+  );
 
   // Single ResizeObserver for the AI input bar height CSS var. This was
   // previously an inline ref callback — React re-attaches inline refs on every
@@ -567,6 +583,15 @@ export default function App() {
       // terminal massacre on a Recent-click of the project you are already
       // in — but still lands you in the project when you are on the
       // StartPage with zero tabs.
+      if (projectsMenu) {
+        const normalized = path.replace(/\\/g, "/").toLowerCase();
+        const existing = projectsMenu.items.find(
+          (item) => item.root.replace(/\\/g, "/").toLowerCase() === normalized,
+        );
+        if (existing) projectsMenu.switchProject(existing.id);
+        else projectsMenu.addProject(path);
+        return;
+      }
       const norm = (p: string) => p.replace(/\\/g, "/");
       if (explorerRoot && norm(explorerRoot) === norm(path)) {
         if (tabs.length === 0) newTab(path);
@@ -588,7 +613,7 @@ export default function App() {
       persistSidebarView("explorer");
       resetWorkspace();
     },
-    [tabs, explorerRoot, resetWorkspace, newTab],
+    [tabs, explorerRoot, resetWorkspace, newTab, projectsMenu],
   );
 
   // Single-instance forwarding: a second KAI launch (e.g. "Open with KAI" in
@@ -598,6 +623,7 @@ export default function App() {
   const onOpenProjectRef = useRef(onOpenProject);
   onOpenProjectRef.current = onOpenProject;
   useEffect(() => {
+    if (!isActive) return;
     const promise = listen<string>("Kai://open-project", (event) => {
       const path = event.payload;
       if (!path) return;
@@ -606,7 +632,7 @@ export default function App() {
     return () => {
       void promise.then((un) => un());
     };
-  }, []);
+  }, [isActive]);
 
   // Current project folder name — the last path segment. Used for the window
   // title (taskbar / Alt+Tab disambiguation) and the header's project label.
@@ -619,17 +645,18 @@ export default function App() {
   // distinguish multiple KAI instances in the taskbar / Alt+Tab. Show only
   // the project name (no "KAI —" prefix).
   useEffect(() => {
+    if (!isActive) return;
     const w = getCurrentWindow();
     const title = projectName ?? "KAI";
     void w.setTitle(title);
     document.title = title;
-  }, [projectName]);
+  }, [projectName, isActive]);
 
   // Persist the workspace root so it's restored on next launch.
   // Guard behind prefsHydrated so we don't overwrite the persisted recent
   // projects list with [current] before the store has loaded from disk.
   useEffect(() => {
-    if (!explorerRoot || !prefsHydrated) return;
+    if (!isActive || !explorerRoot || !prefsHydrated) return;
     void setLastWorkspaceCwd(explorerRoot);
     try {
       const normalized = explorerRoot.replace(/\\/g, "/").replace(/\/$/, "");
@@ -639,7 +666,7 @@ export default function App() {
     } catch {
       // ignore
     }
-  }, [explorerRoot, prefsHydrated]);
+  }, [explorerRoot, prefsHydrated, isActive]);
 
   // Restore per-project model when workspace changes, fall back to global default.
   const projectModelRoot = useRef<string | null>(null);
@@ -649,16 +676,24 @@ export default function App() {
     if (root === projectModelRoot.current) return;
     projectModelRoot.current = root;
     const saved = root ? projectModelIds[root] : undefined;
-    setSelectedModelId((saved ?? prefDefaultModel) as ModelId);
-    // Same project switch also re-applies the per-project AGENT persona
-    // (legacy global selection is the fallback inside the store).
-    useAgentsStore.getState().setRoot(root);
-  }, [prefsHydrated, explorerRoot, projectModelIds, prefDefaultModel, setSelectedModelId]);
+    const model = (saved ?? prefDefaultModel) as ModelId;
+    if (isActive) {
+      // Activate BEFORE setting the legacy global selection: its setter
+      // mirrors into the currently active project's captured config.
+      setActiveProjectRuntime(projectRuntime);
+      setProjectModel(projectRuntime.id, model, useAgentsStore.getState().activeId);
+      // Only the visible project changes the legacy global presentation
+      // selection; the captured project value remains independently stable.
+      useAgentsStore.getState().setRoot(root);
+    }
+  }, [isActive, prefsHydrated, projectRuntime, explorerRoot, projectModelIds, prefDefaultModel, setSelectedModelId]);
 
   useEffect(() => {
-    if (!launchCwdResolved) return;
+    if (!isActive || !launchCwdResolved) return;
     const root = explorerRoot ?? launchCwd ?? home ?? null;
-    void hydrateSessions(root);
+    void hydrateSessions(root).then(() => {
+      setProjectActiveSession(projectRuntime.id, useChatStore.getState().activeSessionId);
+    });
     void useAgentsStore.getState().hydrate();
     void useSnippetsStore.getState().hydrate();
     void useMcpStore.getState().hydrate();
@@ -672,7 +707,7 @@ export default function App() {
     void import("@/modules/ai/store/openrouterModelsStore").then((m) =>
       m.useOpenRouterModelsStore.getState().fetch(),
     );
-  }, [hydrateSessions, launchCwdResolved, explorerRoot, launchCwd, home]);
+  }, [isActive, hydrateSessions, launchCwdResolved, explorerRoot, launchCwd, home]);
 
   // Personal assistant (Telegram bridge) — ONCE per app launch.
   //
@@ -688,6 +723,7 @@ export default function App() {
   // the bot would silently ignore every message.
   const assistantClaimUnlisten = useRef<(() => void) | null>(null);
   useEffect(() => {
+    if (!isActive) return;
     void import("@/modules/assistant")
       .then(async ({ startAssistantBridge, reclaimAssistantEvents, onAssistantClaimRequested }) => {
         assistantClaimUnlisten.current = await onAssistantClaimRequested(() => {
@@ -706,7 +742,7 @@ export default function App() {
       assistantClaimUnlisten.current?.();
       assistantClaimUnlisten.current = null;
     };
-  }, []);
+  }, [isActive]);
 
   useEffect(() => {
     setActiveSearchAddon(
@@ -884,7 +920,9 @@ export default function App() {
       // Dispatch a window event the composer listens for. Same pattern as
       // selections — keeps file-explorer decoupled from the AI module.
       window.dispatchEvent(
-        new CustomEvent<string>("Kai:ai-attach-file", { detail: path }),
+        new CustomEvent<{ path: string; projectId?: string }>("Kai:ai-attach-file", {
+          detail: { path, projectId: projectRuntime.id },
+        }),
       );
       openPanel();
       focusInput(null);
@@ -1020,11 +1058,12 @@ export default function App() {
       });
     };
 
+    if (!isActive) return;
     document.addEventListener("contextmenu", handleContextMenu);
     return () => {
       document.removeEventListener("contextmenu", handleContextMenu);
     };
-  }, [captureActiveSelection]);
+  }, [captureActiveSelection, isActive]);
 
   const openNewTab = useCallback(() => {
     newTab(inheritedCwdForNewTab());
@@ -1322,6 +1361,7 @@ export default function App() {
         );
       }
     };
+    if (!isActive) return;
     document.addEventListener("click", handler, true);
     const onCustom = (e: Event) => {
       const url = (e as CustomEvent<string>).detail;
@@ -1332,7 +1372,7 @@ export default function App() {
       document.removeEventListener("click", handler, true);
       window.removeEventListener("Kai:open-in-preview", onCustom);
     };
-  }, [openPreviewTab]);
+  }, [isActive, openPreviewTab]);
 
   const handleSplitPane = useCallback(
     (dir: "row" | "col") => {
@@ -1361,6 +1401,7 @@ export default function App() {
 
   const { shortcutsOpen, setShortcutsOpen, newEditorOpen, setNewEditorOpen } =
     useAppShortcuts({
+      isActive,
       tabsRef,
       activeId,
       openNewTab,
@@ -1502,6 +1543,22 @@ export default function App() {
   const lastTerminalTabIdRef = useRef<number | null>(null);
 
   useEffect(() => {
+    registerProjectRuntime(projectRuntime);
+    if (isActive) {
+      setActiveProjectRuntime(projectRuntime);
+      setWorkspaceEnv(projectRuntime.env);
+      const savedSession = getProjectActiveSession(projectRuntime.id);
+      if (savedSession && savedSession !== useChatStore.getState().activeSessionId) {
+        useChatStore.getState().switchSession(savedSession);
+      }
+    }
+    if (isActive) {
+      setProjectModel(
+        projectRuntime.id,
+        useChatStore.getState().selectedModelId,
+        useAgentsStore.getState().activeId,
+      );
+    }
     const findCwd = () => {
       const active = tabs.find((x) => x.id === activeId);
       if (active?.kind === "terminal") {
@@ -1519,7 +1576,7 @@ export default function App() {
     // Keep the project sandbox confinement root in sync with the same root
     // tools resolve against — checkSandbox (security.ts) reads it on every
     // fs tool call.
-    setSandboxRoot(explorerRoot ?? launchCwd ?? home ?? null);
+    if (isActive) setSandboxRoot(explorerRoot ?? launchCwd ?? home ?? null);
 
     // Track the most recently active terminal tab for the fallback path in
     // injectIntoActivePty above.
@@ -1528,7 +1585,7 @@ export default function App() {
       lastTerminalTabIdRef.current = activeTab.id;
     }
 
-    setLive({
+    const live = {
       getCwd: findCwd,
       getTerminalContext: () => {
         const t = tabs.find((x) => x.id === activeId);
@@ -1541,7 +1598,7 @@ export default function App() {
         const t = tabs.find((x) => x.id === activeId);
         return t?.kind === "terminal" && t.private === true;
       },
-      injectIntoActivePty: (text) => {
+      injectIntoActivePty: (text: string) => {
         const isTerminalLike = (
           x: (typeof tabs)[number] | undefined,
         ): x is (typeof tabs)[number] & { activeLeafId: number } =>
@@ -1570,7 +1627,7 @@ export default function App() {
       // NOT shell stdin. The injector above is the shell-input path (used by
       // approval-run commands); escape sequences like OSC 1337 inline images
       // must be interpreted by the terminal, never typed into the shell.
-      writeToActiveTerminalDisplay: (data) => {
+      writeToActiveTerminalDisplay: (data: string) => {
         const isTerminalLike = (
           x: (typeof tabs)[number] | undefined,
         ): x is (typeof tabs)[number] & { activeLeafId: number } =>
@@ -1601,8 +1658,33 @@ export default function App() {
         openPreviewTab(url);
         return true;
       },
-    });
-  }, [setLive, activeId, tabs, explorerRoot, launchCwd, home, openPreviewTab]);
+    };
+    setProjectLive(projectRuntime.id, live);
+    if (isActive) setLive(live);
+  }, [isActive, projectRuntime, setLive, activeId, tabs, explorerRoot, launchCwd, home, openPreviewTab]);
+
+  useEffect(() => {
+    return () => {
+      // Explicit project close, not a visibility switch: only THIS
+      // workspace's terminals and sessions are torn down.
+      for (const id of liveLeavesRef.current) disposeSession(id);
+      for (const session of useChatStore.getState().sessions) {
+        if (
+          normalizeWorkspacePath(session.workspaceRoot) === normalizeWorkspacePath(projectRuntime.root) &&
+          (session.workspaceEnv?.kind ?? "local") === projectRuntime.env.kind &&
+          (projectRuntime.env.kind !== "wsl" || session.workspaceEnv?.kind === "wsl" && session.workspaceEnv.distro === projectRuntime.env.distro)
+        ) {
+          stopSession(session.id);
+          void import("@/modules/ai/tools/watch").then(({ reapSessionWatches }) => reapSessionWatches(session.id));
+          void projectRuntime.native.shellBgReap(session.id).catch(() => {});
+        }
+      }
+    };
+  }, [projectRuntime.root]);
+
+  useEffect(() => {
+    if (isActive) setProjectActiveSession(projectRuntime.id, activeChatSessionId);
+  }, [isActive, projectRuntime.id, activeChatSessionId]);
 
   const workspaceSurface = (
     <div className="relative h-full min-h-0">
@@ -1622,6 +1704,7 @@ export default function App() {
         <TerminalStack
           tabs={tabs}
           activeId={activeId}
+          projectVisible={isActive}
           registerHandle={registerTerminalHandle}
           onSearchReady={handleSearchReady}
           onCwd={handleTerminalCwd}
@@ -1658,6 +1741,7 @@ export default function App() {
         <PreviewStack
           tabs={tabs}
           activeId={activeId}
+          projectVisible={isActive}
           registerHandle={registerPreviewHandle}
           onUrlChange={handlePreviewUrl}
           onCloseTab={disposeTab}
@@ -1735,7 +1819,11 @@ export default function App() {
   const shell = (
     <ThemeProvider>
       <TooltipProvider>
-        <div className="relative flex h-screen flex-col overflow-hidden bg-background text-foreground">
+        <div
+          className={cn("relative flex h-screen flex-col overflow-hidden bg-background text-foreground", !isActive && "invisible pointer-events-none")}
+          aria-hidden={!isActive}
+          inert={!isActive ? true : undefined}
+        >
           <Header
             tabs={tabs}
             activeId={activeId}
@@ -1760,6 +1848,10 @@ export default function App() {
             onSaveAll={handleSaveAll}
             dirtyCount={dirtyEditorTabs.length}
             projectName={projectName}
+            projects={projectsMenu?.items}
+            onSwitchProject={projectsMenu?.switchProject}
+            onAddProject={projectsMenu?.addProject}
+            onCloseProject={projectsMenu?.closeProject}
           />
 
           <main className="zoom-content flex min-h-0 flex-1 flex-col">
@@ -1867,6 +1959,7 @@ export default function App() {
                                 <PreviewStack
                                   tabs={tabs}
                                   activeId={splitTab.id}
+                                  projectVisible={isActive}
                                   registerHandle={registerPreviewHandle}
                                   onUrlChange={handlePreviewUrl}
                                   onCloseTab={disposeTab}
@@ -1952,11 +2045,12 @@ export default function App() {
             <AgentRunBridge
               openAiDiffTab={openAiDiffTab}
               closeAiDiffTab={closeAiDiffTab}
+              isActive={isActive}
             />
           ) : null}
 
           <AnimatePresence>
-            {miniOpen && hasComposer ? (
+            {isActive && miniOpen && hasComposer ? (
               <AiErrorBoundary label="mini-window">
                 <AiMiniWindow key="ai-mini" />
               </AiErrorBoundary>

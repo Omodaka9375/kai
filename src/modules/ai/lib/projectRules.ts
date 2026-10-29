@@ -9,7 +9,8 @@
  *  - KAI.local.md is gitignored, personal, loaded alongside KAI.md
  */
 
-import { native } from "./native";
+import { native, type NativeClient } from "./native";
+import { workspaceScopeKey } from "@/modules/workspace/env";
 
 const KAI_MD_MAX_BYTES = 32 * 1024;
 const RULES_DIR = ".kai/rules";
@@ -60,6 +61,7 @@ function resolvePath(...parts: string[]): string {
 async function walkUpTree(
   startPath: string,
   filename: string,
+  client: NativeClient = native,
 ): Promise<RuleEntry[]> {
   const results: RuleEntry[] = [];
   const seen = new Set<string>();
@@ -74,7 +76,7 @@ async function walkUpTree(
     seen.add(filePath);
 
     try {
-      const r = await native.readFile(filePath);
+      const r = await client.readFile(filePath);
       if (r.kind === "text") {
         const capped =
           r.content.length > KAI_MD_MAX_BYTES
@@ -144,6 +146,7 @@ function parseFrontmatter(content: string): { body: string; paths: string[] } {
  */
 async function loadRulesDirectory(
   workspaceRoot: string,
+  client: NativeClient = native,
 ): Promise<{ global: RuleEntry[]; scoped: PathScopedRule[] }> {
   const dirPath = resolvePath(workspaceRoot, RULES_DIR);
   const global: RuleEntry[] = [];
@@ -151,7 +154,7 @@ async function loadRulesDirectory(
 
   let entries: { name: string; kind: string }[];
   try {
-    entries = (await native.readDir(dirPath)).map((e) => ({
+    entries = (await client.readDir(dirPath)).map((e) => ({
       name: e.name,
       kind: e.kind,
     }));
@@ -163,7 +166,7 @@ async function loadRulesDirectory(
     if (entry.kind !== "file" || !entry.name.endsWith(".md")) continue;
     const filePath = resolvePath(dirPath, entry.name);
     try {
-      const r = await native.readFile(filePath);
+      const r = await client.readFile(filePath);
       if (r.kind !== "text") continue;
       const capped =
         r.content.length > KAI_MD_MAX_BYTES
@@ -198,6 +201,7 @@ const CACHE_TTL_MS = 30_000;
  */
 export async function loadProjectRules(
   workspaceRoot: string | null,
+  client: NativeClient = native,
 ): Promise<ProjectRules> {
   const empty: ProjectRules = {
     baseMemory: "",
@@ -209,23 +213,24 @@ export async function loadProjectRules(
   if (!workspaceRoot) return empty;
 
   const root = workspaceRoot.replace(/\\/g, "/").replace(/\/$/, "");
-  const cached = rulesCache.get(root);
+  const cacheKey = `${workspaceScopeKey(client.env)}:${root}`;
+  const cached = rulesCache.get(cacheKey);
   if (cached && Date.now() - cached.mtime < CACHE_TTL_MS) {
     return cached.rules;
   }
 
   try {
     // 1. Walk up for KAI.md files
-    const baseEntries = await walkUpTree(root, KAI_MD);
+    const baseEntries = await walkUpTree(root, KAI_MD, client);
     const baseMemory = baseEntries.map((e) => e.content).join("\n\n");
 
     // 2. Walk up for KAI.local.md files
-    const localEntries = await walkUpTree(root, KAI_LOCAL_MD);
+    const localEntries = await walkUpTree(root, KAI_LOCAL_MD, client);
     const localMemory = localEntries.map((e) => e.content).join("\n\n");
 
     // 3. Load .kai/rules/ directory
     const { global: globalRules, scoped: scopedRules } =
-      await loadRulesDirectory(root);
+      await loadRulesDirectory(root, client);
 
     // 4. Collect sources for diagnostics
     const sources = [
@@ -243,10 +248,10 @@ export async function loadProjectRules(
       sources,
     };
 
-    rulesCache.set(root, { rules, mtime: Date.now() });
+    rulesCache.set(cacheKey, { rules, mtime: Date.now() });
     return rules;
   } catch {
-    rulesCache.set(root, { rules: empty, mtime: Date.now() });
+    rulesCache.set(cacheKey, { rules: empty, mtime: Date.now() });
     return empty;
   }
 }

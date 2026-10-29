@@ -36,7 +36,7 @@ import type { SaveOutcome } from "./lib/useDocument";
 import { DocxPreview } from "./DocxPreview";
 import { SpreadsheetView } from "./SpreadsheetView";
 import { invoke } from "@tauri-apps/api/core";
-import { currentWorkspaceEnv } from "@/modules/workspace";
+import { currentWorkspaceEnv, useProjectRuntime } from "@/modules/workspace";
 import {
   formatDocument,
   formatSelection,
@@ -73,11 +73,12 @@ function fileExt(path: string): string {
 
 /** Read binary file via Rust and return a blob URL. */
 function useBlobUrl(path: string, mime: string, enabled: boolean): string | null {
+  const runtime = useProjectRuntime();
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
     if (!enabled) return;
     let revoke: string | null = null;
-    invoke<number[]>("fs_read_file_bytes", { path, workspace: currentWorkspaceEnv() })
+    invoke<number[]>("fs_read_file_bytes", { path, workspace: runtime?.env ?? currentWorkspaceEnv() })
       .then((bytes) => {
         const blob = new Blob([new Uint8Array(bytes)], { type: mime });
         const u = URL.createObjectURL(blob);

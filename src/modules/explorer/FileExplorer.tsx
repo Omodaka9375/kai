@@ -38,6 +38,7 @@ import {
   relativeSegments,
 } from "./lib/revealPath";
 import { useGlobalShortcuts } from "@/modules/shortcuts";
+import { useProjectRuntime } from "@/modules/workspace";
 import { cn } from "@/lib/utils";
 
 export type FileExplorerHandle = {
@@ -169,6 +170,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(
     ref,
   ) {
     const tree = useFileTree(rootPath, { onPathRenamed, onPathDeleted });
+    const runtime = useProjectRuntime();
     const [selectedPath, setSelectedPath] = useState<string | null>(null);
     // VSCode-style auto-reveal: when an editor tab becomes active, App calls
     // revealFile(path). We stash the target and let two effects converge on
@@ -309,6 +311,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(
       const handler = (e: Event) => {
         const path = (e as CustomEvent<string>).detail;
         if (!path || !rootPath) return;
+        if (runtime && !pathWithinRoot(path, runtime.root)) return;
         // Refresh every ancestor that's already loaded in the tree so
         // newly-created intermediate directories appear in their parent's
         // entry list. Walk up from the immediate parent to rootPath.
@@ -328,7 +331,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(
       };
       window.addEventListener("Kai:fs-changed", handler);
       return () => window.removeEventListener("Kai:fs-changed", handler);
-    }, [rootPath, tree]);
+    }, [rootPath, tree, runtime]);
 
     const virtualizer = useVirtualizer({
       count: rows.length,

@@ -29,6 +29,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { ProjectsSwitcher, type ProjectSwitcherItem } from "@/modules/workspace";
 import {
   SearchInline,
   type SearchInlineHandle,
@@ -64,6 +65,10 @@ type Props = {
   dirtyCount: number;
   /** Current workspace folder name, shown next to the sidebar toggle. */
   projectName: string | null;
+  projects?: ProjectSwitcherItem[];
+  onSwitchProject?: (id: string) => void;
+  onAddProject?: () => void;
+  onCloseProject?: (id: string) => void;
 };
 
 const COMPACT_WIDTH = 720;
@@ -92,6 +97,10 @@ export function Header({
   onSaveAll,
   dirtyCount,
   projectName,
+  projects = [],
+  onSwitchProject,
+  onAddProject,
+  onCloseProject,
 }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [compact, setCompact] = useState(false);
@@ -177,6 +186,14 @@ export function Header({
       }`}
     >
       <div className="flex shrink-0 items-center gap-0.5">
+        {onSwitchProject && onAddProject && onCloseProject ? (
+          <ProjectsSwitcher
+            projects={projects}
+            onSwitch={onSwitchProject}
+            onAdd={onAddProject}
+            onClose={onCloseProject}
+          />
+        ) : null}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button

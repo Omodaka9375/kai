@@ -24,10 +24,12 @@ import { tryRunSlashCommand, type SlashCommandMeta } from "../lib/slashCommands"
 import {
   getOrCreateChat,
   stopSession,
+  setSessionSteeringMessage,
+  getSessionSteeringMessage,
   useChatStore,
 } from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
-import { currentWorkspaceEnv } from "@/modules/workspace";
+import { currentWorkspaceEnv, useProjectRuntime } from "@/modules/workspace";
 
 export type FileAttachment = {
   id: string;
@@ -94,6 +96,7 @@ type ProviderProps = {
 };
 
 export function AiComposerProvider({ children }: ProviderProps) {
+  const runtime = useProjectRuntime();
   const sessionId = useChatStore((s) => s.activeSessionId);
   const status = useChatStore((s) => s.agentMeta.status);
   const isBusy =
@@ -143,17 +146,13 @@ export function AiComposerProvider({ children }: ProviderProps) {
   // Listen for explorer's "Attach to Agent" event.
   useEffect(() => {
     const onAttach = (e: Event) => {
-      const path = (e as CustomEvent<string>).detail;
-      if (typeof path === "string" && path.length > 0) {
-        void attachFileByPath(path);
-      }
+      const detail = (e as CustomEvent<{ path: string; projectId?: string }>).detail;
+      if (runtime && detail.projectId !== runtime.id) return;
+      if (detail.path) void attachFileByPath(detail.path);
     };
     window.addEventListener("Kai:ai-attach-file", onAttach);
     return () => window.removeEventListener("Kai:ai-attach-file", onAttach);
-  // attachFileByPath closes over setFiles (useState setter — identity-stable)
-  // and currentWorkspaceEnv (module-level). Safe to omit from deps.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [runtime]);
 
   useEffect(() => {
     if (pendingSelections.length === 0) return;
@@ -276,7 +275,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
         | { kind: "toolarge"; size: number; limit: number };
       const result = await invoke<ReadResult>("fs_read_file", {
         path,
-        workspace: currentWorkspaceEnv(),
+        workspace: runtime?.env ?? currentWorkspaceEnv(),
       });
       if (result.kind !== "text") {
         // Binary/oversize files: skip (could surface a toast in future).
@@ -413,12 +412,8 @@ export function AiComposerProvider({ children }: ProviderProps) {
     // current run and sends it as-is once idle. Anything sent here must
     // match the normal path exactly: attachments included.
     if (isBusy) {
-      const pending = useChatStore.getState().steeringMessage;
-      useChatStore
-        .getState()
-        .setSteeringMessage(
-          (pending ?? []).concat(parts as LoosePart[]),
-        );
+      const pending = sessionId ? getSessionSteeringMessage(sessionId) : null;
+      if (sessionId) setSessionSteeringMessage(sessionId, (pending ?? []).concat(parts as LoosePart[]));
       setValue("");
       setFiles([]);
       setPickedSnippets([]);

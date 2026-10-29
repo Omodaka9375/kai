@@ -10,6 +10,7 @@ import {
   saveCustomAgents,
   type Agent,
 } from "../lib/agents";
+import { setProjectModel, getActiveProjectRuntime, useChatStore } from "./chatStore";
 
 const CHANGED_EVENT = "Kai://ai-agents-changed";
 
@@ -78,6 +79,10 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
   },
   setActiveId: (id) => {
     set({ activeId: id });
+    const project = getActiveProjectRuntime();
+    if (project) {
+      setProjectModel(project.id, useChatStore.getState().selectedModelId, id);
+    }
     const root = get().root;
     if (root) {
       void saveActiveAgentIdFor(root, id).then(broadcast);

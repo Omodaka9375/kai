@@ -7,10 +7,9 @@
 
 import { tool } from "ai";
 import { z } from "zod";
-import { native } from "../lib/native";
 import { checkWritableCanonical } from "../lib/security";
-import { resolvePath, type ToolContext } from "./context";
-import { snapshotFile, beginCheckpointBatch, commitCheckpoint, discardCheckpoint } from "../lib/checkpoints";
+import { nativeForContext, sandboxOverrideForContext, resolvePath, type ToolContext } from "./context";
+import { createCheckpointBatch, snapshotFileForBatch, commitCheckpointBatch } from "../lib/checkpoints";
 import { withFileMutationLock } from "../lib/mutationLock";
 import { readCacheEntry } from "../lib/hash";
 
@@ -30,6 +29,7 @@ type BatchEditResult =
   | { ok: false; error: string; file?: string };
 
 export function buildBatchEditTools(ctx: ToolContext) {
+  const native = nativeForContext(ctx);
   return {
     batch_edit: tool({
       description:
@@ -56,7 +56,7 @@ export function buildBatchEditTools(ctx: ToolContext) {
           const safety = await checkWritableCanonical(
             reqPath,
             native.canonicalize,
-            ctx.getSandboxOverride?.() ?? null,
+            await sandboxOverrideForContext(ctx),
           );
           if (!safety.ok)
             return { ok: false, error: safety.reason, file: reqPath };
@@ -144,13 +144,14 @@ export function buildBatchEditTools(ctx: ToolContext) {
           const written: string[] = [];
           let totalReplacements = 0;
           try {
-            beginCheckpointBatch(
-              ctx.getRealWorkspaceRoot?.() ?? ctx.getWorkspaceRoot(),
-              ctx.getSessionId(),
+            const checkpoint = createCheckpointBatch(
+              ctx.getRealWorkspaceRoot?.() ?? ctx.getWorkspaceRoot() ?? "",
+              ctx.getSessionId() ?? "",
+              native,
             );
             for (const { path, newContent } of results) {
               // Snapshot before write for checkpoint undo.
-              await snapshotFile(path);
+              await snapshotFileForBatch(checkpoint, path);
               await native.writeFile(path, newContent);
               written.push(path);
               totalReplacements += 1;
@@ -160,9 +161,8 @@ export function buildBatchEditTools(ctx: ToolContext) {
                 new CustomEvent("Kai:fs-changed", { detail: path }),
               );
             }
-            await commitCheckpoint();
+            await commitCheckpointBatch(checkpoint);
           } catch (e) {
-            discardCheckpoint();
             // Roll back written files on failure.
             for (const path of written) {
               const original = snapshots.get(path);

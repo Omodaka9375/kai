@@ -1,5 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
-import { currentWorkspaceEnv } from "@/modules/workspace";
+import { currentWorkspaceEnv, type WorkspaceEnv } from "@/modules/workspace/env";
 
 export type ReadResult =
   | { kind: "text"; content: string; size: number; format?: string }
@@ -254,17 +254,24 @@ export type GitStashEntry = {
   refName: string;
 };
 
-export const native = {
+/** Build a native client whose environment is captured at construction.
+ * Background project work must never consult the currently visible project's
+ * environment midway through a tool call. `native` below remains the legacy
+ * active-window client for global UI surfaces. */
+export function createNative(getEnv: () => WorkspaceEnv) {
+  const env = getEnv;
+  return {
+    env: getEnv(),
   workspaceCurrentDir: () => invoke<string>("workspace_current_dir"),
   workspaceAuthorize: (path: string) =>
     invoke<string>("workspace_authorize", {
       path,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   readFile: (path: string, extract?: boolean) =>
     invoke<ReadResult>("fs_read_file", {
       path,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
       extract: extract ?? false,
     }),
   /** Extract dimensions + OCR text from in-memory image bytes (no temp
@@ -280,41 +287,41 @@ export const native = {
     invoke<void>("fs_write_file", {
       path,
       content,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   writeFileBytes: (path: string, bytes: number[]) =>
     invoke<void>("fs_write_file_bytes", {
       path,
       bytes,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
     readFileBytes: (path: string) =>
     invoke<number[]>("fs_read_file_bytes", {
       path,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   parseSpreadsheet: (path: string) =>
     invoke<SpreadsheetData>("fs_parse_spreadsheet", {
       path,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }), canonicalize: (path: string) =>
     invoke<string>("fs_canonicalize", {
       path,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   createFile: (path: string) =>
-    invoke<void>("fs_create_file", { path, workspace: currentWorkspaceEnv() }),
+    invoke<void>("fs_create_file", { path, workspace: env() }),
   createDir: (path: string) =>
-    invoke<void>("fs_create_dir", { path, workspace: currentWorkspaceEnv() }),
+    invoke<void>("fs_create_dir", { path, workspace: env() }),
   deleteFile: (path: string) =>
-    invoke<void>("fs_delete", { path, workspace: currentWorkspaceEnv() }),
+    invoke<void>("fs_delete", { path, workspace: env() }),
   // AI tooling never sees dot-prefixed entries regardless of the user's
   // explorer preference — keeps .git / .env / .ssh out of agent context.
   readDir: (path: string) =>
     invoke<DirEntry[]>("fs_read_dir", {
       path,
       showHidden: false,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   grep: (params: {
     pattern: string;
@@ -329,14 +336,14 @@ export const native = {
       glob: params.glob ?? null,
       caseInsensitive: params.caseInsensitive ?? null,
       maxResults: params.maxResults ?? null,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   glob: (params: { pattern: string; root: string; maxResults?: number }) =>
     invoke<GlobResponse>("fs_glob", {
       pattern: params.pattern,
       root: params.root,
       maxResults: params.maxResults ?? null,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   runCommand: (
     command: string,
@@ -348,7 +355,7 @@ export const native = {
       command,
       cwd: cwd ?? null,
       timeoutSecs: timeoutSecs ?? null,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
       sandboxRoot: sandboxRoot ?? null,
     }),
   runElevatedCommand: (
@@ -360,13 +367,13 @@ export const native = {
       command,
       cwd: cwd ?? null,
       timeoutSecs: timeoutSecs ?? null,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
 
   shellSessionOpen: (cwd?: string | null) =>
     invoke<number>("shell_session_open", {
       cwd: cwd ?? null,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   shellSessionRun: (
     id: number,
@@ -388,7 +395,7 @@ export const native = {
       command,
       cwd: cwd ?? null,
       timeoutSecs: timeoutSecs ?? null,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
       sandboxRoot: sandboxRoot ?? null,
     }),
   shellSessionClose: (id: number) =>
@@ -420,7 +427,7 @@ export const native = {
     invoke<number>("shell_bg_spawn", {
       command,
       cwd: cwd ?? null,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
       owner: owner ?? null,
       label: label ?? null,
       sandboxRoot: sandboxRoot ?? null,
@@ -449,24 +456,24 @@ export const native = {
   gitResolveRepo: (cwd: string) =>
     invoke<GitRepoInfo | null>("git_resolve_repo", {
       cwd,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   gitPanelSnapshot: (cwd: string) =>
     invoke<GitPanelSnapshot>("git_panel_snapshot", {
       cwd,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   gitStatus: (repoRoot: string) =>
     invoke<GitStatusSnapshot>("git_status", {
       repoRoot,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   gitDiff: (repoRoot: string, path: string | null, staged: boolean) =>
     invoke<GitDiffResult>("git_diff", {
       repoRoot,
       path,
       staged,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   gitDiffContent: (
     repoRoot: string,
@@ -479,54 +486,54 @@ export const native = {
       path,
       staged,
       originalPath: originalPath ?? null,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   gitStage: (repoRoot: string, paths: string[]) =>
     invoke<void>("git_stage", {
       repoRoot,
       paths,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   gitUnstage: (repoRoot: string, paths: string[]) =>
     invoke<void>("git_unstage", {
       repoRoot,
       paths,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   gitDiscard: (repoRoot: string, entries: GitDiscardEntry[]) =>
     invoke<void>("git_discard", {
       repoRoot,
       entries,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   gitStashList: (repoRoot: string) =>
     invoke<GitStashEntry[]>("git_stash_list", {
       repoRoot,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   gitStashPush: (repoRoot: string, message?: string | null) =>
     invoke<void>("git_stash_push", {
       repoRoot,
       message: message ?? null,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   gitStashPop: (repoRoot: string, index: number) =>
     invoke<void>("git_stash_pop", {
       repoRoot,
       index,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   gitStashApply: (repoRoot: string, index: number) =>
     invoke<void>("git_stash_apply", {
       repoRoot,
       index,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   gitStashDrop: (repoRoot: string, index: number) =>
     invoke<void>("git_stash_drop", {
       repoRoot,
       index,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   gitCommit: (
     repoRoot: string,
@@ -538,37 +545,37 @@ export const native = {
       message,
       sign: opts?.sign ?? false,
       signingKey: opts?.signingKey ?? null,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   gitConfigGet: (key: string) =>
     invoke<string | null>("git_config_get", {
       key,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   gitConfigSet: (key: string, value: string) =>
     invoke<void>("git_config_set", {
       key,
       value,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   gitConfigUnset: (key: string) =>
     invoke<void>("git_config_unset", {
       key,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   gpgStatus: () =>
-    invoke<GpgStatus>("gpg_status", { workspace: currentWorkspaceEnv() }),
+    invoke<GpgStatus>("gpg_status", { workspace: env() }),
   sandboxStatus: () => invoke<SandboxStatus>("sandbox_status"),
   sandboxLoadConfig: (root: string) =>
     invoke<SandboxConfig>("sandbox_load_config", {
       root,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   sandboxSaveConfig: (root: string, mode: SandboxMode) =>
     invoke<void>("sandbox_save_config", {
       root,
       mode,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   sandboxWslSetup: (onEvent: Channel<SandboxSetupEvent>) =>
     invoke<void>("sandbox_wsl_setup", { onEvent }),
@@ -582,56 +589,56 @@ export const native = {
   shadowDiscard: (projectRoot: string) =>
     invoke<void>("shadow_discard", { projectRoot }),
   gpgListKeys: () =>
-    invoke<GpgKey[]>("gpg_list_keys", { workspace: currentWorkspaceEnv() }),
+    invoke<GpgKey[]>("gpg_list_keys", { workspace: env() }),
   gpgExportPublic: (fingerprint: string) =>
     invoke<string>("gpg_export_public", {
       fingerprint,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   gitFetch: (repoRoot: string) =>
     invoke<void>("git_fetch", {
       repoRoot,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   gitPullFfOnly: (repoRoot: string) =>
     invoke<GitPullResult>("git_pull_ff_only", {
       repoRoot,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   gitPull: (repoRoot: string) =>
     invoke<GitPullResult>("git_pull", {
       repoRoot,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   gitPush: (repoRoot: string) =>
     invoke<GitPushResult>("git_push", {
       repoRoot,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   gitLog: (repoRoot: string, options?: { limit?: number; beforeSha?: string }) =>
     invoke<GitLogEntry[]>("git_log", {
       repoRoot,
       limit: options?.limit ?? null,
       beforeSha: options?.beforeSha ?? null,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   gitShowCommit: (repoRoot: string, sha: string) =>
     invoke<GitDiffResult>("git_show_commit", {
       repoRoot,
       sha,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   gitCommitFiles: (repoRoot: string, sha: string) =>
     invoke<GitCommitFileChange[]>("git_commit_files", {
       repoRoot,
       sha,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   gitCommitMessage: (repoRoot: string, sha: string) =>
     invoke<string>("git_commit_message", {
       repoRoot,
       sha,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   gitCommitFileDiff: (
     repoRoot: string,
@@ -644,23 +651,23 @@ export const native = {
       sha,
       path,
       originalPath: originalPath ?? null,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   gitRemoteUrl: (repoRoot: string, name?: string) =>
     invoke<string | null>("git_remote_url", {
       repoRoot,
       name: name ?? null,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   gitListBranches: (repoRoot: string) =>
     invoke<GitBranch[]>("git_list_branches", {
       repoRoot,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   gitListConflicts: (repoRoot: string) =>
     invoke<GitConflictFile[]>("git_list_conflicts", {
       repoRoot,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   screenListMonitors: () => invoke<MonitorInfo[]>("screen_list_monitors"),
   screenCapture: (selector?: string | null) =>
@@ -669,18 +676,22 @@ export const native = {
     invoke<void>("git_switch_branch", {
       repoRoot,
       name,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   gitCreateBranch: (repoRoot: string, name: string) =>
     invoke<void>("git_create_branch", {
       repoRoot,
       name,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
   gitDeleteBranch: (repoRoot: string, name: string) =>
     invoke<void>("git_delete_branch", {
       repoRoot,
       name,
-      workspace: currentWorkspaceEnv(),
+      workspace: env(),
     }),
-};
+  };
+}
+
+export type NativeClient = ReturnType<typeof createNative>;
+export const native = createNative(currentWorkspaceEnv);

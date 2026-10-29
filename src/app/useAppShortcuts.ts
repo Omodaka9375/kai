@@ -13,6 +13,7 @@ import type { Tab } from "@/modules/tabs";
  * moving it into `modules/shortcuts` would create a cross-module cycle.
  */
 export type AppShortcutDeps = {
+  isActive?: boolean;
   tabsRef: RefObject<Tab[]>;
   activeId: number;
   // Tabs
@@ -52,6 +53,7 @@ export function useAppShortcuts(deps: AppShortcutDeps): {
   const [newEditorOpen, setNewEditorOpen] = useState(false);
 
   const {
+    isActive = true,
     tabsRef,
     activeId,
     openNewTab,
@@ -176,6 +178,7 @@ export function useAppShortcuts(deps: AppShortcutDeps): {
     // when the editor has focus. Let those chords through to CM instead of
     // routing them to the header's SearchInline.
     isDisabled: (id, e) => {
+      if (!isActive) return true;
       if (id !== "search.focus" && id !== "search.replace") return false;
       const t = e.target as HTMLElement | null;
       return !!t?.closest?.(".cm-editor");

@@ -12,7 +12,8 @@
  */
 
 import { getKaiStateDir, getLegacyKaiStateDir } from "./kaiPaths";
-import { native } from "./native";
+import { native, type NativeClient } from "./native";
+import { workspaceScopeKey } from "@/modules/workspace/env";
 import { neutralizeFenceMarkers, neutralizeInjectionMarkers } from "./fence";
 
 const MAX_MEMORY_LOAD_BYTES = 25 * 1024;
@@ -223,18 +224,20 @@ const MEMORY_CACHE_TTL_MS = 60_000; // 1 minute
  */
 export async function loadProjectMemoryCached(
   workspaceRoot: string | null,
+  client: NativeClient = native,
 ): Promise<string | null> {
   if (!workspaceRoot) return null;
-  const cached = memoryCache.get(workspaceRoot);
+  const cacheKey = `${workspaceScopeKey(client.env)}:${workspaceRoot}`;
+  const cached = memoryCache.get(cacheKey);
   if (cached && Date.now() - cached.mtime < MEMORY_CACHE_TTL_MS) {
     return cached.content;
   }
   try {
     const content = await loadProjectMemory(workspaceRoot);
-    memoryCache.set(workspaceRoot, { content, mtime: Date.now() });
+    memoryCache.set(cacheKey, { content, mtime: Date.now() });
     return content;
   } catch {
-    memoryCache.set(workspaceRoot, { content: null, mtime: Date.now() });
+    memoryCache.set(cacheKey, { content: null, mtime: Date.now() });
     return null;
   }
 }

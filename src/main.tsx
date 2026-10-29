@@ -7,7 +7,7 @@ import "./styles/globals.css";
 
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import ReactDOM from "react-dom/client";
-import App from "./app/App";
+import App from "./app/AppShell";
 import { initLaunchDir } from "./lib/launchDir";
 import { installConsoleLogBridge } from "./lib/logging";
 import { installFocusModalityGuard } from "./lib/focusModality";
