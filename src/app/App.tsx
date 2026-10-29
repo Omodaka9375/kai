@@ -186,6 +186,12 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
   const sidebarWidthWriteTimerRef = useRef(0);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarView, setSidebarViewState] = useState<SidebarViewId>("explorer");
+  // Per-project sidebar collapsed state. Each workspace keeps its own
+  // tree-open/tree-closed preference; switching projects must not force the
+  // new project's sidebar open (which left the expanded AI mini-window
+  // floating over space the tree no longer occupies).
+  const projectSidebarCollapsed = useRef<Map<string, boolean>>(new Map());
+  const lastSidebarProjectRef = useRef<string | null>(null);
   const persistSidebarView = useCallback((view: SidebarViewId) => {
     setSidebarViewState(view);
     void setSidebarView(view);
@@ -196,6 +202,28 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
     if (p.getSize().asPercentage <= 0) p.expand();
     else p.collapse();
   }, []);
+  // Save/restore the sidebar collapsed state across project switches.
+  // Runs on every foreground flip: record the OUTGOING project's state, then
+  // apply the INCOMING project's remembered state (default: open).
+  useEffect(() => {
+    const projectId = runtime?.id ?? null;
+    if (!projectId) return;
+    if (lastSidebarProjectRef.current && lastSidebarProjectRef.current !== projectId) {
+      projectSidebarCollapsed.current.set(lastSidebarProjectRef.current, sidebarCollapsed);
+    }
+    if (lastSidebarProjectRef.current !== projectId) {
+      const remembered = projectSidebarCollapsed.current.get(projectId) ?? false;
+      const panel = sidebarRef.current;
+      if (panel) {
+        const isCollapsedNow = panel.getSize().asPercentage <= 0;
+        if (remembered !== isCollapsedNow) {
+          if (remembered) panel.collapse();
+          else panel.resize(`${sidebarWidthRef.current}px`);
+        }
+      }
+      lastSidebarProjectRef.current = projectId;
+    }
+  }, [runtime?.id, sidebarCollapsed]);
   const cycleSidebarView = useCallback(
     (view: SidebarViewId) => {
       const panel = sidebarRef.current;

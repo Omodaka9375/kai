@@ -82,6 +82,16 @@ describe("multi-project workspace ownership", () => {
     expect(rowEnd).toBeLessThan(statusBar);
   });
 
+  it("remembers the sidebar collapsed state per project across foreground switches", () => {
+    // Switching projects must not force the incoming project's sidebar open
+    // (the expanded mini-window then floats over space the tree vacated).
+    // The save/restore block records the OUTGOING project's state and applies
+    // the INCOMING project's remembered state on every foreground flip.
+    expect(workspace).toContain("projectSidebarCollapsed.current.set(lastSidebarProjectRef.current, sidebarCollapsed)");
+    expect(workspace).toContain("const remembered = projectSidebarCollapsed.current.get(projectId) ?? false;");
+    expect(workspace).toContain("if (remembered) panel.collapse();");
+  });
+
   it("keeps session and archive controls in the AI window, not the project rail", () => {
     const menu = readFileSync(new URL("./projectsMenu.ts", import.meta.url), "utf8");
     const rail = readFileSync(new URL("../modules/workspace/ProjectRail.tsx", import.meta.url), "utf8");

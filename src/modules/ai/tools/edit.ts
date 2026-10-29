@@ -532,24 +532,37 @@ export function buildEditTools(ctx: ToolContext) {
 
     multi_edit: tool({
       description:
-        "Apply several replacements to ONE file in a single atomic call. The file path goes in the TOP-LEVEL `path` field — do NOT put a `path` inside each edit object (an edit-level path is tolerated as a fallback but the top-level field is the contract). `line_hint` per edit is accepted and used to disambiguate repeated old_strings; never omit an edit because you fear it. Same exact-match rules as edit: every old_string must be copied verbatim from the file's current content. Edits apply in order; an edit that fails to match is reported individually and the rest still land. Prefer this over repeated edit calls when changing several spots in the same file. Asks for user approval. The prior content is auto-checkpointed — revert a bad batch with `checkpoint_undo`.",
-      inputSchema: z.object({
-        path: z.string().optional(),
-        edits: z
-          .array(
-            z.object({
-              old_string: z.string(),
-              new_string: z.string(),
-              replace_all: z.boolean().optional(),
-              line_hint: z
-                .number()
-                .optional()
-                .describe("Approximate 1-based line number where the edit should apply. Used to disambiguate when old_string appears more than once."),
-              path: z.string().optional(),
-            }),
-          )
-          .min(1),
-      }),
+        "Apply several replacements to ONE file in a single atomic call. The file path goes in the TOP-LEVEL `path` field — do NOT put a `path` inside each edit object (an edit-level path is tolerated as a fallback but the top-level field is the contract). `line_hint` per edit is accepted and used to disambiguate repeated old_strings; never omit an edit because you fear it. Same exact-match rules as edit: every old_string must be copied verbatim from the file's current content. Edits apply in order; an edit that fails to match is reported individually and the rest still land. Prefer this over repeated edit calls when changing several spots in the same file. Do NOT fall back to write_file when multi_edit fails — retry multi_edit with corrected old_string values copied verbatim from a fresh read. Asks for user approval. The prior content is auto-checkpointed — revert a bad batch with `checkpoint_undo`.",
+      inputSchema: z
+        .object({
+          path: z.string().optional(),
+          edits: z
+            .array(
+              z.object({
+                old_string: z.string(),
+                new_string: z.string(),
+                replace_all: z.boolean().optional(),
+                line_hint: z
+                  .number()
+                  .optional()
+                  .describe("Approximate 1-based line number where the edit should apply. Used to disambiguate when old_string appears more than once."),
+                path: z.string().optional(),
+              }),
+            )
+            .min(1),
+        })
+        .superRefine((v, ctx) => {
+          // One file, one path: accept it at the top level or per-edit
+          // (models do both), but reject a call that names NO file at all —
+          // execute-time errors caused write_file-whole-file fallbacks.
+          if (!v.path && !v.edits.some((e) => e.path)) {
+            ctx.addIssue({
+              code: "custom",
+              message:
+                'path is required — set the top-level "path" field to the ONE file these edits target (a per-edit "path" also works). Example: {"path":"src/app.ts","edits":[{"old_string":"...","new_string":"..."}]}',
+            });
+          }
+        }),
       needsApproval: true,
       execute: async ({ path: pathArg, edits }) => {
         // Some models put `path` inside each edit instead of at the top level.

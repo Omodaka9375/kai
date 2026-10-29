@@ -193,6 +193,52 @@ function Bridge({
     return n;
   }, [messages]);
 
+  // ---- Auto-approve state --------------------------------------------------
+  // Declared before the background-notification effect: that effect must
+  // know which pending approvals auto-approve will NOT resolve on its own.
+  const autoApprove = getSessionAutoApprove(sessionId);
+  const markAutoApproved = useChatStore((s) => s.markAutoApproved);
+  const autoApprovedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    autoApprovedRef.current = new Set();
+  }, [sessionId]);
+
+  // Commit-signing "ask for approval" must outrank autoApprove: "all". A signed
+  // commit is a stronger, user-owned assertion than a routine file edit, so a
+  // `git commit` from the agent should still surface a confirmation card.
+  const signingApprovalRequired = usePreferencesStore(
+    (s) => s.commitSigningEnabled && s.commitSigningMode === "approval",
+  );
+
+  /** Approvals the user PERSONALLY must answer. In Ask mode that is every
+   * approval. Under Allow ("all") the auto-approve effect resolves routine
+   * calls within milliseconds — only the manual carve-outs (elevated
+   * commands, privacy tools, signed commits) still need a human, and only
+   * those justify interrupting work in another project or app. */
+  const manualApprovalsPending = useMemo(() => {
+    let n = 0;
+    for (const m of messages) {
+      if (m.role !== "assistant") continue;
+      for (const p of m.parts as AnyPart[]) {
+        if ((p as { state?: string }).state !== "approval-requested") continue;
+        if (autoApprove !== "all") {
+          n++;
+          continue;
+        }
+        const type = (p as { type?: string }).type ?? "";
+        const toolName = type.replace(/^tool-/, "");
+        const input = (p as { input?: Record<string, unknown> }).input;
+        const isElevated = toolName === "bash_run" && input?.elevated === true;
+        const isSignedCommit =
+          toolName === "bash_run" &&
+          signingApprovalRequired &&
+          isGitCommitCommand(input?.command as string | undefined);
+        if (isElevated || PRIVACY_APPROVAL_TOOLS.has(toolName) || isSignedCommit) n++;
+      }
+    }
+    return n;
+  }, [messages, autoApprove, signingApprovalRequired]);
+
   useEffect(() => {
     if (isActive) {
       backgroundActiveRef.current = false;
@@ -203,7 +249,11 @@ function Bridge({
       backgroundActiveRef.current = true;
       notifiedRef.current = null;
     }
-    if (backgroundActiveRef.current && approvalsPending > 0 && notifiedRef.current !== "approval") {
+    // Ping only for approvals that actually need the user. Under Allow the
+    // routine ones self-resolve milliseconds after this very render — a
+    // toast for them ("needs your approval" while on auto-approve) is the
+    // multi-project noise the user reported.
+    if (backgroundActiveRef.current && manualApprovalsPending > 0 && notifiedRef.current !== "approval") {
       notifiedRef.current = "approval";
       const name = runtime?.root.split(/[\\/]/).filter(Boolean).pop() ?? "Project";
       void notifyBackgroundAgent(name, "Agent needs your approval");
@@ -214,7 +264,7 @@ function Bridge({
       const name = runtime?.root.split(/[\\/]/).filter(Boolean).pop() ?? "Project";
       void notifyBackgroundAgent(name, "Agent finished its task");
     }
-  }, [isActive, status, approvalsPending, runtime]);
+  }, [isActive, status, manualApprovalsPending, approvalsPending, runtime]);
 
   // ── Stale-approval reaper ─────────────────────────────────────────────
   // `approval-requested` parts can outlive their run: an aborted or errored
@@ -400,19 +450,9 @@ function Bridge({
   }, [status, ttsActive, messages, sessionId]);
 
   // ---- Auto-approve effect --------------------------------------------------
-  const autoApprove = getSessionAutoApprove(sessionId);
-  const markAutoApproved = useChatStore((s) => s.markAutoApproved);
-  const autoApprovedRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    autoApprovedRef.current = new Set();
-  }, [sessionId]);
-
-  // Commit-signing "ask for approval" must outrank autoApprove: "all". A signed
-  // commit is a stronger, user-owned assertion than a routine file edit, so a
-  // `git commit` from the agent should still surface a confirmation card.
-  const signingApprovalRequired = usePreferencesStore(
-    (s) => s.commitSigningEnabled && s.commitSigningMode === "approval",
-  );
+  // (autoApprove / markAutoApproved / autoApprovedRef / signingApprovalRequired
+  // are declared above, before the background-notification effect that
+  // consumes manualApprovalsPending.)
 
   useEffect(() => {
     // Approvals are per-call in Ask mode; Allow auto-approves the session,

@@ -16,6 +16,15 @@ const src = (rel: string): string =>
 describe("approval responses flow through the denial latch", () => {
   const bridge = src("../components/AgentRunBridge.tsx");
 
+  it("background approval pings fire only for approvals auto-approve will NOT resolve", () => {
+    // Under Allow, routine approvals self-resolve via the auto-approve
+    // effect within milliseconds — pinging the user for them is noise when
+    // they are working in another project or app. Only the manual
+    // carve-outs (elevated/privacy/signed-commit) may interrupt.
+    expect(bridge).toContain("manualApprovalsPending > 0");
+    expect(bridge).not.toContain("backgroundActiveRef.current && approvalsPending > 0 && notifiedRef");
+  });
+
   it("Allow/Ask cycling updates the session mode consumed by the bridge", () => {
     const store = src("../store/chatStore.ts");
     const toggle = store.slice(

@@ -157,11 +157,15 @@ describe("multi_edit accepts every path/line_hint call shape (no token-burn retr
     // test was born from burned 3 re-calls inventing wrong folklore about the
     // tool). Codex's apply_patch likewise returns RespondToModel guidance on
     // parse failure. Assert the message names the field AND shows an example.
-    const { result } = await tryShape({
+    const { valid, error } = await tryShape({
       edits: [{ old_string: "x", new_string: "y" }],
     });
-    expect(result.ok).toBeUndefined();
-    const msg = String(result.error);
+    // Schema-level rejection: the refinement fires BEFORE execute, so the
+    // model sees the guidance as an argument-validation error it can fix in
+    // the next call — no execute-time error path that invited write_file
+    // whole-file fallbacks.
+    expect(valid).toBe(false);
+    const msg = String(error);
     expect(msg).toContain("path is required");
     expect(msg).toContain('"path"');
     expect(msg).toContain("Example:");
