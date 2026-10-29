@@ -28,9 +28,11 @@ await Promise.race([
   new Promise<void>((resolve) => setTimeout(resolve, 2000)),
 ]);
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <App />,
-);
+const root = document.getElementById("root");
+if (!(root instanceof HTMLElement)) {
+  throw new Error("KAI app root is unavailable");
+}
+ReactDOM.createRoot(root).render(<App />);
 
 // Window starts hidden (per tauri.conf.json) so users never see a transparent
 // shadow-only frame before React paints. Use setTimeout — rAF is throttled

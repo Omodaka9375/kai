@@ -120,8 +120,10 @@ export function ExternalSection() {
             : "Assistant is listening.",
         );
       } else {
-        const { stopAssistantBridge } = await import("@/modules/assistant");
-        await stopAssistantBridge();
+        // Stopping needs only the native command. Importing the assistant
+        // barrel here initialized its entire AI runtime in the Settings
+        // window during a simple disable action.
+        await telegramNative.stop();
         await patch({ enabled: false });
         setStatus("Stopped.");
       }

@@ -754,7 +754,18 @@ type QueueItem = {
 const pendingQueue: QueueItem[] = [];
 
 export async function startAssistantBridge(): Promise<{ ok: boolean; error?: string }> {
-  if (bridgeStarted) return { ok: true };
+  if (bridgeStarted) {
+    // Settings can stop natively without importing this runtime. Revalidate
+    // rather than trusting a stale module cache across an off→on toggle.
+    try {
+      const current = await telegramNative.status();
+      bridgeStarted = current.running;
+      if (bridgeStarted) return { ok: true };
+    } catch {
+      // Continue with a fresh native start below.
+      bridgeStarted = false;
+    }
+  }
   const prefs = await loadAssistantPrefs();
   const token = await getTelegramToken();
   if (!prefs.enabled) return { ok: false, error: "assistant disabled" };

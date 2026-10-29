@@ -55,6 +55,166 @@ static GENERATION: AtomicU64 = AtomicU64::new(0);
 static EVENT_CHANNEL: LazyLock<Mutex<Option<Channel<TelegramEvent>>>> =
     LazyLock::new(|| Mutex::new(None));
 
+/// Cross-PROCESS poll ownership. The GENERATION guard above only arbitrates
+/// threads in one KAI process; project windows can be separate processes and
+/// Telegram allows exactly one getUpdates consumer per bot (otherwise 409).
+/// An OS-owned lease is released automatically even if KAI crashes.
+///
+/// Cross-process stop marker. Preferences are shared between project
+/// instances; a 64-bit disable epoch avoids an older off marker cancelling
+/// a later re-enable.
+static DISABLE_EPOCH: AtomicU64 = AtomicU64::new(0);
+static DISABLE_FILE_CHECK_MS: AtomicU64 = AtomicU64::new(0);
+
+struct PollLease {
+    #[cfg(target_os = "windows")]
+    handle: usize,
+    #[cfg(unix)]
+    fd: i32,
+}
+
+#[cfg(target_os = "windows")]
+impl Drop for PollLease {
+    fn drop(&mut self) {
+        use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+        use windows_sys::Win32::System::Threading::ReleaseMutex;
+        // SAFETY: this handle was returned by CreateMutexW and is released
+        // exactly once, when the owning poll thread exits.
+        unsafe {
+            let handle = self.handle as HANDLE;
+            if ReleaseMutex(handle) == 0 {
+                log::warn!("[kai:assistant] ReleaseMutex failed: {}", std::io::Error::last_os_error());
+            }
+            CloseHandle(handle);
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for PollLease {
+    fn drop(&mut self) {
+        // SAFETY: fd is owned by this lease and closed exactly once.
+        unsafe {
+            libc::close(self.fd);
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn acquire_os_poll_lease() -> Result<Option<PollLease>, String> {
+    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS};
+    use windows_sys::Win32::System::Threading::CreateMutexW;
+    let name: Vec<u16> = "Local\\KaiTelegramPoller\0".encode_utf16().collect();
+    // SAFETY: name is NUL-terminated; the returned handle is owned by the
+    // lease (or closed immediately when another process already owns it).
+    unsafe {
+        let handle = CreateMutexW(std::ptr::null(), 1, name.as_ptr());
+        if handle.is_null() {
+            return Err(format!("CreateMutexW failed: {}", std::io::Error::last_os_error()));
+        }
+        if GetLastError() == ERROR_ALREADY_EXISTS {
+            CloseHandle(handle);
+            return Ok(None);
+        }
+        Ok(Some(PollLease { handle: handle as usize }))
+    }
+}
+
+#[cfg(unix)]
+fn acquire_os_poll_lease() -> Result<Option<PollLease>, String> {
+    use std::os::fd::IntoRawFd;
+    let dir = dirs::home_dir()
+        .ok_or_else(|| "no home directory for Telegram poll lease".to_string())?
+        .join(".kai");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("poll lease dir: {e}"))?;
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .open(dir.join("telegram-poller.lock"))
+        .map_err(|e| format!("poll lease open: {e}"))?;
+    let fd = file.into_raw_fd();
+    // SAFETY: fd is live and owned by this function. On contention/error it
+    // is closed here; on success PollLease takes ownership.
+    if unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+        let error = std::io::Error::last_os_error();
+        unsafe {
+            libc::close(fd);
+        }
+        if error.raw_os_error() == Some(libc::EWOULDBLOCK) {
+            return Ok(None);
+        }
+        return Err(format!("poll lease flock: {error}"));
+    }
+    Ok(Some(PollLease { fd }))
+}
+
+fn now_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn disable_marker_path() -> Result<std::path::PathBuf, String> {
+    Ok(dirs::home_dir()
+        .ok_or_else(|| "no home directory for Telegram disable marker".to_string())?
+        .join(".kai")
+        .join("assistant")
+        .join("telegram-disabled.json"))
+}
+
+/// Monotonic disable generation, written atomically. The file is read only
+/// twice per minute; normal long-polling is unaffected.
+fn write_disable_marker(epoch: u64) -> Result<(), String> {
+    let path = disable_marker_path()?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("disable marker dir: {e}"))?;
+    }
+    let temp = path.with_extension(format!("{}.tmp", std::process::id()));
+    std::fs::write(&temp, format!("{{\"epoch\":{epoch}}}"))
+        .map_err(|e| format!("disable marker write: {e}"))?;
+    std::fs::rename(&temp, &path).map_err(|e| format!("disable marker commit: {e}"))?;
+    Ok(())
+}
+
+fn read_disable_marker() -> Option<u64> {
+    let text = std::fs::read_to_string(disable_marker_path().ok()?).ok()?;
+    #[derive(Deserialize)]
+    struct Marker {
+        epoch: u64,
+    }
+    serde_json::from_str::<Marker>(&text).ok().map(|m| m.epoch)
+}
+
+fn refresh_disable_epoch(force: bool) {
+    let now = now_millis();
+    if !force && now.saturating_sub(DISABLE_FILE_CHECK_MS.load(Ordering::Relaxed)) < 5_000 {
+        return;
+    }
+    DISABLE_FILE_CHECK_MS.store(now, Ordering::Relaxed);
+    if let Some(epoch) = read_disable_marker() {
+        DISABLE_EPOCH.fetch_max(epoch, Ordering::SeqCst);
+    }
+}
+
+fn mark_assistant_disabled() {
+    // Two processes toggling simultaneously still converge on a newer epoch.
+    refresh_disable_epoch(true);
+    let epoch = now_millis().max(DISABLE_EPOCH.load(Ordering::SeqCst).saturating_add(1));
+    if let Err(e) = write_disable_marker(epoch) {
+        // Fail closed locally; don't claim that other instances were stopped
+        // when the shared marker could not be persisted.
+        log::warn!("[kai:assistant] unable to persist cross-instance stop: {e}");
+    }
+    DISABLE_EPOCH.fetch_max(epoch, Ordering::SeqCst);
+}
+
+/// True when this loop's enable generation predates a cross-process stop.
+fn assistant_disabled_since(generation_started: u64) -> bool {
+    refresh_disable_epoch(false);
+    DISABLE_EPOCH.load(Ordering::SeqCst) >= generation_started
+}
+
 /// Send an event to the current channel (silently dropped when none/dead).
 fn emit_event(event: TelegramEvent) {
     let ch = crate::modules::lock::mutex_lock(&EVENT_CHANNEL);
@@ -404,6 +564,17 @@ pub async fn telegram_start(
     if token.trim().is_empty() {
         return Err("bot token is empty".into());
     }
+    refresh_disable_epoch(true);
+    // An enable is a strictly NEWER epoch than any observed disable. Never
+    // compare raw wall-clock timestamps: same-ms toggles/clock rollback
+    // could otherwise disable the replacement loop immediately.
+    let started_at = now_millis().max(DISABLE_EPOCH.load(Ordering::SeqCst).saturating_add(1));
+    if RUNNING.load(Ordering::SeqCst) && assistant_disabled_since(started_at) {
+        // The old loop has not finished its in-flight request yet. Supersede
+        // it now so start cannot return a doomed `running: true` status.
+        GENERATION.fetch_add(1, Ordering::SeqCst);
+        RUNNING.store(false, Ordering::SeqCst);
+    }
     OWNER_CHAT_ID.store(owner_chat_id.unwrap_or(-1), Ordering::SeqCst);
     // Replace the delivery channel FIRST — even when the loop is already
     // running, the most recent caller takes over event delivery.
@@ -418,6 +589,7 @@ pub async fn telegram_start(
     POLL_SHUTDOWN.store(false, Ordering::SeqCst);
     // Claim a fresh generation for this loop.
     let generation = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+    RUNNING.store(true, Ordering::SeqCst);
 
     // Tokio runtime for this thread's async work (the main Tauri runtime is
     // busy with commands; a dedicated 1-thread runtime matches net.rs use).
@@ -435,14 +607,47 @@ pub async fn telegram_start(
                 .timeout(Duration::from_secs(LONG_POLL_SECS + 15))
                 .build()
                 .expect("reqwest client");
+            let mut last_error: Option<String> = None;
+            let mut waiting_logged = false;
+            // Held by THIS poll thread only, across successful polls. A
+            // stale standby thread has no lease and therefore cannot release
+            // a replacement thread's ownership during off→on.
+            let mut lease: Option<PollLease> = None;
             loop {
-                // Exit when stopped, or when a newer start superseded us — a
-                // stale thread must never share LAST_UPDATE_ID with the new
-                // loop (double-advancing the offset skips messages).
+                // Exit when stopped, superseded, or disabled in ANY KAI
+                // instance. The final case is checked before EVERY request,
+                // including after a long-poll/error sleep.
                 if POLL_SHUTDOWN.load(Ordering::SeqCst)
                     || GENERATION.load(Ordering::SeqCst) != generation
+                    || assistant_disabled_since(started_at)
                 {
                     break;
+                }
+                if lease.is_none() {
+                    match acquire_os_poll_lease() {
+                        Ok(Some(acquired)) => {
+                            lease = Some(acquired);
+                            waiting_logged = false;
+                        }
+                        Ok(None) => {
+                            // Another KAI project instance owns polling.
+                            // Standby is healthy: no getUpdates, no 409.
+                            if !waiting_logged {
+                                log::info!("[kai:assistant] Telegram polling owned by another instance; standing by");
+                                waiting_logged = true;
+                            }
+                            tokio::time::sleep(Duration::from_secs(15)).await;
+                            continue;
+                        }
+                        Err(e) => {
+                            if !waiting_logged {
+                                log::warn!("[kai:assistant] Telegram poll lease unavailable: {e}");
+                                waiting_logged = true;
+                            }
+                            tokio::time::sleep(Duration::from_secs(15)).await;
+                            continue;
+                        }
+                    }
                 }
                 let offset = {
                     let last = crate::modules::lock::mutex_lock(&LAST_UPDATE_ID);
@@ -450,6 +655,18 @@ pub async fn telegram_start(
                 };
                 match poll_once(&client, &token, offset).await {
                     Ok(updates) => {
+                        // A stop may arrive while this request is in-flight.
+                        // Do not dispatch agent turns after disable, and do
+                        // not acknowledge the updates: a later enabled poll
+                        // will fetch them again instead of losing messages.
+                        refresh_disable_epoch(true);
+                        if POLL_SHUTDOWN.load(Ordering::SeqCst)
+                            || GENERATION.load(Ordering::SeqCst) != generation
+                            || assistant_disabled_since(started_at)
+                        {
+                            break;
+                        }
+                        last_error = None;
                         for u in &updates {
                             classify(u);
                             let mut last = crate::modules::lock::mutex_lock(&LAST_UPDATE_ID);
@@ -459,13 +676,18 @@ pub async fn telegram_start(
                         }
                     }
                     Err(e) => {
-                        // Transient (network/token). Report at most one event
-                        // per failure burst; back off 5s.
-                        emit_event(TelegramEvent::Error { message: e });
-                        tokio::time::sleep(Duration::from_secs(5)).await;
+                        if last_error.as_deref() != Some(e.as_str()) {
+                            emit_event(TelegramEvent::Error { message: e.clone() });
+                        }
+                        let conflict = e.contains("HTTP 409");
+                        last_error = Some(e);
+                        tokio::time::sleep(Duration::from_secs(if conflict { 30 } else { 5 })).await;
                     }
                 }
             }
+            // Drop only this thread's lease, after its in-flight request has
+            // ended. The OS also releases it automatically on process crash.
+            drop(lease);
             // Only the CURRENT generation may clear the running flag: a
             // stale thread exiting late must not kill the new loop's state.
             if GENERATION.load(Ordering::SeqCst) == generation {
@@ -479,6 +701,7 @@ pub async fn telegram_start(
 /// Stop the poll loop (settings toggle off / app exit).
 #[tauri::command]
 pub fn telegram_stop() -> Result<TelegramStatus, String> {
+    mark_assistant_disabled();
     POLL_SHUTDOWN.store(true, Ordering::SeqCst);
     // Supersede the running poll thread (it may be blocked in a 40s
     // long-poll) so it can never deliver or advance the offset again.
@@ -510,8 +733,12 @@ pub fn telegram_clear_owner() -> Result<(), String> {
 
 fn status() -> TelegramStatus {
     let owner = OWNER_CHAT_ID.load(Ordering::SeqCst);
+    // A loop disabled in another instance may be winding down its in-flight
+    // request; it is NOT a live bridge and must not be treated as one.
+    let running = RUNNING.load(Ordering::SeqCst)
+        && !POLL_SHUTDOWN.load(Ordering::SeqCst);
     TelegramStatus {
-        running: RUNNING.load(Ordering::SeqCst),
+        running,
         owner_chat_id: if owner == -1 { None } else { Some(owner) },
         bot_username: None,
     }
@@ -966,6 +1193,31 @@ mod tests {
         for c in &chunks {
             assert!(c.chars().count() <= 4096);
         }
+    }
+
+    #[test]
+    fn poll_lease_is_exclusive_until_released() {
+        // OS mutexes are recursive within a thread, so the contending call
+        // must come from another thread (matching the real poll-loop model).
+        let acquired = acquire_os_poll_lease().unwrap();
+        let contender = std::thread::spawn(|| {
+            let lease = acquire_os_poll_lease().unwrap();
+            assert!(lease.is_none());
+        });
+        contender.join().unwrap();
+        drop(acquired);
+        let takeover = acquire_os_poll_lease().unwrap();
+        assert!(takeover.is_some());
+    }
+
+    #[test]
+    fn disable_epoch_orders_stops_before_later_enables() {
+        let previous = DISABLE_EPOCH.swap(100, Ordering::SeqCst);
+        let enabled_at = now_millis().max(DISABLE_EPOCH.load(Ordering::SeqCst).saturating_add(1));
+        assert!(enabled_at > 100);
+        assert!(!assistant_disabled_since(enabled_at));
+        assert!(assistant_disabled_since(100));
+        DISABLE_EPOCH.store(previous, Ordering::SeqCst);
     }
 
     #[test]

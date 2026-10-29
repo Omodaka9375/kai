@@ -23,13 +23,19 @@ if (USE_CUSTOM_WINDOW_CONTROLS) {
   document.documentElement.dataset.chrome = "borderless";
 }
 
-ReactDOM.createRoot(
-  document.getElementById("settings-root") as HTMLElement,
-).render(
-  <ThemeProvider>
-    <SettingsApp />
-  </ThemeProvider>,
-);
+const root = document.getElementById("settings-root");
+// WebView2 can briefly deliver a script after a navigation/remount without
+// the expected app document. React #299 is an invalid container, not an
+// Assistant error — fail visibly and quietly instead of taking down the app.
+if (root instanceof HTMLElement) {
+  ReactDOM.createRoot(root).render(
+    <ThemeProvider>
+      <SettingsApp />
+    </ThemeProvider>,
+  );
+} else {
+  console.error("KAI settings root is unavailable; reload the settings window.");
+}
 
 const showWindow = () => {
   getCurrentWindow()
