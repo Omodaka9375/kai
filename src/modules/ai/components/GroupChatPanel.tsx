@@ -10,10 +10,20 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Add01Icon,
   Cancel01Icon,
+  Folder01Icon,
   Link01Icon,
   SentIcon,
+  Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { getProjectAgentStatus } from "../store/projectStatus";
@@ -414,48 +424,87 @@ function InvitePicker({
   onCreate: (invitees: ProjectSwitcherItem[]) => void | Promise<void>;
 }) {
   const [picked, setPicked] = useState<string[]>([]);
-  const invitees = projects.filter((p) => p.id !== activeProjectId && picked.includes(p.id));
+  const candidates = projects.filter((p) => p.id !== activeProjectId);
+  const invitees = candidates.filter((p) => picked.includes(p.id));
+  const inviterName = projects.find((p) => p.id === activeProjectId)?.name ?? "This project";
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    onOpenChange(nextOpen);
+    if (!nextOpen) setPicked([]);
+  };
+
   return (
-    <Popover open={open} onOpenChange={onOpenChange}>
-      <PopoverTrigger asChild>
-        <button type="button" className="hidden" aria-hidden tabIndex={-1} />
-      </PopoverTrigger>
-      <PopoverContent align="end" side="top" className="w-64 gap-0 p-1.5 text-xs" sideOffset={8}>
-        <div className="px-1.5 pb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-          Invite projects — {projects.find((p) => p.id === activeProjectId)?.name ?? "…"} coordinates
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent className="max-w-md gap-5 rounded-2xl p-5">
+        <DialogHeader className="pr-8">
+          <DialogTitle>Start group chat</DialogTitle>
+          <DialogDescription>
+            Select projects to invite. {inviterName} will coordinate the group.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex flex-col gap-2">
+          <div className="text-[11px] font-medium text-muted-foreground">Available projects</div>
+          <div className="flex max-h-72 flex-col gap-1 overflow-y-auto rounded-xl border border-border/60 bg-background/40 p-1.5">
+            {candidates.length > 0 ? (
+              candidates.map((project) => {
+                const selected = picked.includes(project.id);
+                return (
+                  <button
+                    key={project.id}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() =>
+                      setPicked((current) =>
+                        current.includes(project.id)
+                          ? current.filter((id) => id !== project.id)
+                          : [...current, project.id],
+                      )
+                    }
+                    className={cn(
+                      "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+                      selected ? "bg-accent text-foreground" : "text-muted-foreground",
+                    )}
+                  >
+                    <HugeiconsIcon icon={Folder01Icon} size={17} strokeWidth={1.75} className="shrink-0" />
+                    <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-foreground">
+                      {project.name}
+                    </span>
+                    <span
+                      className={cn(
+                        "flex size-4 shrink-0 items-center justify-center rounded border",
+                        selected
+                          ? "border-primary bg-primary text-primary-foreground"
+                          : "border-border bg-background",
+                      )}
+                    >
+                      {selected ? <HugeiconsIcon icon={Tick02Icon} size={11} strokeWidth={2.5} /> : null}
+                    </span>
+                  </button>
+                );
+              })
+            ) : (
+              <div className="px-3 py-6 text-center text-[12px] text-muted-foreground">
+                Open another project to start a group chat.
+              </div>
+            )}
+          </div>
         </div>
-        {projects
-          .filter((p) => p.id !== activeProjectId)
-          .map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              onClick={() =>
-                setPicked((cur) =>
-                  cur.includes(p.id) ? cur.filter((x) => x !== p.id) : [...cur, p.id],
-                )
-              }
-              className={cn(
-                "flex w-full items-center justify-between rounded px-2 py-1.5 text-left hover:bg-accent",
-                picked.includes(p.id) && "bg-accent/50",
-              )}
-            >
-              <span className="min-w-0 flex-1 truncate">{p.name}</span>
-              {picked.includes(p.id) ? (
-                <HugeiconsIcon icon={SentIcon} size={11} strokeWidth={2} className="text-emerald-500" />
-              ) : null}
-            </button>
-          ))}
-        <button
-          type="button"
-          disabled={invitees.length === 0}
-          onClick={() => void onCreate(invitees)}
-          className="mt-1.5 w-full rounded-md border border-border/60 px-2 py-1.5 text-center text-[11px] transition-colors hover:bg-accent disabled:opacity-40"
-        >
-          Create group ({invitees.length})
-        </button>
-      </PopoverContent>
-    </Popover>
+
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            disabled={invitees.length === 0}
+            onClick={() => void onCreate(invitees)}
+          >
+            Create group{invitees.length > 0 ? ` (${invitees.length})` : ""}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 /**
