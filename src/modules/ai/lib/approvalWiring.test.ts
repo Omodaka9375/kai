@@ -16,13 +16,12 @@ const src = (rel: string): string =>
 describe("approval responses flow through the denial latch", () => {
   const bridge = src("../components/AgentRunBridge.tsx");
 
-  it("background approval pings fire only for approvals auto-approve will NOT resolve", () => {
-    // Under Allow, routine approvals self-resolve via the auto-approve
-    // effect within milliseconds — pinging the user for them is noise when
-    // they are working in another project or app. Only the manual
-    // carve-outs (elevated/privacy/signed-commit) may interrupt.
-    expect(bridge).toContain("manualApprovalsPending > 0");
-    expect(bridge).not.toContain("backgroundActiveRef.current && approvalsPending > 0 && notifiedRef");
+  it("NO OS notification popups — the rail's awaiting-dot is the only attention signal", () => {
+    // 2026-10-29: the agent pipeline no longer fires OS popups at all.
+    // Running/awaiting/idle are live in the project rail dot; "needs
+    // your input" pulses violet there. Any re-introduction of popups
+    // must be a scoped, deliberate decision — pin the absence.
+    expect(bridge).not.toContain("notifyBackgroundAgent");
   });
 
   it("Allow/Ask cycling updates the session mode consumed by the bridge", () => {

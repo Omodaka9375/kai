@@ -26,9 +26,6 @@ vi.mock("@tauri-apps/plugin-store", () => {
   }
   return { LazyStore: FakeLazyStore };
 });
-vi.mock("../lib/backgroundNotifications", () => ({
-  notifyBackgroundAgent: vi.fn(async () => {}),
-}));
 
 // Shared mock state (vi.hoisted: available to the factory below).
 const shared = vi.hoisted(() => ({
@@ -230,16 +227,3 @@ describe("join / leave (human-only membership changes)", () => {
   });
 });
 
-describe("queued-delivery notification (Phase 3 UX)", () => {
-  it("a queued delivery pings the background-notifier (best-effort)", async () => {
-    const { notifyBackgroundAgent } = await import("../lib/backgroundNotifications");
-    const g = await createGroupChat(
-      { projectId: "a", sessionId: "s-a", root: "/a", name: "alpha" },
-      [{ projectId: "b", root: "/b", name: "beta" }],
-    );
-    const { sendGroupMessage } = await import("./groupChatStore");
-    shared.metaStatus = "streaming"; // busy → queue path → notify
-    await sendGroupMessage(g!.id, "while you were busy", "b");
-    expect(notifyBackgroundAgent).toHaveBeenCalled();
-  });
-});

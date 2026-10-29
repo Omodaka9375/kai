@@ -105,7 +105,9 @@ describe("multi-project workspace ownership", () => {
     expect(rail).not.toContain("onSwitchSession");
     expect(menu).not.toContain("switchSession");
     expect(menu).not.toContain("archiveSession");
-    expect(bridge).toContain("notifyBackgroundAgent");
+    // No OS popups from the agent pipeline (removed 2026-10-29) — the
+    // rail dot is the attention surface.
+    expect(bridge).not.toContain("notifyBackgroundAgent");
     expect(input).toContain("c.submit({ background: e.altKey })");
     expect(composer).toContain("setSessionPreferences(sessionId, { draft:");
   });

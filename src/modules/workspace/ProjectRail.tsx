@@ -33,7 +33,7 @@ export type ProjectSwitcherItem = {
 const STATUS_LABEL: Record<ProjectSwitcherItem["status"], string> = {
   idle: "Idle",
   running: "Agent running",
-  awaiting: "Approval needed",
+  awaiting: "Needs your input",
   error: "Agent error",
 };
 
@@ -42,8 +42,13 @@ function StatusDot({ status }: { status: ProjectSwitcherItem["status"] }) {
     <span
       className={cn(
         "absolute bottom-1 right-1 size-1.5 rounded-full ring-2 ring-card",
+        // Steady emerald: work happening, no action needed. Calm in the
+        // periphery — the user glances when they choose to.
         status === "running" && "bg-emerald-500",
-        status === "awaiting" && "bg-amber-500",
+        // NEEDS YOUR INPUT — the only attention-demanding state. Unique
+        // violet + pulse so it can't be missed in peripheral vision.
+        // This (plus the error dot) replaces the removed OS popups.
+        status === "awaiting" && "animate-pulse bg-violet-500",
         status === "error" && "bg-destructive",
         status === "idle" && "bg-muted-foreground/30",
       )}

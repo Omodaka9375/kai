@@ -21,7 +21,6 @@ import {
 import { verifyIfDirtyAtRunEnd } from "../lib/autoVerify";
 import { isApprovalDenied, noteApprovalDenied } from "../lib/approvalLatch";
 import { speakText } from "../lib/voiceTts";
-import { notifyBackgroundAgent } from "../lib/backgroundNotifications";
 import { useProjectRuntime } from "@/modules/workspace";
 import {
   appendGroupMessage,
@@ -142,8 +141,6 @@ function Bridge({
   const patch = useCallback((next: Partial<AgentMeta>) => {
     patchSessionAgentMeta(sessionId, next);
   }, [sessionId]);
-  const notifiedRef = useRef<"approval" | "done" | null>(null);
-  const backgroundActiveRef = useRef(false);
   const openMini = useChatStore((s) => s.openMini);
   const persistMessages = useChatStore((s) => s.persistMessages);
   const setApprovalResponder = useChatStore((s) => s.setApprovalResponder);
@@ -228,61 +225,14 @@ function Bridge({
     (s) => s.commitSigningEnabled && s.commitSigningMode === "approval",
   );
 
-  /** Approvals the user PERSONALLY must answer. In Ask mode that is every
-   * approval. Under Allow ("all") the auto-approve effect resolves routine
-   * calls within milliseconds — only the manual carve-outs (elevated
-   * commands, privacy tools, signed commits) still need a human, and only
-   * those justify interrupting work in another project or app. */
-  const manualApprovalsPending = useMemo(() => {
-    let n = 0;
-    for (const m of messages) {
-      if (m.role !== "assistant") continue;
-      for (const p of m.parts as AnyPart[]) {
-        if ((p as { state?: string }).state !== "approval-requested") continue;
-        if (autoApprove !== "all") {
-          n++;
-          continue;
-        }
-        const type = (p as { type?: string }).type ?? "";
-        const toolName = type.replace(/^tool-/, "");
-        const input = (p as { input?: Record<string, unknown> }).input;
-        const isElevated = toolName === "bash_run" && input?.elevated === true;
-        const isSignedCommit =
-          toolName === "bash_run" &&
-          signingApprovalRequired &&
-          isGitCommitCommand(input?.command as string | undefined);
-        if (isElevated || PRIVACY_APPROVAL_TOOLS.has(toolName) || isSignedCommit) n++;
-      }
-    }
-    return n;
-  }, [messages, autoApprove, signingApprovalRequired]);
-
-  useEffect(() => {
-    if (isActive) {
-      backgroundActiveRef.current = false;
-      notifiedRef.current = null;
-      return;
-    }
-    if (status === "submitted" || status === "streaming") {
-      backgroundActiveRef.current = true;
-      notifiedRef.current = null;
-    }
-    // Ping only for approvals that actually need the user. Under Allow the
-    // routine ones self-resolve milliseconds after this very render — a
-    // toast for them ("needs your approval" while on auto-approve) is the
-    // multi-project noise the user reported.
-    if (backgroundActiveRef.current && manualApprovalsPending > 0 && notifiedRef.current !== "approval") {
-      notifiedRef.current = "approval";
-      const name = runtime?.root.split(/[\\/]/).filter(Boolean).pop() ?? "Project";
-      void notifyBackgroundAgent(name, "Agent needs your approval");
-    }
-    if (backgroundActiveRef.current && approvalsPending === 0 && status === "ready" && notifiedRef.current !== "done") {
-      notifiedRef.current = "done";
-      backgroundActiveRef.current = false;
-      const name = runtime?.root.split(/[\\/]/).filter(Boolean).pop() ?? "Project";
-      void notifyBackgroundAgent(name, "Agent finished its task");
-    }
-  }, [isActive, status, manualApprovalsPending, approvalsPending, runtime]);
+  // ---- Background completion bookkeeping ---------------------------------
+  // OS notification popups were REMOVED here (2026-10-29): they interrupted
+  // on every project switch and app focus change. The project rail's status
+  // dot already tracks running/awaiting/idle per project live, and it now
+  // pulses with a distinct color when THIS project needs user input (Ask
+  // mode, or an approval auto-approve won't resolve) — visible in
+  // peripheral vision without stealing focus. Nothing else needed here:
+  // approvalsPending still feeds the status effect below.
 
   // ── Stale-approval reaper ─────────────────────────────────────────────
   // `approval-requested` parts can outlive their run: an aborted or errored

@@ -1,6 +1,5 @@
 import { LazyStore } from "@tauri-apps/plugin-store";
 import { agentBus } from "../lib/eventBus";
-import { notifyBackgroundAgent } from "../lib/backgroundNotifications";
 import { getProjectActiveSession, getSessionAgentMeta, setChatPinner, useChatStore } from "./chatStore";
 
 /**
@@ -350,9 +349,6 @@ function deliverToParticipant(
     q.push({ groupId: g.id, sessionId: p.sessionId, text: prefixed, at: Date.now() });
     sendQueues.set(p.sessionId, q);
     notify();
-    // Best-effort ping: the message sits queued until the agent goes idle —
-    // without this the sender wonders why nothing happened. Never throws.
-    void notifyBackgroundAgent(p.name, `Group message queued - agent is busy in ${p.name}`);
     return true;
   }
   void useChatStore.getState().injectMessage(p.sessionId, prefixed);
