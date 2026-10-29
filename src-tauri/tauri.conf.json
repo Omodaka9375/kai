@@ -8,7 +8,10 @@
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "pnpm build",
     "frontendDist": "../dist",
-    "removeUnusedCommands": true
+    "removeUnusedCommands": true,
+    "windows": {
+      "staticVCRuntime": true
+    }
   },
   "app": {
     "windows": [
