@@ -34,6 +34,8 @@ pub struct SessionRunOutput {
     pub stderr: String,
     pub exit_code: Option<i32>,
     pub timed_out: bool,
+    /// Explicit user cancellation, distinct from a timeout expiry.
+    pub cancelled: bool,
     pub truncated: bool,
     pub cwd_after: String,
 }
@@ -121,6 +123,7 @@ impl ShellSession {
             ));
         });
         let raw = rx.recv().map_err(|e| e.to_string())??;
+        let cancelled = self.cancel.load(Ordering::Acquire);
         self.pristine.store(false, Ordering::Release);
 
         let (stdout_clean, cwd_after) = strip_cwd_sentinel(&raw.stdout, &self.sentinel);
@@ -163,6 +166,7 @@ impl ShellSession {
             stderr,
             exit_code: raw.exit_code,
             timed_out: raw.timed_out,
+            cancelled,
             truncated: raw.truncated,
             cwd_after: resolved_cwd,
         })
@@ -343,6 +347,31 @@ mod tests {
         let (clean, cwd) = strip_cwd_sentinel(&stdout, "__KAI_CWD_x__");
         assert_eq!(cwd.as_deref(), Some("D:\\Code\\KAI"));
         assert!(!clean.contains("__KAI_CWD_x__"));
+    }
+}
+
+#[cfg(test)]
+mod cancellation_tests {
+    use super::*;
+
+    #[test]
+    fn cancel_kills_running_command_and_returns_cancelled() {
+        let cwd = std::env::current_dir().unwrap().to_string_lossy().into_owned();
+        let session = ShellSession::new(cwd, WorkspaceEnv::Local);
+        let cancel = session.cancel.clone();
+        let handle = std::thread::spawn(move || {
+            #[cfg(windows)]
+            let command = "Start-Sleep -Seconds 30".to_string();
+            #[cfg(unix)]
+            let command = "sleep 30".to_string();
+            session.run(command, None, None, Duration::from_secs(60), None)
+        });
+        std::thread::sleep(Duration::from_millis(400));
+        cancel.store(true, Ordering::Release);
+        let output = handle.join().unwrap().unwrap();
+        assert!(output.cancelled);
+        assert!(output.timed_out);
+        assert_eq!(output.exit_code, None);
     }
 }
 

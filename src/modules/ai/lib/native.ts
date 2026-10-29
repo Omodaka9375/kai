@@ -380,6 +380,7 @@ export const native = {
       stderr: string;
       exit_code: number | null;
       timed_out: boolean;
+      cancelled: boolean;
       truncated: boolean;
       cwd_after: string;
     }>("shell_session_run", {

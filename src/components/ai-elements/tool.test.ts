@@ -55,6 +55,20 @@ describe("Tool card streaming-input freeze guard", () => {
   });
 });
 
+describe("foreground command cancellation", () => {
+  it("offers a direct Stop action only while bash_run is executing", () => {
+    expect(src).toContain('toolName === "bash_run" && state === "input-available"');
+    expect(src).toContain("title=\"Stop this command\"");
+    expect(src).toContain("stopCommand(sessionId)");
+    expect(src).toContain("Stopping…");
+    // The action must not be nested inside CollapsibleTrigger, or clicking
+    // Stop would also expand/collapse the command output.
+    const triggerEnd = src.indexOf("</CollapsibleTrigger>");
+    const stop = src.indexOf('title="Stop this command"');
+    expect(stop).toBeGreaterThan(triggerEnd);
+  });
+});
+
 /**
  * Big-text readability (the web_browse "one giant \n-escaped line" class).
  *

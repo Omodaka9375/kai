@@ -42,6 +42,30 @@ export function cancelAllShellSessions(): void {
   sessionShells.clear();
 }
 
+/** Cancel the ACTIVE foreground command in this chat session. Safe when no
+ *  command is running: native cancellation is a no-op for an idle shell.
+ *  Resolves once the cancel request has been issued (not after a potentially
+ *  hung native wait), so the UI can always offer a responsive Stop action. */
+export async function stopCommand(sessionId: string): Promise<void> {
+  const key = workspaceSessionKey(sessionId);
+  const entry = sessionShells.get(key);
+  if (!entry) return;
+  const id = await entry.promise;
+  await native.shellSessionCancel(id);
+  // Same fallback as agent-wide stop: if native cancellation cannot reap a
+  // wedged child, retire the persistent session rather than leaving the next
+  // command stuck behind it. Never close a replacement shell id by accident.
+  setTimeout(() => {
+    const current = sessionShells.get(key);
+    if (current?.generation === entry.generation) {
+      sessionShells.delete(key);
+      void native.shellSessionClose(id).catch((error) => {
+        console.debug("shellSessionClose after stop failed:", error);
+      });
+    }
+  }, 3000);
+}
+
 /** Close and remove the shell session for a deleted chat session. */
 export function closeShellSession(sessionId: string): void {
   // Session keys are workspace-scoped; scan for any key starting with the
@@ -313,6 +337,19 @@ export function buildShellTools(ctx: ToolContext) {
           const stdout = stdoutCapped.text;
           const stderr = stderrCapped.text;
           const outTruncated = r.truncated || stdoutCapped.elided > 0 || stderrCapped.elided > 0;
+          if (r.cancelled) {
+            return {
+              command,
+              stdout,
+              stderr,
+              exit_code: r.exit_code,
+              timed_out: false,
+              cancelled: true,
+              truncated: outTruncated,
+              cwd_after: r.cwd_after,
+              hint: "Command stopped by the user.",
+            };
+          }
           if (r.timed_out) {
             // A timeout kills the whole process tree (Job Object) — the
             // runner dies mid-run with no exit code, and the agent sees only

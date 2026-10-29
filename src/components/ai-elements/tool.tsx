@@ -21,10 +21,12 @@ import {
   RobotIcon,
   SparklesIcon,
   TerminalIcon,
+  StopIcon,
   ToolsIcon,
   VideoIcon,
 } from "@hugeicons/core-free-icons";
 import { useChatStore } from "@/modules/ai/store/chatStore";
+import { stopCommand } from "@/modules/ai/tools/shell";
 import { extractRedactionNotices, unfenceDeep } from "@/modules/ai/lib/fence";
 import { presentationFor } from "@/modules/ai/lib/toolPresentations";
 import { getEffectStatus } from "@/modules/ai/lib/effectStatus";
@@ -162,6 +164,17 @@ const ToolImpl = ({
           : "outcome unknown"
       : null;
   const open = defaultOpen ?? isError;
+  const [stopState, setStopState] = useState<"idle" | "stopping" | "error">("idle");
+  const canStop = toolName === "bash_run" && state === "input-available";
+  const onStop = () => {
+    const sessionId = useChatStore.getState().activeSessionId;
+    if (!sessionId || stopState === "stopping") return;
+    setStopState("stopping");
+    void stopCommand(sessionId).catch((error) => {
+      console.error("Failed to stop command:", error);
+      setStopState("error");
+    });
+  };
   const isHeavy = HEAVY_CONTENT_TOOLS.has(toolName);
   // For heavy tools, only show details on error — never the streamed input
   // body, which is huge and re-renders per token.
@@ -241,6 +254,19 @@ const ToolImpl = ({
           </span>
         )}
       </CollapsibleTrigger>
+
+      {canStop ? (
+        <button
+          type="button"
+          onClick={onStop}
+          disabled={stopState === "stopping"}
+          title="Stop this command"
+          className="mr-2 flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-70"
+        >
+          <HugeiconsIcon icon={StopIcon} size={10} strokeWidth={2} />
+          {stopState === "stopping" ? "Stopping…" : stopState === "error" ? "Stop failed" : "Stop"}
+        </button>
+      ) : null}
 
       {hasDetails && (
         <CollapsibleContent
