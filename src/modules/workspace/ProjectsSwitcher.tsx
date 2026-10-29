@@ -48,10 +48,10 @@ export function ProjectsSwitcher({
           ) : null}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-80 p-1">
-        <DropdownMenuLabel className="flex items-center justify-between px-2 py-1.5 text-[11px] font-normal text-muted-foreground">
+      <DropdownMenuContent align="start" className="w-72 p-1">
+        <DropdownMenuLabel className="flex items-center justify-between px-2 py-1 text-[11px] font-normal text-muted-foreground">
           <span>Projects · work continues in background</span>
-          <Button variant="ghost" size="icon" className="size-6" onClick={onAdd} title="Open project">
+          <Button variant="ghost" size="icon" className="size-5" onClick={() => onAdd()} title="Open project">
             <HugeiconsIcon icon={Add01Icon} size={13} strokeWidth={1.75} />
           </Button>
         </DropdownMenuLabel>
@@ -60,7 +60,7 @@ export function ProjectsSwitcher({
           <DropdownMenuItem
             key={project.id}
             onSelect={() => onSwitch(project.id)}
-            className="group flex items-center gap-2 px-2 py-2"
+            className="group flex items-center gap-2 px-2 py-1"
           >
             <span className={cn(
               "size-1.5 shrink-0 rounded-full",
@@ -70,9 +70,8 @@ export function ProjectsSwitcher({
               project.status === "idle" && "bg-muted-foreground/30",
             )} />
             <HugeiconsIcon icon={Folder01Icon} size={13} className="shrink-0 text-muted-foreground" />
-            <span className="min-w-0 flex-1">
-              <span className={cn("block truncate text-xs", project.active && "font-medium")}>{project.name}</span>
-              <span className="block truncate font-mono text-[10px] text-muted-foreground">{project.root}</span>
+            <span className="min-w-0 flex-1 truncate text-xs" title={project.root}>
+              <span className={cn(project.active && "font-medium")}>{project.name}</span>
             </span>
             {project.status !== "idle" ? (
               <span className="shrink-0 text-[10px] text-muted-foreground">
@@ -94,7 +93,7 @@ export function ProjectsSwitcher({
           </DropdownMenuItem>
         ))}
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={onAdd} className="gap-2 text-xs">
+        <DropdownMenuItem onSelect={() => onAdd()} className="gap-2 py-1 text-xs">
           <HugeiconsIcon icon={Add01Icon} size={13} />
           Open another project
         </DropdownMenuItem>

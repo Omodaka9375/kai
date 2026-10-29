@@ -67,7 +67,7 @@ type Props = {
   projectName: string | null;
   projects?: ProjectSwitcherItem[];
   onSwitchProject?: (id: string) => void;
-  onAddProject?: () => void;
+  onAddProject?: (path?: string) => void | Promise<void>;
   onCloseProject?: (id: string) => void;
 };
 

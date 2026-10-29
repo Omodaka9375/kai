@@ -33,4 +33,17 @@ describe("multi-project workspace ownership", () => {
     expect(composer).toContain("detail.projectId !== runtime.id");
     expect(workspace).toContain("projectId: projectRuntime.id");
   });
+
+  it("keeps bridge status one-way from the SDK, without a status feedback loop", () => {
+    expect(bridge).toContain("const { status, messages, addToolApprovalResponse } = useChat");
+    expect(bridge).not.toContain("const status = sessionMeta.status");
+  });
+
+  it("does not pass a dropdown event object as a project path", () => {
+    const switcher = readFileSync(new URL("../modules/workspace/ProjectsSwitcher.tsx", import.meta.url), "utf8");
+    expect(switcher).toContain("onClick={() => onAdd()}");
+    expect(switcher).toContain("onSelect={() => onAdd()}");
+    expect(switcher).not.toContain("onClick={onAdd}");
+    expect(switcher).not.toContain("onSelect={onAdd}");
+  });
 });

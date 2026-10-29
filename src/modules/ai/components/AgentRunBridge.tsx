@@ -12,8 +12,6 @@ import {
   subscribeProjectActiveSessions,
   useChatStore,
   getSessionAutoApprove,
-  getSessionAgentMeta,
-  subscribeSessionAgentMeta,
   patchSessionAgentMeta,
   type AgentMeta,
   getSessionSteeringMessage,
@@ -111,11 +109,7 @@ function Bridge({
   // are long-lived and keyed by id, useChat simply reconnects to the existing
   // subscription — no state is lost.
   const chat = useMemo(() => getOrCreateChat(sessionId), [sessionId]);
-  const sessionMeta = useSyncExternalStore(
-    subscribeSessionAgentMeta,
-    () => getSessionAgentMeta(sessionId),
-  );
-  const { status: chatStatus, messages, addToolApprovalResponse } = useChat<UIMessage>({
+  const { status, messages, addToolApprovalResponse } = useChat<UIMessage>({
     chat,
     // Cap message-notification re-renders at ~20fps. During thinking bursts
     // the SDK fires replaceMessage (with a structuredClone of the whole
@@ -126,7 +120,6 @@ function Bridge({
     // edge guarantees the final state lands.
     experimental_throttle: 50,
   });
-  const status = sessionMeta.status === "idle" ? chatStatus : sessionMeta.status;
   const patch = useCallback((next: Partial<AgentMeta>) => {
     patchSessionAgentMeta(sessionId, next);
   }, [sessionId]);

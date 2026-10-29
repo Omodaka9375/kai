@@ -3,7 +3,7 @@ import type { ProjectSwitcherItem } from "@/modules/workspace";
 
 export type ProjectsMenu = {
   items: ProjectSwitcherItem[];
-  addProject: (path?: string) => void;
+  addProject: (path?: string) => void | Promise<void>;
   closeProject: (id: string) => void;
   switchProject: (id: string) => void;
   changeEnvironment: (id: string, env: import("@/modules/workspace").WorkspaceEnv, home: string | null) => void;

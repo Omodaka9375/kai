@@ -586,7 +586,7 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
       if (projectsMenu) {
         const normalized = path.replace(/\\/g, "/").toLowerCase();
         const existing = projectsMenu.items.find(
-          (item) => item.root.replace(/\\/g, "/").toLowerCase() === normalized,
+          (item) => item.root.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase() === normalized.replace(/\/+$/, ""),
         );
         if (existing) projectsMenu.switchProject(existing.id);
         else projectsMenu.addProject(path);
