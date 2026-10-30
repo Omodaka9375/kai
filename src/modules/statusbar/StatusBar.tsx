@@ -57,8 +57,9 @@ export function StatusBar({
     }
   }, [panelOpen, togglePanel, openMini, closeMini]);
 
-  // Group-chat toggle — sits immediately LEFT of the AI panel toggle in
-  // both states (Close AI panel button / Open agent pill).
+  // Group-chat toggle — visible ONLY while the AI panel is open, sitting
+  // immediately LEFT of the Close AI panel button. Hidden when the panel
+  // is closed (the "Open agent" pill stands alone).
   const groupToggleButton = canStartGroup ? (
     <button
       type="button"
@@ -99,10 +100,7 @@ export function StatusBar({
         {panelOpen && hasComposer ? (
           <AiStatusBarControls left={groupToggleButton} />
         ) : (
-          <>
-            {groupToggleButton}
-            <AiOpenButton onOpen={handleOpenAgent} />
-          </>
+          <AiOpenButton onOpen={handleOpenAgent} />
         )}
       </div>
     </footer>
