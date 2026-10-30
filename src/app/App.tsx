@@ -33,7 +33,7 @@ import { AiComposerProvider } from "@/modules/ai/components/composer";
 import { AiErrorBoundary } from "@/modules/ai/components/AiErrorBoundary";
 import { redactSensitive } from "@/modules/ai/lib/redact";
 import { setSandboxRoot } from "@/modules/ai/lib/sandbox";
-import { registerProjectRuntime, setActiveProjectRuntime, setProjectLive, setProjectModel, setProjectActiveSession, getProjectActiveSession, projectIdForSession, stopSession } from "@/modules/ai/store/chatStore";
+import { registerProjectRuntime, setActiveProjectRuntime, setProjectLive, setProjectModel, getProjectModel, setProjectActiveSession, getProjectActiveSession, projectIdForSession, stopSession } from "@/modules/ai/store/chatStore";
 import { setSessionPreferences } from "@/modules/ai/store/sessionPreferences";
 import { native } from "@/modules/ai/lib/native";
 import { useAgentsStore } from "@/modules/ai/store/agentsStore";
@@ -476,7 +476,6 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
   const panelOpen = useChatStore((s) => s.panelOpen);
   const apiKeys = useChatStore((s) => s.apiKeys);
   const setApiKeys = useChatStore((s) => s.setApiKeys);
-  const setSelectedModelId = useChatStore((s) => s.setSelectedModelId);
   const setLive = useChatStore((s) => s.setLive);
   const respondToApproval = useChatStore((s) => s.respondToApproval);
   const lmstudioModelId = usePreferencesStore((s) => s.lmstudioModelId);
@@ -708,25 +707,50 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
   }, [explorerRoot, prefsHydrated, isActive]);
 
   // Restore per-project model when workspace changes, fall back to global default.
-  const projectModelRoot = useRef<string | null>(null);
+  // Runs on every ACTIVATION flip, not just root changes: the applied-key
+  // ref records the last APPLIED state ("root" while active, "" while
+  // inactive) so re-activating a project always restores its model —
+  // the old root-only guard skipped the restore on A→B→A switches, leaving
+  // the outgoing project's selection in place.
+  const projectModelApplied = useRef<string | null>(null);
   useEffect(() => {
     if (!prefsHydrated) return;
     const root = normalizeWorkspacePath(explorerRoot);
-    if (root === projectModelRoot.current) return;
-    projectModelRoot.current = root;
+    const key = isActive ? root : "";
+    if (key === projectModelApplied.current) return;
+    projectModelApplied.current = key;
+    if (!isActive) return;
     const saved = root ? projectModelIds[root] : undefined;
     const model = (saved ?? prefDefaultModel) as ModelId;
-    if (isActive) {
-        // Activate BEFORE setting the legacy global selection: its setter
-      // mirrors into the currently active project's captured config.
-      setActiveProjectRuntime(projectRuntime);
-      setProjectModel(projectRuntime.id, model, useAgentsStore.getState().activeId);
-      setSelectedModelId(model);
-      // Only the visible project changes the legacy global presentation
-      // selection; the captured project value remains independently stable.
-      useAgentsStore.getState().setRoot(root);
+    // This is a RESTORE, not a user selection: activate first so
+    // setProjectModel lands on the INCOMING project; the outgoing
+    // project's captured model must stay untouched.
+    setActiveProjectRuntime(projectRuntime);
+    setProjectModel(projectRuntime.id, model, useAgentsStore.getState().activeId);
+    // Session preference is stamped only when the current active session
+    // already belongs to the incoming project (a completed switch set it).
+    // Stamping unconditionally here hit the OUTGOING project's still-active
+    // session with the incoming project's model — the cross-project bleed.
+    if (
+      projectIdForSession(useChatStore.getState().activeSessionId ?? "") ===
+      projectRuntime.id
+    ) {
+      setSessionPreferences(useChatStore.getState().activeSessionId ?? "", {
+        modelId: model,
+      });
     }
-  }, [isActive, prefsHydrated, projectRuntime, explorerRoot, projectModelIds, prefDefaultModel, setSelectedModelId]);
+    // Direct store write — NOT setSelectedModelId: that action mirrors into
+    // the active project AND persists to live.getWorkspaceRoot(), which
+    // during a switch still points at the OUTGOING project's live bridge
+    // (the incoming setLive runs later in the live-bridge effect).
+    // Persisting there overwrote the outgoing project's saved model with
+    // the incoming one — the exact bug this restore path must not
+    // reintroduce.
+    useChatStore.setState({ selectedModelId: model });
+    // Only the visible project changes the legacy global presentation
+    // selection; the captured project value remains independently stable.
+    useAgentsStore.getState().setRoot(root);
+  }, [isActive, prefsHydrated, projectRuntime, explorerRoot, projectModelIds, prefDefaultModel]);
 
   useEffect(() => {
     if (!isActive || !launchCwdResolved) return;
@@ -1594,11 +1618,15 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
         if (savedSession && savedSession !== useChatStore.getState().activeSessionId) {
           useChatStore.getState().switchSession(savedSession);
         }
-        setProjectModel(
-          projectRuntime.id,
-          useChatStore.getState().selectedModelId,
-          useAgentsStore.getState().activeId,
-        );
+        // RESTORE the incoming project's captured model — never mirror the
+        // outgoing project's global selection into it (the old
+        // setProjectModel(selectedModelId) captured A's model on top of B's
+        // on every A→B switch, then re-restored it as if it were B's).
+        // The restore effect (projectModelApplied) owns the visible
+        // presentation selection; this owns the CAPTURE for correctness
+        // right after the session flip.
+        const restored = getProjectModel(projectRuntime.id);
+        setProjectModel(projectRuntime.id, restored, useAgentsStore.getState().activeId);
         setSandboxRoot(explorerRoot ?? launchCwd ?? home ?? null);
       };
       // startTransition: these GLOBAL chatStore writes re-render every
