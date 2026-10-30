@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   Add01Icon,
+  ArrowDown01Icon,
   Cancel01Icon,
   Delete02Icon,
   Folder01Icon,
@@ -198,9 +199,14 @@ export function GroupChatPanel({
               // height formula, same bottom anchor, same card styling.
               "fixed z-40 flex w-[min(34rem,calc(100vw-2rem))] flex-col overflow-hidden",
               "rounded-2xl border border-border/60 bg-card text-[12px] shadow-lg",
+              "ring-1 ring-black/5 dark:ring-white/5",
               "right-2 bottom-[calc(var(--kai-input-bar-h,0px)+84px)] h-[min(42rem,calc(100vh-var(--kai-input-bar-h,0px)-92px))]",
             )}
           >
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-foreground/[0.03] to-transparent"
+            />
             <PanelHeader
               group={active}
               candidates={projects}
@@ -242,24 +248,35 @@ function PanelHeader({
   onClose: () => void;
 }) {
   return (
-    <div className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border/60 px-3">
-      <div className="flex min-w-0 items-center gap-1.5">
-        <HugeiconsIcon icon={Link01Icon} size={13} strokeWidth={1.75} className="shrink-0 text-muted-foreground" />
-        <span className="truncate font-medium">{group.name}</span>
-        {group.endedAt !== null ? (
-          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">ended</span>
-        ) : (
-          <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
-            · {group.participants.length} projects
-            {group.coordinator.kind === "agent" && (
-              <span className="rounded bg-primary/15 px-1 py-0.5 text-[9.5px] text-primary">
-                {group.participants.find((p) => group.coordinator.kind === "agent" && p.projectId === group.coordinator.projectId)?.name ?? ""} coordinates
-              </span>
-            )}
-          </span>
-        )}
+    <div className="flex h-11 shrink-0 items-center gap-3 border-b border-border/60 px-3">
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted/70 text-muted-foreground">
+          <HugeiconsIcon icon={Link01Icon} size={13} strokeWidth={1.75} />
+        </span>
+        <span className="min-w-0 truncate text-[12px] font-medium" title={group.name}>
+          {group.name}
+        </span>
       </div>
-      <div className="flex shrink-0 items-center gap-1">
+      <div className="flex shrink-0 items-center gap-0.5">
+        <span className="flex h-6 shrink-0 items-center gap-1.5 whitespace-nowrap px-2 text-[10.5px] text-muted-foreground">
+          <span
+            className={cn(
+              "size-1.5 shrink-0 rounded-full",
+              group.endedAt !== null ? "bg-muted-foreground/40" : "bg-emerald-500",
+            )}
+          />
+          {group.endedAt !== null
+            ? "Ended"
+            : `${group.participants.length} projects`}
+        </span>
+        {group.coordinator.kind === "agent" && group.endedAt === null ? (
+          <span
+            className="mr-1 shrink-0 rounded-md bg-primary/10 px-1.5 py-1 text-[10px] font-medium text-primary"
+            title={`${group.participants.find((p) => group.coordinator.kind === "agent" && p.projectId === group.coordinator.projectId)?.name ?? "Participant"} coordinates this group`}
+          >
+            Delegated
+          </span>
+        ) : null}
         {group.endedAt !== null ? (
           <Button
             type="button"
@@ -326,11 +343,19 @@ function Transcript({ group }: { group: GroupChat }) {
     [live],
   );
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-3 py-2.5">
+    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4">
       {live.messages.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center text-[11px] text-muted-foreground">
-          Send a message to start coordinating — each project's agent receives
-          it in its own session.
+        <div className="flex flex-1 flex-col items-center justify-center px-8 text-center">
+          <span className="mb-3 flex size-10 items-center justify-center rounded-xl bg-muted/50 text-muted-foreground/70">
+            <HugeiconsIcon icon={Link01Icon} size={20} strokeWidth={1.5} />
+          </span>
+          <span className="text-[12px] font-medium text-foreground/80">
+            Coordinate your projects together
+          </span>
+          <span className="mt-1 max-w-64 text-[11px] leading-relaxed text-muted-foreground">
+            Send a message and each project's agent receives it in its own
+            session.
+          </span>
         </div>
       ) : (
         live.messages.map((m) =>
@@ -373,15 +398,18 @@ function Transcript({ group }: { group: GroupChat }) {
 function Composer({ group }: { group: GroupChat }) {
   const [text, setText] = useState("");
   const [target, setTarget] = useState<string | "all">("all");
-  const [sent, setSent] = useState(false);
+  const [sending, setSending] = useState(false);
   const send = useCallback(async () => {
     const trimmed = text.trim();
-    if (!trimmed || group.endedAt !== null) return;
-    await sendGroupMessage(group.id, trimmed, target === "all" ? undefined : target);
-    setText("");
-    setSent(true);
-    window.setTimeout(() => setSent(false), 1200);
-  }, [text, group, target]);
+    if (!trimmed || group.endedAt !== null || sending) return;
+    setSending(true);
+    try {
+      await sendGroupMessage(group.id, trimmed, target === "all" ? undefined : target);
+      setText("");
+    } finally {
+      setSending(false);
+    }
+  }, [text, group, target, sending]);
 
   if (group.endedAt !== null) {
     return (
@@ -391,17 +419,18 @@ function Composer({ group }: { group: GroupChat }) {
     );
   }
   return (
-    <div className="flex shrink-0 items-center gap-1.5 border-t border-border/60 px-3 py-2">
+    <div className="flex shrink-0 items-center gap-2 border-t border-border/60 bg-card/80 p-3">
       <Popover>
         <PopoverTrigger asChild>
           <button
             type="button"
-            className="flex h-7 min-w-0 max-w-32 items-center gap-1 rounded-md border border-border/60 px-2 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            className="flex h-8 shrink-0 items-center gap-1 rounded-lg px-2 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             title="Send to…"
           >
-            <span className="truncate">
+            <span className="max-w-24 truncate">
               {target === "all" ? "All" : group.participants.find((p) => p.projectId === target)?.name ?? target}
             </span>
+            <HugeiconsIcon icon={ArrowDown01Icon} size={9} strokeWidth={2} />
           </button>
         </PopoverTrigger>
         <PopoverContent align="start" className="w-44 gap-0 p-1 text-xs">
@@ -428,17 +457,18 @@ function Composer({ group }: { group: GroupChat }) {
           }
         }}
         placeholder="Coordinate your project agents…"
-        className="h-7 flex-1 text-[11.5px]"
+        className="h-8 flex-1 rounded-lg border-border/50 bg-muted/30 px-3 text-[11.5px] placeholder:text-muted-foreground/60 focus-visible:ring-1 focus-visible:ring-ring/50"
       />
       <Button
         type="button"
         size="icon"
         variant="ghost"
-        className="size-7"
+        className="size-8 shrink-0 rounded-lg"
         aria-label="Send to group"
+        disabled={!text.trim() || sending}
         onClick={() => void send()}
       >
-        <HugeiconsIcon icon={sent ? SentIcon : SentIcon} size={13} strokeWidth={1.75} />
+        <HugeiconsIcon icon={SentIcon} size={15} strokeWidth={1.75} />
       </Button>
     </div>
   );
