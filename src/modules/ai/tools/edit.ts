@@ -10,7 +10,7 @@ import { withFileMutationLock } from "../lib/mutationLock";
 
 type EditResult =
   | { ok: true; replacements: number; bytesWritten: number; path: string }
-  | { ok: false; error: string; path: string };
+  | { ok: false; error: string; path: string; editIndex?: number };
 
 /** Strip trailing whitespace from each line, preserving line endings.
  *  Exempt .md/.mdx where trailing spaces are meaningful (hard line breaks). */
@@ -206,7 +206,7 @@ async function applyEdits(
   let totalReplacements = 0;
   let skippedIdentical = 0;
 
-  for (const rawEdit of edits) {
+  for (const [editIndex, rawEdit] of edits.entries()) {
     const oldNorm = normEol(rawEdit.old_string);
     // Strip trailing whitespace from new_string to prevent model-generated
     // trailing spaces from dirtying the file.
@@ -222,7 +222,7 @@ async function applyEdits(
       continue;
     }
     if (oldNorm.length === 0) {
-      return { ok: false, error: "old_string cannot be empty", path: abs };
+      return { ok: false, error: "old_string cannot be empty", path: abs, editIndex };
     }
     if (rawEdit.replace_all) {
       let n = 0;
@@ -249,6 +249,7 @@ async function applyEdits(
             ok: false,
             error: `old_string not found: ${JSON.stringify(oldNorm.slice(0, 80))}.${getDidYouMeanHint(content, oldNorm)}`,
             path: abs,
+            editIndex,
           };
         }
         if (fz.length > MAX_FUZZY_HITS) {
@@ -256,6 +257,7 @@ async function applyEdits(
             ok: false,
             error: `old_string matched more than ${MAX_FUZZY_HITS} locations after whitespace relaxation — refusing to rewrite that broadly. Narrow old_string.`,
             path: abs,
+            editIndex,
           };
         }
         for (const h of [...fz].sort((a, b) => b.index - a.index)) {
@@ -279,6 +281,7 @@ async function applyEdits(
             ok: false,
             error: `old_string not found: ${JSON.stringify(oldNorm.slice(0, 80))}.${getDidYouMeanHint(content, oldNorm)}`,
             path: abs,
+            editIndex,
           };
         }
         let chosen = fz[0];
@@ -303,6 +306,7 @@ async function applyEdits(
                   .map((h) => h.line)
                   .join(", ")}) only after whitespace relaxation — nothing was changed. Copy the block verbatim from the file (tabs vs spaces included), widen it with surrounding context, or pass line_hint to pick one.`,
               path: abs,
+              editIndex,
             };
           }
         }
@@ -319,6 +323,7 @@ async function applyEdits(
           error:
             "old_string is not unique. Provide more surrounding context, set replace_all=true, or provide line_hint to disambiguate.",
           path: abs,
+          editIndex,
         };
       }
       // When line_hint is provided and there are multiple matches, pick
@@ -532,46 +537,30 @@ export function buildEditTools(ctx: ToolContext) {
 
     multi_edit: tool({
       description:
-        "Apply several replacements to ONE file in a single atomic call. The file path goes in the TOP-LEVEL `path` field — do NOT put a `path` inside each edit object (an edit-level path is tolerated as a fallback but the top-level field is the contract). `line_hint` per edit is accepted and used to disambiguate repeated old_strings; never omit an edit because you fear it. Same exact-match rules as edit: every old_string must be copied verbatim from the file's current content. Edits apply in order; an edit that fails to match is reported individually and the rest still land. Prefer this over repeated edit calls when changing several spots in the same file. Do NOT fall back to write_file when multi_edit fails — retry multi_edit with corrected old_string values copied verbatim from a fresh read. Asks for user approval. The prior content is auto-checkpointed — revert a bad batch with `checkpoint_undo`.",
-      inputSchema: z
-        .object({
-          path: z.string().optional(),
-          edits: z
-            .array(
-              z.object({
+        "Apply several replacements to ONE file atomically. REQUIRED shape: {path: \"src/app.ts\", edits: [{old_string: \"...\", new_string: \"...\"}]}. Each old_string must match the current file exactly; widen it for uniqueness or use line_hint. If ANY edit fails, NOTHING is written and the failure identifies its edit index. Re-read the file and resubmit corrected edits instead of falling back to PowerShell or write_file. Every write is auto-checkpointed for checkpoint_undo.",
+      inputSchema: z.object({
+        path: z
+          .string({ error: "path is required and must be a string" })
+          .min(1)
+          .describe("The ONE file to edit, absolute or relative to the terminal cwd."),
+        edits: z
+          .array(
+            z
+              .object({
                 old_string: z.string(),
                 new_string: z.string(),
                 replace_all: z.boolean().optional(),
                 line_hint: z
                   .number()
                   .optional()
-                  .describe("Approximate 1-based line number where the edit should apply. Used to disambiguate when old_string appears more than once."),
-                path: z.string().optional(),
-              }),
-            )
-            .min(1),
-        })
-        .superRefine((v, ctx) => {
-          // One file, one path: accept it at the top level or per-edit
-          // (models do both), but reject a call that names NO file at all —
-          // execute-time errors caused write_file-whole-file fallbacks.
-          if (!v.path && !v.edits.some((e) => e.path)) {
-            ctx.addIssue({
-              code: "custom",
-              message:
-                'path is required — set the top-level "path" field to the ONE file these edits target (a per-edit "path" also works). Example: {"path":"src/app.ts","edits":[{"old_string":"...","new_string":"..."}]}',
-            });
-          }
-        }),
+                  .describe("Approximate 1-based line number for a repeated old_string."),
+              })
+              .strict(),
+          )
+          .min(1),
+      }),
       needsApproval: true,
-      execute: async ({ path: pathArg, edits }) => {
-        // Some models put `path` inside each edit instead of at the top level.
-        const path = pathArg ?? edits[0]?.path ?? "";
-        if (!path)
-          return {
-            error:
-              'path is required — multi_edit applies edits to ONE file; set the top-level "path" field to it (a per-edit "path" is also accepted). Example: {"path":"src/app.ts","edits":[{"old_string":"...","new_string":"..."}]}',
-          };
+      execute: async ({ path, edits }) => {
         const reqPath = resolvePath(path, ctx.getCwd());
         const safety = await checkWritableCanonical(reqPath, native.canonicalize, await sandboxOverrideForContext(ctx));
         if (!safety.ok) return { error: safety.reason, path: reqPath };
@@ -646,72 +635,21 @@ export function buildEditTools(ctx: ToolContext) {
             await commitCheckpointBatch(checkpoint);
             return result;
           }
-          // Batch failed — retry each edit individually so correct edits
-          // still land and only the mismatched ones are reported.
-          const succeeded: Array<{
-            old_string: string;
-            replacements: number;
-          }> = [];
-          const failed: Array<{
-            old_string: string;
-            error: string;
-          }> = [];
-          for (let i = 0; i < edits.length; i++) {
-            const e = edits[i];
-            const r = await applyEdits(
-              abs,
-              [e],
-              "edit",
-              ctx.readCache,
-              native,
-            );
-            if ("ok" in r && r.ok) {
-              succeeded.push({
-                old_string: e.old_string.slice(0, 80),
-                replacements: (r as Extract<EditResult, { ok: true }>).replacements,
-              });
-            } else {
-              const err = r as Extract<EditResult, { ok: false }>;
-              failed.push({
-                old_string: e.old_string.slice(0, 80),
-                error: err.error,
-              });
-            }
-          }
-          if (succeeded.length === 0) {
-            getEditFailures(ctx).set(abs, failures + 1);
-            return {
-              ok: false,
-              error:
-                `All ${edits.length} edits failed. ` +
-                (failed.length === 1
-                  ? `Reason: ${failed[0].error}`
-                  : `First failure: ${failed[0].error}`),
-              path: abs,
-              applied: 0,
-              failed: edits.length,
-            } as EditResult;
-          }
-          // Partial success — reset failure counter, mark file modified.
-          // Commit anyway: the edits that DID land still need an undo point,
-          // and leaving the batch pending would fold these files into the
-          // NEXT tool call's checkpoint instead.
-          getEditFailures(ctx).delete(abs);
-          ctx.fileTracker.markModified(abs);
-          await commitCheckpointBatch(checkpoint);
+          // ATOMIC CONTRACT: applyEdits constructs the whole output in
+          // memory and has not written anything on this path. Never salvage
+          // individual edits: partial application makes a model retry work
+          // that already landed and corrupts the file.
+          getEditFailures(ctx).set(abs, failures + 1);
+          const failureIndex = result.editIndex ?? 0;
           return {
-            ok: true as const,
-            replacements: succeeded.reduce((sum, s) => sum + s.replacements, 0),
-            bytesWritten: 0,
+            ok: false,
+            error: `${result.error}\n\nNo changes were written. Re-read the file and resubmit corrected edits; do not retry blindly.`,
             path: abs,
-            applied: succeeded.length,
-            failed: failed.length,
-            failures: failed.map((f) => f.error),
-            note:
-              failed.length > 0
-                ? `${succeeded.length} of ${edits.length} edits applied. The remaining ${failed.length} must be redone with corrected old_string values.`
-                : undefined,
-          };
+            changed: false,
+            failedEdit: failureIndex,
+            applied: 0,
+            failed: edits.length,
+          } as EditResult;
         });
       },
     }),

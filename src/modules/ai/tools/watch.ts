@@ -26,7 +26,11 @@ import { useChatStore } from "../store/chatStore";
 import { tool, generateId } from "ai";
 import { z } from "zod";
 import { nativeForContext, sandboxOverrideForContext, type ToolContext } from "./context";
-import { checkShellCommand } from "../lib/security";
+import {
+  checkShellCommand,
+  powerShellFileSurgeryHint,
+} from "../lib/security";
+import { IS_WINDOWS } from "@/lib/platform";
 import { checkShellSandbox, sandboxExecRoot, type SandboxOverride } from "../lib/sandbox";
 
 // ── Heartbeat (Rust-driven scheduler tick) ─────────────────────────────────
@@ -806,6 +810,12 @@ export function buildWatchTools(ctx: ToolContext) {
       execute: async ({ command, interval_secs, condition, mode, label, notify_telegram }, options) => {
         const safety = checkShellCommand(command);
         if (!safety.ok) return { error: safety.reason };
+        // A watch runs its command repeatedly; a read-modify-write pipeline
+        // would corrupt source files on every poll. Same guard as bash_run.
+        const surgeryHint = IS_WINDOWS && ctx.workspaceEnv?.kind !== "wsl"
+          ? powerShellFileSurgeryHint(command)
+          : null;
+        if (surgeryHint) return { error: surgeryHint };
         const sandbox = await checkShellSandbox(command, await sandboxOverrideForContext(ctx));
         if (!sandbox.ok) return { error: sandbox.reason };
         if (options?.abortSignal?.aborted) return { error: "Cancelled." };

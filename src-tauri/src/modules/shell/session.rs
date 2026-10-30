@@ -141,7 +141,7 @@ impl ShellSession {
         // the command's own error on stderr while the sentinel + `exit` still
         // run, so cwd and exit code stay honest. We still coach the most common
         // root cause: bash-style escaping / unterminated strings / 5.1's
-        // rejection of `&&`, all of which survive repair_bash_style_quotes or
+        // rejection of `&&` or other genuine PowerShell grammar
         // reflect genuine PowerShell grammar the model got wrong.
         //
         // Two variants of coaching matter and are not interchangeable:
@@ -256,13 +256,14 @@ fn wrap_with_sentinel(command: &str, workspace: &WorkspaceEnv, sentinel: &str) -
         // latent bug predated the iex change (the old top-level splice hit it
         // too) — verified empirically across 7 cases including cd-persistence.
         //
-        // repair_bash_style_quotes is applied BEFORE encoding — the same
-        // bash→PS escape coaching the `-File` path applies (see
-        // write_shell_script in mod.rs), so double-escaped `\"` still becomes
-        // the PS literal-quote form. The sentinel line keeps its leading
-        // newline so strip_cwd_sentinel still isolates the cwd cleanly.
-        let repaired = super::repair_bash_style_quotes(command);
-        let b64 = base64::engine::general_purpose::STANDARD.encode(repaired.as_bytes());
+        // The approved command is base64-encoded VERBATIM — no dialect rewrite
+        // may alter single-quoted literals before the wrapper runs it (the
+        // old repair_bash_style_quotes changed literal backslashes inside
+        // single-quoted strings, i.e. executed a different command than the
+        // one on the approval card). One-shot commands are additionally
+        // parser-validated first (validate_powershell_script in mod.rs).
+        // literal backslashes inside single-quoted PowerShell strings.
+        let b64 = base64::engine::general_purpose::STANDARD.encode(command.as_bytes());
         format!(
             "$__KAI_s = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{b64}'))\n$__KAI_err = $false\ntry {{ Invoke-Expression $__KAI_s | Out-Default }}\ncatch {{ $__KAI_err = $true; Write-Error ($_.Exception.Message + \"`n\" + $_.InvocationInfo.PositionMessage) }}\nif ($__KAI_err) {{ $__KAI_rc = 1 }}\nelseif ($null -ne $LASTEXITCODE) {{ $__KAI_rc = $LASTEXITCODE }}\nelseif ($?) {{ $__KAI_rc = 0 }}\nelse {{ $__KAI_rc = 1 }}\n\"`n{sentinel}$($PWD.Path)\"\nexit $__KAI_rc\n",
         )
@@ -318,7 +319,7 @@ mod tests {
     }
 
     #[test]
-    fn repair_runs_before_encoding_so_specials_are_safe() {
+    fn command_is_base64_encoded_verbatim_before_execution() {
         // A bash-style \" must be repaired to the PS literal-quote form, and
         // the whole (repaired) string base64'd — so no raw quote ever sits on
         // the wrapper's top-level parse path.

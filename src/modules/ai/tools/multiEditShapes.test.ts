@@ -1,20 +1,19 @@
 /**
- * REGRESSION (agent token burn, filed by the user): the agent's own pasted
- * transcript shows THREE consecutive multi_edit retries burning tokens:
+ * multi_edit CONTRACT SUITE. History: a live session burned three retries
+ * inventing folklore about the tool's call shape ("path must live inside
+ * each edit object", "line_hint breaks it"). The fix was two-fold:
  *
- *   1. "The tool drops path on multi_edit.. path must live inside each edit object."
- *   2. "Stray line_hint breaks multi_edit in this harness — drop it entirely and put path in each edit."
- *   3. "multi_edit takes path inside each edit object (no outer path param) and line_hint breaks it."
+ *   1. ONE canonical schema - required top-level `path`, `line_hint`
+ *      supported, NO per-edit path. An ambiguous schema is what let the
+ *      folklore form in the first place; a canonical one makes the
+ *      missing-path failure an ordinary field validation error.
+ *   2. True atomicity - any failed edit writes NOTHING and reports the
+ *      failing index, so a retry can never duplicate partial work.
  *
- * The working theory in those notes (path-per-edit required, line_hint
- * forbidden) contradicts the SOURCE schema, which accepts ALL shapes:
- * top-level path, path-per-edit, and line_hint. If the source passes every
- * shape, the failure came from a STALE RUNNING BUILD, not the code — and
- * the correct fix is a rebuild, not agent folklore. This suite pins every
- * shape so a future schema regression fails here instead of in a live
- * session where it burns tokens on retries.
- */
-import { describe, expect, it, beforeEach, vi } from "vitest";
+ * This suite pins the canonical shape (accepts what it must, rejects
+ * per-edit path shapes) and the missing-path error so a future schema
+ * regression fails here instead of in a live session.
+ */import { describe, expect, it, beforeEach, vi } from "vitest";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("../lib/native", () => {
@@ -101,7 +100,7 @@ async function tryShape(input: { path?: string; edits: Edit[] }) {
   return { valid: true, stripped, result };
 }
 
-describe("multi_edit accepts every path/line_hint call shape (no token-burn retries)", () => {
+describe("multi_edit canonical schema and atomic failures", () => {
   beforeEach(() => {
     files.clear();
     files.set("/ws/scratch.txt", "alpha\nbeta\ngamma\n");
@@ -118,37 +117,23 @@ describe("multi_edit accepts every path/line_hint call shape (no token-burn retr
     expect(files.get("/ws/scratch.txt")).toContain("ALPHA");
   });
 
-  it("shape B: path INSIDE each edit + line_hint", async () => {
-    const { valid, stripped, result } = await tryShape({
+  it("rejects path-per-edit: one canonical top-level field only", async () => {
+    const { valid, stripped } = await tryShape({
       edits: [
-        { old_string: "beta", new_string: "BETA", path: "/ws/scratch.txt", line_hint: 2 },
+        { old_string: "beta", new_string: "BETA", path: "/ws/scratch.txt" },
       ],
     });
-    expect(valid).toBe(true);
+    expect(valid).toBe(false);
     expect(stripped).toEqual([]);
-    expect(result.ok).toBe(true);
-    expect(files.get("/ws/scratch.txt")).toContain("BETA");
   });
 
-  it("shape C: path inside each edit, no line_hint (the folklore-required shape)", async () => {
-    const { valid, stripped, result } = await tryShape({
-      edits: [{ old_string: "gamma", new_string: "GAMMA", path: "/ws/scratch.txt" }],
-    });
-    expect(valid).toBe(true);
-    expect(stripped).toEqual([]);
-    expect(result.ok).toBe(true);
-    expect(files.get("/ws/scratch.txt")).toContain("GAMMA");
-  });
-
-  it("shape D: BOTH top-level path AND path-per-edit (redundant)", async () => {
-    const { valid, stripped, result } = await tryShape({
+  it("rejects redundant per-edit path even when top-level path exists", async () => {
+    const { valid, stripped } = await tryShape({
       path: "/ws/scratch.txt",
       edits: [{ old_string: "alpha", new_string: "A1", path: "/ws/scratch.txt" }],
     });
-    expect(valid).toBe(true);
+    expect(valid).toBe(false);
     expect(stripped).toEqual([]);
-    expect(result.ok).toBe(true);
-    expect(files.get("/ws/scratch.txt")).toContain("A1");
   });
 
   it("gives a self-correctable 'path is required' error when NO path is given anywhere", async () => {
@@ -166,9 +151,7 @@ describe("multi_edit accepts every path/line_hint call shape (no token-burn retr
     // whole-file fallbacks.
     expect(valid).toBe(false);
     const msg = String(error);
-    expect(msg).toContain("path is required");
-    expect(msg).toContain('"path"');
-    expect(msg).toContain("Example:");
-    expect(msg).toContain("edits");
+    expect(msg).toContain("path");
+    expect(msg).toContain("required");
   });
 });

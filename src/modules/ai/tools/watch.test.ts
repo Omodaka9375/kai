@@ -20,6 +20,7 @@ vi.mock("../store/chatStore", () => ({
 }));
 vi.mock("../lib/security", () => ({
   checkShellCommand: vi.fn(() => ({ ok: true })),
+  powerShellFileSurgeryHint: vi.fn(() => null),
 }));
 vi.mock("../lib/sandbox", () => ({
   checkShellSandbox: vi.fn(async () => ({ ok: true })),

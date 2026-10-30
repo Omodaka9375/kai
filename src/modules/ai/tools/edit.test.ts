@@ -202,6 +202,38 @@ describe("multi_edit stale guard (hash-only, self-write immune)", () => {
   });
 });
 
+describe("multi_edit atomic failure contract", () => {
+  it("writes nothing when a later edit fails and identifies its index", async () => {
+    const path = "/ws/atomic.ts";
+    const original = "alpha\nbeta\ngamma\n";
+    files.set(path, original);
+    ctx.readCache.set(path, readCacheEntry(original));
+    const tools = applyEditsModule.buildEditTools(ctx);
+    const result = (await tools.multi_edit.execute!(
+      {
+        path,
+        edits: [
+          { old_string: "alpha", new_string: "ALPHA" },
+          { old_string: "DOES NOT EXIST", new_string: "x" },
+        ],
+      },
+      {} as never,
+    )) as {
+      ok?: boolean;
+      changed?: boolean;
+      failedEdit?: number;
+      applied?: number;
+      error?: string;
+    };
+    expect(result.ok).toBe(false);
+    expect(result.changed).toBe(false);
+    expect(result.failedEdit).toBe(1);
+    expect(result.applied).toBe(0);
+    expect(result.error).toContain("No changes were written");
+    expect(files.get(path)).toBe(original);
+  });
+});
+
 describe("batch_edit validation failures leave disk untouched", () => {
   // Regression: a mid-batch validation failure used to call rollback(),
   // which WROTE the in-memory snapshots (including same-file compounds —

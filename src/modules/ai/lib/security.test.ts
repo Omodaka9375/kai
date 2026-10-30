@@ -3,6 +3,7 @@ import {
   checkReadable,
   checkReadableCanonical,
   checkShellCommand,
+  powerShellFileSurgeryHint,
   checkWritable,
 } from "./security";
 
@@ -213,6 +214,24 @@ describe("checkShellCommand — Trojan Source / bidi defense", () => {
     expect(checkShellCommand("rm -rf ~/")).toMatchObject({ ok: false });
     expect(checkShellCommand("rm -rf $HOME/")).toMatchObject({ ok: false });
     expect(checkShellCommand("rm -rf ~")).toMatchObject({ ok: false });
+  });
+});
+
+describe("powerShellFileSurgeryHint — preserve the edit pipeline", () => {
+  it("rejects Get-Content piped through replace into Set-Content", () => {
+    const command = "Get-Content src/app.ts -Raw | ForEach-Object { $_ -replace 'a', 'b' } | Set-Content src/app.ts";
+    expect(powerShellFileSurgeryHint(command)).toContain("edit/multi_edit");
+  });
+
+  it("rejects .NET ReadAllText followed by WriteAllText", () => {
+    const command = "$c = [IO.File]::ReadAllText('a.ts'); [IO.File]::WriteAllText('a.ts', $c.Replace('a', 'b'))";
+    expect(powerShellFileSurgeryHint(command)).toContain("line endings");
+  });
+
+  it("allows new artifact generation and unrelated PowerShell commands", () => {
+    expect(powerShellFileSurgeryHint("Set-Content new-script.ps1 'Write-Output ok'")).toBeNull();
+    expect(powerShellFileSurgeryHint("Get-Content README.md | Select-Object -First 10")).toBeNull();
+    expect(powerShellFileSurgeryHint("pnpm exec tsc --noEmit")).toBeNull();
   });
 });
 

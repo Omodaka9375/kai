@@ -1,7 +1,8 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { native } from "../lib/native";
-import { checkShellCommand } from "../lib/security";
+import { checkShellCommand, powerShellFileSurgeryHint } from "../lib/security";
+import { IS_WINDOWS } from "@/lib/platform";
 import { checkShellSandbox, sandboxExecRoot } from "../lib/sandbox";
 import { withExclusiveLock } from "../lib/mutationLock";
 import { nativeForContext, sandboxOverrideForContext, type ToolContext } from "./context";
@@ -230,7 +231,7 @@ export function buildShellTools(ctx: ToolContext) {
   return {
     bash_run: tool({
       description:
-        "Run a short-lived foreground command (build, test, install, git) in this session's persistent agent shell; cwd persists across calls. For dev servers/watchers use `bash_background`; NEVER run interactive tools (vim, less, top) — they hang. Asks approval. On Windows the shell is PowerShell, NOT bash: do NOT reach for it to search or edit files — use the `grep`/`glob` tools instead of Select-String/findstr, and edit/multi_edit instead of Get-Content `-replace`/Set-Content pipelines. Keep each command to ONE responsibility (do not chain long `;`/`&&` pipelines that mix search+transform+write — split them, or better use the dedicated tools). PowerShell quoting: single quotes are literal; never nest quotes inside double quotes; for mixed quotes use a literal here-string @'...'@. Set `elevated: true` only for genuine admin/root needs (OS privilege prompt + stronger confirmation).",
+        "Run a short-lived foreground command (build, test, install, git) in this session's persistent agent shell; cwd persists across calls. For dev servers/watchers use `bash_background`; NEVER run interactive tools (vim, less, top) — they hang. Asks approval. On Windows the shell is PowerShell, NOT bash: do NOT reach for it to search or edit files — use the `grep`/`glob` tools instead of Select-String/findstr, and edit/multi_edit instead of Get-Content `-replace`/Set-Content pipelines. Keep each command to ONE responsibility (do not chain long `;`/`&&` pipelines that mix search+transform+write — split them, or better use the dedicated tools). PowerShell quoting: single-quoted strings keep everything literal (use them for paths and text with $ or quotes); inside double-quoted strings escape a quote with backtick-quote. The approved command is parsed and executed verbatim, never silently rewritten. Set `elevated: true` only for genuine admin/root needs (OS privilege prompt + stronger confirmation).",
       inputSchema: z.object({
         command: z.string(),
         timeout_secs: z.number().min(1).max(1000).optional(),
@@ -242,6 +243,10 @@ export function buildShellTools(ctx: ToolContext) {
       execute: async ({ command, timeout_secs, elevated }, options) => {
         const safety = checkShellCommand(command);
         if (!safety.ok) return { error: safety.reason };
+        const surgeryHint = IS_WINDOWS && ctx.workspaceEnv?.kind !== "wsl"
+          ? powerShellFileSurgeryHint(command)
+          : null;
+        if (surgeryHint) return { error: surgeryHint };
         const sandbox = await checkShellSandbox(command, await sandboxOverrideForContext(ctx));
         if (!sandbox.ok) return { error: sandbox.reason };
         // Check abort before any work — agent was stopped before we started.
@@ -413,6 +418,10 @@ export function buildShellTools(ctx: ToolContext) {
       execute: async ({ command, cwd }) => {
         const safety = checkShellCommand(command);
         if (!safety.ok) return { error: safety.reason };
+        const surgeryHint = IS_WINDOWS && ctx.workspaceEnv?.kind !== "wsl"
+          ? powerShellFileSurgeryHint(command)
+          : null;
+        if (surgeryHint) return { error: surgeryHint };
         const sandbox = await checkShellSandbox(command, await sandboxOverrideForContext(ctx));
         if (!sandbox.ok) return { error: sandbox.reason };
         const effectiveCwd = cwd ?? ctx.getCwd();

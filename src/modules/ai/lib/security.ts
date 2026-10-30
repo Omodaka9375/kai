@@ -423,6 +423,23 @@ export async function checkWritableCanonical(
   }
 }
 
+/** Model-facing guard against ad-hoc PowerShell source-file rewriting.
+ *  These pipelines bypass edit checkpoints and commonly destroy CRLF files.
+ *  Deliberately narrow: Set-Content/WriteAllText for NEW artifacts is fine. */
+export function powerShellFileSurgeryHint(command: string): string | null {
+  const getContentRewrite =
+    /\bGet-Content\b[\s\S]*\|[\s\S]*\b(?:Set-Content|Add-Content|Out-File)\b/i.test(
+      command,
+    ) ||
+    (/\bGet-Content\b[\s\S]*-replace\b/i.test(command) &&
+      /(?:^|[^>])>>?\s*(?:['"]|[\w$({])/i.test(command));
+  const dotNetRewrite =
+    /\[(?:IO|System\.IO)\.File\]::ReadAllText\b/i.test(command) &&
+    /\[(?:IO|System\.IO)\.File\]::WriteAllText\b/i.test(command);
+  if (!getContentRewrite && !dotNetRewrite) return null;
+  return "Use edit/multi_edit for source-file changes. They preserve line endings, serialize same-file writes, and create an undo checkpoint. PowerShell remains appropriate for builds, tests, installs, git, and creating new artifacts.";
+}
+
 export function checkShellCommand(cmd: string): SafetyResult {
   const c = cmd.trim();
   if (c.length === 0) {
