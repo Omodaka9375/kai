@@ -73,7 +73,7 @@ type FileMenuProps = {
 
 const COMPACT_WIDTH = 720;
 
-/** Launcher tile: icon + label on top row, muted description beneath.
+/** Launcher tile: icon + label on top row, optional description beneath.
  *  textValue keeps Radix typeahead keyed to the label, not the combined
  *  text content (label + desc would make typeahead matches ambiguous). */
 function MenuTile({
@@ -86,7 +86,7 @@ function MenuTile({
 }: {
   icon: typeof Settings01Icon;
   label: string;
-  desc: string;
+  desc?: string;
   shortcut?: string;
   disabled?: boolean;
   onSelect: () => void;
@@ -105,9 +105,10 @@ function MenuTile({
         <HugeiconsIcon icon={Icon} size={13} strokeWidth={1.75} className="shrink-0 text-muted-foreground" />
         <span className="min-w-0 truncate text-xs font-medium">{label}</span>
       </span>
-      {/* Row 2: desc left, shortcut right — both short enough to never wrap. */}
+      {/* Row 2: optional desc left, shortcut right — both short enough to
+          never wrap. Save tiles pass only the shortcut. */}
       <span className="flex w-full min-w-0 items-center gap-1.5">
-        <span className="min-w-0 truncate text-[10px] leading-3 font-normal text-muted-foreground/70">{desc}</span>
+        {desc ? <span className="min-w-0 truncate text-[10px] leading-3 font-normal text-muted-foreground/70">{desc}</span> : null}
         {shortcut ? <span className="ml-auto shrink-0 text-[10px] leading-3 font-normal text-muted-foreground/60">{shortcut}</span> : null}
       </span>
     </DropdownMenuItem>
@@ -122,17 +123,6 @@ export function FileMenu({
   activeTab,
   children,
 }: FileMenuProps) {
-  // Save desc names the file you would save - far more useful than a static
-  // label. Backslash-aware basename (Windows editor paths).
-  const saveTarget =
-    activeTab?.kind === "editor"
-      ? (activeTab.path.split(/[\\/]/).pop() ?? "")
-      : "";
-  const saveDesc = saveTarget !== "" ? saveTarget : "Active editor file";
-  const saveAllDesc =
-    dirtyCount === 0
-      ? "No unsaved files"
-      : `${dirtyCount} unsaved`;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
@@ -144,7 +134,6 @@ export function FileMenu({
           <MenuTile
             icon={FloppyDiskIcon}
             label="Save"
-            desc={saveDesc}
             shortcut={IS_MAC ? "⌘S" : "Ctrl+S"}
             disabled={!activeTab || activeTab.kind !== "editor" || !activeTab.dirty}
             onSelect={onSave}
@@ -152,7 +141,6 @@ export function FileMenu({
           <MenuTile
             icon={FloppyDiskIcon}
             label="Save All"
-            desc={saveAllDesc}
             shortcut={IS_MAC ? "⌘⇧S" : "Ctrl+Shift+S"}
             disabled={dirtyCount < 2}
             onSelect={onSaveAll}
@@ -182,7 +170,6 @@ export function FileMenu({
         >
           <HugeiconsIcon icon={InformationCircleIcon} size={13} strokeWidth={1.75} className="shrink-0 text-muted-foreground" />
           <span className="text-xs font-medium">About</span>
-          <span className="ml-auto text-[10px] text-muted-foreground/70">Version & credits</span>
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
