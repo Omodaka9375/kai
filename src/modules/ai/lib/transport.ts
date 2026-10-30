@@ -14,7 +14,11 @@ import { buildSessionState } from "./sessionState";
 import { appendSessionEvent, sessionEventsClear } from "./sessionEvents";
 import type { FileSnapshot } from "./fileTracker";
 import type { ToolContext } from "../tools/tools";
-import { useChatStore, registerRunController } from "../store/chatStore";
+import {
+  getSessionAutoApprove,
+  registerRunController,
+  useChatStore,
+} from "../store/chatStore";
 import { IS_WINDOWS, IS_MAC, IS_LINUX } from "@/lib/platform";
 
 import { extensionRegistry } from "./extensions";
@@ -208,8 +212,16 @@ export function createContextAwareTransport(deps: Deps) {
     const mcpTools = mcpManager.getActiveTools();
     const mcpSummary = mcpManager.getConnectedServerSummaries();
 
-    // If auto-approve is 'all', tell the model it has full autonomy.
-    const autoApprove = useChatStore.getState().autoApprove;
+    // If auto-approve is 'all', tell the model it has full autonomy. Read
+    // the SESSION-SCOPED mode (the same source the bridge's approval gate
+    // uses) - the legacy global only reflects the active project, so a
+    // background session with its own mode off got the foreground's "all"
+    // hint injected (model stopped narrating / asking while its approvals
+    // were still gated), and vice versa.
+    const sessionIdForRun = deps.getSessionId?.() ?? null;
+    const autoApprove = sessionIdForRun
+      ? getSessionAutoApprove(sessionIdForRun)
+      : useChatStore.getState().autoApprove;
     const autoApproveHint =
       autoApprove === "all"
         ? "\n\n## AUTO-APPROVE MODE — ACTIVE\nAll tool calls (file edits, shell commands, etc.) are pre-approved and execute immediately. Do NOT stop to ask for permission or narrate what you're about to do — just call the tools directly. Chain all actions in a single turn until the task is complete."

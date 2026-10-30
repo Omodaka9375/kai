@@ -539,6 +539,13 @@ function wrapMcpTool(
   const wrapped: Record<string, unknown> = {
     ...(t as Record<string, unknown>),
     description: desc,
+    // MCP tool surface is runtime-defined - there is no static needsApproval
+    // declaration to trust, so EVERY wrapped MCP tool is approval-required.
+    // Without this the AI SDK treats the wrapper as approval-free and runs
+    // execute directly (the central tool guards are a deny-list for secret
+    // paths, not an approval gate), meaning an MCP file-writer or shell
+    // runner bypassed the entire approval flow - even with auto-approve off.
+    needsApproval: true,
   };
   if (typeof t.execute === "function") {
     const timeoutMs =

@@ -435,15 +435,29 @@ export async function runAssistantTurn(
   // so a stale/edited allowedTools can't re-enable a desktop-only tool.
   const allowed = new Set(prefs.allowedTools);
   const tools: Record<string, unknown> = {};
+  const blockedApprovalTools: string[] = [];
   for (const [id, tool] of Object.entries(all)) {
     if (!isToolAllowed(id, allowed)) continue;
+    // Approval-required tools can NEVER run headless: there is no bridge,
+    // no responder, and no card - the SDK would simply never execute the
+    // call and the turn would stall silently. Strip them and tell the
+    // model honestly (below) instead of leaving a dead callable.
+    if ((tool as { needsApproval?: boolean }).needsApproval === true) {
+      blockedApprovalTools.push(id);
+      continue;
+    }
     tools[id] = tool;
   }
   // MCP: per-server grant. getToolsForServers returns tools ONLY for the
   // allowed ids (and only connected servers), so an ungranted server's tools
-  // never surface even if the model was told about them.
+  // never surface even if the model was told about them. MCP wrappers are
+  // approval-required (mcpManager) - same headless rule applies.
   const mcpTools = mcpManager.getToolsForServers(prefs.mcpAllowedServers);
   for (const [id, tool] of Object.entries(mcpTools)) {
+    if ((tool as { needsApproval?: boolean }).needsApproval === true) {
+      blockedApprovalTools.push(id);
+      continue;
+    }
     tools[id] = tool;
   }
   // Assistant-NATIVE media tools replace the desktop ones here: the desktop
@@ -517,6 +531,9 @@ export async function runAssistantTurn(
     `Your name is "${persona.name}". When the user asks your name or addresses you, answer with it.`,
     persona.instructions,
     fenceSystemPrompt(fenceState),
+    blockedApprovalTools.length > 0
+      ? `Tools requiring interactive approval are UNAVAILABLE in this headless assistant: ${blockedApprovalTools.join(", ")}. Never attempt them; if a task needs them, tell the user to run it in the desktop app.`
+      : "",
     "\n\n## CONVERSATION SURFACE — TELEGRAM",
     "You are chatting with the owner over Telegram. Replies are plain text (Telegram Markdown).",
     "Keep replies conversational and SHORT — a chat message, not a document. Bullet points over essays.",

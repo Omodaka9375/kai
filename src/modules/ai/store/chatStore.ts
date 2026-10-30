@@ -589,6 +589,19 @@ const projectLive = new Map<string, ChatRuntimeDeps["live"]>();
 const projectModels = new Map<string, ModelId>();
 const projectPersonas = new Map<string, string>();
 const approvalResponders = new Map<string, ApprovalResponder>();
+/** Which session currently holds an approval id - the owner the decision
+ *  must route to. Same scan shape describeApproval uses (part.approval.id). */
+function findApprovalOwner(approvalId: string): string | null {
+  for (const [sessionId, chat] of chats) {
+    for (const m of chat.messages) {
+      for (const p of (m.parts ?? []) as Array<Record<string, unknown>>) {
+        const approval = p.approval as { id?: string } | undefined;
+        if (approval?.id === approvalId) return sessionId;
+      }
+    }
+  }
+  return null;
+}
 const sessionAgentMeta = new Map<string, AgentMeta>();
 const sessionMetaListeners = new Set<() => void>();
 export function subscribeSessionAgentMeta(listener: () => void): () => void {
@@ -796,10 +809,24 @@ export const useChatStore = create<StoreState>((set, get) => ({
     // Denial is monotonic: latch it so no deferred auto-approve/allowlist
     // callback can re-permit this exact call afterward. An approve that
     // arrives after a denial is dropped (the SDK is otherwise last-writer).
-    if (!approved) noteApprovalDenied(approvalId);
-    else if (isApprovalDenied(approvalId)) return;
-    const fn = get().approvalResponder;
-    if (fn) fn(approvalId, approved);
+  if (!approved) noteApprovalDenied(approvalId);
+  else if (isApprovalDenied(approvalId)) return;
+  // Route by OWNING session, not the global foreground responder: a pending
+  // approval may belong to a background project's session (per-window
+  // bridges register per-session responders). The global responder is the
+  // ACTIVE session's closure - calling it with another session's approval id
+  // throws "Tool call not found" inside the bridge's swallow-all catch and
+  // the user's click silently does nothing while the card pins forever.
+  const owner = approvalResponders.size > 0 ? findApprovalOwner(approvalId) : null;
+  if (owner) {
+    const fn = approvalResponders.get(owner);
+    if (fn) {
+      fn(approvalId, approved);
+      return;
+    }
+  }
+  const fallback = get().approvalResponder;
+  if (fallback) fallback(approvalId, approved);
     // Do NOT abort on denial — the agent should see the "tool call denied"
     // result and continue gracefully. Aborting kills the entire agent run
     // for a single rejected tool call, which causes "(User canceled)" to
@@ -1957,6 +1984,14 @@ export function respondToApprovalStandalone(
     auditSummary.summary,
     auditSummary.root,
   );
+  const owner = approvalResponders.size > 0 ? findApprovalOwner(approvalId) : null;
+  if (owner) {
+    const fn = approvalResponders.get(owner);
+    if (fn) {
+      fn(approvalId, approved);
+      return;
+    }
+  }
   const fn = state.approvalResponder;
   if (fn) fn(approvalId, approved);
   // Same rationale as respondToApproval: don't abort on denial.

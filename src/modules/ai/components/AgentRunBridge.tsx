@@ -9,6 +9,7 @@ import {
   flushPersist,
   getOrCreateChat,
   getProjectActiveSession,
+  stopSession,
   subscribeProjectActiveSessions,
   useChatStore,
   getSessionAutoApprove,
@@ -274,7 +275,13 @@ function Bridge({
     if (status === "submitted" || status === "streaming") {
       // Agent is still running — stop it; the effect will re-fire once
       // status settles to "ready" and send the queued message then.
-      chat.stop();
+      // stopSession (NOT bare chat.stop()): Chat.stop() is a documented
+      // silent no-op when the status is neither streaming nor submitted —
+      // an agent paused ON an approval card sits at `ready`, so bare stop()
+      // left the steering message queued forever AND the run itself
+      // streaming (stopSession also fires the run's own AbortController
+      // and strips the now-orphaned approval parts).
+      stopSession(sessionId);
       return;
     }
     // Consume the message before sending: reading `steeringRef.current` first
