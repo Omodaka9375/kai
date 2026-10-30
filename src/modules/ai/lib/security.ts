@@ -433,10 +433,21 @@ export function powerShellFileSurgeryHint(command: string): string | null {
     ) ||
     (/\bGet-Content\b[\s\S]*-replace\b/i.test(command) &&
       /(?:^|[^>])>>?\s*(?:['"]|[\w$({])/i.test(command));
+  // Variable-mediated read-modify-write: $v = Get-Content ...; ... $v ...;
+  // Set-Content -Value $v (or Add-Content/Out-File). A round trip through
+  // a variable bypassed both pipe- and -replace-based patterns - and it is
+  // the form agents reach for when told to "split long pipelines". The
+  // variable must appear as the SAME $name in the read and the write so
+  // unrelated reads + fresh-file writes stay allowed.
+  const varMediated =
+    /\$\w+\s*=\s*(?:\(?\s*)?Get-Content\b/i.test(command) &&
+    /\b(?:Set-Content|Add-Content|Out-File)\b[\s\S]{0,200}?-Value\s*\$\w+/i.test(
+      command,
+    );
   const dotNetRewrite =
     /\[(?:IO|System\.IO)\.File\]::ReadAllText\b/i.test(command) &&
     /\[(?:IO|System\.IO)\.File\]::WriteAllText\b/i.test(command);
-  if (!getContentRewrite && !dotNetRewrite) return null;
+  if (!getContentRewrite && !varMediated && !dotNetRewrite) return null;
   return "Use edit/batch_edit for source-file changes. They preserve line endings, serialize same-file writes, and create an undo checkpoint. PowerShell remains appropriate for builds, tests, installs, git, and creating new artifacts.";
 }
 

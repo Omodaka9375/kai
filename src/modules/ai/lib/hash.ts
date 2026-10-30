@@ -1,3 +1,7 @@
+/** Max bytes a single read_file page returns — the read-cache module owns
+ *  this so fs.ts (read caps) and edit.ts (latch messages) share ONE number. */
+export const READ_BYTE_CAP = 25 * 1024;
+
 /** DJB2 hash — fast, non-cryptographic string hash for dedup/caching. */
 export function djb2(s: string): number {
   let h = 5381;

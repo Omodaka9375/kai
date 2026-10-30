@@ -307,3 +307,54 @@ describe("batch_edit validation failures leave disk untouched", () => {
     expect(files.get(path)).toBe(original);
   });
 });
+
+describe("edit punctuation near-miss diagnosis", () => {
+  // The em-dash trap: files use em-dashes in comments/prose, but terminal
+  // output renders them as "-", so a model copying an anchor FROM TERMINAL
+  // OUTPUT sends "-" where the file has U+2014. The fuzzy tier only relaxes
+  // WHITESPACE, so the edit bounced with a generic "not found" naming a
+  // visually identical block - the model retried the same anchor forever.
+  // The fix: the error now names the exact differing characters.
+  it("tells the model the em-dash vs hyphen difference and where it is", async () => {
+    const path = "/ws/dash.ts";
+    // File contains a REAL em-dash (U+2014).
+    files.set(path, "// group panel \u2014 the AI mini window's twin\nconst a = 1;\n");
+    ctx.readCache.set(path, readCacheEntry(files.get(path)!));
+    const tools = batchEditModule.buildBatchEditTools(ctx);
+    // Model's anchor uses a plain hyphen where the file has the em-dash.
+    const result = (await tools.batch_edit.execute!(
+      {
+        edits: [
+          {
+            path,
+            old_string: "// group panel - the AI mini window's twin",
+            new_string: "// group panel - docked twin",
+          },
+        ],
+      },
+      {} as never,
+    )) as { ok?: boolean; error?: string };
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("Punctuation near-miss on file line 1");
+    expect(result.error).toMatch(/U\+2014/);
+    expect(result.error).toMatch(/U\+002D/);
+    // Nothing was written.
+    expect(files.get(path)).toContain("\u2014");
+  });
+
+  it("names curly vs straight quotes the same way", async () => {
+    const path = "/ws/quote.ts";
+    files.set(path, "const s = \u201Cdouble\u201D;\n");
+    ctx.readCache.set(path, readCacheEntry(files.get(path)!));
+    const tools = batchEditModule.buildBatchEditTools(ctx);
+    const result = (await tools.batch_edit.execute!(
+      {
+        edits: [{ path, old_string: 'const s = "double";', new_string: "const s = 1;" }],
+      },
+      {} as never,
+    )) as { ok?: boolean; error?: string };
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("Punctuation near-miss on file line 1");
+    expect(result.error).toMatch(/U\+201C/);
+  });
+});

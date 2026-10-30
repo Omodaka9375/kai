@@ -228,6 +228,26 @@ describe("powerShellFileSurgeryHint — preserve the edit pipeline", () => {
     expect(powerShellFileSurgeryHint(command)).toContain("line endings");
   });
 
+  it("rejects the variable-mediated read-modify-write (the file-collapse form)", () => {
+    // The EXACT shape that collapsed GroupChatPanel.tsx to one line in a
+    // live session: read into a variable, transform, write back via
+    // Set-Content -Value $var. No pipe, no -replace near Get-Content.
+    const command = "$c = Get-Content src/modules/ai/components/GroupChatPanelView.tsx; $c = $c -replace 'StopSquareIcon', 'StopIcon'; Set-Content -Path src/modules/ai/components/GroupChatPanelView.tsx -Value $c -NoNewline";
+    expect(powerShellFileSurgeryHint(command)).toContain("edit/batch_edit");
+  });
+
+  it("rejects variable-mediated Add-Content and Out-File variants too", () => {
+    expect(
+      powerShellFileSurgeryHint("$x = Get-Content log.txt; Add-Content -Value $x -Path other.txt"),
+    ).not.toBeNull();
+  });
+
+  it("still allows a read-only variable capture without any write-back", () => {
+    // Reading into a variable for inspection/analysis stays fine - the guard
+    // only fires when the SAME command writes that variable back to disk.
+    expect(powerShellFileSurgeryHint("$c = Get-Content package.json -Raw")).toBeNull();
+  });
+
   it("allows new artifact generation and unrelated PowerShell commands", () => {
     expect(powerShellFileSurgeryHint("Set-Content new-script.ps1 'Write-Output ok'")).toBeNull();
     expect(powerShellFileSurgeryHint("Get-Content README.md | Select-Object -First 10")).toBeNull();

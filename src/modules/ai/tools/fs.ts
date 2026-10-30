@@ -2,7 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { invoke } from "@tauri-apps/api/core";
 import { isDocumentFile, parseDocument, parseDocx } from "../lib/documentParser";
-import { djb2, readCacheEntry } from "../lib/hash";
+import { djb2, readCacheEntry, READ_BYTE_CAP } from "../lib/hash";
 import {
   checkReadableCanonical,
   checkWritableCanonical,
@@ -12,7 +12,6 @@ import { nativeForContext, sandboxOverrideForContext, resolvePath, type ToolCont
 import { createCheckpointBatch, snapshotFileForBatch, commitCheckpointBatch } from "../lib/checkpoints";
 import { withFileMutationLock } from "../lib/mutationLock";
 
-const READ_BYTE_CAP = 25 * 1024;
 const READ_LINE_CAP = 2000;
 
 export function buildFsTools(ctx: ToolContext) {
@@ -88,11 +87,18 @@ export function buildFsTools(ctx: ToolContext) {
             // knowledge the model already has; downgrading a full coverage
             // here would lock the file against writes until re-paging.
             if (!prior.coverage?.full) {
+              // Preserve any page coverage the model already accumulated -
+              // a preview does not un-see pages read before it, and wiping
+              // seenThrough here reset coverage to 0 on every re-read (the
+              // "paging never converges" half of the write deadlock).
               ctx.readCache.set(
                 abs,
                 readCacheEntry(r.content, {
                   full: false,
                   lines: r.content.split("\n").length,
+                  ...(prior.coverage?.seenThrough !== undefined
+                    ? { seenThrough: prior.coverage.seenThrough }
+                    : {}),
                 }),
               );
             }
@@ -133,14 +139,29 @@ export function buildFsTools(ctx: ToolContext) {
             const sliceEnd = Math.min(lines.length, READ_LINE_CAP);
             let content = lines.slice(0, sliceEnd).join("\n");
             let truncated = sliceEnd < lines.length;
+            let seenThrough = sliceEnd;
             if (content.length > READ_BYTE_CAP) {
               content = content.slice(0, READ_BYTE_CAP);
               truncated = true;
+              // Byte cap cut at an unknown position - only the COMPLETE
+              // returned lines count as re-readable coverage; a dangling
+              // partial last line is not a line the model fully saw.
+              seenThrough = content.split("\n").length - 1;
             }
             if (truncated) {
+              // Record seenThrough so the NEXT page starts exactly where
+              // this one stopped and coverage converges for any file size.
+              // The old entry omitted seenThrough here, so the follow-up
+              // page always began beyond prior coverage and reset it to 0 -
+              // a >25KB file could NEVER reach full coverage, wedging
+              // write_file's partial-view guard forever (the deadlock).
               ctx.readCache.set(
                 abs,
-                readCacheEntry(r.content, { full: false, lines: lines.length }),
+                readCacheEntry(r.content, {
+                  full: false,
+                  lines: lines.length,
+                  seenThrough,
+                }),
               );
             }
             return {
@@ -149,7 +170,10 @@ export function buildFsTools(ctx: ToolContext) {
               size: r.size,
               total_lines: lines.length,
               ...(truncated
-                ? { truncated: true, hint: "call read_file with offset to continue" }
+                ? {
+                    truncated: true,
+                    hint: `call read_file with offset: ${seenThrough} to continue`,
+                  }
                 : {}),
             };
           }
@@ -202,7 +226,15 @@ export function buildFsTools(ctx: ToolContext) {
             total_lines: lines.length,
             start_line: start,
             end_line: end,
-            ...(truncated ? { truncated: true } : {}),
+            ...(truncated
+              ? {
+                  truncated: true,
+                  // Same resume hint as the capped full read - the model
+                  // should never have to guess the next offset from
+                  // end_line arithmetic.
+                  hint: `call read_file with offset: ${byteCapped ? "?" : end} to continue`,
+                }
+              : {}),
           };
         } catch (e) {
           return { error: String(e), path: abs };
@@ -257,11 +289,29 @@ export function buildFsTools(ctx: ToolContext) {
         // file. New files (no cache entry) are always fine.
         const cached = ctx.readCache.get(abs);
         if (cached?.coverage && !cached.coverage.full) {
-          return {
-            error:
-              "Your last read of this file was truncated (partial view) — writing would silently destroy the unseen portion. Read the file in full first: call read_file with offset/limit to page through it (the hint includes total_lines), then re-submit the write with the complete content.",
-            path: abs,
-          };
+          // The guard protects an EXISTING larger file. If the file is gone
+          // (deleted externally since the last read), the "unseen portion"
+          // no longer exists - the entry is stale. A refusal here wedged
+          // brand-new-file writes behind a dead cache entry (the missing-file
+          // deadlock). Probe existence; on miss, drop the entry and proceed.
+          let exists = true;
+          try {
+            await native.readFile(abs);
+          } catch {
+            exists = false;
+          }
+          if (exists) {
+            const seen = cached.coverage.seenThrough ?? 0;
+            const total = cached.coverage.lines ?? "?";
+            return {
+              error:
+                `Your last read of this file was truncated (partial view) — writing would silently destroy the unseen portion. ` +
+                `Read the rest first: call read_file with offset: ${seen} (the file has ${total} lines; each page's hint gives the next offset) ` +
+                `until a page returns without truncation, then re-submit the write with the COMPLETE content.`,
+              path: abs,
+            };
+          }
+          ctx.readCache.delete(abs);
         }
 
         if (usePlanStore.getState().active) {

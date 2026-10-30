@@ -1,6 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { djb2, readCacheEntry } from "../lib/hash";
+import { djb2, readCacheEntry, READ_BYTE_CAP } from "../lib/hash";
 import { native } from "../lib/native";
 import { checkReadableCanonical, checkWritableCanonical } from "../lib/security";
 import { newQueuedEditId, usePlanStore } from "../store/planStore";
@@ -268,6 +268,77 @@ function normEol(s: string): string {
  * Generate an actionable hint when old_string fails to match.
  * Shows the closest matching region with a character-level mismatch diagnostic.
  */
+/** Equivalence classes of punctuation marks that terminal rendering and
+ *  OCR make visually indistinguishable (em/en dash vs hyphen, curly vs
+ *  straight quotes). Compared against the needle's trimmed lines. */
+const PUNCT_CLASSES: string[][] = [
+  ["\u2014", "\u2013", "-"], // em dash / en dash / hyphen
+  ["\u201C", '\"'], // curly double quotes / straight
+  ["\u201D", '\"'],
+  ["\u2018", "'"], // curly single quotes / straight
+  ["\u2019", "'"],
+  ["\u2192", "->"], // arrow vs ASCII arrow
+  ["\u00B7", "."], // middle dot vs period
+];
+
+function flattenPunct(s: string): string {
+  let out = s;
+  for (const cls of PUNCT_CLASSES) {
+    // Use the LAST member (the plain ASCII form) for every member.
+    const canon = cls[cls.length - 1]!;
+    for (const ch of cls) {
+      if (ch !== canon) out = out.split(ch).join(canon);
+    }
+  }
+  return out;
+}
+
+/** True when two strings differ ONLY by punctuation equivalence classes. */
+function punctEquivalent(a: string, b: string): boolean {
+  if (a === b) return false;
+  return flattenPunct(a) === flattenPunct(b);
+}
+
+/** Diagnose a punctuation-only near miss: file line number + the exact
+ *  characters that differ, so the model can fix its anchor in one retry. */
+function getPunctuationNearMiss(
+  hLines: string[],
+  nLines: string[],
+): string {
+  for (const nl of nLines) {
+    const trimmedNeedle = nl.trim();
+    if (!trimmedNeedle) continue;
+    for (let i = 0; i < hLines.length; i++) {
+      const hl = hLines[i]!.trim();
+      if (hl === trimmedNeedle) continue; // exact - not a miss
+      if (punctEquivalent(hl, trimmedNeedle)) {
+        // Name every differing character.
+        const diffs: string[] = [];
+        const len = Math.min(hl.length, trimmedNeedle.length);
+        for (let k = 0; k < len; k++) {
+          const a = hl[k]!;
+          const b = trimmedNeedle[k]!;
+          if (a !== b) {
+            const aCode = a.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0");
+            const bCode = b.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0");
+            diffs.push(
+              `file has U+${aCode} (${JSON.stringify(a)}) but old_string has U+${bCode} (${JSON.stringify(b)})`,
+            );
+            if (diffs.length >= 4) break;
+          }
+        }
+        if (hl.length !== trimmedNeedle.length && diffs.length < 4) {
+          diffs.push(
+            `length differs: file ${hl.length} vs old_string ${trimmedNeedle.length} chars`,
+          );
+        }
+        return ` Punctuation near-miss on file line ${i + 1}: ${diffs.join(", ")}. Copy the line VERBATIM from the file (do not retype the dash or quote characters).`;
+      }
+    }
+  }
+  return "";
+}
+
 function getDidYouMeanHint(haystack: string, needle: string): string {
   const hLines = normEol(haystack).split("\n");
   const nLines = needle.split("\n").map((l) => l.trim()).filter(Boolean);
@@ -309,7 +380,14 @@ function getDidYouMeanHint(haystack: string, needle: string): string {
   }
 
   if (matches.length === 0) {
-    return `${wsDiag} Read the file again to get the exact content and indentation.`;
+    // Punctuation near-miss: the model's anchor and the file differ only in
+    // a punctuation mark (em-dash vs hyphen, curly vs straight quotes).
+    // Terminal output and OCR routinely render these ambiguously, and the
+    // fuzzy tier only relaxes WHITESPACE, so a single such char bounced
+    // edits forever with a "not found" that named a visually identical
+    // block. Point at the actual difference instead.
+    const punctuationDiag = getPunctuationNearMiss(hLines, nLines);
+    return `${wsDiag}${punctuationDiag} Read the file again to get the exact content and indentation.`;
   }
 
   matches.sort((a, b) => b.score - a.score);
@@ -632,7 +710,11 @@ export function buildEditTools(ctx: ToolContext) {
         if (failures >= MAX_EDIT_RETRIES) {
           getEditFailures(ctx).delete(abs);
           return {
-            error: `edit failed ${MAX_EDIT_RETRIES} times on this file. Use write_file to replace the entire file content instead.`,
+            error:
+              `edit failed ${MAX_EDIT_RETRIES} times on this file. ` +
+              `write_file may be blocked by its partial-view guard for files over ${Math.round(READ_BYTE_CAP / 1024)}KB - ` +
+              `if so, page read_file (offset/limit) until untruncated FIRST, or split the file. ` +
+              `Re-read the file (force: true) and retry edit with anchors copied VERBATIM before falling back.`,
             path: abs,
           };
         }
