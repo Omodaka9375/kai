@@ -118,13 +118,6 @@ fn stamp(p: &Path) -> FileStamp {
     }
 }
 
-fn rel_key(root: &Path, p: &Path) -> String {
-    p.strip_prefix(root)
-        .unwrap_or(p)
-        .to_string_lossy()
-        .replace('\\', "/")
-}
-
 // ── Create: copy + inventory ──────────────────────────────────────────────
 
 /// Recursively copy `src` → `dst`. Symlinks are re-created as links (never
@@ -215,35 +208,6 @@ fn walk_project_tree(root: &Path, out: &mut HashMap<String, FileStamp>) -> Resul
     Ok(())
 }
 
-/// Walk a tree collecting (rel → stamp) for regular files. Symlinks and
-/// their targets are skipped — shared dirs never enter the merge.
-#[allow(dead_code)]
-fn walk_tree(root: &Path, out: &mut HashMap<String, FileStamp>) -> Result<(), String> {
-    let entries = match std::fs::read_dir(root) {
-        Ok(e) => e,
-        Err(_) => return Ok(()), // vanished mid-walk — treat as absent
-    };
-    for entry in entries {
-        let entry = match entry {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-        let ft = match entry.file_type() {
-            Ok(t) => t,
-            Err(_) => continue,
-        };
-        if ft.is_symlink() {
-            continue;
-        }
-        let p = entry.path();
-        if ft.is_dir() {
-            walk_tree(&p, out)?;
-        } else {
-            out.insert(rel_key(root, &p), stamp(&p));
-        }
-    }
-    Ok(())
-}
 
 // ── Merge plan (pure — unit-tested) ───────────────────────────────────────
 

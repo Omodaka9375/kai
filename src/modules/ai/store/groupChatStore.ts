@@ -401,7 +401,12 @@ export function flushQueuedForSession(sessionId: string): void {
 
 /** The bridge asks this before mirroring a settled reply: true only when the
  *  session received a group delivery it has not yet answered. Clears the
- *  flag (one delivery = one mirrored reply) — the background-chatter gate. */
+ *  flag (one delivery = one mirrored reply) — the background-chatter gate.
+ *  NON-CONSUMING variant: the error/stop path checks whether a delivery is
+ *  pending without burning it, so a later real reply can still claim it. */
+export function peekReplyProvision(sessionId: string): string | null {
+  return awaitingReply.get(sessionId) ?? null;
+}
 export function takeReplyProvision(sessionId: string): string | null {
   const groupId = awaitingReply.get(sessionId);
   if (!groupId) return null;
@@ -543,15 +548,36 @@ export async function deleteGroupChat(groupId: string): Promise<void> {
 /** Drop a project that was closed in the shell (participant cleanup). */
 export async function removeProjectFromGroups(projectId: string): Promise<void> {
   for (const g of groups.values()) {
-    if (g.participants.some((p) => p.projectId === projectId)) {
-      g.participants = g.participants.filter((p) => p.projectId !== projectId);
-      if (g.participants.length <= 1) {
-        // A one-participant group is not a group — end it.
-        g.endedAt = g.endedAt ?? Date.now();
-        for (const p of g.participants) sessionGroups.delete(p.sessionId);
-      } else {
-        reindex(g);
+    const removed = g.participants.filter((p) => p.projectId === projectId);
+    if (removed.length === 0) continue;
+    // Teardown BEFORE filtering the record away — the removed project's
+    // sessions must not keep live-group machinery (queues, reply provisions,
+    // coalesce timers) armed across the removal: a stale sessionGroups entry
+    // kept sessionIsGroupLive true so the LRU pinner pinned a CLOSED
+    // project's chat forever, and a queued message could still wake a
+    // session after its project left the group.
+    for (const p of removed) {
+      teardownSessionMachinery(p.sessionId);
+      sessionGroups.delete(p.sessionId);
+    }
+    g.participants = g.participants.filter((p) => p.projectId !== projectId);
+    // A group whose agent-coordinator was the removed project can no longer
+    // be driven: the coordinator session is dead. Fall back to the user
+    // rather than leaving a coordinator that can never act.
+    if (g.coordinator.kind === "agent" && g.coordinator.projectId === projectId) {
+      g.coordinator = { kind: "user" };
+    }
+    if (g.participants.length <= 1) {
+      // A one-participant group is not a group — end it (and clear the
+      // remaining member's machinery too, or an armed coalesce timer can
+      // inject a wake into it after the group ended).
+      g.endedAt = g.endedAt ?? Date.now();
+      for (const rest of g.participants) {
+        teardownSessionMachinery(rest.sessionId);
+        sessionGroups.delete(rest.sessionId);
       }
+    } else {
+      reindex(g);
     }
   }
   await persist();
@@ -568,7 +594,17 @@ export async function delegateCoordination(groupId: string, projectId: string): 
   if (!g || g.endedAt !== null) return;
   const p = g.participants.find((x) => x.projectId === projectId);
   if (!p) return;
-  g.coordinator = { kind: "agent", projectId, sessionId: p.sessionId };
+  // A participant with no live session can never act as coordinator: no
+  // Bridge exists for session "" so the preamble is never injected, while
+  // coordinatorGroupForSession("") matches everything keyed to the empty
+  // string. Re-resolve once, then refuse.
+  const sid = p.sessionId || getProjectActiveSession(p.projectId) || "";
+  if (!sid) return;
+  if (sid !== p.sessionId) {
+    p.sessionId = sid;
+    sessionGroups.set(sid, g.id);
+  }
+  g.coordinator = { kind: "agent", projectId, sessionId: sid };
   await persist();
   notify();
 }
@@ -620,7 +656,19 @@ export async function sendFromCoordinator(
   if (g.coordinator.kind !== "agent") return "coordination was reclaimed by the user — not delivered";
   const coord = g.coordinator;
   const p = g.participants.find((x) => x.projectId === targetProjectId);
-  if (!p) return `unknown project "${targetProjectId}" — participants: ${g.participants.map((x) => x.name).join(", ")}`;
+  if (!p) return `unknown project "${targetProjectId}" - participants: ${g.participants.map((x) => x.name).join(", ")}`;
+  // Re-resolve like sendGroupMessage: a participant created before its
+  // project ever opened an AI panel has sessionId "" - delivering to ""
+  // fabricates a synthetic chat that can never answer (black-hole delivery
+  // reported as "Delivered").
+  const sid = p.sessionId || getProjectActiveSession(p.projectId) || "";
+  if (!sid) {
+    return `${p.name} has no active chat session - open the AI panel in that project first; its agent joins the group once a session exists.`;
+  }
+  if (sid !== p.sessionId) {
+    p.sessionId = sid;
+    sessionGroups.set(sid, g.id);
+  }
   if (p.sessionId === coord.sessionId) return "refusing to send to yourself (the coordinator)";
   // Hop cap: count active delegations from this coordinator round.
   const depth = relayDepth.get(coord.sessionId) ?? 0;
@@ -672,9 +720,10 @@ export function noteParticipantReply(
   const answered = new Set(buf.replies.map((r) => r.projectId));
   const allAnswered = [...buf.expected].every((e) => answered.has(e));
   if (!allAnswered) return null;
-  // All expected participants answered - one merged wake via the shared
-  // flush (clears the timeout, bumps relay depth, injects). Returning null
-  // keeps the bridge from double-injecting.
+  // All expected participants answered - the shared flush injects the one
+  // merged wake (clears the timeout, bumps relay depth). Returns null: the
+  // bridge's `if (wake)` branch is intentionally unreachable, kept only as
+  // a defensive hook if flush ever becomes split.
   flushCoalesced(coord.sessionId);
   return null;
 }
@@ -718,6 +767,10 @@ export function __resetGroupChatsForTest(): void {
   relayDepth.clear();
   pendingReplies.clear();
   awaitingReply.clear();
+  // Armed 90s coalesce timers survive a state reset and can fire
+  // flushCoalesced into the NEXT test's state.
+  for (const t of coalesceTimers.values()) clearTimeout(t);
+  coalesceTimers.clear();
   hydrated = false;
   hydratePromise = null;
   nextGroupSeq = 1;
@@ -849,17 +902,21 @@ export async function addParticipants(
   const added: string[] = [];
   for (const i of invitees) {
     if (g.participants.some((p) => p.projectId === i.projectId)) continue;
+    // Resolve ONCE — two calls to getProjectActiveSession can race a session
+    // switch between them, leaving the record pointing at session A while
+    // the index maps session B (or the "" key, polluting the map).
+    const sid = getProjectActiveSession(i.projectId) ?? "";
     g.participants = [
       ...g.participants,
       {
         projectId: i.projectId,
-        sessionId: getProjectActiveSession(i.projectId) ?? "",
+        sessionId: sid,
         root: i.root,
         name: i.name,
         joinedAt: Date.now(),
       },
     ];
-    sessionGroups.set(getProjectActiveSession(i.projectId) ?? "", groupId);
+    if (sid) sessionGroups.set(sid, groupId);
     added.push(i.name);
   }
   if (added.length) {

@@ -117,14 +117,6 @@ export type SourceControlSummary = {
   ) => Promise<SourceControlRemoteActionResult>;
 };
 
-export type SourceControlRemoteIndicator = {
-  visible: boolean;
-  label: string;
-  title: string;
-  disabled: boolean;
-  action: SourceControlRemoteAction | null;
-};
-
 type SourceControlSummaryState = {
   repo: GitRepoInfo | null;
   status: GitStatusSnapshot | null;
@@ -159,70 +151,7 @@ function getContextualAction(
   return "fetch";
 }
 
-export function getSourceControlRemoteIndicator(
-  summary: Pick<
-    SourceControlSummary,
-    "hasRepo" | "upstream" | "ahead" | "behind" | "busyAction"
-  >,
-): SourceControlRemoteIndicator {
-  if (!summary.hasRepo) {
-    return { visible: false, label: "", title: "", disabled: true, action: null };
-  }
-  // No upstream yet: offer Publish when there are local commits to push
-  // (Rust publishes via `git push -u`); otherwise hide — nothing to do.
-  if (!summary.upstream) {
-    if (summary.ahead > 0) {
-      return {
-        visible: true,
-        label: "Publish branch",
-        title:
-          "This branch has no upstream. Pushing will create it on the remote and set up tracking (git push -u).",
-        disabled: summary.busyAction !== null,
-        action: "push",
-      };
-    }
-    return { visible: false, label: "", title: "", disabled: true, action: null };
-  }
-  if (summary.ahead > 0 && summary.behind > 0) {
-    return {
-      visible: true,
-      label: `↑${summary.ahead} ↓${summary.behind}`,
-      title:
-        "Branch has diverged — pull will merge. Merge conflicts may need manual resolution.",
-      disabled: summary.busyAction !== null,
-      action: "pull",
-    };
-  }
-  if (summary.behind > 0) {
-    return {
-      visible: true,
-      label: `↓${summary.behind}`,
-      title: `Pull ${summary.behind} remote ${
-        summary.behind === 1 ? "commit" : "commits"
-      } with fast-forward only.`,
-      disabled: summary.busyAction !== null,
-      action: "pull",
-    };
-  }
-  if (summary.ahead > 0) {
-    return {
-      visible: true,
-      label: `↑${summary.ahead}`,
-      title: `Push ${summary.ahead} local ${
-        summary.ahead === 1 ? "commit" : "commits"
-      }.`,
-      disabled: summary.busyAction !== null,
-      action: "push",
-    };
-  }
-  return {
-    visible: true,
-    label: "Sync",
-    title: "Fetch remote updates.",
-    disabled: summary.busyAction !== null,
-    action: "fetch",
-  };
-}
+
 
 function touchAutoFetch(map: Map<string, number>, key: string): void {
   map.delete(key);
@@ -743,3 +672,4 @@ export function useSourceControl(
     [state, applyStatus, refresh, fetchNow, runRemoteAction],
   );
 }
+

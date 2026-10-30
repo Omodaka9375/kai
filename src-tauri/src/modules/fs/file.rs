@@ -1,5 +1,4 @@
 use std::io::Write;
-use std::time::UNIX_EPOCH;
 
 use serde::Serialize;
 use tauri::Emitter;
@@ -54,21 +53,6 @@ pub enum ReadResult {
         size: u64,
         limit: u64,
     },
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum StatKind {
-    File,
-    Dir,
-    Symlink,
-}
-
-#[derive(Serialize)]
-pub struct FileStat {
-    pub size: u64,
-    pub mtime: u64,
-    pub kind: StatKind,
 }
 
 #[tauri::command]
@@ -254,35 +238,6 @@ pub fn fs_read_file_bytes(
         ));
     }
     std::fs::read(&p).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub fn fs_stat(path: String, workspace: Option<WorkspaceEnv>) -> Result<FileStat, String> {
-    let workspace = WorkspaceEnv::from_option(workspace);
-    let p = resolve_path(&path, &workspace);
-    // Use symlink_metadata so we can detect symlinks. std::fs::metadata
-    // follows symlinks, making is_symlink() always return false.
-    let sym_meta = std::fs::symlink_metadata(&p).map_err(|e| e.to_string())?;
-    let kind = if sym_meta.is_symlink() {
-        StatKind::Symlink
-    } else if sym_meta.is_dir() {
-        StatKind::Dir
-    } else {
-        StatKind::File
-    };
-    // For size/mtime, follow the symlink to get the target's metadata.
-    let meta = std::fs::metadata(&p).unwrap_or(sym_meta);
-    let mtime = meta
-        .modified()
-        .ok()
-        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
-    Ok(FileStat {
-        size: meta.len(),
-        mtime,
-        kind,
-    })
 }
 
 /// Read CHANGELOG.md for the updater popup.

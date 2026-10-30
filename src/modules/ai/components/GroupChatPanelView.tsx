@@ -32,7 +32,11 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { getProjectAgentStatus } from "../store/projectStatus";
-import { useChatStore, subscribeSessionAgentMeta } from "../store/chatStore";
+import {
+  useChatStore,
+  subscribeSessionAgentMeta,
+  getSessionMetaVersion,
+} from "../store/chatStore";
 import {
   addParticipants,
   createGroupChat,
@@ -464,7 +468,13 @@ function Transcript({
  * the group-store version (queue changes also notify).
  */
 function ActivityStrip({ group }: { group: GroupChat }) {
-  useSyncExternalStore(subscribeSessionAgentMeta, () => 0, () => 0);
+  // Real version snapshot: the old constant (() => 0) NEVER notified React,
+  // so the strip only refreshed by accident of parent re-renders.
+  useSyncExternalStore(
+    subscribeSessionAgentMeta,
+    getSessionMetaVersion,
+    getSessionMetaVersion,
+  );
   if (group.endedAt !== null) return null;
   const live = group.participants
     .map((p) => ({ p, act: participantActivity(p.sessionId) }))

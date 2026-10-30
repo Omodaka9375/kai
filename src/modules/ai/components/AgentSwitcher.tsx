@@ -20,7 +20,8 @@ import {
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import type { AgentIconId } from "../lib/agents";
+import { useMemo } from "react";
+import { BUILTIN_AGENTS, type Agent, type AgentIconId } from "../lib/agents";
 import { useAgentsStore } from "../store/agentsStore";
 import { useChatStore } from "../store/chatStore";
 import { getSessionPreferences } from "../store/sessionPreferences";
@@ -42,8 +43,17 @@ export function AgentSwitcher({ isMiniWindow }: { isMiniWindow?: boolean }) {
   const activeId = (sessionId ? getSessionPreferences(sessionId).personaId : undefined) ?? projectActiveId;
   const setActiveId = useAgentsStore((s) => s.setActiveId);
 
-  const list = useAgentsStore.getState().all();
-  void customAgents; // keeps the store subscription alive
+  // Merge customAgents OVER builtins by id (same precedence the model path
+  // uses in chatRuntime.getAgentPersona): Settings saves a builtin edit as
+  // a customAgents entry with the SAME id, so builtin-first listing showed
+  // the OLD name after a rename AND listed the override twice (once under
+  // Built-in, once under Custom) with duplicate React keys.
+  const list = useMemo(() => {
+    const byId = new Map<string, Agent>();
+    for (const b of BUILTIN_AGENTS) byId.set(b.id, b);
+    for (const c of customAgents) byId.set(c.id, { ...c, builtIn: byId.has(c.id) });
+    return [...byId.values()];
+  }, [customAgents]);
 
   const noneSelected = activeId === "__none__";
   const active = noneSelected ? null : (list.find((a) => a.id === activeId) ?? list[0]);

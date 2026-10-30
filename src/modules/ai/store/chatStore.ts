@@ -604,9 +604,17 @@ function findApprovalOwner(approvalId: string): string | null {
 }
 const sessionAgentMeta = new Map<string, AgentMeta>();
 const sessionMetaListeners = new Set<() => void>();
+let sessionMetaVersion = 0;
 export function subscribeSessionAgentMeta(listener: () => void): () => void {
   sessionMetaListeners.add(listener);
   return () => sessionMetaListeners.delete(listener);
+}
+/** Version signal for useSyncExternalStore subscribers: bump-count per meta
+ *  patch. A constant snapshot (() => 0) NEVER re-renders the component -
+ *  presence strips reading it go stale the moment their parent stops
+ *  re-rendering for unrelated reasons. */
+export function getSessionMetaVersion(): number {
+  return sessionMetaVersion;
 }
 const sessionAutoApprove = new Map<string, "off" | "all">();
 /** Bumped on every setAutoApprove so subscribers (the bridge's auto-approve
@@ -633,6 +641,7 @@ export function getSessionAutoApprove(sessionId: string): "off" | "all" {
 export function patchSessionAgentMeta(sessionId: string, patch: Partial<AgentMeta>): void {
   const next = { ...getSessionAgentMeta(sessionId), ...patch };
   sessionAgentMeta.set(sessionId, next);
+  sessionMetaVersion++;
   const ownerId = projectIdForSession(sessionId);
   if (ownerId) setProjectAgentStatus(ownerId, next.status);
   if (useChatStore.getState().activeSessionId === sessionId) {
@@ -712,10 +721,6 @@ export function setProjectModel(projectId: string, model: ModelId, personaId: st
 export function getProjectModel(projectId: string, fallback: ModelId = DEFAULT_MODEL_ID): ModelId {
   return projectModels.get(projectId) ?? fallback;
 }
-export function getProjectPersona(projectId: string): string | undefined {
-  return projectPersonas.get(projectId);
-}
-
 const runtimeDeps: ChatRuntimeDeps = {
   projectRuntime: undefined,
   getAgentPersonaId: () => undefined,
@@ -802,7 +807,7 @@ function makeChatSync(sessionId: string): Chat<UIMessage> {
         (project
           ? projectIdForSession(sessionId) === project.id
             ? projectPersonas.get(project.id)
-            : useAgentsStore.getState().activeId
+            : undefined
           : undefined),
     },
     seedMessages,
@@ -872,8 +877,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
       usePreferencesStore.getState().lastWorkspaceCwd ??
       null;
     void persistProjectModel(id, root);
-    agentBus.emit("model:change", { modelId: id });
-  },
+    },
 
   mini: { open: false, expanded: false },
   openMini: () => set((s) => ({ mini: { open: true, expanded: s.mini.expanded } })),
@@ -1316,7 +1320,6 @@ export const useChatStore = create<StoreState>((set, get) => ({
     const prefs = getSessionPreferences(id);
     if (prefs.archivedAt) return;
     const fromId = get().activeSessionId;
-    agentBus.emit("session:switch", { fromId, toId: id });
 
     // Lazily seed the chat with persisted messages the first time we open
     // this session. Subsequent switches reuse the cached Chat instance.
@@ -2132,10 +2135,4 @@ export function stopSession(sessionId: string): void {
       step: null,
     });
   });
-}
-
-export function stop(): void {
-  const id = useChatStore.getState().activeSessionId;
-  if (!id) return;
-  stopSession(id);
 }

@@ -22,7 +22,6 @@ import {
 import { IS_WINDOWS, IS_MAC, IS_LINUX } from "@/lib/platform";
 
 import { extensionRegistry } from "./extensions";
-import { agentBus } from "./eventBus";
 import { createFenceState } from "./fence";
 import { clearSessionProvenance } from "./provenance";
 import { loadProjectRules, formatRulesForPrompt, type ProjectRules } from "./projectRules";
@@ -162,8 +161,7 @@ export function createContextAwareTransport(deps: Deps) {
     sdkSignal?.addEventListener("abort", forwardAbort, { once: true });
     const effectiveSignal = runController.signal;
 
-    agentBus.emit("agent:start", { sessionId });
-    // Fire extension hooks (fire-and-forget, errors logged internally).
+      // Fire extension hooks (fire-and-forget, errors logged internally).
     for (const ext of extensionRegistry.getAll()) {
       if (ext.onAgentStart) void ext.onAgentStart({ sessionId, modelId });
     }
@@ -246,8 +244,7 @@ export function createContextAwareTransport(deps: Deps) {
       onFinishMeta: (info) => {
         deps.onFinishMeta?.(info);
         const finishReason = info.finishReason;
-        agentBus.emit("agent:end", { sessionId, stepCount: extensionStepCount, finishReason });
-        for (const ext of extensionRegistry.getAll()) {
+              for (const ext of extensionRegistry.getAll()) {
           if (ext.onAgentEnd) void ext.onAgentEnd({ sessionId, modelId, stepCount: extensionStepCount, finishReason });
         }
       },

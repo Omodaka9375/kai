@@ -65,6 +65,12 @@ export function removeSessionPreferences(sessionId: string): void {
   notify();
 }
 
+/** All session-id → preferences pairs (for sweeping stale references, e.g.
+ *  clearing personaId pins that point at a deleted agent). */
+export function allSessionPreferences(): Iterable<[string, SessionPreferences]> {
+  return preferences.entries();
+}
+
 export function subscribeSessionPreferences(listener: () => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);

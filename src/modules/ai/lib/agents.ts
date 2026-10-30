@@ -169,11 +169,3 @@ export async function saveActiveAgentIdFor(
 export function newAgentId(): string {
   return `a-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 }
-
-export function findAgent(
-  agents: readonly Agent[],
-  id: string | null | undefined,
-): Agent | null {
-  if (!id || id === NONE_AGENT_ID) return null;
-  return agents.find((a) => a.id === id) ?? null;
-}

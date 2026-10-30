@@ -22,6 +22,7 @@ import {
   type AgentRunStatus,
 } from "../store/chatStore";
 import { verifyIfDirtyAtRunEnd } from "../lib/autoVerify";
+import { hasLeakedToolCall } from "../lib/leakedToolCall";
 import { isApprovalDenied, noteApprovalDenied } from "../lib/approvalLatch";
 import { speakText } from "../lib/voiceTts";
 import { useProjectRuntime } from "@/modules/workspace";
@@ -34,6 +35,7 @@ import {
   noteParticipantReply,
   noteSessionBusy,
   noteSessionIdle,
+  peekReplyProvision,
   takeReplyProvision,
 } from "../store/groupChatStore";
 
@@ -122,6 +124,18 @@ function Bridge({
   // Separate refs (not the TTS ones) so the two concerns stay independent.
   const messagesRefForGroup = useRef<UIMessage[]>([]);
   const lastMirroredIdRef = useRef<string | null>(null);
+  // CAUSALITY BOUNDARY: the id of the last assistant message that existed
+  // BEFORE the current run began (snapshotted in the busy arm). A group
+  // reply is mirrored only when the run produced a NEW assistant message
+  // AFTER the delivery - a run that stopped/errored before emitting text
+  // must not mirror the PREVIOUS turn's reply as this round's answer (the
+  // old gate compared only against lastMirroredIdRef, so any older
+  // un-mirrored message could leak through).
+  const deliveryBoundaryIdRef = useRef<string | null>(null);
+  // Leak-nudge latch: one correction per session - a local model that emits
+  // its tool-call template as text gets exactly one "use function calling"
+  // nudge; repeating it is noise.
+  const leakNudgedRef = useRef(false);
   // getOrCreateChat returns a cached Chat instance per session id. On fast
   // session switches the useMemo swaps the reference, but since Chat instances
   // are long-lived and keyed by id, useChat simply reconnects to the existing
@@ -361,7 +375,12 @@ function Bridge({
       // the gate, any idle reply from a member session — e.g. the user
       // chatting with that same project's agent locally — would leak into
       // the group transcript (and relay to the coordinator) uninvited.
-      const provisionedGroupId = takeReplyProvision(sessionId);
+      const boundary = deliveryBoundaryIdRef.current;
+      deliveryBoundaryIdRef.current = null;
+      // PEEK, not take: an idle settle with NO fresh reply (stopped before
+      // emitting text) must not burn the one-shot provision - the delivery
+      // stays armed so the participant's next real reply can claim it.
+      const provisionedGroupId = peekReplyProvision(sessionId);
       const group = provisionedGroupId ? getGroupForSession(sessionId) : null;
       const coordGroup = coordinatorGroupForSession(sessionId);
       const lastAssistant = [...messagesRefForGroup.current].reverse().find((m) => m.role === "assistant");
@@ -373,7 +392,18 @@ function Bridge({
             .trim()
         : "";
       // 1a. PARTICIPANT mirror: this session's reply lands in the transcript.
-      if (group && lastText && lastAssistant && lastAssistant.id !== lastMirroredIdRef.current) {
+      // CAUSALITY: the reply must post-date the delivery (id !== boundary);
+      // a run that produced no new text leaves lastAssistant === boundary,
+      // so the PREVIOUS turn's reply can never masquerade as this round's
+      // answer and the provision is left armed for the next real reply.
+      if (
+        group &&
+        lastText &&
+        lastAssistant &&
+        lastAssistant.id !== boundary &&
+        lastAssistant.id !== lastMirroredIdRef.current
+      ) {
+        takeReplyProvision(sessionId); // consume: this delivery is answered
         lastMirroredIdRef.current = lastAssistant.id;
         void appendGroupMessage(group.id, {
           from: "agent",
@@ -410,7 +440,9 @@ function Bridge({
       // overflow) used to look like silence in the group transcript — the
       // coordinator kept waiting for a reply that would never come. Consume
       // the reply provision and surface the failure as a system note.
-      const provisionedGroupId = takeReplyProvision(sessionId);
+      const provisionedGroupId = peekReplyProvision(sessionId)
+        ? takeReplyProvision(sessionId)
+        : null;
       const group = provisionedGroupId ? getGroupForSession(sessionId) : null;
       if (group) {
         const who = group.participants.find((p) => p.sessionId === sessionId)?.name ?? "A participant";
@@ -424,11 +456,47 @@ function Bridge({
       noteSessionIdle(sessionId);
     } else {
       noteSessionBusy(sessionId);
+      // Causality boundary: snapshot the last assistant id BEFORE this run
+      // can emit messages of its own, so the idle arm can tell a reply that
+      // pre-dated the delivery from one the delivery provoked.
+      const lastPre = [...messagesRefForGroup.current]
+        .reverse()
+        .find((m) => m.role === "assistant");
+      deliveryBoundaryIdRef.current = lastPre?.id ?? null;
     }
     // Background starts keep the current surface; the composer explicitly
     // opens the transcript for ordinary sends. Background notifications use
     // the same session-scoped status updates without stealing focus.
-  }, [isActive, status, approvalsPending, patch, openMini]);
+
+    // LEAKED TOOL-CALL NUDGE: small/local models sometimes print their
+    // tool-call template as text instead of emitting a structured call; the
+    // run then "finishes" with zero tool parts and looks like the agent
+    // stopped mid-task. Detect that shape ONCE per session and nudge.
+    if (
+      runStatus === "idle" &&
+      !leakNudgedRef.current &&
+      approvalsPending === 0
+    ) {
+      const msgs = messagesRefForGroup.current;
+      const last = [...msgs].reverse().find((m) => m.role === "assistant");
+      const hadToolCall = msgs.some(
+        (m) => m.role === "assistant" && (m.parts ?? []).some((p) => String((p as { type?: string }).type ?? "").startsWith("tool-")),
+      );
+      const text = last
+        ? (last.parts ?? [])
+            .filter((p): p is { type: "text"; text: string } => p.type === "text")
+            .map((p) => p.text)
+            .join("\n")
+        : "";
+      if (!hadToolCall && text && hasLeakedToolCall(text)) {
+        leakNudgedRef.current = true;
+        void useChatStore.getState().injectMessage(
+          sessionId,
+          "Your last message contained tool-call markup written as plain text instead of a real function call. Call tools with native function calling - do not write tool syntax, XML, or JSON blobs in your reply.",
+        );
+      }
+    }
+  }, [isActive, status, approvalsPending, patch, openMini, sessionId]);
 
   useEffect(() => {
     if (isActive && approvalsPending > 0) openMini();

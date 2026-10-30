@@ -4,9 +4,7 @@ export {
   AiInputBarConnect,
   AiMiniWindow,
   GroupPill,
-  SelectionAskAi,
 } from "./components/lazy";
-export { AgentStatusPill } from "./components/AgentStatusPill";
 export {
   EMPTY_PROVIDER_KEYS,
   getAllKeys,
@@ -21,7 +19,6 @@ export {
   getOrCreateChat,
   hasKeyForModel,
   sendMessage,
-  stop,
   useChatStore,
   type AgentMeta,
   type AgentRunStatus,

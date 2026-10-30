@@ -11,7 +11,7 @@ import {
   type Agent,
 } from "../lib/agents";
 import { setProjectModel, getActiveProjectRuntime, useChatStore } from "./chatStore";
-import { setSessionPreferences } from "./sessionPreferences";
+import { allSessionPreferences, setSessionPreferences } from "./sessionPreferences";
 
 const CHANGED_EVENT = "Kai://ai-agents-changed";
 
@@ -46,15 +46,26 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
   hydrate: async () => {
     if (initialized) return;
     initialized = true;
-    const { custom, activeId, activeAgentIds } = await loadAgents();
-    // Apply the current project's saved agent on hydrate (root may already be set).
-    const root = get().root;
-    const perProject = root ? activeAgentIds[root] : undefined;
-    set({
-      customAgents: custom,
-      activeId: perProject ?? activeId,
-      hydrated: true,
-    });
+    try {
+      const { custom, activeId, activeAgentIds } = await loadAgents();
+      // Apply the current project's saved agent on hydrate (root may already be set).
+      const root = get().root;
+      const perProject = root ? activeAgentIds[root] : undefined;
+      set({
+        customAgents: custom,
+        activeId: perProject ?? activeId,
+        hydrated: true,
+      });
+    } catch (err) {
+      // POISON PILL: `initialized = true` used to latch BEFORE the await, so a
+      // single failed hydrate (store IPC race at startup) permanently froze
+      // customAgents at [] AND the CHANGED_EVENT re-sync below never
+      // registered - Settings renames stopped propagating for the whole
+      // session, silently. Unlatch and surface; the next hydrate call retries.
+      initialized = false;
+      console.error("[agentsStore] hydrate failed (will retry on next call):", err);
+      return;
+    }
 
     void listen(CHANGED_EVENT, async () => {
       const fresh = await loadAgents();
@@ -112,6 +123,14 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
       const root = get().root;
       if (root) void saveActiveAgentIdFor(root, active);
       else void saveActiveAgentId(active);
+    }
+    // Clear stale persona pins: any SESSION whose personaId pointed at the
+    // deleted agent would silently degrade to BUILTIN_AGENTS[0] ("Coder") on
+    // its next turn in chatRuntime - impersonating a persona the user never
+    // chose. Reset to the none-sentinel; the next turn runs with no persona
+    // block, matching a fresh session.
+    for (const [sessionId, prefs] of allSessionPreferences()) {
+      if (prefs.personaId === id) setSessionPreferences(sessionId, { personaId: NONE_AGENT_ID });
     }
     void saveCustomAgents(list).then(broadcast);
   },

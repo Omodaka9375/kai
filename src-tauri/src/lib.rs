@@ -710,7 +710,6 @@ app.manage(Mutex::new(None::<fs::env_probe::EnvInventory>));
     fs::file::fs_parse_spreadsheet_bytes,
     fs::file::fs_convert_image,
     fs::env_probe::fs_env_inventory,
-            fs::file::fs_stat,
             fs::file::fs_read_file_bytes,
             fs::file::fs_write_file_bytes,
             fs::file::fs_canonicalize,

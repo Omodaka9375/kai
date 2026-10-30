@@ -17,7 +17,3 @@ export function subscribeProjectAgentStatus(listener: () => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
-
-export function removeProjectAgentStatus(projectId: string): void {
-  statuses.delete(projectId);
-}

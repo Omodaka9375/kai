@@ -286,8 +286,12 @@ export function makeChatSync(
       }
       const builtin = BUILTIN_AGENTS.find((x) => x.id === selectedId);
       if (builtin) return { name: builtin.name, instructions: builtin.instructions };
-      const fallback = BUILTIN_AGENTS[0];
-      return { name: fallback.name, instructions: fallback.instructions };
+      // A STALE id (agent since deleted) means NO persona - not a silent
+      // degradation to BUILTIN_AGENTS[0]: the user picked a specific agent
+      // and Coder would impersonate it. agentsStore.remove clears the pins
+      // it can see, but persisted per-session ids from older runs or another
+      // window's delete can still arrive here.
+      return null;
     },
     getLive: () => {
       return {
