@@ -306,7 +306,10 @@ export function useTabs(initial?: Partial<TerminalTab> & { defer?: boolean }) {
       let targetId: number | null = null;
       setTabs((curr) => {
         const existing = curr.find(
-          (t) => t.kind === "ai-diff" && t.approvalId === input.approvalId,
+          (t) =>
+            t.kind === "ai-diff" &&
+            t.approvalId === input.approvalId &&
+            t.path === input.path,
         );
         if (existing) {
           targetId = existing.id;
@@ -351,19 +354,21 @@ export function useTabs(initial?: Partial<TerminalTab> & { defer?: boolean }) {
 
   const closeAiDiffTab = useCallback((approvalId: string) => {
     setTabs((curr) => {
-      const target = curr.find(
+      // Closes EVERY ai-diff tab for that approval — batch_edit opens one
+      // tab per file, and a single approve/reject ends the whole review.
+      const targets = curr.filter(
         (t) => t.kind === "ai-diff" && t.approvalId === approvalId,
       );
       // Not open (or already responded+closed by the bridge) — nothing to do.
-      if (!target) return curr;
+      if (targets.length === 0) return curr;
       // NO last-tab guard: closing the only tab shows the StartPage (same
-      // as closeTab). The old guard re-marked the status and left the tab
-      // open forever after an approve/reject — the "diff tab never goes
-      // away" bug. Approve/reject means the review is over: close it.
-      const idx = curr.findIndex((t) => t.id === target.id);
-      const next = curr.filter((t) => t.id !== target.id);
+      // as closeTab). Approve/reject means the review is over: close them.
+      const ids = new Set(targets.map((t) => t.id));
+      const next = curr.filter((t) => !ids.has(t.id));
       setActiveId((active) =>
-        target.id === active ? (next[Math.max(0, idx - 1)]?.id ?? 0) : active,
+        ids.has(active)
+          ? (next.find((t) => t.kind !== "ai-diff")?.id ?? next[0]?.id ?? 0)
+          : active,
       );
       return next;
     });

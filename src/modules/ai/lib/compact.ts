@@ -56,6 +56,22 @@ function pathOfInput(input: unknown): string | null {
   return typeof p === "string" && p.length > 0 ? p : null;
 }
 
+function pathsOfInput(input: unknown): string[] {
+  // batch_edit's shape is {edits: [{path}, ...]} — no top-level path. Every
+  // listed file must count as "last mutated here" for compaction or a
+  // pre-batch read_file survives as stale "current" content.
+  if (!input || typeof input !== "object") return [];
+  const edits = (input as { edits?: unknown }).edits;
+  if (!Array.isArray(edits)) return [];
+  const out: string[] = [];
+  for (const e of edits) {
+    if (!e || typeof e !== "object") continue;
+    const p = (e as { path?: unknown }).path;
+    if (typeof p === "string" && p.length > 0 && !out.includes(p)) out.push(p);
+  }
+  return out;
+}
+
 function collectLastMutationIdxPerPath(
   messages: ModelMessage[],
 ): Map<string, number> {
@@ -66,9 +82,10 @@ function collectLastMutationIdxPerPath(
     for (const part of m.content as ToolPart[]) {
       if (part.type !== "tool-call") continue;
       const name = part.toolName;
-      if (
+      if (name === "batch_edit") {
+        for (const p of pathsOfInput(part.input)) lastIdx.set(p, i);
+      } else if (
         name === "edit" ||
-        name === "batch_edit" ||
         name === "write_file" ||
         name === "create_directory"
       ) {

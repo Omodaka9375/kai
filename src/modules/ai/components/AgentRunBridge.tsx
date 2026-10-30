@@ -577,7 +577,8 @@ function Bridge({
         if (
           t === "tool-write_file" ||
           t === "tool-edit" ||
-          t === "tool-multi_edit"
+          t === "tool-multi_edit" ||
+          t === "tool-batch_edit"
         ) {
           const state = (p as { state?: string }).state ?? "";
           const id =
@@ -612,12 +613,15 @@ function Bridge({
     for (const m of messages) {
       if (m.role !== "assistant") continue;
       for (const part of m.parts as AnyPart[]) {
-        const info = extractFileMutation(part);
-        if (!info) continue;
+        for (const info of extractFileMutations(part)) {
         const { state, approvalId, path, derive } = info;
         if (!approvalId) continue;
+        // Keyed by approval AND path: one batch_edit approval opens one
+        // diff tab per file it touches.
+        const dedupeKey = `${approvalId}:${path}`;
         if (state === "approval-requested") {
-          if (!openedRef.current.has(approvalId)) {
+          if (!openedRef.current.has(dedupeKey)) {
+            openedRef.current.add(dedupeKey);
             pending.push({ approvalId, path, derive });
           }
         } else if (
@@ -625,13 +629,17 @@ function Bridge({
           state === "output-available" ||
           state === "output-error"
         ) {
-          if (openedRef.current.has(approvalId)) toClose.add(approvalId);
+          if (openedRef.current.has(dedupeKey)) toClose.add(approvalId);
+        }
         }
       }
     }
 
     for (const id of toClose) {
-      openedRef.current.delete(id);
+      // closeAiDiffTab(approvalId) closes ALL tabs for that approval.
+      for (const key of [...openedRef.current]) {
+        if (key.startsWith(`${id}:`)) openedRef.current.delete(key);
+      }
       closeAiDiffTab(id);
     }
 
@@ -642,8 +650,6 @@ function Bridge({
       const cwd = runtime?.root ?? useChatStore.getState().live.getCwd();
       for (const p of pending) {
         if (cancelled) return;
-        // Mark as opened up-front so a re-render mid-await doesn't double-open.
-        openedRef.current.add(p.approvalId);
         let abs: string;
         try {
           abs = resolvePath(p.path, cwd);
@@ -701,7 +707,7 @@ type FileMutation =
       derive: { kind: "edits"; edits: EditOp[] };
     };
 
-function extractFileMutation(part: AnyPart): FileMutation | null {
+function extractFileMutations(part: AnyPart): FileMutation[] {
   const type = (part as { type?: string }).type;
   const p = part as ToolPartLike;
   const state = (p as { state?: string }).state ?? "";
@@ -711,8 +717,8 @@ function extractFileMutation(part: AnyPart): FileMutation | null {
     const input = (p.input ?? {}) as WriteFileInput;
     const path = typeof input.path === "string" ? input.path : "";
     const content = typeof input.content === "string" ? input.content : "";
-    if (!path) return null;
-    return { state, approvalId, path, derive: { kind: "literal", content } };
+    if (!path) return [];
+    return [{ state, approvalId, path, derive: { kind: "literal", content } }];
   }
   if (type === "tool-edit") {
     const input = (p.input ?? {}) as {
@@ -724,38 +730,60 @@ function extractFileMutation(part: AnyPart): FileMutation | null {
     const path = typeof input.path === "string" ? input.path : "";
     const oldStr = typeof input.old_string === "string" ? input.old_string : "";
     const newStr = typeof input.new_string === "string" ? input.new_string : "";
-    if (!path) return null;
-    return {
+    if (!path) return [];
+    return [
+      {
+        state,
+        approvalId,
+        path,
+        derive: {
+          kind: "edits",
+          edits: [
+            {
+              old_string: oldStr,
+              new_string: newStr,
+              replace_all: Boolean(input.replace_all),
+            },
+          ],
+        },
+      },
+    ];
+  }
+  if (type === "tool-multi_edit" || type === "tool-batch_edit") {
+    // multi_edit is retired but old transcripts replay it — keep the
+    // top-level-path arm. batch_edit groups its edits per path so one
+    // approval yields one mutation per file it touches.
+    const input = (p.input ?? {}) as { path?: unknown; edits?: unknown };
+    if (!Array.isArray(input.edits)) return [];
+    const rawEdits = input.edits as Record<string, unknown>[];
+    const groups = new Map<string, EditOp[]>();
+    for (const e of rawEdits) {
+      const path =
+        typeof e.path === "string" && e.path.length > 0
+          ? e.path
+          : typeof input.path === "string"
+            ? input.path
+            : "";
+      const oldStr = typeof e.old_string === "string" ? e.old_string : "";
+      if (!path || oldStr.length === 0) continue;
+      const op: EditOp = {
+        old_string: oldStr,
+        new_string: typeof e.new_string === "string" ? e.new_string : "",
+        replace_all: Boolean(e.replace_all),
+      };
+      const g = groups.get(path);
+      if (g) g.push(op);
+      else groups.set(path, [op]);
+    }
+    if (groups.size === 0) return [];
+    return [...groups.entries()].map(([path, edits]) => ({
       state,
       approvalId,
       path,
-      derive: {
-        kind: "edits",
-        edits: [
-          {
-            old_string: oldStr,
-            new_string: newStr,
-            replace_all: Boolean(input.replace_all),
-          },
-        ],
-      },
-    };
+      derive: { kind: "edits" as const, edits },
+    }));
   }
-  if (type === "tool-multi_edit") {
-    const input = (p.input ?? {}) as { path?: unknown; edits?: unknown };
-    const path = typeof input.path === "string" ? input.path : "";
-    if (!path || !Array.isArray(input.edits)) return null;
-    const edits: EditOp[] = (input.edits as Record<string, unknown>[])
-      .map((e) => ({
-        old_string: typeof e.old_string === "string" ? e.old_string : "",
-        new_string: typeof e.new_string === "string" ? e.new_string : "",
-        replace_all: Boolean(e.replace_all),
-      }))
-      .filter((e) => e.old_string.length > 0);
-    if (edits.length === 0) return null;
-    return { state, approvalId, path, derive: { kind: "edits", edits } };
-  }
-  return null;
+  return [];
 }
 
 function applyEditsLocally(

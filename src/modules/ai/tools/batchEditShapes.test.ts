@@ -186,4 +186,33 @@ describe("batch_edit canonical schema and atomic failures", () => {
     expect(files.get("/ws/scratch.txt")).toBe("alpha\nbeta\ngamma\n");
     expect(files.get("/ws/other.txt")).toBe("one\ntwo\n");
   });
+
+  it("an all-no-op group on one file does NOT block real edits on another", async () => {
+    const { valid, result } = await tryShape({
+      edits: [
+        // Redundant re-sent edit — common model behavior.
+        { path: "/ws/scratch.txt", old_string: "alpha", new_string: "alpha" },
+        // Real work on another file must survive it.
+        { path: "/ws/other.txt", old_string: "one", new_string: "ONE" },
+      ],
+    });
+    expect(valid).toBe(true);
+    expect(result.ok).toBe(true);
+    expect(files.get("/ws/scratch.txt")).toBe("alpha\nbeta\ngamma\n"); // untouched
+    expect(files.get("/ws/other.txt")).toBe("ONE\ntwo\n"); // applied
+  });
+
+  it("a batch that is entirely no-ops across ALL files errors and writes nothing", async () => {
+    const { valid, result } = await tryShape({
+      edits: [
+        { path: "/ws/scratch.txt", old_string: "alpha", new_string: "alpha" },
+        { path: "/ws/other.txt", old_string: "one", new_string: "one" },
+      ],
+    });
+    expect(valid).toBe(true);
+    expect(result.ok).toBe(false);
+    expect(String(result.error)).toContain("no-ops");
+    expect(files.get("/ws/scratch.txt")).toBe("alpha\nbeta\ngamma\n");
+    expect(files.get("/ws/other.txt")).toBe("one\ntwo\n");
+  });
 });

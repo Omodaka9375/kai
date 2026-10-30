@@ -146,9 +146,23 @@ export function buildBatchEditTools(ctx: ToolContext) {
             if (g) g.edits.push(edits[ei]);
             else groups.set(abs, { edits: [edits[ei]], startIndex: ei });
           }
+          // Groups whose edits are ALL identical no-ops are dropped instead
+          // of failing the whole cross-file batch — a model re-sending a
+          // redundant edit alongside real edits to another file must not
+          // lose the real work. If NOTHING remains, that IS the no-op error.
+          const activeGroups = [...groups].filter(
+            ([, g]) => !g.edits.every((e) => e.old_string === e.new_string),
+          );
+          if (activeGroups.length === 0) {
+            return {
+              ok: false,
+              error: `all ${edits.length} edit(s) are no-ops (old_string === new_string). Nothing to change — if you intended an edit, correct the strings.\n\nNo changes were written.`,
+              changed: false,
+            };
+          }
           const computed = new Map<string, string>();
           let totalReplacements = 0;
-          for (const [abs, group] of groups) {
+          for (const [abs, group] of activeGroups) {
             const current = snapshots.get(abs) ?? "";
             const r = await computeEdits(current, abs, group.edits);
             if (!r.ok) {
@@ -203,16 +217,31 @@ export function buildBatchEditTools(ctx: ToolContext) {
             for (const path of written) {
               const original = snapshots.get(path);
               try {
-                if (original === null) await native.deleteFile(path);
-                else if (original !== undefined) await native.writeFile(path, original);
+                if (original === null) {
+                  await native.deleteFile(path);
+                  ctx.readCache.delete(path);
+                } else if (original !== undefined) {
+                  await native.writeFile(path, original);
+                  // Restore the cache to the pre-batch content so the next
+                  // edit against this file isn't bounced by the stale-read
+                  // guard with content that was never committed.
+                  ctx.readCache.set(path, readCacheEntry(original));
+                }
               } catch {
                 // best-effort rollback; the checkpoint still holds the truth
               }
             }
+            // Count write failures toward the escape hatch too — a
+            // persistent write error (permissions, disk full) must not loop
+            // forever without the write_file suggestion.
+            for (const abs of written) getEditFailures(ctx).set(abs, (getEditFailures(ctx).get(abs) ?? 0) + 1);
             return { ok: false, error: `write failed: ${String(e)}`, changed: false };
           }
 
-          for (const abs of absPaths) getEditFailures(ctx).delete(abs);
+          // Only clear failure counters for files that were actually part
+          // of an applied batch (computed); skipped no-op groups leave
+          // theirs untouched.
+          for (const abs of computed.keys()) getEditFailures(ctx).delete(abs);
           return { ok: true, files: computed.size, replacements: totalReplacements };
         });
       },

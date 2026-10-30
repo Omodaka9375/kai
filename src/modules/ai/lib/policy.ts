@@ -68,6 +68,12 @@ export const TOOL_ACTION_CLASSIFIER: Record<string, ToolActionInfo> = {
     requiresApproval: true,
     description: "Modify file contents",
   },
+  batch_edit: {
+    category: "modify",
+    riskLevel: "medium",
+    requiresApproval: true,
+    description: "Apply edits across one or more files atomically",
+  },
 
   // Create operations - medium risk
   create_directory: {

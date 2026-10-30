@@ -437,7 +437,7 @@ export function powerShellFileSurgeryHint(command: string): string | null {
     /\[(?:IO|System\.IO)\.File\]::ReadAllText\b/i.test(command) &&
     /\[(?:IO|System\.IO)\.File\]::WriteAllText\b/i.test(command);
   if (!getContentRewrite && !dotNetRewrite) return null;
-  return "Use edit/multi_edit for source-file changes. They preserve line endings, serialize same-file writes, and create an undo checkpoint. PowerShell remains appropriate for builds, tests, installs, git, and creating new artifacts.";
+  return "Use edit/batch_edit for source-file changes. They preserve line endings, serialize same-file writes, and create an undo checkpoint. PowerShell remains appropriate for builds, tests, installs, git, and creating new artifacts.";
 }
 
 export function checkShellCommand(cmd: string): SafetyResult {

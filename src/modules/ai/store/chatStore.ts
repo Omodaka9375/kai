@@ -251,7 +251,7 @@ export type AutoApproveMode = "off" | "all";
 export const FILE_MUTATION_TOOLS = new Set([
   "write_file",
   "edit",
-
+  "batch_edit",
   "create_directory",
 ]);
 

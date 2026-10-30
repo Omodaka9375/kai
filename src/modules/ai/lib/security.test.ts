@@ -220,7 +220,7 @@ describe("checkShellCommand — Trojan Source / bidi defense", () => {
 describe("powerShellFileSurgeryHint — preserve the edit pipeline", () => {
   it("rejects Get-Content piped through replace into Set-Content", () => {
     const command = "Get-Content src/app.ts -Raw | ForEach-Object { $_ -replace 'a', 'b' } | Set-Content src/app.ts";
-    expect(powerShellFileSurgeryHint(command)).toContain("edit/multi_edit");
+    expect(powerShellFileSurgeryHint(command)).toContain("edit/batch_edit");
   });
 
   it("rejects .NET ReadAllText followed by WriteAllText", () => {

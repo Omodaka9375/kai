@@ -343,7 +343,7 @@ export async function applyEdits(
   // Normalize the entire file content to \n before applying edits, then
   // restore the original line-ending style at the end. This avoids
   // positional drift that occurs when mapping CRLF↔LF per edit in
-  // sequential multi_edit calls — each edit's position shift compounds.
+  // sequential batch_edit calls — each edit's position shift compounds.
   const useCrlf = original.includes("\r\n");
   let content = normEol(original);
   let totalReplacements = 0;
@@ -675,7 +675,7 @@ export function buildEditTools(ctx: ToolContext) {
               ...result,
               error:
                 result.error +
-                "\n\n(Still not found after re-read. This usually means another edit to the same file already consumed or displaced the target text. Re-read the file to get the current content, then resubmit. Better: use multi_edit for all same-file changes — it runs edits sequentially in one atomic operation instead of racing.)",
+                "\n\n(Still not found after re-read. This usually means another edit to the same file already consumed or displaced the target text. Re-read the file to get the current content, then resubmit. Better: use batch_edit for all same-file changes — it applies edits sequentially in one atomic operation instead of racing.)",
             };
           }
           getEditFailures(ctx).set(abs, failures + 1);

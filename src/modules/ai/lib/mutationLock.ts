@@ -1,5 +1,5 @@
 /**
- * Per-file mutation lock — serializes file mutations (edit, multi_edit,
+ * Per-file mutation lock — serializes file mutations (edit, batch_edit,
  * write_file, batch_edit) on a per-path basis.
  *
  * Why: the AI SDK executes multiple tool calls from a single assistant step
