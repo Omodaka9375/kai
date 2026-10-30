@@ -69,7 +69,9 @@ const STATUS_DOT: Record<ToolPart["state"], string> = {
   "approval-responded": "bg-sky-500",
   "input-streaming": "bg-muted-foreground/40",
   "input-available": "bg-amber-500",
-  "output-available": "bg-transparent border border-muted-foreground/40",
+  // Same geometry as every other state (a border would add 2px and visibly
+  // shift the row when the dot settles). Hollow = done, via ring inset.
+  "output-available": "bg-transparent ring-1 ring-inset ring-muted-foreground/40",
   "output-denied": "bg-orange-500",
   "output-error": "bg-destructive",
 };
