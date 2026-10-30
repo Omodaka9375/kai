@@ -35,7 +35,14 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { motion } from "motion/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { SandboxBadge } from "./SandboxBadge";
 import { ShadowStrip, ShadowSessionMenuItem } from "./ShadowStrip";
 import { estimateCost, getModel, getModelContextLimit } from "../config";
@@ -44,7 +51,11 @@ import { type SessionMeta } from "../lib/sessions";
 import { absoluteTime, relativeTime } from "../lib/relativeTime";
 import { normalizeWorkspacePath } from "../lib/workspacePath";
 import { getOrCreateChat, useChatStore } from "../store/chatStore";
-import { getGroups } from "../store/groupChatStore";
+import {
+  getGroupStoreVersion,
+  getGroups,
+  subscribeGroupChats,
+} from "../store/groupChatStore";
 import { Input } from "@/components/ui/input";
 import { usePlanStore } from "../store/planStore";
 import { AgentSwitcher } from "./AgentSwitcher";
@@ -121,9 +132,22 @@ export function AiMiniWindow() {
   // The group pill sits directly below this window when a group exists and
   // the AI owns the expanded slot — the window's bottom offset grows by one
   // pill height + gap (84 = 42 base + 42 pill) so they stack.
+  // The group count is read imperatively (getGroups is not a hook), so this
+  // component must ALSO subscribe to the group store — otherwise the pill
+  // flag goes stale on group create/delete and the un-shrunk window sits on
+  // the exact same +42px strip (same z-40), hiding the pill behind it.
+  const groupStoreVersion = useSyncExternalStore(
+    subscribeGroupChats,
+    getGroupStoreVersion,
+    getGroupStoreVersion,
+  );
+  const groupCount = useMemo(
+    () => getGroups().length,
+    [groupStoreVersion],
+  );
   const groupPillVisible =
     useChatStore((s) => s.stackRail.surface !== "group") &&
-    getGroups().length > 0;
+    groupCount > 0;
   const setMiniExpanded = useChatStore((s) => s.setMiniExpanded);
   const toggleExpand = useCallback(
     () => setMiniExpanded(!expanded),
