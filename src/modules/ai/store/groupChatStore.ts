@@ -688,10 +688,22 @@ export function coordinatorPendingCount(sessionId: string): number {
 /**
  * Coordinator's own run settled to idle. Does NOT reset relay depth: depth
  * counts agent-driven hops since the last USER action (see the ledger note
- * above); a coordinator round is not user intervention. The stale coalesce
- * buffer and its timer ARE cleared (that round is over).
+ * above); a coordinator round is not user intervention.
+ *
+ * The stale coalesce buffer is cleared ONLY when no replies are still
+ * outstanding. The fire-and-forget contract ("end your turn after
+ * send_to_project") means the coordinator settles BEFORE its participants
+ * answer — clearing unconditionally here destroyed the buffer mid-round, so
+ * every participant reply hit the missing-buffer path and was dropped, and
+ * the 90s timeout note could never fire either.
  */
 export function noteCoordinatorRoundDone(sessionId: string): void {
+  const buf = pendingReplies.get(sessionId);
+  if (buf) {
+    const answered = new Set(buf.replies.map((r) => r.projectId));
+    const outstanding = [...buf.expected].filter((e) => !answered.has(e));
+    if (outstanding.length > 0) return; // round still in flight
+  }
   pendingReplies.delete(sessionId);
   const timer = coalesceTimers.get(sessionId);
   if (timer) {

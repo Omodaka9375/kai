@@ -44,7 +44,7 @@ export function buildGroupTools(ctx: ToolContext) {
       needsApproval: true,
       execute: async ({ project, message }) => {
         const result = await sendFromCoordinator(group.id, project, message);
-        return { delivered: !result.startsWith("Delivered"), note: result };
+        return { delivered: result.startsWith("Delivered"), note: result };
       },
     }),
 

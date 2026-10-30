@@ -365,13 +365,17 @@ function Bridge({
         // participant, feed the reply to the coalescing buffer. When all
         // expected participants answered, the store returns ONE merged wake
         // message — injected here, the yield-and-resume contract (no polling).
-        if (coordGroup && coordGroup.coordinator.kind === "agent") {
+        // The gate is the PROVISIONED group's coordinator (the group this
+        // session is answering a delivery for) — the old coordGroup check
+        // asked whether THIS session coordinates some OTHER group, which an
+        // ordinary participant never does, so replies never relayed.
+        if (group && group.coordinator.kind === "agent" && group.coordinator.sessionId !== sessionId) {
           const myProjectId =
             group.participants.find((p) => p.sessionId === sessionId)?.projectId ?? "";
-          const wake = noteParticipantReply(coordGroup.id, myProjectId, lastText);
+          const wake = noteParticipantReply(group.id, myProjectId, lastText);
           if (wake) {
             void useChatStore.getState().injectMessage(
-              coordGroup.coordinator.sessionId,
+              group.coordinator.sessionId,
               wake,
             );
           }
