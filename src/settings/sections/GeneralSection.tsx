@@ -458,59 +458,50 @@ function GmailCard() {
   };
 
   return (
-    <div className="flex flex-col gap-4 rounded-2xl border border-border bg-card/50 p-4">
-      <div>
+    <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card/50 p-4">
+      <div className="flex items-baseline justify-between gap-2">
         <div className="text-sm font-medium">Gmail (read-only)</div>
-        <div className="text-xs text-muted-foreground">
-          Lets the agent search and read your inbox with Gmail's own query
-          syntax. Sending, replying, and modifying mail are not implemented —
-          the tool cannot do them.
-        </div>
+        {configuredEmail ? (
+          <div className="truncate text-[10.5px] text-muted-foreground">{configuredEmail}</div>
+        ) : null}
       </div>
-
-      <SettingRow
-        title="Gmail account"
-        description={
-          configuredEmail
-            ? `Configured as ${configuredEmail}. Replace by pasting a new password.`
-            : "Needs 2FA on your Google account. Create an app password at myaccount.google.com/apppasswords, then paste your address and the password here. Stored in your OS keychain — never on disk in settings."
-        }
-      >
-        <div className="flex w-full items-center gap-2">
-          <Input
-            type="email"
-            value={email}
-            placeholder={configuredEmail ?? "you@gmail.com"}
-            onChange={(e) => setEmail(e.target.value)}
-            className="flex-1"
-          />
-          <Input
-            type="password"
-            value={password}
-            placeholder={configuredEmail ? "new app password" : "app password"}
-            onChange={(e) => setPassword(e.target.value)}
-            className="flex-1"
-          />
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={busy || !email.trim() || !password.trim()}
-            onClick={() => void onSave()}
-          >
-            Save
+      <div className="text-[10.5px] text-muted-foreground">
+        Agent can search your inbox; it cannot send or modify mail. Needs a
+        Google app password (2FA). Stored in your OS keychain.
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          type="email"
+          value={email}
+          placeholder={configuredEmail ?? "you@gmail.com"}
+          onChange={(e) => setEmail(e.target.value)}
+          className="h-8 min-w-[8rem] flex-[2]"
+        />
+        <Input
+          type="password"
+          value={password}
+          placeholder="app password"
+          onChange={(e) => setPassword(e.target.value)}
+          className="h-8 min-w-[8rem] flex-[2]"
+        />
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={busy || !email.trim() || !password.trim()}
+          onClick={() => void onSave()}
+        >
+          Save
+        </Button>
+        {configuredEmail ? (
+          <Button variant="ghost" size="sm" disabled={busy} onClick={() => void onRemove()}>
+            Remove
           </Button>
-          {configuredEmail ? (
-            <Button variant="ghost" size="sm" disabled={busy} onClick={() => void onRemove()}>
-              Remove
-            </Button>
-          ) : null}
-        </div>
-      </SettingRow>
-
+        ) : null}
+      </div>
       {status ? (
         <div
           className={cn(
-            "rounded-lg px-3 py-2 text-xs",
+            "rounded-lg px-3 py-1.5 text-xs",
             isError ? "bg-red-500/10 text-red-500" : "bg-primary/5 text-muted-foreground",
           )}
         >
@@ -577,52 +568,43 @@ function SocialCard() {
   };
 
   return (
-    <div className="flex flex-col gap-4 rounded-2xl border border-border bg-card/50 p-4">
-      <div>
+    <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card/50 p-4">
+      <div className="flex items-baseline justify-between gap-2">
         <div className="text-sm font-medium">X / Twitter (read-only)</div>
-        <div className="text-xs text-muted-foreground">
-          Lets the agent search X and read the timelines of accounts you name
-          — reactions, sentiment, "what's happening" questions. Posting,
-          liking, and following are not implemented; the tool cannot do them.
-        </div>
+        {xConfigured ? (
+          <div className="text-[10.5px] text-muted-foreground">configured</div>
+        ) : null}
       </div>
-
-      <SettingRow
-        title="Developer Bearer token"
-        description={
-          xConfigured
-            ? "A Bearer token is configured. Replace by pasting a new one."
-            : "From developer.x.com — your app's Bearer Token (search and user-timeline reads need a paid developer tier). Stored in your OS keychain, never on disk in settings."
-        }
-      >
-        <div className="flex w-full items-center gap-2">
-          <Input
-            type="password"
-            value={xToken}
-            placeholder="Bearer token"
-            onChange={(e) => setXToken(e.target.value)}
-            className="flex-1"
-          />
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={busy || !xToken.trim()}
-            onClick={() => void onSaveX()}
-          >
-            Save
+      <div className="text-[10.5px] text-muted-foreground">
+        Agent can search X and read account timelines; it cannot post, like, or
+        follow. Needs your developer Bearer token. Stored in your OS keychain.
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          type="password"
+          value={xToken}
+          placeholder="Bearer token"
+          onChange={(e) => setXToken(e.target.value)}
+          className="h-8 min-w-[8rem] flex-[3]"
+        />
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={busy || !xToken.trim()}
+          onClick={() => void onSaveX()}
+        >
+          Save
+        </Button>
+        {xConfigured ? (
+          <Button variant="ghost" size="sm" disabled={busy} onClick={() => void onRemoveX()}>
+            Remove
           </Button>
-          {xConfigured ? (
-            <Button variant="ghost" size="sm" disabled={busy} onClick={() => void onRemoveX()}>
-              Remove
-            </Button>
-          ) : null}
-        </div>
-      </SettingRow>
-
+        ) : null}
+      </div>
       {status ? (
         <div
           className={cn(
-            "rounded-lg px-3 py-2 text-xs",
+            "rounded-lg px-3 py-1.5 text-xs",
             isError ? "bg-red-500/10 text-red-500" : "bg-primary/5 text-muted-foreground",
           )}
         >
