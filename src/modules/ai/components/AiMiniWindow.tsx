@@ -26,6 +26,7 @@ import {
   AlertCircleIcon,
   ArrowDown01Icon,
   ArrowExpand01Icon,
+  ArrowShrink01Icon,
   Delete02Icon,
   FilterIcon,
   GitMergeIcon,
@@ -144,9 +145,10 @@ export function AiMiniWindow() {
         <Body
           sessionId={sessionId}
           onExpand={toggleExpand}
+          expanded={expanded}
         />
       ) : (
-        <EmptyShell onExpand={toggleExpand} />
+        <EmptyShell onExpand={toggleExpand} expanded={expanded} />
       )}
       <PlanDiffReview />
     </motion.div>
@@ -156,9 +158,11 @@ export function AiMiniWindow() {
 function Body({
   sessionId,
   onExpand,
+  expanded,
 }: {
   sessionId: string;
   onExpand: () => void;
+  expanded: boolean;
 }) {
   const focusInput = useChatStore((s) => s.focusInput);
   const c = useComposer();
@@ -174,6 +178,7 @@ function Body({
     <>
       <Header
         onExpand={onExpand}
+        expanded={expanded}
         messages={helpers.messages}
       />
 
@@ -233,8 +238,10 @@ function PlanModeStrip() {
 
 function EmptyShell({
   onExpand,
+  expanded,
 }: {
   onExpand: () => void;
+  expanded: boolean;
 }) {
   return (
     <>
@@ -242,6 +249,7 @@ function EmptyShell({
         step={null}
         isBusy={false}
         onExpand={onExpand}
+        expanded={expanded}
       />
       <div className="flex flex-1 items-center justify-center text-[11px] text-muted-foreground">
         Loading sessions…
@@ -252,13 +260,16 @@ function EmptyShell({
 
 function Header({
   onExpand,
+  expanded,
   messages,
 }: {
   onExpand: () => void;
+  expanded?: boolean;
   messages?: UIMessage[];
   step?: string | null;
   isBusy?: boolean;
 }) {
+  const expandLabel = expanded ? "Collapse to mini window" : "Expand to panel";
 
   return (
     <div className="relative flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border/60 px-3">
@@ -277,10 +288,10 @@ function Header({
           variant="ghost"
           onClick={onExpand}
           className="size-5"
-          aria-label="Expand to panel"
-          title="Expand to panel"
+          aria-label={expandLabel}
+          title={expandLabel}
         >
-          <HugeiconsIcon icon={ArrowExpand01Icon} size={11} strokeWidth={1.75} />
+          <HugeiconsIcon icon={expanded ? ArrowShrink01Icon : ArrowExpand01Icon} size={11} strokeWidth={1.75} />
         </Button>
       </div>
     </div>
