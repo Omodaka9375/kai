@@ -48,7 +48,7 @@ import { auditAppend, AUDIT_KINDS } from "@/modules/ai/lib/audit";
 import { buildTools } from "@/modules/ai/tools/tools";
 import type { ToolContext } from "@/modules/ai/tools/context";
 import { isToolAllowed } from "./toolCatalog";
-import { BUILTIN_AGENTS } from "@/modules/ai/lib/agents";
+import { BUILTIN_AGENTS, loadAgents } from "@/modules/ai/lib/agents";
 import { toSpeechText, splitForSpeech, transcribeLocal } from "@/modules/ai/lib/voiceTts";
 import { proxyFetch } from "@/modules/ai/lib/proxyFetch";
 import { mcpManager } from "@/modules/ai/lib/mcpManager";
@@ -299,6 +299,28 @@ export function assistantPersona(): { name: string; instructions: string } {
   };
 }
 
+/** Persona honoring the owner's Settings override: a builtin agent edited in
+ *  Settings → Agents is saved into customAgents under the SAME id, so the
+ *  renamed builtin:general must beat the stock one here too — the same
+ *  precedence bug chatRuntime had. Falls back to the builtin when the store
+ *  is unavailable (headless test / store error). */
+export async function resolveAssistantPersona(): Promise<{
+  name: string;
+  instructions: string;
+}> {
+  const fallback = assistantPersona();
+  try {
+    const { custom } = await loadAgents();
+    const override = custom.find((c) => c.id === "builtin:general");
+    if (override && override.instructions.trim()) {
+      return { name: override.name, instructions: override.instructions };
+    }
+  } catch {
+    /* store unavailable - builtin persona */
+  }
+  return fallback;
+}
+
 // ── Headless agent run (auto-execute, fenced) ─────────────────────────────
 
 const ASSISTANT_MAX_STEPS = 24;
@@ -396,7 +418,7 @@ export async function runAssistantTurn(
     usePreferencesStore.getState().defaultModelId;
   const keys = await getAllKeys();
   const toolContext = await makeAssistantToolContext();
-  const persona = assistantPersona();
+  const persona = await resolveAssistantPersona();
   const custom = usePreferencesStore.getState().customInstructions;
 
   const m = getModel(modelId);
@@ -492,6 +514,7 @@ export async function runAssistantTurn(
   } as UIMessage;
 
   const system = [
+    `Your name is "${persona.name}". When the user asks your name or addresses you, answer with it.`,
     persona.instructions,
     fenceSystemPrompt(fenceState),
     "\n\n## CONVERSATION SURFACE — TELEGRAM",

@@ -275,7 +275,7 @@ export function buildStableSystem(
 ): string {
   const base = SYSTEM_PROMPT;
   const personaBlock = persona?.instructions.trim()
-    ? `\n\n## ACTIVE AGENT — ${persona.name}\n${persona.instructions.trim()}`
+    ? `\n\n## ACTIVE AGENT — ${persona.name}\nYour name is "${persona.name}". When the user asks your name or addresses you, answer with it.\n${persona.instructions.trim()}`
     : "";
   const customBlock = customInstructions?.trim()
     ? `\n\n## USER CUSTOM INSTRUCTIONS — follow unless they conflict with safety rules above\n${customInstructions.trim()}`

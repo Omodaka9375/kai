@@ -274,9 +274,20 @@ export function makeChatSync(
       const { activeId, customAgents } = useAgentsStore.getState();
       const selectedId = deps.getAgentPersonaId?.() ?? activeId;
       if (selectedId === "__none__") return null;
-      const all = [...BUILTIN_AGENTS, ...customAgents];
-      const a = all.find((x) => x.id === selectedId) ?? BUILTIN_AGENTS[0];
-      return { name: a.name, instructions: a.instructions };
+      // Settings can OVERRIDE a builtin agent by saving an entry with the
+      // SAME id into customAgents (e.g. renaming builtin:general's name).
+      // Custom entries must win — the old [...BUILTIN_AGENTS, ...customAgents]
+      // .find() always matched the stock builtin first, so a renamed
+      // persona NEVER reached the model and "the assistant doesn't know its
+      // name" was the visible symptom.
+      const override = customAgents.find((x) => x.id === selectedId);
+      if (override) {
+        return { name: override.name, instructions: override.instructions };
+      }
+      const builtin = BUILTIN_AGENTS.find((x) => x.id === selectedId);
+      if (builtin) return { name: builtin.name, instructions: builtin.instructions };
+      const fallback = BUILTIN_AGENTS[0];
+      return { name: fallback.name, instructions: fallback.instructions };
     },
     getLive: () => {
       return {
