@@ -48,6 +48,7 @@ export function buildSearchTools(ctx: ToolContext) {
   const native = nativeForContext(ctx);
   return {
     grep: tool({
+      needsApproval: false,
       description:
         "Search file CONTENTS across the workspace with a regex (ripgrep; honors .gitignore). This is the right tool for \"where is X defined/used?\" and the Windows-safe replacement for Select-String/findstr — it auto-executes with NO approval card, so prefer it over a `bash_run` search pipeline every time. Returns up to `max_results` (default 30, max 500) `{path, line, text}` hits with a `truncated` flag; match lines clip to 160 chars. Narrow with the `glob` arg; raise `max_results` only if the first batch clearly isn't enough. One focused grep beats reading many files — do NOT brute-force read_file across the tree.",
       inputSchema: z.object({
@@ -112,6 +113,7 @@ export function buildSearchTools(ctx: ToolContext) {
     }),
 
     glob: tool({
+      needsApproval: false,
       description:
         "Find files by path pattern (gitignore-aware). Use over `list_directory` when you want all matches recursively. Patterns use globset syntax: `**/*.ts`, `src/**/test_*.py`. Returns up to `max_results` matches.",
       inputSchema: z.object({

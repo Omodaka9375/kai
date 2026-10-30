@@ -78,6 +78,7 @@ function currentVoiceSettings() {
 export function buildVoiceTools(_ctx: ToolContext) {
   return {
     voice_settings: tool({
+      needsApproval: false,
       description:
         "Get or change the text-to-speech (voice) settings — the voice the assistant speaks replies with, on desktop and Telegram voice notes. Changes apply to the NEXT spoken reply. With no arguments (or list=true) return the current settings and the available voice catalogs. To change: pass mode (engine), voice (an OpenAI voice name from the catalog), model (OpenAI TTS model), or localVoice (a Piper voice name). Resolve gender requests against the catalog's gender notes yourself — there is no gender parameter.",
       inputSchema: z.object({

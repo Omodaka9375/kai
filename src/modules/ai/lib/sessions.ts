@@ -15,6 +15,9 @@ export type SessionMeta = {
   workspaceEnv?: WorkspaceEnv;
   /** Last observed message count, used to bump `updatedAt` only on real growth. */
   lastMessageCount?: number;
+  /** Auto-approve mode the user chose for this session; persisted so a
+   *  relaunch doesn't silently reset "Allow" back to "Ask". */
+  autoApprove?: "off" | "all";
 };
 
 const STORE_PATH = "kai-sessions.json";

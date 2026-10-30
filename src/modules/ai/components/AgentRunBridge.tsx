@@ -11,8 +11,10 @@ import {
   getProjectActiveSession,
   stopSession,
   subscribeProjectActiveSessions,
+  subscribeSessionAutoApprove,
   useChatStore,
   getSessionAutoApprove,
+  getSessionAutoApproveVersion,
   patchSessionAgentMeta,
   type AgentMeta,
   getSessionSteeringMessage,
@@ -212,7 +214,18 @@ function Bridge({
   // ---- Auto-approve state --------------------------------------------------
   // Declared before the background-notification effect: that effect must
   // know which pending approvals auto-approve will NOT resolve on its own.
-  const autoApprove = getSessionAutoApprove(sessionId);
+  const autoApproveVersion = useSyncExternalStore(
+    subscribeSessionAutoApprove,
+    getSessionAutoApproveVersion,
+    getSessionAutoApproveVersion,
+  );
+  // Version-derived memo: the Map read is not reactive by itself. Without
+  // this subscription, toggling Allow/Ask on an idle approval-pinned session
+  // never re-ran the auto-approve effect and the toggle looked inert.
+  const autoApprove = useMemo(
+    () => getSessionAutoApprove(sessionId),
+    [sessionId, autoApproveVersion],
+  );
   const markAutoApproved = useChatStore((s) => s.markAutoApproved);
   const autoApprovedRef = useRef<Set<string>>(new Set());
   useEffect(() => {
@@ -564,7 +577,6 @@ function Bridge({
           isGitCommitCommand(input?.command as string | undefined);
         if (isSignedCommit) continue;
         autoApprovedRef.current.add(id);
-        markAutoApproved(id);
         // Defer each response to its own macrotask. Approving N pending tool
         // calls synchronously in one effect pass chains N SDK store
         // notifications inside a single React commit cascade (approval write
@@ -578,6 +590,10 @@ function Bridge({
           // Latch-checked at fire time: a Deny that arrived after this was
           // scheduled must win over session-level auto-approve.
           respond(id, true);
+          // Mark the store only after the deferred response fired: marking
+          // at schedule time grew autoApprovedIds with ids whose cards were
+          // reaped before the timer ran (part gone = decision can't land).
+          markAutoApproved(id);
         }, 0);
       }
     }

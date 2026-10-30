@@ -18,6 +18,7 @@ export function buildFsTools(ctx: ToolContext) {
   const native = nativeForContext(ctx);
   return {
     read_file: tool({
+      needsApproval: false,
       description:
         "Read a KNOWN file's content (page large files with offset/limit; max 2000 lines / 25KB per call). To locate code, use `grep` (contents) or `glob` (paths) FIRST — do not read files one-by-one across a tree you haven't narrowed. Also handles PDF, DOCX, ZIP/JAR, audio, and images (png/jpg/webp/gif/tiff; OCR only if a tesseract binary is installed, otherwise dimensions only). Returns a short preview if unchanged since your last read; pass `force: true` to re-fetch in full. Refuses oversized files and secrets (.env, keys, credentials).",
       inputSchema: z.object({
@@ -243,6 +244,7 @@ export function buildFsTools(ctx: ToolContext) {
     }),
 
     list_directory: tool({
+      needsApproval: false,
       description:
         "List the immediate entries (files + dirs) of ONE directory — non-recursive, hidden omitted. For 'what files anywhere match pattern X' use `glob`; for 'where is string Y' use `grep`. Use this only to see a specific folder's contents.",
       inputSchema: z.object({

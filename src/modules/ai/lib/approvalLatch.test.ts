@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   __resetApprovalLatchForTests,
+  __setLatchClockForTests,
   isApprovalDenied,
   noteApprovalDenied,
 } from "./approvalLatch";
@@ -38,12 +39,21 @@ describe("approvalLatch", () => {
     expect(isApprovalDenied("")).toBe(false);
   });
 
-  it("stays bounded (FIFO eviction) without corrupting recent entries", () => {
+  it("stays bounded (TTL eviction) without corrupting fresh entries", () => {
+    let t = 1_000_000;
+    __setLatchClockForTests(() => t);
     for (let i = 0; i < 1100; i++) noteApprovalDenied(`id-${i}`);
-    // The most recent denials survive the 1000-cap.
+    // Fresh denials survive any volume - a count cap used to evict the
+    // OLDEST denial, which could still be attached to a live card.
     expect(isApprovalDenied("id-1099")).toBe(true);
-    expect(isApprovalDenied("id-1050")).toBe(true);
-    // The oldest ones were evicted (bounded memory), which is safe by design.
+    expect(isApprovalDenied("id-1000")).toBe(true);
+    expect(isApprovalDenied("id-0")).toBe(true);
+    // Only AGE expires an entry: past the TTL, the race it guarded is over.
+    t += 30 * 60 * 1000 + 1;
+    noteApprovalDenied("tick"); // triggers the sweep
     expect(isApprovalDenied("id-0")).toBe(false);
+    expect(isApprovalDenied("id-1099")).toBe(false);
+    expect(isApprovalDenied("tick")).toBe(true);
+    __setLatchClockForTests(null);
   });
 });

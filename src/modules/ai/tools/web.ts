@@ -338,6 +338,7 @@ async function bingSearch(query: string): Promise<WebSearchResult[]> {
 export function buildWebTools(_ctx: ToolContext) {
   return {
     web_browse: tool({
+      needsApproval: false,
       description:
         "Fetch a web page over HTTP and return its readable text (HTML tags stripped). No JavaScript execution or browser rendering — client-side-rendered / SPA pages may come back empty or partial, and bot-protected endpoints can refuse the request. Best for static pages: documentation, articles, READMEs. Auto-executes (read-only).",
       inputSchema: z.object({
@@ -361,6 +362,7 @@ export function buildWebTools(_ctx: ToolContext) {
     }),
 
     web_search: tool({
+      needsApproval: false,
       description:
         "Search the web and return the top results with titles, URLs, and snippets (backed by Bing, with a DuckDuckGo fallback). Useful for finding documentation, answers, or current information. Auto-executes (read-only).",
       inputSchema: z.object({

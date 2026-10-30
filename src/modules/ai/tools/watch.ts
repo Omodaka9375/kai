@@ -860,6 +860,7 @@ export function buildWatchTools(ctx: ToolContext) {
     }),
 
     watch_list: tool({
+      needsApproval: false,
       description: "List all active watches for this session.",
       inputSchema: z.object({}),
       execute: async () => {
@@ -878,6 +879,7 @@ export function buildWatchTools(ctx: ToolContext) {
     }),
 
     watch_kill: tool({
+      needsApproval: false,
       description: "Stop and remove a watch by its ID.",
       inputSchema: z.object({
         watch_id: z.string().describe("Watch ID from watch_create or watch_list."),

@@ -9,6 +9,7 @@ const TodoStatus = z.enum(["pending", "in_progress", "completed"]);
 export function buildTodoTools(ctx: ToolContext) {
   return {
     todo_write: tool({
+      needsApproval: false,
       description:
         "Replace your current task list. Use this for any non-trivial multi-step task (≥3 substantive steps). Mark exactly one item `in_progress` while you work on it; flip it to `completed` and the next to `in_progress` as you go. The tool replaces the previous list — always pass the FULL list, not a delta. REUSE the previous list's ids and titles verbatim, changing only statuses; do not invent new ids or renumber. Call it at plan creation and at real transitions (step done / next started) — not after every tool call. Auto-executes (no approval).",
       inputSchema: z.object({

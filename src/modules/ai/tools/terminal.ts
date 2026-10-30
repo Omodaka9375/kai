@@ -7,6 +7,7 @@ import type { ToolContext } from "./context";
 export function buildTerminalTools(ctx: ToolContext) {
   return {
     suggest_command: tool({
+      needsApproval: false,
       description:
         "Propose a single shell command. Renders a card in chat with an 'Insert' button — the command is NOT written to any terminal automatically; only the user's click inserts it at the prompt without executing. Use this when the answer IS a command.",
       inputSchema: z.object({
@@ -33,6 +34,7 @@ export function buildTerminalTools(ctx: ToolContext) {
     }),
 
     get_terminal_output: tool({
+      needsApproval: false,
       description:
         "Return the tail of the active terminal's scrollback. Use this when the user references 'this error', 'the last command', or you need to interpret recent terminal output. Default is 80 lines; raise it only when you genuinely need more. Returns an empty string if there is no active terminal; refuses if the terminal is in Privacy mode.",
       inputSchema: z.object({
@@ -64,6 +66,7 @@ export function buildTerminalTools(ctx: ToolContext) {
     }),
 
     open_preview: tool({
+      needsApproval: false,
       description:
         "Open a preview tab (in-app iframe) at the given URL — restricted to localhost/loopback addresses for the local dev server. Use this after starting a dev server (e.g. `pnpm dev`, `npm run dev`) to surface the rendered page next to the terminal. To preview external sites, the user should paste the URL into the preview address bar themselves.",
       inputSchema: z.object({

@@ -19,6 +19,7 @@ export function buildVideoGenTools(ctx: ToolContext) {
   const native = nativeForContext(ctx);
   return {
     generate_video: tool({
+      needsApproval: false,
       description: `Generate a video from a text prompt using Google Veo 3.1 (audio-native) — or ANIMATE an existing image (imagePath: Veo animates it as the opening frame; the prompt then describes motion). Uses the configured Google API key — no provider choice needed. Returns the video inline in the conversation.
 
 Video generation takes 1-5 minutes. Auto-executes — no approval needed.

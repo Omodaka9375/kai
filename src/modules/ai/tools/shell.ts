@@ -445,6 +445,7 @@ export function buildShellTools(ctx: ToolContext) {
     }),
 
     bash_logs: tool({
+      needsApproval: false,
       description:
         "Read accumulated logs from a `bash_background` process. Pass `since_offset` from the previous response's `next_offset` to tail incrementally. `dropped` reports bytes evicted by the ring buffer.",
       inputSchema: z.object({
@@ -465,6 +466,7 @@ export function buildShellTools(ctx: ToolContext) {
     }),
 
     bash_list: tool({
+      needsApproval: false,
       description:
         "List all background processes spawned by `bash_background` in this app — running and exited. **Always call this BEFORE spawning a new long-running process** (especially dev servers like `pnpm dev`, `next dev`, `vite`) to avoid duplicates. If a matching process is already running, reuse it (call `open_preview` again instead of respawning). Auto-executes.",
       inputSchema: z.object({}),
@@ -479,6 +481,7 @@ export function buildShellTools(ctx: ToolContext) {
     }),
 
     bash_kill: tool({
+      needsApproval: false,
       description:
         "Terminate a `bash_background` process by handle. Idempotent — kills nothing if the handle is unknown or already exited.",
       inputSchema: z.object({ handle: z.number() }),

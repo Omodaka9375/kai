@@ -221,4 +221,31 @@ describe("KAI.md tool inventory matches the live registry", () => {
       `auto-execute tools missing from KAI.md inventory: ${undocumented.join(", ")}`,
     ).toEqual([]);
   });
+
+  it("every tool declares needsApproval EXPLICITLY (field-absent = caught here, not at runtime)", () => {
+    // The inventory gate above treats a MISSING needsApproval as auto - safe
+    // for the doc check, but it means a NEW mutating tool that simply forgets
+    // the flag sails through CI as auto-execute. This pin closes that hole:
+    // absence is no longer a silent default, it is drift.
+    const toolsDir = join(repoRoot, "src", "modules", "ai", "tools");
+    const undeclared: string[] = [];
+    for (const file of readdirSync(toolsDir)) {
+      if (!file.endsWith(".ts") || file.endsWith(".test.ts")) continue;
+      const txt = readFileSync(join(toolsDir, file), "utf8");
+      const idxs = [...txt.matchAll(/^ {2,4}([a-z_0-9]+):\s*tool\(/gm)];
+      for (let i = 0; i < idxs.length; i++) {
+        const start = idxs[i]!.index!;
+        const end = i + 1 < idxs.length ? idxs[i + 1]!.index! : txt.length;
+        const block = txt.slice(start, end);
+        const name = idxs[i]![1]!;
+        if (!/\bneedsApproval:\s*(true|false)\b/.test(block)) {
+          undeclared.push(`${name} (${file})`);
+        }
+      }
+    }
+    expect(
+      undeclared,
+      `tools with no explicit needsApproval field - add the flag (a mutating tool missing it is AUTO-EXECUTE at runtime):\n  ${undeclared.join("\n  ")}`,
+    ).toEqual([]);
+  });
 });

@@ -45,6 +45,7 @@ export function buildOsc1337(
 export function buildTerminalImageTools(ctx: ToolContext) {
   return {
     display_image: tool({
+      needsApproval: false,
       description:
         "Display an image inline in the active terminal using the iTerm2 inline image protocol. Pass base64-encoded image data (without the data: URL prefix). The image renders at the current terminal cursor position. Use this to show plots, diagrams, screenshots, or AI-generated images directly in the terminal.",
       inputSchema: z.object({

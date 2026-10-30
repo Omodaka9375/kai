@@ -44,6 +44,7 @@ function describeSnapshot() {
 export function buildRadioTools(_ctx: ToolContext) {
   return {
     radio_list_stations: tool({
+      needsApproval: false,
       description:
         "List the available SomaFM radio stations (id, name, genre). Use this when the user wants music/a mood but you're not sure which station fits, or when a requested station isn't found.",
       inputSchema: z.object({}),
@@ -58,6 +59,7 @@ export function buildRadioTools(_ctx: ToolContext) {
     }),
 
     play_radio: tool({
+      needsApproval: false,
       description:
         "Play a SomaFM radio station in the user's status bar — background music for a chill programming mood. The station also starts if the radio is currently stopped. Match the user's requested mood to a station genre; use radio_list_stations if unsure which fits. Never blocks anything: if the stream fails the status bar shows an unavailable state.",
       inputSchema: z.object({
@@ -115,6 +117,7 @@ export function buildRadioTools(_ctx: ToolContext) {
     }),
 
     stop_radio: tool({
+      needsApproval: false,
       description:
         "Stop the radio. Use when the user asks for silence, wants to focus, or explicitly says stop the music.",
       inputSchema: z.object({}),
@@ -130,6 +133,7 @@ export function buildRadioTools(_ctx: ToolContext) {
     }),
 
     radio_now_playing: tool({
+      needsApproval: false,
       description:
         "Get the currently-playing track (artist, title, album) and recent history for a SomaFM station — SomaFM's public song data. Use when the user asks what song is playing, what track this is, or for recent songs on a station.",
       inputSchema: z.object({

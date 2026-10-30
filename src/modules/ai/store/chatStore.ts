@@ -609,6 +609,21 @@ export function subscribeSessionAgentMeta(listener: () => void): () => void {
   return () => sessionMetaListeners.delete(listener);
 }
 const sessionAutoApprove = new Map<string, "off" | "all">();
+/** Bumped on every setAutoApprove so subscribers (the bridge's auto-approve
+ *  effect) re-read the mode reactively - a plain Map read is not reactive. */
+let sessionAutoApproveVersion = 0;
+const sessionAutoApproveListeners = new Set<() => void>();
+export function subscribeSessionAutoApprove(listener: () => void): () => void {
+  sessionAutoApproveListeners.add(listener);
+  return () => sessionAutoApproveListeners.delete(listener);
+}
+export function getSessionAutoApproveVersion(): number {
+  return sessionAutoApproveVersion;
+}
+function bumpAutoApproveVersion(): void {
+  sessionAutoApproveVersion++;
+  for (const listener of sessionAutoApproveListeners) listener();
+}
 export function getSessionAgentMeta(sessionId: string): AgentMeta {
   return sessionAgentMeta.get(sessionId) ?? IDLE_META;
 }
@@ -974,7 +989,19 @@ export const useChatStore = create<StoreState>((set, get) => ({
   autoApprove: "off" as AutoApproveMode,
   setAutoApprove: (mode) => {
     const sessionId = get().activeSessionId;
-    if (sessionId) sessionAutoApprove.set(sessionId, mode);
+    if (sessionId) {
+      sessionAutoApprove.set(sessionId, mode);
+      bumpAutoApproveVersion();
+      // Persist onto the session's meta so the choice survives relaunch -
+      // the Map is memory-only and used to reset a user-set "Allow" back
+      // to "Ask" on every start.
+      const next = get().sessions.map((s) =>
+        s.id === sessionId ? { ...s, autoApprove: mode } : s,
+      );
+      set({ sessions: next, autoApprove: mode });
+      persistActiveSessionsList(next);
+      return;
+    }
     set({ autoApprove: mode });
   },
   cycleAutoApprove: () => {
@@ -1234,6 +1261,15 @@ export const useChatStore = create<StoreState>((set, get) => ({
 
     if (isStale()) return;
 
+    // Restore persisted per-session auto-approve modes BEFORE the set()
+    // below reads getSessionAutoApprove(nextActiveId) - a user-set "Allow"
+    // used to silently reset to "Ask" on every relaunch (memory-only Map).
+    for (const s of nextSessions) {
+      if (s.autoApprove === "all" || s.autoApprove === "off") {
+        sessionAutoApprove.set(s.id, s.autoApprove);
+      }
+    }
+
     if (hydrationRuntime) setProjectActiveSession(hydrationRuntime.id, nextActiveId);
     set({
       sessions: nextSessions,
@@ -1335,6 +1371,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
 
   deleteSession: (id) => {
     removeSessionPreferences(id);
+    sessionAutoApprove.delete(id);
     const remaining = get().sessions.filter((s) => s.id !== id);
     abortRunController(id);
     chats.get(id)?.stop();
@@ -1944,6 +1981,18 @@ function stripIncompleteToolMessages(messages: UIMessage[]): UIMessage[] {
 
 function releasePendingApprovals(chat: Chat<UIMessage>): void {
   if (!hasPendingApprovals(chat)) return;
+  // Absence of permission is denial: latch every still-pending approval id
+  // before stripping, so a deferred auto-approve callback already in flight
+  // for this exact call cannot resurrect it. The stale reaper
+  // (releaseStaleApprovalsOnly) latches the same way - stop must not be the
+  // one asymmetry.
+  for (const m of chat.messages) {
+    for (const p of m.parts as Array<Record<string, unknown>>) {
+      if ((p as { state?: string }).state !== "approval-requested") continue;
+      const ap = p.approval as { id?: string } | undefined;
+      if (ap?.id) noteApprovalDenied(ap.id);
+    }
+  }
   const cleaned = stripIncompleteToolMessages(chat.messages);
   if (cleaned !== chat.messages) {
     chat.messages = cleaned;
@@ -2007,13 +2056,15 @@ function describeApproval(
 ): { subject: string; summary: string; root: string } {
   try {
     // Find the approval-requested part across session messages to recover
-    // the tool name + input. (The resolver map isn't exported; scanning is
-    // acceptable — one pass over the active session's messages.)
+    // the tool name + input. Resolve the OWNING session first (an approval
+    // can belong to a background project's chat) — the old active-session
+    // read attributed decisions to the wrong transcript's audit trail.
     const root =
       state.live?.getWorkspaceRoot?.() ??
       usePreferencesStore.getState().lastWorkspaceCwd ??
       "";
-    const chat = chats.get(state.activeSessionId ?? "");
+    const owner = findApprovalOwner(approvalId);
+    const chat = chats.get(owner ?? state.activeSessionId ?? "");
     if (!chat) return { subject: "unknown", summary: `approval ${approved ? "approved" : "denied"} (${approvalId})`, root };
     for (const m of chat.messages) {
       for (const p of m.parts as Array<Record<string, unknown>>) {

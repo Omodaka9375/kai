@@ -17,27 +17,49 @@
  * permission, so listener ORDER can never turn a denial back into
  * permission.
  *
- * Bounded FIFO: approval ids are per tool-call and never reused within a
- * session's life, but sessions churn; the cap keeps the set from growing
- * without limit. Eviction is safe — an id whose denial was evicted would
- * need a still-pending deferred approval from long after its call settled
- * to do any harm, which the SDK's own stale-call throw already bounces.
+ * WINDOW SCOPE: the latch is per-JS-context by design. Approval cards and
+ * responders live ONLY in the main webview — the settings window imports
+ * the assistant's prefs split (modules/assistant/prefs.ts) precisely so no
+ * chat/approval machinery loads there, and the Telegram assistant is a
+ * separate headless process with approval tools stripped entirely. A second
+ * window therefore cannot call `addToolApprovalResponse` on another
+ * window's Chat, so no cross-window denial can be overturned. If a future
+ * surface ever renders approval cards in a second webview, route latch
+ * writes through one canonical owner (e.g. a Kai://approval-denied event
+ * fanned out from the main window) BEFORE shipping that surface.
+ *
+ * Bounded by TIME, not by count: approval ids are per tool-call and never
+ * reused, and the relevant race window (deferred auto-approve vs a just-made
+ * denial) is seconds wide. A FIFO CAP eviction could drop a still-relevant
+ * denial in a long-running session (>1000 approvals evicts the OLDEST,
+ * which may be minutes old and still attached to a live card). Entries now
+ * expire only when older than LATCH_TTL_MS, so an id that was denied within
+ * the last TTL can never be evicted while its race is still possible.
  */
 
-const LATCH_CAP = 1000;
-const denied = new Set<string>();
+const LATCH_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const denied = new Map<string, number>();
+
+/** Current time, overridable in tests. */
+let now = () => Date.now();
+
+function sweep(): void {
+  const t = now();
+  for (const [id, at] of denied) {
+    if (t - at > LATCH_TTL_MS) denied.delete(id);
+  }
+}
 
 /** Record that an approval id was denied (human click, or a stale
  *  approval reaped without a decision — absence of permission is denial). */
 export function noteApprovalDenied(approvalId: string): void {
   if (!approvalId) return;
-  if (denied.has(approvalId)) return;
-  denied.add(approvalId);
-  while (denied.size > LATCH_CAP) {
-    const oldest = denied.values().next().value;
-    if (oldest === undefined) break;
-    denied.delete(oldest);
+  if (denied.has(approvalId)) {
+    denied.set(approvalId, now()); // refresh TTL on repeat notes
+    return;
   }
+  denied.set(approvalId, now());
+  if (denied.size > 1) sweep();
 }
 
 /** True when this approval id was denied at some point. Every deferred
@@ -50,4 +72,9 @@ export function isApprovalDenied(approvalId: string): boolean {
 /** Test helper only: forget all latched denials. */
 export function __resetApprovalLatchForTests(): void {
   denied.clear();
+}
+
+/** Test helper only: pin the clock for TTL testing. */
+export function __setLatchClockForTests(fn: (() => number) | null): void {
+  now = fn ?? (() => Date.now());
 }

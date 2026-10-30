@@ -15,6 +15,7 @@ export function buildImageGenTools(ctx: ToolContext) {
   const native = nativeForContext(ctx);
   return {
     generate_image: tool({
+      needsApproval: false,
       description: `Generate an image from a text prompt using AI. Returns the image inline in the conversation.
 
 Providers:
