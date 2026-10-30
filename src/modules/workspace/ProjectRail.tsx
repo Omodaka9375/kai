@@ -97,7 +97,13 @@ export function ProjectRail({
 }) {
   const fileMenuTrigger = useFileMenuTrigger();
   return (
-    <TooltipProvider delayDuration={250}>
+    <TooltipProvider
+      delayDuration={250}
+      // Skip the open delay on immediate re-hover (e.g. after a project
+      // switch makes the tile the pointer is over change identity): the
+      // tooltip then appears instantly instead of lagging 250ms behind.
+      skipDelayDuration={100}
+    >
       <aside
         aria-label="Open projects"
         className="flex w-12 shrink-0 flex-col border-r border-border/60 bg-card"

@@ -107,7 +107,7 @@ import { listen } from "@tauri-apps/api/event";
 import { homeDir } from "@tauri-apps/api/path";
 import type { SearchAddon } from "@xterm/addon-search";
 import { AnimatePresence, motion } from "motion/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PanelImperativeHandle } from "react-resizable-panels";
 
 function dirname(path: string | null): string | null {
@@ -1583,19 +1583,29 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
   useEffect(() => {
     registerProjectRuntime(projectRuntime);
     if (isActive) {
-      setActiveProjectRuntime(projectRuntime);
-      setWorkspaceEnv(projectRuntime.env);
-      const savedSession = getProjectActiveSession(projectRuntime.id);
-      if (savedSession && savedSession !== useChatStore.getState().activeSessionId) {
-        useChatStore.getState().switchSession(savedSession);
-      }
-    }
-    if (isActive) {
-      setProjectModel(
-        projectRuntime.id,
-        useChatStore.getState().selectedModelId,
-        useAgentsStore.getState().activeId,
-      );
+      // startTransition: these GLOBAL chatStore writes re-render every
+      // useChatStore subscriber app-wide. Deferring them out of the
+      // visibility-flip paint keeps the project switch from blocking the
+      // frame (the switch itself is what the user sees).
+      const activate = () => {
+        setActiveProjectRuntime(projectRuntime);
+        setWorkspaceEnv(projectRuntime.env);
+        const savedSession = getProjectActiveSession(projectRuntime.id);
+        if (savedSession && savedSession !== useChatStore.getState().activeSessionId) {
+          useChatStore.getState().switchSession(savedSession);
+        }
+        setProjectModel(
+          projectRuntime.id,
+          useChatStore.getState().selectedModelId,
+          useAgentsStore.getState().activeId,
+        );
+        setSandboxRoot(explorerRoot ?? launchCwd ?? home ?? null);
+      };
+      // startTransition: these GLOBAL chatStore writes re-render every
+      // useChatStore subscriber app-wide. Deferring them out of the
+      // visibility-flip paint keeps the project switch from blocking the
+      // frame — the switch itself is what the user sees first.
+      startTransition(activate);
     }
     const findCwd = () => {
       const active = tabs.find((x) => x.id === activeId);

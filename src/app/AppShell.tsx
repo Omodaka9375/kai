@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { homeDir } from "@tauri-apps/api/path";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useState } from "react";
 import { getLaunchDir } from "@/lib/launchDir";
 import { cn } from "@/lib/utils";
 import { useChatStore } from "@/modules/ai";
@@ -250,7 +250,12 @@ export default function App() {
       items,
       addProject,
       closeProject,
-      switchProject: setActiveId,
+      switchProject: (id) => {
+        // startTransition: the visibility flip paints first; the heavy
+        // re-render cascade (global chatStore session switch, hydration,
+        // rail re-render) stays interruptible instead of blocking the frame.
+        startTransition(() => setActiveId(id));
+      },
       changeEnvironment,
     }}>
       <div className="flex h-screen w-full">
