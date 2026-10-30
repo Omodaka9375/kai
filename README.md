@@ -47,6 +47,19 @@ Kai is a fast, cross-platform terminal built on **Tauri 2 + Rust** and **React 1
 - 9 editor themes, Vim mode (`:w` / `:q` Ex commands, visual/insert/normal)
 - Image & PDF preview, plus **Open in Live Preview** — right-click an HTML file to serve and preview it in-app
 
+### Multi-Project
+
+- **Run several projects side by side** in the same window — each with its own terminal tabs, file tree, sessions, and chats, all kept alive in the background
+- A permanent project rail on the left: status dots (including "needs input" pulses from your agents), one-click switch, and add/close
+- Per-project sessions, model preferences, and sandbox settings — nothing bleeds across projects
+- A second launch of KAI forwards its project dirs to the running window instead of opening a dead one
+
+### Agent Group Chats
+
+- **Cross-project group chats** — put agents from different projects in one conversation and have them coordinate: review each other's work, split a task, or discuss a design
+- One agent's reply lands in the shared transcript; the others see it on their next turn
+- Entry from the status bar, with clear per-agent status and a single merged activity dot
+
 ### AI Agent
 
 - **Bring your own key** — 12 providers: OpenAI, Anthropic, Google, Groq, xAI, Cerebras, DeepSeek, Mistral, OpenRouter, and direct Z.ai (GLM), plus any OpenAI-compatible endpoint
@@ -60,6 +73,7 @@ Kai is a fast, cross-platform terminal built on **Tauri 2 + Rust** and **React 1
 - Resizable model picker — drag its left edge to set the width (persisted); descriptions hide automatically at narrower widths
 - Multi-step goals with automation, plan mode (queue edits for review as one diff), and sub-agents (explore / code-review / security / research)
 - Conversation forking and merging — branch any message into a parallel thread, then merge it back or into another thread
+- **Gmail + X (Twitter), read-only** — give the agent your Gmail app password and/or X developer token (Settings → General) and it can check your mail or scan X for what people are saying about a topic. Sending, posting, liking, and following are not implemented — it cannot do them. Credentials live in your OS keychain.
 - Watch monitoring — the agent polls any shell command on an interval and reports back when it matches (`watch_create`), with optional Telegram pings when you're away
 
 ### Image & Video Generation
