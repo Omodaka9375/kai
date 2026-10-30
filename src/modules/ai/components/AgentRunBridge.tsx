@@ -134,6 +134,18 @@ function Bridge({
   // old gate compared only against lastMirroredIdRef, so any older
   // un-mirrored message could leak through).
   const deliveryBoundaryIdRef = useRef<string | null>(null);
+  // CROSS-PROJECT NEWS boundary (same causality contract as the group
+  // delivery boundary above, kept as its own ref): the last assistant id
+  // that existed BEFORE the current run began. A news flag is set ONLY
+  // when a run that just settled to idle produced a NEW assistant message
+  // AFTER its busy-arm snapshot - mount-time recomputes, aborted runs and
+  // unrelated effect re-runs must never flag.
+  const newsBoundaryIdRef = useRef<string | null>(null);
+  // Previous runStatus for transition detection (null on first run):
+  // the news flag fires ONLY on a busy (thinking/streaming) -> idle
+  // transition, never on mount or on idle->idle recomputes.
+  const prevRunStatusRef = useRef<AgentRunStatus | null>(null);
+  const prevNewsSessionRef = useRef<string | null>(null);
   // Leak-nudge latch: one correction per session - a local model that emits
   // its tool-call template as text gets exactly one "use function calling"
   // nudge; repeating it is noise.
@@ -465,6 +477,7 @@ function Bridge({
         .reverse()
         .find((m) => m.role === "assistant");
       deliveryBoundaryIdRef.current = lastPre?.id ?? null;
+      newsBoundaryIdRef.current = lastPre?.id ?? null;
     }
     // Background starts keep the current surface; the composer explicitly
     // opens the transcript for ordinary sends. Background notifications use
@@ -474,10 +487,34 @@ function Bridge({
     // the user is NOT looking at is exactly the "it completed while I was
     // elsewhere and I never noticed" case. Surface it on the rail (amber
     // pulse) instead of relying on the user to poll project tiles.
-    if (runStatus === "idle" && !isActive) {
-      const owner = projectIdForSession(sessionId);
-      if (owner && owner !== activeProjectId()) {
-        setProjectHasNews(owner, true);
+    //
+    // GATED (the first cut fired on every effect re-run while a background
+    // bridge sat ready - mount, approvalsPending recomputes, message loads -
+    // flagging every background project with a phantom "something new"):
+    //  1. TRANSITION: prev status was thinking/streaming (a real run just
+    //     ended), not a mount or an idle->idle recompute. Tracked per
+    //     session so a sessionId switch can't smuggle a stale prev in.
+    //  2. CAUSALITY: the run produced a NEW assistant message after the
+    //     busy-arm boundary snapshot - an aborted/empty run doesn't flag.
+    if (prevNewsSessionRef.current !== sessionId) prevRunStatusRef.current = null;
+    prevNewsSessionRef.current = sessionId;
+    const prevRunStatus = prevRunStatusRef.current;
+    prevRunStatusRef.current = runStatus;
+    if (
+      runStatus === "idle" &&
+      !isActive &&
+      (prevRunStatus === "thinking" || prevRunStatus === "streaming")
+    ) {
+      const newsBoundary = newsBoundaryIdRef.current;
+      newsBoundaryIdRef.current = null;
+      const lastAssistant = [...messagesRefForGroup.current]
+        .reverse()
+        .find((m) => m.role === "assistant");
+      if (lastAssistant && lastAssistant.id !== newsBoundary) {
+        const owner = projectIdForSession(sessionId);
+        if (owner && owner !== activeProjectId()) {
+          setProjectHasNews(owner, true);
+        }
       }
     }
 
