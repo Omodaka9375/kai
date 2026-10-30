@@ -3,7 +3,7 @@ import { useSyncExternalStore } from "react";
 import { cn } from "@/lib/utils";
 import { AiBrain02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { getGroups, subscribeGroupChats } from "../store/groupChatStore";
+import { getGroupStoreVersion, getGroups, subscribeGroupChats } from "../store/groupChatStore";
 import { useChatStore } from "../store/chatStore";
 
 /**
@@ -16,8 +16,8 @@ import { useChatStore } from "../store/chatStore";
 export function GroupPill() {
   const version = useSyncExternalStore(
     subscribeGroupChats,
-    () => 0,
-    () => 0,
+    getGroupStoreVersion,
+    getGroupStoreVersion,
   );
   const openMiniToStack = useChatStore((s) => s.openMiniToStack);
   // Count is cosmetic — shows how many groups are live while the group

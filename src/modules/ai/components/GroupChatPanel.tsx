@@ -34,6 +34,7 @@ import {
   createGroupChat,
   deleteGroupChat,
   endGroupChat,
+  getGroupStoreVersion,
   getGroups,
   getGroup,
   removeParticipant,
@@ -65,10 +66,14 @@ export function GroupChatPanel({
   projects: ProjectSwitcherItem[];
   activeProjectId: string | null;
 }) {
+  // Monotonic store version as the snapshot — group deletes/ends/messages
+  // MUST re-render this panel, or it shows ghosts of dead groups (the X
+  // would seem not to work: the pill/panel would keep pointing at a group
+  // that no longer exists until some unrelated re-render).
   const version = useSyncExternalStore(
     subscribeGroupChats,
-    () => 0,
-    () => 0,
+    getGroupStoreVersion,
+    getGroupStoreVersion,
   );
   const [openGroupId, setOpenGroupId] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -295,7 +300,7 @@ function ParticipantDot({ participant }: { participant: GroupParticipant }) {
 }
 
 function Transcript({ group }: { group: GroupChat }) {
-  const version = useSyncExternalStore(subscribeGroupChats, () => 0, () => 0);
+  const version = useSyncExternalStore(subscribeGroupChats, getGroupStoreVersion, getGroupStoreVersion);
   // Re-read the group each version bump — messages arrays are replaced.
   const live = useMemo(() => getGroup(group.id) ?? group, [group.id, version]);
   const nameFor = useCallback(

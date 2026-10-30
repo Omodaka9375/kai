@@ -174,23 +174,12 @@ export function getGroupForSession(sessionId: string): GroupChat | null {
   return groupId ? (groups.get(groupId) ?? null) : null;
 }
 
-/** Groups a project participates in (for rail arcs + panel entry). */
+/** Groups a project participates in. */
 export function groupsForProject(projectId: string): GroupChat[] {
   const out: GroupChat[] = [];
   for (const g of groups.values()) {
     if (g.endedAt !== null) continue;
     if (g.participants.some((p) => p.projectId === projectId)) out.push(g);
-  }
-  return out;
-}
-
-/** Groups where BOTH projects are participants — the arc edges. */
-export function groupArcsBetween(projectId: string): Array<{ groupId: string; otherId: string }> {
-  const out: Array<{ groupId: string; otherId: string }> = [];
-  for (const g of groupsForProject(projectId)) {
-    for (const p of g.participants) {
-      if (p.projectId !== projectId) out.push({ groupId: g.id, otherId: p.projectId });
-    }
   }
   return out;
 }

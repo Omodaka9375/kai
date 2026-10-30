@@ -226,14 +226,17 @@ describe("source pins — trust boundary & wiring", () => {
     expect(mounts).toBe(1);
   });
 
-  it("rail draws connector arcs; arcs open the panel via the app-level event", () => {
-    expect(rail).toContain("GroupArcs");
-    expect(rail).toContain("onOpenGroup");
-    expect(rail).toContain("strokeDasharray={e.busy");
-    // The rail itself stays decoupled — App wires onOpenGroup to the event
-    // the app-level panel listens for.
-    const workspace = readFileSync(new URL("../../../app/App.tsx", import.meta.url), "utf8");
-    expect(workspace).toContain("Kai:open-group-chat");
+  it("rail arcs are REMOVED; group surfaces open via the app-level event only", () => {
+    // The connector arcs were removed by user request — the rail must not
+    // regress them (no GroupArcs, no arc prop chain, no arc helpers).
+    expect(rail).not.toContain("GroupArcs");
+    expect(rail).not.toContain("onOpenGroup");
+    expect(rail).not.toContain("groupArcColor");
+    expect(store).not.toContain("groupArcsBetween");
+    // The app-level panel still listens for the decoupled open event
+    // (a public seam; no dispatcher remains after the arcs were removed —
+    // the picker's "Open" calls the panel callback directly).
+    expect(panel).toContain('window.addEventListener("Kai:open-group-chat"');
   });
 
   it("bridge mirrors agent replies into the group and flushes queues on idle", () => {

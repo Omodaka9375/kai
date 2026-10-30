@@ -1933,7 +1933,6 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
             onSwitch={(id) => projectsMenu?.switchProject(id)}
             onAdd={() => projectsMenu?.addProject()}
             onClose={(id) => projectsMenu?.closeProject(id)}
-            onOpenGroup={(groupId) => window.dispatchEvent(new CustomEvent("Kai:open-group-chat", { detail: groupId }))}
           />
           <div className="flex h-full min-w-0 flex-1 flex-col">
           <Header
