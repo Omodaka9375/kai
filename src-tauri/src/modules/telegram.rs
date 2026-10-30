@@ -102,9 +102,20 @@ impl Drop for PollLease {
 
 #[cfg(target_os = "windows")]
 fn acquire_os_poll_lease() -> Result<Option<PollLease>, String> {
+    acquire_os_poll_lease_named("KaiTelegramPoller")
+}
+
+/// Windows implementation with an injectable mutex name. The production
+/// name is a `Local\` namespace constant shared with every KAI process; the
+/// tests pass their own per-test name so a LIVE running KAI holding the
+/// production mutex (this dev machine, right now) cannot make the
+/// exclusivity test fail for environment reasons.
+#[cfg(target_os = "windows")]
+fn acquire_os_poll_lease_named(name: &str) -> Result<Option<PollLease>, String> {
     use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS};
     use windows_sys::Win32::System::Threading::CreateMutexW;
-    let name: Vec<u16> = "Local\\KaiTelegramPoller\0".encode_utf16().collect();
+    let full = format!("Local\\{name}\0");
+    let name: Vec<u16> = full.encode_utf16().collect();
     // SAFETY: name is NUL-terminated; the returned handle is owned by the
     // lease (or closed immediately when another process already owns it).
     unsafe {
@@ -1197,16 +1208,26 @@ mod tests {
 
     #[test]
     fn poll_lease_is_exclusive_until_released() {
-        // OS mutexes are recursive within a thread, so the contending call
-        // must come from another thread (matching the real poll-loop model).
-        let acquired = acquire_os_poll_lease().unwrap();
-        let contender = std::thread::spawn(|| {
-            let lease = acquire_os_poll_lease().unwrap();
-            assert!(lease.is_none());
-        });
+        // Per-TEST mutex name: the production name may already be held by a
+        // LIVE KAI instance on this machine (dev runs KAI while testing
+        // KAI), which made the takeover assert fail for environment
+        // reasons, not code reasons. Exclusivity semantics are identical.
+        let name = format!("KaiTestPoller-{}", std::process::id());
+        let acquired = acquire_os_poll_lease_named(&name).unwrap();
+        assert!(acquired.is_some());
+        let contender = {
+            let name = name.clone();
+            std::thread::spawn(move || {
+                // OS mutexes are recursive within a thread, so the
+                // contending call comes from another thread (matching the
+                // real poll-loop model).
+                let lease = acquire_os_poll_lease_named(&name).unwrap();
+                assert!(lease.is_none());
+            })
+        };
         contender.join().unwrap();
         drop(acquired);
-        let takeover = acquire_os_poll_lease().unwrap();
+        let takeover = acquire_os_poll_lease_named(&name).unwrap();
         assert!(takeover.is_some());
     }
 
