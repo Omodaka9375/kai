@@ -18,6 +18,7 @@ import {
 } from "../lib/diagnostics";
 
 const REPO_URL = "https://github.com/Omodaka9375/kai";
+const AUTHOR_URL = "https://github.com/Omodaka9375";
 const WEBSITE = "https://omodaka9375.github.io/kai";
 
 const PLATFORM_LABEL: Record<string, string> = {
@@ -144,6 +145,18 @@ export function AboutSection() {
           >
             <HugeiconsIcon icon={Globe02Icon} size={12} strokeWidth={1.75} />
             kai.app
+          </button>
+        </dd>
+
+        <dt className="text-muted-foreground">Author</dt>
+        <dd>
+          <button
+            type="button"
+            onClick={() => void openUrl(AUTHOR_URL)}
+            className="inline-flex items-center gap-1.5 rounded-md text-[12px] underline-offset-2 hover:text-foreground hover:underline"
+          >
+            <HugeiconsIcon icon={GithubIcon} size={12} strokeWidth={1.75} />
+            Omodaka9375
           </button>
         </dd>
       </dl>
