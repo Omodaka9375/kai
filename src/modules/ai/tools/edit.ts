@@ -55,11 +55,29 @@ export async function computeEdits(
       if (n === 0) {
         const fz = fuzzyHits(text, oldNorm);
         if (!fz) {
-          return {
-            ok: false,
-            error: `old_string not found: ${JSON.stringify(oldNorm.slice(0, 80))}.${getDidYouMeanHint(text, oldNorm)}`,
-            editIndex,
-          };
+          const ph = punctHits(text, oldNorm);
+          if (!ph) {
+            return {
+              ok: false,
+              error: `old_string not found: ${JSON.stringify(oldNorm.slice(0, 80))}.${getDidYouMeanHint(text, oldNorm)}`,
+              editIndex,
+            };
+          }
+          if (ph.length > MAX_FUZZY_HITS) {
+            return {
+              ok: false,
+              error: `old_string matched more than ${MAX_FUZZY_HITS} locations after punctuation relaxation — refusing to rewrite that broadly. Narrow old_string.`,
+              editIndex,
+            };
+          }
+          for (const h of [...ph].sort((a, b) => b.index - a.index)) {
+            text =
+              text.slice(0, h.index) +
+              applyPunctCarry(oldNorm, newNorm, h) +
+              text.slice(h.index + h.length);
+          }
+          totalReplacements += ph.length;
+          continue;
         }
         if (fz.length > MAX_FUZZY_HITS) {
           return {
@@ -80,6 +98,44 @@ export async function computeEdits(
       if (idx === -1) {
         const fz = fuzzyHits(text, oldNorm);
         if (!fz) {
+          // Third tier: punctuation-equivalence (em/en dash vs hyphen,
+          // curly vs straight quotes...). Same policy as the fuzzy tier —
+          // multi-hit needs line_hint, else bounce with locations.
+          const ph = punctHits(text, oldNorm);
+          if (ph && ph.length === 1) {
+            const h = ph[0]!;
+            text =
+              text.slice(0, h.index) +
+              applyPunctCarry(oldNorm, newNorm, h) +
+              text.slice(h.index + h.length);
+            totalReplacements += 1;
+            continue;
+          }
+          if (ph && ph.length > 1) {
+            if (rawEdit.line_hint) {
+              const chosenP = ph.reduce((best, cur) =>
+                Math.abs(cur.line - rawEdit.line_hint!) <
+                Math.abs(best.line - rawEdit.line_hint!)
+                  ? cur
+                  : best,
+              );
+              text =
+                text.slice(0, chosenP.index) +
+                applyPunctCarry(oldNorm, newNorm, chosenP) +
+                text.slice(chosenP.index + chosenP.length);
+              totalReplacements += 1;
+              continue;
+            }
+            return {
+              ok: false,
+              error:
+                `old_string matched ${ph.length} locations (lines ${ph
+                  .slice(0, 8)
+                  .map((h) => h.line)
+                  .join(", ")}) only after punctuation relaxation — nothing was changed. Widen old_string or pass line_hint.`,
+              editIndex,
+            };
+          }
           return {
             ok: false,
             error: `old_string not found: ${JSON.stringify(oldNorm.slice(0, 80))}.${getDidYouMeanHint(text, oldNorm)}`,
@@ -299,6 +355,188 @@ function punctEquivalent(a: string, b: string): boolean {
   return flattenPunct(a) === flattenPunct(b);
 }
 
+/**
+ * Punctuation-tolerant find — the THIRD matching tier (after exact and
+ * whitespace-fuzzy).
+ *
+ * Terminal output and OCR render em/en dashes as "-" and curly quotes as
+ * straight ones, so an anchor copied FROM TERMINAL OUTPUT can be visually
+ * identical to the file yet differ byte-wise. The fuzzy tier relaxes
+ * WHITESPACE only, so these bounced with "not found" against a visually
+ * identical block — the model retried the same anchor forever, and 3 such
+ * bounces latched the file into the write_file-only escape hatch.
+ * Diagnosing the near-miss (the not-found hint) was necessary but not
+ * sufficient: the fix is to MATCH and APPLY.
+ *
+ * Matching: every punct-variant member in the needle becomes an ALTERNATION
+ * over its whole equivalence class (multi-char members like "->" included,
+ * longest-first so they win over their single-char neighbors). Whitespace
+ * runs keep the fuzzy tier's tolerance. Each punct position is a CAPTURE
+ * group, so the caller learns which variant the FILE uses at each position.
+ *
+ * Carry-over: applyPunctCarry rewrites new_string positions that repeat the
+ * needle's punct variant to the FILE's variant — but ONLY under a strict
+ * same-index + same-char guard, and only for single-char variants. The
+ * guard makes corruption structurally impossible: it can never touch a
+ * position the needle didn't mark as punctuation, and never rewrites an
+ * identifier (the needle's char must be a punct variant at that exact
+ * index, and the new char must equal it).
+ */
+type PunctHit = {
+  index: number;
+  length: number;
+  line: number;
+  /** The file's own text for the matched region (whole-line-extended). */
+  carry: string;
+  /** Per punct position: the variant the FILE uses (aligned with punctIdx). */
+  captures: string[];
+  /** Indices (into the TRIMMED needle) of the punct positions, in order. */
+  punctIdx: number[];
+};
+
+/** member -> every variant it may represent (union across classes).
+ *  A straight quote is a member of BOTH the open and close curly classes -
+ *  a member->class map kept only the last one and the opening curly quote
+ *  could never match its straight form. */
+const PUNCT_MEMBER_VARIANTS = new Map<string, string[]>();
+for (const cls of PUNCT_CLASSES) {
+  for (const member of cls) {
+    const seen = new Set<string>(PUNCT_MEMBER_VARIANTS.get(member) ?? []);
+    for (const v of cls) seen.add(v);
+    PUNCT_MEMBER_VARIANTS.set(member, [...seen]);
+  }
+}
+const PUNCT_MEMBERS_LONGEST = [...PUNCT_MEMBER_VARIANTS.keys()].sort((a, b) => b.length - a.length);
+
+function punctAlternation(cls: string[]): string {
+  const sorted = [...cls].sort((a, b) => b.length - a.length);
+  return "(" + sorted.map(escapeRe).join("|") + ")";
+}
+
+/**
+ * Build the relaxed pattern for a needle. Returns the pattern source plus
+ * the punct position bookkeeping. Multi-char members are consumed
+ * greedily (longest first) so "a -> b" sees "->" as ONE punct position,
+ * not "-" + ">".
+ */
+function buildPunctPattern(needle: string): {
+  pattern: string;
+  punctIdx: number[];
+  anyPunct: boolean;
+} {
+  const trimmed = needle.replace(/^\s+|\s+$/g, "");
+  const parts = trimmed.split(/(\s+)/);
+  let pattern = "";
+  const punctIdx: number[] = [];
+  let anyPunct = false;
+  let absIdx = 0; // index into trimmed
+  for (const part of parts) {
+    if (part === "") continue;
+    if (/^\s+$/.test(part)) {
+      pattern += part.includes("\n") ? "[\\s]*\\n[\\s]*" : "[ \\t]*";
+      absIdx += part.length;
+      continue;
+    }
+    let i = 0;
+    while (i < part.length) {
+      let matched = "";
+      for (const member of PUNCT_MEMBERS_LONGEST) {
+        if (part.startsWith(member, i)) {
+          matched = member;
+          break;
+        }
+      }
+      if (matched && PUNCT_MEMBER_VARIANTS.has(matched)) {
+        pattern += punctAlternation(PUNCT_MEMBER_VARIANTS.get(matched)!);
+        punctIdx.push(absIdx);
+        anyPunct = true;
+        i += matched.length;
+        absIdx += matched.length;
+      } else {
+        const ch = part[i]!;
+        pattern += escapeRe(ch);
+        i += 1;
+        absIdx += 1;
+      }
+    }
+  }
+  return { pattern, punctIdx, anyPunct };
+}
+
+function punctHits(content: string, needle: string, maxHits = MAX_FUZZY_HITS): PunctHit[] | null {
+  const { pattern, punctIdx, anyPunct } = buildPunctPattern(needle);
+  if (!pattern || !anyPunct) return null; // no punct positions — tier inactive
+  let re: RegExp;
+  try {
+    re = new RegExp(pattern, "g");
+  } catch {
+    return null;
+  }
+  const hits: PunctHit[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content)) !== null) {
+    if (m[0].length === 0) {
+      re.lastIndex += 1; // pathological empty match guard
+      continue;
+    }
+    let index = m.index;
+    let end = m.index + m[0].length;
+    // Same whole-line coverage extension as the fuzzy tier: a match that
+    // spans a line's entire non-whitespace content owns the full line(s).
+    const lineStart = content.lastIndexOf("\n", index - 1) + 1;
+    const lineEnd = content.indexOf("\n", end) === -1 ? content.length : content.indexOf("\n", end);
+    const before = content.slice(lineStart, index);
+    const after = content.slice(end, lineEnd);
+    if (before.trim() === "" && after.trim() === "") {
+      index = lineStart;
+      end = lineEnd;
+    }
+    hits.push({
+      index,
+      length: end - index,
+      line: content.slice(0, index).split("\n").length,
+      carry: content.slice(index, end),
+      captures: m.slice(1) as string[],
+      punctIdx,
+    });
+    if (hits.length > maxHits) break;
+  }
+  return hits.length > 0 ? hits : null;
+}
+
+/**
+ * Rewrite new_string's punct variants to the FILE's variants at positions
+ * the needle marked. Strict guard per position i:
+ *  - both variants single chars (length-changing classes like → vs -> are
+ *    skipped: index alignment is not guaranteed there);
+ *  - newTrimmed[i] === oldTrimmed[i] (the model repeated its own variant);
+ *  - oldTrimmed[i] differs from the file's variant (a REAL variant diff).
+ * Everything else passes through untouched. Worst case misfire: a hyphen
+ * becomes an em-dash in prose — visually identical, self-healing on the
+ * next edit, and never a code identifier.
+ */
+function applyPunctCarry(
+  oldNorm: string,
+  newNorm: string,
+  hit: PunctHit,
+): string {
+  const oldTrimmed = oldNorm.replace(/^\s+|\s+$/g, "");
+  const newTrimmed = newNorm.replace(/^\s+|\s+$/g, "");
+  const lead = newNorm.slice(0, newNorm.indexOf(newTrimmed) === -1 ? 0 : newNorm.indexOf(newTrimmed));
+  const out = newTrimmed.split("");
+  for (let g = 0; g < hit.punctIdx.length; g++) {
+    const i = hit.punctIdx[g]!;
+    const fileVariant = hit.captures[g] ?? "";
+    if (fileVariant.length !== 1) continue; // multi-char variant: skip
+    const needleChar = oldTrimmed[i] ?? "";
+    if (needleChar === fileVariant) continue; // not a real variant diff
+    if (i >= out.length) continue;
+    if (out[i] === needleChar) out[i] = fileVariant; // model repeated its variant -> harmonize
+  }
+  return lead + out.join("");
+}
+
+
 /** Diagnose a punctuation-only near miss: file line number + the exact
  *  characters that differ, so the model can fix its anchor in one retry. */
 function getPunctuationNearMiss(
@@ -466,26 +704,44 @@ export async function applyEdits(
         // hit offsets stay valid.
         const fz = fuzzyHits(content, oldNorm);
         if (!fz) {
-          return {
-            ok: false,
-            error: `old_string not found: ${JSON.stringify(oldNorm.slice(0, 80))}.${getDidYouMeanHint(content, oldNorm)}`,
-            path: abs,
-            editIndex,
-          };
-        }
-        if (fz.length > MAX_FUZZY_HITS) {
+          const ph = punctHits(content, oldNorm);
+          if (!ph) {
+            return {
+              ok: false,
+              error: `old_string not found: ${JSON.stringify(oldNorm.slice(0, 80))}.${getDidYouMeanHint(content, oldNorm)}`,
+              path: abs,
+              editIndex,
+            };
+          }
+          if (ph.length > MAX_FUZZY_HITS) {
+            return {
+              ok: false,
+              error: `old_string matched more than ${MAX_FUZZY_HITS} locations after punctuation relaxation — refusing to rewrite that broadly. Narrow old_string.`,
+              path: abs,
+              editIndex,
+            };
+          }
+          for (const h of [...ph].sort((a, b) => b.index - a.index)) {
+            content =
+              content.slice(0, h.index) +
+              applyPunctCarry(oldNorm, newNorm, h) +
+              content.slice(h.index + h.length);
+          }
+          n = ph.length;
+        } else if (fz.length > MAX_FUZZY_HITS) {
           return {
             ok: false,
             error: `old_string matched more than ${MAX_FUZZY_HITS} locations after whitespace relaxation — refusing to rewrite that broadly. Narrow old_string.`,
             path: abs,
             editIndex,
           };
+        } else {
+          for (const h of [...fz].sort((a, b) => b.index - a.index)) {
+            content =
+              content.slice(0, h.index) + newNorm + content.slice(h.index + h.length);
+          }
+          n = fz.length;
         }
-        for (const h of [...fz].sort((a, b) => b.index - a.index)) {
-          content =
-            content.slice(0, h.index) + newNorm + content.slice(h.index + h.length);
-        }
-        n = fz.length;
       }
       totalReplacements += n;
     } else {
@@ -498,6 +754,44 @@ export async function applyEdits(
       if (idx === -1) {
         const fz = fuzzyHits(content, oldNorm);
         if (!fz) {
+          // Third tier: punctuation-equivalence. See computeEdits for the
+          // policy (single hit applies; multi needs line_hint).
+          const ph = punctHits(content, oldNorm);
+          if (ph && ph.length === 1) {
+            const h = ph[0]!;
+            content =
+              content.slice(0, h.index) +
+              applyPunctCarry(oldNorm, newNorm, h) +
+              content.slice(h.index + h.length);
+            totalReplacements += 1;
+            continue;
+          }
+          if (ph && ph.length > 1) {
+            if (rawEdit.line_hint) {
+              const chosenP = ph.reduce((best, cur) =>
+                Math.abs(cur.line - rawEdit.line_hint!) <
+                Math.abs(best.line - rawEdit.line_hint!)
+                  ? cur
+                  : best,
+              );
+              content =
+                content.slice(0, chosenP.index) +
+                applyPunctCarry(oldNorm, newNorm, chosenP) +
+                content.slice(chosenP.index + chosenP.length);
+              totalReplacements += 1;
+              continue;
+            }
+            return {
+              ok: false,
+              error:
+                `old_string matched ${ph.length} locations (lines ${ph
+                  .slice(0, 8)
+                  .map((h) => h.line)
+                  .join(", ")}) only after punctuation relaxation — nothing was changed. Widen old_string or pass line_hint.`,
+              path: abs,
+              editIndex,
+            };
+          }
           return {
             ok: false,
             error: `old_string not found: ${JSON.stringify(oldNorm.slice(0, 80))}.${getDidYouMeanHint(content, oldNorm)}`,
@@ -757,7 +1051,7 @@ export function buildEditTools(ctx: ToolContext) {
               ...result,
               error:
                 result.error +
-                "\n\n(Still not found after re-read. This usually means another edit to the same file already consumed or displaced the target text. Re-read the file to get the current content, then resubmit. Better: use batch_edit for all same-file changes — it applies edits sequentially in one atomic operation instead of racing.)",
+                `\n\n(Still not found after re-read — attempt ${failures + 1}/${MAX_EDIT_RETRIES} on this file before the write_file fallback is suggested. This usually means another edit to the same file already consumed or displaced the target text. Re-read the file to get the current content, then resubmit. Better: use batch_edit for all same-file changes — it applies edits sequentially in one atomic operation instead of racing.)`,
             };
           }
           getEditFailures(ctx).set(abs, failures + 1);

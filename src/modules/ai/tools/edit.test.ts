@@ -312,13 +312,18 @@ describe("edit punctuation near-miss diagnosis", () => {
   // The em-dash trap: files use em-dashes in comments/prose, but terminal
   // output renders them as "-", so a model copying an anchor FROM TERMINAL
   // OUTPUT sends "-" where the file has U+2014. The fuzzy tier only relaxes
-  // WHITESPACE, so the edit bounced with a generic "not found" naming a
-  // visually identical block - the model retried the same anchor forever.
-  // The fix: the error now names the exact differing characters.
-  it("tells the model the em-dash vs hyphen difference and where it is", async () => {
+  // WHITESPACE, so historically the edit bounced with a generic "not found"
+  // naming a visually identical block - the model retried the same anchor
+  // forever, and 3 bounces latched the file into the write_file-only path.
+  // Now the THIRD matching tier auto-applies punctuation-equivalent matches,
+  // and the diagnosis only fires when even that tier can't act (ambiguity).
+  it("APPLIES an em-dash vs hyphen near-miss via the punct tier (carry-over preserves the file's dash)", async () => {
     const path = "/ws/dash.ts";
-    // File contains a REAL em-dash (U+2014).
-    files.set(path, "// group panel \u2014 the AI mini window's twin\nconst a = 1;\n");
+    // File contains a REAL em-dash (U+2014) in BOTH lines.
+    files.set(
+      path,
+      "// group panel \u2014 the AI mini window's twin\n// note \u2014 keep me\n",
+    );
     ctx.readCache.set(path, readCacheEntry(files.get(path)!));
     const tools = batchEditModule.buildBatchEditTools(ctx);
     // Model's anchor uses a plain hyphen where the file has the em-dash.
@@ -333,18 +338,20 @@ describe("edit punctuation near-miss diagnosis", () => {
         ],
       },
       {} as never,
-    )) as { ok?: boolean; error?: string };
-    expect(result.ok).toBe(false);
-    expect(result.error).toContain("Punctuation near-miss on file line 1");
-    expect(result.error).toMatch(/U\+2014/);
-    expect(result.error).toMatch(/U\+002D/);
-    // Nothing was written.
-    expect(files.get(path)).toContain("\u2014");
+    )) as { ok?: boolean; replacements?: number; error?: string };
+    expect(result.ok).toBe(true);
+    expect(result.replacements).toBe(1);
+    const out = files.get(path)!;
+    // The REPLACED line keeps the file's em-dash (carry-over harmonized the
+    // model's hyphen to the file's variant), and the untouched line is
+    // byte-identical.
+    expect(out).toContain("// group panel \u2014 docked twin");
+    expect(out).toContain("// note \u2014 keep me");
   });
 
-  it("names curly vs straight quotes the same way", async () => {
+  it("APPLIES curly vs straight quotes the same way", async () => {
     const path = "/ws/quote.ts";
-    files.set(path, "const s = \u201Cdouble\u201D;\n");
+    files.set(path, "const s = \u201Cdouble\u201D;\nconst t = 1;\n");
     ctx.readCache.set(path, readCacheEntry(files.get(path)!));
     const tools = batchEditModule.buildBatchEditTools(ctx);
     const result = (await tools.batch_edit.execute!(
@@ -352,9 +359,48 @@ describe("edit punctuation near-miss diagnosis", () => {
         edits: [{ path, old_string: 'const s = "double";', new_string: "const s = 1;" }],
       },
       {} as never,
+    )) as { ok?: boolean; replacements?: number };
+    expect(result.ok).toBe(true);
+    expect(result.replacements).toBe(1);
+    expect(files.get(path)).toBe("const s = 1;\nconst t = 1;\n");
+  });
+
+  it("still bounces when even the punct tier is ambiguous (multi-hit, no line_hint)", async () => {
+    const path = "/ws/amb.ts";
+    // TWO IDENTICAL lines that both differ from the anchor only by the
+    // dash - the punct tier finds 2 hits and no line_hint: refuse.
+    files.set(
+      path,
+      "// panel \u2014 twin\n// panel \u2014 twin\n",
+    );
+    ctx.readCache.set(path, readCacheEntry(files.get(path)!));
+    const tools = batchEditModule.buildBatchEditTools(ctx);
+    const result = (await tools.batch_edit.execute!(
+      {
+        edits: [{ path, old_string: "// panel - twin", new_string: "// panel x" }],
+      },
+      {} as never,
     )) as { ok?: boolean; error?: string };
     expect(result.ok).toBe(false);
-    expect(result.error).toContain("Punctuation near-miss on file line 1");
-    expect(result.error).toMatch(/U\+201C/);
+    // Ambiguous multi-hit, not a silent write.
+    expect(result.error).toContain("punctuation relaxation");
+    expect(files.get(path)).toContain("\u2014");
+  });
+
+  it("multi-char variants (-> vs U+2192) match and splice the full region", async () => {
+    const path = "/ws/arrow.ts";
+    files.set(path, "const flow = a \u2192 b;\n");
+    ctx.readCache.set(path, readCacheEntry(files.get(path)!));
+    const tools = batchEditModule.buildBatchEditTools(ctx);
+    // Model sends ASCII "->" where the file has the real arrow.
+    const result = (await tools.batch_edit.execute!(
+      {
+        edits: [{ path, old_string: "const flow = a -> b;", new_string: "const flow = a \u2192 b;" }],
+      },
+      {} as never,
+    )) as { ok?: boolean; replacements?: number };
+    expect(result.ok).toBe(true);
+    expect(result.replacements).toBe(1);
+    expect(files.get(path)).toBe("const flow = a \u2192 b;\n");
   });
 });
