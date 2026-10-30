@@ -254,7 +254,6 @@ export const IRREVERSIBILITY: Record<string, IrreversibilityLevel> = {
   // Reversible — effects can be undone (checkpoints, file operations).
   write_file: "reversible",
   edit: "reversible",
-  multi_edit: "reversible",
   batch_edit: "reversible",
   create_directory: "reversible",
   checkpoint_undo: "reversible",

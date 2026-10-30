@@ -3,7 +3,7 @@
  * the user can undo any batch of agent edits with a single action.
  *
  * Strategy:
- *  - Before any write_file / edit / multi_edit, snapshot the current file
+ *  - Before any write_file / edit / batch_edit, snapshot the current file
  *    content into `~/.kai/checkpoints/<workspace-hash>/<ts>-<session>.json`.
  *  - Checkpoints live OUTSIDE the workspace (like auto-memory) so they never
  *    appear in the user's file tree, git status, or a commit. No .gitignore

@@ -162,7 +162,7 @@ describe("write_file partial-view truncation guard", () => {
     files.set(path, "one\ntwo\n");
     const tools = fsToolsModule.buildFsTools(ctx);
 
-    // edit/multi_edit/applyEdits write full-content cache entries (no
+    // edit/batch_edit/applyEdits write full-content cache entries (no
     // coverage field) — write_file must stay allowed after them.
     ctx.readCache.set(path, readCacheEntry("one\ntwo\n"));
     const write = await exec(tools.write_file, {

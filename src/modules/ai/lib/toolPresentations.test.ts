@@ -37,11 +37,27 @@ describe("presentationFor — known tools", () => {
     expect(bg.fence).toBe(false);
   });
 
-  it("edit/multi_edit summary is the path; status handles Windows backslashes", () => {
+  it("edit summary is the path; status handles Windows backslashes", () => {
     expect(presentationFor("edit").summary?.({ path: "x/y.ts" })).toBe("x/y.ts");
     expect(presentationFor("edit").status?.({ path: "C:\\a\\b.ts" })).toBe(
       "Editing b.ts",
     );
+  });
+
+  it("batch_edit status/summary handle one file, several files, and garbage", () => {
+    const p = presentationFor("batch_edit");
+    expect(
+      p.status?.({ edits: [{ path: "a.ts" }, { path: "a.ts" }] }),
+    ).toBe("Editing 2 spots in 1 file");
+    expect(
+      p.status?.({ edits: [{ path: "a.ts" }, { path: "b.ts" }] }),
+    ).toBe("Editing 2 spots in 2 files");
+    expect(p.status?.({})).toBe("Editing 0 spots in 0 files");
+    expect(p.summary?.({ edits: [{ path: "src/a.ts" }] })).toBe("a.ts");
+    expect(p.summary?.({ edits: [{ path: "a.ts" }, { path: "b.ts" }] })).toBe(
+      "2 files, starting a.ts",
+    );
+    expect(p.summary?.({})).toBe(null);
   });
 
   it("checkpoint_undo is ROLLED_BACK, todo_write is COMMIT+unfenced", () => {
@@ -61,7 +77,7 @@ describe("presentationFor — known tools", () => {
 
   it("every registered status/summary fn is total: handles empty/garbage args without throwing", () => {
     const names = [
-      "read_file", "write_file", "edit", "multi_edit", "batch_edit",
+      "read_file", "write_file", "edit", "batch_edit",
       "create_directory", "grep", "glob", "bash_run", "bash_background",
       "bash_logs", "bash_kill", "todo_write", "checkpoint_undo",
       "run_subagent", "save_memory", "suggest_command", "open_preview",
@@ -115,7 +131,7 @@ describe("registry well-formedness", () => {
   // resolved rows' fields are valid (including unknown-tool defaults).
   it("every sampled row's effect is a valid EffectStatus", () => {
     const sample = [
-      "read_file", "write_file", "edit", "multi_edit", "batch_edit",
+      "read_file", "write_file", "edit", "batch_edit",
       "create_directory", "fs_delete", "bash_run", "bash_background",
       "bash_logs", "bash_kill", "shell_session_run", "grep", "glob",
       "web_browse", "web_fetch", "web_search", "todo_write", "save_memory",

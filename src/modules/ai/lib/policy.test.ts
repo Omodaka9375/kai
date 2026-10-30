@@ -52,7 +52,7 @@ describe("Tool Action Classifier", () => {
     it("should return true for write operations", () => {
       expect(requiresApproval("write_file")).toBe(true);
       expect(requiresApproval("edit")).toBe(true);
-      expect(requiresApproval("multi_edit")).toBe(true);
+      expect(requiresApproval("batch_edit")).toBe(true);
     });
 
     it("should return true for execute operations", () => {

@@ -9,7 +9,6 @@ import { cn } from "@/lib/utils";
 import {
   ArrowRight01Icon,
   CheckListIcon,
-  Edit02Icon,
   EyeIcon,
   File01Icon,
   FileEditIcon,
@@ -48,7 +47,6 @@ const TOOL_ICON: Record<string, typeof File01Icon> = {
   write_file: FilePlusIcon,
   create_directory: FolderAddIcon,
   edit: FileEditIcon,
-  multi_edit: Edit02Icon,
   bash_run: TerminalIcon,
   bash_background: TerminalIcon,
   bash_logs: TerminalIcon,
@@ -108,7 +106,7 @@ export type ToolProps = ComponentProps<typeof Collapsible> & {
 const HEAVY_CONTENT_TOOLS = new Set([
   "write_file",
   "edit",
-  "multi_edit",
+  "batch_edit",
   "todo_write",
   // run_subagent prompts carry the whole task context (files, excerpts) —
   // rendering the live stream re-lays out a huge text node per token and
@@ -828,7 +826,7 @@ function renderToolOutput(toolName: string, output: unknown): ReactNode | null {
     );
   }
 
-  if (toolName === "edit" || toolName === "multi_edit") {
+  if (toolName === "edit") {
     const ok = o.ok === true || typeof o.replacements === "number";
     if (ok) {
       const reps = typeof o.replacements === "number" ? o.replacements : null;
@@ -843,6 +841,26 @@ function renderToolOutput(toolName: string, output: unknown): ReactNode | null {
           ) : null}
           {path ? (
             <span className="text-muted-foreground">· {path}</span>
+          ) : null}
+        </div>
+      );
+    }
+  }
+  if (toolName === "batch_edit") {
+    const ok = o.ok === true || typeof o.files === "number";
+    if (ok) {
+      const files = typeof o.files === "number" ? o.files : null;
+      const reps = typeof o.replacements === "number" ? o.replacements : null;
+      return (
+        <div className="flex items-center gap-1.5 font-mono text-[11px]">
+          <span className="text-emerald-600 dark:text-emerald-400">✓</span>
+          <span className="text-foreground">
+            {reps != null ? `${reps} edit${reps === 1 ? "" : "s"}` : "applied"}
+          </span>
+          {files != null ? (
+            <span className="text-muted-foreground">
+              · {files} file{files === 1 ? "" : "s"}
+            </span>
           ) : null}
         </div>
       );

@@ -91,22 +91,34 @@ const REGISTRY: Record<string, ToolPresentation> = {
     fence: true,
     remoteSurface: false,
   },
-  multi_edit: {
-    label: "Edit",
-    approvalLabel: "Edit file (batch)",
-    status: (a) => `Editing ${shortPath(a.path)}`,
-    summary: (a) => str(a, "path"),
-    effect: "COMMITTED",
-    fence: true,
-    remoteSurface: false,
-  },
   batch_edit: {
-    status: (a) =>
-      `Batch editing ${Array.isArray(a.edits) ? a.edits.length : 0} files`,
-    summary: (a) =>
-      Array.isArray(a.edits)
-        ? `${a.edits.length} file${a.edits.length === 1 ? "" : "s"}`
-        : null,
+    label: "Edit",
+    approvalLabel: "Apply edits",
+    status: (a) => {
+      const edits = Array.isArray(a.edits) ? a.edits.length : 0;
+      const files = new Set(
+        (Array.isArray(a.edits) ? a.edits : [])
+          .map((e) => (e as { path?: unknown }).path)
+          .filter((p): p is string => typeof p === "string"),
+      ).size;
+      return `Editing ${edits} spot${edits === 1 ? "" : "s"} in ${files} file${files === 1 ? "" : "s"}`;
+    },
+    summary: (a) => {
+      const first = (Array.isArray(a.edits) ? a.edits : []).find(
+        (e) => typeof (e as { path?: unknown }).path === "string",
+      ) as { path?: string } | undefined;
+      const files = new Set(
+        (Array.isArray(a.edits) ? a.edits : [])
+          .map((e) => (e as { path?: unknown }).path)
+          .filter((p): p is string => typeof p === "string"),
+      ).size;
+      const firstPath = first?.path;
+      return firstPath
+        ? files > 1
+          ? `${files} files, starting ${shortPath(firstPath)}`
+          : shortPath(firstPath)
+        : null;
+    },
     effect: "COMMITTED",
     fence: true,
     remoteSurface: false,

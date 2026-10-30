@@ -184,18 +184,6 @@ function resolveEffect(
     return "COMMITTED";
   }
 
-  // multi_edit: check for partial success.
-  if (toolName === "multi_edit") {
-    if (r.applied != null && r.failed != null) {
-      const applied = Number(r.applied);
-      const failed = Number(r.failed);
-      if (failed > 0 && applied > 0) return "PARTIAL";
-      if (failed > 0 && applied === 0) return "ROLLED_BACK";
-    }
-    if (r.error != null) return "ROLLED_BACK";
-    return "COMMITTED";
-  }
-
   // batch_edit: check for rollback.
   if (toolName === "batch_edit") {
     if (r.ok === false) return "ROLLED_BACK";

@@ -17,7 +17,6 @@ vi.mock("../lib/security", () => ({
   checkWritableCanonical: vi.fn(async (p: string) => ({ ok: true as const, canonical: p })),
 }));
 
-const applyEditsModule = await import("./edit");
 const batchEditModule = await import("./batchEdit");
 
 // applyEdits dispatches a `Kai:fs-changed` CustomEvent on window after
@@ -33,9 +32,8 @@ vi.stubGlobal(
   },
 );
 
-// applyEdits is module-private; reach it through the exported tools. The
-// multi_edit execute is driven through a minimal ToolContext with an
-// in-memory file store so the identical-edit path runs end to end.
+// The edit/batch_edit executes are driven through a minimal ToolContext
+// with an in-memory file store so the identical-edit path runs end to end.
 type FileStore = Map<string, string>;
 const files: FileStore = new Map();
 
@@ -65,23 +63,22 @@ const ctx = {
   fileTracker: { markRead: () => {}, markModified: () => {} },
 } as unknown as import("./context").ToolContext;
 
-describe("multi_edit identical-edit hardening", () => {
+describe("batch_edit identical-edit hardening", () => {
   it("skips an identical old/new edit and applies the rest atomically", async () => {
     const path = "/ws/a.ts";
     files.set(path, "const a = 1;\nconst b = 2;\n");
-    const tools = applyEditsModule.buildEditTools(ctx);
+    const tools = batchEditModule.buildBatchEditTools(ctx);
     // AI SDK v6 tool execute signature is (input, options) — pass an empty
     // second arg, and type the result loosely since execute returns unknown.
-    const result = (await tools.multi_edit.execute!(
+    const result = (await tools.batch_edit.execute!(
       {
-        path,
         edits: [
-          { old_string: "const a = 1;", new_string: "const a = 1;" }, // no-op
-          { old_string: "const b = 2;", new_string: "const b = 20;" },
+          { path, old_string: "const a = 1;", new_string: "const a = 1;" }, // no-op
+          { path, old_string: "const b = 2;", new_string: "const b = 20;" },
         ],
       },
       {} as never,
-    )) as { ok?: boolean; replacements?: number; applied?: number; error?: string };
+    )) as { ok?: boolean; replacements?: number; files?: number; error?: string };
     expect(result.ok).toBe(true);
     expect(files.get(path)).toBe("const a = 1;\nconst b = 20;\n");
   });
@@ -89,11 +86,10 @@ describe("multi_edit identical-edit hardening", () => {
   it("errors when the ENTIRE batch is identical no-ops", async () => {
     const path = "/ws/b.ts";
     files.set(path, "hello\n");
-    const tools = applyEditsModule.buildEditTools(ctx);
-    const result = (await tools.multi_edit.execute!(
+    const tools = batchEditModule.buildBatchEditTools(ctx);
+    const result = (await tools.batch_edit.execute!(
       {
-        path,
-        edits: [{ old_string: "hello", new_string: "hello" }],
+        edits: [{ path, old_string: "hello", new_string: "hello" }],
       },
       {} as never,
     )) as { ok?: boolean; error?: string };
@@ -103,33 +99,31 @@ describe("multi_edit identical-edit hardening", () => {
   });
 });
 
-describe("multi_edit stale guard (hash-only, self-write immune)", () => {
+describe("batch_edit stale guard (hash-only, self-write immune)", () => {
   // The tool's OWN writes must never trip the stale-read guard. The old
   // guard compared cache size (UTF-16 chars) against the disk read size
   // (bytes) — any non-ASCII file made them disagree, so the second
-  // multi_edit after a successful first one bounced with "file changed
+  // batch_edit after a successful first one bounced with "file changed
   // since your last read", looping models into single edit calls.
-  it("accepts a second multi_edit after its own write on a non-ASCII file", async () => {
+  it("accepts a second batch_edit after its own write on a non-ASCII file", async () => {
     const path = "/ws/uni.ts";
     files.set(path, 'const s = "héllo → wörld — ünïcode";\nconst a = 1;\n');
-    const tools = applyEditsModule.buildEditTools(ctx);
+    const tools = batchEditModule.buildBatchEditTools(ctx);
     // Simulate the model's read_file: seed the cache from the same string.
     ctx.readCache.set(path, readCacheEntry(files.get(path)!));
 
-    const first = (await tools.multi_edit.execute!(
+    const first = (await tools.batch_edit.execute!(
       {
-        path,
-        edits: [{ old_string: "const a = 1;", new_string: "const a = 2;" }],
+        edits: [{ path, old_string: "const a = 1;", new_string: "const a = 2;" }],
       },
       {} as never,
     )) as { ok?: boolean; error?: string };
     expect(first.ok).toBe(true);
 
-    // Second multi_edit against the content the tool itself wrote.
-    const second = (await tools.multi_edit.execute!(
+    // Second batch_edit against the content the tool itself wrote.
+    const second = (await tools.batch_edit.execute!(
       {
-        path,
-        edits: [{ old_string: "const a = 2;", new_string: "const a = 3;" }],
+        edits: [{ path, old_string: "const a = 2;", new_string: "const a = 3;" }],
       },
       {} as never,
     )) as { ok?: boolean; error?: string };
@@ -143,56 +137,52 @@ describe("multi_edit stale guard (hash-only, self-write immune)", () => {
   it("bounces on a GENUINE external change and counts it toward the escape hatch", async () => {
     const path = "/ws/ext.ts";
     files.set(path, "externally modified content\n");
-    const tools = applyEditsModule.buildEditTools(ctx);
+    const tools = batchEditModule.buildBatchEditTools(ctx);
     // Cache claims a different content than disk — a real external edit.
     ctx.readCache.set(path, { size: 5, hash: 1 });
 
     for (let i = 0; i < 3; i++) {
-      const r = (await tools.multi_edit.execute!(
+      const r = (await tools.batch_edit.execute!(
         {
-          path,
-          edits: [{ old_string: "x", new_string: "y" }],
+          edits: [{ path, old_string: "x", new_string: "y" }],
         },
         {} as never,
       )) as { error?: string };
       expect(r.error).toContain("file changed since your last read");
     }
     // Fourth consecutive resubmission (no re-read between) hits the hatch.
-    const last = (await tools.multi_edit.execute!(
+    const last = (await tools.batch_edit.execute!(
       {
-        path,
-        edits: [{ old_string: "x", new_string: "y" }],
+        edits: [{ path, old_string: "x", new_string: "y" }],
       },
       {} as never,
     )) as { error?: string };
     expect(last.error).toContain("failed 3 times");
   });
 
-  it("accepts line_hint in the multi_edit schema (was silently stripped)", async () => {
+  it("accepts line_hint in the batch_edit schema (was silently stripped)", async () => {
     const path = "/ws/dup.ts";
     files.set(path, "flag = 0\n// midpoint\nflag = 0\n");
-    const tools = applyEditsModule.buildEditTools(ctx);
+    const tools = batchEditModule.buildBatchEditTools(ctx);
     ctx.readCache.set(path, readCacheEntry(files.get(path)!));
     // Sanity: schema now parses line_hint instead of dropping it.
     const parsed = (
-      tools.multi_edit.inputSchema as unknown as {
+      tools.batch_edit.inputSchema as unknown as {
         safeParse: (v: unknown) => {
           success: boolean;
           data?: { edits: { line_hint?: number }[] };
         };
       }
     ).safeParse({
-      path,
-      edits: [{ old_string: "flag = 0", new_string: "flag = 1", line_hint: 3 }],
+      edits: [{ path, old_string: "flag = 0", new_string: "flag = 1", line_hint: 3 }],
     });
     expect(parsed.success).toBe(true);
     expect(parsed.data?.edits[0]?.line_hint).toBe(3);
 
     // End to end: line_hint picks the occurrence near line 3.
-    const r = (await tools.multi_edit.execute!(
+    const r = (await tools.batch_edit.execute!(
       {
-        path,
-        edits: [{ old_string: "flag = 0", new_string: "flag = 1", line_hint: 3 }],
+        edits: [{ path, old_string: "flag = 0", new_string: "flag = 1", line_hint: 3 }],
       },
       {} as never,
     )) as { ok?: boolean; replacements?: number };
@@ -202,19 +192,18 @@ describe("multi_edit stale guard (hash-only, self-write immune)", () => {
   });
 });
 
-describe("multi_edit atomic failure contract", () => {
+describe("batch_edit atomic failure contract", () => {
   it("writes nothing when a later edit fails and identifies its index", async () => {
     const path = "/ws/atomic.ts";
     const original = "alpha\nbeta\ngamma\n";
     files.set(path, original);
     ctx.readCache.set(path, readCacheEntry(original));
-    const tools = applyEditsModule.buildEditTools(ctx);
-    const result = (await tools.multi_edit.execute!(
+    const tools = batchEditModule.buildBatchEditTools(ctx);
+    const result = (await tools.batch_edit.execute!(
       {
-        path,
         edits: [
-          { old_string: "alpha", new_string: "ALPHA" },
-          { old_string: "DOES NOT EXIST", new_string: "x" },
+          { path, old_string: "alpha", new_string: "ALPHA" },
+          { path, old_string: "DOES NOT EXIST", new_string: "x" },
         ],
       },
       {} as never,
@@ -222,15 +211,56 @@ describe("multi_edit atomic failure contract", () => {
       ok?: boolean;
       changed?: boolean;
       failedEdit?: number;
-      applied?: number;
       error?: string;
     };
     expect(result.ok).toBe(false);
     expect(result.changed).toBe(false);
     expect(result.failedEdit).toBe(1);
-    expect(result.applied).toBe(0);
     expect(result.error).toContain("No changes were written");
     expect(files.get(path)).toBe(original);
+  });
+
+  it("edits multiple files in one batch and rolls back nothing on success", async () => {
+    const p1 = "/ws/m1.ts";
+    const p2 = "/ws/m2.ts";
+    files.set(p1, "one\n");
+    files.set(p2, "two\n");
+    const tools = batchEditModule.buildBatchEditTools(ctx);
+    const result = (await tools.batch_edit.execute!(
+      {
+        edits: [
+          { path: p1, old_string: "one", new_string: "ONE" },
+          { path: p2, old_string: "two", new_string: "TWO" },
+        ],
+      },
+      {} as never,
+    )) as { ok?: boolean; files?: number; replacements?: number };
+    expect(result.ok).toBe(true);
+    expect(result.files).toBe(2);
+    expect(result.replacements).toBe(2);
+    expect(files.get(p1)).toBe("ONE\n");
+    expect(files.get(p2)).toBe("TWO\n");
+  });
+
+  it("cross-file failure writes NEITHER file", async () => {
+    const p1 = "/ws/x1.ts";
+    const p2 = "/ws/x2.ts";
+    files.set(p1, "one\n");
+    files.set(p2, "two\n");
+    const tools = batchEditModule.buildBatchEditTools(ctx);
+    const result = (await tools.batch_edit.execute!(
+      {
+        edits: [
+          { path: p1, old_string: "one", new_string: "ONE" },
+          { path: p2, old_string: "MISSING", new_string: "X" },
+        ],
+      },
+      {} as never,
+    )) as { ok?: boolean; error?: string };
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("No changes were written");
+    expect(files.get(p1)).toBe("one\n");
+    expect(files.get(p2)).toBe("two\n");
   });
 });
 
@@ -270,7 +300,10 @@ describe("batch_edit validation failures leave disk untouched", () => {
       {} as never,
     )) as { ok?: boolean; error?: string };
     expect(result.ok).toBeFalsy();
-    expect(result.error).toContain("identical");
+    // The consolidated engine reports a lone no-op as a no-op batch (the
+    // old pre-engine batch_edit said "identical" — same contract, clearer
+    // wording).
+    expect(result.error).toContain("no-ops");
     expect(files.get(path)).toBe(original);
   });
 });

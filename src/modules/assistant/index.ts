@@ -321,7 +321,7 @@ export function describeAssistantCapabilities(
     groups.push("web search/fetch");
   if (allowed.has("read_file") || allowed.has("list_directory") || allowed.has("grep") || allowed.has("glob"))
     groups.push("reading files in your scratch dir");
-  if (allowed.has("write_file") || allowed.has("edit") || allowed.has("multi_edit") || allowed.has("batch_edit") || allowed.has("create_directory"))
+  if (allowed.has("write_file") || allowed.has("edit") || allowed.has("batch_edit") || allowed.has("create_directory"))
     groups.push("writing files in your scratch dir");
   if (allowed.has("bash_run") || allowed.has("bash_background"))
     groups.push("shell commands in your scratch dir");

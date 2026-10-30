@@ -8,9 +8,152 @@ import { nativeForContext, sandboxOverrideForContext, resolvePath, type ToolCont
 import { createCheckpointBatch, snapshotFileForBatch, commitCheckpointBatch } from "../lib/checkpoints";
 import { withFileMutationLock } from "../lib/mutationLock";
 
-type EditResult =
+export type EditResult =
   | { ok: true; replacements: number; bytesWritten: number; path: string }
   | { ok: false; error: string; path: string; editIndex?: number };
+
+/** Compute a batch of edits against IN-MEMORY content without touching
+ *  disk — the consolidated batch_edit applies edits per file through this
+ *  core so it inherits the hardened matcher (EOL normalize/restore,
+ *  fuzzy whitespace fallback, replace_all, line_hint, did-you-mean hints)
+ *  while keeping its own all-or-nothing cross-file write phase.
+ *  Returns the new content, or the failing edit's index + the same
+ *  actionable error applyEdits would surface. */
+export async function computeEdits(
+  content: string,
+  filePath: string,
+  edits: { old_string: string; new_string: string; replace_all?: boolean; line_hint?: number }[],
+): Promise<{ ok: true; content: string; replacements: number } | { ok: false; error: string; editIndex: number }> {
+  const original = content;
+  const useCrlf = original.includes("\r\n");
+  let text = normEol(original);
+  let totalReplacements = 0;
+  let skippedIdentical = 0;
+
+  for (const [editIndex, rawEdit] of edits.entries()) {
+    const oldNorm = normEol(rawEdit.old_string);
+    const newNorm = stripTrailingWs(normEol(rawEdit.new_string), filePath);
+
+    if (oldNorm === newNorm) {
+      skippedIdentical++;
+      continue;
+    }
+    if (oldNorm.length === 0) {
+      return { ok: false, error: "old_string cannot be empty", editIndex };
+    }
+    if (rawEdit.replace_all) {
+      let n = 0;
+      let searchFrom = 0;
+      while (searchFrom < text.length) {
+        const idx = text.indexOf(oldNorm, searchFrom);
+        if (idx === -1) break;
+        text = text.slice(0, idx) + newNorm + text.slice(idx + oldNorm.length);
+        searchFrom = idx + newNorm.length;
+        n++;
+        if (n > 1000) break;
+      }
+      if (n === 0) {
+        const fz = fuzzyHits(text, oldNorm);
+        if (!fz) {
+          return {
+            ok: false,
+            error: `old_string not found: ${JSON.stringify(oldNorm.slice(0, 80))}.${getDidYouMeanHint(text, oldNorm)}`,
+            editIndex,
+          };
+        }
+        if (fz.length > MAX_FUZZY_HITS) {
+          return {
+            ok: false,
+            error: `old_string matched more than ${MAX_FUZZY_HITS} locations after whitespace relaxation — refusing to rewrite that broadly. Narrow old_string.`,
+            editIndex,
+          };
+        }
+        for (const h of [...fz].sort((a, b) => b.index - a.index)) {
+          text = text.slice(0, h.index) + newNorm + text.slice(h.index + h.length);
+        }
+        n = fz.length;
+      }
+      totalReplacements += n;
+    } else {
+      let idx = text.indexOf(oldNorm);
+      let matchLen = oldNorm.length;
+      if (idx === -1) {
+        const fz = fuzzyHits(text, oldNorm);
+        if (!fz) {
+          return {
+            ok: false,
+            error: `old_string not found: ${JSON.stringify(oldNorm.slice(0, 80))}.${getDidYouMeanHint(text, oldNorm)}`,
+            editIndex,
+          };
+        }
+        let chosen = fz[0];
+        if (fz.length > 1) {
+          if (rawEdit.line_hint) {
+            chosen = fz.reduce((best, cur) =>
+              Math.abs(cur.line - rawEdit.line_hint!) <
+              Math.abs(best.line - rawEdit.line_hint!)
+                ? cur
+                : best,
+            );
+          } else {
+            return {
+              ok: false,
+              error:
+                `old_string matched ${fz.length} locations (lines ${fz
+                  .slice(0, 8)
+                  .map((h) => h.line)
+                  .join(", ")}) only after whitespace relaxation — nothing was changed. Copy the block verbatim from the file (tabs vs spaces included), widen it with surrounding context, or pass line_hint to pick one.`,
+              editIndex,
+            };
+          }
+        }
+        idx = chosen.index;
+        matchLen = chosen.length;
+      }
+      const secondIdx = text.indexOf(oldNorm, idx + matchLen);
+      if (secondIdx !== -1 && !rawEdit.line_hint) {
+        return {
+          ok: false,
+          error:
+            "old_string is not unique. Provide more surrounding context, set replace_all=true, or provide line_hint to disambiguate.",
+          editIndex,
+        };
+      }
+      let chosenIdx = idx;
+      if (secondIdx !== -1 && rawEdit.line_hint) {
+        const occurrences: number[] = [idx, secondIdx];
+        let next = secondIdx;
+        for (let i = 0; i < 50; i++) {
+          const nidx = text.indexOf(oldNorm, next + oldNorm.length);
+          if (nidx === -1) break;
+          occurrences.push(nidx);
+          next = nidx;
+        }
+        chosenIdx = occurrences.reduce((best, cur) => {
+          const cLine = text.slice(0, cur).split("\n").length;
+          const bLine = text.slice(0, best).split("\n").length;
+          return Math.abs(cLine - rawEdit.line_hint!) < Math.abs(bLine - rawEdit.line_hint!)
+            ? cur : best;
+        });
+      }
+      text = text.slice(0, chosenIdx) + newNorm + text.slice(chosenIdx + matchLen);
+      totalReplacements += 1;
+    }
+  }
+
+  if (totalReplacements === 0 && skippedIdentical > 0 && edits.length > 0) {
+    return {
+      ok: false,
+      error: `all ${skippedIdentical} edit(s) are no-ops (old_string === new_string). Nothing to change — if you intended an edit, correct the strings.`,
+      editIndex: 0,
+    };
+  }
+
+  if (useCrlf) {
+    text = text.replace(/\n/g, "\r\n");
+  }
+  return { ok: true, content: text, replacements: totalReplacements };
+}
 
 /** Strip trailing whitespace from each line, preserving line endings.
  *  Exempt .md/.mdx where trailing spaces are meaningful (hard line breaks). */
@@ -174,10 +317,10 @@ function getDidYouMeanHint(haystack: string, needle: string): string {
   return `${wsDiag} Similar lines in file:\n${best.map((m) => `  L${m.lineNum}: ${JSON.stringify(m.content.trimEnd())}`).join("\n")}`;
 }
 
-async function applyEdits(
+export async function applyEdits(
   abs: string,
   edits: { old_string: string; new_string: string; replace_all?: boolean; line_hint?: number }[],
-  kind: "edit" | "multi_edit",
+  kind: "edit" | "batch_edit",
   readCache: Map<string, { size: number; hash: number }>,
   client: typeof native = native,
 ): Promise<EditResult> {
@@ -408,8 +551,10 @@ async function applyEdits(
  * (model skipped read_file, session was compacted, or cache was reset),
  * read it once here instead of hard-failing. Returns null on success
  * (cache now warm) or an error result to return to the model.
+ * Exported for batch_edit (the consolidated multi-file tool) — it shares
+ * the same read-before-edit contract per file.
  */
-async function ensureReadCache(
+export async function ensureReadCache(
   abs: string,
   ctx: ToolContext,
   client: typeof native = native,
@@ -434,11 +579,13 @@ async function ensureReadCache(
 }
 
 /** Per-path edit failure counter. Resets on success or session switch.
- *  Scoped per ToolContext so cross-session counters don't interfere. */
+ *  Scoped per ToolContext so cross-session counters don't interfere.
+ *  Exported for batch_edit — the shared escape hatch (N failures on one
+ *  file → suggest write_file) must count across both entry points. */
 const editFailures = new WeakMap<ToolContext, Map<string, number>>();
 const MAX_EDIT_RETRIES = 3;
 
-function getEditFailures(ctx: ToolContext): Map<string, number> {
+export function getEditFailures(ctx: ToolContext): Map<string, number> {
   let map = editFailures.get(ctx);
   if (!map) {
     map = new Map();
@@ -447,12 +594,14 @@ function getEditFailures(ctx: ToolContext): Map<string, number> {
   return map;
 }
 
+export const EDIT_MAX_RETRIES = MAX_EDIT_RETRIES;
+
 export function buildEditTools(ctx: ToolContext) {
   const native = nativeForContext(ctx);
   return {
     edit: tool({
       description:
-        "Replace text in an existing file. HOW IT WORKS: the tool searches the file for old_string and swaps it for new_string. RULES: (1) old_string must be copied EXACTLY from the file — every character, space, and indent; never invent or paraphrase it. (2) To INSERT without deleting, set old_string to the line before/after the spot and repeat that line inside new_string with your addition. (3) If old_string appears more than once, either widen it with surrounding lines to make it unique, or pass line_hint. (4) To create a NEW file use write_file instead. (5) If you need multiple changes to the SAME file, use multi_edit — it applies edits sequentially inside one atomic write. Never emit separate edit calls for the same file in one step (they race each other). Asks for user approval. The prior content is auto-checkpointed — revert a bad edit with `checkpoint_undo`.",
+        "Replace text in an existing file. HOW IT WORKS: the tool searches the file for old_string and swaps it for new_string. RULES: (1) old_string must be copied EXACTLY from the file — every character, space, and indent; never invent or paraphrase it. (2) To INSERT without deleting, set old_string to the line before/after the spot and repeat that line inside new_string with your addition. (3) If old_string appears more than once, either widen it with surrounding lines to make it unique, or pass line_hint. (4) To create a NEW file use write_file instead. (5) If you need multiple changes — to one file or several — use batch_edit: each edit entry carries its own path; all edits apply atomically (any failure writes nothing). Never emit separate edit calls for the same file in one step (they race each other). Asks for user approval. The prior content is auto-checkpointed — revert a bad edit with `checkpoint_undo`.",
       inputSchema: z.object({
         path: z.string().optional(),
         old_string: z
@@ -535,128 +684,9 @@ export function buildEditTools(ctx: ToolContext) {
       },
     }),
 
-    multi_edit: tool({
-      description:
-        "Apply several replacements to ONE file atomically. REQUIRED shape: {path: \"src/app.ts\", edits: [{old_string: \"...\", new_string: \"...\"}]}. Each old_string must match the current file exactly; widen it for uniqueness or use line_hint. If ANY edit fails, NOTHING is written and the failure identifies its edit index. Re-read the file and resubmit corrected edits instead of falling back to PowerShell or write_file. Every write is auto-checkpointed for checkpoint_undo.",
-      inputSchema: z.object({
-        path: z
-          .string({ error: "path is required and must be a string" })
-          .min(1)
-          .describe("The ONE file to edit, absolute or relative to the terminal cwd."),
-        edits: z
-          .array(
-            z
-              .object({
-                old_string: z.string(),
-                new_string: z.string(),
-                replace_all: z.boolean().optional(),
-                line_hint: z
-                  .number()
-                  .optional()
-                  .describe("Approximate 1-based line number for a repeated old_string."),
-              })
-              .strict(),
-          )
-          .min(1),
-      }),
-      needsApproval: true,
-      execute: async ({ path, edits }) => {
-        const reqPath = resolvePath(path, ctx.getCwd());
-        const safety = await checkWritableCanonical(reqPath, native.canonicalize, await sandboxOverrideForContext(ctx));
-        if (!safety.ok) return { error: safety.reason, path: reqPath };
-        const abs = safety.canonical;
-        const guard = await ensureReadCache(abs, ctx, native);
-        if (guard) return guard;
-        const failures = getEditFailures(ctx).get(abs) ?? 0;
-        if (failures >= MAX_EDIT_RETRIES) {
-          getEditFailures(ctx).delete(abs);
-          return {
-            error: `multi_edit failed ${MAX_EDIT_RETRIES} times on this file. Use write_file to replace the entire file content instead.`,
-            path: abs,
-          };
-        }
-        // STALE-READ GUARD: the model authors all old_strings against the
-        // content it last READ. If anything changed the file since (another
-        // agent edit, a background process, a formatter), the batch would
-        // fail with confusing not-found errors — or worse, partially apply
-        // against content the model never saw. Compare the cached read hash
-        // against disk up front and bounce with one clear instruction.
-        // HASH ONLY: size is disk bytes here but UTF-16 length in the cache
-        // (they disagree on any non-ASCII file), so comparing it produced a
-        // false "file changed" bounce after every one of this tool's own
-        // writes — the loop that made models abandon multi_edit for edit.
-        // The bounce is COUNTED so a model that resubmits regardless hits
-        // the escape hatch above instead of looping forever.
-        const cachedBefore = ctx.readCache.get(abs);
-        if (cachedBefore) {
-          const r = await native.readFile(abs);
-          if (r.kind === "text" && djb2(r.content) !== cachedBefore.hash) {
-            getEditFailures(ctx).set(abs, failures + 1);
-            return {
-              error:
-                "file changed since your last read — edited by something outside this session's write pipeline (another agent, a formatter, a process). Read it again with force: true and re-author the edits against the current content before submitting.",
-              path: abs,
-            };
-          }
-        }
-        return withFileMutationLock([abs], async () => {
-          const checkpoint = createCheckpointBatch(
-            ctx.getRealWorkspaceRoot?.() ?? ctx.getWorkspaceRoot() ?? "",
-            ctx.getSessionId() ?? "",
-            native,
-          );
-          await snapshotFileForBatch(checkpoint, abs);
-          // Try batch first — fast path when all old_strings match.
-          let result = await applyEdits(
-            abs,
-            edits,
-            "multi_edit",
-            ctx.readCache,
-            native,
-          );
-          // Retry once if old_string wasn't found (concurrent same-file edit
-          // shifted content). Re-read from disk fresh.
-          if (
-            "error" in result &&
-            result.error.startsWith("old_string not found")
-          ) {
-            ctx.readCache.delete(abs);
-            result = await applyEdits(
-              abs,
-              edits,
-              "multi_edit",
-              ctx.readCache,
-              native,
-            );
-          }
-          if (result.ok) {
-            getEditFailures(ctx).delete(abs);
-            ctx.fileTracker.markModified(abs);
-            await commitCheckpointBatch(checkpoint);
-            return result;
-          }
-          // ATOMIC CONTRACT: applyEdits constructs the whole output in
-          // memory and has not written anything on this path. Never salvage
-          // individual edits: partial application makes a model retry work
-          // that already landed and corrupts the file.
-          getEditFailures(ctx).set(abs, failures + 1);
-          const failureIndex = result.editIndex ?? 0;
-          return {
-            ok: false,
-            error: `${result.error}\n\nNo changes were written. Re-read the file and resubmit corrected edits; do not retry blindly.`,
-            path: abs,
-            changed: false,
-            failedEdit: failureIndex,
-            applied: 0,
-            failed: edits.length,
-          } as EditResult;
-        });
-      },
-    }),
-
     checkpoint_undo: tool({
       description:
-        "Revert the last AI-write batch (write_file / edit / multi_edit / batch_edit) to its pre-write snapshot — every one of those tools auto-checkpoints before mutating, so this is always available after a write. Call it when an edit produced an unexpected result, when the user says 'undo that' / 'revert', or when you need to abandon a partial change set and retry a different approach. Takes no arguments; reverts the most recent batch only.",
+        "Revert the last AI-write batch (write_file / edit / batch_edit) to its pre-write snapshot — every one of those tools auto-checkpoints before mutating, so this is always available after a write. Call it when an edit produced an unexpected result, when the user says 'undo that' / 'revert', or when you need to abandon a partial change set and retry a different approach. Takes no arguments; reverts the most recent batch only.",
       inputSchema: z.object({}),
       needsApproval: true,
       execute: async () => {

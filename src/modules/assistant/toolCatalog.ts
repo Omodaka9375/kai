@@ -75,8 +75,7 @@ export const TOOL_CATALOG: readonly ToolEntry[] = [
   // ── WRITE: mutate files / state / spend API credits (fenced to scratch). ─
   { name: "write_file", tier: "write", blurb: "Create or overwrite a file." },
   { name: "edit", tier: "write", blurb: "Replace text in a file." },
-  { name: "multi_edit", tier: "write", blurb: "Several edits to one file atomically." },
-  { name: "batch_edit", tier: "write", blurb: "Edits across multiple files atomically." },
+  { name: "batch_edit", tier: "write", blurb: "Several edits — one file or many — applied atomically." },
   { name: "create_directory", tier: "write", blurb: "Create a directory." },
   { name: "convert_to_pdf", tier: "write", blurb: "Convert md/txt/docx to PDF." },
   { name: "convert_image", tier: "write", blurb: "Convert / resize an image." },

@@ -160,7 +160,7 @@ function PlanRow({
               </span>
               <span className="text-destructive">−{stats.removed}</span>
               <span className="text-muted-foreground">
-                {item.kind === "multi_edit" ? "multi-edit" : item.kind}
+                {item.kind === "batch_edit" ? "multi-edit" : item.kind}
               </span>
             </div>
           ) : (

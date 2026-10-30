@@ -4,7 +4,7 @@ import { native } from "../lib/native";
 export type QueuedEdit = {
   id: string;
   /** Tool that produced the queued mutation. */
-  kind: "write_file" | "edit" | "multi_edit" | "create_directory";
+  kind: "write_file" | "edit" | "batch_edit" | "create_directory";
   path: string;
   /** Original file content (empty for new files / create_directory). */
   originalContent: string;

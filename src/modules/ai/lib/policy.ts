@@ -68,12 +68,6 @@ export const TOOL_ACTION_CLASSIFIER: Record<string, ToolActionInfo> = {
     requiresApproval: true,
     description: "Modify file contents",
   },
-  multi_edit: {
-    category: "modify",
-    riskLevel: "medium",
-    requiresApproval: true,
-    description: "Apply multiple file modifications",
-  },
 
   // Create operations - medium risk
   create_directory: {

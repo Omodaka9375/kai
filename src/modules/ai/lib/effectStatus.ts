@@ -6,7 +6,7 @@
  *
  *   - UNKNOWN ≠ NONE: "the command timed out, we don't know if it ran"
  *     is VERY different from "the command did nothing."
- *   - PARTIAL: multi_edit with 3/5 edits applied — the file is in an
+ *   - PARTIAL: a batched edit tool with 3/5 edits applied — the file is in an
  *     intermediate state the model needs to understand.
  *   - ROLLED_BACK: batch_edit tried to apply across files, failed, and
  *     reverted — no changes survived.

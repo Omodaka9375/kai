@@ -36,6 +36,7 @@ import {
 } from "./grader";
 import { buildFsTools } from "../../tools/fs";
 import { buildEditTools } from "../../tools/edit";
+import { buildBatchEditTools } from "../../tools/batchEdit";
 import { withToolRedaction } from "../toolFencing";
 
 export type FitCheckMissionReport = {
@@ -142,9 +143,11 @@ async function runOneMission(
   // Minimal tool subset with recording + injected-error wrapping.
   const fsTools = buildFsTools(ctx);
   const editTools = buildEditTools(ctx);
+  const batchTools = buildBatchEditTools(ctx);
   const raw: Record<string, unknown> = {
     ...fsTools,
     ...editTools,
+    ...batchTools,
   };
   let firstEditInjected = false;
   let firstEditInput: string | null = null;
@@ -160,12 +163,12 @@ async function runOneMission(
       ...(toolObj as object),
       execute: async (input: unknown, options?: unknown) => {
         calls.push({ tool: name, executed: true });
-        // Injected-error drill: first edit/multi_edit call returns a stale-
+        // Injected-error drill: first edit/batch_edit call returns a stale-
         // anchor error; a retry with a DIFFERENT input counts as recovery.
         if (
           injectErr &&
           !firstEditInjected &&
-          (name === "edit" || name === "multi_edit")
+          (name === "edit" || name === "batch_edit")
         ) {
           firstEditInjected = true;
           firstEditInput = JSON.stringify(input);
@@ -179,7 +182,7 @@ async function runOneMission(
         if (
           injectErr &&
           firstEditInjected &&
-          (name === "edit" || name === "multi_edit") &&
+          (name === "edit" || name === "batch_edit") &&
           recoveredAfterInjectedError === false
         ) {
           const current = JSON.stringify(input);

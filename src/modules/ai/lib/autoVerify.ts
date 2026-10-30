@@ -33,7 +33,6 @@ import { native as ambientNative, type NativeClient } from "./native";
 /** Tools whose success marks the project dirty for end-of-run verification. */
 export const WRITE_TOOLS = new Set([
   "edit",
-  "multi_edit",
   "write_file",
   "batch_edit",
   "rename",

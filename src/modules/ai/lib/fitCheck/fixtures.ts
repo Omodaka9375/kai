@@ -46,7 +46,7 @@ export type FitFixture = {
    *  error instead of executing — the recovery drill. The injected error
    *  mimics a stale-anchor edit failure so the model must re-read and
    *  retry differently. */
-  injectErrorOnFirstCall?: { tool: "edit" | "multi_edit"; error: string };
+  injectErrorOnFirstCall?: { tool: "edit" | "batch_edit"; error: string };
   /** For the control mission: grading reads this file after the run. */
   expects?: { answerFile: string; answerRe: string };
 };
@@ -163,7 +163,7 @@ export function fixAndRecoverFixture(seed: FitCheckSeed): FitFixture {
       `When done, reply with exactly: FIX_DONE`,
     ].join("\n"),
     files,
-    // The runner injects this as the result of the FIRST edit/multi_edit
+    // The runner injects this as the result of the FIRST edit/batch_edit
     // call: the model must NOT repeat the identical call; it must re-read
     // and retry. Grading requires the fix AND a changed second attempt.
     injectErrorOnFirstCall: {

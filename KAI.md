@@ -109,11 +109,11 @@ Machine-checked by `src/modules/ai/lib/kaiMdDriftGate.test.ts` against `src/modu
 Card carve-outs (never auto-approved, even under auto-approve-all): elevated `bash_run`, `look_at_screen`, commit-signing git commits.
 
 - Auto-execute: `bash_kill`, `bash_list`, `bash_logs`, `display_image`, `generate_image`, `generate_video`, `get_terminal_output`, `gmail_read`, `glob`, `grep`, `list_directory`, `mcp_list_servers`, `open_preview`, `play_radio`, `project_status`, `radio_list_stations`, `radio_now_playing`, `read_file`, `social_read`, `stop_radio`, `suggest_command`, `todo_write`, `voice_settings`, `watch_kill`, `watch_list`, `web_browse`, `web_search`
-- Approval-required: `bash_background`, `bash_run`, `batch_edit`, `checkpoint_undo`, `convert_image`, `convert_to_pdf`, `create_directory`, `display_video`, `edit`, `look_at_screen`, `mcp_add_server`, `multi_edit`, `run_subagent`, `send_to_project`, `save_memory`, `watch_create`, `write_file`
+- Approval-required: `bash_background`, `bash_run`, `batch_edit`, `checkpoint_undo`, `convert_image`, `convert_to_pdf`, `create_directory`, `display_video`, `edit`, `look_at_screen`, `mcp_add_server`, `run_subagent`, `send_to_project`, `save_memory`, `watch_create`, `write_file`
 
 ### Agent tool reliability
 
-- `multi_edit` has ONE canonical shape: required top-level `path` + `edits[]` (no per-edit path). Any failed edit means the entire batch writes nothing; the error reports the failing index and `changed: false`, so retries cannot duplicate partial work.
+- `batch_edit` is the ONE multi-edit tool (the old `multi_edit` was consolidated into it — do not reintroduce a second edit tool). Canonical shape: `edits: [{path, old_string, new_string}]` — every edit carries its own path; one file or many, same tool. Any failed edit means the entire batch writes nothing; the error names the failing edit and `changed: false`, so retries cannot duplicate partial work. Same-file edits compound in order. It shares edit.ts's hardened matcher (fuzzy whitespace fallback, replace_all, line_hint), stale-read guard, 3-strike counter, plan-mode queueing, and checkpointing via `computeEdits`/`ensureReadCache`/`getEditFailures` exports.
 - On Windows, reject PowerShell read-modify-write pipelines (`Get-Content | Set-Content`, `[IO.File]::ReadAllText` + `WriteAllText`) for source-file edits. Use edit tools for checkpointing, same-file locking, and line-ending preservation; new artifacts and builds/tests/git are still allowed.
 - PowerShell commands are parser-validated and executed verbatim. The deferred `Invoke-Expression | Out-Default` wrapper still isolates malformed commands while preserving cwd and flushing output; no silent quote repair.
 

@@ -27,7 +27,7 @@ describe("Tool card streaming-input freeze guard", () => {
     const m = src.match(/const HEAVY_CONTENT_TOOLS = new Set\(\[([\s\S]*?)\]\)/);
     expect(m).not.toBeNull();
     const setBody = m?.[1] ?? "";
-    for (const name of ["write_file", "edit", "multi_edit", "todo_write", "run_subagent"]) {
+    for (const name of ["write_file", "edit", "batch_edit", "todo_write", "run_subagent"]) {
       expect(setBody).toContain(`"${name}"`);
     }
   });

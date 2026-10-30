@@ -4,7 +4,6 @@ import { cn } from "@/lib/utils";
 import {
   AiBrain03Icon,
   Cancel01Icon,
-  Edit02Icon,
   FileEditIcon,
   FilePlusIcon,
   FolderAddIcon,
@@ -36,7 +35,6 @@ type Props = {
 const TOOL_ICON: Record<string, typeof FilePlusIcon> = {
   write_file: FilePlusIcon,
   edit: FileEditIcon,
-  multi_edit: Edit02Icon,
   create_directory: FolderAddIcon,
   bash_run: TerminalIcon,
   bash_background: TerminalIcon,
@@ -459,15 +457,26 @@ function PreviewBlock({
       </div>
     );
   }
-  if (toolName === "multi_edit") {
+  if (toolName === "batch_edit") {
     const edits = Array.isArray(input.edits)
-      ? (input.edits as Array<{ old_string?: string; new_string?: string }>)
+      ? (input.edits as Array<{ path?: string }>)
       : [];
+    const files = new Set(
+      edits.map((e) => e.path).filter((p): p is string => !!p),
+    );
     return (
       <div className="space-y-0.5 font-mono text-[11px]">
-        <div className="text-muted-foreground">{String(input.path ?? "")}</div>
+        {Array.from(files)
+          .slice(0, 3)
+          .map((p) => (
+            <div key={p} className="text-muted-foreground">
+              {p}
+            </div>
+          ))}
         <div className="text-[10.5px] text-muted-foreground/80">
-          {edits.length} edit{edits.length === 1 ? "" : "s"} · review in the
+          {edits.length} edit{edits.length === 1 ? "" : "s"} in {files.size} file
+          {files.size === 1 ? "" : "s"}
+          {files.size > 3 ? ` (+${files.size - 3} more)` : ""} · review in the
           diff tab
         </div>
       </div>

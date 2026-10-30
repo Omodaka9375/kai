@@ -68,7 +68,7 @@ function collectLastMutationIdxPerPath(
       const name = part.toolName;
       if (
         name === "edit" ||
-        name === "multi_edit" ||
+        name === "batch_edit" ||
         name === "write_file" ||
         name === "create_directory"
       ) {
