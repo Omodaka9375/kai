@@ -133,6 +133,19 @@ fn acquire_os_poll_lease_named(name: &str) -> Result<Option<PollLease>, String> 
 
 #[cfg(unix)]
 fn acquire_os_poll_lease() -> Result<Option<PollLease>, String> {
+    // Production name: keeps the historical `~/.kai/telegram-poller.lock`
+    // path so existing deployments keep their lease semantics.
+    acquire_os_poll_lease_named("telegram-poller")
+}
+
+/// Unix mirror of the Windows `_named` variant: `name` selects the flock'd
+/// lock file under `~/.kai`. Tests pass their own per-test name so a LIVE
+/// KAI instance holding the production lock (dev machines run KAI while
+/// testing KAI) cannot fail the exclusivity test for environment reasons.
+/// flock is per open-file-description, so the contender in the same
+/// process is still a real contention test.
+#[cfg(unix)]
+fn acquire_os_poll_lease_named(name: &str) -> Result<Option<PollLease>, String> {
     use std::os::fd::IntoRawFd;
     let dir = dirs::home_dir()
         .ok_or_else(|| "no home directory for Telegram poll lease".to_string())?
@@ -141,7 +154,7 @@ fn acquire_os_poll_lease() -> Result<Option<PollLease>, String> {
     let file = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
-        .open(dir.join("telegram-poller.lock"))
+        .open(dir.join(format!("{name}.lock")))
         .map_err(|e| format!("poll lease open: {e}"))?;
     let fd = file.into_raw_fd();
     // SAFETY: fd is live and owned by this function. On contention/error it
@@ -1242,6 +1255,16 @@ mod tests {
         drop(acquired);
         let takeover = acquire_os_poll_lease_named(&name).unwrap();
         assert!(takeover.is_some());
+        drop(takeover);
+        // Unix lock files persist after release; Windows named mutexes die
+        // with the handle. Best-effort tidy so ~/.kai doesn't collect a
+        // per-test litter file on every dev-machine run.
+        #[cfg(unix)]
+        {
+            if let Some(home) = dirs::home_dir() {
+                let _ = std::fs::remove_file(home.join(".kai").join(format!("{name}.lock")));
+            }
+        }
     }
 
     #[test]
