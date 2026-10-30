@@ -134,7 +134,14 @@ export function ProjectRail({
                     {project.active ? (
                       <span className="absolute -left-1.5 h-4 w-0.5 rounded-r bg-foreground/70" />
                     ) : null}
-                    <HugeiconsIcon icon={Folder01Icon} size={17} strokeWidth={project.active ? 2 : 1.75} />
+                    <HugeiconsIcon
+                      icon={Folder01Icon}
+                      size={17}
+                      strokeWidth={project.active ? 2 : 1.75}
+                      // Subtle per-project hue so tiles stay recognizable at a
+                      // glance. Low saturation/lightness keeps it on-theme.
+                      style={{ color: projectIconColor(project.id) }}
+                    />
                     <TileStatusDot status={project.status} projectId={project.id} />
                   </button>
                 </TooltipTrigger>
@@ -279,6 +286,17 @@ function GroupArcs({
 function isProjectAgentBusy(projectId: string): boolean {
   const s = getProjectAgentStatus(projectId);
   return s === "streaming" || s === "thinking";
+}
+
+/** Deterministic, subtle per-project icon hue: hash -> hsl(h, 45%, 55%).
+ *  Same hash scheme as groupArcColor but muted — enough to tell projects
+ *  apart at a glance without fighting the theme. Dark mode lightens a touch. */
+function projectIconColor(projectId: string): string {
+  let h = 0;
+  for (let i = 0; i < projectId.length; i++) {
+    h = (h * 31 + projectId.charCodeAt(i)) >>> 0;
+  }
+  return `hsl(${h % 360} 45% 52%)`;
 }
 
 /** Deterministic arc hue per group id: hash -> hsl(h, 70%, 55%) so concurrent
