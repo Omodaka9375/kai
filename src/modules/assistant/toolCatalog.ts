@@ -66,6 +66,11 @@ export const TOOL_CATALOG: readonly ToolEntry[] = [
     tier: "read",
     blurb: "Search and read your Gmail (read-only). Off by default — needs the app password from Settings → General.",
   },
+  {
+    name: "social_read",
+    tier: "read",
+    blurb: "Search X/Twitter and read account timelines — read-only. Off by default — needs the developer Bearer token from Settings → General.",
+  },
 
   // ── WRITE: mutate files / state / spend API credits (fenced to scratch). ─
   { name: "write_file", tier: "write", blurb: "Create or overwrite a file." },
@@ -107,7 +112,10 @@ export const TIER_HINTS: Record<ToolTier, string> = {
  *  existing installs never see any new tool until they tick it either, since
  *  allowedTools is a persisted explicit list). */
 export const DEFAULT_ALLOWED_TOOLS: readonly string[] = TOOL_CATALOG.filter(
-  (t) => t.tier === "read" && t.name !== "gmail_read",
+  (t) =>
+    t.tier === "read" &&
+    t.name !== "gmail_read" &&
+    t.name !== "social_read",
 ).map((t) => t.name);
 
 /** Names in a given tier (used by the picker's per-tier master toggle). */

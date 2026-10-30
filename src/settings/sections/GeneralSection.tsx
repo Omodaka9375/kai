@@ -52,6 +52,7 @@ import {
   gmailAccountEmail,
   setGmailSecret,
 } from "@/modules/ai/tools/gmail";
+import { clearXBearer, setXBearer, xBearerSet } from "@/modules/ai/tools/social";
 
 const APPEARANCE: {
   id: ThemePref;
@@ -401,6 +402,7 @@ export function GeneralSection() {
       </div>
 
       <GmailCard />
+      <SocialCard />
     </div>
   );
 }
@@ -524,5 +526,109 @@ function Label({ children }: { children: React.ReactNode }) {
     <span className="text-[11px] font-medium tracking-tight text-muted-foreground">
       {children}
     </span>
+  );
+}
+
+/**
+ * X (Twitter) card — developer Bearer token for the agent's read-only
+ * social_read tool. Same storage contract as the Gmail card: OS keychain
+ * under service "kai", never the settings store.
+ *
+ * Read-only is enforced in social.ts: only search + timeline GETs are
+ * implemented — no code path can post, like, or follow.
+ */
+function SocialCard() {
+  const [xToken, setXToken] = useState("");
+  const [xConfigured, setXConfigured] = useState(false);
+  const [status, setStatus] = useState("");
+  const [isError, setIsError] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    void xBearerSet().then(setXConfigured);
+  }, []);
+
+  const onSaveX = async () => {
+    setBusy(true);
+    setIsError(false);
+    setStatus("");
+    try {
+      await setXBearer(xToken);
+      setXConfigured(true);
+      setXToken("");
+      setStatus("Saved. The agent can now search X and read account timelines (read-only).");
+    } catch (e) {
+      setIsError(true);
+      setStatus(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onRemoveX = async () => {
+    setBusy(true);
+    try {
+      await clearXBearer();
+      setXConfigured(false);
+      setStatus("X token removed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-4 rounded-2xl border border-border bg-card/50 p-4">
+      <div>
+        <div className="text-sm font-medium">X / Twitter (read-only)</div>
+        <div className="text-xs text-muted-foreground">
+          Lets the agent search X and read the timelines of accounts you name
+          — reactions, sentiment, "what's happening" questions. Posting,
+          liking, and following are not implemented; the tool cannot do them.
+        </div>
+      </div>
+
+      <SettingRow
+        title="Developer Bearer token"
+        description={
+          xConfigured
+            ? "A Bearer token is configured. Replace by pasting a new one."
+            : "From developer.x.com — your app's Bearer Token (search and user-timeline reads need a paid developer tier). Stored in your OS keychain, never on disk in settings."
+        }
+      >
+        <div className="flex w-full items-center gap-2">
+          <Input
+            type="password"
+            value={xToken}
+            placeholder="Bearer token"
+            onChange={(e) => setXToken(e.target.value)}
+            className="flex-1"
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={busy || !xToken.trim()}
+            onClick={() => void onSaveX()}
+          >
+            Save
+          </Button>
+          {xConfigured ? (
+            <Button variant="ghost" size="sm" disabled={busy} onClick={() => void onRemoveX()}>
+              Remove
+            </Button>
+          ) : null}
+        </div>
+      </SettingRow>
+
+      {status ? (
+        <div
+          className={cn(
+            "rounded-lg px-3 py-2 text-xs",
+            isError ? "bg-red-500/10 text-red-500" : "bg-primary/5 text-muted-foreground",
+          )}
+        >
+          {status}
+        </div>
+      ) : null}
+    </div>
   );
 }

@@ -47,9 +47,12 @@ describe("DEFAULT_ALLOWED_TOOLS", () => {
     // fresh install: it reads the owner's private mailbox, which deserves an
     // explicit grant, not a default.
     expect([...DEFAULT_ALLOWED_TOOLS].sort()).toEqual(
-      toolsInTier("read").filter((n) => n !== "gmail_read").sort(),
+      toolsInTier("read")
+        .filter((n) => n !== "gmail_read" && n !== "social_read")
+        .sort(),
     );
     expect(DEFAULT_ALLOWED_TOOLS).not.toContain("gmail_read");
+    expect(DEFAULT_ALLOWED_TOOLS).not.toContain("social_read");
     for (const dangerous of [
       "bash_run",
       "write_file",

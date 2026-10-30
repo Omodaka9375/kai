@@ -206,6 +206,21 @@ const REGISTRY: Record<string, ToolPresentation> = {
     fence: true,
     remoteSurface: true,
   },
+  social_read: {
+    label: "X / Twitter",
+    approvalLabel: "Read X (Twitter)",
+    status: (a) =>
+      str(a, "username")
+        ? `Reading @${str(a, "username")} on X`
+        : `Searching X: ${ellipsize(str(a, "query") ?? "", 40)}`,
+    summary: (a) =>
+      (str(a, "username") ? `@${str(a, "username")}` : str(a, "query")) ?? null,
+    // Posts are sender-authored untrusted text — fence + provenance like
+    // web content and mail.
+    effect: "NONE",
+    fence: true,
+    remoteSurface: true,
+  },
 
   // ── Structure / delegation ────────────────────────────────────────────
   todo_write: {

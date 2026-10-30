@@ -19,6 +19,7 @@ import { buildRadioTools } from "./radio";
 import { buildVoiceTools } from "./voice";
 import { buildGroupTools } from "./group";
 import { buildGmailTools } from "./gmail";
+import { buildSocialTools } from "./social";
 
 export { resolvePath, type ToolContext } from "./context";
 
@@ -40,6 +41,7 @@ export function buildCoreTools(ctx: import("./context").ToolContext) {
     ...buildVoiceTools(ctx),
     ...buildGroupTools(ctx),
     ...buildGmailTools(ctx),
+    ...buildSocialTools(ctx),
   } as const;
 }
 
