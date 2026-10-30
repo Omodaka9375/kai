@@ -3,6 +3,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -17,7 +18,21 @@ import {
 } from "@/modules/shortcuts/shortcuts";
 import type { Tab } from "@/modules/tabs";
 import { TabBar } from "@/modules/tabs";
-import { FloppyDiskIcon, KeyboardIcon, SidebarLeftIcon } from "@hugeicons/core-free-icons";
+import {
+  AiScanIcon,
+  FloppyDiskIcon,
+  GlobeIcon,
+  InformationCircleIcon,
+  KeyboardIcon,
+  LockKeyIcon,
+  Mic01Icon,
+  PuzzleIcon,
+  Settings01Icon,
+  Shield01Icon,
+  SidebarLeftIcon,
+  SparklesIcon,
+  UserMultiple02Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import {
@@ -58,6 +73,43 @@ type FileMenuProps = {
 
 const COMPACT_WIDTH = 720;
 
+/** Launcher tile: icon + label on top row, muted description beneath.
+ *  textValue keeps Radix typeahead keyed to the label, not the combined
+ *  text content (label + desc would make typeahead matches ambiguous). */
+function MenuTile({
+  icon: Icon,
+  label,
+  desc,
+  shortcut,
+  disabled,
+  onSelect,
+}: {
+  icon: typeof Settings01Icon;
+  label: string;
+  desc: string;
+  shortcut?: string;
+  disabled?: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <DropdownMenuItem
+      textValue={label}
+      disabled={disabled}
+      onSelect={onSelect}
+      className="flex flex-col items-start gap-0.5 rounded-xl px-2.5 py-2"
+    >
+      <span className="flex w-full items-center gap-1.5">
+        <HugeiconsIcon icon={Icon} size={13} strokeWidth={1.75} className="shrink-0 text-muted-foreground" />
+        <span className="text-xs font-medium">{label}</span>
+        {shortcut ? (
+          <span className="ml-auto text-[10px] font-normal text-muted-foreground/60">{shortcut}</span>
+        ) : null}
+      </span>
+      <span className="text-[10px] leading-3 text-muted-foreground/70">{desc}</span>
+    </DropdownMenuItem>
+  );
+}
+
 /** The rail supplies the trigger; the active project supplies these actions. */
 export function FileMenu({
   onSave,
@@ -66,30 +118,68 @@ export function FileMenu({
   activeTab,
   children,
 }: FileMenuProps) {
+  // Save desc names the file you would save - far more useful than a static
+  // label. Backslash-aware basename (Windows editor paths).
+  const saveTarget =
+    activeTab?.kind === "editor"
+      ? (activeTab.path.split(/[\\/]/).pop() ?? "")
+      : "";
+  const saveDesc = saveTarget !== "" ? saveTarget : "Active editor file";
+  const saveAllDesc =
+    dirtyCount === 0
+      ? "No unsaved files"
+      : `${dirtyCount} unsaved ${dirtyCount === 1 ? "file" : "files"}`;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-52">
-        <DropdownMenuItem disabled={!activeTab || activeTab.kind !== "editor" || !activeTab.dirty} onSelect={onSave} className="text-xs">
-          <HugeiconsIcon icon={FloppyDiskIcon} size={13} strokeWidth={1.75} />
-          Save <span className="ml-auto text-[10px] text-muted-foreground/60">{IS_MAC ? "⌘S" : "Ctrl+S"}</span>
+      <DropdownMenuContent align="start" className="w-80 rounded-2xl p-2">
+        <DropdownMenuLabel className="px-2.5 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+          File
+        </DropdownMenuLabel>
+        <div className="grid grid-cols-2 gap-1">
+          <MenuTile
+            icon={FloppyDiskIcon}
+            label="Save"
+            desc={saveDesc}
+            shortcut={IS_MAC ? "⌘S" : "Ctrl+S"}
+            disabled={!activeTab || activeTab.kind !== "editor" || !activeTab.dirty}
+            onSelect={onSave}
+          />
+          <MenuTile
+            icon={FloppyDiskIcon}
+            label="Save All"
+            desc={saveAllDesc}
+            shortcut={IS_MAC ? "⌘⇧S" : "Ctrl+Shift+S"}
+            disabled={dirtyCount < 2}
+            onSelect={onSaveAll}
+          />
+        </div>
+        <DropdownMenuSeparator className="my-1.5" />
+        <DropdownMenuLabel className="px-2.5 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+          Settings
+        </DropdownMenuLabel>
+        <div className="grid grid-cols-2 gap-1">
+          <MenuTile icon={Settings01Icon} label="General" desc="Theme, behavior, Gmail" onSelect={() => void openSettingsWindow("general")} />
+          <MenuTile icon={KeyboardIcon} label="Shortcuts" desc="Key bindings" onSelect={() => void openSettingsWindow("shortcuts")} />
+          <MenuTile icon={AiScanIcon} label="Models" desc="Providers & API keys" onSelect={() => void openSettingsWindow("models")} />
+          <MenuTile icon={UserMultiple02Icon} label="Agents" desc="Sub-agent registry" onSelect={() => void openSettingsWindow("agents")} />
+          <MenuTile icon={SparklesIcon} label="Snippets" desc="Prompts & skills" onSelect={() => void openSettingsWindow("snippets")} />
+          <MenuTile icon={PuzzleIcon} label="MCP Servers" desc="External tool servers" onSelect={() => void openSettingsWindow("mcp")} />
+          <MenuTile icon={Shield01Icon} label="Sandbox" desc="Shadow mode" onSelect={() => void openSettingsWindow("sandbox")} />
+          <MenuTile icon={LockKeyIcon} label="Security" desc="Approvals & audit" onSelect={() => void openSettingsWindow("security")} />
+          <MenuTile icon={Mic01Icon} label="Voice" desc="Speech & TTS" onSelect={() => void openSettingsWindow("voice")} />
+          <MenuTile icon={GlobeIcon} label="Assistant" desc="Telegram channels" onSelect={() => void openSettingsWindow("assistant")} />
+        </div>
+        <DropdownMenuSeparator className="my-1.5" />
+        <DropdownMenuItem
+          textValue="About"
+          onSelect={() => void openSettingsWindow("about")}
+          className="flex items-center gap-2 rounded-xl px-2.5 py-1.5"
+        >
+          <HugeiconsIcon icon={InformationCircleIcon} size={13} strokeWidth={1.75} className="shrink-0 text-muted-foreground" />
+          <span className="text-xs font-medium">About</span>
+          <span className="ml-auto text-[10px] text-muted-foreground/70">Version & credits</span>
         </DropdownMenuItem>
-        <DropdownMenuItem disabled={dirtyCount < 2} onSelect={onSaveAll} className="text-xs">
-          <HugeiconsIcon icon={FloppyDiskIcon} size={13} strokeWidth={1.75} />
-          Save All <span className="ml-auto text-[10px] text-muted-foreground/60">{IS_MAC ? "⌘⇧S" : "Ctrl+Shift+S"}</span>
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={() => void openSettingsWindow("general")} className="text-xs">General</DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => void openSettingsWindow("models")} className="text-xs">Models</DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => void openSettingsWindow("agents")} className="text-xs">Agents</DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => void openSettingsWindow("snippets")} className="text-xs">Snippets</DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => void openSettingsWindow("mcp")} className="text-xs">MCP Servers</DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => void openSettingsWindow("sandbox")} className="text-xs">Sandbox</DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => void openSettingsWindow("security")} className="text-xs">Security</DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => void openSettingsWindow("voice")} className="text-xs">Voice</DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => void openSettingsWindow("assistant")} className="text-xs">Assistant</DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => void openSettingsWindow("shortcuts")} className="text-xs">Shortcuts</DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => void openSettingsWindow("about")} className="text-xs">About</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
