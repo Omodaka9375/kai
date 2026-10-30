@@ -86,9 +86,11 @@ async function runFixtureTests(
   fixture: FitFixture,
   root: string,
 ): Promise<{ exitCode: number | null; stdout: string } | null> {
+  // Relative forward-slash paths: node accepts them on every platform and
+  // they need no quoting (fixture paths never contain spaces).
   const testFiles = fixture.files
     .filter((f) => /\.test\.js$/.test(f.path))
-    .map((f) => toPlatform(f.path));
+    .map((f) => f.path);
   if (testFiles.length === 0) return null;
   const out = await native.runCommand(
     `node --test ${testFiles.join(" ")}`,
@@ -99,8 +101,9 @@ async function runFixtureTests(
   return { exitCode: out.exit_code, stdout: out.stdout };
 }
 
-function toPlatform(p: string): string {
-  return p.replace(/\//g, "\\");
+/** The separator a base path implies (tempRoot arrives forward-normalized). */
+function sepOf(p: string): string {
+  return p.includes("\\") ? "\\" : "/";
 }
 
 async function runOneMission(
@@ -114,7 +117,7 @@ async function runOneMission(
   const before = new Map<string, number>();
   // Pre-hash every fixture file.
   for (const f of fixture.files) {
-    const abs = joinPath(root, toPlatform(f.path));
+    const abs = joinPath(root, f.path);
     const bytes = await native.readFileBytes(abs);
     let h = 5381;
     for (let i = 0; i < bytes.length; i++) h = ((h << 5) + h + bytes[i]) | 0;
@@ -213,7 +216,7 @@ async function runOneMission(
   // Post-run file states.
   const files: MissionResult["files"] = [];
   for (const [rel, oldHash] of before) {
-    const abs = joinPath(root, toPlatform(rel));
+    const abs = joinPath(root, rel);
     let changed = true;
     try {
       const bytes = await native.readFileBytes(abs);
@@ -250,10 +253,34 @@ async function runOneMission(
 }
 
 function joinPath(root: string, rel: string): string {
-  const sep = root.includes("\\") ? "\\" : "/";
-  return root.endsWith(sep) ? root + rel : root + sep + rel;
+  const sep = sepOf(root);
+  const relNorm = sep === "\\" ? rel.replace(/\//g, "\\") : rel;
+  return root.endsWith(sep) ? root + relNorm : root + sep + relNorm;
 }
 
+/**
+ * Parent directories a fixture needs, DEDUPED and in creation order.
+ * fs_create_dir refuses existing paths, so sibling files sharing a
+ * directory (src/math.js + src/math.test.js) must yield ONE entry —
+ * the "already exists" crash from the first shipped version.
+ */
+export function fixtureParentDirs(
+  fixture: Pick<FitFixture, "files">,
+  root: string,
+): string[] {
+  const sep = sepOf(root);
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const f of fixture.files) {
+    const abs = joinPath(root, f.path);
+    const dir = abs.substring(0, abs.lastIndexOf(sep));
+    if (dir && dir !== root && !seen.has(dir)) {
+      seen.add(dir);
+      out.push(dir);
+    }
+  }
+  return out;
+}
 export async function runFitCheck(
   opts: FitCheckOptions,
 ): Promise<FitCheckReport> {
@@ -266,16 +293,26 @@ export async function runFitCheck(
   const base = await tempRoot();
   const sep = base.includes("/") ? "/" : "\\";
   const tmpBase = `${base}${sep}kai-fit-check-${stamp}`;
+  // Sweep leftovers from earlier runs — a failed run used to leak its tree
+  // (cleanup only ran on success). This dir is KAI-owned fit-check temp
+  // space; nothing else lives here. Best-effort: a locked file just proceeds.
+  try {
+    await native.deleteFile(base);
+  } catch {
+    /* absent or locked — fine */
+  }
   await native.createDir(tmpBase);
 
   const runMission = async (fixture: FitFixture) => {
     opts.onProgress?.(fixture.title);
     const root = `${tmpBase}${sep}${fixture.id}`;
     await native.createDir(root);
+    // fs_create_dir refuses existing paths and sibling files share
+    // directories — create each parent exactly once per mission.
+    const parents = fixtureParentDirs(fixture, root);
+    for (const dir of parents) await native.createDir(dir);
     for (const f of fixture.files) {
-      const abs = joinPath(root, toPlatform(f.path));
-      const dir = abs.substring(0, abs.lastIndexOf("\\"));
-      if (dir && dir !== root) await native.createDir(dir);
+      const abs = joinPath(root, f.path);
       await native.writeFile(abs, f.content);
     }
     const injectErr =
@@ -300,15 +337,25 @@ export async function runFitCheck(
     ])) ?? { fixture, result: emptyFailure(fixture, "timeout") };
 
   let pairs: { fixture: FitFixture; result: MissionResult }[];
-  if (opts.local) {
-    pairs = [];
-    for (const f of fixtures) {
-      pairs.push(await missionTimeout(f, runMission(f)));
+  try {
+    if (opts.local) {
+      pairs = [];
+      for (const f of fixtures) {
+        pairs.push(await missionTimeout(f, runMission(f)));
+      }
+    } else {
+      pairs = await Promise.all(
+        fixtures.map((f) => missionTimeout(f, runMission(f))),
+      );
     }
-  } else {
-    pairs = await Promise.all(
-      fixtures.map((f) => missionTimeout(f, runMission(f))),
-    );
+  } finally {
+    // Cleanup runs on FAILURE too — a leaked tree survives only until the
+    // next run's sweep above.
+    try {
+      await native.deleteFile(tmpBase);
+    } catch {
+      /* best-effort */
+    }
   }
 
   const reports: FitCheckMissionReport[] = pairs.map(({ fixture, result }) => {
@@ -324,13 +371,6 @@ export async function runFitCheck(
   });
 
   const totalDurationMs = Date.now() - started;
-
-  // Cleanup temp tree (best-effort).
-  try {
-    await native.deleteFile(tmpBase);
-  } catch {
-    /* best-effort */
-  }
 
   return {
     modelId: opts.modelId,

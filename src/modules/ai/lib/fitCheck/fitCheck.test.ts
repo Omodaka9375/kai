@@ -13,6 +13,7 @@ import {
   readOnlyControlFixture,
 } from "./fixtures";
 import { gradeMission, type MissionResult } from "./grader";
+import { fixtureParentDirs } from "./runner";
 
 function resultFor(
   fixture: ReturnType<typeof allFixtures>[number],
@@ -93,6 +94,26 @@ describe("fixtures", () => {
     expect(f.injectErrorOnFirstCall?.error).toBeTruthy();
   });
 });
+
+describe("fixtureParentDirs - the already-exists regression", () => {
+  // The first shipped version created a parent dir once PER FILE; sibling
+  // files sharing a directory (surgical-fix: src/math.js + src/math.test.js)
+  // hit fs_create_dir's "already exists" refusal on the second call and
+  // aborted the whole fit check with a red error.
+  it("yields ONE entry for sibling files sharing a directory", () => {
+    const f = surgicalFixFixture({ base: 100, tag: 1234 });
+    const dirs = fixtureParentDirs(f, "base\\surgical-fix");
+    expect(dirs).toEqual(["base\\surgical-fix\\src"]);
+  });
+
+  it("returns nothing for root-level files and stays separator-safe", () => {
+    const control = readOnlyControlFixture({ base: 100, tag: 1234 });
+    expect(fixtureParentDirs(control, "base/control")).toEqual([]);
+    const f = fixAndRecoverFixture({ base: 100, tag: 1234 });
+    expect(fixtureParentDirs(f, "base/recover")).toEqual(["base/recover/lib"]);
+  });
+});
+
 
 describe("grader", () => {
   it("passes a clean surgical mission", () => {
