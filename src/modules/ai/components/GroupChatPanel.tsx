@@ -72,21 +72,33 @@ export function GroupChatPanel({
   );
   const [openGroupId, setOpenGroupId] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
-  // The group tray sits under the AI mini window when that is open — don't
-  // render it into a covered zone (the panel itself still renders on top).
-  const miniOpen = useChatStore((s) => s.mini.open);
+  // Right-gutter stack: the group panel and the AI mini window share ONE
+  // expanded slot. Whichever surface owns it renders as the window; the
+  // other is a pill. `expanded` = the group panel owns the slot.
+  const stackSurface = useChatStore((s) => s.stackRail.surface);
+  const openGroupToStack = useChatStore((s) => s.openGroupToStack);
+  const closeGroupFromStack = useChatStore((s) => s.closeGroupFromStack);
+  // The group pill always sits at the bottom of the right-gutter stack;
+  // the expanded surface (whoever owns the slot) renders above it.
   const groups = useMemo(() => getGroups(), [version]);
   const active = useMemo(
     () => (openGroupId ? getGroup(openGroupId) : null),
     [openGroupId, version],
   );
+  const expanded = stackSurface === "group" && active !== null;
 
   // Auto-open the newest group when created; close the panel state when the
-  // open group vanishes (all participants closed, etc.).
+  // open group vanishes (deleted, etc.). If it owned the expanded slot, the
+  // AI mini window comes back automatically.
   useEffect(() => {
     if (!openGroupId) return;
-    if (!getGroup(openGroupId)) setOpenGroupId(null);
-  }, [openGroupId, version]);
+    if (!getGroup(openGroupId)) {
+      setOpenGroupId(null);
+      if (useChatStore.getState().stackRail.surface === "group") {
+        closeGroupFromStack();
+      }
+    }
+  }, [openGroupId, version, closeGroupFromStack]);
 
   // Cross-surface entries via window events (the rail and the status bar
   // live inside project workspaces; the panel is app-level — events keep
@@ -94,7 +106,10 @@ export function GroupChatPanel({
   useEffect(() => {
     const onOpen = (e: Event) => {
       const id = (e as CustomEvent<string>).detail;
-      if (typeof id === "string" && getGroup(id)) setOpenGroupId(id);
+      if (typeof id === "string" && getGroup(id)) {
+        setOpenGroupId(id);
+        openGroupToStack();
+      }
     };
     // Status-bar "start group chat" button → open the invite picker here.
     const onNew = () => setPickerOpen(true);
@@ -104,7 +119,7 @@ export function GroupChatPanel({
       window.removeEventListener("Kai:open-group-chat", onOpen);
       window.removeEventListener("Kai:new-group-chat", onNew);
     };
-  }, []);
+  }, [openGroupToStack]);
 
   const onCreate = useCallback(
     async (invitees: ProjectSwitcherItem[]) => {
@@ -129,8 +144,8 @@ export function GroupChatPanel({
   );
 
   // No groups and no picker open — nothing to render. Starting a group lives
-  // in the status bar (next to the AI panel toggle): a floating entry point
-  // here sat underneath the AI mini window (z-30 vs. its fixed z-40).
+  // in the status bar (next to the AI panel toggle). The pill is the group's
+  // floating entry point now.
   if (groups.length === 0 && !pickerOpen) return null;
 
   return (
@@ -144,10 +159,11 @@ export function GroupChatPanel({
         onOpenGroup={(id) => {
           setPickerOpen(false);
           setOpenGroupId(id);
+          openGroupToStack();
         }}
       />
       <AnimatePresence>
-        {active ? (
+        {expanded ? (
           <motion.div
             key={active.id}
             initial={{ opacity: 0, x: 16 }}
@@ -156,19 +172,37 @@ export function GroupChatPanel({
             transition={{ type: "spring", stiffness: 320, damping: 32 }}
             data-group-chat-panel
             className={cn(
-              "fixed z-40 flex w-[min(30rem,calc(100vw-var(--kai-workspace-left,0px)-1rem))] flex-col overflow-hidden",
+              // Twin of the AI mini window's DOCKED box: same width, same
+              // height formula, same bottom anchor, same card styling.
+              "fixed z-40 flex w-[min(34rem,calc(100vw-2rem))] flex-col overflow-hidden",
               "rounded-2xl border border-border/60 bg-card text-[12px] shadow-lg",
-              "top-[2.85rem] right-2 bottom-[calc(var(--kai-input-bar-h,0px)+42px)]",
+              "right-2 bottom-[calc(var(--kai-input-bar-h,0px)+84px)] h-[min(42rem,calc(100vh-var(--kai-input-bar-h,0px)-92px))]",
             )}
           >
-            <PanelHeader group={active} candidates={projects} onEnd={() => void endGroupChat(active.id)} onClose={() => setOpenGroupId(null)} />
+            <PanelHeader
+              group={active}
+              candidates={projects}
+              onEnd={() => void endGroupChat(active.id)}
+              // ✕ hands the slot back to the AI mini window.
+              onClose={() => {
+                setOpenGroupId(null);
+                closeGroupFromStack();
+              }}
+            />
             <Transcript group={active} />
             <Composer group={active} />
           </motion.div>
         ) : null}
       </AnimatePresence>
-      {!active && !miniOpen && groups.length > 0 ? (
-        <GroupListTray groups={groups} onOpen={(id) => setOpenGroupId(id)} />
+      {groups.length > 0 && stackSurface !== "group" ? (
+        <GroupListTray
+          groups={groups}
+          activeId={active?.id ?? null}
+          onOpen={(id) => {
+            setOpenGroupId(id);
+            openGroupToStack();
+          }}
+        />
       ) : null}
     </>
   );
@@ -390,29 +424,39 @@ function Composer({ group }: { group: GroupChat }) {
 
 function GroupListTray({
   groups,
+  activeId,
   onOpen,
 }: {
   groups: GroupChat[];
+  activeId: string | null;
   onOpen: (id: string) => void;
 }) {
+  // ONE pill for the whole gutter: it names the most recent live group (or
+  // the most recent one of any kind) and expands whichever group it names.
+  // While a group is expanded it is the panel, not the pill - so with a
+  // group owning the slot the pill is hidden entirely (App renders the AI
+  // pill instead).
+  if (activeId !== null) return null;
+  const g = groups.find((x) => x.endedAt === null) ?? groups[0];
+  if (!g) return null;
   return (
-    <div className="absolute bottom-16 right-2 z-30 flex flex-col items-end gap-1.5">
-      {groups.slice(0, 4).map((g) => (
-        <button
-          key={g.id}
-          type="button"
-          onClick={() => onOpen(g.id)}
-          title={g.name}
-          className={cn(
-            "flex max-w-52 items-center gap-1.5 rounded-lg border border-border/60 bg-card px-2.5 py-1.5 text-[11px] shadow-md transition-colors hover:bg-accent",
-            g.endedAt !== null && "opacity-60",
-          )}
-        >
-          <HugeiconsIcon icon={Link01Icon} size={12} strokeWidth={1.75} className="shrink-0 text-muted-foreground" />
-          <span className="truncate">{g.name}</span>
-        </button>
-      ))}
-    </div>
+    <button
+      type="button"
+      onClick={() => onOpen(g.id)}
+      title={g.endedAt !== null ? "Resume group chat" : "Open group chat"}
+      data-group-pill
+      className={cn(
+        // Twin of the AI pill: same width as the mini window stack, sits at
+        // the bottom of the right gutter below the AI window/pill.
+        "fixed z-40 flex h-8 items-center gap-1.5 rounded-lg border border-border/60 bg-card px-2.5",
+        "text-[11px] text-muted-foreground shadow-md transition-colors hover:bg-accent hover:text-foreground",
+        "right-2 w-[min(34rem,calc(100vw-2rem))] bottom-[calc(var(--kai-input-bar-h,0px)+42px)]",
+        g.endedAt !== null && "opacity-60",
+      )}
+    >
+      <HugeiconsIcon icon={Link01Icon} size={12} strokeWidth={1.75} className="shrink-0 text-muted-foreground" />
+      <span className="truncate">{g.name}</span>
+    </button>
   );
 }
 

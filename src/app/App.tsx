@@ -22,6 +22,7 @@ import {
   AiInputBar,
   AiInputBarConnect,
   AiMiniWindow,
+  GroupPill,
   getAllKeys,
   hasAnyKey,
   useChatStore,
@@ -471,6 +472,10 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
   );
   const closeSplit = useCallback(() => setSplitTabId(null), []);
   const miniOpen = useChatStore((s) => s.mini.open);
+  // Right-gutter stack: when a group chat owns the expanded slot, the AI
+  // mini window is NOT mounted — the GroupPill (AppShell-level, since the
+  // group panel is app-level) swaps back on click.
+  const stackSurface = useChatStore((s) => s.stackRail.surface);
   const focusInput = useChatStore((s) => s.focusInput);
   const openPanel = useChatStore((s) => s.openPanel);
   const panelOpen = useChatStore((s) => s.panelOpen);
@@ -2152,10 +2157,13 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
           ) : null}
 
           <AnimatePresence>
-            {isActive && miniOpen && hasComposer ? (
+            {isActive && miniOpen && hasComposer && stackSurface !== "group" ? (
               <AiErrorBoundary label="mini-window">
-                <AiMiniWindow key="ai-mini" />
+                <AiMiniWindow key="ai-mini-window" />
               </AiErrorBoundary>
+            ) : null}
+            {isActive && hasComposer && stackSurface === "group" ? (
+              <GroupPill />
             ) : null}
             {contextMenu ? (
               <CustomContextMenu

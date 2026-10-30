@@ -3,6 +3,7 @@ export {
   AiInputBar,
   AiInputBarConnect,
   AiMiniWindow,
+  GroupPill,
   SelectionAskAi,
 } from "./components/lazy";
 export { AgentStatusPill } from "./components/AgentStatusPill";

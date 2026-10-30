@@ -44,6 +44,7 @@ import { type SessionMeta } from "../lib/sessions";
 import { absoluteTime, relativeTime } from "../lib/relativeTime";
 import { normalizeWorkspacePath } from "../lib/workspacePath";
 import { getOrCreateChat, useChatStore } from "../store/chatStore";
+import { getGroups } from "../store/groupChatStore";
 import { Input } from "@/components/ui/input";
 import { usePlanStore } from "../store/planStore";
 import { AgentSwitcher } from "./AgentSwitcher";
@@ -117,6 +118,12 @@ export function AiMiniWindow() {
   // collapse the window when the user opens a file — an expanded AI window
   // covers the editor, and the file would open behind it invisibly.
   const expanded = useChatStore((s) => s.mini.expanded);
+  // The group pill sits directly below this window when a group exists and
+  // the AI owns the expanded slot — the window's bottom offset grows by one
+  // pill height + gap (84 = 42 base + 42 pill) so they stack.
+  const groupPillVisible =
+    useChatStore((s) => s.stackRail.surface !== "group") &&
+    getGroups().length > 0;
   const setMiniExpanded = useChatStore((s) => s.setMiniExpanded);
   const toggleExpand = useCallback(
     () => setMiniExpanded(!expanded),
@@ -172,6 +179,10 @@ export function AiMiniWindow() {
         expanded
           ? "top-[2.85rem] right-2 bottom-[calc(var(--kai-input-bar-h,0px)+42px)] left-[calc(var(--kai-workspace-left,0px)+8px)] rounded-xl"
           : "right-2 bottom-[calc(var(--kai-input-bar-h,0px)+42px)] h-[min(42rem,calc(100vh-var(--kai-input-bar-h,0px)-92px))] w-[min(34rem,calc(100vw-2rem))]",
+        // Shrink up by one pill height + gap when the group pill is stacked
+        // below (84 = 42 base + 42 pill).
+        !expanded && groupPillVisible &&
+          "bottom-[calc(var(--kai-input-bar-h,0px)+84px)] h-[min(42rem,calc(100vh-var(--kai-input-bar-h,0px)-134px))]",
       )}
     >
       <div

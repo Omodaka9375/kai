@@ -10,6 +10,10 @@ const AiMiniWindowInner = lazy(() =>
   import("./AiMiniWindow").then((m) => ({ default: m.AiMiniWindow })),
 );
 
+const GroupPillInner = lazy(() =>
+  import("./GroupPill").then((m) => ({ default: m.GroupPill })),
+);
+
 const AiInputBarModule = () => import("./AiInputBar");
 
 const AiInputBarInner = lazy(() =>
@@ -36,6 +40,14 @@ export function AiMiniWindow() {
   return (
     <Suspense fallback={null}>
       <AiMiniWindowInner />
+    </Suspense>
+  );
+}
+
+export function GroupPill() {
+  return (
+    <Suspense fallback={null}>
+      <GroupPillInner />
     </Suspense>
   );
 }

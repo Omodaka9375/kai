@@ -292,6 +292,15 @@ type StoreState = {
    *  behind the expanded AI window. */
   collapseMini: () => void;
 
+  /** Right-gutter stack: which surface owns the single expanded slot. */
+  stackRail: { surface: "ai" | "group" };
+  /** Show the AI mini window (swap: group panel collapses to its pill). */
+  openMiniToStack: () => void;
+  /** Expand the group panel (swap: AI mini window collapses to its pill). */
+  openGroupToStack: () => void;
+  /** ✕ on the group panel — AI mini window comes back automatically. */
+  closeGroupFromStack: () => void;
+
   panelOpen: boolean;
   openPanel: () => void;
   closePanel: () => void;
@@ -829,6 +838,21 @@ export const useChatStore = create<StoreState>((set, get) => ({
     set((s) => ({ mini: { open: s.mini.open, expanded } })),
   collapseMini: () =>
     set((s) => ({ mini: { open: s.mini.open, expanded: false } })),
+
+  // Right-gutter stack rail: the AI mini window and the group panel share
+  // ONE expanded slot. expandedSurface says which surface currently owns
+  // the slot; the OTHER one is collapsed to its pill. This lives in the
+  // store (not component state) so the two surfaces can swap each other
+  // without prop-drilling across the app-level panel.
+  stackRail: { surface: "ai" },
+  openMiniToStack: () =>
+    set((s) => ({ mini: { open: true, expanded: s.mini.expanded }, stackRail: { surface: "ai" } })),
+  openGroupToStack: () =>
+    set(() => ({ stackRail: { surface: "group" } })),
+  /** Close (✕) the group panel: the AI mini window automatically comes
+   *  back — either AI or the group owns the expanded slot, never neither. */
+  closeGroupFromStack: () =>
+    set((s) => ({ stackRail: { surface: "ai" }, mini: { open: true, expanded: s.mini.expanded } })),
 
   panelOpen: false,
   openPanel: () => set({ panelOpen: true }),

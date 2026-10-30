@@ -17,7 +17,7 @@ describe("restored conversation scrolling", () => {
 
   it("keeps the mini-window mounted when its workspace switches visibility", () => {
     const app = readFileSync(new URL("../../app/App.tsx", import.meta.url), "utf8");
-    expect(app).toContain("{isActive && miniOpen && hasComposer ? (");
+    expect(app).toContain('{isActive && miniOpen && hasComposer && stackSurface !== "group" ? (');
     // No session key on the animated window: changing sessions reuses the
     // same conversation surface rather than restarting an enter animation.
     expect(miniWindow).not.toContain('<AiMiniWindow key={sessionId}');

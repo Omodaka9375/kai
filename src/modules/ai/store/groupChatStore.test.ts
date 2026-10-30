@@ -254,4 +254,31 @@ describe("source pins — trust boundary & wiring", () => {
   it("closing a project removes it from groups before unmount", () => {
     expect(shell).toContain("removeProjectFromGroups(id)");
   });
+
+  it("right-gutter stack: one expanded slot, mutual-exclusive swap, AI auto-restores", () => {
+    const app = readFileSync(new URL("../../../app/App.tsx", import.meta.url), "utf8");
+    const pill = readFileSync(new URL("../components/GroupPill.tsx", import.meta.url), "utf8");
+    const mini = readFileSync(new URL("../components/AiMiniWindow.tsx", import.meta.url), "utf8");
+    const chatStore = readFileSync(new URL("./chatStore.ts", import.meta.url), "utf8");
+    // Store owns the slot; surfaces swap via the store, never local state.
+    expect(chatStore).toContain('stackRail: { surface: "ai" }');
+    expect(chatStore).toContain("closeGroupFromStack");
+    // The AI window unmounts when the group owns the slot; the GroupPill
+    // (collapsed AI) mounts in its place.
+    expect(app).toContain('stackSurface !== "group" ? (');
+    expect(app).toContain('stackSurface === "group" ? (');
+    expect(app).toContain("<GroupPill />");
+    // The group panel expands ONLY when it owns the slot, and its ✕ both
+    // closes the group AND hands the slot back to AI.
+    expect(panel).toContain('stackSurface === "group" && active !== null');
+    expect(panel).toContain("closeGroupFromStack();");
+    // The group pill and the expanded group panel are the same width as the
+    // AI mini window; the pill hides while the group is expanded.
+    expect(panel).toContain("w-[min(34rem,calc(100vw-2rem))]");
+    expect(pill).toContain("w-[min(34rem,calc(100vw-2rem))]");
+    expect(panel).toContain('stackSurface !== "group" ? (');
+    // The mini window shrinks up by one pill height when the group pill is
+    // stacked below it.
+    expect(mini).toContain("+84px");
+  });
 });
