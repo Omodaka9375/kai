@@ -20,10 +20,15 @@ export function GroupPill() {
     getGroupStoreVersion,
   );
   const openMiniToStack = useChatStore((s) => s.openMiniToStack);
+  const groupPanelExpanded = useChatStore((s) => s.groupPanelExpanded);
   // Count is cosmetic — shows how many groups are live while the group
   // panel is the expanded surface.
   const groups = useMemo(() => getGroups(), [version]);
   const liveCount = groups.filter((g) => g.endedAt === null).length;
+
+  // Full view: the group panel overlays the workspace down to the +42px
+  // strip — the pill's own strip. Hide instead of painting over/below it.
+  if (groupPanelExpanded) return null;
 
   return (
     <button

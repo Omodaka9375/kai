@@ -20,6 +20,8 @@ import {
 import {
   Add01Icon,
   ArrowDown01Icon,
+  ArrowExpand01Icon,
+  ArrowShrink01Icon,
   Cancel01Icon,
   Delete02Icon,
   Folder01Icon,
@@ -88,6 +90,9 @@ export function GroupChatPanel({
   const stackSurface = useChatStore((s) => s.stackRail.surface);
   const openGroupToStack = useChatStore((s) => s.openGroupToStack);
   const closeGroupFromStack = useChatStore((s) => s.closeGroupFromStack);
+  // Full-view toggle — twin of the AI mini window's expand state.
+  const groupExpanded = useChatStore((s) => s.groupPanelExpanded);
+  const setGroupExpanded = useChatStore((s) => s.setGroupPanelExpanded);
   // The group pill always sits at the bottom of the right-gutter stack;
   // the expanded surface (whoever owns the slot) renders above it.
   const groups = useMemo(() => getGroups(), [version]);
@@ -199,12 +204,16 @@ export function GroupChatPanel({
             transition={{ type: "spring", stiffness: 320, damping: 32 }}
             data-group-chat-panel
             className={cn(
-              // Twin of the AI mini window's DOCKED box: same width, same
-              // height formula, same bottom anchor, same card styling.
-              "fixed z-40 flex w-[min(34rem,calc(100vw-2rem))] flex-col overflow-hidden",
+              "fixed z-40 flex flex-col overflow-hidden",
               "rounded-2xl border border-border/60 bg-card text-[12px] shadow-lg",
               "ring-1 ring-black/5 dark:ring-white/5",
-              "right-2 bottom-[calc(var(--kai-input-bar-h,0px)+84px)] h-[min(42rem,calc(100vh-var(--kai-input-bar-h,0px)-92px))]",
+              // Twin of the AI mini window in BOTH states: expanded mirrors
+              // the mini window's full-workspace overlay (and owns the
+              // +42px strip — the AI pill hides); docked keeps the same
+              // width, height formula, and the +84px anchor (AI pill below).
+              groupExpanded
+                ? "top-[2.85rem] right-2 bottom-[calc(var(--kai-input-bar-h,0px)+42px)] left-[calc(var(--kai-workspace-left,0px)+8px)] rounded-xl"
+                : "right-2 w-[min(34rem,calc(100vw-2rem))] bottom-[calc(var(--kai-input-bar-h,0px)+84px)] h-[min(42rem,calc(100vh-var(--kai-input-bar-h,0px)-92px))]",
             )}
           >
             <div
@@ -216,15 +225,17 @@ export function GroupChatPanel({
               candidates={projects}
               onEnd={() => void endGroupChat(active.id)}
               onStopAll={() => void stopGroupParticipants(active.id)}
+              expanded={groupExpanded}
+              onToggleExpand={() => setGroupExpanded(!groupExpanded)}
               // ✕ hands the slot back to the AI mini window.
               onClose={() => {
                 setOpenGroupId(null);
                 closeGroupFromStack();
               }}
             />
-            <Transcript group={active} />
+            <Transcript group={active} expanded={groupExpanded} />
             <ActivityStrip group={active} />
-            <Composer group={active} />
+            <Composer group={active} expanded={groupExpanded} />
           </motion.div>
         ) : null}
       </AnimatePresence>
@@ -247,12 +258,16 @@ function PanelHeader({
   candidates,
   onEnd,
   onStopAll,
+  expanded,
+  onToggleExpand,
   onClose,
 }: {
   group: GroupChat;
   candidates: ProjectSwitcherItem[];
   onEnd: () => void;
   onStopAll: () => void;
+  expanded: boolean;
+  onToggleExpand: () => void;
   onClose: () => void;
 }) {
   return (
@@ -266,7 +281,7 @@ function PanelHeader({
         </span>
       </div>
       <div className="flex shrink-0 items-center gap-0.5">
-        <span className="flex h-6 shrink-0 items-center gap-1.5 whitespace-nowrap px-2 text-[10.5px] text-muted-foreground">
+        <span className="flex h-6 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-border/60 px-2.5 text-[10.5px] font-medium text-muted-foreground">
           <span
             className={cn(
               "size-1.5 shrink-0 rounded-full",
@@ -290,7 +305,7 @@ function PanelHeader({
             type="button"
             size="sm"
             variant="ghost"
-            className="h-6 px-2 text-[11px]"
+            className="h-6 shrink-0 rounded-full border border-border/60 px-2.5 text-[11px]"
             onClick={() => void resumeGroupChat(group.id)}
           >
             Resume
@@ -307,7 +322,7 @@ function PanelHeader({
               type="button"
               size="sm"
               variant="ghost"
-              className="h-6 gap-1 px-2 text-[11px]"
+              className="h-6 shrink-0 gap-1 rounded-full border border-border/60 px-2.5 text-[11px]"
               title="Stop every busy participant agent now"
               onClick={onStopAll}
             >
@@ -318,7 +333,7 @@ function PanelHeader({
               type="button"
               size="sm"
               variant="ghost"
-              className="h-6 px-2 text-[11px]"
+              className="h-6 shrink-0 rounded-full border border-border/60 px-2.5 text-[11px]"
               title="End group chat - every agent keeps running as before"
               onClick={onEnd}
             >
@@ -326,6 +341,17 @@ function PanelHeader({
             </Button>
           </>
         )}
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          className="size-5"
+          aria-label={expanded ? "Collapse to mini window" : "Expand to panel"}
+          title={expanded ? "Collapse to mini window" : "Expand to panel"}
+          onClick={onToggleExpand}
+        >
+          <HugeiconsIcon icon={expanded ? ArrowShrink01Icon : ArrowExpand01Icon} size={11} strokeWidth={1.75} />
+        </Button>
         <Button
           type="button"
           size="icon"
@@ -356,7 +382,13 @@ function ParticipantDot({ participant }: { participant: GroupParticipant }) {
   );
 }
 
-function Transcript({ group }: { group: GroupChat }) {
+function Transcript({
+  group,
+  expanded,
+}: {
+  group: GroupChat;
+  expanded: boolean;
+}) {
   const version = useSyncExternalStore(subscribeGroupChats, getGroupStoreVersion, getGroupStoreVersion);
   // Re-read the group each version bump — messages arrays are replaced.
   const live = useMemo(() => getGroup(group.id) ?? group, [group.id, version]);
@@ -366,7 +398,13 @@ function Transcript({ group }: { group: GroupChat }) {
     [live],
   );
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4">
+    <div
+      className={cn(
+        "flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4",
+        // Full view: keep transcript lines readable — centered column.
+        expanded && "mx-auto w-full max-w-3xl",
+      )}
+    >
       {live.messages.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center px-8 text-center">
           <span className="mb-3 flex size-10 items-center justify-center rounded-xl bg-muted/50 text-muted-foreground/70">
@@ -483,7 +521,13 @@ function TypingDots() {
   );
 }
 
-function Composer({ group }: { group: GroupChat }) {
+function Composer({
+  group,
+  expanded,
+}: {
+  group: GroupChat;
+  expanded: boolean;
+}) {
   const [text, setText] = useState("");
   const [target, setTarget] = useState<string | "all">("all");
   const [sending, setSending] = useState(false);
@@ -507,7 +551,12 @@ function Composer({ group }: { group: GroupChat }) {
     );
   }
   return (
-    <div className="flex shrink-0 items-center gap-2 border-t border-border/60 bg-card/80 p-3">
+    <div
+      className={cn(
+        "flex shrink-0 items-center gap-2 border-t border-border/60 bg-card/80 p-3",
+        expanded && "mx-auto w-full max-w-3xl border-x",
+      )}
+    >
       <Popover>
         <PopoverTrigger asChild>
           <button
@@ -805,7 +854,7 @@ function ParticipantsMenu({
           type="button"
           size="sm"
           variant="ghost"
-          className="h-6 px-2 text-[11px]"
+          className="h-6 shrink-0 rounded-full border border-border/60 px-2.5 text-[11px]"
           title="Group participants"
         >
           Members

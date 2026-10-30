@@ -33,7 +33,7 @@ export function CoordinatorMenu({ group }: { group: GroupChat }) {
           type="button"
           size="sm"
           variant="ghost"
-          className="h-6 gap-1 px-2 text-[11px]"
+          className="h-6 shrink-0 gap-1 rounded-full border border-border/60 px-2.5 text-[11px]"
           title="Who coordinates this group"
         >
           {isAgentCoord ? "Delegated" : "You coordinate"}

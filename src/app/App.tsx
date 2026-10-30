@@ -1196,6 +1196,9 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
       // behind it would be invisible. Collapse to the docked mini window
       // so the editor takes focus visibly.
       useChatStore.getState().collapseMini();
+      // Same visibility rule for an expanded group panel - it covers the
+      // whole workspace too.
+      useChatStore.getState().setGroupPanelExpanded(false);
       // Explorer defaults to preview (pin=false); explicit actions like
       // context-menu "Open" pass pin=true for a persistent tab.
       const tabId = openFileTab(path, pin ?? false);

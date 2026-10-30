@@ -283,5 +283,14 @@ describe("source pins — trust boundary & wiring", () => {
     // The mini window shrinks up by one pill height when the group pill is
     // stacked below it.
     expect(mini).toContain("+84px");
+    // The group panel has the SAME expand toggle as the mini window: the
+    // store owns the full-view flag, every slot swap resets it, expanded
+    // geometry mirrors the mini window's overlay, and the AI pill hides
+    // while the group panel covers its strip.
+    expect(chatStore).toContain("groupPanelExpanded: false");
+    expect(panel).toContain("groupPanelExpanded");
+    expect(panel).toContain("top-[2.85rem]");
+    expect(panel).toContain("ArrowExpand01Icon");
+    expect(pill).toContain("groupPanelExpanded");
   });
 });

@@ -300,6 +300,9 @@ type StoreState = {
   openGroupToStack: () => void;
   /** ✕ on the group panel — AI mini window comes back automatically. */
   closeGroupFromStack: () => void;
+  /** Group panel full-view state — the twin of mini.expanded. */
+  groupPanelExpanded: boolean;
+  setGroupPanelExpanded: (expanded: boolean) => void;
 
   panelOpen: boolean;
   openPanel: () => void;
@@ -845,14 +848,20 @@ export const useChatStore = create<StoreState>((set, get) => ({
   // store (not component state) so the two surfaces can swap each other
   // without prop-drilling across the app-level panel.
   stackRail: { surface: "ai" },
+  // Group panel full-view state — the twin of mini.expanded. Every slot
+  // swap RESETS it: a freshly opened group starts docked, and handing the
+  // slot back to AI collapses it. A stale true would full-screen the panel
+  // the next time it opens.
+  groupPanelExpanded: false,
+  setGroupPanelExpanded: (expanded) => set({ groupPanelExpanded: expanded }),
   openMiniToStack: () =>
-    set((s) => ({ mini: { open: true, expanded: s.mini.expanded }, stackRail: { surface: "ai" } })),
+    set((s) => ({ mini: { open: true, expanded: s.mini.expanded }, stackRail: { surface: "ai" }, groupPanelExpanded: false })),
   openGroupToStack: () =>
-    set(() => ({ stackRail: { surface: "group" } })),
+    set(() => ({ stackRail: { surface: "group" }, groupPanelExpanded: false })),
   /** Close (✕) the group panel: the AI mini window automatically comes
    *  back — either AI or the group owns the expanded slot, never neither. */
   closeGroupFromStack: () =>
-    set((s) => ({ stackRail: { surface: "ai" }, mini: { open: true, expanded: s.mini.expanded } })),
+    set((s) => ({ stackRail: { surface: "ai" }, mini: { open: true, expanded: s.mini.expanded }, groupPanelExpanded: false })),
 
   panelOpen: false,
   openPanel: () => set({ panelOpen: true }),
