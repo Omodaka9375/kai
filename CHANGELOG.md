@@ -4,6 +4,28 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [2.0.0]
+
+- Group chats: added cross-project group chats where multiple agents coordinate (phases 1–3), with a status-bar entry and one merged rail status dot.
+- Group chats: fixed a boot crash after the group-chat commit (module-cycle TDZ and hooks nested in an effect) and added a boot trap + watchdog for diagnosing blank windows.
+- Agent OS: replaced the plain browser popups with a themed "needs input" dot pulsing violet in the project rail, and project close now confirms via a themed dialog.
+- Group chat UI: fixed the invite dialog positioning and styling, and the mini-window expand icon now swaps with its state.
+- Fit check: added a built-in model "fit check" with deterministic fixture grading, and made its setup dedupe parent dirs and clean up after itself.
+- Rail: folder icons in the project rail are tinted with a deterministic muted hue.
+- Projects: single-instance enforcement — a second launch forwards its project dirs to the already-running window instead of opening a dead one.
+- AI: fixed cross-project model bleed on project switch — the restore path no longer mirrors side effects.
+- Performance: heavy activation work is deferred out of the project-switch paint, and large transcripts mount in two phases, so switching projects mid-stream no longer freezes the UI for seconds.
+- Gmail: added a read-only Gmail tool (IMAP with an app password) so the agent can search your inbox; it cannot send or modify mail.
+- AI: overhauled the multi_edit contract and PowerShell execution reliability.
+- UI: fixed the tool-card done-state dot jumping (ring-inset instead of border).
+- X/Twitter: added a read-only X tool (developer Bearer token) for topic search and account timelines; it cannot post, like, or follow.
+- Settings: Gmail and X credential cards redesigned as compact full-width forms with one-line guidance.
+- Windows: no more console flash when the agent runs commands — CREATE_NO_WINDOW on the PowerShell parser probe, tesseract, and ffmpeg.
+- Telegram: made the poll-lease test hermetic with a per-test mutex name.
+- Build: pinned staticVCRuntime and upgraded the Tauri CLI to 2.12.4 to drop the deprecated STATIC_VCRUNTIME env injection.
+
+---
+
 ## [1.9.7]
 
 - Assistant: tool allowlists, isolated model endpoint, scratch-dir sandboxing, and shared image→text extraction with no duplicate tool runs on OCR retries.
