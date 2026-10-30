@@ -105,6 +105,17 @@ export function GroupChatPanel({
     }
   }, [openGroupId, version, closeGroupFromStack]);
 
+  // Stack invariant: a selected group only makes sense while the group
+  // panel owns the expanded slot. When the AI window takes the slot back
+  // (openMiniToStack from the AI pill), clear the selection — otherwise the
+  // group is unreachable: the tray pill hides on activeId !== null while
+  // the panel hides on !expanded.
+  useEffect(() => {
+    if (stackSurface !== "group" && openGroupId !== null) {
+      setOpenGroupId(null);
+    }
+  }, [stackSurface, openGroupId]);
+
   // Cross-surface entries via window events (the rail and the status bar
   // live inside project workspaces; the panel is app-level — events keep
   // them decoupled, same pattern as Kai:term-command-end).
@@ -143,9 +154,15 @@ export function GroupChatPanel({
       // createGroupChat resolves the inviter's CURRENT active session on
       // flush; the sessionId passed here is a placeholder replaced in-store.
       setPickerOpen(false);
-      if (g) setOpenGroupId(g.id);
+      // Claim the expanded slot immediately. Without openGroupToStack the
+      // new group is INVISIBLE: the tray pill hides itself while a group is
+      // selected (activeId !== null) and the panel needs the slot to expand.
+      if (g) {
+        setOpenGroupId(g.id);
+        openGroupToStack();
+      }
     },
-    [projects, activeProjectId],
+    [projects, activeProjectId, openGroupToStack],
   );
 
   // No groups and no picker open — nothing to render. Starting a group lives

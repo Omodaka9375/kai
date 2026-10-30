@@ -98,14 +98,18 @@ function MenuTile({
       onSelect={onSelect}
       className="flex flex-col items-start gap-0.5 rounded-xl px-2.5 py-2"
     >
-      <span className="flex w-full items-center gap-1.5">
+      {/* Row 1: icon + label ONLY. Never the shortcut: at ~150px per tile,
+          label + "Ctrl+Shift+S" overflows, the span wraps, and the Save
+          tiles' rows break alignment entirely. */}
+      <span className="flex w-full min-w-0 items-center gap-1.5">
         <HugeiconsIcon icon={Icon} size={13} strokeWidth={1.75} className="shrink-0 text-muted-foreground" />
-        <span className="text-xs font-medium">{label}</span>
-        {shortcut ? (
-          <span className="ml-auto text-[10px] font-normal text-muted-foreground/60">{shortcut}</span>
-        ) : null}
+        <span className="min-w-0 truncate text-xs font-medium">{label}</span>
       </span>
-      <span className="text-[10px] leading-3 text-muted-foreground/70">{desc}</span>
+      {/* Row 2: desc left, shortcut right — both short enough to never wrap. */}
+      <span className="flex w-full min-w-0 items-center gap-1.5">
+        <span className="min-w-0 truncate text-[10px] leading-3 font-normal text-muted-foreground/70">{desc}</span>
+        {shortcut ? <span className="ml-auto shrink-0 text-[10px] leading-3 font-normal text-muted-foreground/60">{shortcut}</span> : null}
+      </span>
     </DropdownMenuItem>
   );
 }
@@ -128,7 +132,7 @@ export function FileMenu({
   const saveAllDesc =
     dirtyCount === 0
       ? "No unsaved files"
-      : `${dirtyCount} unsaved ${dirtyCount === 1 ? "file" : "files"}`;
+      : `${dirtyCount} unsaved`;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
