@@ -27,6 +27,15 @@ export function wrapAsciiArt(text: string): string {
   // otherwise a model-fenced diagram gets a second nested ```text fence
   // injected, which then renders as literal text inside the block.
   let inFence = false;
+  let fenceDelimiter = "`";
+  let fenceLength = 3;
+  // Markdown container prefix: nested blockquotes/lists share one fence
+  // state with their contents. Continuation lines in a blockquoted shell
+  // command commonly start with `>` and end in `\`; classifying those as
+  // ASCII art injected a second fence through the middle of the command.
+  const MARKDOWN_CONTAINER_RE = /^\s*(?:(?:>\s*)|(?:(?:[-*+]|\d{1,3}[.)])\s+))+/;
+  const markdownLine = (line: string): string =>
+    line.replace(MARKDOWN_CONTAINER_RE, "");
 
   const flushArt = () => {
     // Fence single-line Unicode box-drawing diagrams — they collapse to
@@ -77,6 +86,12 @@ export function wrapAsciiArt(text: string): string {
     TABLE_SEPARATOR_RE.test(l) && l.includes("|") && l.includes("-");
 
   const isArtLine = (line: string): boolean => {
+    // Markdown containers are never ASCII art themselves. Their unprefixed
+    // content is intentionally NOT reclassified: a quoted shell continuation
+    // looks exactly like a `> … \` diagram frame, and a list's `| … |` prose
+    // looks like a table. Preserve the container verbatim rather than
+    // injecting a top-level fence through it.
+    if (line !== markdownLine(line)) return false;
     if (LIST_ITEM_RE.test(line)) return false;
     if (ATX_HEADING_RE.test(line)) return false;
     if (SETEXT_UNDERLINE_RE.test(line)) return false;
@@ -95,15 +110,37 @@ export function wrapAsciiArt(text: string): string {
     const line = lines[i];
     // Fence delimiter (up to 3 leading spaces per CommonMark): toggle and
     // flush any pending run so it never merges across the boundary.
-    if (/^\s{0,3}```/.test(line)) {
-      if (inArt) flushArt();
-      else if (artRun.length > 0) {
-        out.push(...artRun);
-        artRun = [];
+    // Opening and closing fences have different CommonMark rules: an
+    // opening fence may carry an info string; a closing fence may contain
+    // only backticks/whitespace. Handle blockquoted/list-nested fences too,
+    // and support tildes (CommonMark's other fence delimiter).
+    const contentLine = markdownLine(line);
+    const fenceMatch = /^(\s{0,3})(`{3,}|~{3,})(.*)$/.exec(contentLine);
+    if (fenceMatch) {
+      const marker = fenceMatch[2] ?? "";
+      const remainder = fenceMatch[3] ?? "";
+      const delimiter = marker[0];
+      const closesFence =
+        inFence &&
+        delimiter === fenceDelimiter &&
+        marker.length >= fenceLength &&
+        remainder.trim() === "";
+      if (!inFence || closesFence) {
+        if (inArt) flushArt();
+        else if (artRun.length > 0) {
+          out.push(...artRun);
+          artRun = [];
+        }
+        if (!inFence) {
+          fenceDelimiter = delimiter ?? "`";
+          fenceLength = marker.length;
+          inFence = true;
+        } else {
+          inFence = false;
+        }
+        out.push(line);
+        continue;
       }
-      inFence = !inFence;
-      out.push(line);
-      continue;
     }
     if (inFence) {
       out.push(line);

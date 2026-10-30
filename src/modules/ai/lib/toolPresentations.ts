@@ -91,6 +91,15 @@ const REGISTRY: Record<string, ToolPresentation> = {
     fence: true,
     remoteSurface: false,
   },
+  replace_exact: {
+    label: "Replace exact",
+    approvalLabel: "Replace exact bytes (recovery)",
+    status: (a) => `Byte-replacing ${shortPath(a.path)}`,
+    summary: (a) => str(a, "path"),
+    effect: "COMMITTED",
+    fence: true,
+    remoteSurface: false,
+  },
   batch_edit: {
     label: "Edit",
     approvalLabel: "Apply edits",

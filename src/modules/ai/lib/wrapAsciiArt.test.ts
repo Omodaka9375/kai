@@ -56,6 +56,55 @@ describe("wrapAsciiArt — markdown structure must not become art", () => {
     expect(wrapAsciiArt(input)).toBe("```text\n" + input + "\n```");
   });
 
+  it("leaves a blockquoted shell fence and its backslash continuations intact", () => {
+    const input = [
+      "> Decision: review-time enforcement.",
+      ">",
+      "> ```bash",
+      "> set -o pipefail",
+      "> docker run --rm --env-file /srv/dreamwork-shadow/config/shadow.env \\",
+      ">   dreamwork-shadow:87fd42ea6 \\",
+      ">   node /app/apps/api/dist/scripts/shadow-readonly-role-verify.js \\",
+      ">   2>&1 | tee /srv/dreamwork-shadow/reports/role-verify.txt",
+      "> ```",
+      "> Valid evidence requires **all three** checks.",
+    ].join("\n");
+    // The continuation lines used to be classified as ASCII art because they
+    // start with `>` and end in `\`. That injected a ```text fence between
+    // the third and fourth command lines, leaking the rest outside the code
+    // block and unbalancing the surrounding blockquoted fence.
+    expect(wrapAsciiArt(input)).toBe(input);
+  });
+
+  it("leaves Markdown blockquotes alone even when prose contains frame chars", () => {
+    const input = "> Use <left> and <right> | exactly as shown.\n> Next line";
+    expect(wrapAsciiArt(input)).toBe(input);
+  });
+
+  it("recognizes fences nested in lists and longer fence delimiters", () => {
+    const input = [
+      "- command:",
+      "  ````bash",
+      "  printf '%s' \"```\",",
+      "  next --flag \\",
+      "  ````",
+      "- after",
+    ].join("\n");
+    expect(wrapAsciiArt(input)).toBe(input);
+  });
+
+  it("recognizes tilde fences and does not confuse an info string with a close", () => {
+    const input = [
+      "~~~text",
+      "> this is code, not a blockquote",
+      "~~~javascript",
+      "still code",
+      "~~~",
+      "after",
+    ].join("\n");
+    expect(wrapAsciiArt(input)).toBe(input);
+  });
+
   it("still fences real box-drawing diagrams", () => {
     const input = "┌─────┐\n│ hi  │\n└─────┘";
     expect(wrapAsciiArt(input)).toBe("```text\n" + input + "\n```");

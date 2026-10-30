@@ -264,7 +264,7 @@ export function buildConfiguredLanguageModel(
 }
 
 const PLAN_MODE_PROMPT = `## PLAN MODE — ACTIVE
-Mutating tools (write_file, edit, batch_edit, create_directory) will queue their changes for the user to review as a single diff. Do NOT execute bash_run or bash_background while plan mode is active — restrict yourself to reads (read_file, grep, glob, list_directory) and the queued mutations. After queueing the full set of edits, stop and return a brief summary; do not continue acting until the user has accepted/rejected.`;
+Mutating tools (write_file, edit, batch_edit, replace_exact, create_directory) will queue their changes for the user to review as a single diff. Do NOT execute bash_run or bash_background while plan mode is active — restrict yourself to reads (read_file, grep, glob, list_directory) and the queued mutations. After queueing the full set of edits, stop and return a brief summary; do not continue acting until the user has accepted/rejected.`;
 
 export function buildStableSystem(
   _modelId: ModelId,

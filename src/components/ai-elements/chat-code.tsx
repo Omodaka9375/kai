@@ -99,7 +99,7 @@ function BlockChrome({
   children: React.ReactNode;
 }) {
   return (
-    <div className="not-prose my-2 overflow-hidden rounded-lg border border-border/50 bg-muted/30">
+    <div className="not-prose my-2 w-full min-w-0 max-w-full overflow-hidden rounded-lg border border-border/50 bg-muted/30">
       <div className="flex items-center justify-between gap-2 border-b border-border/40 bg-muted/20 px-3 py-1">
         <span className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
           {label}
@@ -185,7 +185,7 @@ function CommandCard({ code, lang }: { code: string; lang: string }) {
   const isMultiline = code.includes("\n");
   const prompt = shellPrompt(lang);
   return (
-    <div className="not-prose my-2 overflow-hidden rounded-lg border border-border/50 bg-muted/40">
+    <div className="not-prose my-2 w-full min-w-0 max-w-full overflow-hidden rounded-lg border border-border/50 bg-muted/40">
       <div className="flex items-center justify-between gap-2 px-3 py-1.5">
         <span className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
           {normalizeLangLabel(lang)}

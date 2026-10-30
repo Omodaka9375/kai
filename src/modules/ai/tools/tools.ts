@@ -10,6 +10,7 @@ import { buildTodoTools } from "./todo";
 import { buildWebTools } from "./web";
 import { buildMemoryTools } from "./memory";
 import { buildBatchEditTools } from "./batchEdit";
+import { buildReplaceExactTools } from "./replaceExact";
 import { buildTerminalImageTools } from "./terminalImage";
 import { buildTerminalVideoTools } from "./terminalVideo";
 import { buildWatchTools } from "./watch";
@@ -32,6 +33,7 @@ export function buildCoreTools(ctx: import("./context").ToolContext) {
     ...buildTerminalTools(ctx),
     ...buildMemoryTools(ctx),
     ...buildBatchEditTools(ctx),
+    ...buildReplaceExactTools(ctx),
     ...buildTerminalImageTools(ctx),
     ...buildTerminalVideoTools(ctx),
     ...buildWatchTools(ctx),

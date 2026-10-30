@@ -337,7 +337,7 @@ export const MessageResponse = memo(
     <ChatStreamingProvider value={streaming}>
       <Streamdown
         className={cn(
-          "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+          "size-full min-w-0 max-w-full overflow-wrap-anywhere [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_blockquote]:max-w-full [&_p]:max-w-full [&_pre]:max-w-full",
           className,
         )}
         linkSafety={{ enabled: false }}

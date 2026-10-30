@@ -739,6 +739,7 @@ function Bridge({
         if (
           t === "tool-write_file" ||
           t === "tool-edit" ||
+          t === "tool-replace_exact" ||
           t === "tool-multi_edit" ||
           t === "tool-batch_edit"
         ) {
@@ -760,9 +761,9 @@ function Bridge({
        * Either a literal proposed content (write_file), or a function that
        * derives proposed content from the on-disk original (edit/multi_edit).
        */
-      derive:
+        derive:
         | { kind: "literal"; content: string }
-        | { kind: "edits"; edits: EditOp[] };
+        | { kind: "edits"; edits: EditOp[]; expectedOccurrences?: number };
     };
     if (fileMutationFingerprint === fileMutationFingerprintRef.current) {
       return;
@@ -824,7 +825,11 @@ function Bridge({
         if (p.derive.kind === "literal") {
           proposed = p.derive.content;
         } else {
-          const r = applyEditsLocally(original.content, p.derive.edits);
+          const r = applyEditsLocally(
+            original.content,
+            p.derive.edits,
+            p.derive.expectedOccurrences,
+          );
           if (r.ok) {
             proposed = r.content;
           } else {
@@ -866,7 +871,7 @@ type FileMutation =
       state: string;
       approvalId: string | null;
       path: string;
-      derive: { kind: "edits"; edits: EditOp[] };
+      derive: { kind: "edits"; edits: EditOp[]; expectedOccurrences?: number };
     };
 
 function extractFileMutations(part: AnyPart): FileMutation[] {
@@ -882,12 +887,13 @@ function extractFileMutations(part: AnyPart): FileMutation[] {
     if (!path) return [];
     return [{ state, approvalId, path, derive: { kind: "literal", content } }];
   }
-  if (type === "tool-edit") {
+  if (type === "tool-edit" || type === "tool-replace_exact") {
     const input = (p.input ?? {}) as {
       path?: unknown;
       old_string?: unknown;
       new_string?: unknown;
       replace_all?: unknown;
+      expected_occurrences?: unknown;
     };
     const path = typeof input.path === "string" ? input.path : "";
     const oldStr = typeof input.old_string === "string" ? input.old_string : "";
@@ -904,9 +910,15 @@ function extractFileMutations(part: AnyPart): FileMutation[] {
             {
               old_string: oldStr,
               new_string: newStr,
-              replace_all: Boolean(input.replace_all),
+              replace_all: type === "tool-replace_exact" || Boolean(input.replace_all),
             },
           ],
+          expectedOccurrences:
+            type === "tool-replace_exact"
+              ? typeof input.expected_occurrences === "number"
+                ? input.expected_occurrences
+                : 1
+              : undefined,
         },
       },
     ];
@@ -951,13 +963,18 @@ function extractFileMutations(part: AnyPart): FileMutation[] {
 function applyEditsLocally(
   original: string,
   edits: EditOp[],
+  expectedOccurrences?: number,
 ): { ok: true; content: string } | { ok: false } {
   let content = original;
   for (const e of edits) {
     if (e.old_string === e.new_string || e.old_string.length === 0)
       return { ok: false };
     if (e.replace_all) {
-      if (!content.includes(e.old_string)) return { ok: false };
+      const matches = content.split(e.old_string).length - 1;
+      if (matches !== (expectedOccurrences ?? 1) && expectedOccurrences !== undefined) {
+        return { ok: false };
+      }
+      if (matches === 0) return { ok: false };
       content = content.split(e.old_string).join(e.new_string);
     } else {
       const first = content.indexOf(e.old_string);

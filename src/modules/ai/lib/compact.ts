@@ -86,6 +86,7 @@ function collectLastMutationIdxPerPath(
         for (const p of pathsOfInput(part.input)) lastIdx.set(p, i);
       } else if (
         name === "edit" ||
+        name === "replace_exact" ||
         name === "write_file" ||
         name === "create_directory"
       ) {

@@ -4,7 +4,7 @@ import { native } from "../lib/native";
 export type QueuedEdit = {
   id: string;
   /** Tool that produced the queued mutation. */
-  kind: "write_file" | "edit" | "batch_edit" | "create_directory";
+  kind: "write_file" | "edit" | "batch_edit" | "replace_exact" | "create_directory";
   path: string;
   /** Original file content (empty for new files / create_directory). */
   originalContent: string;
@@ -12,6 +12,16 @@ export type QueuedEdit = {
   proposedContent: string;
   /** True if the file did not exist when the edit was queued. */
   isNewFile: boolean;
+  /** Byte-exact mutation retained until review is accepted. Decoded
+   *  proposedContent is for display only; applying must use raw bytes. */
+  exactReplacement?: {
+    oldString: string;
+    newString: string;
+    expectedOccurrences: number;
+  };
+  /** Completion hook for recovery state (edit-failure latch, read cache).
+   *  Runs only after the queued mutation actually succeeds. */
+  onApplied?: () => void | Promise<void>;
   /** Human-readable description, used for create_directory. */
   description?: string;
 };
@@ -52,9 +62,19 @@ export const usePlanStore = create<PlanState>((set, get) => ({
       try {
         if (q.kind === "create_directory") {
           await native.createDir(q.path);
+        } else if (q.kind === "replace_exact" && q.exactReplacement) {
+          await native.replaceExact(
+            q.path,
+            q.exactReplacement.oldString,
+            q.exactReplacement.newString,
+            q.exactReplacement.expectedOccurrences,
+          );
+        } else if (q.kind === "replace_exact") {
+          throw new Error("replace_exact plan entry is missing exactReplacement arguments");
         } else {
           await native.writeFile(q.path, q.proposedContent);
         }
+        await q.onApplied?.();
         results.push({ id: q.id, ok: true });
       } catch (e) {
         results.push({ id: q.id, ok: false, error: String(e) });

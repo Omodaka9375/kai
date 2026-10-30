@@ -712,6 +712,7 @@ app.manage(Mutex::new(None::<fs::env_probe::EnvInventory>));
     fs::env_probe::fs_env_inventory,
             fs::file::fs_read_file_bytes,
             fs::file::fs_write_file_bytes,
+            fs::file::fs_replace_exact,
             fs::file::fs_canonicalize,
             fs::extract::fs_extract_image_bytes,
             fs::mutate::fs_create_file,

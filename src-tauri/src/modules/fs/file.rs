@@ -202,6 +202,237 @@ pub fn fs_write_file(
     Ok(())
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplaceExactResult {
+    pub replacements: usize,
+    pub bytes_written: usize,
+}
+
+/// Count non-overlapping literal byte matches, retaining at most `keep`
+/// offsets. KMP avoids quadratic behavior on large files/repetitive needles.
+fn exact_byte_matches(haystack: &[u8], needle: &[u8], keep: usize) -> (usize, Vec<usize>) {
+    let mut prefix = vec![0usize; needle.len()];
+    let mut matched = 0usize;
+    for i in 1..needle.len() {
+        while matched > 0 && needle[i] != needle[matched] {
+            matched = prefix[matched - 1];
+        }
+        if needle[i] == needle[matched] {
+            matched += 1;
+        }
+        prefix[i] = matched;
+    }
+
+    let mut count = 0usize;
+    let mut offsets = Vec::new();
+    let mut i = 0usize;
+    let mut j = 0usize;
+    while i < haystack.len() {
+        while j > 0 && haystack[i] != needle[j] {
+            j = prefix[j - 1];
+        }
+        if haystack[i] == needle[j] {
+            j += 1;
+        }
+        if j == needle.len() {
+            let start = i + 1 - needle.len();
+            count += 1;
+            if offsets.len() < keep {
+                offsets.push(start);
+            }
+            // Non-overlapping occurrence semantics, matching String.indexOf.
+            j = 0;
+        }
+        i += 1;
+    }
+    (count, offsets)
+}
+
+fn replace_exact_bytes(
+    original: &[u8],
+    old_string: &str,
+    new_string: &str,
+    expected_occurrences: usize,
+) -> Result<(Vec<u8>, usize), String> {
+    if old_string.is_empty() {
+        return Err("old_string cannot be empty".into());
+    }
+    if old_string == new_string {
+        return Err("old_string and new_string are identical; nothing to change".into());
+    }
+    if !(1..=1000).contains(&expected_occurrences) {
+        return Err("expected_occurrences must be between 1 and 1000".into());
+    }
+    // This is deliberately a UTF-8 TEXT recovery tool, not a binary editor.
+    // Validate the complete file, not just a sniff window, and reject NULs.
+    if std::str::from_utf8(original).is_err() || original.contains(&0) {
+        return Err("replace_exact requires a valid UTF-8 text file without NUL bytes".into());
+    }
+
+    // `read_file` strips a leading UTF-8 BOM for display. Preserve the raw
+    // BOM but exclude it from the needle domain so an anchor copied from
+    // that view can still replace the file's first bytes. An explicit BOM
+    // remains matchable at offset 0 via the fallback domain.
+    let bom_len = usize::from(original.starts_with(b"\xEF\xBB\xBF")) * 3;
+    let explicit_bom = old_string.starts_with('\u{FEFF}');
+    let (old, new, offsets, count) = if bom_len > 0 && !explicit_bom {
+        let (count, mut offsets) = exact_byte_matches(
+            &original[bom_len..],
+            old_string.as_bytes(),
+            usize::MAX,
+        );
+        for offset in &mut offsets {
+            *offset += bom_len;
+        }
+        (old_string.as_bytes(), new_string.as_bytes(), offsets, count)
+    } else {
+        let (count, offsets) = exact_byte_matches(original, old_string.as_bytes(), usize::MAX);
+        (old_string.as_bytes(), new_string.as_bytes(), offsets, count)
+    };
+    if count != expected_occurrences {
+        let locations = if offsets.is_empty() {
+            String::new()
+        } else {
+            format!(
+                " (byte offsets: {})",
+                offsets
+                    .iter()
+                    .map(usize::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
+        return Err(format!(
+            "old_string matched {count} exact UTF-8 byte occurrence(s){locations}; expected {expected_occurrences}. Nothing was changed."
+        ));
+    }
+
+    let mut replaced = Vec::with_capacity(
+        original
+            .len()
+            .saturating_add(new.len().saturating_sub(old.len()).saturating_mul(count)),
+    );
+    let mut cursor = 0usize;
+    for offset in offsets {
+        replaced.extend_from_slice(&original[cursor..offset]);
+        replaced.extend_from_slice(new);
+        cursor = offset + old.len();
+    }
+    replaced.extend_from_slice(&original[cursor..]);
+    Ok((replaced, count))
+}
+
+/// Recovery-only literal replacement for UTF-8 text. No EOL/whitespace
+/// normalization happens: every byte outside the exact match is preserved.
+#[tauri::command]
+pub fn fs_replace_exact(
+    path: String,
+    old_string: String,
+    new_string: String,
+    expected_occurrences: Option<usize>,
+    workspace: Option<WorkspaceEnv>,
+) -> Result<ReplaceExactResult, String> {
+    let env = WorkspaceEnv::from_option(workspace.clone());
+    let target = resolve_path(&path, &env);
+    let size = std::fs::metadata(&target)
+        .map_err(|e| e.to_string())?
+        .len();
+    if size > MAX_READ_BYTES {
+        return Err(format!(
+            "file too large ({size} bytes, limit {MAX_READ_BYTES})"
+        ));
+    }
+    let original = std::fs::read(&target).map_err(|e| e.to_string())?;
+    let (replaced, replacements) = replace_exact_bytes(
+        &original,
+        &old_string,
+        &new_string,
+        expected_occurrences.unwrap_or(1),
+    )?;
+    let bytes_written = replaced.len();
+    fs_write_file_bytes(path, replaced, workspace)?;
+    Ok(ReplaceExactResult {
+        replacements,
+        bytes_written,
+    })
+}
+
+#[cfg(test)]
+mod replace_exact_tests {
+    use super::replace_exact_bytes;
+
+    #[test]
+    fn preserves_bom_mixed_eols_trailing_whitespace_and_eof_state() {
+        let original = b"\xEF\xBB\xBFfirst\r\n  keep  \nthird \xE2\x80\x94 dash\r\nlast";
+        let (out, count) = replace_exact_bytes(original, "keep", "KEPT", 1).unwrap();
+        assert_eq!(count, 1);
+        assert_eq!(
+            out,
+            b"\xEF\xBB\xBFfirst\r\n  KEPT  \nthird \xE2\x80\x94 dash\r\nlast"
+        );
+    }
+
+    #[test]
+    fn display_view_anchors_match_bom_prefixed_files() {
+        let original = b"\xEF\xBB\xBFfirst\r\n";
+        let (out, count) = replace_exact_bytes(original, "first", "FIRST", 1).unwrap();
+        assert_eq!(count, 1);
+        assert_eq!(out, b"\xEF\xBB\xBFFIRST\r\n");
+
+        // An explicit BOM is still a literal needle at byte offset zero.
+        let (out, count) = replace_exact_bytes(original, "\u{FEFF}first", "FIRST", 1).unwrap();
+        assert_eq!(count, 1);
+        assert_eq!(out, b"FIRST\r\n");
+    }
+
+    #[test]
+    fn never_relaxes_punctuation_or_line_endings() {
+        let original = b"a \xE2\x80\x94 b\r\n";
+        assert!(replace_exact_bytes(original, "a - b\n", "x", 1).is_err());
+        assert_eq!(original, b"a \xE2\x80\x94 b\r\n");
+    }
+
+    #[test]
+    fn enforces_the_exact_occurrence_count() {
+        let err = replace_exact_bytes(b"x x", "x", "y", 1).unwrap_err();
+        assert!(err.contains("matched 2"), "{err}");
+        assert!(err.contains("byte offsets: 0, 2"), "{err}");
+        let (out, count) = replace_exact_bytes(b"x x", "x", "y", 2).unwrap();
+        assert_eq!(count, 2);
+        assert_eq!(out, b"y y");
+    }
+
+    #[test]
+    fn uses_non_overlapping_matches() {
+        let err = replace_exact_bytes(b"aaaa", "aa", "b", 4).unwrap_err();
+        assert!(err.contains("matched 2"), "{err}");
+        assert!(err.contains("byte offsets: 0, 2"), "{err}");
+        let (out, count) = replace_exact_bytes(b"aaaa", "aa", "b", 2).unwrap();
+        assert_eq!(count, 2);
+        assert_eq!(out, b"bb");
+    }
+
+    #[test]
+    fn rejects_binary_noops_and_bad_counts() {
+        assert!(replace_exact_bytes(&[0xFF, 0xFE], "x", "y", 1).is_err());
+        assert!(replace_exact_bytes(b"a\0b", "a", "y", 1).is_err());
+        assert!(replace_exact_bytes(b"same", "same", "same", 1).is_err());
+        assert!(replace_exact_bytes(b"x", "x", "y", 0).is_err());
+    }
+
+    // NOTE: no Rust unit test may call the `#[tauri::command]` wrappers
+    // (fs_replace_exact included). A #[test] fn is a linker root even under
+    // #[ignore], and one command call roots emit_fs_changed → tauri
+    // AppHandle::emit → the whole tauri/tao/muda runtime. The lib test
+    // binary gets no SxS manifest, so comctl32 v6 entrypoints
+    // (TaskDialogIndirect) fail to resolve and the exe dies at load with
+    // STATUS_ENTRYPOINT_NOT_FOUND — killing EVERY cargo test on Windows.
+    // The matcher logic is covered by the pure tests below; the command
+    // wrapper (metadata/size guard/read/write/emit) is covered end-to-end
+    // by replaceExact.test.ts against the native client.
+}
+
 #[tauri::command]
 pub fn fs_canonicalize(path: String, workspace: Option<WorkspaceEnv>) -> Result<String, String> {
     let workspace = WorkspaceEnv::from_option(workspace);

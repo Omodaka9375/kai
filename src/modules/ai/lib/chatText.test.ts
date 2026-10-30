@@ -40,6 +40,20 @@ describe("stripLeakedTokens", () => {
     expect(out).toContain("Trailing paragraph.");
   });
 
+  it("keeps a blockquoted multiline shell command in one balanced fence", () => {
+    const s = [
+      "> ```bash",
+      "> set -o pipefail",
+      "> docker run --rm --env-file /srv/config.env \\",
+      ">   image:87fd42ea6 \\",
+      ">   node /app/verify.js \\",
+      ">   2>&1 | tee /srv/report.txt",
+      "> ```",
+      "> Evidence remains prose.",
+    ].join("\n");
+    expect(stripLeakedTokens(s)).toBe(s);
+  });
+
   it("strips <thinking> blocks but keeps surrounding prose", () => {
     const s = "Before.<thinking>secret</thinking>After.";
     expect(stripLeakedTokens(s)).toBe("Before.After.");

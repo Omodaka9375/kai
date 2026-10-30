@@ -295,6 +295,19 @@ export function createNative(getEnv: () => WorkspaceEnv) {
       bytes,
       workspace: env(),
     }),
+  replaceExact: (
+    path: string,
+    oldString: string,
+    newString: string,
+    expectedOccurrences = 1,
+  ) =>
+    invoke<{ replacements: number; bytesWritten: number }>("fs_replace_exact", {
+      path,
+      oldString,
+      newString,
+      expectedOccurrences,
+      workspace: env(),
+    }),
     readFileBytes: (path: string) =>
     invoke<number[]>("fs_read_file_bytes", {
       path,
