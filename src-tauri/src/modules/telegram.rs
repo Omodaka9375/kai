@@ -1073,13 +1073,18 @@ pub async fn telegram_send_media_url(
 // ── ffmpeg helpers (fail-soft) ─────────────────────────────────────────────
 
 fn ffmpeg_available() -> bool {
-    std::process::Command::new("ffmpeg")
+    let mut probe = std::process::Command::new("ffmpeg");
+    probe
         .arg("-version")
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+        .stderr(std::process::Stdio::null());
+    // CREATE_NO_WINDOW — no console flash from the GUI app on every probe.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        probe.creation_flags(0x08000000);
+    }
+    probe.status().map(|s| s.success()).unwrap_or(false)
 }
 
 fn transcode_to_ogg(input: &[u8]) -> Result<Vec<u8>, String> {
@@ -1111,12 +1116,20 @@ fn run_ffmpeg(input: &[u8], encode_args: &[&str]) -> Result<Vec<u8>, String> {
     f.write_all(input).map_err(|e| format!("tmp write: {e}"))?;
     drop(f);
 
-    let out = std::process::Command::new("ffmpeg")
+    let mut ffmpeg = std::process::Command::new("ffmpeg");
+    ffmpeg
         .arg("-y")
         .arg("-loglevel").arg("error")
         .arg("-i").arg(&in_path)
         .args(encode_args)
-        .arg(&out_path)
+        .arg(&out_path);
+    // CREATE_NO_WINDOW — no console flash from the GUI app on transcode.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        ffmpeg.creation_flags(0x08000000);
+    }
+    let out = ffmpeg
         .output()
         .map_err(|e| format!("ffmpeg spawn: {e}"))?;
     let _ = std::fs::remove_file(&in_path);

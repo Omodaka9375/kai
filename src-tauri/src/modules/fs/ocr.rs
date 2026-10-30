@@ -26,13 +26,16 @@ pub fn get_ocr_text(bytes: &[u8]) -> Result<String, String> {
     let output_stem = std::env::temp_dir().join(&unique);
     std::fs::write(&input, bytes).map_err(|e| e.to_string())?;
     let exe = find_tesseract()?;
-    let result = Command::new(exe)
-        .arg(&input)
-        .arg(&output_stem)
-        .arg("-l")
-        .arg("eng")
-        .output()
-        .map_err(|e| e.to_string());
+    let mut probe = Command::new(exe);
+    probe.arg(&input).arg(&output_stem).arg("-l").arg("eng");
+    // CREATE_NO_WINDOW — tesseract is a console binary; without this KAI
+    // (GUI subsystem) flashes a console window on every OCR pass.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        probe.creation_flags(0x08000000);
+    }
+    let result = probe.output().map_err(|e| e.to_string());
 
     // Best-effort cleanup regardless of outcome.
     let text_path = output_stem.with_extension("txt");

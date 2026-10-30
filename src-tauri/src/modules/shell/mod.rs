@@ -561,13 +561,23 @@ fn validate_powershell_script(shell: &Path, command: &str) -> Result<(), String>
         "$e = $null\n[void][System.Management.Automation.Language.Parser]::ParseFile('{}', [ref]$null, [ref]$e)\nif ($e.Count -gt 0) {{ $f = $e[0]; Write-Error (\"$($f.Message)|$($f.Extent.StartLineNumber)|$($f.Extent.StartColumnNumber)\"); exit 1 }}\nexit 0\n",
         script.to_string_lossy().replace('\'', "''")
     );
-    let output = std::process::Command::new(shell)
+    let mut probe = std::process::Command::new(shell);
+    probe
         .arg("-NoProfile")
         .arg("-NonInteractive")
         .arg("-ExecutionPolicy")
         .arg("Bypass")
         .arg("-Command")
-        .arg(validation)
+        .arg(validation);
+    // CREATE_NO_WINDOW — this probe runs before EVERY oneshot command; a
+    // visible pwsh console here flashes on each agent Run. KAI is a
+    // GUI-subsystem app, so Windows would otherwise allocate a fresh
+    // console window per spawn.
+    {
+        use std::os::windows::process::CommandExt;
+        probe.creation_flags(0x08000000);
+    }
+    let output = probe
         .output()
         .map_err(|e| format!("PowerShell parser validation failed to start: {e}"))?;
     if output.status.success() {
