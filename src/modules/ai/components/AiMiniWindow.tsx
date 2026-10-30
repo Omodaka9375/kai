@@ -20,7 +20,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { useChat, type UIMessage } from "@ai-sdk/react";
+import { useChat, type Chat, type UIMessage } from "@ai-sdk/react";
 import {
   Add01Icon,
   AlertCircleIcon,
@@ -47,12 +47,49 @@ import { getOrCreateChat, useChatStore } from "../store/chatStore";
 import { Input } from "@/components/ui/input";
 import { usePlanStore } from "../store/planStore";
 import { AgentSwitcher } from "./AgentSwitcher";
-import { AiChatView } from "./AiChat";
+import { AiChatView, GameOfLifeSpinner } from "./AiChat";
 import { PlanDiffReview } from "./PlanDiffReview";
 import { TodoStrip } from "./TodoStrip";
 import { useComposer } from "./composer";
 import { cancelAllShellSessions } from "../tools/shell";
 
+/** Transcript renders below this message count mount instantly (warm
+ *  session switches feel unchanged). Above it, the first paint shows the
+ *  shell + spinner and the full transcript fills in on the next idle. */
+const HEAVY_TRANSCRIPT_MESSAGES = 40;
+
+/** Two-phase transcript mount - the fix for the switch-mid-stream freeze.
+ *
+ * Rendering the FULL transcript of a large session is the single most
+ * expensive synchronous render in KAI: every message x markdown/code
+ * parts, hundreds of DOM nodes, all in ONE commit. A project switch
+ * mounts the incoming project's window, and that render used to land in
+ * the SAME commit as the visibility flip + the outgoing project's
+ * still-streaming window - the UI froze for seconds until it finished.
+ * Now the shell paints first (header, strips, input - cheap), and the
+ * transcript renders two animation frames later, off the interaction.
+ * Ready state is keyed to the Chat identity so switching sessions inside
+ * the window re-evaluates: small transcripts still mount instantly,
+ * heavy ones re-defer. */
+function useDeferredTranscript(chat: Chat<UIMessage>): boolean {
+  const heavy = chat.messages.length > HEAVY_TRANSCRIPT_MESSAGES;
+  const [readyFor, setReadyFor] = useState<Chat<UIMessage> | null>(
+    heavy ? null : chat,
+  );
+  const ready = readyFor === chat || !heavy;
+  useEffect(() => {
+    if (ready) return;
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => setReadyFor(chat));
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+    };
+  }, [ready, chat]);
+  return ready;
+}
 const SUGGESTIONS = [
   {
     label: "Explain the last error",
@@ -168,6 +205,7 @@ function Body({
   const c = useComposer();
 
   const chat = useMemo(() => getOrCreateChat(sessionId), [sessionId]);
+  const transcriptReady = useDeferredTranscript(chat);
   // Same rationale as AgentRunBridge: the mini window is always mounted and
   // shares the Chat with the main bridge — an unthrottled subscriber here
   // would keep per-chunk setStates (and #185 re-entrancy) alive even with
@@ -187,7 +225,7 @@ function Body({
       <div className="flex min-h-0 flex-1 flex-col">
         {helpers.messages.length === 0 ? (
           <EmptyState onPick={focusInput} />
-        ) : (
+        ) : transcriptReady ? (
           <div className="flex min-h-0 flex-1 flex-col [&_.text-sm]:text-[12px] [&_p]:leading-relaxed">
             <AiChatView
               messages={helpers.messages}
@@ -195,6 +233,12 @@ function Body({
               error={helpers.error}
               clearError={helpers.clearError}
             />
+          </div>
+        ) : (
+          // Heavy transcript deferred past the switch commit - paint the
+          // shell now, fill the history on the next idle.
+          <div className="flex flex-1 items-center justify-center">
+            <GameOfLifeSpinner />
           </div>
         )}
       </div>
