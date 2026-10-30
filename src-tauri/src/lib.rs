@@ -810,6 +810,8 @@ app.manage(Mutex::new(None::<fs::env_probe::EnvInventory>));
             secrets::secrets_set,
             secrets::secrets_delete,
             secrets::secrets_get_all,
+            modules::gmail::gmail_search,
+            modules::gmail::gmail_read_message,
             modules::telegram::telegram_start,
             modules::telegram::telegram_stop,
             modules::telegram::telegram_bind_owner,

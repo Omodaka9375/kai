@@ -65,6 +65,13 @@ image = { version = "0.25", default-features = false, features = [
 ] }
 xcap = { version = "0.9.8", default-features = false }
 tauri-plugin-notification = "2.8.0"
+# Gmail read-only IMAP tool (app-password auth, no OAuth, no MCP).
+# rustls-tls keeps the stack OpenSSL-free (matches reqwest's rustls build).
+imap = { version = "3.0.0-alpha.15", default-features = false, features = [
+  "rustls-tls",
+] }
+# 0.11, not 1.0: 1.0's rust-version floor (1.98) is above our toolchain.
+mail-parser = "0.11"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

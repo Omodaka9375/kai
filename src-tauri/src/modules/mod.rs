@@ -1,5 +1,6 @@
 pub mod audit;
 pub mod diagnostics;
+pub mod gmail;
 pub mod fs;
 pub mod git;
 pub mod gpg;

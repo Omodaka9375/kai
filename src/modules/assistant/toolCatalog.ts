@@ -61,6 +61,11 @@ export const TOOL_CATALOG: readonly ToolEntry[] = [
   { name: "grep", tier: "read", blurb: "Search file contents." },
   { name: "glob", tier: "read", blurb: "Find files by name pattern." },
   { name: "watch_list", tier: "read", blurb: "List active background watches." },
+  {
+    name: "gmail_read",
+    tier: "read",
+    blurb: "Search and read your Gmail (read-only). Off by default — needs the app password from Settings → General.",
+  },
 
   // ── WRITE: mutate files / state / spend API credits (fenced to scratch). ─
   { name: "write_file", tier: "write", blurb: "Create or overwrite a file." },
@@ -97,9 +102,12 @@ export const TIER_HINTS: Record<ToolTier, string> = {
   execute: "Run shell commands and schedules. Most powerful — enable only if you trust the model on your machine.",
 };
 
-/** Tools enabled on a fresh install: the READ tier only. */
+/** Tools enabled on a fresh install: the READ tier only — minus gmail_read,
+ *  which stays opt-in even on a fresh install (it reads the owner's mailbox;
+ *  existing installs never see any new tool until they tick it either, since
+ *  allowedTools is a persisted explicit list). */
 export const DEFAULT_ALLOWED_TOOLS: readonly string[] = TOOL_CATALOG.filter(
-  (t) => t.tier === "read",
+  (t) => t.tier === "read" && t.name !== "gmail_read",
 ).map((t) => t.name);
 
 /** Names in a given tier (used by the picker's per-tier master toggle). */

@@ -42,10 +42,14 @@ describe("tool catalog shape", () => {
 });
 
 describe("DEFAULT_ALLOWED_TOOLS", () => {
-  it("is exactly the read tier — nothing that writes, executes, or costs credits", () => {
+  it("is the read tier minus gmail_read — nothing that writes, executes, costs credits, or reads the owner's mail", () => {
+    // gmail_read is READ-tier (zero side effects) but stays opt-in even on a
+    // fresh install: it reads the owner's private mailbox, which deserves an
+    // explicit grant, not a default.
     expect([...DEFAULT_ALLOWED_TOOLS].sort()).toEqual(
-      toolsInTier("read").sort(),
+      toolsInTier("read").filter((n) => n !== "gmail_read").sort(),
     );
+    expect(DEFAULT_ALLOWED_TOOLS).not.toContain("gmail_read");
     for (const dangerous of [
       "bash_run",
       "write_file",
@@ -77,5 +81,10 @@ describe("isToolAllowed", () => {
   it("accepts both a Set and an array for the allowlist", () => {
     expect(isToolAllowed("grep", new Set(["grep"]))).toBe(true);
     expect(isToolAllowed("grep", ["grep"])).toBe(true);
+  });
+
+  it("denies gmail_read when not granted — it is selectable, never default", () => {
+    expect(isToolAllowed("gmail_read", DEFAULT_ALLOWED_TOOLS)).toBe(false);
+    expect(isToolAllowed("gmail_read", [...DEFAULT_ALLOWED_TOOLS, "gmail_read"])).toBe(true);
   });
 });

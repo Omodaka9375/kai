@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -43,9 +44,14 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { SectionHeader } from "../components/SectionHeader";
 import { SettingRow } from "../components/SettingRow";
+import {
+  clearGmailSecret,
+  gmailAccountEmail,
+  setGmailSecret,
+} from "@/modules/ai/tools/gmail";
 
 const APPEARANCE: {
   id: ThemePref;
@@ -393,6 +399,122 @@ export function GeneralSection() {
           </SettingRow>
         </div>
       </div>
+
+      <GmailCard />
+    </div>
+  );
+}
+
+/**
+ * Gmail read-only access card. The agent's gmail_read tool searches the
+ * user's own inbox over IMAP with an app password — no OAuth, no GCP
+ * project, no MCP server. The stored secret is "<email> <app-password>" in
+ * the OS keychain (service "kai", account "gmail-app-password").
+ *
+ * Read-only is enforced in the Rust module: connect/login, UID SEARCH,
+ * UID FETCH, LOGOUT — there is no code path that can write or send.
+ */
+function GmailCard() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [configuredEmail, setConfiguredEmail] = useState<string | null>(null);
+  const [status, setStatus] = useState("");
+  const [isError, setIsError] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    void gmailAccountEmail().then(setConfiguredEmail);
+  }, []);
+
+  const onSave = async () => {
+    setBusy(true);
+    setIsError(false);
+    setStatus("");
+    try {
+      await setGmailSecret(email, password);
+      setConfiguredEmail(await gmailAccountEmail());
+      setEmail("");
+      setPassword("");
+      setStatus("Saved. The agent can now search your Gmail (read-only).");
+    } catch (e) {
+      setIsError(true);
+      setStatus(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onRemove = async () => {
+    setBusy(true);
+    try {
+      await clearGmailSecret();
+      setConfiguredEmail(null);
+      setStatus("Gmail access removed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-4 rounded-2xl border border-border bg-card/50 p-4">
+      <div>
+        <div className="text-sm font-medium">Gmail (read-only)</div>
+        <div className="text-xs text-muted-foreground">
+          Lets the agent search and read your inbox with Gmail's own query
+          syntax. Sending, replying, and modifying mail are not implemented —
+          the tool cannot do them.
+        </div>
+      </div>
+
+      <SettingRow
+        title="Gmail account"
+        description={
+          configuredEmail
+            ? `Configured as ${configuredEmail}. Replace by pasting a new password.`
+            : "Needs 2FA on your Google account. Create an app password at myaccount.google.com/apppasswords, then paste your address and the password here. Stored in your OS keychain — never on disk in settings."
+        }
+      >
+        <div className="flex w-full items-center gap-2">
+          <Input
+            type="email"
+            value={email}
+            placeholder={configuredEmail ?? "you@gmail.com"}
+            onChange={(e) => setEmail(e.target.value)}
+            className="flex-1"
+          />
+          <Input
+            type="password"
+            value={password}
+            placeholder={configuredEmail ? "new app password" : "app password"}
+            onChange={(e) => setPassword(e.target.value)}
+            className="flex-1"
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={busy || !email.trim() || !password.trim()}
+            onClick={() => void onSave()}
+          >
+            Save
+          </Button>
+          {configuredEmail ? (
+            <Button variant="ghost" size="sm" disabled={busy} onClick={() => void onRemove()}>
+              Remove
+            </Button>
+          ) : null}
+        </div>
+      </SettingRow>
+
+      {status ? (
+        <div
+          className={cn(
+            "rounded-lg px-3 py-2 text-xs",
+            isError ? "bg-red-500/10 text-red-500" : "bg-primary/5 text-muted-foreground",
+          )}
+        >
+          {status}
+        </div>
+      ) : null}
     </div>
   );
 }

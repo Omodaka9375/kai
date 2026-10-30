@@ -194,6 +194,19 @@ const REGISTRY: Record<string, ToolPresentation> = {
   web_fetch: { effect: "NONE", fence: true, remoteSurface: true },
   web_search: { effect: "NONE", fence: true, remoteSurface: true },
 
+  // Mail (read-only IMAP bridge). Bodies are sender-authored text — fence
+  // like web content, flag injection-exposure provenance like any remote
+  // surface.
+  gmail_read: {
+    label: "Gmail",
+    approvalLabel: "Search Gmail",
+    status: (a) => `Searching Gmail: ${ellipsize(str(a, "query") ?? "", 40)}`,
+    summary: (a) => str(a, "query"),
+    effect: "NONE",
+    fence: true,
+    remoteSurface: true,
+  },
+
   // ── Structure / delegation ────────────────────────────────────────────
   todo_write: {
     label: "Todos",
