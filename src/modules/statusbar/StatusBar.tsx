@@ -57,6 +57,20 @@ export function StatusBar({
     }
   }, [panelOpen, togglePanel, openMini, closeMini]);
 
+  // Group-chat toggle — sits immediately LEFT of the AI panel toggle in
+  // both states (Close AI panel button / Open agent pill).
+  const groupToggleButton = canStartGroup ? (
+    <button
+      type="button"
+      onClick={() => window.dispatchEvent(new CustomEvent("Kai:new-group-chat"))}
+      title="Start a cross-project group chat"
+      aria-label="Start a cross-project group chat"
+      className="flex h-6 w-6 items-center justify-center rounded-md border border-border/60 bg-card text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-foreground"
+    >
+      <HugeiconsIcon icon={UserMultiple02Icon} size={13} strokeWidth={1.75} />
+    </button>
+  ) : null;
+
   return (
     <footer className="grid h-9 shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 overflow-hidden border-t border-border/60 bg-card/60 px-3 pb-0.5 text-[11px]">
       <div className="flex min-w-0 items-center gap-2">
@@ -82,21 +96,13 @@ export function StatusBar({
         {radioEnabled ? <RadioMarquee /> : null}
       </div>
       <div className="flex min-w-0 items-center justify-end gap-1.5">
-        {canStartGroup ? (
-          <button
-            type="button"
-            onClick={() => window.dispatchEvent(new CustomEvent("Kai:new-group-chat"))}
-            title="Start a cross-project group chat"
-            aria-label="Start a cross-project group chat"
-            className="flex h-6 w-6 items-center justify-center rounded-md border border-border/60 bg-card text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-foreground"
-          >
-            <HugeiconsIcon icon={UserMultiple02Icon} size={13} strokeWidth={1.75} />
-          </button>
-        ) : null}
         {panelOpen && hasComposer ? (
-          <AiStatusBarControls />
+          <AiStatusBarControls left={groupToggleButton} />
         ) : (
-          <AiOpenButton onOpen={handleOpenAgent} />
+          <>
+            {groupToggleButton}
+            <AiOpenButton onOpen={handleOpenAgent} />
+          </>
         )}
       </div>
     </footer>

@@ -25,7 +25,12 @@ export function AiOpenButton({ onOpen }: { onOpen: () => void }) {
   );
 }
 
-export function AiStatusBarControls() {
+export function AiStatusBarControls({
+  left,
+}: {
+  /** Optional node rendered left of the panel toggle button. */
+  left?: React.ReactNode;
+}) {
   const togglePanel = useChatStore((s) => s.togglePanel);
   const panelOpen = useChatStore((s) => s.panelOpen);
   const closeMini = useChatStore((s) => s.closeMini);
@@ -51,6 +56,7 @@ export function AiStatusBarControls() {
       <ModelDropdown />
 
       <span className="mx-1 h-8 w-px bg-border" aria-hidden />
+      {left}
       <IconBtn
         title={panelOpen ? "Close AI panel" : "Open AI panel"}
         onClick={handleToggle}
