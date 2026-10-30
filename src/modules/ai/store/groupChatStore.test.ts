@@ -24,6 +24,9 @@ vi.mock("@tauri-apps/plugin-store", () => {
 });
 
 const injectMessageMock = vi.fn();
+// Mutable per-project active-session map: tests drive WHICH sessions exist
+// (the re-resolve path depends on a session appearing AFTER group creation).
+const activeSessions: Record<string, string | null> = {};
 vi.mock("./chatStore", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./chatStore")>();
   return {
@@ -32,7 +35,7 @@ vi.mock("./chatStore", async (importOriginal) => {
       getState: () => ({ injectMessage: injectMessageMock }),
     },
     getSessionAgentMeta: () => ({ status: "idle" }),
-    getProjectActiveSession: (id: string) => `active-${id}`,
+    getProjectActiveSession: (id: string) => activeSessions[id] ?? null,
   };
 });
 
@@ -40,6 +43,7 @@ import {
   __resetGroupChatsForTest,
   appendGroupMessage,
   createGroupChat,
+  deleteGroupChat,
   endGroupChat,
   getGroup,
   getGroups,
@@ -53,6 +57,10 @@ import {
 beforeEach(() => {
   __resetGroupChatsForTest();
   injectMessageMock.mockReset();
+  activeSessions["a"] = "active-a";
+  activeSessions["b"] = "active-b";
+  activeSessions["c"] = "active-c";
+  delete activeSessions["nosession"];
 });
 
 describe("group chat store — lifecycle", () => {
@@ -120,6 +128,68 @@ describe("group chat store — lifecycle", () => {
     expect(getGroupForSession("s1")!.id).toBe(g!.id);
   });
 
+  it("sendGroupMessage re-resolves a sessionless participant instead of silently skipping", async () => {
+    // Invitee had no active session at creation; one exists NOW.
+    activeSessions["b"] = null;
+    const g = await createGroupChat(
+      { projectId: "a", sessionId: "", root: "/a", name: "alpha" },
+      [{ projectId: "b", root: "/b", name: "beta" }],
+    );
+    expect(g!.participants[1]!.sessionId).toBe("");
+    activeSessions["b"] = "late-b";
+    const delivered = await sendGroupMessage(g!.id, "anyone there?");
+    // Not silently skipped — the late session was picked up and used.
+    expect(delivered.find((d) => d.projectId === "b")!.sessionId).toBe("late-b");
+    expect(getGroup(g!.id)!.participants[1]!.sessionId).toBe("late-b");
+    expect(getGroupForSession("late-b")!.id).toBe(g!.id);
+    const betaCall = injectMessageMock.mock.calls.find((c) => c[0] === "late-b");
+    expect(betaCall).toBeTruthy();
+  });
+
+  it("names undeliverable participants in a system note instead of silently dropping", async () => {
+    activeSessions["b"] = null;
+    const g = await createGroupChat(
+      { projectId: "a", sessionId: "", root: "/a", name: "alpha" },
+      [{ projectId: "b", root: "/b", name: "beta" }],
+    );
+    await sendGroupMessage(g!.id, "hello?");
+    const live = getGroup(g!.id)!;
+    const note = live.messages.find(
+      (m) => m.from === "system" && m.text.includes("no active chat session"),
+    );
+    expect(note).toBeDefined();
+    expect(note!.text).toContain("beta");
+    expect(injectMessageMock).not.toHaveBeenCalledWith(
+      expect.stringContaining("hello?"),
+    );
+    void appendGroupMessage;
+  });
+
+  it("deleteGroupChat removes the group entirely (live or ended), end keeps it", async () => {
+    const g = await createGroupChat(
+      { projectId: "a", sessionId: "s1", root: "/a", name: "alpha" },
+      [{ projectId: "b", root: "/b", name: "beta" }],
+    );
+    // End is a soft pause — the group stays resumable.
+    await endGroupChat(g!.id);
+    expect(getGroups()).toHaveLength(1);
+    // Delete removes it for good, live session index and all.
+    await resumeGroupChat(g!.id);
+    await deleteGroupChat(g!.id);
+    expect(getGroups()).toHaveLength(0);
+    expect(getGroup(g!.id)).toBeNull();
+    expect(getGroupForSession("s1")).toBeNull();
+    // Deleting a live group directly works too.
+    const g2 = await createGroupChat(
+      { projectId: "a", sessionId: "s1", root: "/a", name: "alpha" },
+      [{ projectId: "b", root: "/b", name: "beta" }],
+    );
+    await deleteGroupChat(g2!.id);
+    expect(getGroups()).toHaveLength(0);
+    expect(getGroupForSession("s1")).toBeNull();
+    void groupsForProject;
+  });
+
   it("flushQueuedForSession delivers queued messages as one merged wake", async () => {
     const q = await import("./groupChatStore");
     // Queue directly through the busy path: patch the meta mock for one call.
@@ -170,6 +240,15 @@ describe("source pins — trust boundary & wiring", () => {
     expect(bridge).toContain("getGroupForSession(sessionId)");
     expect(bridge).toContain("appendGroupMessage(group.id");
     expect(bridge).toContain("noteSessionIdle(sessionId)");
+  });
+
+  it("the create dialog lists existing groups with open + delete (deletion is human-only)", () => {
+    expect(panel).toContain("Your groups");
+    expect(panel).toContain("deleteGroupChat(g.id)");
+    // Trust boundary: the store's delete is human-triggered via the panel;
+    // tool code must never gain a delete path.
+    const groupTool = readFileSync(new URL("../tools/group.ts", import.meta.url), "utf8");
+    expect(groupTool).not.toContain("deleteGroupChat");
   });
 
   it("closing a project removes it from groups before unmount", () => {

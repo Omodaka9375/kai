@@ -20,6 +20,7 @@ import {
 import {
   Add01Icon,
   Cancel01Icon,
+  Delete02Icon,
   Folder01Icon,
   Link01Icon,
   SentIcon,
@@ -31,6 +32,7 @@ import { useChatStore } from "../store/chatStore";
 import {
   addParticipants,
   createGroupChat,
+  deleteGroupChat,
   endGroupChat,
   getGroups,
   getGroup,
@@ -139,6 +141,10 @@ export function GroupChatPanel({
         projects={projects}
         activeProjectId={activeProjectId}
         onCreate={onCreate}
+        onOpenGroup={(id) => {
+          setPickerOpen(false);
+          setOpenGroupId(id);
+        }}
       />
       <AnimatePresence>
         {active ? (
@@ -416,21 +422,29 @@ function InvitePicker({
   projects,
   activeProjectId,
   onCreate,
+  onOpenGroup,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   projects: ProjectSwitcherItem[];
   activeProjectId: string | null;
   onCreate: (invitees: ProjectSwitcherItem[]) => void | Promise<void>;
+  onOpenGroup: (groupId: string) => void;
 }) {
   const [picked, setPicked] = useState<string[]>([]);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  // Re-read on every open (the dialog lives outside the version-notify tree).
+  const existing = open ? getGroups() : [];
   const candidates = projects.filter((p) => p.id !== activeProjectId);
   const invitees = candidates.filter((p) => picked.includes(p.id));
   const inviterName = projects.find((p) => p.id === activeProjectId)?.name ?? "This project";
 
   const handleOpenChange = (nextOpen: boolean) => {
     onOpenChange(nextOpen);
-    if (!nextOpen) setPicked([]);
+    if (!nextOpen) {
+      setPicked([]);
+      setConfirmDelete(null);
+    }
   };
 
   return (
@@ -442,6 +456,71 @@ function InvitePicker({
             Select projects to invite. {inviterName} will coordinate the group.
           </DialogDescription>
         </DialogHeader>
+
+        {existing.length > 0 ? (
+          <div className="flex flex-col gap-2">
+            <div className="text-[11px] font-medium text-muted-foreground">Your groups</div>
+            <div className="flex max-h-40 flex-col gap-1 overflow-y-auto rounded-xl border border-border/60 bg-background/40 p-1.5">
+              {existing.map((g) => {
+                const confirming = confirmDelete === g.id;
+                return (
+                  <div
+                    key={g.id}
+                    className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => onOpenGroup(g.id)}
+                      title={g.endedAt !== null ? "Resume and open this group" : "Open this group"}
+                      className="flex min-w-0 flex-1 items-center gap-1.5 rounded px-1 py-0.5 text-left transition-colors hover:bg-accent"
+                    >
+                      <HugeiconsIcon icon={Link01Icon} size={12} strokeWidth={1.75} className="shrink-0 text-muted-foreground" />
+                      <span className="min-w-0 flex-1 truncate text-[12px]">{g.name}</span>
+                      {g.endedAt !== null ? (
+                        <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">ended</span>
+                      ) : null}
+                    </button>
+                    {confirming ? (
+                      <div className="flex shrink-0 items-center gap-1">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 px-1.5 text-[10.5px]"
+                          onClick={() => setConfirmDelete(null)}
+                        >
+                          Keep
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="destructive"
+                          className="h-6 px-1.5 text-[10.5px]"
+                          onClick={() => {
+                            void deleteGroupChat(g.id);
+                            setConfirmDelete(null);
+                          }}
+                        >
+                          Delete
+                        </Button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        aria-label={`Delete group ${g.name}`}
+                        title="Delete this group (removes its transcript)"
+                        onClick={() => setConfirmDelete(g.id)}
+                        className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-destructive"
+                      >
+                        <HugeiconsIcon icon={Delete02Icon} size={11} strokeWidth={1.75} />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
 
         <div className="flex flex-col gap-2">
           <div className="text-[11px] font-medium text-muted-foreground">Available projects</div>

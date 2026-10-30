@@ -317,10 +317,24 @@ export async function sendGroupMessage(
     ? targets.filter((p) => p.projectId === targetProjectId)
     : targets;
   const out: Array<{ projectId: string; sessionId: string; queued: boolean }> = [];
+  const undeliverable: string[] = [];
   for (const p of picked) {
-    if (!p.sessionId) continue;
+    // Re-resolve: a participant with no active session at creation (its AI
+    // panel had never been opened) may have one now — pick it up instead of
+    // skipping silently. The participant record is updated so the group
+    // keeps pointing at the session that actually received the delivery.
+    const sid = p.sessionId || getProjectActiveSession(p.projectId) || "";
+    if (!sid) {
+      undeliverable.push(p.name);
+      out.push({ projectId: p.projectId, sessionId: "", queued: false });
+      continue;
+    }
+    if (sid !== p.sessionId) {
+      p.sessionId = sid;
+      sessionGroups.set(sid, g.id);
+    }
     const queued = deliverToParticipant(g, p, text);
-    out.push({ projectId: p.projectId, sessionId: p.sessionId, queued });
+    out.push({ projectId: p.projectId, sessionId: sid, queued });
   }
   await appendGroupMessage(groupId, {
     from: "user",
@@ -328,6 +342,17 @@ export async function sendGroupMessage(
     sessionId: g.coordinator.kind === "user" ? "" : g.coordinator.sessionId,
     text,
   });
+  // Silent-skip guard: a message that reached nobody is the #1 "I connected
+  // the projects and nothing happened" report — always name WHO was
+  // unreachable and what to do about it.
+  if (undeliverable.length > 0) {
+    await appendGroupMessage(groupId, {
+      from: "system",
+      projectId: "",
+      sessionId: "",
+      text: `${undeliverable.join(", ")} ${undeliverable.length === 1 ? "has" : "have"} no active chat session — open the AI panel in that project; its agent joins the group once a session exists.`,
+    });
+  }
   return out;
 }
 
@@ -414,6 +439,26 @@ export async function resumeGroupChat(groupId: string): Promise<void> {
   if (!g || g.endedAt === null) return;
   g.endedAt = null;
   reindex(g);
+  await persist();
+  notify();
+}
+
+/** Hard-delete a group (live or ended): transcript and machinery are
+ *  removed and nothing is kept for resume. This is the ONLY way a group
+ *  leaves kai-groups.json — endGroupChat is a soft pause. Human-only
+ *  (panel); same trust boundary as createGroupChat. */
+export async function deleteGroupChat(groupId: string): Promise<void> {
+  const g = groups.get(groupId);
+  if (!g) return;
+  for (const p of g.participants) {
+    teardownSessionMachinery(p.sessionId);
+    sessionGroups.delete(p.sessionId);
+  }
+  if (g.coordinator.kind === "agent") {
+    teardownSessionMachinery(g.coordinator.sessionId);
+    sessionGroups.delete(g.coordinator.sessionId);
+  }
+  groups.delete(groupId);
   await persist();
   notify();
 }
