@@ -154,6 +154,11 @@ fn acquire_os_poll_lease_named(name: &str) -> Result<Option<PollLease>, String> 
     let file = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
+        // Lock-file contents are never read or written — only the flock
+        // matters — so never truncate an existing lock. Stating that
+        // explicitly (the Unix default) silences
+        // clippy::suspicious_open_options on newer toolchains.
+        .truncate(false)
         .open(dir.join(format!("{name}.lock")))
         .map_err(|e| format!("poll lease open: {e}"))?;
     let fd = file.into_raw_fd();
