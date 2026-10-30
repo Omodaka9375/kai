@@ -17,6 +17,9 @@ const { injectMessageMock } = vi.hoisted(() => ({ injectMessageMock: vi.fn() }))
 vi.mock("../store/chatStore", () => ({
   useChatStore: { getState: () => ({ injectMessage: injectMessageMock }) },
   flushAllPendingWatchWakes: vi.fn(),
+  // Cross-project news surfacing (watch firing in a non-active project).
+  projectIdForSession: vi.fn(() => null),
+  activeProjectId: vi.fn(() => null),
 }));
 vi.mock("../lib/security", () => ({
   checkShellCommand: vi.fn(() => ({ ok: true })),

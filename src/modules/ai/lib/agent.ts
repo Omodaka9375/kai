@@ -810,6 +810,23 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // instead of silently killing a run that may just be unlucky.
   const TOOL_LOOP_THRESHOLD = 3;
   const TOOL_LOOP_NUDGE = 2;
+  // POLLING TOOLS: identical args + identical output is the EXPECTED steady
+  // state here (the model tails a dev server, waits for CI, checks a
+  // terminal) - it is "waiting for change", not a runaway. The hard stop was
+  // the #1 false-alarm report ("Loop detected - Agent is repeatedly calling
+  // the same tool"). These tools never enter the repeat counter; a model
+  // that genuinely wedges while polling still hits the step cap, and the
+  // text-similarity guard remains armed.
+  const TOOL_LOOP_POLLING_EXEMPT = new Set([
+    "get_terminal_output", // read-only terminal tail; no-change = normal
+    "bash_logs", // background-process log tail; no-change = normal
+    "bash_list", // enumerate handles; stable output = normal
+    "watch_list", // enumerate watches; stable output = normal
+    "project_status", // group participant probe; stable output = normal
+    "radio_now_playing", // track metadata; repeats between updates
+    "radio_list_stations", // static catalog
+    "mcp_list_servers", // static catalog
+  ]);
   // Minimum step text length that may enter the repetition window (see the
   // gate in onStepFinish — short procedural narration collides trivially).
   const GUARD_MIN_STEP_TEXT = 300;
@@ -931,7 +948,16 @@ export async function runAgentStream(opts: RunAgentOptions) {
       // exactly those runs. Any *different* fingerprint resets the counter.
       const toolFingerprint = toolLoopFingerprint(step);
       if (toolFingerprint) {
-        if (toolFingerprint === lastToolFingerprint) {
+        const stepTools = step.toolCalls?.map((tc) => tc.toolName) ?? [];
+        const allPolling =
+          stepTools.length > 0 && stepTools.every((t) => TOOL_LOOP_POLLING_EXEMPT.has(t));
+        if (allPolling) {
+          // A polling-only step never advances the repeat counter. The
+          // fingerprint still updates so a later MUTATING repeat starts
+          // counting from fresh history.
+          lastToolFingerprint = toolFingerprint;
+          toolRepeatCount = 0;
+        } else if (toolFingerprint === lastToolFingerprint) {
           toolRepeatCount++;
           // One advisory before the kill: the model already got byte-identical
           // output from a byte-identical call. Tell it to change approach,

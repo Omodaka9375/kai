@@ -23,6 +23,8 @@ import {
 } from "../store/chatStore";
 import { verifyIfDirtyAtRunEnd } from "../lib/autoVerify";
 import { hasLeakedToolCall } from "../lib/leakedToolCall";
+import { setProjectHasNews } from "../store/projectStatus";
+import { activeProjectId, projectIdForSession } from "../store/chatStore";
 import { isApprovalDenied, noteApprovalDenied } from "../lib/approvalLatch";
 import { speakText } from "../lib/voiceTts";
 import { useProjectRuntime } from "@/modules/workspace";
@@ -467,6 +469,17 @@ function Bridge({
     // Background starts keep the current surface; the composer explicitly
     // opens the transcript for ordinary sends. Background notifications use
     // the same session-scoped status updates without stealing focus.
+
+    // CROSS-PROJECT NEWS: a run that just produced its reply in a project
+    // the user is NOT looking at is exactly the "it completed while I was
+    // elsewhere and I never noticed" case. Surface it on the rail (amber
+    // pulse) instead of relying on the user to poll project tiles.
+    if (runStatus === "idle" && !isActive) {
+      const owner = projectIdForSession(sessionId);
+      if (owner && owner !== activeProjectId()) {
+        setProjectHasNews(owner, true);
+      }
+    }
 
     // LEAKED TOOL-CALL NUDGE: small/local models sometimes print their
     // tool-call template as text instead of emitting a structured call; the

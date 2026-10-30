@@ -20,6 +20,9 @@ export type ProjectSwitcherItem = {
   root: string;
   name: string;
   status: "idle" | "running" | "awaiting" | "error";
+  /** Unseen agent-side news in this project (watch fired / agent replied
+   *  while another project was active). Cleared on switch. */
+  hasNews?: boolean;
   active: boolean;
 };
 
@@ -33,9 +36,11 @@ const STATUS_LABEL: Record<ProjectSwitcherItem["status"], string> = {
 function TileStatusDot({
   status,
   projectId,
+  hasNews,
 }: {
   status: ProjectSwitcherItem["status"];
   projectId: string;
+  hasNews?: boolean;
 }) {
   const runningTerminals = useProjectRunningTerminals(projectId);
   return (
@@ -47,13 +52,24 @@ function TileStatusDot({
         // This (plus the error dot) replaces the removed OS popups.
         status === "awaiting" && "animate-pulse bg-violet-500",
         status === "error" && "bg-destructive",
+        // UNSEEN NEWS in a background project (watch fired / agent replied
+        // while the user was elsewhere): amber pulse ranks below "needs your
+        // input" but above routine running/idle — "something happened
+        // there, look when you can".
+        hasNews && status !== "awaiting" && status !== "error" && "animate-pulse bg-amber-500",
         // Steady emerald: agent work happening, no action needed.
-        status === "running" && "bg-emerald-500",
+        !hasNews && status === "running" && "bg-emerald-500",
         // Idle agent but terminals producing output — sky pulse. ONE dot per
         // tile: terminal activity surfaces only when there is no agent state
         // to show; the tooltip always carries the running-command count.
-        status === "idle" && runningTerminals > 0 && "animate-pulse bg-sky-500",
-        status === "idle" && runningTerminals === 0 && "bg-muted-foreground/30",
+        !hasNews &&
+          status === "idle" &&
+          runningTerminals > 0 &&
+          "animate-pulse bg-sky-500",
+        !hasNews &&
+          status === "idle" &&
+          runningTerminals === 0 &&
+          "bg-muted-foreground/30",
       )}
     />
   );
@@ -130,7 +146,7 @@ export function ProjectRail({
                       // glance. Low saturation/lightness keeps it on-theme.
                       style={{ color: projectIconColor(project.id) }}
                     />
-                    <TileStatusDot status={project.status} projectId={project.id} />
+                    <TileStatusDot status={project.status} projectId={project.id} hasNews={project.hasNews} />
                   </button>
                 </TooltipTrigger>
                 <TooltipContent
@@ -144,6 +160,9 @@ export function ProjectRail({
                   </div>
                   <div className="w-full whitespace-nowrap border-t border-background/15 pt-1.5 text-[10px] text-background/70">
                     {STATUS_LABEL[project.status]}
+                    {project.hasNews ? (
+                      <span className="text-amber-400">{" • something new"}</span>
+                    ) : null}
                     <TerminalRunningText projectId={project.id} />
                   </div>
                 </TooltipContent>

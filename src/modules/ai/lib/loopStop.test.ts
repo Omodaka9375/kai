@@ -85,4 +85,26 @@ describe("loop-detector false-positive gates (agent.ts)", () => {
     expect(ternary).toMatch(/:\s*guardedTools;/);
     expect(ternary).not.toMatch(/:\s*redactedTools;/);
   });
+
+  it("POLLING tools are exempt from the identical-repeat kill (the #1 false-alarm fix)", () => {
+    // Identical args + identical output is the EXPECTED steady state for a
+    // model tailing a dev server / waiting on CI: "nothing changed yet".
+    // The hard stop fired on exactly those runs. The exemption set must
+    // exist, cover the classic polling tools, and the arm must reset (not
+    // advance) the counter for polling-only steps.
+    expect(src).toContain("TOOL_LOOP_POLLING_EXEMPT");
+    for (const t of [
+      "get_terminal_output",
+      "bash_logs",
+      "bash_list",
+      "watch_list",
+      "project_status",
+    ]) {
+      expect(src).toContain(`"${t}"`);
+    }
+    expect(src).toMatch(/allPolling[\s\S]{0,400}toolRepeatCount = 0;/);
+    // A mutating tool must NOT be in the exemption set - the kill stays
+    // armed for real runaway repeats.
+    expect(src).not.toMatch(/TOOL_LOOP_POLLING_EXEMPT[\s\S]{0,600}"edit"/);
+  });
 });

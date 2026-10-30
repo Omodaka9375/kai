@@ -6,7 +6,12 @@ import { cn } from "@/lib/utils";
 import { useChatStore } from "@/modules/ai";
 import { subscribeSessionAgentMeta } from "@/modules/ai/store/chatStore";
 import { hydrateSessionPreferences, subscribeSessionPreferences } from "@/modules/ai/store/sessionPreferences";
-import { getProjectAgentStatus, subscribeProjectAgentStatus } from "@/modules/ai/store/projectStatus";
+import {
+  getProjectAgentStatus,
+  getProjectHasNews,
+  setProjectHasNews,
+  subscribeProjectAgentStatus,
+} from "@/modules/ai/store/projectStatus";
 import { hydrateGroups, removeProjectFromGroups } from "@/modules/ai/store/groupChatStore";
 import { GroupChatPanel } from "@/modules/ai/components/GroupChatPanelView";
 import { usePreferencesStore } from "@/modules/settings/preferences";
@@ -222,6 +227,9 @@ export default function App() {
         : status === "idle" ? "idle" as const
         : "running" as const;
     })(),
+    // Unseen cross-project news (watch fired / agent replied while another
+    // project was active). Amber pulse on the tile; cleared on switch.
+    hasNews: project.id !== activeId && getProjectHasNews(project.id),
     active: project.id === activeId,
   })), [projects, activeId, sessions, activeSessionId, statusVersion]);
 
@@ -232,6 +240,13 @@ export default function App() {
       activeId,
     });
   }, [projects, activeId, ready]);
+
+  // Entering a project consumes its unseen-news flag: whatever fired while
+  // the user was elsewhere (watch firing, background agent reply) has now
+  // been seen.
+  useEffect(() => {
+    if (activeId) setProjectHasNews(activeId, false);
+  }, [activeId]);
 
   if (!ready) {
     // Diagnosable boot placeholder instead of a blank themed window: shows

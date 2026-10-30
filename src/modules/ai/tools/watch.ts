@@ -32,6 +32,11 @@ import {
 } from "../lib/security";
 import { IS_WINDOWS } from "@/lib/platform";
 import { checkShellSandbox, sandboxExecRoot, type SandboxOverride } from "../lib/sandbox";
+import {
+  activeProjectId,
+  projectIdForSession,
+} from "../store/chatStore";
+import { setProjectHasNews } from "../store/projectStatus";
 
 // ── Heartbeat (Rust-driven scheduler tick) ─────────────────────────────────
 //
@@ -758,6 +763,18 @@ function injectWatchResult(
   // hijack the user's conversation. Idle fires wake inline (injectMessage).
   const sessionId = w.sessionId;
   void useChatStore.getState().injectMessage(sessionId, text);
+
+  // CROSS-PROJECT SURFACING: the owning session's model is woken above, but
+  // the USER may be in a different project watching a different terminal —
+  // the fire used to be completely invisible until they happened to switch
+  // back. Mark the owning project as "has news" (amber pulse on the project
+  // rail) whenever the firing project is not the ACTIVE one.
+  {
+    const ownerProject = projectIdForSession(sessionId);
+    if (ownerProject && ownerProject !== activeProjectId()) {
+      setProjectHasNews(ownerProject, true);
+    }
+  }
 
   // Optional Telegram ping: the same firing ALSO reaches the owner's phone
   // when the watch opted in. Fail-soft — no assistant → silent no-op.

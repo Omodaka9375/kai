@@ -683,6 +683,13 @@ function persistActiveSessionId(id: string | null): void {
 export function getProjectActiveSession(projectId: string): string | null {
   return projectActiveSessions.get(projectId) ?? null;
 }
+/** The currently ACTIVE project id (null when no project is open).
+ *  Used by cross-project surfaces (watch firings) to decide whether an
+ *  event lands in the project the user is looking at. */
+export function activeProjectId(): string | null {
+  return activeProjectRuntime?.id ?? null;
+}
+
 export function projectIdForSession(sessionId: string): string | null {
   const session = useChatStore.getState().sessions.find((s) => s.id === sessionId);
   const root = normalizeWorkspacePath(session?.workspaceRoot);
