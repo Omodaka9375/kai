@@ -37,17 +37,20 @@ import {
   ArrowDown01Icon,
   CheckmarkCircle02Icon,
   Cancel01Icon,
+  TestTubeIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useState } from "react";
 import { ProviderIcon } from "../components/ProviderIcon";
 import { ProviderKeyCard } from "../components/ProviderKeyCard";
 import { SectionHeader } from "../components/SectionHeader";
+import { FitCheckDialog } from "../components/FitCheckDialog";
 
 type KeysMap = Record<ProviderId, string | null>;
 
 export function ModelsSection() {
   const [keys, setKeys] = useState<KeysMap | null>(null);
+  const [fitOpen, setFitOpen] = useState(false);
   const defaultModel = usePreferencesStore((s) => s.defaultModelId);
   const lmstudioModelId = usePreferencesStore((s) => s.lmstudioModelId);
   const openaiCompatModelId = usePreferencesStore(
@@ -92,6 +95,7 @@ export function ModelsSection() {
         keys={keys}
         lmstudioModelId={lmstudioModelId}
         openaiCompatModelId={openaiCompatModelId}
+        onTest={() => setFitOpen(true)}
       />
 
       <div className="flex flex-col gap-2">
@@ -121,6 +125,13 @@ export function ModelsSection() {
         onSaveKey={(v) => onSave("openai-compatible", v)}
         onClearKey={() => onClear("openai-compatible")}
       />
+
+      <FitCheckDialog
+        open={fitOpen}
+        onOpenChange={setFitOpen}
+        modelId={defaultModel}
+        keys={keys}
+      />
     </div>
   );
 }
@@ -130,11 +141,13 @@ function DefaultModelBlock({
   keys,
   lmstudioModelId,
   openaiCompatModelId,
+  onTest,
 }: {
   defaultModel: ModelId;
   keys: KeysMap;
   lmstudioModelId: string;
   openaiCompatModelId: string;
+  onTest: () => void;
 }) {
   const m = getModel(defaultModel);
 
@@ -147,7 +160,19 @@ function DefaultModelBlock({
 
   return (
     <div className="flex flex-col gap-2">
-      <Label>Default model</Label>
+      <div className="flex items-center justify-between">
+        <Label>Default model</Label>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-7 gap-1.5 px-2 text-[11px]"
+          onClick={onTest}
+        >
+          <HugeiconsIcon icon={TestTubeIcon} size={13} strokeWidth={1.75} />
+          Test model
+        </Button>
+      </div>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
@@ -630,8 +655,8 @@ function OpenAICompatibleBlock({
               </Button>
             ))}
           </div>
-          <span className="text-[10px] text-muted-foreground mt-1">
-            Sends reasoning_effort param — supported by vLLM, Ollama, Z.AI, Fireworks, etc.
+          <span className="text-[10px] text-muted-foreground">
+            Sends reasoning_effort — vLLM, Ollama, Z.AI, Fireworks, etc.
           </span>
         </FieldRow>
 
@@ -754,9 +779,8 @@ function VisionRow({
           </Button>
         ))}
       </div>
-      <span className="text-[10px] text-muted-foreground mt-1">
-        Auto detects from the model name — set On/Off when the name has no
-        &quot;vl&quot;/&quot;vision&quot; hint. On sends image attachments directly.
+      <span className="text-[10px] text-muted-foreground">
+        Auto detects from the name — set On/Off to force.
       </span>
     </FieldRow>
   );
