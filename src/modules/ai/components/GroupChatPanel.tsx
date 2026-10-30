@@ -566,7 +566,11 @@ function InvitePicker({
                   >
                     <button
                       type="button"
-                      onClick={() => onOpenGroup(g.id)}
+                      onClick={() => {
+                        setPicked([]);
+                        setConfirmDelete(null);
+                        onOpenGroup(g.id);
+                      }}
                       title={g.endedAt !== null ? "Resume and open this group" : "Open this group"}
                       className="flex min-w-0 flex-1 items-center gap-1.5 rounded px-1 py-0.5 text-left transition-colors hover:bg-accent"
                     >
@@ -673,7 +677,11 @@ function InvitePicker({
           <Button
             type="button"
             disabled={invitees.length === 0}
-            onClick={() => void onCreate(invitees)}
+            onClick={() => {
+              setPicked([]);
+              setConfirmDelete(null);
+              void onCreate(invitees);
+            }}
           >
             Create group{invitees.length > 0 ? ` (${invitees.length})` : ""}
           </Button>
