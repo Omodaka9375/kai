@@ -8,7 +8,7 @@ import { subscribeSessionAgentMeta } from "@/modules/ai/store/chatStore";
 import { hydrateSessionPreferences, subscribeSessionPreferences } from "@/modules/ai/store/sessionPreferences";
 import { getProjectAgentStatus, subscribeProjectAgentStatus } from "@/modules/ai/store/projectStatus";
 import { hydrateGroups, removeProjectFromGroups } from "@/modules/ai/store/groupChatStore";
-import { GroupChatPanel } from "@/modules/ai/components/GroupChatPanel";
+import { GroupChatPanel } from "@/modules/ai/components/GroupChatPanelView";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   AlertDialog,

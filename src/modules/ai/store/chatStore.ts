@@ -2027,6 +2027,15 @@ export function stopSession(sessionId: string): void {
   if (!chat) return;
   void chat.stop().finally(() => {
     releasePendingApprovals(chat);
+    // Meta MUST settle to idle here, not keep its last busy value. Group
+    // delivery gates on this mirrored status; a stale "streaming" after a
+    // stop pinned every later cross-project message in the send queue
+    // forever (flush only fires on an idle transition that never came).
+    patchSessionAgentMeta(sessionId, {
+      status: "idle",
+      approvalsPending: 0,
+      step: null,
+    });
   });
 }
 

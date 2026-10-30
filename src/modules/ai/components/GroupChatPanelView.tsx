@@ -25,11 +25,12 @@ import {
   Folder01Icon,
   Link01Icon,
   SentIcon,
+  StopIcon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { getProjectAgentStatus } from "../store/projectStatus";
-import { useChatStore } from "../store/chatStore";
+import { useChatStore, subscribeSessionAgentMeta } from "../store/chatStore";
 import {
   addParticipants,
   createGroupChat,
@@ -38,9 +39,12 @@ import {
   getGroupStoreVersion,
   getGroups,
   getGroup,
+  participantActivity,
   removeParticipant,
   resumeGroupChat,
   sendGroupMessage,
+  stopGroupParticipant,
+  stopGroupParticipants,
   subscribeGroupChats,
   type GroupChat,
   type GroupParticipant,
@@ -211,6 +215,7 @@ export function GroupChatPanel({
               group={active}
               candidates={projects}
               onEnd={() => void endGroupChat(active.id)}
+              onStopAll={() => void stopGroupParticipants(active.id)}
               // ✕ hands the slot back to the AI mini window.
               onClose={() => {
                 setOpenGroupId(null);
@@ -218,6 +223,7 @@ export function GroupChatPanel({
               }}
             />
             <Transcript group={active} />
+            <ActivityStrip group={active} />
             <Composer group={active} />
           </motion.div>
         ) : null}
@@ -240,11 +246,13 @@ function PanelHeader({
   group,
   candidates,
   onEnd,
+  onStopAll,
   onClose,
 }: {
   group: GroupChat;
   candidates: ProjectSwitcherItem[];
   onEnd: () => void;
+  onStopAll: () => void;
   onClose: () => void;
 }) {
   return (
@@ -289,8 +297,23 @@ function PanelHeader({
           </Button>
         ) : (
           <>
-            <ParticipantsMenu group={group} candidates={candidates} />
+            <ParticipantsMenu
+              group={group}
+              candidates={candidates}
+              onStopOne={(pid) => void stopGroupParticipant(group.id, pid)}
+            />
             <CoordinatorMenu group={group} />
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-6 gap-1 px-2 text-[11px]"
+              title="Stop every busy participant agent now"
+              onClick={onStopAll}
+            >
+              <HugeiconsIcon icon={StopIcon} size={11} strokeWidth={1.75} />
+              Stop
+            </Button>
             <Button
               type="button"
               size="sm"
@@ -392,6 +415,71 @@ function Transcript({ group }: { group: GroupChat }) {
         )
       )}
     </div>
+  );
+}
+
+/**
+ * Live per-participant presence, rendered between transcript and composer:
+ * who is working (typing dots), who is waiting on an approval, whose
+ * message queued behind a busy run, and who stopped on an error. Driven by
+ * chatStore's session-meta version (fires on every status transition) plus
+ * the group-store version (queue changes also notify).
+ */
+function ActivityStrip({ group }: { group: GroupChat }) {
+  useSyncExternalStore(subscribeSessionAgentMeta, () => 0, () => 0);
+  if (group.endedAt !== null) return null;
+  const live = group.participants
+    .map((p) => ({ p, act: participantActivity(p.sessionId) }))
+    .filter((x) => x.act !== "idle");
+  if (live.length === 0) return null;
+  return (
+    <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/40 px-4 py-1.5 text-[10.5px] text-muted-foreground">
+      {live.map(({ p, act }) => (
+        <span key={p.projectId} className="flex min-w-0 items-center gap-1.5">
+          {act === "working" ? (
+            <>
+              <TypingDots />
+              <span className="truncate font-medium text-foreground/80">{p.name}</span>
+              <span>is working…</span>
+            </>
+          ) : act === "approval" ? (
+            <>
+              <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-amber-500" />
+              <span className="truncate font-medium text-foreground/80">{p.name}</span>
+              <span>needs your approval</span>
+            </>
+          ) : act === "queued" ? (
+            <>
+              <span className="size-1.5 shrink-0 rounded-full bg-muted-foreground/50" />
+              <span className="truncate font-medium text-foreground/80">{p.name}</span>
+              <span>queued (busy)</span>
+            </>
+          ) : (
+            <>
+              <span className="size-1.5 shrink-0 rounded-full bg-destructive" />
+              <span className="truncate font-medium text-foreground/80">{p.name}</span>
+              <span>stopped on error</span>
+            </>
+          )}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** Three bouncing dots — the chat-app "typing" affordance. */
+function TypingDots() {
+  return (
+    <span className="flex shrink-0 items-center gap-0.5" aria-hidden>
+      {[0, 1, 2].map((i) => (
+        <motion.span
+          key={i}
+          className="size-1 rounded-full bg-foreground/60"
+          animate={{ y: [0, -2, 0], opacity: [0.4, 1, 0.4] }}
+          transition={{ duration: 0.9, repeat: Infinity, delay: i * 0.15 }}
+        />
+      ))}
+    </span>
   );
 }
 
@@ -690,6 +778,7 @@ function InvitePicker({
     </Dialog>
   );
 }
+
 /**
  * Phase 3: participants management — invite more projects into a live
  * group, or remove one. HUMAN-ONLY actions (same trust boundary as group
@@ -698,9 +787,11 @@ function InvitePicker({
 function ParticipantsMenu({
   group,
   candidates,
+  onStopOne,
 }: {
   group: GroupChat;
   candidates: ProjectSwitcherItem[];
+  onStopOne: (projectId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const live = getGroup(group.id) ?? group;
@@ -732,6 +823,17 @@ function ParticipantsMenu({
             <span className="min-w-0 flex-1 truncate">{p.name}</span>
             <div className="flex items-center gap-1.5">
               <ParticipantDot participant={p} />
+              {participantActivity(p.sessionId) !== "idle" ? (
+                <button
+                  type="button"
+                  aria-label={`Stop ${p.name}'s agent`}
+                  title={`Stop ${p.name}'s agent now`}
+                  onClick={() => onStopOne(p.projectId)}
+                  className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-destructive"
+                >
+                  <HugeiconsIcon icon={StopIcon} size={10} strokeWidth={1.75} />
+                </button>
+              ) : null}
               {live.participants.length > 2 ? (
                 <button
                   type="button"
@@ -772,4 +874,3 @@ function ParticipantsMenu({
     </Popover>
   );
 }
-

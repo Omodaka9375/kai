@@ -207,7 +207,7 @@ describe("group chat store — lifecycle", () => {
 
 describe("source pins — trust boundary & wiring", () => {
   const store = readFileSync(new URL("./groupChatStore.ts", import.meta.url), "utf8");
-  const panel = readFileSync(new URL("../components/GroupChatPanel.tsx", import.meta.url), "utf8");
+  const panel = readFileSync(new URL("../components/GroupChatPanelView.tsx", import.meta.url), "utf8");
   const rail = readFileSync(new URL("../../workspace/ProjectRail.tsx", import.meta.url), "utf8");
   const bridge = readFileSync(new URL("../components/AgentRunBridge.tsx", import.meta.url), "utf8");
   const shell = readFileSync(new URL("../../../app/AppShell.tsx", import.meta.url), "utf8");

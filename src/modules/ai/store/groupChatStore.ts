@@ -1,6 +1,13 @@
 import { LazyStore } from "@tauri-apps/plugin-store";
 import { agentBus } from "../lib/eventBus";
-import { getProjectActiveSession, getSessionAgentMeta, setChatPinner, useChatStore } from "./chatStore";
+import {
+  getChat,
+  getProjectActiveSession,
+  getSessionAgentMeta,
+  setChatPinner,
+  stopSession,
+  useChatStore,
+} from "./chatStore";
 
 /**
  * Cross-project group chats — a coordination layer OVER existing per-project
@@ -322,6 +329,11 @@ export async function sendGroupMessage(
       p.sessionId = sid;
       sessionGroups.set(sid, g.id);
     }
+    // Self-heal before delivering: a queue can outlive a stale busy flag
+    // (the stop path used to leave meta stuck at "streaming"). If the
+    // session's live chat is actually ready, flush now instead of waiting
+    // for an idle transition that never comes.
+    if (getChat(sid)?.status === "ready") flushQueuedForSession(sid);
     const queued = deliverToParticipant(g, p, text);
     out.push({ projectId: p.projectId, sessionId: sid, queued });
   }
@@ -353,11 +365,16 @@ function deliverToParticipant(
 ): boolean {
   awaitingReply.set(p.sessionId, g.id);
   const prefixed = `[${g.name} · cross-project group] ${text}`;
+  // Busy check: a LIVE chat object is the source of truth — the mirrored
+  // agentMeta can go stale (the stop path historically never patched it
+  // back to idle), which queued deliveries forever with zero feedback.
+  const live = getChat(p.sessionId);
   const meta = getSessionAgentMeta(p.sessionId);
-  const busy =
-    meta.status === "streaming" ||
-    meta.status === "awaiting-approval" ||
-    meta.status === "thinking";
+  const busy = live
+    ? live.status === "streaming" || live.status === "submitted"
+    : meta.status === "streaming" ||
+      meta.status === "awaiting-approval" ||
+      meta.status === "thinking";
   if (busy) {
     const q = sendQueues.get(p.sessionId) ?? [];
     q.push({ groupId: g.id, sessionId: p.sessionId, text: prefixed, at: Date.now() });
@@ -395,6 +412,77 @@ export function takeReplyProvision(sessionId: string): string | null {
 /** Session became idle — called by the status observer. */
 export function noteSessionIdle(sessionId: string): void {
   flushQueuedForSession(sessionId);
+}
+
+/** Live per-participant run state for the panel's presence strip. */
+export type ParticipantActivity =
+  | "working"
+  | "approval"
+  | "queued"
+  | "error"
+  | "idle";
+
+export function participantActivity(sessionId: string): ParticipantActivity {
+  const meta = getSessionAgentMeta(sessionId);
+  if (meta.status === "streaming" || meta.status === "thinking") return "working";
+  if (meta.status === "awaiting-approval") return "approval";
+  if (meta.status === "error") return "error";
+  const q = sendQueues.get(sessionId);
+  return q && q.length > 0 ? "queued" : "idle";
+}
+
+/**
+ * HUMAN-ONLY (panel): stop one participant's agent run and drop any queued
+ * group deliveries for it. Same trust boundary as membership — tool code
+ * must never gain a stop path.
+ */
+export async function stopGroupParticipant(
+  groupId: string,
+  projectId: string,
+): Promise<void> {
+  const g = groups.get(groupId);
+  if (!g || g.endedAt !== null) return;
+  const p = g.participants.find((x) => x.projectId === projectId);
+  if (!p || !p.sessionId) return;
+  const dropped = sendQueues.get(p.sessionId)?.length ?? 0;
+  sendQueues.delete(p.sessionId);
+  awaitingReply.delete(p.sessionId);
+  stopSession(p.sessionId);
+  await appendGroupMessage(groupId, {
+    from: "system",
+    projectId: "",
+    sessionId: "",
+    text: `${p.name}'s agent was stopped${
+      dropped > 0 ? ` (${dropped} queued message${dropped === 1 ? "" : "s"} dropped)` : ""
+    }.`,
+  });
+  notify();
+}
+
+/** HUMAN-ONLY (panel): stop every busy participant in the group. */
+export async function stopGroupParticipants(groupId: string): Promise<void> {
+  const g = groups.get(groupId);
+  if (!g || g.endedAt !== null) return;
+  let stopped = 0;
+  for (const p of g.participants) {
+    if (!p.sessionId) continue;
+    const act = participantActivity(p.sessionId);
+    if (act === "working" || act === "approval" || act === "queued") {
+      sendQueues.delete(p.sessionId);
+      awaitingReply.delete(p.sessionId);
+      stopSession(p.sessionId);
+      stopped++;
+    }
+  }
+  if (stopped > 0) {
+    await appendGroupMessage(groupId, {
+      from: "system",
+      projectId: "",
+      sessionId: "",
+      text: `${stopped} participant${stopped === 1 ? "" : "s"} stopped by the coordinator.`,
+    });
+  }
+  notify();
 }
 
 /** Session went busy — nothing to do (queues only flush on idle). */

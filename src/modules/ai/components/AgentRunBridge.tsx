@@ -381,6 +381,23 @@ function Bridge({
       // depth for the next round.
       if (coordGroup) noteCoordinatorRoundDone(sessionId);
       noteSessionIdle(sessionId);
+    } else if (runStatus === "error") {
+      // A group participant that errored (bad key, provider outage, context
+      // overflow) used to look like silence in the group transcript — the
+      // coordinator kept waiting for a reply that would never come. Consume
+      // the reply provision and surface the failure as a system note.
+      const provisionedGroupId = takeReplyProvision(sessionId);
+      const group = provisionedGroupId ? getGroupForSession(sessionId) : null;
+      if (group) {
+        const who = group.participants.find((p) => p.sessionId === sessionId)?.name ?? "A participant";
+        void appendGroupMessage(group.id, {
+          from: "system",
+          projectId: "",
+          sessionId: "",
+          text: `${who} hit an error and stopped — open that project's AI panel to see the failure or send another message to retry.`,
+        });
+      }
+      noteSessionIdle(sessionId);
     } else {
       noteSessionBusy(sessionId);
     }
