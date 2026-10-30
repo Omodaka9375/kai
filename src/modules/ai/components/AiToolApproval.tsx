@@ -132,9 +132,12 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue }: Props) {
     : null;
 
   if (wasAutoApproved) {
+    // NO border/box: the Tool row that replaces this card on the
+    // approval-responded transition has no border and uses px-2 py-1.5 — a
+    // bordered box here made the whole row visibly jump when the state
+    // flipped. Match the Tool row geometry so the swap is dot-color only.
     return (
-      <div className="rounded-lg border border-border/40 bg-card/60">
-        <div className="flex items-center gap-2 px-3 py-2">
+      <div className="flex w-full items-center gap-2 rounded-md px-2 py-1.5">
           {/* Dot language, matching the tool cards — a green check-circle
               icon here flashed between the approval and execution states
               and read as a glitch. */}
@@ -151,7 +154,6 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue }: Props) {
           <span className="ml-auto text-[10px] text-emerald-600 dark:text-emerald-400">
             auto-approved
           </span>
-        </div>
       </div>
     );
   }
