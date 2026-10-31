@@ -24,6 +24,17 @@ export default defineConfig(async ({ mode }) => ({
   // scripts) — cloned public repos ship their own test suites expecting
   // THEIR deps (js-yaml etc), which explode at import time here.
   test: {
+    // Pin the runner's timezone: wall-clock expectations (reminders'
+    // dueLocal, nextOccurrence clock-time preservation, any future
+    // local-date rendering) must not depend on the machine running the
+    // suite. CI runners are UTC — an unpinned run rendered
+    // "2026-11-02T09:00:00+01:00" as 08:00 and failed. The suite is
+    // authored and verified under Europe/Budapest (+01:00/+02:00).
+    // reminders.test.ts has a guard that fails with a clear message if
+    // this pin is removed.
+    env: {
+      TZ: "Europe/Budapest",
+    },
     exclude: [
       "**/node_modules/**",
       "**/dist/**",

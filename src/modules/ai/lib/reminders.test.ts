@@ -59,6 +59,20 @@ beforeEach(() => {
   resetRemindersForTests();
 });
 
+describe("suite zone pin (runner must be Europe/Budapest)", () => {
+  it("renders +01:00 wall clock as-is — fails loudly if vite.config.ts drops the TZ pin", () => {
+    // dueLocal is the NAIVE LOCAL rendering of an instant. Tests below
+    // assert wall-clock strings ("2026-11-02 09:00" for 09:00+01:00), so
+    // the runner's zone must match the zone those expectations were
+    // authored in. Without the vite.config.ts test.env.TZ pin, a UTC
+    // runner (CI) renders that instant as 08:00 and every wall-clock
+    // expectation drifts. Guard here = a clear failure message instead
+    // of a cryptic "expected 09:00, received 08:00" one file away.
+    const offset = new Date("2026-11-02T09:00:00+01:00").getTimezoneOffset();
+    expect(offset).toBe(-60);
+  });
+});
+
 describe("parseDueAt - absolute instants only (restart-safety contract)", () => {
   it("accepts explicit ISO-8601 with timezone offset", () => {
     expect(parseDueAt("2026-11-02T09:00:00+01:00")!.getTime())
