@@ -35,7 +35,9 @@ export function buildReminderTools(ctx: ToolContext) {
   return {
     reminder_create: tool({
       description:
-        "Create a long-term reminder that fires at an absolute time - hours, days, weeks, or months from now. " +
+        "Create a reminder that fires at an absolute time - anything from minutes from now (\"ping me in 5 " +
+        "minutes\") to weeks or months out (\"remind me to pay bills by Monday\"). The scheduler ticks every " +
+        "second, so short timers are accurate to ~1s. " +
         "Persistent: survives restarts (fires on next launch if overdue), works with the window closed, and " +
         "pings the owner's Telegram when the personal assistant is enabled. " +
         "RESOLVE THE DATE YOURSELF: dueAt must be an ABSOLUTE ISO-8601 timestamp with an explicit timezone offset " +
