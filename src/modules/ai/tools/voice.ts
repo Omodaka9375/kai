@@ -1,25 +1,30 @@
 /**
- * Voice (TTS) settings tool — agent-driven engine/voice changes.
+ * Voice (TTS) settings tool - agent-driven engine/voice changes.
  *
- * "Switch to a female voice" / "use the local engine" from the user
- * shouldn't require a Settings round-trip. Both TTS consumers (the
- * desktop agent's speakText and the Telegram assistant's voice replies)
+ * "Switch to a female voice" / "use the local engine" / "try AssemblyAI"
+ * from the user shouldn't require a Settings round-trip. Both TTS consumers
+ * (the desktop agent's speakText and the Telegram assistant's voice replies)
  * read the prefs LAZILY at speak time, so a change made here applies to
  * the next utterance with zero extra wiring.
  *
  * Design:
- *  - NAMED voices only (no `gender` param) — the model resolves "female"
- *    against the gender-annotated catalog in the list output rather than
- *    the tool hardcoding a gender→voice map that goes stale as OpenAI
- *    adds voices.
- *  - Preference write, not a file/shell mutation — same class as
+ *  - NAMED voices only (no `gender` param) - the model resolves "female"
+ *    against the gender-annotated catalogs in the list output rather than
+ *    the tool hardcoding a gender->voice map that goes stale as providers
+ *    add voices.
+ *  - Preference write, not a file/shell mutation - same class as
  *    save_memory, so the tool auto-executes (no approval card).
  *  - Fully reversible; every change is audited (sandboxChange kind,
  *    matching the network-policy precedent for agent-driven setting
  *    changes).
  *  - Core toolset (NOT extended): main agent + Telegram assistant.
- *    Subagents deliberately excluded — a subagent silently changing the
+ *    Subagents deliberately excluded - a subagent silently changing the
  *    user's voice is surprising, and they don't speak.
+ *
+ * Engines:
+ *  - "api"        OpenAI TTS (cloud, needs an OpenAI key)
+ *  - "assemblyai" AssemblyAI-TTS-1 (cloud, needs an AssemblyAI key)
+ *  - "local"      Piper (offline)
  */
 
 import { z } from "zod";
@@ -27,16 +32,18 @@ import { tool } from "ai";
 import {
   setVoiceTtsApiModel,
   setVoiceTtsApiVoice,
+  setVoiceTtsAssemblyVoice,
   setVoiceTtsLocalVoice,
   setVoiceTtsMode,
   type Preferences,
 } from "@/modules/settings/store";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { auditAppend, AUDIT_KINDS } from "../lib/audit";
+import { ASSEMBLY_VOICES } from "../lib/assemblyai";
 import type { ToolContext } from "./context";
 
 /** Curated OpenAI TTS voices with gender notes for natural-language
- *  resolution ("a male voice" → echo/onyx/ash). Names kept as the source of
+ *  resolution ("a male voice" -> echo/onyx/ash). Names kept as the source of
  *  truth; the gender note is a hint for selection, not a hard map. */
 const OPENAI_VOICES = [
   { name: "alloy", gender: "neutral" },
@@ -52,7 +59,7 @@ const OPENAI_VOICES = [
   { name: "verse", gender: "female" },
 ];
 
-/** Representative Piper voices (the local engine) — full list lives with the
+/** Representative Piper voices (the local engine) - full list lives with the
  *  engine; these cover the common ask (quality/tone variants). */
 const PIPER_VOICES = [
   { name: "en_US-lessac-medium", note: "female, medium quality" },
@@ -71,6 +78,7 @@ function currentVoiceSettings() {
     mode: prefs.voiceTtsMode,
     apiVoice: prefs.voiceTtsApiVoice,
     apiModel: prefs.voiceTtsApiModel,
+    assemblyVoice: prefs.voiceTtsAssemblyVoice,
     localVoice: prefs.voiceTtsLocalVoice,
   };
 }
@@ -80,18 +88,24 @@ export function buildVoiceTools(_ctx: ToolContext) {
     voice_settings: tool({
       needsApproval: false,
       description:
-        "Get or change the text-to-speech (voice) settings — the voice the assistant speaks replies with, on desktop and Telegram voice notes. Changes apply to the NEXT spoken reply. With no arguments (or list=true) return the current settings and the available voice catalogs. To change: pass mode (engine), voice (an OpenAI voice name from the catalog), model (OpenAI TTS model), or localVoice (a Piper voice name). Resolve gender requests against the catalog's gender notes yourself — there is no gender parameter.",
+        "Get or change the text-to-speech (voice) settings - the voice the assistant speaks replies with, on desktop and Telegram voice notes. Changes apply to the NEXT spoken reply. With no arguments (or list=true) return the current settings and the available voice catalogs for every engine. To change: pass mode (engine), voice (an OpenAI voice name), assemblyVoice (an AssemblyAI voice like aai-jane or aai-audrey), model (OpenAI TTS model), or localVoice (a Piper voice name). Resolve gender or tone requests against the catalogs' notes yourself - there is no gender parameter.",
       inputSchema: z.object({
         mode: z
-          .enum(["off", "api", "local"])
+          .enum(["off", "api", "assemblyai", "local"])
           .describe(
-            "TTS engine: 'api' = OpenAI TTS (cloud, needs an OpenAI key), 'local' = Piper (offline), 'off' = disable spoken replies.",
+            "TTS engine: 'api' = OpenAI TTS (cloud, needs an OpenAI key), 'assemblyai' = AssemblyAI-TTS-1 (cloud, needs an AssemblyAI key), 'local' = Piper (offline), 'off' = disable spoken replies.",
           )
           .optional(),
         voice: z
           .string()
           .describe(
-            "OpenAI voice name (e.g. alloy, echo, nova) — pick from the listed catalog, do not invent names.",
+            "OpenAI voice name (e.g. alloy, echo, nova) - pick from the listed catalog, do not invent names. Applies to the 'api' engine.",
+          )
+          .optional(),
+        assemblyVoice: z
+          .string()
+          .describe(
+            "AssemblyAI voice slug (e.g. aai-jane, aai-audrey) - pick from the listed catalog, do not invent slugs. Applies to the 'assemblyai' engine.",
           )
           .optional(),
         model: z.string().optional(),
@@ -116,6 +130,14 @@ export function buildVoiceTools(_ctx: ToolContext) {
         ) {
           await setVoiceTtsApiVoice(input.voice.trim());
           changed.push(`apiVoice=${input.voice.trim()}`);
+        }
+        if (
+          input.assemblyVoice !== undefined &&
+          input.assemblyVoice.trim() &&
+          input.assemblyVoice !== prefs.voiceTtsAssemblyVoice
+        ) {
+          await setVoiceTtsAssemblyVoice(input.assemblyVoice.trim());
+          changed.push(`assemblyVoice=${input.assemblyVoice.trim()}`);
         }
         if (
           input.model !== undefined &&
@@ -151,12 +173,14 @@ export function buildVoiceTools(_ctx: ToolContext) {
             mode: now.mode as Preferences["voiceTtsMode"],
             apiVoice: now.apiVoice,
             apiModel: now.apiModel,
+            assemblyVoice: now.assemblyVoice || "aai-jane",
             localVoice: now.localVoice,
           },
           ...(input.list || changed.length === 0
             ? {
                 openaiVoices: OPENAI_VOICES,
                 openaiTtsModels: OPENAI_TTS_MODELS,
+                assemblyVoices: ASSEMBLY_VOICES,
                 piperVoices: PIPER_VOICES,
               }
             : {}),

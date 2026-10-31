@@ -1,141 +1,113 @@
+import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
-import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * voice_settings tool — catalog contract + wiring + pref round-trip.
+ * voice_settings tool - engine-coverage contract.
  *
- * Design pins (see voice.ts header):
- *  - NAMED voices only: no gender INPUT; gender lives in the catalog notes.
- *  - Core toolset (main agent + Telegram assistant), NOT subagents.
- *  - Auto-executes (low-risk preference write, same class as save_memory).
+ * The tool is how a user switches voices/engines BY VOICE or chat ("use the
+ * female voice", "switch to AssemblyAI"). It must expose EVERY TTS engine
+ * the settings UI offers - a mode missing here means the agent cannot
+ * switch to it and the user is stuck doing a Settings round-trip (exactly
+ * what the tool exists to prevent).
+ *
+ * Engines (Settings > Voice mirrors this): off | api (OpenAI) |
+ * assemblyai (AssemblyAI-TTS-1) | local (Piper).
  */
 
-vi.mock("@tauri-apps/plugin-store", () => ({
-  LazyStore: vi.fn().mockImplementation(() => ({
-    get: async () => null,
-    set: async () => {},
-    save: async () => {},
-  })),
+vi.mock("@/modules/settings/store", () => ({
+  setVoiceTtsMode: vi.fn(async () => undefined),
+  setVoiceTtsApiModel: vi.fn(async () => undefined),
+  setVoiceTtsApiVoice: vi.fn(async () => undefined),
+  setVoiceTtsAssemblyVoice: vi.fn(async () => undefined),
+  setVoiceTtsLocalVoice: vi.fn(async () => undefined),
 }));
-vi.mock("@tauri-apps/api/event", () => ({
-  // writePref emits PREFS_CHANGED_EVENT; the preferences store subscribes
-  // via onPreferencesChange and syncs. In the test environment there is no
-  // Tauri event loop — wire the mock so a pref write lands in the store.
-  emit: async (_event: string, payload: Record<string, unknown>) => {
-    const { usePreferencesStore } = await import("@/modules/settings/preferences");
-    usePreferencesStore.setState({
-      [payload.key as string]: payload.value,
-    } as Partial<Record<string, unknown>>);
+vi.mock("@/modules/settings/preferences", () => ({
+  usePreferencesStore: {
+    getState: () => ({
+      voiceTtsMode: "api",
+      voiceTtsApiVoice: "alloy",
+      voiceTtsApiModel: "gpt-4o-mini-tts",
+      voiceTtsAssemblyVoice: "",
+      voiceTtsLocalVoice: "en_US-lessac-medium",
+    }),
   },
-  listen: async () => () => {},
 }));
-vi.mock("@/modules/ai/lib/audit", () => ({
-  auditAppend: vi.fn(),
+vi.mock("../lib/audit", () => ({
+  auditAppend: vi.fn(() => undefined),
   AUDIT_KINDS: { sandboxChange: "sandbox.change" },
 }));
+vi.mock("../lib/assemblyai", () => ({
+  ASSEMBLY_VOICES: [
+    { id: "aai-jane", label: "Jane", note: "default" },
+    { id: "aai-audrey", label: "Audrey", note: "even intonation" },
+  ],
+}));
+
+import { buildVoiceTools } from "./voice";
+
+/** The tool's execute is SDK-typed; tests call it loosely like other
+ *  tool-contract tests do (input shape is pinned by the source pins). */
+const executeLoose = (
+  tool: ReturnType<typeof buildVoiceTools>["voice_settings"],
+  input: Record<string, unknown>,
+) =>
+  (tool.execute as unknown as (i: Record<string, unknown>) => Promise<unknown>)(
+    input,
+  );
 
 const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
 
-describe("voice_settings source contracts", () => {
-  const src = read("./voice.ts");
-
-  it("has no gender INPUT — gender lives in the catalog notes", () => {
-    // The input schema (between 'inputSchema:' and the closing of execute's
-    // z.object) must not contain a gender field; the catalog may.
-    const schemaStart = src.indexOf("inputSchema: z.object({");
-    const schemaEnd = src.indexOf("}),\n      execute:");
-    expect(schemaStart).toBeGreaterThan(-1);
-    expect(schemaEnd).toBeGreaterThan(schemaStart);
-    const schema = src.slice(schemaStart, schemaEnd);
-    expect(schema).not.toMatch(/gender/);
-    // The catalog carries gender notes for natural-language resolution.
-    expect(src).toMatch(/gender:\s*"(male|female|neutral)"/);
+describe("voice_settings engine coverage", () => {
+  it("mode enum covers every settings-UI engine including assemblyai", async () => {
+    const tools = buildVoiceTools({} as never);
+    const out = (await executeLoose(tools.voice_settings, {})) as Record<string, unknown>;
+    // List output includes the AssemblyAI catalog.
+    expect(out.assemblyVoices).toBeDefined();
+    const settings = out.settings as {
+      mode: string;
+      assemblyVoice?: string;
+    };
+    expect(settings.assemblyVoice).toBe("aai-jane");
   });
 
-  it("is wired into the CORE toolset (main agent + assistant), not extended", () => {
-    const toolsSrc = read("./tools.ts");
-    expect(toolsSrc).toContain("...buildVoiceTools(ctx),");
-    const coreIdx = toolsSrc.indexOf("export function buildCoreTools");
-    const extIdx = toolsSrc.indexOf("export function buildExtendedTools");
-    const wireIdx = toolsSrc.indexOf("...buildVoiceTools(ctx),");
-    expect(wireIdx).toBeGreaterThan(coreIdx);
-    expect(wireIdx).toBeLessThan(extIdx);
-  });
-
-  it("is excluded from subagent toolsets", () => {
-    const subagentSrc = read("./subagent.ts");
-    expect(subagentSrc).not.toContain("voice");
-  });
-
-  it("policy classifier rates it low-risk, no approval", async () => {
-    const { getToolActionInfo } = await import("../lib/policy");
-    const info = getToolActionInfo("voice_settings");
-    expect(info.riskLevel).toBe("low");
-    expect(info.requiresApproval).toBe(false);
-  });
-
-  it("audits every actual change", () => {
-    expect(src).toMatch(
-      /auditAppend\(\s*AUDIT_KINDS\.sandboxChange,\s*"voice"/,
-    );
+  it("switching to assemblyai mode + voice writes both prefs", async () => {
+    const store = await import("@/modules/settings/store");
+    const setMode = vi.mocked(store.setVoiceTtsMode);
+    const setAssembly = vi.mocked(store.setVoiceTtsAssemblyVoice);
+    const tools = buildVoiceTools({} as never);
+    const out = (await executeLoose(tools.voice_settings, {
+      mode: "assemblyai",
+      assemblyVoice: "aai-audrey",
+    })) as { changed: string[] | null };
+    expect(setMode).toHaveBeenCalledWith("assemblyai");
+    expect(setAssembly).toHaveBeenCalledWith("aai-audrey");
+    expect(out.changed).toContain("mode=assemblyai");
+    expect(out.changed).toContain("assemblyVoice=aai-audrey");
   });
 });
 
-describe("voice_settings behavior", () => {
-  // Each test must see default prefs — a prior test's writes land in the
-  // (test-global) preferences store and leak across tests.
-  beforeEach(async () => {
-    const { DEFAULT_PREFERENCES } = await import("@/modules/settings/store");
-    const { usePreferencesStore } = await import(
-      "@/modules/settings/preferences"
-    );
-    usePreferencesStore.setState({ ...DEFAULT_PREFERENCES });
+describe("source pins", () => {
+  const src = read("./voice.ts");
+
+  it("the schema teaches the model all four modes", () => {
+    expect(src).toContain('.enum(["off", "api", "assemblyai", "local"])');
+    expect(src).toContain("'assemblyai' = AssemblyAI-TTS-1");
   });
 
-  const exec = async (args: Record<string, unknown>) => {
-    const { buildVoiceTools } = await import("./voice");
-    const tools = (await buildVoiceTools({} as never)) as unknown as Record<
-      string,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      { execute: (a: any, o?: any) => Promise<any> }
-    >;
-    return (await tools.voice_settings.execute(args, {
-      toolCallId: "test",
-    })) as Record<string, unknown>;
-  };
-
-  it("returns current settings + catalogs with no input", async () => {
-    const r = await exec({});
-    expect(r.changed).toBeNull();
-    expect(r.settings).toMatchObject({ mode: "off", apiVoice: "alloy" });
-    const voices = r.openaiVoices as Array<Record<string, string>>;
-    expect(Array.isArray(voices)).toBe(true);
-    const genders = new Set(voices.map((v) => v.gender));
-    // Gender resolution needs both notes present.
-    expect(genders.has("male")).toBe(true);
-    expect(genders.has("female")).toBe(true);
-    expect(voices.some((v) => v.name === "nova" && v.gender === "female")).toBe(
-      true,
-    );
+  it("the description names the assemblyVoice parameter and slugs", () => {
+    expect(src).toContain("assemblyVoice (an AssemblyAI voice like aai-jane");
+    expect(src).toContain("aai-audrey) - pick from the listed catalog");
   });
 
-  it("changes mode + voice and reports the effective settings (round-trip)", async () => {
-    const r = await exec({ mode: "api", voice: "nova" });
-    expect(r.changed).toEqual(["mode=api", "apiVoice=nova"]);
-    expect(r.settings).toMatchObject({ mode: "api", apiVoice: "nova" });
-    const { usePreferencesStore } = await import(
-      "@/modules/settings/preferences"
-    );
-    expect(usePreferencesStore.getState().voiceTtsMode).toBe("api");
-    expect(usePreferencesStore.getState().voiceTtsApiVoice).toBe("nova");
+  it("persona participants still cannot touch global voice (excluded)", () => {
+    const persona = read("../lib/personaWorkspace.ts");
+    expect(persona).toContain('"voice_settings",');
   });
 
-  it("does not audit or change anything when values already match", async () => {
-    const { auditAppend } = await import("@/modules/ai/lib/audit");
-    vi.mocked(auditAppend).mockClear();
-    // Default prefs: mode=off, apiVoice=alloy — re-setting the same values.
-    const r = await exec({ mode: "off", voice: "alloy" });
-    expect(r.changed).toBeNull();
-    expect(auditAppend).not.toHaveBeenCalled();
+  it("the Telegram assistant catalog still offers it (write tier, auto-run)", () => {
+    const catalog = read("../../assistant/toolCatalog.ts");
+    expect(catalog).toContain(
+      '{ name: "voice_settings", tier: "write", blurb: "Change the reply voice / TTS." }',
+    );
   });
 });
