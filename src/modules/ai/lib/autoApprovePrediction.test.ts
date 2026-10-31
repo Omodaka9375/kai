@@ -91,13 +91,19 @@ describe("lockstep with AgentRunBridge (the real gate)", () => {
     new URL("../components/AiToolApproval.tsx", import.meta.url),
     "utf8",
   );
+  const predictor = readFileSync(
+    new URL("./autoApprovePrediction.ts", import.meta.url),
+    "utf8",
+  );
 
   it("the bridge still enforces the same three carve-outs in the same order", () => {
     // Order matters: elevated → privacy → signed commit, then approve.
+    // 2026-10-31: the carve-outs are SHAPE-based (no bash_run name match) so
+    // MCP (`server__*`) wrappers stop for the same clicks — pinned below.
     const order: [string, number][] = [
       ["input?.elevated === true", -1],
       ["PRIVACY_APPROVAL_TOOLS.has(toolName)", -1],
-      ["isGitCommitCommand(input?.command", -1],
+      ["isSignedCommit =", -1],
       ["autoApprovedRef.current.add(id)", -1],
     ];
     let prev = -1;
@@ -106,6 +112,62 @@ describe("lockstep with AgentRunBridge (the real gate)", () => {
       expect(idx).toBeGreaterThan(prev);
       prev = idx;
     }
+  });
+
+  it("the carve-outs hold for MCP tools too (shape-based, not name-based)", () => {
+    // The elevation gate must NOT require toolName === "bash_run" — an MCP
+    // shell wrapper passing elevated:true is the same privilege request.
+    expect(bridge).not.toMatch(
+      /toolName === "bash_run" && input\?\.elevated === true/,
+    );
+    expect(predictor).not.toMatch(
+      /toolName === "bash_run" && args\.input\?\.elevated === true/,
+    );
+    // The signed-commit gate probes command/cmd/script (the central tool
+    // guards' MCP field set), not just first-party input.command.
+    expect(bridge).toMatch(/input\?\.command \?\? input\?\.cmd \?\? input\?\.script/);
+    expect(predictor).toMatch(
+      /args\.input\?\.command \?\? args\.input\?\.cmd \?\? args\.input\?\.script/,
+    );
+  });
+
+  it("MCP carve-out prediction: an MCP git wrapper with signing-required stays a card", () => {
+    expect(
+      predictAutoApproval(
+        base({
+          toolName: "github__create_commit",
+          input: { command: "git commit -m x" },
+          signingApprovalRequired: true,
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      predictAutoApproval(
+        base({
+          toolName: "shellmcp__run",
+          input: { cmd: "git commit -m x" },
+          signingApprovalRequired: true,
+        }),
+      ),
+    ).toBe(false);
+    // Ordinary MCP calls in all mode are approved like everything else.
+    expect(
+      predictAutoApproval(
+        base({
+          toolName: "github__get_issue",
+          input: { repo: "a/b" },
+        }),
+      ),
+    ).toBe(true);
+    // An MCP shell wrapper passing elevated:true never auto-approves.
+    expect(
+      predictAutoApproval(
+        base({
+          toolName: "shellmcp__run",
+          input: { cmd: "x", elevated: true },
+        }),
+      ),
+    ).toBe(false);
   });
 
   it("the bridge still auto-approves on a deferred timer (the reason the prediction exists)", () => {

@@ -735,8 +735,12 @@ function Bridge({
         const input = (p as { input?: Record<string, unknown> }).input;
         // Elevation is a stronger trust boundary — never auto-approve it, even
         // under autoApprove: "all". The user must click the elevation card.
-        const isElevated =
-          toolName === "bash_run" && input?.elevated === true;
+        // SHAPE-based (2026-10-31): the gate no longer requires
+        // `toolName === "bash_run"` — an MCP (`server__*`) wrapper of shell
+        // execution passing elevated:true is the same OS-privilege request
+        // and must stop for the same click. The auto-allow carve-outs hold
+        // for MCP tools too.
+        const isElevated = input?.elevated === true;
         if (isElevated) continue;
         // Screen capture reads EVERYTHING visible on the monitor (other apps,
         // documents, passwords). Its approval card IS the privacy boundary, so
@@ -746,10 +750,17 @@ function Bridge({
         if (PRIVACY_APPROVAL_TOOLS.has(toolName)) continue;
         // Commit signing "ask for approval" — a `git commit` from the agent
         // must be reviewed before signing, even under autoApprove: "all".
+        // SHAPE-based (2026-10-31): any command-shaped input (command / cmd /
+        // script — the same field set the central tool guards probe for MCP
+        // tools) carries the gate, not just first-party bash_run. An MCP git
+        // wrapper committing while signing is "ask" stops for the click.
         const isSignedCommit =
-          toolName === "bash_run" &&
           signingApprovalRequired &&
-          isGitCommitCommand(input?.command as string | undefined);
+          isGitCommitCommand(
+            (input?.command ?? input?.cmd ?? input?.script) as
+              | string
+              | undefined,
+          );
         if (isSignedCommit) continue;
         autoApprovedRef.current.add(id);
         // Defer each response to its own macrotask. Approving N pending tool

@@ -48,23 +48,31 @@ export type AutoApprovalPrediction = {
 };
 
 /** True when the bridge WILL auto-approve this pending call. Mirrors the
- *  bridge's per-part gate exactly (elevated → privacy → signed commit). */
+ *  bridge's per-part gate exactly (elevated → privacy → signed commit).
+ *  The carve-outs are SHAPE-based, not name-based — MCP (`server__*`)
+ *  wrappers of shell execution or git commits stop for the same clicks
+ *  their first-party equivalents do. */
 export function predictAutoApproval(
   args: AutoApprovalPrediction,
 ): boolean {
   if (args.autoApprove !== "all") return false;
   // Elevation is a stronger trust boundary — never auto-approved, even
   // under "all". The user must click the elevation card.
-  if (args.toolName === "bash_run" && args.input?.elevated === true) {
+  if (args.input?.elevated === true) {
     return false;
   }
   // Screen capture's approval card IS the privacy boundary.
   if (PRIVACY_APPROVAL_TOOLS.has(args.toolName)) return false;
-  // Commit-signing "ask for approval" outranks autoApprove: "all".
+  // Commit-signing "ask for approval" outranks autoApprove: "all". Command-
+  // shaped inputs across first-party and MCP shapes (command/cmd/script —
+  // the same field set the central tool guards probe).
   if (
-    args.toolName === "bash_run" &&
     args.signingApprovalRequired &&
-    isGitCommitCommand(args.input?.command as string | undefined)
+    isGitCommitCommand(
+      (args.input?.command ?? args.input?.cmd ?? args.input?.script) as
+        | string
+        | undefined,
+    )
   ) {
     return false;
   }
