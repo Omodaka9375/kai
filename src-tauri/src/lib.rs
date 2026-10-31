@@ -336,7 +336,9 @@ fn settings_panel_title(key: &str) -> String {
 /// showing a half-empty dialog.
 fn settings_panel_height(key: &str) -> f64 {
     match key {
-        "about" => 460.0,
+        // 540: 460 cut off the Copy-diagnostics row (the second button row
+        // sits at the very bottom of the scroll area).
+        "about" => 540.0,
         _ => 640.0,
     }
 }

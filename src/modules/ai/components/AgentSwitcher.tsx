@@ -92,20 +92,23 @@ export function AgentSwitcher({ isMiniWindow }: { isMiniWindow?: boolean }) {
           />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-60">
+      {/* max-h-80 caps the list — with 7 built-ins + customs the menu used
+          to stretch to the bottom of the window. Compact rows (py-1,
+          11px/9.5px text) fit ~9 items in the cap; overflow scrolls. */}
+      <DropdownMenuContent align="start" className="max-h-80 min-w-60">
         <DropdownMenuItem
           onSelect={() => setActiveId("__none__")}
           className={cn(
-            "flex items-start gap-2 text-[12px]",
+            "flex items-start gap-1.5 px-2 py-1 text-[11px]",
             noneSelected && "bg-accent/40",
           )}
         >
-          <span className="text-muted-foreground/70 text-[11px] mt-0.5 w-[13px] text-center">
+          <span className="text-muted-foreground/70 text-[10px] mt-0.5 w-3 text-center">
             —
           </span>
           <span className="flex min-w-0 flex-1 flex-col">
             <span>None</span>
-            <span className="line-clamp-1 text-[10.5px] text-muted-foreground">
+            <span className="line-clamp-1 text-[9.5px] text-muted-foreground">
               No persona — use the base system prompt only
             </span>
           </span>
@@ -119,7 +122,7 @@ export function AgentSwitcher({ isMiniWindow }: { isMiniWindow?: boolean }) {
           ) : null}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <div className="px-2 pt-1.5 pb-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+        <div className="px-2 pt-1 pb-0.5 text-[9px] font-medium tracking-wide text-muted-foreground uppercase">
           Built-in
         </div>
         {builtIn.map((a) => {
@@ -129,13 +132,13 @@ export function AgentSwitcher({ isMiniWindow }: { isMiniWindow?: boolean }) {
               key={a.id}
               onSelect={() => setActiveId(a.id)}
               className={cn(
-                "flex items-start gap-2 pr-2 text-[12px]",
+                "flex items-start gap-1.5 px-2 py-1 text-[11px]",
                 a.id === activeId && "bg-accent/40",
               )}
             >
               <HugeiconsIcon
                 icon={Icon}
-                size={13}
+                size={12}
                 strokeWidth={1.75}
                 className={cn(
                   "mt-0.5",
@@ -146,7 +149,7 @@ export function AgentSwitcher({ isMiniWindow }: { isMiniWindow?: boolean }) {
               />
               <span className="flex min-w-0 flex-1 flex-col">
                 <span>{a.name}</span>
-                <span className="line-clamp-1 text-[10.5px] text-muted-foreground">
+                <span className="line-clamp-1 text-[9.5px] text-muted-foreground">
                   {a.description}
                 </span>
               </span>
@@ -164,7 +167,7 @@ export function AgentSwitcher({ isMiniWindow }: { isMiniWindow?: boolean }) {
         {custom.length > 0 ? (
           <>
             <DropdownMenuSeparator />
-            <div className="px-2 pt-1 pb-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+            <div className="px-2 pt-1 pb-0.5 text-[9px] font-medium tracking-wide text-muted-foreground uppercase">
               Custom
             </div>
             {custom.map((a) => {
@@ -174,20 +177,20 @@ export function AgentSwitcher({ isMiniWindow }: { isMiniWindow?: boolean }) {
                   key={a.id}
                   onSelect={() => setActiveId(a.id)}
                   className={cn(
-                    "flex items-start gap-2 text-[12px]",
+                    "flex items-start gap-1.5 px-2 py-1 text-[11px]",
                     a.id === activeId && "bg-accent/40",
                   )}
                 >
                   <HugeiconsIcon
                     icon={Icon}
-                    size={13}
+                    size={12}
                     strokeWidth={1.75}
                     className="mt-0.5 text-muted-foreground"
                   />
                   <span className="flex min-w-0 flex-1 flex-col">
                     <span className="truncate">{a.name}</span>
                     {a.description ? (
-                      <span className="line-clamp-1 text-[10.5px] text-muted-foreground">
+                      <span className="line-clamp-1 text-[9.5px] text-muted-foreground">
                         {a.description}
                       </span>
                     ) : null}
@@ -208,7 +211,7 @@ export function AgentSwitcher({ isMiniWindow }: { isMiniWindow?: boolean }) {
         <DropdownMenuSeparator />
         <DropdownMenuItem
           onSelect={() => void openSettingsWindow("agents")}
-          className="gap-2 text-[12px] text-muted-foreground"
+          className="gap-1.5 px-2 py-1 text-[11px] text-muted-foreground"
         >
           <HugeiconsIcon icon={Settings01Icon} size={12} strokeWidth={1.75} />
           Manage agents…
