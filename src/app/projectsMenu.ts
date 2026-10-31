@@ -4,6 +4,9 @@ import type { ProjectSwitcherItem } from "@/modules/workspace";
 export type ProjectsMenu = {
   items: ProjectSwitcherItem[];
   addProject: (path?: string) => void | Promise<void>;
+  /** Create a NEW project folder (save-style dialog), then open it in the
+   *  rail via the same path as addProject. */
+  newProject: () => void | Promise<void>;
   closeProject: (id: string) => void;
   switchProject: (id: string) => void;
   changeEnvironment: (id: string, env: import("@/modules/workspace").WorkspaceEnv, home: string | null) => void;

@@ -1,4 +1,9 @@
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
@@ -9,8 +14,11 @@ import {
   Add01Icon,
   Cancel01Icon,
   Folder01Icon,
+  FolderAddIcon,
+  Upload04Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useState } from "react";
 import { useFileMenuTrigger } from "@/app/fileMenu";
 import { SIDEBAR_RAIL_HEIGHT } from "@/modules/sidebar";
 import { useProjectRunningTerminals } from "@/modules/terminal/lib/terminalActivity";
@@ -94,14 +102,17 @@ export function ProjectRail({
   projects,
   onSwitch,
   onAdd,
+  onNewProject,
   onClose,
 }: {
   projects: ProjectSwitcherItem[];
   onSwitch: (id: string) => void;
   onAdd: () => void | Promise<void>;
+  onNewProject: () => void | Promise<void>;
   onClose: (id: string) => void;
 }) {
   const fileMenuTrigger = useFileMenuTrigger();
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
   return (
     <TooltipProvider
       delayDuration={250}
@@ -185,19 +196,62 @@ export function ProjectRail({
           style={{ height: SIDEBAR_RAIL_HEIGHT }}
           className="flex shrink-0 items-center justify-center border-t border-border/60"
         >
-          <Tooltip>
-            <TooltipTrigger asChild>
+          {/* The + opens a DROP-UP (the rail sits at the screen's bottom-left
+              edge, so up is the only direction with room): New Project
+              (create a folder + open it) and Open Project (pick an existing
+              folder). Built on the Popover primitive per the multiProject
+              contract's no-header-dropdown rule. */}
+          <Popover open={addMenuOpen} onOpenChange={setAddMenuOpen}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="Add project"
+                    aria-haspopup="menu"
+                    aria-expanded={addMenuOpen}
+                    onClick={() => setAddMenuOpen(true)}
+                    className="flex size-9 w-full items-center justify-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary/40"
+                  >
+                    <HugeiconsIcon icon={Add01Icon} size={17} strokeWidth={1.75} />
+                  </button>
+                </PopoverTrigger>
+              </TooltipTrigger>
+              <TooltipContent side="right" sideOffset={8}>Add project</TooltipContent>
+            </Tooltip>
+            <PopoverContent
+              side="top"
+              align="start"
+              sideOffset={8}
+              className="flex w-48 flex-col gap-0 p-1 text-xs"
+              // Don't steal focus from the rail — the menu opens on click,
+              // not as a typing-context interruption.
+              onOpenAutoFocus={(e) => e.preventDefault()}
+            >
               <button
                 type="button"
-                aria-label="Open another project"
-                onClick={() => void onAdd()}
-                className="flex size-9 w-full items-center justify-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary/40"
+                onClick={() => {
+                  setAddMenuOpen(false);
+                  void onNewProject();
+                }}
+                className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent hover:text-foreground"
               >
-                <HugeiconsIcon icon={Add01Icon} size={17} strokeWidth={1.75} />
+                <HugeiconsIcon icon={FolderAddIcon} size={14} strokeWidth={1.75} className="shrink-0 text-muted-foreground" />
+                <span>New Project</span>
               </button>
-            </TooltipTrigger>
-            <TooltipContent side="right" sideOffset={8}>Open another project</TooltipContent>
-          </Tooltip>
+              <button
+                type="button"
+                onClick={() => {
+                  setAddMenuOpen(false);
+                  void onAdd();
+                }}
+                className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <HugeiconsIcon icon={Upload04Icon} size={14} strokeWidth={1.75} className="shrink-0 text-muted-foreground" />
+                <span>Open Project</span>
+              </button>
+            </PopoverContent>
+          </Popover>
         </div>
       </aside>
     </TooltipProvider>

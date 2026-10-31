@@ -168,6 +168,19 @@ export default function App() {
     }
   }, []);
 
+  // New Project: save-style dialog (pick location + name), the Rust side
+  // creates the folder, then it flows through addProject — the SAME open
+  // path, so the new folder lands in the rail exactly like an opened one.
+  const newProject = useCallback(async () => {
+    try {
+      const created = await invoke<string | null>("new_project_folder");
+      if (!created) return; // user cancelled the dialog
+      await addProject(created);
+    } catch (error) {
+      console.error("New project failed:", error);
+    }
+  }, [addProject]);
+
   const changeEnvironment = useCallback((id: string, env: WorkspaceEnv, home: string | null) => {
     const source = projects.find((project) => project.id === id);
     if (!source) return;
@@ -263,8 +276,9 @@ export default function App() {
   return (
     <ProjectsMenuContext.Provider value={{
       items,
-      addProject,
-      closeProject,
+    addProject,
+    newProject,
+    closeProject,
       switchProject: (id) => {
         // startTransition: the visibility flip paints first; the heavy
         // re-render cascade (global chatStore session switch, hydration,

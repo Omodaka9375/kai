@@ -53,7 +53,14 @@ describe("multi-project workspace ownership", () => {
     expect(header).not.toContain("onSwitchProject");
     expect(rail).toContain('aria-label="Open projects"');
     expect(rail).toContain("onClick={() => onSwitch(project.id)}");
-    expect(rail).toContain("onClick={() => void onAdd()}");
+    // The + is a DROP-UP with both entries (user ask 2026-10-31): New
+    // Project creates a folder and opens it; Open Project keeps the old
+    // folder-pick flow. Popover-based — the rail stays DropdownMenu-free.
+    expect(rail).toContain("New Project");
+    expect(rail).toContain("Open Project");
+    expect(rail).toContain("void onNewProject()");
+    expect(rail).toContain("void onAdd()");
+    expect(rail).toContain('side="top"');
     expect(rail).not.toContain("DropdownMenu");
     // The hamburger occupies the rail's top-left slot, not a duplicate header
     // position. Only the active workspace may supply the File menu trigger.

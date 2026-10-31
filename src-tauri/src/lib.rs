@@ -418,6 +418,36 @@ async fn pick_project_folder(app: tauri::AppHandle) -> Result<Option<String>, St
     rx.await.map_err(|e| e.to_string())
 }
 
+/// New Project flow: a SAVE-style dialog (user picks the parent location and
+/// types the new project folder's name), then the folder is created and its
+/// path returned. The frontend then opens it through the same addProject path
+/// as "Open Project" — one code path for both entries, so the new folder
+/// lands in the rail identically.
+///
+/// An existing folder is accepted (create_dir_all is idempotent) — the user
+/// may have pre-created an empty skeleton; opening it is then the right move.
+#[tauri::command]
+async fn new_project_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .set_title("Create project folder")
+        .set_file_name("new-project")
+        .save_file(move |p| {
+            let _ = tx.send(p.map(|pb| pb.to_string()));
+        });
+    // None = user cancelled the dialog — not an error.
+    let Some(raw) = rx.await.map_err(|e| e.to_string())? else {
+        return Ok(None);
+    };
+    let path = raw.replace("\\", "/");
+    std::fs::create_dir_all(&path)
+        .map_err(|e| format!("could not create project folder '{path}': {e}"))?;
+    log::info!("created project folder: {path}");
+    Ok(Some(path))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Distinguish concurrent instances so their mutable app-global artifacts
@@ -820,6 +850,7 @@ app.manage(Mutex::new(None::<fs::env_probe::EnvInventory>));
             open_settings_window,
             modules::updater::update_install,
             pick_project_folder,
+            new_project_folder,
             secrets::secrets_get,
             secrets::secrets_set,
             secrets::secrets_delete,

@@ -2050,7 +2050,8 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
           <ProjectRail
             projects={projectsMenu?.items ?? []}
             onSwitch={(id) => projectsMenu?.switchProject(id)}
-            onAdd={() => projectsMenu?.addProject()}
+            onAdd={() => void projectsMenu?.addProject()}
+            onNewProject={() => void projectsMenu?.newProject()}
             onClose={(id) => projectsMenu?.closeProject(id)}
           />
           <div className="flex h-full min-w-0 flex-1 flex-col">
