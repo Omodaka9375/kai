@@ -82,7 +82,7 @@ describe("loop-detector false-positive gates (agent.ts)", () => {
     // never persisted; cleared on read so it can't repeat every step.
     const prepIdx = src.indexOf("prepareStep:");
     expect(prepIdx).toBeGreaterThan(-1);
-    const block = src.slice(prepIdx, prepIdx + 600);
+    const block = src.slice(prepIdx, prepIdx + 1600);
     expect(block).toContain("loopNudgeMessage");
     expect(block).toMatch(/loopNudgeMessage = null;/);
     expect(block).toContain('role: "user"');

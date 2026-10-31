@@ -100,6 +100,70 @@ export function isStallError(err: unknown): boolean {
   return msg.includes(STALL_SIGNATURE);
 }
 
+/** True when an error is a CONTEXT-OVERFLOW rejection: the provider refused
+ *  the request because the prompt exceeds the model's window. These deserve
+ *  the same automatic compact-and-retry recovery stalls get - without it a
+ *  hard-overflowed run surfaces a manual error card while the SAME session
+ *  on a fresh start would have been auto-compacted at send time and sailed
+ *  through (the 2026-10-31 "restart resumes at 4% but live hits the limit"
+ *  report).
+ *
+ *  Matched shapes (across providers, message text AND structured fields):
+ *  - HTTP 400 with a length-related message body (OpenAI/Anthropic/Google
+ *    all reject oversized prompts with 400, wording varies per vendor)
+ *  - explicit "context length / prompt is too long / maximum context"
+ *    phrases in the message
+ *  - Anthropic's "prompt is too long" / "request too large" wording
+ *  - 413 Request Entity Too Large (some gateways)
+ *  Deliberately NOT matched: "maximum output tokens exceeded" style
+ *  OUTPUT-length errors - compacting cannot fix those (the OUTPUT is the
+ *  problem), and a retry would just fail again. */
+const OVERFLOW_MARKERS = [
+  "context length",
+  "context window",
+  "context size",
+  "maximum context",
+  "max_tokens exceeds",
+  "prompt is too long",
+  "prompt too long",
+  "too many tokens",
+  "request too large",
+  "input too long",
+  "input length exceeded",
+  "exceeds the maximum",
+  "exceeds your model",
+  "requested tokens exceed",
+  "total tokens exceed",
+] as const;
+
+export function isContextOverflowError(err: unknown): boolean {
+  if (!err) return false;
+  const e = err as {
+    message?: unknown;
+    statusCode?: unknown;
+    responseBody?: unknown;
+  };
+  const msg = typeof e.message === "string" ? e.message : "";
+  const lowered = msg.toLowerCase();
+  // Structural: 400/413 with a token/length marker anywhere in the body.
+  const status =
+    typeof e.statusCode === "number"
+      ? e.statusCode
+      : /"\s*status(code)?\s*"\s*:\s*(400|413)/.test(msg)
+        ? 400
+        : undefined;
+  if (status === 400 || status === 413) {
+    const body =
+      typeof e.responseBody === "string"
+        ? e.responseBody.toLowerCase()
+        : lowered;
+    if (OVERFLOW_MARKERS.some((m) => body.includes(m))) return true;
+  }
+  // Text-only matches (some providers wrap the reason in a generic message).
+  if (OVERFLOW_MARKERS.some((m) => lowered.includes(m))) return true;
+  return false;
+}
+
 async function readWithStallWatchdog(
   reader: ReadableStreamDefaultReader<Part>,
   sawAnyChunk: boolean,

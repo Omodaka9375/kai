@@ -26,7 +26,7 @@ import type { AgentUsage } from "../lib/agent";
 import type { StackInfo } from "../lib/stackDetector";
 import { detectStack } from "../lib/stackDetector";
 import { createContextAwareTransport } from "../lib/transport";
-import { isStallError } from "../lib/dsmlMiddleware";
+import { isContextOverflowError, isStallError } from "../lib/dsmlMiddleware";
 import { appendSessionEvent } from "../lib/sessionEvents";
 import { loadShadow, withShadowRedirect } from "../lib/shadow";
 import { FileTracker } from "../lib/fileTracker";
@@ -191,6 +191,10 @@ export function makeChatSync(
   // finish; capped so a truly dead provider/engine surfaces the manual error
   // card instead of an infinite retry loop.
   const stallRetriesRef = { current: 0 };
+  // Context-overflow compact-and-retries (see the recovery block in onError):
+  // one shot — a second overflow after a successful compact means the tail
+  // itself is oversized and only the manual card can tell the user.
+  const overflowRetriesRef = { current: 0 };
 
   const toolContext: ToolContext = (() => {
     // Base context from live state, with shadow-session redirection: while
@@ -404,6 +408,7 @@ export function makeChatSync(
       // A completed run proves the stream is healthy again — any stall
       // retry budget this run consumed is forgiven.
       stallRetriesRef.current = 0;
+      overflowRetriesRef.current = 0;
       deps.patchAgentMeta({
         hitStepCap: info.hitStepCap,
         finishReason: info.finishReason,
@@ -509,6 +514,52 @@ export function makeChatSync(
       // The consecutive-retry cap (stallRetriesRef, reset on any
       // successful finish) is the loop-breaker for both: a truly dead
       // provider surfaces the manual error card after MAX attempts.
+      //
+      // ── Context-overflow recovery (2026-10-31) ───────────────────────
+      // A provider 400 "prompt is too long" is the one error class where
+      // compacting is not just A recovery, it IS the fix: the same session
+      // compacted on a fresh start sails through. Route it into the SAME
+      // compact-and-retry machinery — with its own retry budget and a
+      // distinct summaryNotice so the user sees WHY the run paused. A
+      // history that is already minimal (nothing to compact) falls to the
+      // manual error card: compacting again cannot help.
+      if (isContextOverflowError(e) && isActive()) {
+        const MAX_OVERFLOW_RETRIES = 1;
+        if (overflowRetriesRef.current < MAX_OVERFLOW_RETRIES) {
+          const outcome =
+            deps.compactSession?.(sessionId) ?? deps.compactActiveSession();
+          const compacted = outcome.startsWith("Context compacted");
+          if (compacted) {
+            overflowRetriesRef.current += 1;
+            appendSessionEvent(sessionId, {
+              kind: "retry",
+              reason: "context-overflow-compacted",
+              attempt: overflowRetriesRef.current,
+            });
+            deps.patchAgentMeta({
+              status: "streaming",
+              error: null,
+              summaryNotice: {
+                at: Date.now(),
+                text: "Context limit hit — older messages were summarized and the run continues automatically.",
+              },
+            });
+            setTimeout(() => {
+              void chatRef.current?.regenerate().catch((retryErr) => {
+                console.error("[kai] overflow retry failed:", retryErr);
+                deps.patchAgentMeta({
+                  status: "error",
+                  error: resolveErrorDisplay(retryErr),
+                });
+              });
+            }, 0);
+            return;
+          }
+        }
+        // Not compacted (already minimal) or budget spent: fall through to
+        // the error card below - an already-minimal history cannot shrink
+        // further and an infinite retry loop would just burn requests.
+      }
       if (isStallError(e) && isActive()) {
         const MAX_STALL_RETRIES = 2;
         if (stallRetriesRef.current < MAX_STALL_RETRIES) {

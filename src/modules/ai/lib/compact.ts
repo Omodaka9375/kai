@@ -521,12 +521,17 @@ export function compactModelMessagesDetailed(
   }
 
   // ── Phase 3: signal summarization ──
-  // Summarize at 75% of effective limit (unified with phases 1 & 2).
-  // Leaves 25% headroom for the summarization call itself.
+  // Summarize at 60% of effective limit (2026-10-31: lowered from 75% to
+  // align with phase-2 truncation). The old 75% trigger left only 25%
+  // headroom at SEND time - a single heavy step (30KB shell output +
+  // follow-up reads) could push the request past the window before the
+  // next send's maybeSummarize ran, surfacing a hard provider 400 while
+  // the same session restarted fresh sailed through at low pressure.
+  // 60% leaves a full 40% of headroom for the run that follows.
   return {
     messages: working,
     compacted: dropped > 0,
     droppedCount: dropped,
-    needsSummarization: approxTokens >= 0.75 * effectiveLimit,
+    needsSummarization: approxTokens >= 0.6 * effectiveLimit,
   };
 }

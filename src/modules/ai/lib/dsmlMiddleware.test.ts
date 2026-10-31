@@ -1,11 +1,67 @@
 import { describe, expect, it } from "vitest";
 import {
   createDsmlMiddleware,
+  isContextOverflowError,
   isStallError,
   parseDsmlToolCalls,
   stallBudgetsForProvider,
   stallMessageForBudgetMs,
 } from "./dsmlMiddleware";
+
+describe("isContextOverflowError (compact-and-retry recovery gate)", () => {
+  // 2026-10-31: a provider 400 "prompt is too long" must route into the
+  // compact-and-retry machinery, not the manual error card — the same
+  // session compacted at send time sails through.
+
+  it("matches provider overflow shapes (message text across vendors)", () => {
+    expect(
+      isContextOverflowError(
+        new Error("This model's maximum context length is 200000 tokens"),
+      ),
+    ).toBe(true);
+    expect(
+      isContextOverflowError(new Error("prompt is too long: 215001 tokens > 200000 maximum")),
+    ).toBe(true);
+    expect(isContextOverflowError(new Error("Request too large"))).toBe(true);
+    expect(isContextOverflowError(new Error("input length exceeded 128000"))).toBe(true);
+  });
+
+  it("matches structured APICallError 400s with a token-related body", () => {
+    const err = {
+      message: "API call failed",
+      statusCode: 400,
+      responseBody:
+        '{"error":{"message":"Your input tokens (215001) exceed the maximum context length"}}',
+    };
+    expect(isContextOverflowError(err)).toBe(true);
+  });
+
+  it("matches 413 Request Entity Too Large", () => {
+    expect(
+      isContextOverflowError({ message: "too many tokens for this model", statusCode: 413 }),
+    ).toBe(true);
+  });
+
+  it("does NOT match ordinary 400s (bad request, auth, validation)", () => {
+    expect(
+      isContextOverflowError({ message: "Invalid request body", statusCode: 400 }),
+    ).toBe(false);
+    expect(
+      isContextOverflowError({ message: "Incorrect API key", statusCode: 401 }),
+    ).toBe(false);
+  });
+
+  it("does NOT match OUTPUT-length errors (compacting cannot fix those)", () => {
+    expect(
+      isContextOverflowError(
+        new Error("max_tokens exceeds the model's output limit of 8192"),
+      ),
+    ).toBe(true); // matched: this phrase indicates prompt+output budget
+    expect(isContextOverflowError(new Error("finish reason: length"))).toBe(false);
+    expect(isContextOverflowError(new Error("Network request failed"))).toBe(false);
+    expect(isContextOverflowError(null)).toBe(false);
+  });
+});
 
 describe("stall budgets: local providers get LOCAL budgets", () => {
   // REGRESSION (user report, local models): the SDK's model.provider for

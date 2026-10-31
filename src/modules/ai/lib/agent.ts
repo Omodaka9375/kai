@@ -685,10 +685,8 @@ export async function runAgentStream(opts: RunAgentOptions) {
       });
     }
   }
-  const compact = compactModelMessagesDetailed(
-    history,
-    getModelContextLimit(getModel(modelId).id),
-  );
+  const contextLimit = getModelContextLimit(getModel(modelId).id);
+  const compact = compactModelMessagesDetailed(history, contextLimit);
   const compactedHistory = compact.messages;
   if (compact.compacted) {
     opts.onCompact?.({ droppedCount: compact.droppedCount });
@@ -697,7 +695,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
     appendSessionEvent(opts.toolContext.getSessionId() ?? "", {
       kind: "compact",
       droppedCount: compact.droppedCount,
-      contextLimit: getModelContextLimit(getModel(modelId).id),
+      contextLimit,
     });
   }
 
@@ -908,12 +906,38 @@ export async function runAgentStream(opts: RunAgentOptions) {
     // Inject a pending loop nudge into the immediate next request only.
     // Returning undefined leaves the step untouched (the common case).
     prepareStep: ({ messages: stepMessages }) => {
+      // ── MID-RUN CONTEXT RE-ELISION (2026-10-31) ────────────────────────
+      // The pre-run compaction above elides ONCE at send time, but a long
+      // multi-step run (heavy bash output, big reads) re-attaches fresh
+      // tool results to every subsequent step's request. Nothing trimmed
+      // MID-RUN - so a run that started at 30% could still push past the
+      // window by its last step, while a RESTART of the same session sailed
+      // through (the restart path compacts at every send). Same elision,
+      // same thresholds, applied per step: if it changes anything, we
+      // override THIS step's messages. Ephemeral by design - the persisted
+      // transcript keeps the full text (the turn's "compact" journal entry
+      // already records the pre-run elision; this logs its own event).
+      let messages = stepMessages;
+      const stepCompact = compactModelMessagesDetailed(messages, contextLimit);
+      if (stepCompact.compacted) {
+        messages = stepCompact.messages;
+        opts.onCompact?.({ droppedCount: stepCompact.droppedCount });
+        appendSessionEvent(opts.toolContext.getSessionId() ?? "", {
+          kind: "compact",
+          droppedCount: stepCompact.droppedCount,
+          contextLimit,
+        });
+      }
       const nudge = loopNudgeMessage;
-      if (!nudge) return undefined;
-      loopNudgeMessage = null;
-      return {
-        messages: [...stepMessages, { role: "user", content: nudge }],
-      };
+      if (nudge) {
+        loopNudgeMessage = null;
+        return {
+          messages: [...messages, { role: "user", content: nudge }],
+        };
+      }
+      return messages === stepMessages
+        ? undefined
+        : { messages };
     },
     ...(hasProviderOpts ? { providerOptions: thinkingProviderOpts } : {}),
     onChunk: (chunk) => {
