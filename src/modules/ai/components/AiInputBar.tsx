@@ -522,13 +522,20 @@ export function AiInputBar() {
               />
               {/* min-w-0 lets the long provider error text truncate inside
                   its own box — without it the flex item refuses to shrink,
-                  overflows the row, and clips the Dismiss button out of view. */}
-              <span className="min-w-0 flex-1 truncate">{c.voice.error}</span>
+                  overflows the row, and clips the Dismiss button out of view.
+                  NO flex-1 on the span and NO ml-auto on the button: with
+                  them the X was pinned to the panel's far-right edge even
+                  for a short sentence — the eye reads the amber text on the
+                  left and never finds the button (user report 2026-10-31).
+                  Left-packed: the X sits right after the sentence, and only
+                  reaches the right edge when a long message actually
+                  truncates (min-w-0 + shrink-0 keep it visible then). */}
+              <span className="min-w-0 truncate">{c.voice.error}</span>
               <button
                 type="button"
                 title="Dismiss"
                 onClick={c.voice.clearError}
-                className="ml-auto shrink-0 rounded p-0.5 text-muted-foreground/70 hover:bg-accent hover:text-foreground"
+                className="shrink-0 rounded p-0.5 text-amber-600/70 hover:bg-accent hover:text-amber-600 dark:text-amber-400/70 dark:hover:text-amber-400"
               >
                 <HugeiconsIcon
                   icon={Cancel01Icon}
