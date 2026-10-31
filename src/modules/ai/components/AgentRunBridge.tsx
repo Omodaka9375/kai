@@ -24,6 +24,7 @@ import {
 import { verifyIfDirtyAtRunEnd } from "../lib/autoVerify";
 import { hasLeakedToolCall } from "../lib/leakedToolCall";
 import { setProjectHasNews } from "../store/projectStatus";
+import { offerToDigest } from "../lib/desktopDigest";
 import { activeProjectId, projectIdForSession } from "../store/chatStore";
 import { isApprovalDenied, noteApprovalDenied } from "../lib/approvalLatch";
 import { speakText } from "../lib/voiceTts";
@@ -146,6 +147,13 @@ function Bridge({
   // transition, never on mount or on idle->idle recomputes.
   const prevRunStatusRef = useRef<AgentRunStatus | null>(null);
   const prevNewsSessionRef = useRef<string | null>(null);
+  // Desktop-digest transition refs (see the status effect): prev pending
+  // count for the approval-rose check + prev runStatus for the settled
+  // error/done check. Both reset on session switch so a stale count from
+  // the outgoing session can't fire a phantom digest offer.
+  const prevApprovalsPendingRef = useRef(0);
+  const prevRunStatusForDigestRef = useRef<AgentRunStatus | null>(null);
+  const digestSessionRef = useRef<string | null>(null);
   // Leak-nudge latch: one correction per session - a local model that emits
   // its tool-call template as text gets exactly one "use function calling"
   // nudge; repeating it is noise.
@@ -366,6 +374,55 @@ function Bridge({
     else if (status === "streaming") runStatus = "streaming";
     else if (status === "error") runStatus = "error";
     else runStatus = "idle";
+    // DESKTOP DIGEST (2026-10-31): OS toasts return for the HIDDEN window -
+    // approval needed / error settled / run COMPLETELY finished. Never a
+    // toast while visible, and parallel bursts coalesce into one multi-line
+    // toast (see lib/desktopDigest.ts). The visibility gate + queue live
+    // there; this bridge only OFFERS the three classes of event. Background
+    // sessions only (`isActive` here means the foreground session - the one
+    // whose panel is in front of the user).
+    //
+    // A NOTE ON busy->idle: `status` settles to "ready" (mapped to idle)
+    // only when the WHOLE run ends - mid-run tool steps keep it at
+    // "streaming". So the idle offer below fires on complete-run
+    // completion, never per step. `awaiting-approval` is excluded from the
+    // completion pair: pausing on a card is not finishing.
+    if (!isActive) {
+      // Session switch: reset the prev-refs so a stale count/status from
+      // the outgoing session can't fire a phantom digest offer.
+      if (digestSessionRef.current !== sessionId) {
+        prevApprovalsPendingRef.current = 0;
+        prevRunStatusForDigestRef.current = null;
+        digestSessionRef.current = sessionId;
+      }
+      const projectName = digestProjectName(sessionId);
+      // Approval: the pending count ROSE (0 -> 1, or a new card after the
+      // previous one was answered). Prev-count ref mirrors the
+      // news-boundary pattern - mount recomputes must not fire.
+      if (approvalsPending > prevApprovalsPendingRef.current) {
+        offerToDigest({
+          project: projectName,
+          kind: "approval",
+          detail: `${approvalsPending} pending`,
+        });
+      }
+      // Error / done: the run SETTLED (prev was thinking/streaming - a real
+      // run just ended). The stall-recovery path patches back to streaming
+      // instantly, so its blip never lands as a settled error here.
+      const prevForDigest = prevRunStatusForDigestRef.current;
+      if (
+        (runStatus === "error" || runStatus === "idle") &&
+        (prevForDigest === "thinking" || prevForDigest === "streaming")
+      ) {
+        offerToDigest({
+          project: projectName,
+          kind: runStatus === "error" ? "error" : "done",
+          detail: "",
+        });
+      }
+    }
+    prevApprovalsPendingRef.current = approvalsPending;
+    prevRunStatusForDigestRef.current = runStatus;
     patch({
       status: runStatus,
       approvalsPending,
@@ -1012,4 +1069,22 @@ async function readOriginal(
       msg.includes("os error 2");
     return { content: "", isNewFile: notFound };
   }
+}
+
+/** Desktop-digest display name for a session's owning project (root's last
+ *  path segment). Sessions with no project (assistant) fall back to the
+ *  session id. */
+function digestProjectName(sessionId: string): string {
+  const root = projectRootForSession(sessionId);
+  if (!root) return sessionId.slice(0, 12);
+  return root.split(/[\\/]/).filter(Boolean).pop() ?? root;
+}
+
+function projectRootForSession(sessionId: string): string | null {
+  const id = projectIdForSession(sessionId);
+  if (!id) return null;
+  // ProjectRuntime roots are not directly reachable from here; the rail's
+  // items carry them. Fall back to the project id (stable, readable enough
+  // in a toast) when the root is unavailable.
+  return id;
 }
