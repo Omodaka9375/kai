@@ -344,6 +344,25 @@ export function AiChatView({
     prevMsgCount.current = messages.length;
   }, [messages.length, messages]);
 
+  // Keep the stick-to-bottom lock THROUGH streaming. The library escapes the
+  // lock on any scroll-up, including programmatic ones: while markdown
+  // streams, Streamdown re-parses and tool cards swap state, so the content
+  // can transiently SHRINK (a partial fence completing, a spinner card
+  // collapsing) — the browser clamps scrollTop down, that lands as
+  // "scrolling up", and the run stops following mid-reply with the
+  // catch-up arrow showing even though the user never touched the wheel
+  // (the user report). Same rule the library itself applies to negative
+  // resizes: if the view is NEAR the bottom (within its own 70px threshold),
+  // re-assert the lock on every streamed message update; a user who
+  // genuinely scrolled up to read stays far from the bottom and is left
+  // alone.
+  useEffect(() => {
+    if (status !== "streaming" && status !== "submitted") return;
+    if (scrollCtx.current?.state.isNearBottom) {
+      scrollCtx.current?.scrollToBottom();
+    }
+  }, [messages, status]);
+
   return (
     <Conversation contextRef={scrollCtx}>
         <ConversationContent className="gap-5 p-3 pb-6">
