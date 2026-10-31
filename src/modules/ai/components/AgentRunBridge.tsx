@@ -136,6 +136,16 @@ function Bridge({
   // old gate compared only against lastMirroredIdRef, so any older
   // un-mirrored message could leak through).
   const deliveryBoundaryIdRef = useRef<string | null>(null);
+  // Busy-transition tracker for the boundary snapshot below: the snapshot
+  // must fire ONLY on idle->busy transitions. The busy arm re-runs on every
+  // effect re-execution while busy (approvalsPending toggles, message
+  // updates now that `messages` is a dep) — re-snapshotting mid-run would
+  // move the boundary onto a message the run itself produced, making the
+  // final reply equal the boundary so the mirror gate never fires.
+  const prevBusyRef = useRef<{ sid: string | null; busy: boolean }>({
+    sid: null,
+    busy: false,
+  });
   // CROSS-PROJECT NEWS boundary (same causality contract as the group
   // delivery boundary above, kept as its own ref): the last assistant id
   // that existed BEFORE the current run began. A news flag is set ONLY
@@ -539,13 +549,20 @@ function Bridge({
     } else {
       noteSessionBusy(sessionId);
       // Causality boundary: snapshot the last assistant id BEFORE this run
-      // can emit messages of its own, so the idle arm can tell a reply that
-      // pre-dated the delivery from one the delivery provoked.
-      const lastPre = [...messagesRefForGroup.current]
-        .reverse()
-        .find((m) => m.role === "assistant");
-      deliveryBoundaryIdRef.current = lastPre?.id ?? null;
-      newsBoundaryIdRef.current = lastPre?.id ?? null;
+      // can emit messages of its own — but ONLY on the idle->busy TRANSITION
+      // (see prevBusyRef above). Mid-run re-runs (approvals toggling,
+      // throttled message updates landing) must not clobber it, or the
+      // final reply equals the boundary and is never mirrored.
+      const justWentBusy =
+        prevBusyRef.current.sid !== sessionId || !prevBusyRef.current.busy;
+      prevBusyRef.current = { sid: sessionId, busy: true };
+      if (justWentBusy) {
+        const lastPre = [...messagesRefForGroup.current]
+          .reverse()
+          .find((m) => m.role === "assistant");
+        deliveryBoundaryIdRef.current = lastPre?.id ?? null;
+        newsBoundaryIdRef.current = lastPre?.id ?? null;
+      }
     }
     // Background starts keep the current surface; the composer explicitly
     // opens the transcript for ordinary sends. Background notifications use
@@ -614,7 +631,7 @@ function Bridge({
         );
       }
     }
-  }, [isActive, status, approvalsPending, patch, openMini, sessionId]);
+  }, [isActive, status, approvalsPending, patch, openMini, sessionId, messages]);
 
   useEffect(() => {
     if (isActive && approvalsPending > 0) openMini();

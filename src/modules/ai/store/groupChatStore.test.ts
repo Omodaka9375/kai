@@ -265,8 +265,8 @@ describe("source pins — trust boundary & wiring", () => {
   });
 
   it("bridge mirrors agent replies into the group and flushes queues on idle", () => {
-    // 2026-11-01: the mirror must resolve the group by the PROVISION'S OWN
-    // id (getGroup(provisionedGroupId)) — the old getGroupForSession lookup
+    // 2026-11-01 (r2): the mirror must resolve the group by the PROVISION'S
+    // OWN id (getGroup(provisionedGroupId)) — the old getGroupForSession lookup
     // went through a SECOND map (sessionGroups) whose divergence from
     // awaitingReply silently dropped the mirror (reply stayed in the
     // project chat). The two-map form must not return.
@@ -274,6 +274,26 @@ describe("source pins — trust boundary & wiring", () => {
     expect(bridge).not.toContain("getGroupForSession(sessionId)");
     expect(bridge).toContain("appendGroupMessage(group.id");
     expect(bridge).toContain("noteSessionIdle(sessionId)");
+  });
+
+  it("the status effect re-runs when throttled messages land late (throttle race)", () => {
+    // The status effect's dep array MUST include `messages`: useChat runs
+    // with experimental_throttle: 50, so the run can settle to ready
+    // BEFORE the final assistant message lands in a re-render. Without
+    // `messages` as a dep, that late flush updates the ref but never
+    // re-runs the idle arm — the reply stayed in the project chat alone
+    // ("agent replies outside the group") on every run whose last chunk
+    // landed inside the throttle window.
+    expect(bridge).toMatch(/\}, \[isActive, status, approvalsPending, patch, openMini, sessionId, messages\]\);/);
+  });
+
+  it("the causality boundary snapshots ONLY on the idle->busy transition", () => {
+    // Mid-run re-runs (approvals toggling, throttled message updates — the
+    // effect now re-runs while busy) must NOT re-snapshot the boundary onto
+    // a message the run itself produced: the final reply would equal the
+    // boundary and never mirror. prevBusyRef gates the snapshot.
+    expect(bridge).toContain("const justWentBusy =");
+    expect(bridge).toMatch(/prevBusyRef\.current = \{ sid: sessionId, busy: true \};/);
   });
 
   it("the create dialog lists existing groups with open + delete (deletion is human-only)", () => {
