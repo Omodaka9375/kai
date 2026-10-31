@@ -21,6 +21,7 @@ import {
   sweepPersonaWorkspace,
 } from "../lib/personaWorkspace";
 import { auditAppend, AUDIT_KINDS } from "../lib/audit";
+import { predictAutoApproval } from "../lib/autoApprovePrediction";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { generateText, stepCountIs, type ModelMessage } from "ai";
 
@@ -76,6 +77,12 @@ export type GroupChat = {
   messages: GroupMessage[];
   createdAt: number;
   endedAt: number | null;
+  /** Group auto-allow (coordinator toggle, defaults off): persona tool
+   *  calls the production gate would auto-approve run without a card.
+   *  Project participants are NOT affected - their own sessions' bridges
+   *  decide with their per-chat auto-approve setting. Persisted with the
+   *  group in kai-groups.json. */
+  autoApprove?: boolean;
 };
 
 /** Message queued for a participant whose agent is busy; flushed on idle. */
@@ -768,11 +775,48 @@ async function runPersonaReply(
         denyPersonaApprovals(key);
         return;
       }
+      // GROUP AUTO-ALLOW: when the coordinator turned it on for this group,
+      // persona calls the production gate would auto-approve run without a
+      // card. predictAutoApproval IS the desktop bridge's gate (imported,
+      // never reimplemented here) - the same shape-based carve-outs apply:
+      // elevated privileges, screen capture, and signed commits still stop
+      // for a human click. Round-granularity: the flag is read once per
+      // approval round, so a mid-pause toggle lands on the next round.
+      const signingApprovalRequired =
+        usePreferencesStore.getState().commitSigningEnabled &&
+        usePreferencesStore.getState().commitSigningMode === "approval";
+      const groupAutoAllow = liveGroup.autoApprove === true;
       // Register a card per un-executed call, THEN wait for every decision
-      // (approve / deny / teardown-deny all resolve the promise).
+      // (approve / deny / teardown-deny all resolve the promise). Auto-
+      // allowed calls skip the registry entirely - no card, no wait.
       const decisionPromises = pendingCalls.map(
         (c) =>
           new Promise<boolean>((resolve) => {
+            const input = (c.input ?? undefined) as
+              | Record<string, unknown>
+              | undefined;
+            const summary = summarizePersonaToolCall(c.input);
+            if (
+              groupAutoAllow &&
+              predictAutoApproval({
+                autoApprove: "all",
+                toolName: c.toolName,
+                input,
+                signingApprovalRequired,
+              })
+            ) {
+              // AUDIT: the transcript alone can't prove what ran - auto
+              // decisions are recorded exactly like human ones, marked as
+              // the group toggle's decision.
+              auditAppend(
+                AUDIT_KINDS.approvalApprove,
+                c.toolName,
+                `persona ${p.name} (group auto-allow): ${summary}`.slice(0, 200),
+                "",
+              );
+              resolve(true);
+              return;
+            }
             // KEY = THE SDK'S approvalId, not the toolCallId. The unified
             // approval surface (groupApprovals.personaEntries) exposes
             // approvalId, and respondPersonaApproval looks the card up by
@@ -787,7 +831,7 @@ async function runPersonaReply(
               sessionKey: key,
               personaName: p.name,
               toolName: c.toolName,
-              summary: summarizePersonaToolCall(c.input),
+              summary,
               input: c.input,
               at: Date.now(),
               decide: (approved) => resolve(approved),
@@ -1003,6 +1047,16 @@ export async function endGroupChat(groupId: string): Promise<void> {
     sessionGroups.delete(p.sessionId);
   }
   if (g.coordinator.kind === "agent") teardownSessionMachinery(g.coordinator.sessionId);
+  await persist();
+  notify();
+}
+
+/** Set the group's auto-allow toggle (persona approvals only). Persists
+ *  with the group; no-op when the value is unchanged. Human-only (panel). */
+export async function setGroupAutoApprove(groupId: string, value: boolean): Promise<void> {
+  const g = groups.get(groupId);
+  if (!g || g.autoApprove === value) return;
+  g.autoApprove = value;
   await persist();
   notify();
 }

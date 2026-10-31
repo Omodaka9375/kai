@@ -60,6 +60,7 @@ import {
   participantActivity,
   removeParticipant,
   resumeGroupChat,
+  setGroupAutoApprove,
   sendGroupMessage,
   stopGroupParticipant,
   stopGroupParticipants,
@@ -357,6 +358,7 @@ function PanelHeader({
           </Button>
         ) : (
           <>
+            <GroupAutoApproveToggle group={group} />
             <ParticipantsMenu
               group={group}
               candidates={candidates}
@@ -414,6 +416,34 @@ function PanelHeader({
         </Button>
       </div>
     </div>
+  );
+}
+
+/** Group auto-allow toggle — twin of the AI input bar's AutoApproveToggle
+ *  (same Ask/Allow labels, same emerald dot) but scoped to THIS group's
+ *  PERSONA approvals. Project participants are deliberately untouched:
+ *  their own sessions' bridges decide with their per-chat setting. */
+function GroupAutoApproveToggle({ group }: { group: GroupChat }) {
+  const on = group.autoApprove === true;
+  return (
+    <button
+      type="button"
+      onClick={() => void setGroupAutoApprove(group.id, !on)}
+      title={
+        on
+          ? "Auto-allow for this group: persona tool calls run without asking. Elevated commands, screen capture, and signed commits still ask. Project participants keep their own chat's setting."
+          : "Ask before every persona tool call — click to auto-allow for this group"
+      }
+      className="flex h-6 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-border/60 px-2.5 text-[10.5px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+    >
+      <span
+        className={cn(
+          "size-1.5 shrink-0 rounded-full",
+          on ? "bg-emerald-500" : "bg-muted-foreground/50",
+        )}
+      />
+      {on ? "Allow" : "Ask"}
+    </button>
   );
 }
 
