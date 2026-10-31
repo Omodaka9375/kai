@@ -551,7 +551,6 @@ function deliverToParticipant(
   if (isPersonaParticipantId(p.projectId)) {
     return deliverToPersonaParticipant(g, p, text);
   }
-  awaitingReply.set(p.sessionId, g.id);
   const prefixed = `[${g.name} · cross-project group] ${text}`;
   // Busy check: a LIVE chat object is the source of truth — the mirrored
   // agentMeta can go stale (the stop path historically never patched it
@@ -568,8 +567,16 @@ function deliverToParticipant(
     q.push({ groupId: g.id, sessionId: p.sessionId, text: prefixed, at: Date.now() });
     sendQueues.set(p.sessionId, q);
     notify();
+    // DELIBERATELY no awaitingReply here: the provision must be armed only
+    // when the delivery is actually INJECTED (flushQueuedForSession below).
+    // Arming at queue time let a *local* run settle and claim/consume the
+    // provision with its unrelated reply, so the reply to the real group
+    // delivery never mirrored back into the group transcript.
     return true;
   }
+  // Delivered: arm the mirror provision NOW (the injected message is the
+  // next thing the agent answers).
+  awaitingReply.set(p.sessionId, g.id);
   void useChatStore.getState().injectMessage(p.sessionId, prefixed);
   return false;
 }
@@ -928,6 +935,16 @@ export function flushQueuedForSession(sessionId: string): void {
   sendQueues.delete(sessionId);
   notify();
   const merged = q.map((m) => m.text).join("\n\n");
+  // Arm the mirror provision at DELIVERY time (see deliverToParticipant):
+  // the provision belongs to the run that actually answers the delivery —
+  // not to whatever run happened to be in flight when it queued. Only arm
+  // for a still-live group; a delivery flushed after the group ended needs
+  // no mirror.
+  const groupId = q[q.length - 1].groupId;
+  const g = groups.get(groupId);
+  if (g && g.endedAt === null) {
+    awaitingReply.set(sessionId, groupId);
+  }
   void useChatStore.getState().injectMessage(sessionId, merged);
 }
 

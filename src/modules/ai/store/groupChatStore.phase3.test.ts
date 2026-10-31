@@ -71,6 +71,30 @@ beforeEach(() => {
 });
 
 describe("mirror gate — takeReplyProvision", () => {
+  // PROVISION-AT-DELIVERY (2026-10-31 regression): the provision used to be
+  // armed at QUEUE time (deliverToParticipant before the busy check), so a
+  // delivery queued behind a *local* run armed the group before the local
+  // run's reply existed; that local reply claimed/consumed the provision
+  // and the reply to the actual group delivery never mirrored into the
+  // transcript ("the agent answered in the normal AI chat instead"). The
+  // provision must be armed ONLY when the delivery is injected — in the
+  // idle path and in flushQueuedForSession, never in the queue arm.
+  it("the provision is armed at INJECTION, never at queue time (source pin)", () => {
+    const src = readFileSync(
+      new URL("./groupChatStore.ts", import.meta.url),
+      "utf8",
+    );
+    // Idle-delivery arm: AFTER the busy branch, before injectMessage.
+    const idleArm = /if \(busy\) \{[\s\S]*?\}\s*\/\/ Delivered: arm the mirror provision NOW[\s\S]*?awaitingReply\.set\(p\.sessionId, g\.id\);\s*void useChatStore[\s\S]*?injectMessage/;
+    expect(src).toMatch(idleArm);
+    // Queue arm must NOT arm: the old `awaitingReply.set` before the busy
+    // check is exactly the regression.
+    const queueArm = /const prefixed[\s\S]{0,200}?awaitingReply\.set/;
+    expect(src).not.toMatch(queueArm);
+    // Flush arms for the queued group's delivery.
+    expect(src).toMatch(/export function flushQueuedForSession[\s\S]{0,800}?awaitingReply\.set\(sessionId, groupId\)/);
+  });
+
   it("no provision before any delivery: an idle local reply is NOT mirrored", async () => {
     await createGroupChat(
       { projectId: "a", sessionId: "s-a", root: "/a", name: "alpha" },
