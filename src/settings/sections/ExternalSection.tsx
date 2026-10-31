@@ -345,14 +345,11 @@ export function ExternalSection() {
           <li>Chat by text or voice notes. /new resets the conversation.</li>
         </ol>
         <div className="mt-2">
-          The assistant uses the general Assistant persona and the model picked
-          above. What it may do is set under <span className="text-foreground">Allowed tools</span>
-          {" "}— read-only by default (web search + file reads); write and shell
-          tools stay off until you grant them, and when on are fenced to a
-          scratch folder (~/.kai/assistant), never your projects. Note: calling
-          any tool requires a model with <span className="text-foreground">function-calling</span> support — many
-          small / local models reply conversationally but will run nothing.
-          The app must be running (tray is fine) for the bot to answer.
+          Uses the Assistant persona and the model above. What the bot may do is set
+          under <span className="text-foreground">Allowed tools</span> — read-only by default; write and shell tools,
+          once granted, stay fenced to a scratch folder (~/.kai/assistant), never your
+          projects. Tools need a <span className="text-foreground">function-calling</span> model; the app must be running
+          (tray is fine).
         </div>
       </div>
     </div>
