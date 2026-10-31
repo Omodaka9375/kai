@@ -27,7 +27,7 @@
 //!    close hides at all.
 
 use tauri::menu::{Menu, MenuItem};
-use tauri::tray::TrayIconBuilder;
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_notification::NotificationExt;
 
@@ -59,6 +59,16 @@ fn load_tray_icon<R: Runtime>(app: &AppHandle<R>) -> Option<tauri::image::Image<
     app.default_window_icon().cloned().map(|i| i.to_owned())
 }
 
+/// Reopen the main window from the tray (left click on the icon, or the
+/// menu's Show KAI): un-minimize, show, focus. Idempotent.
+fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.show();
+        let _ = win.unminimize();
+        let _ = win.set_focus();
+    }
+}
+
 /// Create the tray icon + menu. Called once from Builder::setup.
 pub fn install<R: Runtime>(app: &AppHandle<R>) -> Result<(), tauri::Error> {
     let show = MenuItem::with_id(app, "show", "Show KAI", true, None::<&str>)?;
@@ -74,15 +84,23 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) -> Result<(), tauri::Error> {
     }
 
     builder
+        .on_tray_icon_event(|tray, event| {
+            // A plain LEFT click reopens the window; the context menu stays
+            // on the right button (show_menu_on_left_click(false) above).
+            // Match the Up state only — Down and Up both arrive as Click
+            // events and would run this twice per click.
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_main_window(tray.app_handle());
+            }
+        })
         .on_menu_event(|app, event| {
             match event.id.as_ref() {
-                "show" => {
-                    if let Some(win) = app.get_webview_window("main") {
-                        let _ = win.show();
-                        let _ = win.unminimize();
-                        let _ = win.set_focus();
-                    }
-                }
+                "show" => show_main_window(app),
                 "quit" => {
                     // True exit: app.exit bypasses the CloseRequested guard,
                     // so the kill-on-close job and every PTY descends with us.
