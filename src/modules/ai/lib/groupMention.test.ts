@@ -18,6 +18,41 @@ import { describe, expect, it } from "vitest";
 const read = (rel: string) => readFileSync(new URL(rel, import.meta.url), "utf8");
 const panel = read("../components/GroupChatPanelView.tsx");
 
+import { resolveGroupMentionTarget } from "../components/GroupChatPanelView";
+
+const PARTS = [
+  { projectId: "p-alpha", name: "alpha", sessionId: "s-a", root: "/a", joinedAt: 0 },
+  { projectId: "p-beta", name: "beta", sessionId: "s-b", root: "/b", joinedAt: 0 },
+  { projectId: "p-sec", name: "Security Reviewer", sessionId: "s-c", root: "/c", joinedAt: 0 },
+] as const;
+
+describe("resolveGroupMentionTarget — default all, anywhere-in-message matching", () => {
+  it("no mention = everyone (undefined)", () => {
+    expect(resolveGroupMentionTarget("hello team", [...PARTS])).toBeUndefined();
+  });
+
+  it("a mention at the BEGINNING targets that agent", () => {
+    expect(resolveGroupMentionTarget("@alpha did the tests pass?", [...PARTS])).toBe("p-alpha");
+  });
+
+  it("a mention MID-SENTENCE targets that agent", () => {
+    expect(resolveGroupMentionTarget("hey, can @alpha check the build today?", [...PARTS])).toBe("p-alpha");
+  });
+
+  it("stray non-matching @tokens never strip a real mention (default all)", () => {
+    expect(resolveGroupMentionTarget("@alpha look at test@2 and user@host", [...PARTS])).toBe("p-alpha");
+  });
+
+  it("prefix + case-insensitive matching; last MATCHING mention wins", () => {
+    expect(resolveGroupMentionTarget("@SEC check the report", [...PARTS])).toBe("p-sec");
+    expect(resolveGroupMentionTarget("@alpha and then @beta please reply", [...PARTS])).toBe("p-beta");
+  });
+
+  it("only stray tokens = everyone, not a wrong target", () => {
+    expect(resolveGroupMentionTarget("check test@2 and user@host", [...PARTS])).toBeUndefined();
+  });
+});
+
 describe("composer @-mention targeting (replaces the All dropdown)", () => {
   it("the dropdown trigger is gone; @-mention drives targeting", () => {
     // The old Popover trigger button (title="Send to…") is gone.
@@ -30,13 +65,13 @@ describe("composer @-mention targeting (replaces the All dropdown)", () => {
     expect(panel).toContain("onTextChange(");
   });
 
-  it("the last @-mention in the text is the send target", () => {
-    expect(panel).toMatch(/mentionedTarget[\s\S]{0,300}?matchAll\(/);
+  it("the last MATCHING mention in the text is the send target (resolver)", () => {
+    // The resolver is exported + used by the composer's send path.
+    expect(panel).toContain("export function resolveGroupMentionTarget(");
+    expect(panel).toContain("resolveGroupMentionTarget(text, group.participants)");
     expect(panel).toContain(
       "await sendGroupMessage(group.id, composed, mentionedTarget);",
     );
-    // No mention = undefined target = everyone.
-    expect(panel).toContain("tokens.length === 0) return undefined;");
   });
 
   it("keyboard: arrows navigate, Enter/Tab pick, Escape closes", () => {

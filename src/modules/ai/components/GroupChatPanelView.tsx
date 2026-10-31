@@ -717,6 +717,35 @@ function TypingDots() {
   );
 }
 
+/**
+ * Resolve the @-mention send target from message text (exported for tests).
+ * RULE: default = ALL. A mention routes to an agent from ANYWHERE in the
+ * message — beginning or mid-sentence. Every @token in the whole text is a
+ * candidate; the LAST token that MATCHES a participant wins; stray
+ * non-matching @tokens (paths, emails) never strip a real mention.
+ */
+export function resolveGroupMentionTarget(
+  text: string,
+  participants: GroupParticipant[],
+): string | undefined {
+  const tokens = [...text.matchAll(/@([^\s]+)/g)];
+  if (tokens.length === 0) return undefined; // default: all
+  const matchParticipant = (raw: string) => {
+    const token = raw.toLowerCase();
+    return participants.find(
+      (p) =>
+        p.name.toLowerCase() === token ||
+        p.name.toLowerCase().replace(/\s+/g, "").startsWith(token.replace(/\s+/g, "")) ||
+        p.name.toLowerCase().includes(token),
+    );
+  };
+  let hit: GroupParticipant | undefined;
+  for (const token of tokens) {
+    hit = matchParticipant(token[1]) ?? hit;
+  }
+  return hit ? hit.projectId : undefined; // default: all
+}
+
 function Composer({
   group,
   expanded,
@@ -790,18 +819,18 @@ function Composer({
     setText(value);
   }, []);
   // Last @-mention in the text wins as the send target (null = all).
-  const mentionedTarget = useMemo(() => {
-    const tokens = [...text.matchAll(/@([^\s]+)/g)];
-    if (tokens.length === 0) return undefined;
-    const last = tokens[tokens.length - 1][1].toLowerCase();
-    const hit = group.participants.find(
-      (p) =>
-        p.name.toLowerCase() === last ||
-        p.name.toLowerCase().replace(/\s+/g, "").startsWith(last.replace(/\s+/g, "")) ||
-        p.name.toLowerCase().includes(last),
-    );
-    return hit ? hit.projectId : undefined;
-  }, [text, group.participants]);
+  // @-TARGETING RULE (2026-10-31): default = ALL. A mention routes to an
+  // agent when it appears ANYWHERE in the message — at the beginning
+  // ("@alpha did the tests pass?") or mid-sentence ("hey, can @alpha check
+  // the build?"). Every @token in the WHOLE message is a candidate; the LAST
+  // token that MATCHES a participant wins. Non-matching tokens (a stray @
+  // in a path, an email, a typo) never override a real mention elsewhere
+  // in the sentence — the old last-token-only rule let "check test@2" strip
+  // a beginning "@alpha" target. See resolveGroupMentionTarget (exported).
+  const mentionedTarget = useMemo(
+    () => resolveGroupMentionTarget(text, group.participants),
+    [text, group.participants],
+  );
   // The group panel is app-level; quote dispatches arrive via the same
   // window-event seam the panel's other cross-surface entries use. Scope by
   // groupId so quoting in one group doesn't seed another group's composer.
