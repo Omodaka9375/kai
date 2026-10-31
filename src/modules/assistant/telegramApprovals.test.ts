@@ -235,3 +235,30 @@ describe("source pins", () => {
     expect(src).toContain('"telegram-deny"');
   });
 });
+
+describe("Phase 4: assistant tier honesty", () => {
+  // The Settings page offers write/execute tiers; before Phase 4 the runtime
+  // STRIPPED every approval-gated tool, making those tiers dead options.
+  // Now: keep the tool, strip the interactive PAUSE (auto-run, desktop
+  // "Allow" semantics), audit the granted tier per turn. All inline
+  // security checks (deny-list, scratch-dir sandbox override, central
+  // guards) still run - only the pause is gone.
+  const index = read("../assistant/index.ts");
+
+  it("approval-gated tools are kept with the pause stripped, not removed", () => {
+    expect(index).toContain("needsApproval: undefined");
+    expect(index).not.toContain("blockedApprovalTools");
+    // The old honest-but-dead disclaimer is gone.
+    expect(index).not.toContain("are UNAVAILABLE in this headless assistant");
+  });
+
+  it("every granted auto-run tool writes an audit entry per turn", () => {
+    expect(index).toContain('"telegram-auto-run"');
+  });
+
+  it("the tier strip applies to MCP tools identically", () => {
+    const mcpLoop = index.split("getToolsForServers(prefs.mcpAllowedServers)")[1] ?? "";
+    expect(mcpLoop).toContain('"telegram-auto-run"');
+    expect(mcpLoop).toContain("needsApproval: undefined");
+  });
+});

@@ -440,15 +440,26 @@ export async function runAssistantTurn(
   // so a stale/edited allowedTools can't re-enable a desktop-only tool.
   const allowed = new Set(prefs.allowedTools);
   const tools: Record<string, unknown> = {};
-  const blockedApprovalTools: string[] = [];
+  // TIER HONESTY (Phase 4): approval-gated tools are NOT stripped anymore -
+  // they AUTO-EXECUTE (the desktop's "Allow" semantics) behind the
+  // scratch-dir fence, and every executed approval-gated call is AUDITED
+  // so there is a record of what a Telegram-originated turn did. The tool
+  // functions' own security checks (deny-list, sandbox override, central
+  // guards below) all still run - this only removes the interactive PAUSE
+  // that nothing headless can answer. The never-auto-approve PRIVACY set
+  // (look_at_screen, elevated bash) stays hard-excluded via
+  // toolCatalog/HARD_EXCLUDED + the tool's own input checks.
   for (const [id, tool] of Object.entries(all)) {
     if (!isToolAllowed(id, allowed)) continue;
-    // Approval-required tools can NEVER run headless: there is no bridge,
-    // no responder, and no card - the SDK would simply never execute the
-    // call and the turn would stall silently. Strip them and tell the
-    // model honestly (below) instead of leaving a dead callable.
     if ((tool as { needsApproval?: boolean }).needsApproval === true) {
-      blockedApprovalTools.push(id);
+      // One audit entry per granted auto-run tool per turn: proves the
+      // write/execute tier was ACTIVE for this Telegram-originated turn
+      // (each executed call is separately covered by tool.exec audits).
+      auditAppend(AUDIT_KINDS.assistantExec, "telegram-auto-run", id, "");
+      tools[id] = {
+        ...(tool as Record<string, unknown>),
+        needsApproval: undefined,
+      };
       continue;
     }
     tools[id] = tool;
@@ -459,8 +470,13 @@ export async function runAssistantTurn(
   // approval-required (mcpManager) - same headless rule applies.
   const mcpTools = mcpManager.getToolsForServers(prefs.mcpAllowedServers);
   for (const [id, tool] of Object.entries(mcpTools)) {
+    // Same tier-honesty rule as core tools: keep, strip the pause, audit.
     if ((tool as { needsApproval?: boolean }).needsApproval === true) {
-      blockedApprovalTools.push(id);
+      auditAppend(AUDIT_KINDS.assistantExec, "telegram-auto-run", id, "");
+      tools[id] = {
+        ...(tool as Record<string, unknown>),
+        needsApproval: undefined,
+      };
       continue;
     }
     tools[id] = tool;
@@ -536,9 +552,9 @@ export async function runAssistantTurn(
     `Your name is "${persona.name}". When the user asks your name or addresses you, answer with it.`,
     persona.instructions,
     fenceSystemPrompt(fenceState),
-    blockedApprovalTools.length > 0
-      ? `Tools requiring interactive approval are UNAVAILABLE in this headless assistant: ${blockedApprovalTools.join(", ")}. Never attempt them; if a task needs them, tell the user to run it in the desktop app.`
-      : "",
+    // Phase 4: approval-gated tools in the owner's allowlist AUTO-RUN
+    // (desktop "Allow" semantics) inside the scratch fence - the old
+    // "interactive tools unavailable" disclaimer is obsolete.
     "\n\n## CONVERSATION SURFACE — TELEGRAM",
     "You are chatting with the owner over Telegram. Replies are plain text (Telegram Markdown).",
     "Keep replies conversational and SHORT — a chat message, not a document. Bullet points over essays.",
