@@ -12,7 +12,8 @@ export type ProviderId =
   | "openrouter"
   | "openai-compatible"
   | "lmstudio"
-  | "zai";
+  | "zai"
+  | "assemblyai";
 
 export type ProviderInfo = {
   id: ProviderId;
@@ -109,6 +110,17 @@ export const PROVIDERS: readonly ProviderInfo[] = [
     keyringAccount: "zai-api-key",
     keyPrefix: null,
     consoleUrl: "https://z.ai/model-api",
+  },
+  {
+    // VOICE provider, not a chat-model provider: the key powers AssemblyAI
+    // STT (composer mic) and TTS (voice replies) in Settings > Voice. Listed
+    // here so it rides the same keychain storage + key card UI; there are
+    // NO chat models for this id and none must be added to models.ts.
+    id: "assemblyai",
+    label: "AssemblyAI",
+    keyringAccount: "assemblyai-api-key",
+    keyPrefix: null,
+    consoleUrl: "https://www.assemblyai.com/dashboard/api-keys",
   },
 ] as const;
 

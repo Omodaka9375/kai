@@ -1,5 +1,6 @@
 import type { ProviderId } from "@/modules/ai/config";
 import {
+  AiVoiceIcon,
   ChatGptIcon,
   ClaudeIcon,
   ComputerIcon,
@@ -27,6 +28,9 @@ const ICON_BY_PROVIDER = {
   "openai-compatible": PlugIcon,
   lmstudio: ComputerIcon,
   zai: CpuIcon,
+  // Voice provider (STT/TTS) - a voice glyph distinguishes it from the
+  // chat-model providers in the key grid.
+  assemblyai: AiVoiceIcon,
 } as const satisfies Record<ProviderId, typeof ChatGptIcon>;
 
 type Props = {

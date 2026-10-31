@@ -223,6 +223,15 @@ export async function buildLanguageModel(
       })(resolvedModelId);
       break;
     }
+    case "assemblyai": {
+      // Voice provider (STT/TTS in Settings > Voice) - deliberately has NO
+      // chat-model path. Reaching here means a model was registered with a
+      // provider id that only exists for key storage; that must never
+      // happen (models.ts has no assemblyai entries).
+      throw new Error(
+        "AssemblyAI is a voice provider (STT/TTS), not a chat model provider.",
+      );
+    }
     default: {
       const _exhaustive: never = provider;
       throw new Error(`Unsupported provider: ${_exhaustive as ProviderId}`);

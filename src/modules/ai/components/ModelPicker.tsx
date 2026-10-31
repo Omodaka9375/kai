@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import {
   AiBookIcon,
+  AiVoiceIcon,
   ArrowDown01Icon,
   BrainIcon,
   ChatGptIcon,
@@ -68,6 +69,9 @@ const PROVIDER_ICON = {
   "openai-compatible": PlugIcon,
   lmstudio: ComputerIcon,
   zai: CpuIcon,
+  // Voice provider - never appears in a model list, but the Record must be
+  // exhaustive so a future ProviderId can't compile without an icon.
+  assemblyai: AiVoiceIcon,
 } as const satisfies Record<ProviderId, typeof ChatGptIcon>;
 
 type Tab = "all" | "favorites" | "recent";

@@ -22,6 +22,7 @@ export const EMPTY_PROVIDER_KEYS: ProviderKeys = {
   "openai-compatible": null,
   lmstudio: null,
   zai: null,
+  assemblyai: null,
 };
 
 export async function getKey(provider: ProviderId): Promise<string | null> {
