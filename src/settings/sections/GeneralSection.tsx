@@ -466,7 +466,16 @@ function GmailCard() {
         ) : null}
       </div>
       <div className="text-[10.5px] text-muted-foreground">
-        Agent cannot send or modify mail. Needs a Google app password. Stored in your OS keychain.
+        Agent cannot send or modify mail. Needs a{" "}
+        <button
+          type="button"
+          title="Opens Google's app-password page (2-Step Verification required)"
+          onClick={() => void openUrl("https://myaccount.google.com/apppasswords")}
+          className="text-foreground/90 underline-offset-2 hover:underline"
+        >
+          Google app password
+        </button>
+        . Requires 2-Step Verification. Stored in your OS keychain.
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <Input
@@ -575,7 +584,16 @@ function SocialCard() {
         ) : null}
       </div>
       <div className="text-[10.5px] text-muted-foreground">
-        Agent cannot post, like, or follow. Needs your developer Bearer token. Stored in your OS keychain.
+        Agent cannot post, like, or follow. Needs your developer{" "}
+        <button
+          type="button"
+          title="Opens the X developer portal (create a project to get a Bearer token)"
+          onClick={() => void openUrl("https://developer.x.com/en/portal/dashboard")}
+          className="text-foreground/90 underline-offset-2 hover:underline"
+        >
+          Bearer token
+        </button>
+        . Stored in your OS keychain.
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <Input
