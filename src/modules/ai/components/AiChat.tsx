@@ -30,6 +30,7 @@ import {
   File01Icon,
   HashtagIcon,
   Image01Icon,
+  LeftToRightBlockQuoteIcon,
   TerminalIcon,
 } from "@hugeicons/core-free-icons";
 import { SLASH_COMMANDS, Kai_CMD_RE } from "../lib/slashCommands";
@@ -148,18 +149,37 @@ const ContextChips = memo(function ContextChips({
 }) {
   return (
     <div className="mb-1 flex flex-wrap gap-1">
-      {chips.map((c, i) => (
-        <span
-          key={i}
-          className="inline-flex items-center gap-1 rounded-md border border-border/50 bg-card/60 px-1.5 py-0.5 text-[10.5px] text-muted-foreground"
-        >
-          {chipIcon(c)}
-          <span className="font-medium text-foreground">{chipLabel(c)}</span>
-          {"lines" in c && c.lines > 0 ? (
-            <span className="opacity-70">· {c.lines}L</span>
-          ) : null}
-        </span>
-      ))}
+      {chips.map((c, i) => {
+        // Quote chips render as a reply-quote preview (author + excerpt,
+        // left accent bar) like mainstream chat apps; other chips stay pills.
+        if (c.kind === "quote") {
+          return (
+            <span
+              key={i}
+              className="flex w-full items-center gap-1.5 rounded-md border-l-2 border-primary/70 bg-muted/50 px-2 py-1 text-[10.5px]"
+            >
+              <HugeiconsIcon icon={LeftToRightBlockQuoteIcon} size={10} strokeWidth={1.75} className="shrink-0 text-primary/80" />
+              <span className="min-w-0 truncate">
+                <span className="font-semibold text-primary/90">{c.author}</span>
+                <span className="ml-1.5 text-muted-foreground">{c.excerpt}</span>
+              </span>
+              {c.lines > 1 ? <span className="shrink-0 opacity-70">{c.lines}L</span> : null}
+            </span>
+          );
+        }
+        return (
+          <span
+            key={i}
+            className="inline-flex items-center gap-1 rounded-md border border-border/50 bg-card/60 px-1.5 py-0.5 text-[10.5px] text-muted-foreground"
+          >
+            {chipIcon(c)}
+            <span className="font-medium text-foreground">{chipLabel(c)}</span>
+            {"lines" in c && c.lines > 0 ? (
+              <span className="opacity-70">· {c.lines}L</span>
+            ) : null}
+          </span>
+        );
+      })}
     </div>
   );
 });
@@ -177,6 +197,11 @@ function chipIcon(c: ContextChip) {
   if (c.kind === "file") {
     return <HugeiconsIcon icon={File01Icon} size={10} strokeWidth={1.75} />;
   }
+  if (c.kind === "quote") {
+    return (
+      <HugeiconsIcon icon={LeftToRightBlockQuoteIcon} size={10} strokeWidth={1.75} />
+    );
+  }
   return <HugeiconsIcon icon={HashtagIcon} size={10} strokeWidth={1.75} />;
 }
 
@@ -185,6 +210,7 @@ function chipLabel(c: ContextChip): string {
     return c.source === "editor" ? "Editor selection" : "Terminal selection";
   }
   if (c.kind === "file") return c.name;
+  if (c.kind === "quote") return c.excerpt;
   return `#${c.name}`;
 }
 type AnyPart = UIMessagePart<Record<string, never>, Record<string, never>>;
@@ -339,7 +365,13 @@ export function AiChatView({
           return (
             <Fragment key={m.id}>
               {showDay && <DaySeparator ts={ts as number} />}
-              <div className="group/msg relative">
+              <div
+                className="group/msg relative"
+                // Author stamp for the transcript Quote action: the
+                // context-menu builder recovers who said the selected text
+                // from this attribute (App.tsx contextmenu handler).
+                data-msg-author={m.role === "user" ? "You" : (m.metadata as { agentName?: string } | undefined)?.agentName ?? "Kai"}
+              >
                 <RenderedMessage
                   message={m}
                   onApproval={onApproval}

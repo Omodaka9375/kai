@@ -11,6 +11,7 @@ import {
   GridIcon,
   ArrowRight01Icon,
   ArrowDown01Icon,
+  LeftToRightBlockQuoteIcon,
   MagicWand01Icon,
   UserWarning01Icon
 } from "@hugeicons/core-free-icons";
@@ -27,6 +28,9 @@ export type CustomContextMenuProps = {
     formatterName: string | null;
     onFormat: (selectionOnly: boolean) => void;
   };
+  /** Chat-transcript quote: set when the menu targets a chat/agent message.
+   *  The row attaches the selected text as a reply-quote for the composer. */
+  onQuote?: () => void;
   /** Inline error row (e.g. formatter failures). Keeps the menu open so the
    *  message stays visible until dismissed. */
   error?: string | null;
@@ -46,6 +50,7 @@ export function CustomContextMenu({
   selectionText,
   isTerminal,
   editorFormat,
+  onQuote,
   error,
   onCopy,
   onPaste,
@@ -78,9 +83,10 @@ export function CustomContextMenu({
 
   const hasSelection = selectionText && selectionText.trim().length > 0;
   const fmt = editorFormat;
-  // Height estimate for viewport clamping — format entries add rows.
+  // Height estimate for viewport clamping — format/quote entries add rows.
   const extraRows =
-    fmt ? (fmt.formattable ? (hasSelection ? 3 : 2) : 1) + 1 : 0; // +1 separator
+    (fmt ? (fmt.formattable ? (hasSelection ? 3 : 2) : 1) + 1 : 0) + // +1 separator
+    (onQuote ? 1 : 0);
   const menuHeight =
     (fmt ? 250 : 0) + (hasSelection ? 100 : 200) + extraRows * 30;
   const menuWidth = 180;
@@ -169,6 +175,20 @@ export function CustomContextMenu({
               <Kbd className="h-4 min-w-4 px-1 text-[9px]">{fmtShortcut(MOD_KEY, "L")}</Kbd>
             </KbdGroup>
           </button>
+          {onQuote && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onQuote();
+                onDismiss();
+              }}
+              className="flex h-7 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-[11.5px] hover:bg-accent text-foreground font-medium"
+            >
+              <HugeiconsIcon icon={LeftToRightBlockQuoteIcon} size={12} strokeWidth={1.8} className="text-primary" />
+              <span>Quote</span>
+            </button>
+          )}
           {error && (
             <div className="flex items-start gap-1.5 px-2 py-1.5 text-[10.5px] text-amber-600 dark:text-amber-400">
               <HugeiconsIcon

@@ -1018,6 +1018,39 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
     activeTab,
   ]);
 
+  // Quote-from-transcript: the DOM selection inside a chat transcript is
+  // captured at MENU-BUILD time (the browser clears it on mousedown before
+  // the row's click fires), and the author is recovered from the nearest
+  // [data-msg-author] wrapper. The group panel carries data-group-chat-panel
+  // + the open group's id; its quote seeds the GROUP composer (scoped by
+  // groupId), everything else seeds the session composer.
+  const quoteFromTranscript = useCallback(
+    (text: string, author: string, groupId?: string) => {
+      if (groupId) {
+        window.dispatchEvent(
+          new CustomEvent<{ groupId: string; author: string; text: string }>(
+            "Kai:group-quote",
+            { detail: { groupId, author, text } },
+          ),
+        );
+        return;
+      }
+      if (!hasComposer) {
+        void openSettingsWindow("models");
+        return;
+      }
+      window.dispatchEvent(
+        new CustomEvent<{ author: string; text: string }>("Kai:ai-quote", {
+          detail: { author, text },
+        }),
+      );
+      openPanel();
+      focusInput(null);
+    },
+    [hasComposer, openPanel, focusInput],
+  );
+
+
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
@@ -1025,6 +1058,8 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
     isTerminal: boolean;
     /** Editor path when the menu targets a code editor (adds Format rows). */
     editorPath: string | null;
+    /** Quote payload when the menu targets a chat transcript message. */
+    quote: { author: string; text: string; groupId: string | null } | null;
   } | null>(null);
 
   /** Format errors from the context menu's Format actions — shown inline in
@@ -1107,14 +1142,37 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
 
       const isTerminal = !!target.closest(".xterm-screen");
       const isEditor = !!target.closest(".cm-editor");
-      
-      // Do not open our custom context menu outside editor/terminal panes (e.g., standard UI borders)
-      if (!isTerminal && !isEditor) {
+      // Chat transcripts (AI mini window, group panel): selection quoting.
+      // The transcript author is stamped on the message wrapper via
+      // data-msg-author; the browser selection is captured NOW because it
+      // is cleared before the menu row's click handler runs.
+      const msgEl = target.closest("[data-msg-author]");
+      const quoteTarget = msgEl as { getAttribute(k: string): string | null } | null;
+      // Group panel quotes seed the GROUP composer - recover the open group
+      // from the panel container so the event lands in the right Composer.
+      const groupPanelEl = target.closest("[data-group-chat-panel]");
+      const groupQuoteId = groupPanelEl
+        ? (groupPanelEl as { getAttribute(k: string): string | null }).getAttribute("data-group-id")
+        : null;
+      const transcriptSelection = msgEl
+        ? String(document.getSelection?.() ?? "").trim() || null
+        : null;
+
+      // Do not open our custom context menu outside editor/terminal/chat panes
+      if (!isTerminal && !isEditor && !quoteTarget) {
+        setContextMenu(null);
+        return;
+      }
+      // No selection in a chat message: fall through to the standard rows
+      // only for terminal/editor; a bare chat right-click shows nothing.
+      if (!isTerminal && !isEditor && !transcriptSelection) {
         setContextMenu(null);
         return;
       }
 
-      const selectionText = captureActiveSelection();
+      const selectionText = isTerminal || isEditor
+        ? captureActiveSelection()
+        : transcriptSelection;
       setFormatMenuError(null);
       setContextMenu({
         x: e.clientX,
@@ -1122,6 +1180,14 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
         selectionText,
         isTerminal,
         editorPath: isEditor ? activeTabPathRef.current : null,
+        quote:
+          quoteTarget && transcriptSelection
+            ? {
+                author: quoteTarget.getAttribute("data-msg-author") || "You",
+                text: transcriptSelection,
+                groupId: groupQuoteId,
+              }
+            : null,
       });
     };
 
@@ -2202,6 +2268,16 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
                 onSplitRight={handleSplitRight}
                 onSplitDown={handleSplitDown}
                 onAskKai={askFromSelection}
+                onQuote={
+                  contextMenu.quote
+                    ? () =>
+                        quoteFromTranscript(
+                          contextMenu.quote!.text,
+                          contextMenu.quote!.author,
+                          contextMenu.quote!.groupId ?? undefined,
+                        )
+                    : undefined
+                }
                 onDismiss={() => setContextMenu(null)}
               />
             ) : null}

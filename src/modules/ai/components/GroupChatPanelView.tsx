@@ -25,6 +25,7 @@ import {
   Cancel01Icon,
   Delete02Icon,
   Folder01Icon,
+  LeftToRightBlockQuoteIcon,
   Link01Icon,
   SentIcon,
   StopIcon,
@@ -60,10 +61,16 @@ import {
   stopGroupParticipants,
   subscribeGroupChats,
   type GroupChat,
+  type GroupMessage,
   type GroupParticipant,
 } from "../store/groupChatStore";
 import type { ProjectSwitcherItem } from "@/modules/workspace/ProjectRail";
 import { CoordinatorMenu } from "./CoordinatorMenu";
+import {
+  buildQuoteBlock,
+  quoteExcerpt,
+  splitQuoteBlock,
+} from "../lib/chatText";
 
 /**
  * Cross-project group chat panel — app-level surface (mounted once in
@@ -229,6 +236,7 @@ export function GroupChatPanel({
             exit={{ opacity: 0, x: 16 }}
             transition={{ type: "spring", stiffness: 320, damping: 32 }}
             data-group-chat-panel
+            data-group-id={active.id}
             className={cn(
               "fixed z-40 flex flex-col overflow-hidden",
               "rounded-2xl border border-border/60 bg-card text-[12px] shadow-lg",
@@ -456,7 +464,11 @@ function Transcript({
               {m.text}
             </div>
           ) : (
-          <div key={m.id} className="flex flex-col gap-0.5">
+          <div
+            key={m.id}
+            className="flex flex-col gap-0.5"
+            data-msg-author={m.from === "user" ? "You" : nameFor(m.projectId)}
+          >
             <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
               <span className="font-medium text-foreground">
                 {m.from === "user" ? "You" : nameFor(m.projectId)}
@@ -469,16 +481,7 @@ function Transcript({
                   : "replied"}
               </span>
             </div>
-            <div
-              className={cn(
-                "whitespace-pre-wrap rounded-lg border px-2.5 py-1.5",
-                m.from === "user"
-                  ? "border-border/60 bg-muted/40"
-                  : "border-border/60 bg-background",
-              )}
-            >
-              {m.text}
-            </div>
+            <GroupMessageBody text={m.text} from={m.from} />
           </div>
           )
         )
@@ -541,6 +544,57 @@ function PersonaApprovals({ groupId }: { groupId: string }) {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+/** One group message bubble: renders a leading <quote author="..."> block as
+ *  a reply-quote preview (accent bar + author + excerpt) when present - the
+ *  same wire shape the regular composer emits. */
+function GroupMessageBody({ text, from }: { text: string; from: GroupMessage["from"] }) {
+  const parsed = splitQuoteBlock(text);
+  if (!parsed) {
+    return (
+      <div
+        className={cn(
+          "whitespace-pre-wrap rounded-lg border px-2.5 py-1.5",
+          from === "user"
+            ? "border-border/60 bg-muted/40"
+            : "border-border/60 bg-background",
+        )}
+      >
+        {text}
+      </div>
+    );
+  }
+  return (
+    <div
+      className={cn(
+        "rounded-lg border px-2.5 py-1.5",
+        from === "user"
+          ? "border-border/60 bg-muted/40"
+          : "border-border/60 bg-background",
+      )}
+    >
+      <div className="mb-1.5 flex items-start gap-1.5 rounded-md border-l-2 border-primary/60 bg-background/80 px-2 py-1">
+        <HugeiconsIcon
+          icon={LeftToRightBlockQuoteIcon}
+          size={10}
+          strokeWidth={1.75}
+          className="mt-0.5 shrink-0 text-primary/70"
+        />
+        <div className="min-w-0 flex-1">
+          <span className="text-[10px] font-semibold text-primary/90">
+            {parsed.author}
+          </span>
+          <span className="ml-1.5 text-[10px] text-muted-foreground line-clamp-2">
+            {quoteExcerpt(parsed.quoteText)}
+          </span>
+        </div>
+      </div>
+      {parsed.rest ? (
+        <span className="whitespace-pre-wrap">{parsed.rest}</span>
+      ) : null}
     </div>
   );
 }
@@ -632,17 +686,38 @@ function Composer({
   const [text, setText] = useState("");
   const [target, setTarget] = useState<string | "all">("all");
   const [sending, setSending] = useState(false);
+  // Reply-quote from the group transcript (right-click → Quote). The quote
+  // rides the sent text as a <quote author="..."> block so every participant
+  // agent sees WHO is being quoted from the earlier conversation.
+  const [pendingQuote, setPendingQuote] = useState<{ author: string; text: string } | null>(null);
+  // The group panel is app-level; quote dispatches arrive via the same
+  // window-event seam the panel's other cross-surface entries use. Scope by
+  // groupId so quoting in one group doesn't seed another group's composer.
+  useEffect(() => {
+    const onQuote = (e: Event) => {
+      const detail = (e as CustomEvent<{ groupId: string; author: string; text: string }>).detail;
+      if (detail?.groupId !== group.id || !detail.text) return;
+      setPendingQuote({ author: detail.author, text: detail.text });
+    };
+    window.addEventListener("Kai:group-quote", onQuote);
+    return () => window.removeEventListener("Kai:group-quote", onQuote);
+  }, [group.id]);
   const send = useCallback(async () => {
     const trimmed = text.trim();
-    if (!trimmed || group.endedAt !== null || sending) return;
+    if ((!trimmed && !pendingQuote) || group.endedAt !== null || sending) return;
     setSending(true);
     try {
-      await sendGroupMessage(group.id, trimmed, target === "all" ? undefined : target);
+      const quoteBlock = pendingQuote
+        ? buildQuoteBlock(pendingQuote.author, pendingQuote.text)
+        : null;
+      const composed = [quoteBlock, trimmed].filter(Boolean).join("\n\n");
+      await sendGroupMessage(group.id, composed, target === "all" ? undefined : target);
       setText("");
+      setPendingQuote(null);
     } finally {
       setSending(false);
     }
-  }, [text, group, target, sending]);
+  }, [text, group, target, sending, pendingQuote]);
 
   if (group.endedAt !== null) {
     return (
@@ -654,10 +729,38 @@ function Composer({
   return (
     <div
       className={cn(
-        "flex shrink-0 items-center gap-2 border-t border-border/60 bg-card/80 p-3",
+        "flex shrink-0 flex-col gap-1.5 border-t border-border/60 bg-card/80 p-3",
         expanded && "mx-auto w-full max-w-3xl border-x",
       )}
     >
+      {pendingQuote && (
+        <div className="flex items-center gap-1.5 rounded-lg border-l-2 border-primary/70 bg-muted/50 px-2 py-1">
+          <HugeiconsIcon
+            icon={LeftToRightBlockQuoteIcon}
+            size={12}
+            strokeWidth={1.75}
+            className="shrink-0 text-primary/80"
+          />
+          <div className="min-w-0 flex-1">
+            <span className="text-[10px] font-semibold text-primary/90">
+              {pendingQuote.author}
+            </span>
+            <span className="ml-1.5 text-[10.5px] text-muted-foreground line-clamp-1">
+              {quoteExcerpt(pendingQuote.text)}
+            </span>
+          </div>
+          <button
+            type="button"
+            aria-label="Remove quote"
+            title="Remove quote"
+            onClick={() => setPendingQuote(null)}
+            className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <HugeiconsIcon icon={Cancel01Icon} size={11} strokeWidth={2} />
+          </button>
+        </div>
+      )}
+      <div className="flex items-center gap-2">
       <Popover>
         <PopoverTrigger asChild>
           <button
@@ -706,8 +809,9 @@ function Composer({
         disabled={!text.trim() || sending}
         onClick={() => void send()}
       >
-        <HugeiconsIcon icon={SentIcon} size={15} strokeWidth={1.75} />
+          <HugeiconsIcon icon={SentIcon} size={15} strokeWidth={1.75} />
       </Button>
+      </div>
     </div>
   );
 }

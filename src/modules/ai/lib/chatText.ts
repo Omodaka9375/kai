@@ -10,13 +10,41 @@ import { wrapAsciiArt } from "./wrapAsciiArt";
 export type ContextChip =
   | { kind: "selection"; source: "terminal" | "editor"; lines: number }
   | { kind: "file"; name: string; lines: number }
-  | { kind: "snippet"; name: string };
+  | { kind: "snippet"; name: string }
+  | { kind: "quote"; author: string; lines: number; excerpt: string };
 
 const SELECTION_RE =
   /<selection\s+source="(terminal|editor)">\n?([\s\S]*?)\n?<\/selection>/g;
 const FILE_RE =
   /<file\s+name="([^"]+)"[^>]*>\n?([\s\S]*?)\n?<\/file>/g;
 const SNIPPET_RE = /<snippet\s+name="([^"]+)">\n?[\s\S]*?\n?<\/snippet>/g;
+const QUOTE_RE = /<quote\s+author="([^"]*)">\n?([\s\S]*?)\n?<\/quote>/g;
+
+/** Unescape the attribute-encoding used when the block was written. */
+function attrDecode(s: string): string {
+  return s.replace(/&quot;/g, '"').replace(/&amp;/g, "&");
+}
+
+/** Extract the FIRST <quote> block from arbitrary message text (the group
+ *  transcript path — group messages prepend the quote block to the text).
+ *  Returns null when there is no quote. `rest` is the text minus the block. */
+export function splitQuoteBlock(
+  text: string,
+): { author: string; quoteText: string; rest: string } | null {
+  const m = /<quote\s+author="([^"]*)">\n?([\s\S]*?)\n?<\/quote>/.exec(text);
+  if (!m) return null;
+  return {
+    author: attrDecode(m[1]!),
+    quoteText: m[2] ?? "",
+    rest: text.replace(m[0], "").trim(),
+  };
+}
+
+/** Short single-line excerpt for quote previews. */
+export function quoteExcerpt(text: string, max = 120): string {
+  const firstLine = text.split("\n").find((l) => l.trim().length > 0)?.trim() ?? "";
+  return firstLine.length > max ? `${firstLine.slice(0, max)}…` : firstLine;
+}
 
 function countLines(s: string): number {
   if (!s) return 0;
@@ -31,6 +59,15 @@ export function stripUserContextBlocks(text: string): {
 } {
   const chips: ContextChip[] = [];
   let out = text;
+  out = out.replace(QUOTE_RE, (_m, author: string, body: string) => {
+    chips.push({
+      kind: "quote",
+      author: attrDecode(author),
+      lines: countLines(body),
+      excerpt: quoteExcerpt(body),
+    });
+    return "";
+  });
   out = out.replace(SELECTION_RE, (_m, source: string, body: string) => {
     chips.push({
       kind: "selection",
@@ -48,6 +85,13 @@ export function stripUserContextBlocks(text: string): {
     return "";
   });
   return { text: out.trim(), chips };
+}
+
+/** Build a `<quote>` wire block. The author attribute is escaped so a name
+ *  containing `"` can't break out of the attribute. */
+export function buildQuoteBlock(author: string, quoteText: string): string {
+  const safe = author.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+  return `<quote author="${safe}">\n${quoteText}\n</quote>`;
 }
 
 // Only actual thinking markers are stripped. An earlier `\\n{2}\\s*`

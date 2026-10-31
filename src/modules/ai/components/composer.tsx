@@ -21,6 +21,7 @@ import {
 import type { SpreadsheetData } from "../lib/native";
 import { expandSnippetTokens, type Snippet } from "../lib/snippets";
 import { tryRunSlashCommand, type SlashCommandMeta } from "../lib/slashCommands";
+import { buildQuoteBlock } from "../lib/chatText";
 import {
   getOrCreateChat,
   stopSession,
@@ -58,17 +59,29 @@ export const ACCEPTED_FILES =
 
 type Voice = ReturnType<typeof useWhisperRecording>;
 
+export type PendingQuote = {
+  /** Who said the quoted text ("You" or an agent/participant name). */
+  author: string;
+  /** The quoted text (full, untruncated). */
+  text: string;
+};
+
 type ComposerCtx = {
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   value: string;
   setValue: React.Dispatch<React.SetStateAction<string>>;
   files: FileAttachment[];
   addFiles: (list: FileList | null) => Promise<void>;
-  /** Attach pasted text as a chip — used for large/formatted pastes that would swamp the input. */
+  /** Attach pasted text as a chip - used for large/formatted pastes that would swamp the input. */
   attachPastedText: (text: string) => void;
-  /** Attach a file by absolute path — used by the file explorer's "Attach to Agent". */
+  /** Attach a file by absolute path - used by the file explorer's "Attach to Agent". */
   attachFileByPath: (path: string) => Promise<void>;
   removeFile: (id: string) => void;
+  /** Reply-quote bar: set by Quote actions (transcript selections), sent as
+   *  a <quote author="..."> block ahead of the message body, cleared on
+   *  submit or dismiss. */
+  pendingQuote: PendingQuote | null;
+  setPendingQuote: (q: PendingQuote | null) => void;
   pickedSnippets: Snippet[];
   addSnippet: (s: Snippet) => void;
   removeSnippet: (id: string) => void;
@@ -136,6 +149,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
   const [files, setFiles] = useState<FileAttachment[]>([]);
   const [pickedSnippets, setPickedSnippets] = useState<Snippet[]>([]);
   const [pickedCommands, setPickedCommands] = useState<SlashCommandMeta[]>([]);
+  const [pendingQuote, setPendingQuote] = useState<PendingQuote | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Transient slash-command outcome. The main window has no transcript
@@ -181,6 +195,18 @@ export function AiComposerProvider({ children }: ProviderProps) {
     window.addEventListener("Kai:ai-attach-file", onAttach);
     return () => window.removeEventListener("Kai:ai-attach-file", onAttach);
   }, [runtime]);
+
+  // Quote-from-transcript (right-click Quote on a chat message). Replaces
+  // any pending quote - one quote per message, like every chat app.
+  useEffect(() => {
+    const onQuote = (e: Event) => {
+      const detail = (e as CustomEvent<{ author: string; text: string }>).detail;
+      if (!detail?.text) return;
+      setPendingQuote({ author: detail.author, text: detail.text });
+    };
+    window.addEventListener("Kai:ai-quote", onQuote);
+    return () => window.removeEventListener("Kai:ai-quote", onQuote);
+  }, []);
 
   useEffect(() => {
     if (pendingSelections.length === 0) return;
@@ -405,9 +431,13 @@ export function AiComposerProvider({ children }: ProviderProps) {
       if (m) seenHandles.add(m[1]);
       allSnippetBlocks.push(block);
     }
+    const quoteBlock = pendingQuote
+      ? buildQuoteBlock(pendingQuote.author, pendingQuote.text)
+      : null;
     const composed = [
       commandMarker ?? "",
       allSnippetBlocks.join("\n\n"),
+      quoteBlock ?? "",
       selectionBlocks.join("\n\n"),
       fileBlocks.join("\n\n"),
       bodyAfterTokens,
@@ -415,6 +445,8 @@ export function AiComposerProvider({ children }: ProviderProps) {
       .filter(Boolean)
       .join("\n\n");
     if (composed) parts.push({ type: "text", text: composed });
+    // The quote is one-shot: consumed by the send, like files and snippets.
+    setPendingQuote(null);
 
     for (const f of files) {
       if (f.kind === "image" && f.url) {
@@ -446,6 +478,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
       setFiles([]);
       setPickedSnippets([]);
       setPickedCommands([]);
+      setPendingQuote(null);
       return;
     }
 
@@ -470,6 +503,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
     setFiles([]);
     setPickedSnippets([]);
     setPickedCommands([]);
+    setPendingQuote(null);
   };
 
   const stop = () => {
@@ -482,7 +516,8 @@ export function AiComposerProvider({ children }: ProviderProps) {
     (!isBusy &&
       (files.length > 0 ||
         pickedSnippets.length > 0 ||
-        pickedCommands.length > 0));
+        pickedCommands.length > 0 ||
+        pendingQuote !== null));
 
   const ctx: ComposerCtx = {
     textareaRef,
@@ -493,6 +528,8 @@ export function AiComposerProvider({ children }: ProviderProps) {
     attachPastedText,
     attachFileByPath,
     removeFile,
+    pendingQuote,
+    setPendingQuote,
     pickedSnippets,
     addSnippet,
     removeSnippet,

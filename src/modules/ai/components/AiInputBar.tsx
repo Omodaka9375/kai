@@ -10,6 +10,7 @@ import {
   Copy01Icon,
   HashtagIcon,
   Key01Icon,
+  LeftToRightBlockQuoteIcon,
   Mic01Icon,
   RedoIcon,
   Scissor01Icon,
@@ -25,6 +26,7 @@ import { IS_MAC } from "@/lib/platform";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ACCEPTED_FILES, useComposer, type FileAttachment } from "./composer";
+import { quoteExcerpt } from "../lib/chatText";
 import { modelTextOnly } from "../extraction";
 import { useWorkspaceFiles } from "../hooks/useWorkspaceFiles";
 import { usePreferencesStore } from "@/modules/settings/preferences";
@@ -245,6 +247,34 @@ export function AiInputBar() {
           commands={c.pickedCommands}
           onRemoveCommand={(name) => c.removeCommand(name)}
         />
+
+        {c.pendingQuote && (
+          <div className="flex items-center gap-1.5 rounded-lg border-l-2 border-primary/70 bg-muted/50 px-2 py-1">
+            <HugeiconsIcon
+              icon={LeftToRightBlockQuoteIcon}
+              size={12}
+              strokeWidth={1.75}
+              className="shrink-0 text-primary/80"
+            />
+            <div className="min-w-0 flex-1">
+              <span className="text-[10px] font-semibold text-primary/90">
+                {c.pendingQuote.author}
+              </span>
+              <span className="ml-1.5 text-[10.5px] text-muted-foreground line-clamp-1">
+                {quoteExcerpt(c.pendingQuote.text)}
+              </span>
+            </div>
+            <button
+              type="button"
+              aria-label="Remove quote"
+              title="Remove quote"
+              onClick={() => c.setPendingQuote(null)}
+              className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <HugeiconsIcon icon={Cancel01Icon} size={11} strokeWidth={2} />
+            </button>
+          </div>
+        )}
 
         {imageBlindModel && (
           <div className="flex items-center gap-1.5 px-1 text-[10.5px] text-amber-600 dark:text-amber-400">

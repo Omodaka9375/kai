@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { stripLeakedTokens, isBlankMarkdown, splitThinkingBlocks } from "./chatText";
+import {
+  stripLeakedTokens,
+  isBlankMarkdown,
+  splitThinkingBlocks,
+  stripUserContextBlocks,
+  buildQuoteBlock,
+  splitQuoteBlock,
+  quoteExcerpt,
+} from "./chatText";
 
 describe("stripLeakedTokens", () => {
   it("passes plain paragraphs through unchanged", () => {
@@ -87,5 +95,46 @@ describe("isBlankMarkdown", () => {
 
   it("treats real content as not blank", () => {
     expect(isBlankMarkdown("---\nhello\n")).toBe(false);
+  });
+});
+
+describe("quote blocks", () => {
+  it("buildQuoteBlock round-trips through stripUserContextBlocks as a quote chip", () => {
+    const block = buildQuoteBlock("Reviewer", "earlier said\nmulti line");
+    const { text, chips } = stripUserContextBlocks(`${block}\n\nWhat did you mean?`);
+    expect(text).toBe("What did you mean?");
+    expect(chips).toHaveLength(1);
+    expect(chips[0]).toMatchObject({
+      kind: "quote",
+      author: "Reviewer",
+      lines: 2,
+    });
+  });
+
+  it("escapes quotes and ampersands in the author attribute", () => {
+    const block = buildQuoteBlock('Weird "Name" & Co', "text");
+    expect(block).toContain('author="Weird &quot;Name&quot; &amp; Co"');
+    const { chips } = stripUserContextBlocks(block);
+    expect(chips[0]).toMatchObject({ kind: "quote", author: 'Weird "Name" & Co' });
+  });
+
+  it("splitQuoteBlock extracts author + text for the group transcript renderer", () => {
+    const block = buildQuoteBlock("Alpha", "quoted body");
+    const parsed = splitQuoteBlock(`${block}\n\nMy reply`);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.author).toBe("Alpha");
+    expect(parsed!.quoteText).toBe("quoted body");
+    expect(parsed!.rest).toBe("My reply");
+  });
+
+  it("splitQuoteBlock returns null for plain group text", () => {
+    expect(splitQuoteBlock("just a message")).toBeNull();
+  });
+
+  it("quoteExcerpt clips to one line and max length", () => {
+    expect(quoteExcerpt("first\nsecond")).toBe("first");
+    const long = "x".repeat(140);
+    expect(quoteExcerpt(long)).toHaveLength(121); // 120 + ellipsis
+    expect(quoteExcerpt(long).endsWith("…")).toBe(true);
   });
 });
