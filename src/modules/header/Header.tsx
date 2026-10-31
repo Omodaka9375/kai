@@ -106,10 +106,10 @@ function MenuTile({
         <span className="min-w-0 truncate text-xs font-medium">{label}</span>
       </span>
       {/* Row 2: optional desc left, shortcut right — both short enough to
-          never wrap. Save tiles pass only the shortcut. */}
+          never wrap. With no desc (Save tiles) the shortcut left-aligns. */}
       <span className="flex w-full min-w-0 items-center gap-1.5">
         {desc ? <span className="min-w-0 truncate text-[10px] leading-3 font-normal text-muted-foreground/70">{desc}</span> : null}
-        {shortcut ? <span className="ml-auto shrink-0 text-[10px] leading-3 font-normal text-muted-foreground/60">{shortcut}</span> : null}
+        {shortcut ? <span className={`${desc ? "ml-auto " : ""}shrink-0 text-[10px] leading-3 font-normal text-muted-foreground/60`}>{shortcut}</span> : null}
       </span>
     </DropdownMenuItem>
   );
