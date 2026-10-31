@@ -1,7 +1,7 @@
 use std::io::Write;
 
 use serde::Serialize;
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 use super::extract;
 use crate::modules::workspace::{resolve_path, WorkspaceEnv};
@@ -472,21 +472,44 @@ pub fn fs_read_file_bytes(
 }
 
 /// Read CHANGELOG.md for the updater popup.
-/// Prefers the bundled copy; falls back to the working directory.
+/// CHANGELOG.md for the updater dialog's release-notes fallback.
+///
+/// Resolution order (2.0.0 regression: installed apps rendered NO changelog
+/// because the release `latest.json` carried an empty `notes` field AND this
+/// loader only tried the CWD / exe directory, where no bundled copy exists):
+///
+/// 1. BUNDLED RESOURCE (tauri.conf.json `bundle.resources`) via the Tauri
+///    resource dir - the only path that exists in an INSTALLED app
+///    (Contents/Resources on macOS, exe dir on Windows, /usr/lib/<bundle>
+///    on Linux).
+/// 2. Working directory - dev mode (repo root).
+/// 3. Executable directory - legacy layouts.
 #[tauri::command]
 pub fn fs_read_changelog() -> Result<String, String> {
-    match std::fs::read_to_string("CHANGELOG.md") {
-        Ok(content) => Ok(content),
-        Err(_) => {
-            // Bundled copy — read from same directory as the executable.
-            let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-            let asset = exe.parent().map(|p| p.join("CHANGELOG.md"));
-            if let Some(p) = asset {
-                std::fs::read_to_string(p).map_err(|e| e.to_string())
-            } else {
-                Err("".to_string())
+    // 1. Bundled resource through the process-global handle (set in
+    //    Builder::setup; in unit-test contexts it is unset and we fall
+    //    through to the CWD).
+    if let Some(app) = fs_changed_app_handle() {
+        if let Ok(resource) = app
+            .path()
+            .resolve("CHANGELOG.md", tauri::path::BaseDirectory::Resource)
+        {
+            if let Ok(content) = std::fs::read_to_string(&resource) {
+                return Ok(content);
             }
         }
+    }
+    // 2. Working directory (dev mode - repo root).
+    if let Ok(content) = std::fs::read_to_string("CHANGELOG.md") {
+        return Ok(content);
+    }
+    // 3. Executable directory (legacy).
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let asset = exe.parent().map(|p| p.join("CHANGELOG.md"));
+    if let Some(p) = asset {
+        std::fs::read_to_string(p).map_err(|e| e.to_string())
+    } else {
+        Err("".to_string())
     }
 }
 

@@ -208,3 +208,70 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+  # ── 3. Patch latest.json's notes field on the draft release ──────────────
+  #
+  # 2.0.0 regression: the in-app "Update & restart" dialog rendered NO
+  # changelog because latest.json shipped with notes: "" — tauri-action
+  # derives that field from the release body, but on a REUSED draft (or
+  # when the body isn't yet attached at upload time) it can upload an
+  # empty one, and later matrix jobs only replace same-name assets whose
+  # content hash matches, so the empty field sticks. This job downloads
+  # the draft's latest.json, injects the changelog section extracted above
+  # into notes when missing/empty, and re-uploads the asset. Runs once,
+  # after all matrix builds, so it sees the final latest.json.
+  patch-notes:
+    needs: [create-release, publish-tauri]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Inject release notes into latest.json
+        uses: actions/github-script@v7
+        env:
+          RELEASE_BODY: ${{ needs.create-release.outputs.release-body }}
+        with:
+          script: |
+            const fs = require('fs');
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const releaseId = Number('${{ needs.create-release.outputs.release-id }}');
+            const body = (process.env.RELEASE_BODY || '').trim();
+            if (!body) {
+              core.setFailed('Release body is empty - CHANGELOG.md has no section for this tag. Fix the changelog and re-tag.');
+              return;
+            }
+            const { data: assets } = await github.rest.repos.listReleaseAssets({
+              owner, repo, release_id: releaseId, per_page: 100,
+            });
+            const latest = assets.find((a) => a.name === 'latest.json');
+            if (!latest) {
+              core.setFailed('latest.json not found on the draft release - did the builds upload updater artifacts?');
+              return;
+            }
+            const res = await github.request(latest.url, {
+              headers: { Accept: 'application/octet-stream' },
+            });
+            const json = JSON.parse(new TextDecoder().decode(res.data));
+            const notes = (json.notes || '').trim();
+            if (notes) {
+              core.info(`latest.json notes already populated (${notes.length} chars) - nothing to do.`);
+              return;
+            }
+            json.notes = body;
+            core.info(`Injecting ${body.length} chars of release notes into latest.json (was empty).`);
+            fs.writeFileSync('/tmp/latest.json', JSON.stringify(json, null, 2));
+            // The API rejects a same-name duplicate asset - delete first.
+            await github.rest.repos.deleteReleaseAsset({
+              owner, repo, asset_id: latest.id,
+            });
+            await github.rest.repos.uploadReleaseAsset({
+              owner,
+              repo,
+              release_id: releaseId,
+              data: fs.readFileSync('/tmp/latest.json'),
+              name: 'latest.json',
+              headers: { 'content-type': 'application/json' },
+            });
+            core.info('latest.json re-uploaded with notes.');
+

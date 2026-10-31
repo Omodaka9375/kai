@@ -48,8 +48,13 @@ describe("parseChangelogSection", () => {
     expect(sections[0].title).toBe("Added");
   });
 
-  it("returns empty for a missing version", () => {
-    expect(parseChangelogSection(changelog, "9.9.9")).toEqual([]);
+  it("falls back to the top-most section for a missing version (2.0.0 lesson)", () => {
+    // An unknown version used to return [] and the updater dialog rendered
+    // NOTHING. The documented top-most fallback is now actually implemented.
+    const sections = parseChangelogSection(changelog, "9.9.9");
+    expect(sections.length).toBeGreaterThan(0);
+    const flat = sections.flatMap((s) => s.body);
+    expect(flat.length).toBeGreaterThan(0);
   });
 
   it("collects flat bullets with no ### subheading into one untitled section (current CHANGELOG format)", () => {

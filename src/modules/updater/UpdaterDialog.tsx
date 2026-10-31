@@ -64,7 +64,21 @@ export function UpdaterDialog() {
   // `manual-available` (Linux) gets the GitHub release `body`. Rendering only
   // happens while the note text matches — no work is done `ready`/`downloading`
   // states after install starts.
+  //
+  // 2.0.0 postmortem: latest.json shipped with notes: "" (tauri-action
+  // doesn't always propagate the release body into the updater JSON), so
+  // `update.body` was empty and the fallback ran — but the fallback only
+  // reads CHANGELOG.md from the CWD / exe dir, which does NOT exist in an
+  // installed app. Result: no changelog section at all. Two fixes: the
+  // fallback now resolves the BUNDLED resource (tauri.conf.json
+  // bundle.resources), and the release workflow patches latest.json's
+  // notes field post-build (patch-notes job) so the primary path carries
+  // real notes too.
+  //
+  // Reset per status change: a stale section list from a previous
+  // version must never render for a new offer.
   useEffect(() => {
+    setChangelog({ loading: true, sections: null });
     if (status.kind === "available") {
       const body = status.update?.body?.trim();
       if (body) {
@@ -74,14 +88,16 @@ export function UpdaterDialog() {
           return;
         }
       }
-      // Fall back to the bundled CHANGELOG.md if notes are missing/empty.
+      // Fall back to the bundled CHANGELOG.md if notes are missing/empty
+      // (the 2.0.0 case) or unparseable.
       invoke<string>("fs_read_changelog")
-        .then((text) =>
-          setChangelog({
-            loading: false,
-            sections: parseChangelogSection(text, status.update?.version ?? ""),
-          }),
-        )
+        .then((text) => {
+          const sections = parseChangelogSection(
+            text,
+            status.update?.version ?? "",
+          );
+          setChangelog({ loading: false, sections: sections.length > 0 ? sections : null });
+        })
         .catch(() => setChangelog({ loading: false, sections: null }));
     } else if (status.kind === "manual-available") {
       const body = status.info.body?.trim();
