@@ -635,6 +635,16 @@ pub fn run() {
                 });
             }
 
+            // System tray (2026-10-31): close-to-tray keeps the process (and
+            // every running agent) alive when the window is closed; the tray's
+            // "Quit KAI" is the real exit. Always created — a hidden process
+            // with no tray icon is unreachable. The window-event backstop in
+            // the builder below hides instead of closing even when the
+            // frontend can't answer (crashed webview / dev server down).
+            if let Err(e) = crate::modules::tray::install(&app.handle().clone()) {
+                log::error!("failed to install tray icon: {e}");
+            }
+
             // Resolve the log dir once and install the crash-snapshot panic
             // hook + record the dir for diagnostics_collect.
             let log_dir = app
@@ -686,6 +696,20 @@ app.manage(Mutex::new(None::<fs::env_probe::EnvInventory>));
             Ok(())
         })
         .manage(pty::PtyState::default())
+        // Close-to-tray backstop: hide the main window instead of closing it.
+        // The frontend's onCloseRequested guard handles the normal path (and
+        // its own first-hide toast); this catches closes the webview can't
+        // answer. The tray's "Quit KAI" exits via app.exit, which bypasses
+        // this handler — the only true exit for the main window.
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                crate::modules::tray::on_window_close_requested(
+                    window.app_handle(),
+                    window,
+                    api,
+                );
+            }
+        })
         .manage(shell::ShellState::default())
         .manage(secrets::SecretsState::default())
         .manage(mcp_oauth::McpOAuthState::default())

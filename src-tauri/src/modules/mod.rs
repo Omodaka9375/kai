@@ -17,6 +17,7 @@ pub mod secrets;
 pub mod session_journal;
 pub mod shell;
 pub mod telegram;
+pub mod tray;
 pub mod voice;
 pub mod updater;
 pub mod workspace;

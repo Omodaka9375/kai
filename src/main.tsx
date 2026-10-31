@@ -56,3 +56,24 @@ const showWindow = () => {
 setTimeout(showWindow, 50);
 // Safety net: if the first show somehow fails to take effect, force again.
 setTimeout(showWindow, 500);
+
+// ── Close-to-tray (2026-10-31) ─────────────────────────────────────────
+// Closing the window must NOT kill the process: the assistant and any
+// long-running agent runs keep working with the window gone. The tray
+// icon (Rust modules/tray.rs) is the way back in — right-click → "Quit KAI"
+// is the only real exit.
+//
+// The RUST on_window_event handler is the authoritative backstop (it also
+// covers a webview that crashed before this listener installs). This JS
+// guard exists so the normal path is handled in the frontend too — same
+// behavior, and it keeps working if the Rust handler is ever made
+// preference-gated.
+{
+  const w = getCurrentWindow();
+  const unlisten = w.onCloseRequested(async (event) => {
+    event.preventDefault();
+    await w.hide();
+  });
+  // Never unlisten — the guard lives for the whole window lifetime.
+  void unlisten;
+}
