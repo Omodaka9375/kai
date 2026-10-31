@@ -418,6 +418,7 @@ export function VoiceSection() {
               type="button"
               size="sm"
               variant="ghost"
+              className="-ml-2"
               onClick={() => void onTestVoice()}
             >
               Test voice
@@ -450,6 +451,7 @@ export function VoiceSection() {
               type="button"
               size="sm"
               variant="ghost"
+              className="-ml-2"
               onClick={() => void onTestVoice()}
             >
               Test voice
