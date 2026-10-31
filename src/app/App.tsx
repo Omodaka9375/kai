@@ -1280,6 +1280,22 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
     [openFileTab, activeId],
   );
 
+  // Clicking a tab follows the same visibility rule as opening a file from
+  // the explorer (handleOpenFile): an expanded AI window or group panel
+  // covers the whole workspace, so the tab switch behind it would be
+  // invisible. Shrink whichever surface is expanded so the newly selected
+  // tab takes focus visibly. Guarded so ordinary tab clicks (nothing
+  // expanded) don't touch the chat store at all.
+  const handleSelectTab = useCallback(
+    (id: number) => {
+      const s = useChatStore.getState();
+      if (s.mini.expanded) s.collapseMini();
+      if (s.groupPanelExpanded) s.setGroupPanelExpanded(false);
+      setActiveId(id);
+    },
+    [setActiveId],
+  );
+
   const handlePathRenamed = useCallback(
     (from: string, to: string) => {
       for (const t of tabs) {
@@ -2032,7 +2048,7 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
           <Header
             tabs={tabs}
             activeId={activeId}
-            onSelect={setActiveId}
+            onSelect={handleSelectTab}
             onNew={openNewTab}
             onNewEditor={() => setNewEditorOpen(true)}
             onNewApiTester={newApiTesterTab}
