@@ -81,7 +81,7 @@ export function RadioMarquee() {
 
   const statusText = useMemo(() => {
     const s = player.status;
-    if (s.state === "stopped") return "SomaFM · pick a station";
+    if (s.state === "stopped") return "SomaFM";
     const station = s.station;
     if (!station) return "SomaFM";
     if (s.state === "connecting") return `${station.name} · connecting…`;
