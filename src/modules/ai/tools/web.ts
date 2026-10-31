@@ -340,20 +340,53 @@ export function buildWebTools(_ctx: ToolContext) {
     web_browse: tool({
       needsApproval: false,
       description:
-        "Fetch a web page over HTTP and return its readable text (HTML tags stripped). No JavaScript execution or browser rendering — client-side-rendered / SPA pages may come back empty or partial, and bot-protected endpoints can refuse the request. Best for static pages: documentation, articles, READMEs. Auto-executes (read-only).",
+        "Fetch a web page over HTTP and return its readable text (HTML tags stripped). No JavaScript execution or browser rendering — client-side-rendered / SPA pages may come back empty or partial, and bot-protected endpoints can refuse the request. Best for static pages: documentation, articles, READMEs. GitHub/Reddit/V2EX/YouTube links are auto-routed to a native structured adapter (issues and PRs arrive WITH their comment threads). Auto-executes (read-only).",
       inputSchema: z.object({
         url: z.string().url().describe("The URL to browse."),
       }),
       execute: async ({ url }) => {
         try {
+          // NATIVE CHANNEL ROUTING (the Agent-Reach "read <url>" idea,
+          // implemented in-process): platform URLs go to the structured
+          // adapter instead of a scrape — a GitHub issue read this way
+          // includes its comment thread, which scraping cannot get.
+          const { channelForUrl, CHANNELS } = await import("./platformReach");
+          const routed = channelForUrl(url);
+          if (routed) {
+            const out = await CHANNELS[routed.channel].run({
+              action: routed.action,
+              url,
+            });
+            if (out.items.length > 0) {
+              return { url, routedTo: routed.channel, ...out };
+            }
+            // Adapter came back empty (bad id, rate limit) — fall through
+            // to the generic scrape rather than failing the call.
+          }
           const { body } = await httpFetch(url);
           const { text, hiddenDropped } = htmlToText(body);
+          let content = text;
+          // Jina Reader fallback (same backend Agent Reach uses): the page
+          // rendered client-side, so the scrape is empty — ask Jina (free,
+          // keyless, server-side rendering) before giving up.
+          if (content.trim().length < 80) {
+            try {
+              const jina = await httpFetch(
+                `https://r.jina.ai/${url}`,
+              );
+              if (jina.status === 200 && jina.body.trim().length > 80) {
+                content = jina.body;
+              }
+            } catch {
+              /* keep the (empty) scrape */
+            }
+          }
           return {
             url,
-            content: text.slice(0, 25000),
-            size: text.length,
+            content: content.slice(0, 25000),
+            size: content.length,
             ...(hiddenDropped > 0 ? { hiddenDropped } : {}),
-            ...(text.length > 25000 ? { truncated: true } : {}),
+            ...(content.length > 25000 ? { truncated: true } : {}),
           };
         } catch (e) {
           return { error: String(e), url };

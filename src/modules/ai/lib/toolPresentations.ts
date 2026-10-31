@@ -215,34 +215,27 @@ const REGISTRY: Record<string, ToolPresentation> = {
   web_fetch: { effect: "NONE", fence: true, remoteSurface: true },
   web_search: { effect: "NONE", fence: true, remoteSurface: true },
 
-  // Agent Reach bridge (read-only CLI into login-walled / Chinese /
-  // video platforms). Results are remote content - fence + provenance
+  // Platform reach (KAI-native channel adapters: GitHub issues+PRs with
+  // comments, Reddit threads, V2EX topics, HN, Stack Overflow, YouTube
+  // metadata). All results are remote content - fence + provenance
   // exactly like the web tools above.
-  agent_reach: {
-    label: "Agent Reach",
-    approvalLabel: "Search via Agent Reach",
+  platform_reach: {
+    label: "Platform",
+    approvalLabel: "Search platform",
     status: (a) => {
       const channel = str(a, "channel");
       const action = str(a, "action");
       const url = str(a, "url");
       const target = url ?? str(a, "query") ?? "";
       if (channel && action) {
-        return `Agent Reach: ${channel} ${action}${target ? ` - ${ellipsize(target, 30)}` : ""}`;
+        return `${channel} ${action}${target ? ` - ${ellipsize(target, 30)}` : ""}`;
       }
-      return url
-        ? `Agent Reach: reading ${ellipsize(url, 40)}`
-        : "Agent Reach";
+      return url ? `reading ${ellipsize(url, 40)}` : "platform reach";
     },
-    summary: (a) => str(a, "url") ?? str(a, "query") ?? `${str(a, "channel") ?? ""} ${str(a, "action") ?? ""}`.trim(),
-    effect: "NONE",
-    fence: true,
-    remoteSurface: true,
-  },
-  agent_reach_list: {
-    label: "Agent Reach",
-    approvalLabel: "List Agent Reach channels",
-    status: () => "Agent Reach: listing channels",
-    summary: () => "channels",
+    summary: (a) =>
+      str(a, "url") ??
+      str(a, "query") ??
+      `${str(a, "channel") ?? ""} ${str(a, "action") ?? ""}`.trim(),
     effect: "NONE",
     fence: true,
     remoteSurface: true,
