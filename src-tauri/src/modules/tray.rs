@@ -107,7 +107,7 @@ pub fn notify_hidden_once<R: Runtime>(app: &AppHandle<R>) {
         .notification()
         .builder()
         .title("KAI keeps running")
-        .body("The window is closed but KAI is still active — agents keep working. Click the tray icon to reopen; right-click → Quit KAI to exit completely.")
+        .body("Agents keep working. Click the tray icon to reopen; right-click → Quit KAI to exit.")
         .show();
 }
 
