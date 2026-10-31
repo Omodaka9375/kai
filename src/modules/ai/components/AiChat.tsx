@@ -1084,14 +1084,23 @@ const ReadRow = memo(function ReadRow({ part }: { part: AnyPart }) {
   const path = readPathFromPart(part);
   const state = (part as { state?: string }).state ?? "";
   const isError = state === "output-error";
+  // Same dot contract as the Tool card (STATUS_DOT in ai-elements/tool.tsx):
+  // amber while running (input-streaming/input-available/approval-*), hollow
+  // ring when done, destructive on error. The old literal `border` added 2px
+  // to the done state and visibly offset the row on every settle - reads are
+  // typically the FIRST row of a run, so this was the jump users saw most.
+  // ring-inset keeps every state the same 6px geometry.
+  const dot = isError
+    ? "bg-destructive"
+    : state === "output-available" || state === "output-denied"
+      ? "bg-transparent ring-1 ring-inset ring-muted-foreground/40"
+      : "bg-amber-500";
   return (
     <div className="flex items-center gap-2 rounded-md px-2 py-1.5 text-[12px]">
       <span
         className={cn(
-          "size-1.5 shrink-0 rounded-full",
-          isError
-            ? "bg-destructive"
-            : "border border-muted-foreground/40 bg-transparent",
+          "size-1.5 shrink-0 rounded-full transition-[background-color,box-shadow] duration-200 ease-out",
+          dot,
         )}
       />
       <HugeiconsIcon

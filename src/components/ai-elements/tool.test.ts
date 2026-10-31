@@ -55,6 +55,55 @@ describe("Tool card streaming-input freeze guard", () => {
   });
 });
 
+describe("status dot stability (the 'jumping tool rows' fix)", () => {
+  // User report (twice): tool rows "jumped" - gray > amber > blue > hollow
+  // dot cycles on fast tools, plus a done-state outline that offset the row.
+  // The contract: ONE running color (amber) for every in-flight state, the
+  // done state is a ring-inset (same 6px geometry, never a border), and the
+  // dot cross-fades so state changes never snap.
+  it("every in-flight state renders the SAME amber dot color", () => {
+    const m = src.match(/const STATUS_DOT[^=]*=\s*\{([\s\S]*?)\n\};/);
+    expect(m).not.toBeNull();
+    const table = m?.[1] ?? "";
+    for (const state of [
+      "approval-requested",
+      "approval-responded",
+      "input-streaming",
+      "input-available",
+    ]) {
+      const row = table.split(`"${state}"`)[1]?.split("\n")[0] ?? "";
+      expect(row).toContain("bg-amber-500");
+      expect(row).not.toContain("bg-sky-500");
+      expect(row).not.toContain("bg-muted-foreground/40");
+    }
+  });
+
+  it("the done state is a ring-inset, never a border (geometry never changes)", () => {
+    const table = src.match(/const STATUS_DOT[^=]*=\s*\{([\s\S]*?)\n\};/)?.[1] ?? "";
+    const done = table.split('"output-available"')[1]?.split("\n")[0] ?? "";
+    expect(done).toContain("ring-1 ring-inset");
+    expect(table).not.toMatch(/"output-available".*border(?!-)/);
+  });
+
+  it("the dot cross-fades state changes instead of snapping", () => {
+    expect(src).toMatch(
+      /transition-\[background-color,box-shadow\] duration-200/,
+    );
+  });
+
+  it("ReadRow (AiChat) shares the same dot contract - no literal border", () => {
+    const chat = readFileSync(
+      new URL("../../modules/ai/components/AiChat.tsx", import.meta.url),
+      "utf8",
+    );
+    const row = chat.split("const ReadRow = memo")[1]?.split("const PartAppear")[0] ?? "";
+    expect(row).toContain("ring-1 ring-inset ring-muted-foreground/40");
+    expect(row).toContain("bg-amber-500");
+    expect(row).not.toMatch(/border border-muted-foreground\/40/);
+    expect(row).toMatch(/transition-\[background-color,box-shadow\] duration-200/);
+  });
+});
+
 describe("foreground command cancellation", () => {
   it("offers a direct Stop action only while bash_run is executing", () => {
     expect(src).toContain('toolName === "bash_run" && state === "input-available"');

@@ -63,9 +63,16 @@ const TOOL_ICON: Record<string, typeof File01Icon> = {
 };
 
 const STATUS_DOT: Record<ToolPart["state"], string> = {
+  // ONE running color. input-streaming used to be gray and
+  // approval-responded used to be blue - a fast tool cycled
+  // gray > amber > blue > hollow within ~200ms and the card visibly
+  // "jumped" (user report, twice). The intermediate colors carry no
+  // actionable information: streaming = the model is emitting the call,
+  // responded = the decision landed and execution is starting - both ARE
+  // "running". Labels stay distinct (aria); the dot does not.
   "approval-requested": "bg-amber-500",
-  "approval-responded": "bg-sky-500",
-  "input-streaming": "bg-muted-foreground/40",
+  "approval-responded": "bg-amber-500",
+  "input-streaming": "bg-amber-500",
   "input-available": "bg-amber-500",
   // Same geometry as every other state (a border would add 2px and visibly
   // shift the row when the dot settles). Hollow = done, via ring inset.
@@ -213,7 +220,13 @@ const ToolImpl = ({
         )}
       >
         <span
-          className={cn("size-1.5 shrink-0 rounded-full", STATUS_DOT[state])}
+          // Cross-fade the dot: background-color covers solid state changes,
+          // box-shadow covers the solid > ring-inset (done) settle. Without
+          // this the amber > hollow snap read as a "jump" on fast tools.
+          className={cn(
+            "size-1.5 shrink-0 rounded-full transition-[background-color,box-shadow] duration-200 ease-out",
+            STATUS_DOT[state],
+          )}
           aria-label={STATUS_LABEL[state]}
         />
         <HugeiconsIcon
