@@ -50,7 +50,7 @@ Kai is a fast, cross-platform terminal built on **Tauri 2 + Rust** and **React 1
 ### Multi-Project
 
 - **Run several projects side by side** in the same window — each with its own terminal tabs, file tree, sessions, and chats, all kept alive in the background
-- A permanent project rail on the left: status dots (including "needs input" pulses from your agents), one-click switch, and add/close
+- A permanent project rail on the left: status dots (including "needs input" pulses from your agents), one-click switch, and add/close — **New Project** creates the folder and opens it in one action
 - Per-project sessions, model preferences, and sandbox settings — nothing bleeds across projects
 - A second launch of KAI forwards its project dirs to the running window instead of opening a dead one
 
@@ -59,6 +59,7 @@ Kai is a fast, cross-platform terminal built on **Tauri 2 + Rust** and **React 1
 - **Cross-project group chats** — put agents from different projects in one conversation and have them coordinate: review each other's work, split a task, or discuss a design
 - One agent's reply lands in the shared transcript; the others see it on their next turn
 - Entry from the status bar, with clear per-agent status and a single merged activity dot
+- **Personas join too** — built-in and custom agents participate with the same tools as project agents, fenced to a per-group scratch workspace, with approvals surfaced as unified cards
 
 ### AI Agent
 
@@ -66,6 +67,8 @@ Kai is a fast, cross-platform terminal built on **Tauri 2 + Rust** and **React 1
 - Local models via LM Studio or Ollama — vision models receive images automatically (runtime-name detection + a manual Vision override in Settings)
 - Paste screenshots straight into chat with `Ctrl+V`; attach PDF/DOCX via the + button (text extracted, works on every model)
 - `/compact` — reset the context in place in the same chat when a session runs long; no new chat needed
+- Automatic context recovery — long runs re-elide tool output mid-run and self-compact past the model's window, so the run continues instead of dying on a provider error
+- **Long-term reminders** — `reminder_create` persists restart-safe reminders from minutes to months ("remind me to pay bills by Monday"), delivered as an OS notification, an in-session agent wake, and a Telegram ping
 - Screen access — `look_at_screen` shows your displays to the agent (multi-monitor aware, every capture needs your approval)
 - Universal file extraction — zip, audio, image, and video read locally as text
 - Interactive todo toggling with auto-closing completion lists
@@ -95,7 +98,7 @@ Kai is a fast, cross-platform terminal built on **Tauri 2 + Rust** and **React 1
 - **MCP** — connect external tool servers and install from the official registry, or hand the agent a setup URL: `mcp_add_server` registers it so it shows up live in the MCP Servers UI
 - File explorer and built-in web preview (with one-tap Stop)
 - REST API tester and 8 UI themes
-- Voice input — OpenAI whisper-1 transcription with a no-key browser SpeechRecognition fallback
+- Voice — spoken input via OpenAI whisper-1 (or the no-key browser fallback) and spoken replies via local Piper (offline), OpenAI TTS, or AssemblyAI; the agent can switch voices itself with `voice_settings`
 - PDF/DOCX reading, image OCR (tesseract), ZIP/JAR listing, and audio metadata
 - Direct PDF export (`convert_to_pdf`) from Markdown/Word
 - `KAI.md` project memory, context summarization, and auto-approve modes — plus persistent memory tools the agent can use mid-session
@@ -111,8 +114,14 @@ Kai is a fast, cross-platform terminal built on **Tauri 2 + Rust** and **React 1
 - Send photos the model can see, or files it can work on (saved to a scratch folder)
 - Generated images and videos are delivered straight to your chat
 - `watch_create` with `notify_telegram` pings your phone when a long-running job finishes
+- **Project monitoring** — `/tell` messages a project's agent from your phone; replies mirror back into the project, and approval requests arrive with inline approve/deny buttons
 - **Fenced by design** — file and shell tools are limited to a scratch folder (`~/.kai/assistant`), never your projects or home directory; read-only tools are enabled by default, with write/execute/MCP access controlled in Settings → External
 - Optional dedicated assistant model or OpenAI-compatible endpoint, independent of the desktop chat model; the desktop app must be running (tray is fine) for the bot to answer
+
+### Tray & Notifications
+
+- **Closes to the tray** — closing the window keeps KAI alive: running agents, watches, and the Telegram assistant keep working in the background; tray "Show KAI" reopens, "Quit KAI" is the only true exit
+- OS notifications arrive only while the window is hidden — approval needed, a run completely finished, or a settled error; bursts from parallel projects coalesce into one toast
 
 ## Agent Personas
 
