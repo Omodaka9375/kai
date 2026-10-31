@@ -197,6 +197,7 @@ export function useWhisperRecording({
     if (autoSubmitRef.current) onAutoSubmitRef.current?.(text);
   }, []);
 
+  const assemblyAiKey = useChatStore((s) => s.apiKeys.assemblyai);
   const useWhisper = !!apiKey;
   const supported =
     typeof navigator !== "undefined" &&
@@ -338,6 +339,85 @@ export function useWhisperRecording({
       setError(looksLikeDenied(String(e)) ? "Microphone permission denied." : "Could not start speech recognition.");
     }
   }, [fail, deliver]);
+
+  /** AssemblyAI Sync-STT route: same MediaRecorder capture as the OpenAI
+   *  route (WebM/Opus accepted as-is by the Sync API - no transcoding), one
+   *  multipart call, transcript in the same response. */
+  const startAssemblyAi = useCallback(
+    async () => {
+      if (!assemblyAiKey) {
+        fail("AssemblyAI voice input needs an AssemblyAI API key (Settings \u2192 Models).");
+        return;
+      }
+      try {
+        const stream = await withTimeout(
+          navigator.mediaDevices.getUserMedia({ audio: true }),
+          GET_MEDIA_TIMEOUT_MS,
+          "Timed out waiting for microphone access",
+        );
+        streamRef.current = stream;
+        detachTapRef.current?.();
+        detachTapRef.current = attachDetectorTap(stream);
+        const mimeType = pickMime();
+        const rec = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+        chunksRef.current = [];
+        rec.ondataavailable = (e) => {
+          if (e.data.size > 0) chunksRef.current.push(e.data);
+        };
+        rec.onstop = async () => {
+          const blob = new Blob(chunksRef.current, {
+            type: rec.mimeType || "audio/webm",
+          });
+          chunksRef.current = [];
+          detachTapRef.current?.();
+          detachTapRef.current = null;
+          teardownStream();
+          if (blob.size === 0) {
+            setState("idle");
+            return;
+          }
+          setState("transcribing");
+          try {
+            const { transcribeViaAssemblyAi } = await import("../lib/assemblyai");
+            const text = await withTimeout(
+              transcribeViaAssemblyAi(blob),
+              TRANSCRIBE_TIMEOUT_BASE_MS,
+              "Speech transcription timed out",
+            );
+            if (text.trim()) deliver(text.trim());
+          } catch (e) {
+            console.error("assemblyai.transcribe", e);
+            setError(
+              typeof (e as Error)?.message === "string" &&
+                String((e as Error).message).length > 0
+                ? `Transcription failed: ${String((e as Error).message)}`
+                : "Transcription failed.",
+            );
+          } finally {
+            setState("idle");
+          }
+        };
+        recRef.current = rec;
+        rec.start();
+        startingRef.current = false;
+        clearWatchdog();
+        setState("recording");
+      } catch (e) {
+        const msg = typeof (e as Error)?.message === "string"
+          ? String((e as Error).message)
+          : String(e);
+        teardownStream();
+        startingRef.current = false;
+        setError(
+          looksLikeDenied(msg)
+            ? "Microphone permission denied. Enable mic access for this app in your OS / WebView settings."
+            : `Could not start microphone: ${msg}`,
+        );
+        setState("idle");
+      }
+    },
+    [assemblyAiKey, fail, teardownStream, deliver],
+  );
 
   const startWhisper = useCallback(
     async () => {
@@ -522,18 +602,21 @@ export function useWhisperRecording({
     startingRef.current = true;
 
     // Route by configured STT mode (freshest prefs each toggle):
-    //   local  → whisper.cpp via WAV tap (needs engine, no key)
-    //   api    → OpenAI whisper (needs key; falls back to browser STT)
-    //   browser→ WebView SpeechRecognition (no key)
+    //   local      → whisper.cpp via WAV tap (needs engine, no key)
+    //   assemblyai → AssemblyAI Sync STT (needs key; falls back to browser STT)
+    //   api        → OpenAI whisper (needs key; falls back to browser STT)
+    //   browser    → WebView SpeechRecognition (no key)
     if (sttMode === "local") {
       void startLocalWhisper();
+    } else if (sttMode === "assemblyai" && !!assemblyAiKey) {
+      void startAssemblyAi();
     } else if (sttMode === "api" && useWhisper) {
       // startWhisper is async and catches its own errors; keep non-blocking.
       void startWhisper();
     } else {
       startSpeechApi();
     }
-  }, [state, supported, sttMode, useWhisper, startWhisper, startLocalWhisper, startSpeechApi]);
+  }, [state, supported, sttMode, useWhisper, assemblyAiKey, startWhisper, startAssemblyAi, startLocalWhisper, startSpeechApi]);
 
   const clearError = useCallback(() => setError(null), []);
 

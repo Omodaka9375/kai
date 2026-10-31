@@ -315,6 +315,11 @@ export async function speakText(
     if (mode === "local") {
       const b64 = await native.voiceTts(chunk, prefs.voiceTtsLocalVoice);
       bytes = base64ToBytes(b64);
+    } else if (mode === "assemblyai") {
+      bytes = await speakViaAssemblyAi(
+        chunk,
+        prefs.voiceTtsAssemblyVoice,
+      );
     } else {
       bytes = await speakViaOpenAi(chunk, prefs.voiceTtsApiModel, prefs.voiceTtsApiVoice);
     }
@@ -358,6 +363,17 @@ function base64ToBytes(b64: string): ArrayBuffer {
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out.buffer;
+}
+
+/** AssemblyAI /v1/speech (WAV) via the SSRF-hardened Rust proxy - same
+ *  keyring-read rule as the OpenAI path below (the settings window's
+ *  chatStore never hydrates apiKeys). */
+async function speakViaAssemblyAi(
+  text: string,
+  voice: string,
+): Promise<ArrayBuffer> {
+  const { speakViaAssemblyAi: synthesize } = await import("./assemblyai");
+  return await synthesize(text, voice);
 }
 
 /** OpenAI /v1/audio/speech via the SSRF-hardened Rust proxy (binary response).

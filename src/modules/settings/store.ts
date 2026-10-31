@@ -107,8 +107,10 @@ export type Preferences = {
   radioEnabled: boolean;
   /** Persisted SomaFM station id (empty = none picked yet). */
   radioStationId: string;
-  /** Voice input mode: "api" (OpenAI whisper), "local" (whisper.cpp), "browser" (SpeechRecognition fallback). */
-  voiceSttMode: "api" | "local" | "browser";
+  /** Voice input mode: "api" (OpenAI whisper), "assemblyai" (Universal-3.5
+   *  Pro via the Sync STT API), "local" (whisper.cpp), "browser"
+   *  (SpeechRecognition fallback). */
+  voiceSttMode: "api" | "assemblyai" | "local" | "browser";
   /** Local STT model name (whisper.cpp quantized ggml). */
   voiceSttModel: string;
   /** API STT model id. */
@@ -118,8 +120,11 @@ export type Preferences = {
    *  Browser STT route has no audio access — auto only applies to the
    *  local and API routes. */
   voiceSttEndMode: "manual" | "auto";
-  /** Text-to-speech mode: "off" | "api" (OpenAI TTS) | "local" (Piper). */
-  voiceTtsMode: "off" | "api" | "local";
+  /** Text-to-speech mode: "off" | "api" (OpenAI TTS) | "assemblyai"
+   *  (AssemblyAI-TTS-1) | "local" (Piper). */
+  voiceTtsMode: "off" | "api" | "assemblyai" | "local";
+  /** AssemblyAI TTS voice slug (aai-jane, aai-audrey, ...). */
+  voiceTtsAssemblyVoice: string;
   /** API TTS voice (alloy/echo/...). */
   voiceTtsApiVoice: string;
   /** API TTS model id. */
@@ -185,6 +190,7 @@ const KEY_VOICE_TTS_MODE = "voiceTtsMode";
 const KEY_VOICE_TTS_API_VOICE = "voiceTtsApiVoice";
 const KEY_VOICE_TTS_API_MODEL = "voiceTtsApiModel";
 const KEY_VOICE_TTS_LOCAL_VOICE = "voiceTtsLocalVoice";
+const KEY_VOICE_TTS_ASSEMBLY_VOICE = "voiceTtsAssemblyVoice";
 const KEY_NETWORK_POLICY = "networkPolicy";
 
 export const TERMINAL_FONT_SIZE_DEFAULT = 14;
@@ -257,6 +263,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   voiceSttApiModel: "whisper-1",
   voiceSttEndMode: "manual",
   voiceTtsMode: "off",
+    voiceTtsAssemblyVoice: "",
   voiceTtsApiVoice: "alloy",
   voiceTtsApiModel: "gpt-4o-mini-tts",
   voiceTtsLocalVoice: "en_US-lessac-medium",
@@ -409,6 +416,9 @@ export async function loadPreferences(): Promise<Preferences> {
         get<string>(KEY_VOICE_TTS_API_MODEL) ?? DEFAULT_PREFERENCES.voiceTtsApiModel,
     voiceTtsLocalVoice:
       get<string>(KEY_VOICE_TTS_LOCAL_VOICE) ?? DEFAULT_PREFERENCES.voiceTtsLocalVoice,
+    voiceTtsAssemblyVoice:
+      get<string>(KEY_VOICE_TTS_ASSEMBLY_VOICE) ??
+      DEFAULT_PREFERENCES.voiceTtsAssemblyVoice,
     networkPolicy:
       get<Preferences["networkPolicy"]>(KEY_NETWORK_POLICY) === "lan"
         ? "lan"
@@ -504,6 +514,10 @@ export async function setVoiceTtsApiModel(value: string): Promise<void> {
 
 export async function setVoiceTtsLocalVoice(value: string): Promise<void> {
   await writePref(KEY_VOICE_TTS_LOCAL_VOICE, value ?? "");
+}
+
+export async function setVoiceTtsAssemblyVoice(value: string): Promise<void> {
+  await writePref(KEY_VOICE_TTS_ASSEMBLY_VOICE, value ?? "");
 }
 
 export async function setLmstudioBaseURL(value: string): Promise<void> {
@@ -782,6 +796,7 @@ export async function onPreferencesChange(
     [KEY_VOICE_TTS_API_VOICE]: "voiceTtsApiVoice",
     [KEY_VOICE_TTS_API_MODEL]: "voiceTtsApiModel",
     [KEY_VOICE_TTS_LOCAL_VOICE]: "voiceTtsLocalVoice",
+    [KEY_VOICE_TTS_ASSEMBLY_VOICE]: "voiceTtsAssemblyVoice",
     [KEY_NETWORK_POLICY]: "networkPolicy",
   };
   // Same-process writes still fire onChange immediately; cross-window writes

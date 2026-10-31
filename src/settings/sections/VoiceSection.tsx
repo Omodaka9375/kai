@@ -13,6 +13,7 @@ import {
   setVoiceTtsMode,
   setVoiceTtsApiVoice,
   setVoiceTtsApiModel,
+  setVoiceTtsAssemblyVoice,
   setVoiceTtsLocalVoice,
 } from "@/modules/settings/store";
 import { Channel } from "@tauri-apps/api/core";
@@ -38,6 +39,8 @@ const STT_API_MODELS = [
   { id: "gpt-4o-mini-transcribe", label: "gpt-4o-mini-transcribe" },
 ];
 
+import { ASSEMBLY_VOICES } from "@/modules/ai/lib/assemblyai";
+
 /** OpenAI TTS models + voices. */
 const TTS_API_MODELS = [
   { id: "gpt-4o-mini-tts", label: "gpt-4o-mini-tts" },
@@ -48,8 +51,8 @@ const TTS_API_VOICES = [
   "alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer",
 ];
 
-type SttMode = "api" | "local" | "browser";
-type TtsMode = "off" | "api" | "local";
+type SttMode = "api" | "assemblyai" | "local" | "browser";
+type TtsMode = "off" | "api" | "assemblyai" | "local";
 
 function ModeCard({
   active,
@@ -224,6 +227,16 @@ export function VoiceSection() {
     );
   };
 
+  const onPreviewAssemblyVoice = async (voice: string) => {
+    await setVoiceTtsAssemblyVoice(voice);
+    setError("");
+    const m = await import("@/modules/ai/lib/voiceTts");
+    await m.speakText(
+      `Hello, this is the ${voice.replace(/^aai-/, "")} voice.`,
+      (msg) => setError(msg),
+    );
+  };
+
   const onPreviewApiVoice = async (voice: string) => {
     await setVoiceTtsApiVoice(voice);
     setError("");
@@ -255,6 +268,12 @@ export function VoiceSection() {
             title="API (OpenAI)"
             description="Transcribes via your OpenAI key. Works everywhere, sends audio to OpenAI."
             onClick={() => setSttMode("api")}
+          />
+          <ModeCard
+            active={sttMode === "assemblyai"}
+            title="API (AssemblyAI)"
+            description="Universal-3.5 Pro - state-of-the-art accuracy on names, numbers, and code. Sends audio to AssemblyAI."
+            onClick={() => setSttMode("assemblyai")}
           />
           <ModeCard
             active={sttMode === "local"}
@@ -361,6 +380,12 @@ export function VoiceSection() {
             onClick={() => setTtsMode("api")}
           />
           <ModeCard
+            active={ttsMode === "assemblyai"}
+            title="API (AssemblyAI TTS)"
+            description="AssemblyAI-TTS-1 voices via your AssemblyAI key. Sends text to AssemblyAI."
+            onClick={() => setTtsMode("assemblyai")}
+          />
+          <ModeCard
             active={ttsMode === "local"}
             title="Local (Piper)"
             description="Piper neural TTS on your CPU. Fully offline. Engine (~22 MB) + voice (~60 MB)."
@@ -385,6 +410,38 @@ export function VoiceSection() {
                 value={prefs.voiceTtsApiVoice}
                 onChange={(v) => void onPreviewApiVoice(v)}
                 options={TTS_API_VOICES.map((v) => ({ id: v, label: v }))}
+              />
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => void onTestVoice()}
+            >
+              Test voice
+            </Button>
+            <span className="text-[11px] text-muted-foreground/70">
+              Picking a voice speaks a short sample.
+            </span>
+          </div>
+        </div>
+      ) : null}
+
+      {ttsMode === "assemblyai" ? (
+        <div className="flex flex-col gap-2 rounded-lg border border-border/60 bg-card/60 px-3 py-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-[12px]">
+            <span className="text-muted-foreground">Voice</span>
+            <div className="flex items-center gap-2">
+              <Select
+                ariaLabel="AssemblyAI TTS voice"
+                value={prefs.voiceTtsAssemblyVoice || "aai-jane"}
+                onChange={(v) => void onPreviewAssemblyVoice(v)}
+                options={ASSEMBLY_VOICES.map((v) => ({
+                  id: v.id,
+                  label: `${v.label} - ${v.note}`,
+                }))}
               />
             </div>
           </div>
