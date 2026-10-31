@@ -207,6 +207,127 @@ describe("chatStore exports", () => {
     expect(mod.useChatStore.getState().steeringMessage).toBeNull();
   });
 
+  describe("ghost-session hygiene (empty \"New chat\" litter)", () => {
+    // The user report: many projects show multiple empty "New chat" entries
+    // in the session picker. Root cause chain: (1) boot manufactured a fresh
+    // placeholder per project AND persisted it; (2) meta-only ghost
+    // detection was impossible pre-lastMessageCount, so nothing ever cleaned
+    // the accumulated files. Contracts below pin the new behavior.
+
+    it("boot placeholders are MEMORY-ONLY - nothing lands in the store file", async () => {
+      const store = mod.useChatStore;
+      const { loadAll, scopedPath } = await import("../lib/sessions");
+
+      await store.getState().hydrateSessions("D:/ghost-clean");
+      const active = store.getState().activeSessionId!;
+      expect(active).toBeTruthy(); // a placeholder exists in memory...
+
+      // ...but the project's store file knows nothing about it.
+      const before = await loadAll();
+      expect(before.sessions).toHaveLength(0);
+      expect(before.activeId).toBeNull();
+
+      // Relaunch into the same project: hydration is idempotent (no
+      // stacking) and STILL writes nothing.
+      await store.getState().hydrateSessions("D:/ghost-clean");
+      expect(store.getState().activeSessionId).toBe(active);
+      expect((await loadAll()).sessions).toHaveLength(0);
+      expect(scopedPath("D:/ghost-clean")).toContain("kai-sessions-");
+    });
+
+    it("the first real message promotes the placeholder to disk", async () => {
+      const store = mod.useChatStore;
+      const { loadAll, loadMessages } = await import("../lib/sessions");
+
+      await store.getState().hydrateSessions("D:/ghost-promote");
+      const id = store.getState().activeSessionId!;
+      store.getState().persistMessages(id, [
+        { id: "m1", role: "user", parts: [{ type: "text", text: "hello" }] },
+      ] as never);
+      mod.flushPersist(id);
+      // saveActiveId has an await hop before its write - let it settle.
+      await new Promise((r) => setTimeout(r, 0));
+
+      const all = await loadAll();
+      expect(all.sessions).toHaveLength(1);
+      expect(all.sessions[0].id).toBe(id);
+      expect(all.sessions[0].title).toBe("hello");
+      expect(all.activeId).toBe(id);
+      expect((await loadMessages(id))?.length).toBe(1);
+    });
+
+    it("a COLD BOOT into a littered file purges ghosts and keeps real sessions", async () => {
+      const store = mod.useChatStore;
+      const { loadAll, saveSessionsListForRoot, saveMessagesForRoot } =
+        await import("../lib/sessions");
+
+      // Simulate an OLDER build's leftovers: one true ghost (no blob) and
+      // one populated session whose meta predates lastMessageCount. Written
+      // via the root-explicit helpers so no scope dependency.
+      const realId = "purge-real-session";
+      await saveMessagesForRoot(
+        "D:/ghost-purge",
+        realId,
+        [{ id: "m1", role: "user", parts: [{ type: "text", text: "real work" }] }] as never,
+      );
+      await saveSessionsListForRoot("D:/ghost-purge", [
+        { id: "ghost-old", title: "New chat", createdAt: 1, updatedAt: 1, workspaceRoot: "D:/ghost-purge" },
+        { id: realId, title: "New chat", createdAt: 1, updatedAt: 2, workspaceRoot: "D:/ghost-purge" },
+      ] as never);
+
+      // Cold boot: fresh store state, hydrate once.
+      store.setState({
+        sessions: [],
+        activeSessionId: null,
+        sessionsHydrated: false,
+        lastHydratedWorkspace: null,
+      });
+      await store.getState().hydrateSessions("D:/ghost-purge");
+      await new Promise((r) => setTimeout(r, 0)); // let the purge write settle
+
+      const sessions = store.getState().sessions;
+      expect(sessions.some((s) => s.id === "ghost-old")).toBe(false);
+      expect(sessions.some((s) => s.id === realId)).toBe(true);
+      // The survivor got lastMessageCount backfilled, so display filters
+      // treat it as real from now on.
+      expect(sessions.find((s) => s.id === realId)!.lastMessageCount).toBe(1);
+
+      // And the purge persisted: the file no longer contains the ghost.
+      const all = await loadAll();
+      expect(all.sessions.some((s) => s.id === "ghost-old")).toBe(false);
+      expect(all.sessions.some((s) => s.id === realId)).toBe(true);
+    });
+
+    it("isGhostSession: only content-less untitled non-forks are ghosts", () => {
+      const base = {
+        title: "New chat",
+        createdAt: 1,
+        updatedAt: 1,
+        workspaceRoot: "D:/x",
+      };
+      expect(mod.isGhostSession({ ...base, id: "g1" })).toBe(true);
+      expect(
+        mod.isGhostSession({ ...base, id: "g2", lastMessageCount: 3 }),
+      ).toBe(false);
+      expect(mod.isGhostSession({ ...base, id: "g3", parentId: "p" })).toBe(
+        false,
+      );
+      expect(mod.isGhostSession({ ...base, id: "g4", title: "work" })).toBe(
+        false,
+      );
+    });
+
+    it("the session picker source hides ghosts (source pin)", async () => {
+      const fs = await import("node:fs");
+      const src = fs.readFileSync(
+        new URL("../components/AiMiniWindow.tsx", import.meta.url),
+        "utf8",
+      );
+      expect(src).toContain("isGhostSession(s)");
+      expect(src).toContain("if (s.id === activeId) return true;");
+    });
+  });
+
   describe("workspace switching", () => {
     it("activates the new project's own session on a project switch", async () => {
       const store = mod.useChatStore;

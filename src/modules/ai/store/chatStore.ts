@@ -669,12 +669,38 @@ export function subscribeProjectActiveSessions(listener: () => void): () => void
   return () => projectActiveSessionListeners.delete(listener);
 }
 
+/**
+ * True for a session that has never had content: untitled, no recorded
+ * message growth, not a fork/shadow. Boot manufactures such placeholders
+ * in MEMORY ONLY (they die with the process) and hydration purges any that
+ * older builds persisted. Display filters use this to keep the session
+ * picker free of "New chat" litter — the ACTIVE session is always exempt
+ * (the user is looking at it).
+ */
+export function isGhostSession(s: SessionMeta): boolean {
+  return (
+    (!s.title || s.title === "New chat") &&
+    (s.lastMessageCount ?? 0) === 0 &&
+    !s.parentId
+  );
+}
+
 function persistActiveSessionsList(sessions: SessionMeta[]): void {
+  // Ghost guard: memory-only placeholders must never land in a store file.
+  // (Older builds persisted a fresh "New chat" on every boot per project —
+  // that litter is what the session picker was drowning in.)
+  const real = sessions.filter((s) => !isGhostSession(s));
   void (activeProjectRuntime
-    ? saveSessionsListForRoot(activeProjectRuntime.root, sessions, activeProjectRuntime.env)
-    : saveSessionsList(sessions));
+    ? saveSessionsListForRoot(activeProjectRuntime.root, real, activeProjectRuntime.env)
+    : saveSessionsList(real));
 }
 function persistActiveSessionId(id: string | null): void {
+  // Ghost guard: never persist the id of a content-less placeholder — the
+  // file would resurrect a dead "New chat" as the active session.
+  if (id != null) {
+    const meta = useChatStore.getState().sessions.find((s) => s.id === id);
+    if (meta && isGhostSession(meta)) return;
+  }
   void (activeProjectRuntime
     ? saveActiveIdForRoot(activeProjectRuntime.root, id, activeProjectRuntime.env)
     : saveActiveId(id));
@@ -1099,6 +1125,49 @@ export const useChatStore = create<StoreState>((set, get) => ({
       );
     }
 
+    // ── Ghost purge ────────────────────────────────────────────────────
+    // Untitled, message-less sessions are placeholder litter left by older
+    // builds (boot used to manufacture + PERSIST a fresh "New chat" per
+    // project, so files accumulated one per launch). A ghost by META alone
+    // isn't proof of emptiness — old builds never stamped lastMessageCount —
+    // so verify against the persisted message blob before dropping
+    // anything. Populated survivors get their lastMessageCount backfilled,
+    // which makes the meta predicate sound for every later display filter.
+    {
+      const ghostCandidates = sessions.filter((s) => isGhostSession(s));
+      const ghostIds: string[] = [];
+      let backfilled = false;
+      for (const s of ghostCandidates) {
+        const blob = await (hydrationRuntime
+          ? loadMessagesForRoot(hydrationRuntime.root, s.id, hydrationRuntime.env)
+          : loadMessages(s.id));
+        if (isStale()) return;
+        if (!blob || blob.length === 0) {
+          ghostIds.push(s.id);
+        } else {
+          s.lastMessageCount = blob.length;
+          backfilled = true;
+        }
+      }
+      if (ghostIds.length > 0 || backfilled) {
+        if (ghostIds.length > 0) {
+          const dead = new Set(ghostIds);
+          sessions = sessions.filter((s) => !dead.has(s.id));
+          if (loadedActiveId && dead.has(loadedActiveId)) loadedActiveId = null;
+          console.warn(
+            `[hydrateSessions] purged ${ghostIds.length} empty session placeholder(s)`,
+          );
+        }
+        // Write the cleaned list back — fire-and-forget; a failed write only
+        // means the next hydration purges again.
+        void (hydrationRuntime
+          ? saveSessionsListForRoot(hydrationRuntime.root, sessions, hydrationRuntime.env)
+          : saveSessionsList(sessions)).catch((err) =>
+          console.error("[hydrateSessions] ghost purge persist failed:", err),
+        );
+      }
+    }
+
     // Keep ALL sessions — never filter at the store level. Filtering happens
     // at the display layer (SessionPicker) so sessions from other workspaces
     // survive workspace switches. (Previously we filtered here and wrote the
@@ -1211,11 +1280,12 @@ export const useChatStore = create<StoreState>((set, get) => ({
       // Nothing from the target workspace to activate — the fresh session
       // (stamped with this root) becomes active.
       if (!nextActiveId) nextActiveId = freshId;
-      void (hydrationRuntime
-        ? saveSessionsListForRoot(hydrationRuntime.root, nextSessions, hydrationRuntime.env)
-        : saveSessionsList(nextSessions)).catch((err) =>
-        console.error("[hydrateSessions] Failed to persist sessions:", err),
-      );
+      // Deliberately NOT persisted: the placeholder is memory-only until
+      // its first real message (persistMessages promotes it to disk). Older
+      // builds persisted it here — that was the "New chat" litter source.
+      // Hydration still finds a reusable in-memory placeholder on the next
+      // boot-into-this-project via the `reusable` lookup above, or simply
+      // manufactures a new one; nothing of value is lost.
     }
     // Safety net: `activeSessionId` must always reference a session in the
     // list the UI reads, otherwise SessionPicker renders nothing. Fall back
@@ -1234,11 +1304,19 @@ export const useChatStore = create<StoreState>((set, get) => ({
     // project's conversation after a fast project switch.
     if (isStale()) return;
 
-    void (hydrationRuntime
-      ? saveActiveIdForRoot(hydrationRuntime.root, nextActiveId, hydrationRuntime.env)
-      : saveActiveId(nextActiveId)).catch((err) =>
-      console.error("[hydrateSessions] Failed to persist activeId:", err),
-    );
+    // Persist activeId ONLY when it points at a real session. The active
+    // session can be a memory-only placeholder (fresh "New chat"); writing
+    // its id to disk is exactly the ghost litter the purge above removes.
+    {
+      const activeMeta = nextSessions.find((s) => s.id === nextActiveId);
+      if (!activeMeta || !isGhostSession(activeMeta)) {
+        void (hydrationRuntime
+          ? saveActiveIdForRoot(hydrationRuntime.root, nextActiveId, hydrationRuntime.env)
+          : saveActiveId(nextActiveId)).catch((err) =>
+          console.error("[hydrateSessions] Failed to persist activeId:", err),
+        );
+      }
+    }
 
     // Seed the restored/next active session's persisted history BEFORE
     // flipping activeSessionId. If we flip first, React renders the body and
@@ -1316,8 +1394,10 @@ export const useChatStore = create<StoreState>((set, get) => ({
       autoApprove: "off" as AutoApproveMode,
       autoApprovedIds: new Set<string>(),
     });
-    persistActiveSessionsList(next);
-    persistActiveSessionId(id);
+    // Memory-only until real content: persistMessages promotes the
+    // placeholder to disk on its first message (list + activeId). The
+    // central ghost guards in the persist helpers are the real safety net
+    // if a future edit reintroduces a call here.
     return id;
   },
 
@@ -1410,8 +1490,10 @@ export const useChatStore = create<StoreState>((set, get) => ({
       workspaceEnv: activeProjectRuntime?.env,
       };
       set({ sessions: [fresh], activeSessionId: fresh.id });
-      persistActiveSessionsList([fresh]);
-      persistActiveSessionId(fresh.id);
+      // Record the DELETION on disk, but keep the replacement placeholder
+      // memory-only (same contract as newSession).
+      persistActiveSessionsList([]);
+      persistActiveSessionId(null);
       return;
     }
 
@@ -1542,6 +1624,8 @@ export const useChatStore = create<StoreState>((set, get) => ({
     const countChanged = count !== (meta.lastMessageCount ?? -1);
     const nextTitle = isUntitled ? deriveTitle(messages) : meta.title;
     if (!countChanged && nextTitle === meta.title) return;
+    // Was this session a memory-only placeholder until this very persist?
+    const wasGhost = isUntitled && (meta.lastMessageCount ?? 0) === 0;
     const next = sessions.map((s) =>
       s.id === id
         ? {
@@ -1554,6 +1638,10 @@ export const useChatStore = create<StoreState>((set, get) => ({
     );
     set({ sessions: next });
     persistActiveSessionsList(next);
+    // First real content on a memory-only placeholder: promote it to disk.
+    // Until this write the session (list entry + activeId) was deliberately
+    // never persisted, so THIS is what makes it survive a restart.
+    if (wasGhost && count > 0) persistActiveSessionId(id);
   },
   injectMessage: async (id, text) => {
     // Hydrate persisted history BEFORE constructing a chat, so evicting a

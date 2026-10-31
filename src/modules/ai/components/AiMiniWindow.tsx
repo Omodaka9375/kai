@@ -51,7 +51,7 @@ import { effectiveContextLimit, SYSTEM_OVERHEAD_TOKENS } from "../lib/compact";
 import { type SessionMeta } from "../lib/sessions";
 import { absoluteTime, relativeTime } from "../lib/relativeTime";
 import { normalizeWorkspacePath } from "../lib/workspacePath";
-import { getOrCreateChat, useChatStore } from "../store/chatStore";
+import { getOrCreateChat, isGhostSession, useChatStore } from "../store/chatStore";
 import {
   getGroupStoreVersion,
   getGroups,
@@ -559,8 +559,12 @@ function SessionPicker() {
     const normalized = normalizeWorkspacePath(workspaceRoot);
     const norm = (s: SessionMeta) => normalizeWorkspacePath(s.workspaceRoot ?? "");
     return sessions.filter((s) => {
-      // Always show the active session regardless of workspace.
+      // Always show the active session regardless of workspace — even a
+      // fresh "New chat" the user is looking at right now.
       if (s.id === activeId) return true;
+      // Hide content-less placeholders (empty "New chat" litter from older
+      // builds + this boot's memory-only ghosts). They carry no value.
+      if (isGhostSession(s)) return false;
       if (!s.workspaceRoot) return false;
       return norm(s) === normalized;
     });
