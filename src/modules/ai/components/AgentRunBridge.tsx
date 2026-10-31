@@ -40,6 +40,7 @@ import {
   noteSessionIdle,
   peekReplyProvision,
   takeReplyProvision,
+  isGroupDeliveryText,
 } from "../store/groupChatStore";
 
 /**
@@ -680,6 +681,14 @@ function Bridge({
   // "this run produced it".
   const busyTailRef = useRef<number | null>(null);
   const busyLastAssistantRef = useRef<UIMessage | null>(null);
+  // TTS BOUNDARY: true when THIS run was provoked by a GROUP delivery:
+  // a cross-project participant delivery, an agent-coordinator wake, or
+  // the coordinator prompt. Group runs never speak: spoken replies are
+  // reserved for one-to-one user↔agent chats (the reply is mirrored into
+  // the group transcript instead, where it belongs). Snapshotted at
+  // busy-arm alongside the tail, BEFORE the ttsActive gate, so a mid-run
+  // TTS enable cannot resurrect a group run's voice either.
+  const busyWasGroupRef = useRef<boolean>(false);
   // Latest render's state, read at speak time (after messages settle).
   const statusRef = useRef(status);
   statusRef.current = status;
@@ -697,6 +706,7 @@ function Bridge({
       runEndedRef.current = false;
       busyTailRef.current = null;
       busyLastAssistantRef.current = null;
+      busyWasGroupRef.current = false;
       spokenForRef.current = null;
       return;
     }
@@ -717,6 +727,22 @@ function Bridge({
           busyLastAssistantRef.current = msgs[i];
           break;
         }
+      }
+      // Group-provoked? The triggering user message is the LAST user text
+      // in the array at busy-arm (a queued group delivery may sit behind an
+      // even later user message only when the user typed while it was still
+      // queued — in that case the run answers the USER, not the group, and
+      // speaking is correct).
+      busyWasGroupRef.current = false;
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        const m = msgs[i];
+        if (m.role !== "user") continue;
+        const text = m.parts
+          ?.map((p) => (p.type === "text" && typeof p.text === "string" ? p.text : ""))
+          .join("")
+          .trim();
+        busyWasGroupRef.current = !!text && isGroupDeliveryText(text);
+        break;
       }
     }
     if (isBusy) {
@@ -789,9 +815,12 @@ function Bridge({
         }
       }
     }
+    const wasGroupRun = busyWasGroupRef.current;
     busyTailRef.current = null;
     busyLastAssistantRef.current = null;
+    busyWasGroupRef.current = false;
     if (!text) return; // THIS run produced nothing speakable — say nothing
+    if (wasGroupRun) return; // group chats never speak — reserved for 1:1
     if (spokenForRef.current === spokenId) return;
     spokenForRef.current = spokenId;
     void speakText(text);

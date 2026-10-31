@@ -132,6 +132,32 @@ export function isPersonaParticipantId(id: string): boolean {
   return id.startsWith(PERSONA_ID_PREFIX);
 }
 
+// ── TTS boundary ────────────────────────────────────────────────────────
+// Spoken replies are reserved for one-to-one user↔agent chats. Every group
+// injection into a session's chat carries one of these FIXED markers, so
+// the bridge's auto-speak effect can tell a group-provoked run from a
+// direct chat and stay silent for it (the reply is mirrored into the group
+// transcript instead — reading multi-agent chatter aloud was noise).
+// Keep the markers in lockstep with the injection templates:
+//   deliverToParticipant   `[${g.name} · cross-project group] …`
+//   flushCoalesced         `[group] ${name} replied: …`
+//   coordinatorPrompt      `[group: ${g.name}] You are now the COORDINATOR…`
+const GROUP_DELIVERY_MARKER_CROSS_PROJECT = " · cross-project group] ";
+const GROUP_DELIVERY_MARKER_WAKE = "[group] ";
+const GROUP_DELIVERY_MARKER_PROMPT = "[group: ";
+
+/** True when a chat message's text identifies it as a GROUP delivery
+ *  (participant delivery, coordinator wake, or coordinator prompt). The
+ *  bridge snapshots this at busy-arm: a run whose triggering user message
+ *  is a group delivery never speaks its reply. */
+export function isGroupDeliveryText(text: string): boolean {
+  return (
+    text.includes(GROUP_DELIVERY_MARKER_CROSS_PROJECT) ||
+    text.startsWith(GROUP_DELIVERY_MARKER_WAKE) ||
+    text.startsWith(GROUP_DELIVERY_MARKER_PROMPT)
+  );
+}
+
 function personaKey(groupId: string, sessionId: string): string {
   return `${groupId}::${sessionId}`;
 }

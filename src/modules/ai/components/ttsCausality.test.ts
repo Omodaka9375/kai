@@ -86,6 +86,67 @@ describe("AgentRunBridge auto-speak: causality boundary (source pins)", () => {
   });
 });
 
+describe("TTS is reserved for one-to-one chats — group runs never speak", () => {
+  // 2026-10-31: "make sure group chats do not trigger TTS" — a group
+  // delivery landing in a participant's (or coordinator's) session used
+  // to settle and hit the same auto-speak effect, so multi-agent chatter
+  // was read aloud. The fix: every group injection carries a FIXED marker
+  // (isGroupDeliveryText), the bridge snapshots "group-provoked" at
+  // busy-arm — BEFORE the ttsActive gate, so a mid-run enable can't
+  // resurrect it — and the speak decision refuses group runs.
+  const src = read("./AgentRunBridge.tsx");
+  const store = read("../store/groupChatStore.ts");
+
+  it("the bridge imports the group-delivery marker check", () => {
+    expect(src).toContain("isGroupDeliveryText,");
+  });
+
+  it("group-provoked is snapshotted at busy-arm BEFORE the ttsActive gate", () => {
+    const armIdx = src.indexOf("busyWasGroupRef.current = !!text && isGroupDeliveryText(text);");
+    const gateIdx = src.indexOf("if (!ttsActive) return;");
+    expect(armIdx).toBeGreaterThan(-1);
+    expect(gateIdx).toBeGreaterThan(armIdx);
+  });
+
+  it("the speak decision refuses group runs (and consumes the snapshot)", () => {
+    expect(src).toContain("const wasGroupRun = busyWasGroupRef.current;");
+    expect(src).toMatch(
+      /if \(wasGroupRun\) return; \/\/ group chats never speak/,
+    );
+    // Snapshot cleared on the decision path so the NEXT one-to-one run
+    // speaks normally: the read immediately precedes the boundary clears.
+    // (lastIndexOf: the session-switch block also clears the ref, EARLIER
+    // in the file — the decision block's clear is the last one.)
+    const readIdx = src.lastIndexOf("const wasGroupRun = busyWasGroupRef.current;");
+    const clearIdx = src.lastIndexOf("busyWasGroupRef.current = false;");
+    expect(readIdx).toBeGreaterThan(-1);
+    expect(clearIdx).toBeGreaterThan(readIdx);
+    expect(clearIdx - readIdx).toBeLessThan(200);
+  });
+
+  it("session switch resets the group snapshot with the other boundaries", () => {
+    const switchBlock = src.slice(
+      src.indexOf("prevSessionRef.current !== sessionId"),
+      src.indexOf("const wasStreaming"),
+    );
+    expect(switchBlock).toContain("busyWasGroupRef.current = false;");
+  });
+
+  it("the store's markers match every group injection template", () => {
+    // The three injection shapes, in lockstep with isGroupDeliveryText.
+    expect(store).toContain(" · cross-project group] ");
+    expect(store).toContain("`[group] ${r.name} replied:");
+    expect(store).toContain("[group: ");
+    expect(store).toContain("export function isGroupDeliveryText");
+  });
+
+  it("persona runs have no speak path at all (headless generateText)", () => {
+    // The ONLY production speakText call site is the bridge effect —
+    // groupChatStore never speaks.
+    expect(store).not.toContain("speakText");
+  });
+});
+
 describe("speakText supersede semantics (the replies-after case)", () => {
   // The "then it doesn't read anything in front" half: a NEW run that
   // produces a reply must never be silenced by a stale spokenFor key. That
