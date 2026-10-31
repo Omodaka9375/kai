@@ -32,6 +32,7 @@ import {
   UserMultiple02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { MessageResponse } from "@/components/ai-elements/message";
 import { getProjectAgentStatus } from "../store/projectStatus";
 import { useAgentsStore } from "../store/agentsStore";
 import { BUILTIN_AGENTS } from "../lib/agents";
@@ -599,20 +600,7 @@ function GroupApprovals({ group }: { group: GroupChat }) {
  *  same wire shape the regular composer emits. */
 function GroupMessageBody({ text, from }: { text: string; from: GroupMessage["from"] }) {
   const parsed = splitQuoteBlock(text);
-  if (!parsed) {
-    return (
-      <div
-        className={cn(
-          "whitespace-pre-wrap rounded-lg border px-2.5 py-1.5",
-          from === "user"
-            ? "border-border/60 bg-muted/40"
-            : "border-border/60 bg-background",
-        )}
-      >
-        {text}
-      </div>
-    );
-  }
+  const body = parsed ? parsed.rest : text;
   return (
     <div
       className={cn(
@@ -622,24 +610,31 @@ function GroupMessageBody({ text, from }: { text: string; from: GroupMessage["fr
           : "border-border/60 bg-background",
       )}
     >
-      <div className="mb-1.5 flex items-start gap-1.5 rounded-md border-l-2 border-primary/60 bg-background/80 px-2 py-1">
-        <HugeiconsIcon
-          icon={LeftToRightBlockQuoteIcon}
-          size={10}
-          strokeWidth={1.75}
-          className="mt-0.5 shrink-0 text-primary/70"
-        />
-        <div className="min-w-0 flex-1">
-          <span className="text-[10px] font-semibold text-primary/90">
-            {parsed.author}
-          </span>
-          <span className="ml-1.5 text-[10px] text-muted-foreground line-clamp-2">
-            {quoteExcerpt(parsed.quoteText)}
-          </span>
+      {parsed ? (
+        <div className="mb-1.5 flex items-start gap-1.5 rounded-md border-l-2 border-primary/60 bg-background/80 px-2 py-1">
+          <HugeiconsIcon
+            icon={LeftToRightBlockQuoteIcon}
+            size={10}
+            strokeWidth={1.75}
+            className="mt-0.5 shrink-0 text-primary/70"
+          />
+          <div className="min-w-0 flex-1">
+            <span className="text-[10px] font-semibold text-primary/90">
+              {parsed.author}
+            </span>
+            <span className="ml-1.5 text-[10px] text-muted-foreground line-clamp-2">
+              {quoteExcerpt(parsed.quoteText)}
+            </span>
+          </div>
         </div>
-      </div>
-      {parsed.rest ? (
-        <span className="whitespace-pre-wrap">{parsed.rest}</span>
+      ) : null}
+      {body ? (
+        // The SAME markdown renderer the main AI chat uses for assistant
+        // text (MessageResponse → Streamdown with the MarkdownCode +
+        // ChatTable components): agent replies in the group are markdown —
+        // headings, lists, code fences, tables — and must render exactly
+        // like the main chat, not as pre-wrapped raw text.
+        <MessageResponse>{body}</MessageResponse>
       ) : null}
     </div>
   );

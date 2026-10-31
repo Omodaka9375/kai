@@ -97,6 +97,22 @@ describe("composer mirrors the AI input bar", () => {
     expect(panel).toContain('m.from === "user" && "ml-auto max-w-[85%]"');
     expect(composer).not.toContain("border-x");
   });
+
+  it("agent markdown renders with the main chat's renderer (MessageResponse/Streamdown)", () => {
+    // 2026-10-31: agent replies in the group are MARKDOWN - the raw
+    // whitespace-pre-wrap text dump rendered fences/headings as literal
+    // characters. GroupMessageBody must use the SAME MessageResponse
+    // (Streamdown + MarkdownCode + ChatTable) the main AI chat renders
+    // assistant text with - not a hand-rolled renderer.
+    const start = panel.indexOf("function GroupMessageBody");
+    const end = panel.indexOf("function ActivityStrip");
+    const body = panel.slice(start, end);
+    expect(panel).toContain('import { MessageResponse } from "@/components/ai-elements/message";');
+    expect(body).toContain("<MessageResponse>{body}</MessageResponse>");
+    // The raw pre-wrap dump is gone (user text also rides the renderer -
+    // same as the main chat's user bubbles).
+    expect(body).not.toContain("whitespace-pre-wrap rounded-lg");
+  });
 });
 
 describe("the pill unmounts when the last group is gone", () => {
