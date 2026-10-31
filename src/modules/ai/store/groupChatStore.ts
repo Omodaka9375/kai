@@ -1009,7 +1009,18 @@ export async function stopGroupParticipant(
   const g = groups.get(groupId);
   if (!g || g.endedAt !== null) return;
   const p = g.participants.find((x) => x.projectId === projectId);
-  if (!p || !p.sessionId) return;
+  if (!p) return;
+  // RE-RESOLVE (same rule as sendGroupMessage / stopGroupParticipants): stop
+  // the project's CURRENT active session when the record is empty/stale,
+  // and re-point the record so the group keeps tracking the real run.
+  if (!isPersonaParticipantId(projectId) && !p.sessionId) {
+    const sid = getProjectActiveSession(projectId);
+    if (sid) {
+      p.sessionId = sid;
+      sessionGroups.set(sid, g.id);
+    }
+  }
+  if (!p.sessionId) return;
   // Persona stop: abort the in-flight run, drop its queue — no session exists.
   if (isPersonaParticipantId(projectId)) {
     const dropped = personaQueues.get(personaKey(g.id, p.sessionId))?.length ?? 0;
@@ -1046,7 +1057,27 @@ export async function stopGroupParticipants(groupId: string): Promise<void> {
   if (!g || g.endedAt !== null) return;
   let stopped = 0;
   for (const p of g.participants) {
-    if (!p.sessionId) continue;
+    // RE-RESOLVE before the activity check (same rule as sendGroupMessage):
+    // the recorded session can be EMPTY (the project had no chat session at
+    // group creation) or STALE (the project switched chats since). The
+    // agent the user sees running lives in the project's CURRENT active
+    // session — stop THAT, and re-point the record so the group keeps
+    // tracking the real run. Without this, an empty/stale record made the
+    // loop `continue` or check a dead session's meta, and Stop only
+    // reached whichever participants' records happened to be current
+    // ("I pressed stop and it only stopped one agent").
+    if (isPersonaParticipantId(p.projectId)) {
+      // Personas ARE their own identity — no session to re-resolve.
+      if (!p.sessionId) continue;
+    } else {
+      const sid = getProjectActiveSession(p.projectId) || p.sessionId;
+      if (!sid) continue;
+      if (sid !== p.sessionId) {
+        sessionGroups.delete(p.sessionId);
+        p.sessionId = sid;
+        sessionGroups.set(sid, g.id);
+      }
+    }
     const act = participantActivity(p.sessionId);
     if (act === "working" || act === "approval" || act === "queued") {
       sendQueues.delete(p.sessionId);

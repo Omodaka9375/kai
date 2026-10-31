@@ -71,14 +71,35 @@ beforeEach(() => {
 });
 
 describe("mirror gate — takeReplyProvision", () => {
-  // PROVISION-AT-DELIVERY (2026-10-31 regression): the provision used to be
-  // armed at QUEUE time (deliverToParticipant before the busy check), so a
-  // delivery queued behind a *local* run armed the group before the local
-  // run's reply existed; that local reply claimed/consumed the provision
-  // and the reply to the actual group delivery never mirrored into the
-  // transcript ("the agent answered in the normal AI chat instead"). The
-  // provision must be armed ONLY when the delivery is injected — in the
-  // idle path and in flushQueuedForSession, never in the queue arm.
+  // STOP RE-RESOLUTION (2026-10-31 regression): both stop paths used the
+  // RECORDED p.sessionId verbatim — empty (project had no chat at group
+  // creation) or stale (project switched chats). The running agent lives
+  // in the project's CURRENT active session, so Stop missed it and only
+  // the participants whose records happened to be current were stopped
+  // ("I pressed stop and it only stopped one agent"). Both stop paths must
+  // re-resolve via getProjectActiveSession and re-point the record.
+  it("both stop paths re-resolve stale/empty session records (source pin)", () => {
+    const src = readFileSync(
+      new URL("./groupChatStore.ts", import.meta.url),
+      "utf8",
+    );
+    const stops = [
+      src.slice(src.indexOf("export async function stopGroupParticipant("),
+               src.indexOf("export async function stopGroupParticipants(")),
+      src.slice(src.indexOf("export async function stopGroupParticipants("),
+               src.indexOf("/** Session went busy")),
+    ];
+    expect(stops).toHaveLength(2);
+    for (const block of stops) {
+      expect(block).toMatch(/getProjectActiveSession/);
+      // Record re-pointing keeps the group tracking the real run.
+      expect(block).toMatch(/p\.sessionId = sid/);
+    }
+    // The plural loop must NOT skip empty records before re-resolving
+    // (the old `if (!p.sessionId) continue;` was the miss).
+    expect(stops[1]).not.toMatch(/^    if \(!p\.sessionId\) continue;$/m);
+  });
+
   it("the provision is armed at INJECTION, never at queue time (source pin)", () => {
     const src = readFileSync(
       new URL("./groupChatStore.ts", import.meta.url),
