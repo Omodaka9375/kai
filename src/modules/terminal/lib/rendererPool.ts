@@ -40,6 +40,13 @@ export type SlotAdapter = {
   resolveLeaf(leafId: number): LeafBridge | null;
   evictLeaf(leafId: number): void;
   isLeafFocused(leafId: number): boolean;
+  /** True when the leaf produced PTY output within the last few seconds -
+   *  an actively RUNNING command (build, dev server, test suite). The
+   *  eviction scorer protects such leaves (smooth-switch 2026-10-31):
+   *  taking a renderer away from a live build means a serialize + WebGL
+   *  teardown AND a re-bind when the user returns - the expensive case
+   *  the pool should avoid when any cold leaf can serve instead. */
+  leafProducedRecently?: (leafId: number) => boolean;
 };
 
 export type LeafBridge = {
@@ -63,6 +70,8 @@ export type Slot = {
   ptyTimer: ReturnType<typeof setTimeout> | null;
   unhideRaf: number | null;
   unhideTimer: ReturnType<typeof setTimeout> | null;
+  /** Pending paced-backlog replay slice (see replayBacklog). */
+  replayTimer: ReturnType<typeof setTimeout> | null;
   webglRecoveryTimer: ReturnType<typeof setTimeout> | null;
   /** Once-per-bind: the first keystroke forwarded to the PTY is file-logged
    *  (input-path proof — see term.onData in createSlot). */
@@ -149,6 +158,7 @@ function createSlot(): Slot {
     ptyTimer: null,
     unhideRaf: null,
     unhideTimer: null,
+    replayTimer: null,
     webglRecoveryTimer: null,
     sawKeystroke: false,
     lastCols: term.cols,
@@ -219,8 +229,18 @@ function pickSlotFor(leafId: number): PickResult {
     const focused =
       s.currentLeafId !== null &&
       (adapter?.isLeafFocused(s.currentLeafId) ?? false);
+    // Activity protection (smooth-switch): a slot whose leaf is RUNNING a
+    // command is the expensive eviction (serialize + teardown + re-bind on
+    // return). Same weight class as alt-screen: still evictable when the
+    // pool is all-hot, but never picked while a cold leaf exists.
+    const hot =
+      s.currentLeafId !== null &&
+      (adapter?.leafProducedRecently?.(s.currentLeafId) ?? false);
     const score =
-      (isAltScreen(s) ? 100 : 0) + (focused ? 10 : 0) + s.lastUsedAt / 1e12;
+      (isAltScreen(s) ? 100 : 0) +
+      (hot ? 100 : 0) +
+      (focused ? 10 : 0) +
+      s.lastUsedAt / 1e12;
     if (score < bestScore) {
       bestScore = score;
       best = s;
@@ -241,7 +261,10 @@ export type AcquireParams = {
   leafId: number;
   container: HTMLDivElement;
   snapshot: string | null;
-  drainRing: (write: (bytes: Uint8Array) => void) => void;
+  /** Yields ring chunks with their REMAINING byte count (paced replay -
+   *  see bindSlot). The iterator is one-shot: consuming or abandoning it
+   *  spends the ring. */
+  drainRing: () => Generator<{ bytes: Uint8Array; remaining: number }>;
   shellExited: boolean;
   searchQuery: string | null;
   cols: number;
@@ -269,12 +292,70 @@ export function acquireSlot(params: AcquireParams): Slot {
   return pick.slot;
 }
 
+/** Per-frame byte budget for the paced backlog replay. ~32KB keeps a
+ *  well-filled frame under 16ms on modest hardware; the fuse guarantees
+ *  completion regardless. */
+const REPLAY_CHUNK_BYTES = 32 * 1024;
+/** Hard cap on total replay wall time: past this, finish in one write. */
+const REPLAY_FUSE_MS = 2_000;
+
+/** Stream the dormant ring's backlog into a freshly bound slot in
+ *  per-frame slices. See bindSlot's replay comment for the why. */
+function replayBacklog(slot: Slot, p: AcquireParams): void {
+  const iter = p.drainRing();
+  const startedAt = performance.now();
+  const writeSlice = (): void => {
+    if (slot.currentLeafId !== p.leafId) {
+      // Slot re-bound to another leaf mid-replay: abandon the iterator (the
+      // ring's finally resets it; the rest of THIS backlog is spent - a
+      // re-bind replays from the snapshot, not a half-drained ring).
+      iter.return?.(undefined as never);
+      return;
+    }
+    let written = 0;
+    try {
+      while (written < REPLAY_CHUNK_BYTES) {
+        const next = iter.next();
+        if (next.done) return;
+        slot.term.write(next.value.bytes);
+        written += next.value.bytes.length;
+      }
+    } catch (e) {
+      console.warn("[Kai-pool] backlog replay failed:", e);
+      return;
+    }
+    if (performance.now() - startedAt > REPLAY_FUSE_MS) {
+      // Fuse: stop pacing, finish synchronously so the backlog can never
+      // dribble forever.
+      try {
+        let next = iter.next();
+        while (!next.done) {
+          slot.term.write(next.value.bytes);
+          next = iter.next();
+        }
+      } catch {
+        /* already warned above */
+      }
+      return;
+    }
+    // Continue next frame. setTimeout, not rAF: rAF is throttled while the
+    // OS window is hidden, and a paced drain must keep making progress.
+    slot.replayTimer = setTimeout(() => {
+      slot.replayTimer = null;
+      writeSlice();
+    }, 0);
+  };
+  writeSlice();
+}
+
 function bindSlot(slot: Slot, p: AcquireParams): void {
   slot.currentLeafId = p.leafId;
   slot.lastUsedAt = performance.now();
   slot.sawKeystroke = false;
 
   cancelPendingUnhide(slot);
+  if (slot.replayTimer) clearTimeout(slot.replayTimer);
+  slot.replayTimer = null;
   slot.host.style.visibility = "hidden";
 
   try {
@@ -301,7 +382,18 @@ function bindSlot(slot: Slot, p: AcquireParams): void {
         console.warn("[Kai] snapshot replay failed:", e);
       }
     }
-    p.drainRing((bytes) => slot.term.write(bytes));
+    // ── PACED BACKLOG REPLAY (2026-10-31 smooth-switch fix) ────────────
+    // The old single-shot drainRing write replayed up to 256KB of output
+    // accumulated while the project was hidden in ONE synchronous pass -
+    // xterm parse + WebGL render of a whole build log before the first
+    // frame - exactly the "switching into a busy project freezes for a
+    // beat" jank. The snapshot above already restored the visible state;
+    // the backlog is history, so it streams in CHUNK_BYTES-per-frame slices
+    // with a hard completion fuse. The pane is live and interactive from
+    // the first frame; new PTY output keeps flowing normally (the session
+    // layer writes live bytes directly to the bound slot, ahead of this
+    // backlog tail - late-history ordering is acceptable for a replay).
+    replayBacklog(slot, p);
     try {
       slot.term.write("\x1b[?25h");
     } catch (e) {
@@ -568,6 +660,11 @@ function detachSlotFromLeaf(slot: Slot): void {
   if (slot.ptyTimer) clearTimeout(slot.ptyTimer);
   slot.fitTimer = null;
   slot.ptyTimer = null;
+  // A mid-flight paced replay stops with the unbind: the writeSlice guard
+  // also checks currentLeafId, but clearing the timer prevents a straggler
+  // slice from firing at all after the slot moves on.
+  if (slot.replayTimer) clearTimeout(slot.replayTimer);
+  slot.replayTimer = null;
 
   cancelPendingUnhide(slot);
   slot.host.style.visibility = "";

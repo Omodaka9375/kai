@@ -28,6 +28,17 @@ import {
   setSlotFocused,
 } from "./rendererPool";
 
+/** Display budget for a dormant-ring backlog replay (smooth-switch 2026-10-31):
+ *  output that accumulated while the project was hidden beyond this TAIL is
+ *  dropped at drain time with the overflow notice — hidden-project build
+ *  spam is history; only the tail matters. The pool paces what remains
+ *  across frames (see replayBacklog in rendererPool.ts). */
+const REPLAY_BACKLOG_BUDGET_BYTES = 64 * 1024;
+
+/** A leaf counts as "running a command" for eviction protection if it
+ *  produced output within this window (see leafProducedRecently). */
+const LEAF_HOT_WINDOW_MS = 5_000;
+
 type Callbacks = {
   onSearchReady?: (addon: SearchAddon) => void;
   onExit?: (code: number) => void;
@@ -60,6 +71,11 @@ type Session = {
   hasSlot: boolean;
   /** Set to true once the PTY has delivered at least one byte of output. */
   receivedOutput: boolean;
+  /** performance.now() of the LAST PTY output byte — feeds the pool's
+   *  eviction scorer (leafProducedRecently): a leaf that produced output
+   *  seconds ago is a RUNNING command; its renderer is expensive to take
+   *  away. 0 = never. */
+  lastOutputAt: number;
   /** First output was EXACTLY a DSR cursor query (`\x1b[6n`) with no
    *  visible text — the known pwsh/PSReadLine startup-block signature.
    *  Gates the early (1.5s) synthetic CPR reply. */
@@ -119,6 +135,11 @@ configureRendererPool({
     const s = sessions.get(leafId);
     return !!s && s.visibleNow && s.focusedNow;
   },
+  leafProducedRecently(leafId) {
+    const s = sessions.get(leafId);
+    if (!s || s.lastOutputAt === 0) return false;
+    return performance.now() - s.lastOutputAt < LEAF_HOT_WINDOW_MS;
+  },
 });
 
 function ensureSession(leafId: number, initialCwd?: string, env?: Session["env"]): Session {
@@ -146,6 +167,7 @@ function ensureSession(leafId: number, initialCwd?: string, env?: Session["env"]
     dormantRing: new DormantRing(),
     hasSlot: false,
     receivedOutput: false,
+    lastOutputAt: 0,
     firstOutputWasDsrQuery: false,
     spawnEpoch: 0,
     nudgeTimers: [],
@@ -218,6 +240,7 @@ function deliverPtyBytes(leafId: number, bytes: Uint8Array): void {
       s.firstOutputWasDsrQuery = preview === "\x1b[6n";
     }
   }
+  s.lastOutputAt = performance.now();
   if (slot) slot.term.write(bytes);
   else s.dormantRing.push(bytes);
   // Feed to error detector (skip private terminals).
@@ -435,7 +458,10 @@ function bindLeafToSlot(leafId: number, s: Session): void {
       leafId,
       container: s.container,
       snapshot: s.snapshot,
-      drainRing: (write) => s.dormantRing.drain(write),
+      // Paced replay (smooth-switch): the pool slices this iterator across
+      // frames; the display budget drops a hidden-project build-log backlog
+      // beyond its tail (with the overflow notice).
+      drainRing: () => s.dormantRing.drainChunked(REPLAY_BACKLOG_BUDGET_BYTES),
       shellExited: s.shellExited,
       searchQuery: s.searchQuery,
       cols: s.cols,
