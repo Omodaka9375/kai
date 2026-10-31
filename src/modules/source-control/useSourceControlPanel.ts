@@ -388,7 +388,6 @@ export function useSourceControlPanel(
     const model = getModel(state.selectedModelId);
     return !providerNeedsKey(model.provider) || !!state.apiKeys[model.provider];
   });
-  const lmstudioModelId = usePreferencesStore((state) => state.lmstudioModelId);
   const openaiCompatibleBaseURL = usePreferencesStore(
     (state) => state.openaiCompatibleBaseURL,
   );
@@ -509,9 +508,6 @@ export function useSourceControlPanel(
     if (!hasApiKeyForSelected) {
       return "Connect an AI provider to generate commit messages";
     }
-    if (selectedModel.id === "lmstudio-local" && !lmstudioModelId.trim()) {
-      return "Connect an AI provider to generate commit messages";
-    }
     if (
       selectedModel.id === "openai-compatible-custom" &&
       (!openaiCompatibleBaseURL.trim() || !openaiCompatibleModelId.trim())
@@ -521,7 +517,6 @@ export function useSourceControlPanel(
     return null;
   }, [
     hasApiKeyForSelected,
-    lmstudioModelId,
     openaiCompatibleBaseURL,
     openaiCompatibleModelId,
     selectedModel,
@@ -957,10 +952,8 @@ export function useSourceControlPanel(
       const model = await buildConfiguredLanguageModel(
         selectedModelId,
         chatState.apiKeys,
-        prefs.lmstudioBaseURL,
-        lmstudioModelId,
-        openaiCompatibleBaseURL,
-        openaiCompatibleModelId,
+        prefs.openaiCompatibleBaseURL,
+        prefs.openaiCompatibleModelId,
       );
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 15000);
@@ -1011,7 +1004,6 @@ export function useSourceControlPanel(
   }, [
     aiUnavailableReason,
     aiBusy,
-    lmstudioModelId,
     openaiCompatibleBaseURL,
     openaiCompatibleModelId,
     repo,

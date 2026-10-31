@@ -16,7 +16,6 @@ import {
   ClaudeIcon,
   Clock01Icon,
   CoinsDollarIcon,
-  ComputerIcon,
   CpuIcon,
   DeepseekIcon,
   FavouriteIcon,
@@ -67,7 +66,6 @@ const PROVIDER_ICON = {
   mistral: Hexagon01Icon,
   openrouter: GlobeIcon,
   "openai-compatible": PlugIcon,
-  lmstudio: ComputerIcon,
   zai: CpuIcon,
   // Voice provider - never appears in a model list, but the Record must be
   // exhaustive so a future ProviderId can't compile without an icon.
@@ -179,7 +177,6 @@ function ModelDropdown() {
   }, []);
   const current = getModel(selected);
   // For custom endpoints, show the actual model ID instead of generic label.
-  const lmModelId = usePreferencesStore((s) => s.lmstudioModelId);
   const compatModelId = usePreferencesStore((s) => s.openaiCompatibleModelId);
 
   // Auto-sync OpenRouter models so the dropdown stays current.
@@ -190,11 +187,9 @@ function ModelDropdown() {
     if (hasOpenRouterKey) void orFetch();
   }, [hasOpenRouterKey, orFetch]);
   const displayLabel =
-    current.id === "lmstudio-local" && lmModelId.trim()
-      ? lmModelId.trim()
-      : current.id === "openai-compatible-custom" && compatModelId.trim()
-        ? compatModelId.trim()
-        : current.label;
+    current.id === "openai-compatible-custom" && compatModelId.trim()
+      ? compatModelId.trim()
+      : current.label;
   const [search, setSearch] = useState("");
   const [activeProvider, setActiveProvider] = useState<ProviderId | null>(null);
   const [tab, setTab] = useState<Tab>("all");
@@ -555,13 +550,12 @@ function ModelRow({
   onToggleFavorite: () => void;
   onToggleThinking: (modelId: string) => void;
 }) {
-  // Runtime enables thinking for reasoning-tagged models AND both custom
+  // Runtime enables thinking for reasoning-tagged models AND custom
   // endpoints. OpenAI-compatible has a dedicated preference, not the
   // per-model override map (mirrors chatRuntime.ts).
   const isReasoning =
     model.tags?.includes("reasoning") ||
-    model.id === "openai-compatible-custom" ||
-    model.id === "lmstudio-local";
+    model.id === "openai-compatible-custom";
   const hasOverride = isReasoning && model.id in modelThinkingModes;
   const effective =
     model.id === "openai-compatible-custom"

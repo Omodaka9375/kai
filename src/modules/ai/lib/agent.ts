@@ -11,7 +11,6 @@ import {
   DEFAULT_MODEL_ID,
   getModel,
   getModelContextLimit,
-  LMSTUDIO_DEFAULT_BASE_URL,
   MAX_AGENT_STEPS,
   NO_VISION_NOTICE,
   providerNeedsKey,
@@ -82,7 +81,6 @@ const cloudFetch: typeof fetch = async (input, init) => {
 
 export type BuildModelOptions = {
   modelIdOverride?: string;
-  lmstudioBaseURL?: string;
   openaiCompatibleBaseURL?: string;
 };
 
@@ -111,9 +109,8 @@ export async function buildLanguageModel(
     );
   }
   const key = keys[provider] ?? "";
-  const lmstudioURL = options.lmstudioBaseURL ?? LMSTUDIO_DEFAULT_BASE_URL;
   const compatURL = options.openaiCompatibleBaseURL ?? "";
-  const cacheKey = `${provider} ${key} ${resolvedModelId} ${lmstudioURL} ${compatURL}`;
+  const cacheKey = `${provider} ${key} ${resolvedModelId} ${compatURL}`;
   const hit = modelCache.get(cacheKey);
   if (hit) return hit;
 
@@ -213,21 +210,14 @@ export async function buildLanguageModel(
       })(resolvedModelId);
       break;
     }
-    case "lmstudio": {
-      const { createOpenAICompatible } =
-        await import("@ai-sdk/openai-compatible");
-      built = createOpenAICompatible({
-        name: "lmstudio",
-        baseURL: lmstudioURL,
-        fetch: localProxyFetch,
-      })(resolvedModelId);
-      break;
-    }
     case "assemblyai": {
       // Voice provider (STT/TTS in Settings > Voice) - deliberately has NO
       // chat-model path. Reaching here means a model was registered with a
       // provider id that only exists for key storage; that must never
-      // happen (models.ts has no assemblyai entries).
+      // happen (models.ts has no assemblyai entries). The never-narrowing
+      // below tolerates deprecated provider ids (lmstudio) still reaching
+      // this switch from stale persisted settings.
+      void (provider as string);
       throw new Error(
         "AssemblyAI is a voice provider (STT/TTS), not a chat model provider.",
       );
@@ -244,21 +234,12 @@ export async function buildLanguageModel(
 export function buildConfiguredLanguageModel(
   modelId: ModelId,
   keys: ProviderKeys,
-  lmstudioBaseURL?: string,
-  lmstudioModelId?: string,
   openaiCompatibleBaseURL?: string,
   openaiCompatibleModelId?: string,
 ): Promise<LanguageModel> {
   const m = getModel(modelId);
   let resolvedId: string = m.id;
-  if (m.id === "lmstudio-local") {
-    if (!lmstudioModelId?.trim()) {
-      throw new Error(
-        "LM Studio: no model id set. Open Settings → Models and enter the model id loaded in LM Studio.",
-      );
-    }
-    resolvedId = lmstudioModelId.trim();
-  } else if (m.id === "openai-compatible-custom") {
+  if (m.id === "openai-compatible-custom") {
     if (!openaiCompatibleModelId?.trim()) {
       throw new Error(
         "OpenAI-compatible: no model id set. Open Settings → Models.",
@@ -267,7 +248,6 @@ export function buildConfiguredLanguageModel(
     resolvedId = openaiCompatibleModelId.trim();
   }
   return buildLanguageModel(m.provider, keys, resolvedId, {
-    lmstudioBaseURL,
     openaiCompatibleBaseURL,
   });
 }
@@ -361,8 +341,6 @@ export type RunAgentOptions = {
   onCompact?: (info: { droppedCount: number }) => void;
   onFinishMeta?: (info: { hitStepCap: boolean; finishReason: string }) => void;
   onLoopDetected?: (info: LoopDetectionResult) => void;
-  lmstudioBaseURL?: string;
-  lmstudioModelId?: string;
   openaiCompatibleBaseURL?: string;
   openaiCompatibleModelId?: string;
   /** User-set vision override for custom endpoints (Settings → Models).
@@ -611,8 +589,6 @@ export async function runAgentStream(opts: RunAgentOptions) {
   const model = await buildConfiguredLanguageModel(
     modelId,
     opts.keys,
-    opts.lmstudioBaseURL,
-    opts.lmstudioModelId,
     opts.openaiCompatibleBaseURL,
     opts.openaiCompatibleModelId,
   );
@@ -634,15 +610,13 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // history transform, so the model is never told it can see when the
   // request will strip images (and vice versa). For custom endpoints the
   // registry entry is a placeholder — consult the RUNTIME model name
-  // (opts.lmstudioModelId / opts.openaiCompatibleModelId) so a locally-hosted
-  // vision model actually receives the image. A user-set override
-  // (Settings → Models → Vision) wins over both.
+  // (opts.openaiCompatibleModelId) so a locally-hosted vision model actually
+  // receives the image. A user-set override (Settings → Models → Vision)
+  // wins over both.
   const runtimeModelName =
-    modelId === "lmstudio-local"
-      ? opts.lmstudioModelId
-      : modelId === "openai-compatible-custom"
-        ? opts.openaiCompatibleModelId
-        : null;
+    modelId === "openai-compatible-custom"
+      ? opts.openaiCompatibleModelId
+      : null;
   const canSee = modelCanSee(
     modelId,
     runtimeModelName,
@@ -711,9 +685,9 @@ export async function runAgentStream(opts: RunAgentOptions) {
   const thinkingMode: ThinkingMode = (opts.thinkingMode ?? "off") as ThinkingMode;
   const modelTags = getModel(modelId).tags;
   const isReasoningModel = modelTags?.includes("reasoning");
-  // Custom endpoints (openai-compatible, LM Studio) always allow thinking
-  // so users can control reasoning effort for their local models.
-  const isCustomEndpoint = modelId === "openai-compatible-custom" || modelId === "lmstudio-local";
+  // Custom endpoints always allow thinking so users can control
+  // reasoning effort for their local models.
+  const isCustomEndpoint = modelId === "openai-compatible-custom";
   const thinkingProviderOpts: Record<string, Record<string, unknown>> = {};
   if (thinkingMode !== "off" && (isReasoningModel || isCustomEndpoint)) {
     switch (provider) {
@@ -753,17 +727,15 @@ export async function runAgentStream(opts: RunAgentOptions) {
         };
         break;
       case "openai-compatible":
-      case "lmstudio":
         // OpenAI-compatible endpoints accept `reasoning_effort` natively
         // (vLLM, Ollama, Z.AI, Fireworks, ...). CRITICAL: @ai-sdk's
         // openai-compatible provider reads providerOptions under the NAME
         // passed to createOpenAICompatible (camelCase per v6 — SDK v6
         // still merges the hyphenated "openai-compatible" but warns it is
-        // deprecated and will drop it; "lmstudio" is single-token so
-        // unchanged) — any other key is silently dropped and the param
-        // never sent. See the four-key merge in
+        // deprecated and will drop it) — any other key is silently dropped
+        // and the param never sent. See the four-key merge in
         // @ai-sdk/openai-compatible/dist getArgs().
-        thinkingProviderOpts[provider === "openai-compatible" ? "openaiCompatible" : provider] = {
+        thinkingProviderOpts.openaiCompatible = {
           reasoningEffort: THINKING_EFFORT_OPENAI[thinkingMode],
         };
         break;

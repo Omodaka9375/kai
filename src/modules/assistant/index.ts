@@ -365,7 +365,7 @@ export function describeAssistantCapabilities(
  * Resolve the assistant's model endpoint, honoring its OWN custom-endpoint
  * overrides so it stays isolated from the desktop's Settings → Models config.
  *
- * For a custom provider (lmstudio-local / openai-compatible-custom) the model
+ * For a custom provider (openai-compatible-custom) the model
  * NAME and BASE URL come from prefs.customModelId / prefs.customBaseUrl when
  * set, else fall back to the global Settings → Models value. That means: leave
  * them blank → "inherit the global endpoint"; set them → the assistant is
@@ -376,23 +376,17 @@ export function resolveAssistantEndpoint(
   modelId: string,
   prefs: { customModelId?: string | null; customBaseUrl?: string | null },
   global: {
-    lmstudioModelId?: string;
-    lmstudioBaseURL: string;
     openaiCompatibleModelId?: string;
     openaiCompatibleBaseURL: string;
   },
-): { resolvedModelId: string; lmstudioBaseURL: string; openaiCompatibleBaseURL: string } {
+): { resolvedModelId: string; openaiCompatibleBaseURL: string } {
   const ownModel = prefs.customModelId?.trim() || null;
   const ownUrl = prefs.customBaseUrl?.trim() || null;
   const out = {
     resolvedModelId: modelId,
-    lmstudioBaseURL: global.lmstudioBaseURL,
     openaiCompatibleBaseURL: global.openaiCompatibleBaseURL,
   };
-  if (modelId === "lmstudio-local") {
-    out.resolvedModelId = ownModel || global.lmstudioModelId?.trim() || modelId;
-    if (ownUrl) out.lmstudioBaseURL = ownUrl;
-  } else if (modelId === "openai-compatible-custom") {
+  if (modelId === "openai-compatible-custom") {
     out.resolvedModelId = ownModel || global.openaiCompatibleModelId?.trim() || modelId;
     if (ownUrl) out.openaiCompatibleBaseURL = ownUrl;
   }
@@ -429,7 +423,6 @@ export async function runAssistantTurn(
   const m = getModel(modelId);
   const ep = resolveAssistantEndpoint(m.id, prefs, usePreferencesStore.getState());
   const model = await buildLanguageModel(m.provider, keys, ep.resolvedModelId, {
-    lmstudioBaseURL: ep.lmstudioBaseURL,
     openaiCompatibleBaseURL: ep.openaiCompatibleBaseURL,
   });
 

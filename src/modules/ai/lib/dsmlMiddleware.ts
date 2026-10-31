@@ -58,7 +58,7 @@ function stallBudgetsFor(provider: string): StallBudgets {
   // 5-min first-token kill against multi-minute local prefill). Compare the
   // first dot-segment instead.
   const head = (provider.split(".")[0] ?? "").trim();
-  const local = head === "lmstudio" || head === "openai-compatible";
+  const local = head === "openai-compatible";
   return local
     ? { first: STALL_FIRST_CHUNK_LOCAL_MS, inter: STALL_INTER_CHUNK_LOCAL_MS }
     : { first: STALL_FIRST_CHUNK_MS, inter: STALL_INTER_CHUNK_MS };

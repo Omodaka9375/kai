@@ -194,28 +194,15 @@ export function AiInputBar() {
   // the agent will send extracted text instead of the picture itself.
   const selectedModelId = useChatStore((s) => s.selectedModelId);
   const hasImageAttachment = c.files.some((f) => f.kind === "image");
-  // Custom endpoints (LM Studio / OpenAI-compatible) run a user-supplied
+  // Custom endpoints (OpenAI-compatible) run a user-supplied
   // model — the registry entry is a placeholder with no vision tag, so consult
   // the RUNTIME model name: a local qwen2-vl / llava actually sees images.
   // The Settings → Models → Vision override (on/off) wins over the name guess.
-  const lmModelId = usePreferencesStore((s) => s.lmstudioModelId);
   const compatModelId = usePreferencesStore((s) => s.openaiCompatibleModelId);
-  const lmVision = usePreferencesStore((s) => s.lmstudioVision);
   const compatVision = usePreferencesStore((s) => s.openaiCompatibleVision);
-  const isCustom =
-    selectedModelId === "lmstudio-local" ||
-    selectedModelId === "openai-compatible-custom";
-  const runtimeModelName =
-    selectedModelId === "lmstudio-local"
-      ? lmModelId
-      : selectedModelId === "openai-compatible-custom"
-        ? compatModelId
-        : null;
-  const visionOverride = isCustom
-    ? selectedModelId === "lmstudio-local"
-      ? lmVision
-      : compatVision
-    : null;
+  const isCustom = selectedModelId === "openai-compatible-custom";
+  const runtimeModelName = isCustom ? compatModelId : null;
+  const visionOverride = isCustom ? compatVision : null;
   const imageBlindModel =
     hasImageAttachment &&
     modelTextOnly(selectedModelId, runtimeModelName, visionOverride);

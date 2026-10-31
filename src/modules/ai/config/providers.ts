@@ -11,7 +11,6 @@ export type ProviderId =
   | "mistral"
   | "openrouter"
   | "openai-compatible"
-  | "lmstudio"
   | "zai"
   | "assemblyai";
 
@@ -98,13 +97,6 @@ export const PROVIDERS: readonly ProviderInfo[] = [
     keyOptional: true,
   },
   {
-    id: "lmstudio",
-    label: "LM Studio",
-    keyringAccount: "",
-    keyPrefix: null,
-    consoleUrl: "https://lmstudio.ai/docs/basics/server",
-  },
-  {
     id: "zai",
     label: "Z.ai (GLM)",
     keyringAccount: "zai-api-key",
@@ -132,7 +124,6 @@ export function getProvider(id: ProviderId): ProviderInfo {
 
 /** Providers that do not require an API key (local servers, key-optional). */
 export const KEYLESS_PROVIDERS: readonly ProviderId[] = [
-  "lmstudio",
   "openai-compatible",
 ] as const;
 
@@ -148,5 +139,4 @@ export function providerSupportsKey(id: ProviderId): boolean {
   return !!p.keyOptional;
 }
 
-export const LMSTUDIO_DEFAULT_BASE_URL = "http://localhost:1234/v1";
 export const OPENAI_COMPATIBLE_DEFAULT_BASE_URL = "";

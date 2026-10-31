@@ -249,17 +249,13 @@ export function makeChatSync(
         const selectedModelId = deps.getSelectedModelId();
         const prefs = usePreferencesStore.getState();
         const runtimeModelName =
-          selectedModelId === "lmstudio-local"
-            ? prefs.lmstudioModelId
-            : selectedModelId === "openai-compatible-custom"
-              ? prefs.openaiCompatibleModelId
-              : null;
+          selectedModelId === "openai-compatible-custom"
+            ? prefs.openaiCompatibleModelId
+            : null;
         const visionOverride =
-          selectedModelId === "lmstudio-local"
-            ? (prefs.lmstudioVision ?? "auto")
-            : selectedModelId === "openai-compatible-custom"
-              ? (prefs.openaiCompatibleVision ?? "auto")
-              : null;
+          selectedModelId === "openai-compatible-custom"
+            ? (prefs.openaiCompatibleVision ?? "auto")
+            : null;
         return canDeliverToolResultImages(
           getModel(selectedModelId).provider,
           modelCanSee(selectedModelId, runtimeModelName, visionOverride),
@@ -306,8 +302,6 @@ export function makeChatSync(
       };
     },
     getPlanMode: () => usePlanStore.getState().active,
-    getLmstudioBaseURL: () => usePreferencesStore.getState().lmstudioBaseURL,
-    getLmstudioModelId: () => usePreferencesStore.getState().lmstudioModelId,
     getOpenaiCompatibleBaseURL: () =>
       usePreferencesStore.getState().openaiCompatibleBaseURL,
     getOpenaiCompatibleModelId: () =>
@@ -317,8 +311,6 @@ export function makeChatSync(
     getCustomVisionOverride: () => {
       const prefs = usePreferencesStore.getState();
       const selectedModelId = deps.getSelectedModelId();
-      if (selectedModelId === "lmstudio-local")
-        return prefs.lmstudioVision ?? "auto";
       if (selectedModelId === "openai-compatible-custom")
         return prefs.openaiCompatibleVision ?? "auto";
       return null;

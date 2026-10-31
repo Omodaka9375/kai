@@ -671,9 +671,7 @@ async function runPersonaReply(
     }
     const prefs = usePreferencesStore.getState();
     let resolved = m.id;
-    if (m.id === "lmstudio-local" && prefs.lmstudioModelId?.trim()) {
-      resolved = prefs.lmstudioModelId.trim();
-    } else if (m.id === "openai-compatible-custom" && prefs.openaiCompatibleModelId?.trim()) {
+    if (m.id === "openai-compatible-custom" && prefs.openaiCompatibleModelId?.trim()) {
       resolved = prefs.openaiCompatibleModelId.trim();
     }
     // Dynamic imports: lib/agent + tools/tools pull the whole registry and
@@ -685,7 +683,6 @@ async function runPersonaReply(
       import("../lib/mcpManager"),
     ]);
     const model = await buildLanguageModel(m.provider, keys, resolved, {
-      lmstudioBaseURL: prefs.lmstudioBaseURL,
       openaiCompatibleBaseURL: prefs.openaiCompatibleBaseURL,
     });
     // The transcript contains OTHER agents' output - fence it so a malicious

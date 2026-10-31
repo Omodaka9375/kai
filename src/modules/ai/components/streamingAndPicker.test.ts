@@ -38,7 +38,9 @@ describe("resizable model picker", () => {
 
   it("shows thinking for custom endpoints and uses the compat-specific preference", () => {
     expect(src).toContain('model.id === "openai-compatible-custom"');
-    expect(src).toContain('model.id === "lmstudio-local"');
     expect(src).toContain("setOpenaiCompatibleThinkingMode(next)");
+    // The lmstudio-local model entry was removed (2026-10-31) — LM Studio
+    // rides the OpenAI-compatible endpoint. It must not reappear.
+    expect(src).not.toContain('model.id === "lmstudio-local"');
   });
 });

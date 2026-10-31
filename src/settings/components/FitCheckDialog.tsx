@@ -84,13 +84,10 @@ export function FitCheckDialog({
       const model = await buildConfiguredLanguageModel(
         modelId,
         keys,
-        prefs.lmstudioBaseURL,
-        prefs.lmstudioModelId,
         prefs.openaiCompatibleBaseURL,
         prefs.openaiCompatibleModelId,
       );
-      const local =
-        m.provider === "lmstudio" || m.provider === "openai-compatible";
+      const local = m.provider === "openai-compatible";
       const rep = await runFitCheck({
         model,
         modelId,

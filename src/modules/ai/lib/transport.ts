@@ -100,8 +100,6 @@ type Deps = {
   getCustomInstructions: () => string;
   getAgentPersona: () => { name: string; instructions: string } | null;
   getLive: () => LiveSnapshot;
-  getLmstudioBaseURL?: () => string | undefined;
-  getLmstudioModelId?: () => string | undefined;
   getOpenaiCompatibleBaseURL?: () => string | undefined;
   getOpenaiCompatibleModelId?: () => string | undefined;
   getCustomVisionOverride?: () => import("@/modules/ai/config").VisionOverride | null;
@@ -248,8 +246,6 @@ export function createContextAwareTransport(deps: Deps) {
           if (ext.onAgentEnd) void ext.onAgentEnd({ sessionId, modelId, stepCount: extensionStepCount, finishReason });
         }
       },
-      lmstudioBaseURL: deps.getLmstudioBaseURL?.(),
-      lmstudioModelId: deps.getLmstudioModelId?.(),
       openaiCompatibleBaseURL: deps.getOpenaiCompatibleBaseURL?.(),
       openaiCompatibleModelId: deps.getOpenaiCompatibleModelId?.(),
       customVisionOverride: deps.getCustomVisionOverride?.() ?? null,

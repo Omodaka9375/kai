@@ -34,12 +34,14 @@ const providersSrc = readFileSync(
 );
 
 describe("compat provider transport stays LAN-capable", () => {
-  it("openai-compatible and lmstudio build with localProxyFetch", () => {
-    // Extract the two provider cases and assert each uses localProxyFetch.
+  it("openai-compatible builds with localProxyFetch", () => {
+    // Extract the provider case and assert it uses localProxyFetch.
     const compatCase = agentSrc.split('case "openai-compatible":')[1]?.split("case")[0] ?? "";
     expect(compatCase).toContain("localProxyFetch");
-    const lmCase = agentSrc.split('case "lmstudio":')[1]?.split("default:")[0] ?? "";
-    expect(lmCase).toContain("localProxyFetch");
+    // The dedicated lmstudio provider was removed (2026-10-31): LM Studio is
+    // the OpenAI-compatible endpoint (same createOpenAICompatible client,
+    // same localProxyFetch). No second local-provider case may reappear.
+    expect(agentSrc).not.toContain('case "lmstudio":');
   });
 
   it("localProxyFetch allows private networks", () => {

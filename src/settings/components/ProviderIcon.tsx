@@ -3,7 +3,6 @@ import {
   AiVoiceIcon,
   ChatGptIcon,
   ClaudeIcon,
-  ComputerIcon,
   FlashIcon,
   GoogleGeminiIcon,
   Grok02Icon,
@@ -26,7 +25,6 @@ const ICON_BY_PROVIDER = {
   mistral: Hexagon01Icon,
   openrouter: GlobeIcon,
   "openai-compatible": PlugIcon,
-  lmstudio: ComputerIcon,
   zai: CpuIcon,
   // Voice provider (STT/TTS) - a voice glyph distinguishes it from the
   // chat-model providers in the key grid.

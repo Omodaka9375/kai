@@ -240,8 +240,8 @@ export function ExternalSection() {
           />
         </SettingRow>
 
-        {(prefs.modelId ?? globalDefaultModelId) === "openai-compatible-custom" ||
-        (prefs.modelId ?? globalDefaultModelId) === "lmstudio-local" ? (
+        {(prefs.modelId ?? globalDefaultModelId) ===
+        "openai-compatible-custom" ? (
           <>
             <SettingRow
               title="Assistant model name"
@@ -258,7 +258,7 @@ export function ExternalSection() {
             </SettingRow>
             <SettingRow
               title="Assistant base URL"
-              description="Overrides the OpenAI-compatible / LM Studio base URL for the ASSISTANT only. Blank = inherit Settings → Models (e.g. http://localhost:1234/v1)."
+              description="Overrides the OpenAI-compatible base URL for the ASSISTANT only. Blank = inherit Settings → Models (e.g. http://127.0.0.1:1234/v1)."
             >
               <Input
                 value={prefs.customBaseUrl ?? ""}

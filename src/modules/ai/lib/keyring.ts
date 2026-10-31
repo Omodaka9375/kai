@@ -7,7 +7,10 @@ import {
   type ProviderId,
 } from "../config";
 
-export type ProviderKeys = Record<ProviderId, string | null>;
+/** Keys per provider id. Excess/deprecated ids (a removed provider still
+ *  present in persisted settings) are allowed as `string | null` so stale
+ *  state type-checks; lookups only ever go through PROVIDERS members. */
+export type ProviderKeys = Record<string, string | null>;
 
 export const EMPTY_PROVIDER_KEYS: ProviderKeys = {
   openai: null,
@@ -20,7 +23,6 @@ export const EMPTY_PROVIDER_KEYS: ProviderKeys = {
   mistral: null,
   openrouter: null,
   "openai-compatible": null,
-  lmstudio: null,
   zai: null,
   assemblyai: null,
 };

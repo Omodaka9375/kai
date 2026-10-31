@@ -79,14 +79,7 @@ describe("stall budgets: local providers get LOCAL budgets", () => {
     expect(b.inter).toBe(240_000);
   });
 
-  it("lmstudio.chat (dotted, real SDK shape) gets LOCAL budgets", () => {
-    const b = stallBudgetsForProvider("lmstudio.chat");
-    expect(b.first).toBe(600_000);
-    expect(b.inter).toBe(240_000);
-  });
-
-  it("bare legacy names still match (defense in depth)", () => {
-    expect(stallBudgetsForProvider("lmstudio").inter).toBe(240_000);
+  it("bare legacy name still matches (defense in depth)", () => {
     expect(stallBudgetsForProvider("openai-compatible").inter).toBe(240_000);
   });
 

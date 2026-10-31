@@ -63,7 +63,6 @@ export function SearchableModelPicker({ value, onChange, disabled }: Props) {
   const [keys, setKeys] = useState<ProviderKeys | null>(null);
 
   const defaultModelId = usePreferencesStore((s) => s.defaultModelId);
-  const lmstudioModelId = usePreferencesStore((s) => s.lmstudioModelId);
   const openaiCompatibleModelId = usePreferencesStore(
     (s) => s.openaiCompatibleModelId,
   );
@@ -76,7 +75,6 @@ export function SearchableModelPicker({ value, onChange, disabled }: Props) {
   }, [open]);
 
   const isAvailable = (id: string, provider: ProviderId): boolean => {
-    if (id === "lmstudio-local") return !!lmstudioModelId.trim();
     if (id === "openai-compatible-custom")
       return !!openaiCompatibleModelId.trim();
     if (!providerNeedsKey(provider)) return true;

@@ -41,7 +41,7 @@ export function modelTextOnly(
 ): boolean {
   const m = getModel(modelId as never);
   if (m.tags?.includes("vision")) return false;
-  if (m.id === "openai-compatible-custom" || m.id === "lmstudio-local") {
+  if (m.id === "openai-compatible-custom") {
     // Explicit user override beats both the registry and the name guess.
     if (visionOverride === "on") return false;
     if (visionOverride === "off") return true;

@@ -14,7 +14,6 @@ type State = Preferences & {
 };
 
 function syncContextOverrides(prefs: Preferences) {
-  setCustomContextLimit("lmstudio-local", prefs.lmstudioContextSize ?? 0);
   setCustomContextLimit("openai-compatible-custom", prefs.openaiCompatibleContextSize ?? 0);
 }
 
@@ -32,8 +31,11 @@ export const usePreferencesStore = create<State>((set) => ({
     syncContextOverrides(prefs);
     void onPreferencesChange((key, value) => {
       set({ [key]: value } as Partial<State>);
-      if (key === "lmstudioContextSize" || key === "openaiCompatibleContextSize") {
-        syncContextOverrides({ ...usePreferencesStore.getState(), [key]: value });
+      if (key === "openaiCompatibleContextSize") {
+        syncContextOverrides({
+          ...usePreferencesStore.getState(),
+          [key]: value as number,
+        });
       }
     });
   },

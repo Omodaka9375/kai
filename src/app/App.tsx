@@ -483,8 +483,6 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
   const setApiKeys = useChatStore((s) => s.setApiKeys);
   const setLive = useChatStore((s) => s.setLive);
   const respondToApproval = useChatStore((s) => s.respondToApproval);
-  const lmstudioModelId = usePreferencesStore((s) => s.lmstudioModelId);
-  const lmstudioBaseURL = usePreferencesStore((s) => s.lmstudioBaseURL);
   const openaiCompatibleModelId = usePreferencesStore(
     (s) => s.openaiCompatibleModelId,
   );
@@ -492,9 +490,8 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
     (s) => s.openaiCompatibleBaseURL,
   );
   const hasLocalModel =
-    (lmstudioBaseURL.trim().length > 0 && lmstudioModelId.trim().length > 0) ||
-    (openaiCompatibleBaseURL.trim().length > 0 &&
-      openaiCompatibleModelId.trim().length > 0);
+    openaiCompatibleBaseURL.trim().length > 0 &&
+    openaiCompatibleModelId.trim().length > 0;
   const hasComposer = hasAnyKey(apiKeys) || hasLocalModel;
 
   const [keysLoaded, setKeysLoaded] = useState(false);

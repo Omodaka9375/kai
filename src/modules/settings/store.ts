@@ -1,6 +1,5 @@
 import {
   DEFAULT_MODEL_ID,
-  LMSTUDIO_DEFAULT_BASE_URL,
   OPENAI_COMPATIBLE_DEFAULT_BASE_URL,
   type ModelId,
   type ThinkingMode,
@@ -45,8 +44,6 @@ export type Preferences = {
   customInstructions: string;
   autostart: boolean;
   restoreWindowState: boolean;
-  lmstudioBaseURL: string;
-  lmstudioModelId: string;
   openaiCompatibleBaseURL: string;
   openaiCompatibleModelId: string;
   favoriteModelIds: string[];
@@ -63,17 +60,13 @@ export type Preferences = {
   defaultShell: string;
   /** Last workspace directory — restored on next launch if no launch dir. */
   lastWorkspaceCwd: string;
-  /** Context window size in tokens for LM Studio model. 0 = use default (128k). */
-  lmstudioContextSize: number;
   /** Context window size in tokens for OpenAI-compatible model. 0 = use default (128k). */
   openaiCompatibleContextSize: number;
   /** Thinking mode for the OpenAI-compatible endpoint model. off/low/medium/high. */
   openaiCompatibleThinkingMode: ThinkingMode;
-  /** Vision capability for the LM Studio model. "auto" = detect from the
-   *  model name (vl/vision/llava/…); "on"/"off" override the detection. */
-  lmstudioVision: VisionOverride;
-  /** Vision capability for the OpenAI-compatible endpoint model. Same
-   *  semantics as lmstudioVision. */
+  /** Vision capability for the OpenAI-compatible endpoint model. "auto" =
+   *  detect from the model name (vl/vision/llava/…); "on"/"off" override
+   *  the detection. */
   openaiCompatibleVision: VisionOverride;
   /** Active UI color theme. "default" uses the built-in Kai palette. */
   uiThemeId: string;
@@ -145,8 +138,6 @@ const KEY_EDITOR_THEME = "editorTheme";
 const KEY_CUSTOM_INSTRUCTIONS = "customInstructions";
 const KEY_AUTOSTART = "autostart";
 const KEY_RESTORE_WINDOW = "restoreWindowState";
-const KEY_LMSTUDIO_BASE_URL = "lmstudioBaseURL";
-const KEY_LMSTUDIO_MODEL_ID = "lmstudioModelId";
 const KEY_OPENAI_COMPAT_BASE_URL = "openaiCompatibleBaseURL";
 const KEY_OPENAI_COMPAT_MODEL_ID = "openaiCompatibleModelId";
 const KEY_FAVORITE_MODELS = "favoriteModelIds";
@@ -163,10 +154,8 @@ const KEY_SHORTCUTS = "shortcuts";
 const KEY_DEFAULT_SHELL = "defaultShell";
 const KEY_LAST_WORKSPACE_CWD = "lastWorkspaceCwd";
 const KEY_RECENT_PROJECTS = "recentProjects";
-const KEY_LMSTUDIO_CTX_SIZE = "lmstudioContextSize";
 const KEY_COMPAT_CTX_SIZE = "openaiCompatibleContextSize";
 const KEY_COMPAT_THINKING = "openaiCompatibleThinkingMode";
-const KEY_LMSTUDIO_VISION = "lmstudioVision";
 const KEY_COMPAT_VISION = "openaiCompatibleVision";
 const KEY_UI_THEME = "uiThemeId";
 const KEY_SUBAGENT_MAX_STEPS = "subagentMaxSteps";
@@ -215,8 +204,6 @@ export const DEFAULT_PREFERENCES: Preferences = {
   customInstructions: "",
   autostart: false,
   restoreWindowState: true,
-  lmstudioBaseURL: LMSTUDIO_DEFAULT_BASE_URL,
-  lmstudioModelId: "",
   openaiCompatibleBaseURL: OPENAI_COMPATIBLE_DEFAULT_BASE_URL,
   openaiCompatibleModelId: "",
   favoriteModelIds: [],
@@ -237,10 +224,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
   shortcuts: {} as Record<ShortcutId, KeyBinding[]>,
   defaultShell: "auto",
   lastWorkspaceCwd: "",
-  lmstudioContextSize: 0,
   openaiCompatibleContextSize: 0,
   openaiCompatibleThinkingMode: "off" as ThinkingMode,
-  lmstudioVision: "auto" as VisionOverride,
   openaiCompatibleVision: "auto" as VisionOverride,
   uiThemeId: "default",
   recentProjects: [],
@@ -303,10 +288,6 @@ export async function loadPreferences(): Promise<Preferences> {
     restoreWindowState:
       get<boolean>(KEY_RESTORE_WINDOW) ??
       DEFAULT_PREFERENCES.restoreWindowState,
-    lmstudioBaseURL:
-      get<string>(KEY_LMSTUDIO_BASE_URL) ?? DEFAULT_PREFERENCES.lmstudioBaseURL,
-    lmstudioModelId:
-      get<string>(KEY_LMSTUDIO_MODEL_ID) ?? DEFAULT_PREFERENCES.lmstudioModelId,
     openaiCompatibleBaseURL:
       get<string>(KEY_OPENAI_COMPAT_BASE_URL) ??
       DEFAULT_PREFERENCES.openaiCompatibleBaseURL,
@@ -346,18 +327,12 @@ export async function loadPreferences(): Promise<Preferences> {
     lastWorkspaceCwd:
       get<string>(KEY_LAST_WORKSPACE_CWD) ??
       DEFAULT_PREFERENCES.lastWorkspaceCwd,
-    lmstudioContextSize:
-      get<number>(KEY_LMSTUDIO_CTX_SIZE) ??
-      DEFAULT_PREFERENCES.lmstudioContextSize,
     openaiCompatibleContextSize:
       get<number>(KEY_COMPAT_CTX_SIZE) ??
       DEFAULT_PREFERENCES.openaiCompatibleContextSize,
     openaiCompatibleThinkingMode:
       get<ThinkingMode>(KEY_COMPAT_THINKING) ??
       DEFAULT_PREFERENCES.openaiCompatibleThinkingMode,
-    lmstudioVision:
-      get<VisionOverride>(KEY_LMSTUDIO_VISION) ??
-      DEFAULT_PREFERENCES.lmstudioVision,
     openaiCompatibleVision:
       get<VisionOverride>(KEY_COMPAT_VISION) ??
       DEFAULT_PREFERENCES.openaiCompatibleVision,
@@ -520,14 +495,6 @@ export async function setVoiceTtsAssemblyVoice(value: string): Promise<void> {
   await writePref(KEY_VOICE_TTS_ASSEMBLY_VOICE, value ?? "");
 }
 
-export async function setLmstudioBaseURL(value: string): Promise<void> {
-  await writePref(KEY_LMSTUDIO_BASE_URL, value);
-}
-
-export async function setLmstudioModelId(value: string): Promise<void> {
-  await writePref(KEY_LMSTUDIO_MODEL_ID, value);
-}
-
 export async function setOpenaiCompatibleBaseURL(value: string): Promise<void> {
   await writePref(KEY_OPENAI_COMPAT_BASE_URL, value);
 }
@@ -627,20 +594,12 @@ export async function setDefaultShell(value: string): Promise<void> {
   await writePref(KEY_DEFAULT_SHELL, value);
 }
 
-export async function setLmstudioContextSize(value: number): Promise<void> {
-  await writePref(KEY_LMSTUDIO_CTX_SIZE, value);
-}
-
 export async function setOpenaiCompatibleContextSize(value: number): Promise<void> {
   await writePref(KEY_COMPAT_CTX_SIZE, value);
 }
 
 export async function setOpenaiCompatibleThinkingMode(value: ThinkingMode): Promise<void> {
   await writePref(KEY_COMPAT_THINKING, value);
-}
-
-export async function setLmstudioVision(value: VisionOverride): Promise<void> {
-  await writePref(KEY_LMSTUDIO_VISION, value);
 }
 
 export async function setOpenaiCompatibleVision(value: VisionOverride): Promise<void> {
@@ -752,8 +711,6 @@ export async function onPreferencesChange(
     [KEY_CUSTOM_INSTRUCTIONS]: "customInstructions",
     [KEY_AUTOSTART]: "autostart",
     [KEY_RESTORE_WINDOW]: "restoreWindowState",
-    [KEY_LMSTUDIO_BASE_URL]: "lmstudioBaseURL",
-    [KEY_LMSTUDIO_MODEL_ID]: "lmstudioModelId",
     [KEY_OPENAI_COMPAT_BASE_URL]: "openaiCompatibleBaseURL",
     [KEY_OPENAI_COMPAT_MODEL_ID]: "openaiCompatibleModelId",
     [KEY_FAVORITE_MODELS]: "favoriteModelIds",
@@ -769,10 +726,8 @@ export async function onPreferencesChange(
     [KEY_SHORTCUTS]: "shortcuts",
     [KEY_DEFAULT_SHELL]: "defaultShell",
     [KEY_LAST_WORKSPACE_CWD]: "lastWorkspaceCwd",
-    [KEY_LMSTUDIO_CTX_SIZE]: "lmstudioContextSize",
     [KEY_COMPAT_CTX_SIZE]: "openaiCompatibleContextSize",
     [KEY_COMPAT_THINKING]: "openaiCompatibleThinkingMode",
-    [KEY_LMSTUDIO_VISION]: "lmstudioVision",
     [KEY_COMPAT_VISION]: "openaiCompatibleVision",
     [KEY_UI_THEME]: "uiThemeId",
     projectModelIds: "projectModelIds",

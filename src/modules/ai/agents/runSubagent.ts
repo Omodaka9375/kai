@@ -17,8 +17,6 @@ type Args = {
   keys: ProviderKeys;
   modelId: ModelId;
   toolContext: ToolContext;
-  lmstudioBaseURL?: string;
-  lmstudioModelId?: string;
   openaiCompatibleBaseURL?: string;
   openaiCompatibleModelId?: string;
   onStep?: (label: string) => void;
@@ -38,8 +36,6 @@ export async function runSubagent({
   keys,
   modelId,
   toolContext,
-  lmstudioBaseURL,
-  lmstudioModelId,
   openaiCompatibleBaseURL,
   openaiCompatibleModelId,
   onStep,
@@ -71,9 +67,7 @@ export async function runSubagent({
   // Resolve model id for local providers that use a user-configured model name.
   const m = getModel(modelId);
   let resolvedModelId = m.id;
-  if (m.id === "lmstudio-local" && lmstudioModelId?.trim()) {
-    resolvedModelId = lmstudioModelId.trim();
-  } else if (m.id === "openai-compatible-custom" && openaiCompatibleModelId?.trim()) {
+  if (m.id === "openai-compatible-custom" && openaiCompatibleModelId?.trim()) {
     resolvedModelId = openaiCompatibleModelId.trim();
   }
 
@@ -81,7 +75,7 @@ export async function runSubagent({
     m.provider,
     keys,
     resolvedModelId,
-    { lmstudioBaseURL, openaiCompatibleBaseURL },
+    { openaiCompatibleBaseURL },
   );
 
   const start = Date.now();

@@ -684,16 +684,6 @@ export const MODELS = [
     capabilities: { intelligence: 3, speed: 3, cost: 3 },
   },
 
-  // ── LM Studio (local; model id is user-supplied at runtime) ───────────────
-  {
-    id: "lmstudio-local",
-    provider: "lmstudio",
-    label: "LM Studio",
-    hint: "Local",
-    description: "Local GGUF models via LM Studio.",
-    capabilities: { intelligence: 3, speed: 3, cost: 5 },
-  },
-
   // ── Z.ai (GLM) ─────────────────────────────────────────────────────────────
   {
     id: "glm-5.3",
@@ -860,7 +850,6 @@ export const MODEL_CONTEXT_LIMITS: Record<string, number> = {
   "glm-5.1": 205_000,
   "glm-4.7": 128_000,
   "openai-compatible-custom": 128_000,
-  "lmstudio-local": 128_000,
   "mistral-large-latest": 131_072,
   "mistral-medium-latest": 32_768,
   "codestral-latest": 256_000,

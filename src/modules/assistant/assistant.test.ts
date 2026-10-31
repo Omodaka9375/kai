@@ -274,8 +274,6 @@ describe("telegram IPC contract", () => {
 
 describe("resolveAssistantEndpoint (assistant endpoint isolation)", () => {
   const globals = {
-    lmstudioModelId: "global-lm-name",
-    lmstudioBaseURL: "http://localhost:1234/v1",
     openaiCompatibleModelId: "global-compat-name",
     openaiCompatibleBaseURL: "http://sparky.local:8888/v1",
   };
@@ -298,22 +296,12 @@ describe("resolveAssistantEndpoint (assistant endpoint isolation)", () => {
 
   it("blank/whitespace overrides fall back to global (not empty string)", () => {
     const r = assistant.resolveAssistantEndpoint(
-      "lmstudio-local",
+      "openai-compatible-custom",
       { customModelId: "   ", customBaseUrl: "" },
       globals,
     );
-    expect(r.resolvedModelId).toBe("global-lm-name");
-    expect(r.lmstudioBaseURL).toBe("http://localhost:1234/v1");
-  });
-
-  it("lmstudio override sets the lmstudio URL, not the compat one", () => {
-    const r = assistant.resolveAssistantEndpoint(
-      "lmstudio-local",
-      { customBaseUrl: "http://lm:1234/v1" },
-      globals,
-    );
-    expect(r.lmstudioBaseURL).toBe("http://lm:1234/v1");
-    expect(r.openaiCompatibleBaseURL).toBe("http://sparky.local:8888/v1"); // untouched
+    expect(r.resolvedModelId).toBe("global-compat-name");
+    expect(r.openaiCompatibleBaseURL).toBe("http://sparky.local:8888/v1");
   });
 
   it("a non-custom cloud model ignores the assistant overrides entirely", () => {

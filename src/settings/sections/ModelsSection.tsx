@@ -22,10 +22,6 @@ import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   emitKeysChanged,
   setDefaultModel,
-  setLmstudioBaseURL,
-  setLmstudioContextSize,
-  setLmstudioModelId,
-  setLmstudioVision,
   setOpenaiCompatibleBaseURL,
   setOpenaiCompatibleContextSize,
   setOpenaiCompatibleModelId,
@@ -46,13 +42,12 @@ import { ProviderKeyCard } from "../components/ProviderKeyCard";
 import { SectionHeader } from "../components/SectionHeader";
 import { FitCheckDialog } from "../components/FitCheckDialog";
 
-type KeysMap = Record<ProviderId, string | null>;
+type KeysMap = Record<string, string | null>;
 
 export function ModelsSection() {
   const [keys, setKeys] = useState<KeysMap | null>(null);
   const [fitOpen, setFitOpen] = useState(false);
   const defaultModel = usePreferencesStore((s) => s.defaultModelId);
-  const lmstudioModelId = usePreferencesStore((s) => s.lmstudioModelId);
   const openaiCompatModelId = usePreferencesStore(
     (s) => s.openaiCompatibleModelId,
   );
@@ -79,7 +74,7 @@ export function ModelsSection() {
 
   const cloudProviders = PROVIDERS.filter(
     (p) =>
-      providerNeedsKey(p.id) && p.id !== "lmstudio" && p.id !== "openai-compatible",
+      providerNeedsKey(p.id) && p.id !== "openai-compatible",
   );
   const configuredCount = cloudProviders.filter((p) => !!keys[p.id]).length;
 
@@ -93,7 +88,6 @@ export function ModelsSection() {
       <DefaultModelBlock
         defaultModel={defaultModel}
         keys={keys}
-        lmstudioModelId={lmstudioModelId}
         openaiCompatModelId={openaiCompatModelId}
         onTest={() => setFitOpen(true)}
       />
@@ -118,8 +112,6 @@ export function ModelsSection() {
         </div>
       </div>
 
-      <LocalModelsBlock />
-
       <OpenAICompatibleBlock
         compatKey={keys["openai-compatible"]}
         onSaveKey={(v) => onSave("openai-compatible", v)}
@@ -139,20 +131,17 @@ export function ModelsSection() {
 function DefaultModelBlock({
   defaultModel,
   keys,
-  lmstudioModelId,
   openaiCompatModelId,
   onTest,
 }: {
   defaultModel: ModelId;
   keys: KeysMap;
-  lmstudioModelId: string;
   openaiCompatModelId: string;
   onTest: () => void;
 }) {
   const m = getModel(defaultModel);
 
   const isAvailable = (modelId: string, providerId: ProviderId): boolean => {
-    if (modelId === "lmstudio-local") return !!lmstudioModelId.trim();
     if (modelId === "openai-compatible-custom")
       return !!openaiCompatModelId.trim();
     return providerNeedsKey(providerId) ? !!keys[providerId] : true;
@@ -347,116 +336,6 @@ function ModelIdWithFetch({
           {fetchError}
         </p>
       )}
-    </div>
-  );
-}
-
-function LocalModelsBlock() {
-  const baseURL = usePreferencesStore((s) => s.lmstudioBaseURL);
-  const modelId = usePreferencesStore((s) => s.lmstudioModelId);
-  const ctxSize = usePreferencesStore((s) => s.lmstudioContextSize);
-  const [urlDraft, setUrlDraft] = useState(baseURL);
-  const [modelDraft, setModelDraft] = useState(modelId);
-  const [testStatus, setTestStatus] = useState<
-    "idle" | "testing" | "ok" | "fail"
-  >("idle");
-
-  useEffect(() => setUrlDraft(baseURL), [baseURL]);
-  useEffect(() => setModelDraft(modelId), [modelId]);
-
-  const dirty =
-    urlDraft.trim() !== baseURL || modelDraft.trim() !== modelId;
-
-  const save = async () => {
-    const u = urlDraft.trim();
-    const m = modelDraft.trim();
-    if (u && u !== baseURL) await setLmstudioBaseURL(u);
-    if (m !== modelId) await setLmstudioModelId(m);
-  };
-
-  const test = async () => {
-    setTestStatus("testing");
-    try {
-      const status = await invoke<number>("lm_ping", {
-        baseUrl: urlDraft,
-      });
-      setTestStatus(status > 0 ? "ok" : "fail");
-    } catch {
-      setTestStatus("fail");
-    }
-  };
-
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-col gap-0.5">
-        <Label>Local / LAN — LM Studio</Label>
-      </div>
-
-      <div className="flex flex-col gap-2.5 rounded-lg border border-border/60 bg-card/60 px-3 py-2.5">
-        <FieldRow label="Base URL">
-          <div className="flex flex-1 gap-1.5">
-            <Input
-              value={urlDraft}
-              onChange={(e) => setUrlDraft(e.target.value)}
-              onBlur={() => {
-                const v = urlDraft.trim();
-                if (v && v !== baseURL) void setLmstudioBaseURL(v);
-              }}
-              placeholder="http://localhost:1234/v1"
-              spellCheck={false}
-              className="h-8 flex-1 font-mono text-[11.5px]"
-            />
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => void test()}
-              disabled={!urlDraft.trim()}
-              className="h-8 px-3 text-[11px]"
-            >
-              Test
-            </Button>
-            <Button
-              size="sm"
-              onClick={() => void save()}
-              disabled={!dirty}
-              className="h-8 px-3 text-[11px]"
-            >
-              Save
-            </Button>
-          </div>
-        </FieldRow>
-
-        <FieldRow label="Model ID">
-          <ModelIdWithFetch
-            value={modelDraft}
-            onChange={setModelDraft}
-            onBlur={(v) => { if (v !== modelId) void setLmstudioModelId(v); }}
-            baseUrl={urlDraft}
-            placeholder="qwen2.5-coder-7b-instruct"
-          />
-        </FieldRow>
-
-        <FieldRow label="Context (tokens)">
-          <ContextSizeRow
-            value={ctxSize}
-            onCommit={(v) => void setLmstudioContextSize(v)}
-          />
-        </FieldRow>
-
-        <VisionRow
-          value={usePreferencesStore((s) => s.lmstudioVision)}
-          onChange={(v) => void setLmstudioVision(v)}
-        />
-
-        <StatusLine status={testStatus} />
-
-        {!modelId.trim() ? (
-          <p className="text-[10.5px] leading-relaxed text-amber-600 dark:text-amber-400">
-            Enter the model id that's loaded in LM Studio — e.g. the one shown
-            on the server's <span className="font-mono">/v1/models</span> page.
-          </p>
-        ) : null}
-      </div>
     </div>
   );
 }
