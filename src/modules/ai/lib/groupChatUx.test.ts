@@ -21,6 +21,7 @@ const read = (rel: string) =>
 
 const store = read("../store/groupChatStore.ts");
 const panel = read("../components/GroupChatPanelView.tsx");
+const mini = read("../components/AiMiniWindow.tsx");
 const lib = read("./groupApprovals.ts");
 
 describe("persona approval ids route by the SDK approvalId", () => {
@@ -147,5 +148,19 @@ describe("composer mirrors the AI input bar", () => {
 describe("the pill unmounts when the last group is gone", () => {
   it("the panel renders nothing without groups (delete clears the pill)", () => {
     expect(panel).toContain('if (groups.length === 0 && !pickerOpen) return null;');
+  });
+
+  it("AiMiniWindow reserves the pill strip by the SAME predicate the pill paints by", () => {
+    // 2026-11-01: "the gap where the collapsed pill was is still there — it
+    // recovers if I expand and collapse the AI window again". The window
+    // reserved its +42px pill strip for ANY group anywhere
+    // (`getGroups().length > 0` — ended groups included, other projects'
+    // groups included) while the pill itself only paints for the ACTIVE
+    // project's LIVE groups: two predicates = a reserved empty strip with
+    // nothing in it. Both surfaces must use groupsForProject(active) —
+    // live groups the active project participates in, nothing else.
+    expect(mini).toContain("groupsForProject(activeProjectId() ?? \"\").length > 0");
+    expect(mini).not.toContain("getGroups().length");
+    expect(mini).not.toMatch(/groupCount > 0/);
   });
 });

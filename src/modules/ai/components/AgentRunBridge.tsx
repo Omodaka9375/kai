@@ -33,7 +33,7 @@ import {
   appendGroupMessage,
   coordinatorGroupForSession,
   coordinatorPreamble,
-  getGroupForSession,
+  getGroup,
   noteCoordinatorRoundDone,
   noteParticipantReply,
   noteSessionBusy,
@@ -453,7 +453,16 @@ function Bridge({
       // emitting text) must not burn the one-shot provision - the delivery
       // stays armed so the participant's next real reply can claim it.
       const provisionedGroupId = peekReplyProvision(sessionId);
-      const group = provisionedGroupId ? getGroupForSession(sessionId) : null;
+      // Look the group up by the PROVISION'S OWN id, not via a second map
+      // (getGroupForSession/sessionGroups). Two maps for one fact is a
+      // silent mirror-killer: any divergence between awaitingReply and
+      // sessionGroups (hot-reload re-instantiating the module, index
+      // ordering, a future writer that updates one but not the other)
+      // drops `group` to null — the reply then lands in the project chat
+      // ALONE and never mirrors into the group transcript, while the
+      // provision stays armed forever. The peeked id IS the group this
+      // reply answers; resolve it directly.
+      const group = provisionedGroupId ? getGroup(provisionedGroupId) : null;
       const coordGroup = coordinatorGroupForSession(sessionId);
       const lastAssistant = [...messagesRefForGroup.current].reverse().find((m) => m.role === "assistant");
       const lastText = lastAssistant
@@ -515,7 +524,8 @@ function Bridge({
       const provisionedGroupId = peekReplyProvision(sessionId)
         ? takeReplyProvision(sessionId)
         : null;
-      const group = provisionedGroupId ? getGroupForSession(sessionId) : null;
+      // Same rule as the idle mirror: the provision names the group directly.
+      const group = provisionedGroupId ? getGroup(provisionedGroupId) : null;
       if (group) {
         const who = group.participants.find((p) => p.sessionId === sessionId)?.name ?? "A participant";
         void appendGroupMessage(group.id, {

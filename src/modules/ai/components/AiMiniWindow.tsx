@@ -51,10 +51,10 @@ import { effectiveContextLimit, SYSTEM_OVERHEAD_TOKENS } from "../lib/compact";
 import { type SessionMeta } from "../lib/sessions";
 import { absoluteTime, relativeTime } from "../lib/relativeTime";
 import { normalizeWorkspacePath } from "../lib/workspacePath";
-import { getOrCreateChat, isGhostSession, useChatStore } from "../store/chatStore";
+import { activeProjectId, getOrCreateChat, isGhostSession, useChatStore } from "../store/chatStore";
 import {
   getGroupStoreVersion,
-  getGroups,
+  groupsForProject,
   subscribeGroupChats,
 } from "../store/groupChatStore";
 import { Input } from "@/components/ui/input";
@@ -133,7 +133,7 @@ export function AiMiniWindow() {
   // The group pill sits directly below this window when a group exists and
   // the AI owns the expanded slot — the window's bottom offset grows by one
   // pill height + gap (84 = 42 base + 42 pill) so they stack.
-  // The group count is read imperatively (getGroups is not a hook), so this
+  // The live-group lookup is read imperatively (it is not a hook), so this
   // component must ALSO subscribe to the group store — otherwise the pill
   // flag goes stale on group create/delete and the un-shrunk window sits on
   // the exact same +42px strip (same z-40), hiding the pill behind it.
@@ -142,13 +142,21 @@ export function AiMiniWindow() {
     getGroupStoreVersion,
     getGroupStoreVersion,
   );
-  const groupCount = useMemo(
-    () => getGroups().length,
+  // PILL-VISIBLE must use the SAME predicate the pill itself paints by:
+  // the ACTIVE project is a participant in a LIVE group (groupsForProject
+  // filters endedAt). Counting ALL groups instead reserved the +42px strip
+  // for an ended-but-not-deleted group, or a live group between two OTHER
+  // projects, while the pill (scoped 2026-10-31) stayed hidden: a reserved
+  // empty strip under the window with nothing in it ("the gap where the
+  // pill was"). One predicate, no split-brain. Read imperatively
+  // (groupsForProject is not a hook) — the group-store subscription above
+  // re-runs this on every group change.
+  const groupPillVisible = useMemo(
+    () =>
+      useChatStore.getState().stackRail.surface !== "group" &&
+      groupsForProject(activeProjectId() ?? "").length > 0,
     [groupStoreVersion],
   );
-  const groupPillVisible =
-    useChatStore((s) => s.stackRail.surface !== "group") &&
-    groupCount > 0;
   const setMiniExpanded = useChatStore((s) => s.setMiniExpanded);
   const toggleExpand = useCallback(
     () => setMiniExpanded(!expanded),
