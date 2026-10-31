@@ -173,10 +173,16 @@ describe("source pins - wiring & approval protocol", () => {
 
   it("the panel renders persona approval cards and routes decisions", () => {
     const panel = readFileSync(new URL("../components/GroupChatPanelView.tsx", import.meta.url), "utf8");
+    // Phase 1 unified the approval surface: personas + background sessions
+    // render through the SAME rich AiToolApproval card, enumerated by
+    // unifiedGroupApprovals and decided via respondUnifiedApproval (which
+    // routes persona ids to respondPersonaApproval internally). The old
+    // persona-only simple card is superseded - pinned in
+    // groupApprovals.test.ts.
     expect(panel).toContain("getPersonaApprovals");
-    expect(panel).toContain("respondPersonaApproval(a.approvalId, true)");
-    expect(panel).toContain("respondPersonaApproval(a.approvalId, false)");
-    expect(panel).toContain("<PersonaApprovals groupId={active.id} />");
+    expect(panel).toContain("unifiedGroupApprovals");
+    expect(panel).toContain("<AiToolApproval");
+    expect(panel).toContain("<GroupApprovals group={active} />");
   });
 
   it("persona activity reports approval state before working", () => {

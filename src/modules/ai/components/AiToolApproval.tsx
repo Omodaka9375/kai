@@ -28,6 +28,18 @@ type Props = {
   onRespond: (approved: boolean) => void;
   /** Sequential approval queue: queued = render as a compact chip, not a card. */
   queue?: { queued: boolean; position: number; total: number } | null;
+  /** PROXY MODE (group panel + Telegram): this card decides on behalf of
+   *  another surface - a group persona's headless run or a background
+   *  project session. Differences: a "requested by <name>" subtitle, and
+   *  NO edit affordance - edited-shell approve injects into the FOREGROUND
+   *  terminal, which would run the command in the wrong project; memory
+   *  edit depends on the foreground session's tool execute. Deny is always
+   *  available, and shell preview still renders read-only. */
+  proxy?: {
+    requester: string;
+    /** Where the requester runs, shown in the subtitle ("persona - no project"). */
+    context?: string;
+  } | null;
 };
 
 // Icons only (UI-layer). Approval-card LABELS come from the toolPresentations
@@ -41,7 +53,7 @@ const TOOL_ICON: Record<string, typeof FilePlusIcon> = {
   save_memory: AiBrain03Icon,
 };
 
-function AiToolApprovalImpl({ part, toolName, onRespond, queue }: Props) {
+function AiToolApprovalImpl({ part, toolName, onRespond, queue, proxy }: Props) {
   const meta = TOOL_ICON[toolName];
   const label = presentationFor(toolName).approvalLabel ?? toolName;
   const Icon = meta ?? ToolsIcon;
@@ -55,7 +67,10 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue }: Props) {
   // approving. Shell edits run via terminal injection (see handleApprove);
   // memory edits travel out-of-band to the tool's execute (see
   // toolInputOverrides).
-  const isEditable = isShell || isMemory;
+  // PROXY cards never offer edit - the injection and override paths both
+  // target the FOREGROUND session, which is not the requester (see the
+  // proxy prop doc).
+  const isEditable = !proxy && (isShell || isMemory);
   const commandText = isShell ? String(input.command ?? "") : "";
   const entryText = isMemory ? String(input.entry ?? "") : "";
   const isElevated = toolName === "bash_run" && input.elevated === true;
@@ -171,7 +186,13 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue }: Props) {
         <span className="text-[12px] font-medium text-foreground">
           {label}
         </span>
-        <span className="ml-auto text-[10px] text-muted-foreground">
+        {proxy ? (
+          <span className="min-w-0 truncate text-[10px] text-muted-foreground">
+            requested by <span className="font-medium text-foreground/80">{proxy.requester}</span>
+            {proxy.context ? <span className="opacity-70"> ({proxy.context})</span> : null}
+          </span>
+        ) : null}
+        <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">
           {queue && queue.total > 1
             ? `needs approval · ${queue.position} of ${queue.total}`
             : "needs approval"}

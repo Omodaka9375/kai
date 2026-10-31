@@ -3,7 +3,12 @@ import { useSyncExternalStore } from "react";
 import { cn } from "@/lib/utils";
 import { AiBrain02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { getGroupStoreVersion, getGroups, subscribeGroupChats } from "../store/groupChatStore";
+import {
+  getGroupStoreVersion,
+  getGroups,
+  getPersonaApprovals,
+  subscribeGroupChats,
+} from "../store/groupChatStore";
 import { useChatStore } from "../store/chatStore";
 
 /**
@@ -25,6 +30,14 @@ export function GroupPill() {
   // panel is the expanded surface.
   const groups = useMemo(() => getGroups(), [version]);
   const liveCount = groups.filter((g) => g.endedAt === null).length;
+  // Pending approvals across ALL live groups (persona registry) - the pill is
+  // the group system's attention surface when the panel is collapsed behind
+  // the AI window. Same violet as the rail's "needs your input" dot: one
+  // meaning, one color.
+  const pendingApprovals = useMemo(
+    () => getPersonaApprovals().length,
+    [version],
+  );
 
   // Full view: the group panel overlays the workspace down to the +42px
   // strip — the pill's own strip. Hide instead of painting over/below it.
@@ -51,6 +64,14 @@ export function GroupPill() {
       {liveCount > 0 ? (
         <span className="shrink-0 rounded bg-primary/15 px-1.5 py-0.5 text-[10px] text-primary">
           {liveCount} live
+        </span>
+      ) : null}
+      {pendingApprovals > 0 ? (
+        <span
+          title={`${pendingApprovals} approval${pendingApprovals === 1 ? "" : "s"} waiting in group chats`}
+          className="ml-1 inline-flex h-3.5 min-w-3.5 shrink-0 items-center justify-center rounded-full border border-violet-500/50 bg-violet-500/15 px-1 text-[8.5px] font-semibold tabular-nums text-violet-600 dark:text-violet-400"
+        >
+          {pendingApprovals}
         </span>
       ) : null}
     </button>

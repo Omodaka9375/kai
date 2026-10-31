@@ -153,6 +153,10 @@ export type PersonaApproval = {
   toolName: string;
   /** Short human summary of the tool input (command / path / prompt). */
   summary: string;
+  /** Raw tool input - the unified approval surface (groupApprovals.ts)
+   *  renders the RICH card (AiToolApproval) for personas too, which needs
+   *  the actual input object (command/path/entry) to summarize and edit. */
+  input?: unknown;
   at: number;
 };
 const personaApprovals = new Map<string, PersonaApproval & { decide: (approved: boolean) => void }>();
@@ -759,6 +763,7 @@ async function runPersonaReply(
               personaName: p.name,
               toolName: c.toolName,
               summary: summarizePersonaToolCall(c.input),
+              input: c.input,
               at: Date.now(),
               decide: (approved) => resolve(approved),
             });
