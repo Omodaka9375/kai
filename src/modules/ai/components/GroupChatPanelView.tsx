@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSyncExternalStore } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/lib/utils";
@@ -18,7 +18,6 @@ import {
 } from "@/components/ui/dialog";
 import {
   Add01Icon,
-  ArrowDown01Icon,
   ArrowExpand01Icon,
   ArrowShrink01Icon,
   Cancel01Icon,
@@ -726,12 +725,83 @@ function Composer({
   expanded: boolean;
 }) {
   const [text, setText] = useState("");
-  const [target, setTarget] = useState<string | "all">("all");
   const [sending, setSending] = useState(false);
   // Reply-quote from the group transcript (right-click → Quote). The quote
   // rides the sent text as a <quote author="..."> block so every participant
   // agent sees WHO is being quoted from the earlier conversation.
   const [pendingQuote, setPendingQuote] = useState<{ author: string; text: string } | null>(null);
+  // ── @-MENTION TARGETING (replaces the "All" dropdown) ───────────────────
+  // Typing "@" at the caret opens a picker over the group's participants
+  // (plus "All" to clear targeting). Picking inserts "@Name " into the text.
+  // On send, the LAST @-mention in the text targets that participant (same
+  // single-target semantics the dropdown had); no mentions = everyone. The
+  // mention itself stays in the text so the targeted agent sees it addressed.
+  const [mention, setMention] = useState<{ open: boolean; start: number; query: string }>({
+    open: false,
+    start: 0,
+    query: "",
+  });
+  const textRef = useRef<HTMLTextAreaElement | null>(null);
+  const mentionCandidates = useMemo(() => {
+    const q = mention.query.toLowerCase();
+    const list = group.participants.filter((p) =>
+      !q ? true : p.name.toLowerCase().includes(q),
+    );
+    return list;
+  }, [group.participants, mention.query]);
+  const mentionIndexRef = useRef(0);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const mentionList = mentionCandidates.length > 0 || mention.query
+    ? [{ id: "all" as const, name: "All" }, ...mentionCandidates]
+    : [];
+  // Pick a candidate: replace the "@query" token at mention.start with
+  // "@Name " ("All" inserts nothing — clearing targeting is the point).
+  const pickMention = useCallback(
+    (name: string) => {
+      setMention((m) => {
+        if (!m.open) return m;
+        const before = text.slice(0, m.start);
+        const insertion = name === "All" ? "" : `@${name} `;
+        setText(before + insertion + text.slice(m.start + 1 + m.query.length));
+        // Restore the caret after the inserted mention.
+        queueMicrotask(() => {
+          const el = textRef.current;
+          if (el) {
+            el.focus();
+            const at = (before + insertion).length;
+            el.setSelectionRange(at, at);
+          }
+        });
+        return { open: false, start: 0, query: "" };
+      });
+    },
+    [text],
+  );
+  // Detect an open @-token at the caret on every edit.
+  const onTextChange = useCallback((value: string, caret: number) => {
+    const beforeCaret = value.slice(0, caret);
+    const m = /(^|\s)@([^\s]*)$/.exec(beforeCaret);
+    if (m) {
+      setMention((prev) => ({ ...prev, open: true, start: caret - m[2].length, query: m[2] }));
+      setMentionIndex(0);
+    } else {
+      setMention((prev) => (prev.open ? { ...prev, open: false, query: "" } : prev));
+    }
+    setText(value);
+  }, []);
+  // Last @-mention in the text wins as the send target (null = all).
+  const mentionedTarget = useMemo(() => {
+    const tokens = [...text.matchAll(/@([^\s]+)/g)];
+    if (tokens.length === 0) return undefined;
+    const last = tokens[tokens.length - 1][1].toLowerCase();
+    const hit = group.participants.find(
+      (p) =>
+        p.name.toLowerCase() === last ||
+        p.name.toLowerCase().replace(/\s+/g, "").startsWith(last.replace(/\s+/g, "")) ||
+        p.name.toLowerCase().includes(last),
+    );
+    return hit ? hit.projectId : undefined;
+  }, [text, group.participants]);
   // The group panel is app-level; quote dispatches arrive via the same
   // window-event seam the panel's other cross-surface entries use. Scope by
   // groupId so quoting in one group doesn't seed another group's composer.
@@ -753,13 +823,14 @@ function Composer({
         ? buildQuoteBlock(pendingQuote.author, pendingQuote.text)
         : null;
       const composed = [quoteBlock, trimmed].filter(Boolean).join("\n\n");
-      await sendGroupMessage(group.id, composed, target === "all" ? undefined : target);
+      await sendGroupMessage(group.id, composed, mentionedTarget);
       setText("");
       setPendingQuote(null);
+      setMention({ open: false, start: 0, query: "" });
     } finally {
       setSending(false);
     }
-  }, [text, group, target, sending, pendingQuote]);
+  }, [text, group, sending, pendingQuote, mentionedTarget]);
 
   if (group.endedAt !== null) {
     return (
@@ -806,44 +877,83 @@ function Composer({
           </button>
         </div>
       )}
-      <div className="flex items-center gap-2">
-      <Popover>
-        <PopoverTrigger asChild>
-          <button
-            type="button"
-            className="flex h-8 shrink-0 items-center gap-1 rounded-lg px-2 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            title="Send to…"
+      <div className="relative flex items-center gap-2">
+      {mention.open && mentionList.length > 0 ? (
+        <Popover open={true}>
+          {/* @-mention picker: anchored under the composer strip (not the
+              caret — absolute anchoring inside a 1-row textarea is not worth
+              the complexity; the list is small and keyboard-driven). */}
+          <PopoverContent
+            align="start"
+            className="w-52 gap-0 p-1 text-xs"
+            onOpenAutoFocus={(e) => e.preventDefault()}
+            onEscapeKeyDown={() => setMention((m) => ({ ...m, open: false }))}
           >
-            <span className="max-w-24 truncate">
-              {target === "all" ? "All" : group.participants.find((p) => p.projectId === target)?.name ?? target}
-            </span>
-            <HugeiconsIcon icon={ArrowDown01Icon} size={9} strokeWidth={2} />
-          </button>
-        </PopoverTrigger>
-        <PopoverContent align="start" className="w-44 gap-0 p-1 text-xs">
-          {group.participants.map((p) => (
-            <button
-              key={p.projectId}
-              type="button"
-              onClick={() => setTarget(p.projectId)}
-              className="flex w-full items-center justify-between rounded px-2 py-1.5 text-left hover:bg-accent"
-            >
-              <span className="truncate">{p.name}</span>
-              <ParticipantDot participant={p} />
-            </button>
-          ))}
-        </PopoverContent>
-      </Popover>
+            {mentionList.map((c, i) => (
+              <button
+                key={"projectId" in c ? c.projectId : c.id}
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  pickMention(c.name);
+                }}
+                onMouseEnter={() => {
+                  mentionIndexRef.current = i;
+                  setMentionIndex(i);
+                }}
+                className={cn(
+                  "flex w-full items-center justify-between rounded px-2 py-1.5 text-left hover:bg-accent",
+                  i === mentionIndex && "bg-accent",
+                )}
+              >
+                <span className="truncate">
+                  {"projectId" in c ? `@${c.name}` : "All — send to everyone"}
+                </span>
+                {"projectId" in c ? (
+                  <ParticipantDot participant={c} />
+                ) : null}
+              </button>
+            ))}
+          </PopoverContent>
+        </Popover>
+      ) : null}
       <textarea
+        ref={textRef}
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => onTextChange(e.target.value, e.target.selectionStart ?? e.target.value.length)}
         onKeyDown={(e) => {
+          if (mention.open && mentionList.length > 0) {
+            if (e.key === "ArrowDown") {
+              e.preventDefault();
+              const next = (mentionIndex + 1) % mentionList.length;
+              mentionIndexRef.current = next;
+              setMentionIndex(next);
+              return;
+            }
+            if (e.key === "ArrowUp") {
+              e.preventDefault();
+              const prev = (mentionIndex - 1 + mentionList.length) % mentionList.length;
+              mentionIndexRef.current = prev;
+              setMentionIndex(prev);
+              return;
+            }
+            if (e.key === "Enter" || e.key === "Tab") {
+              e.preventDefault();
+              pickMention(mentionList[mentionIndex]?.name ?? "All");
+              return;
+            }
+            if (e.key === "Escape") {
+              e.preventDefault();
+              setMention((m) => ({ ...m, open: false }));
+              return;
+            }
+          }
           if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
             void send();
           }
         }}
-        placeholder="Coordinate your project agents…"
+        placeholder="Coordinate your project agents… use @ to address one"
         rows={1}
         wrap="soft"
         className={cn(
