@@ -202,7 +202,7 @@ async function findBoundProject(
 /** All bound projects, for routing plain text (the "current" one is the
  *  single- binding convenience: with exactly one project bound, plain text
  *  routes to it; /tell names the target when several are bound). */
-async function soleBoundProject(): Promise<{ id: string; binding: BoundProject } | null> {
+export async function soleBoundProject(): Promise<{ id: string; binding: BoundProject } | null> {
   const bound = await listBoundProjects();
   const entries = Object.entries(bound);
   return entries.length === 1 ? { id: entries[0]![0], binding: entries[0]![1] } : null;

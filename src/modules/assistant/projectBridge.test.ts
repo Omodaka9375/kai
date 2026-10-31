@@ -197,7 +197,17 @@ describe("telegram command surface (source pins)", () => {
     expect(index).toContain('case "/projects"');
     expect(index).toContain('case "/tell"');
     expect(index).toContain("/projects - list monitored projects");
-    expect(index).toContain("/tell <name> <msg> - prompt a monitored project's agent");
+    expect(index).toContain("/tell <msg> - message the monitored project");
+  });
+
+  it("sole-bound shorthand: /tell <message> routes without a project name", () => {
+    // With exactly one binding the ENTIRE argument is the message, unless
+    // the first token explicitly names/id's that project (then the
+    // two-token form still works).
+    expect(index).toContain("const sole = await soleBoundProject();");
+    expect(index).toContain("if (sole && !namesSole) {");
+    expect(index).toContain("const outcome = await tellProject(sole.id, arg, chatId);");
+    expect(index).toContain("namesSole");
   });
 
   it("plain text routes to the sole bound project, assistant otherwise", () => {

@@ -63,6 +63,7 @@ import {
 } from "./prefs";
 import {
   formatProjectsStatus,
+  soleBoundProject,
   tellProject,
 } from "./projectBridge";
 
@@ -1028,21 +1029,40 @@ async function handleCommand(chatId: number, raw: string): Promise<void> {
       return;
     }
     case "/tell": {
-      // /tell <project name|id> <message> - routes into the bound project's
-      // agent session; no assistant turn is consumed. The first token is
-      // the target; /tell with no message lists the project status.
+      // /tell <message> when EXACTLY ONE project is monitored - the whole
+      // argument routes to it, no name needed. /tell <name> <message>
+      // names the target when several are bound; a first token that NAMES
+      // the sole project still takes the explicit form. No assistant turn
+      // is consumed either way.
+      const sole = await soleBoundProject();
       const firstSpace = arg.indexOf(" ");
-      if (!arg || firstSpace === -1) {
-        await reply("Usage: /tell <project-name> <message> - prompt a monitored project's agent.");
+      const firstToken = firstSpace === -1 ? arg : arg.slice(0, firstSpace);
+      const namesSole =
+        sole !== null &&
+        (firstToken.toLowerCase() === sole.id.toLowerCase() ||
+          firstToken.toLowerCase() === sole.binding.name.toLowerCase());
+      if (!arg) {
+        await reply(
+          sole
+            ? `Usage: /tell <message> - it goes to ${sole.binding.name}.`
+            : "Usage: /tell <project-name> <message> - prompt a monitored project's agent.",
+        );
         await reply(await formatProjectsStatus());
+        return;
+      }
+      if (sole && !namesSole) {
+        // Sole monitored project + the first token is not its name/id: the
+        // ENTIRE argument is the message.
+        const outcome = await tellProject(sole.id, arg, chatId);
+        await reply(outcome);
+        return;
+      }
+      if (firstSpace === -1 || !arg.slice(firstSpace + 1).trim()) {
+        await reply("Usage: /tell <project-name> <message>");
         return;
       }
       const target = arg.slice(0, firstSpace);
       const message = arg.slice(firstSpace + 1).trim();
-      if (!message) {
-        await reply("Usage: /tell <project-name> <message>");
-        return;
-      }
       const outcome = await tellProject(target, message, chatId);
       await reply(outcome);
       return;
@@ -1098,7 +1118,7 @@ async function handleCommand(chatId: number, raw: string): Promise<void> {
           "/use <id> — switch chat",
           "/del <id> — delete a chat",
           "/projects - list monitored projects",
-          "/tell <name> <msg> - prompt a monitored project's agent",
+          "/tell <msg> - message the monitored project (add its name first when several are bound)",
         ].join("\n"),
       );
       return;
