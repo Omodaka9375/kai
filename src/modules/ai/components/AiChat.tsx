@@ -28,6 +28,7 @@ import {
   ArrowRight01Icon,
   CodeIcon,
   File01Icon,
+  GitForkIcon,
   HashtagIcon,
   Image01Icon,
   LeftToRightBlockQuoteIcon,
@@ -69,12 +70,10 @@ function ForkButton({ messageIndex }: { messageIndex: number }) {
       type="button"
       onClick={onClick}
       disabled={forking}
-      title="Continue in a new chat from here — same project files, fresh thread (for isolated FILES, use Shadow mode in the session menu)"
-      className="shrink-0 size-6 flex items-center justify-center rounded-md border border-border/40 bg-background/50 text-muted-foreground opacity-0 group-hover/msg:opacity-100 transition-all hover:bg-accent hover:text-foreground shadow-sm"
+      title="Fork: branch the conversation from this message into a new chat — same project files. (To isolate FILES, use Shadow mode in the session menu.)"
+      className="shrink-0 size-6 flex items-center justify-center rounded-md border border-border/40 bg-background/50 text-muted-foreground opacity-70 group-hover/msg:opacity-100 transition-all hover:bg-accent hover:text-foreground shadow-sm"
     >
-      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round">
-        <path d="M5 3v4a2 2 0 002 2h2m0 0V5m0 4l-2-2m2 2l2-2" />
-      </svg>
+      <HugeiconsIcon icon={GitForkIcon} size={13} strokeWidth={1.75} />
     </button>
   );
 }

@@ -1649,9 +1649,11 @@ export const useChatStore = create<StoreState>((set, get) => ({
         newId = stored.newId;
       }
       if (messages.length === 0) throw new Error("source session not found");
+      const originTitle =
+        get().sessions.find((s) => s.id === activeId)?.title ?? "chat";
       const meta: SessionMeta = {
         id: newId,
-        title: "Fork",
+        title: `Fork · ${originTitle}`,
         createdAt: Date.now(),
         updatedAt: Date.now(),
         parentId: activeId,
