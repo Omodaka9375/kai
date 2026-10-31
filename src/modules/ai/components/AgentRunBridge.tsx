@@ -630,19 +630,33 @@ function Bridge({
   }, [runtime, status, sessionId, injectMessage]);
 
   // ---- Auto-speak finished replies (Voice settings) -----------------------
-  // When a run settles to idle after streaming, read the last assistant text
-  // aloud via the configured TTS mode (local Piper / OpenAI). Selecting any
-  // TTS mode other than "off" IS the opt-in — there is no separate checkbox.
-  // Tracked with a ref so a re-mount (session switch) doesn't re-speak an
-  // old message: only transitions count.
+  // When a run settles to idle after streaming, read the reply THIS run
+  // produced aloud via the configured TTS mode (local Piper / OpenAI /
+  // AssemblyAI). Selecting any TTS mode other than "off" IS the opt-in —
+  // there is no separate checkbox.
+  //
+  // CAUSALITY BOUNDARY (2026-10-31 fix): the pre-run tail (array length +
+  // the last assistant message OBJECT) is snapshotted on every busy
+  // transition, and the extraction NEVER walks back past it. The old code
+  // searched the whole history for "the last assistant text" — a run whose
+  // final message had no speakable text (tool-only replies, a stopped run,
+  // a TTS toggle made through the voice_settings tool mid-run) fell through
+  // to the PREVIOUS turn's reply and spoke it: "I turned TTS on and it
+  // read the message from before my request." It also left the arm set on
+  // that path (!text return), so the NEXT unrelated messages-change effect
+  // re-fired extraction and spoke the old reply from nowhere, and its
+  // dedupe key (session-id + array LENGTH — forbidden by the ttsCausality
+  // pin) collided across compaction and steering strips, silently skipping
+  // later replies.
   //
   // Two-phase on purpose: useChat throttles MESSAGE notifications
   // (experimental_throttle: 50) but NOT status notifications, so at end of
   // run the status flips to idle up to 50ms before the final message commit
-  // lands. Acting on the status change alone reads a stale messages array
-  // and speaks the PREVIOUS turn's reply (always one turn behind). Phase 1
-  // (the transition) only arms runEndedRef; phase 2 — re-entered when the
-  // final messages land — actually speaks.
+  // lands. Phase 1 (the transition) only arms runEndedRef; phase 2 —
+  // re-entered when the final messages land — actually speaks. (The status
+  // flip render reads the LIVE array via getSnapshot, so the reply is
+  // normally already there; phase 2 only waits out the throttle's trailing
+  // edge when the settle and the last commit land in the same tick.)
   // Hooks must be UNCONDITIONAL: `isActive` flips when this workspace moves
   // between background and foreground (project switch) while the component
   // stays mounted. A conditional hook shifts every later hook's position;
@@ -651,65 +665,135 @@ function Bridge({
   // areHookInputsEqual → the whole tree unmounts (themed blank window).
   const voiceTtsEnabled = usePreferencesStore((s) => s.voiceTtsMode !== "off");
   const ttsActive = isActive && voiceTtsEnabled;
+  // Id of the last assistant message already spoken (dedupe by MESSAGE
+  // identity, not array length — compaction changes lengths).
   const spokenForRef = useRef<string | null>(null);
   const prevStatusRef = useRef(status);
   const prevSessionRef = useRef(sessionId);
-  // True between a streaming→idle transition and the speak actually firing.
+  // True between a streaming→idle transition and the speak decision.
   const runEndedRef = useRef(false);
+  // CAUSALITY BOUNDARY: what the tail looked like BEFORE the current run.
+  // busyTailRef = array length snapshot at busy-arm; busyLastAssistantRef =
+  // the last assistant message OBJECT at that moment (null when none).
+  // Object identity, not id: the SDK deep-clones on replaceMessage, so a
+  // regenerated reply is a NEW object with the same id and still counts as
+  // "this run produced it".
+  const busyTailRef = useRef<number | null>(null);
+  const busyLastAssistantRef = useRef<UIMessage | null>(null);
   // Latest render's state, read at speak time (after messages settle).
   const statusRef = useRef(status);
   statusRef.current = status;
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
   useEffect(() => {
-    // Session switch: refs carry over (Bridge is not remounted), so reset the
-    // transition tracking rather than speaking the new session's old tail.
+    const isBusy = status === "submitted" || status === "streaming";
+    // Session switch: refs carry over (Bridge is not remounted), so reset
+    // ALL transition tracking rather than speaking the new session's old
+    // tail. spokenFor too: the key embeds no session, and a stale id from
+    // the outgoing session must not skip the incoming one's first reply.
     if (prevSessionRef.current !== sessionId) {
       prevSessionRef.current = sessionId;
       prevStatusRef.current = status;
       runEndedRef.current = false;
+      busyTailRef.current = null;
+      busyLastAssistantRef.current = null;
+      spokenForRef.current = null;
       return;
     }
     const wasStreaming = prevStatusRef.current === "streaming";
+    const wasBusy =
+      prevStatusRef.current === "streaming" ||
+      prevStatusRef.current === "submitted";
     prevStatusRef.current = status;
-    if (!ttsActive) {
+    // Snapshot the pre-run tail on EVERY busy transition — including when
+    // ttsActive is false. TTS can be enabled MID-RUN (voice_settings tool),
+    // and a boundary snapshotted only-while-enabled would date from some
+    // earlier run and mis-gate the settle.
+    if (isBusy && !wasBusy) {
+      const msgs = messagesRef.current;
+      busyTailRef.current = msgs.length;
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role === "assistant") {
+          busyLastAssistantRef.current = msgs[i];
+          break;
+        }
+      }
+    }
+    if (isBusy) {
+      // Mid-run: no settle to process. Any arm from a previous settle is
+      // void — a new run superseded it.
       runEndedRef.current = false;
       return;
     }
-    if (wasStreaming && status !== "submitted" && status !== "streaming") {
+    if (!ttsActive) return;
+    if (wasStreaming && !isBusy) {
       // A run just settled — arm the speak (fires once messages settle).
       runEndedRef.current = true;
     }
     if (!runEndedRef.current) return;
-    if (status === "submitted" || status === "streaming") {
-      // A NEW run started before the settled one produced speakable text —
-      // disarm so it can never speak a stale message from an earlier turn.
-      runEndedRef.current = false;
-      return;
-    }
-    // The last assistant message that has text is the reply just finished.
+    // THE SPEAK DECISION happens exactly once per settle: consume the arm
+    // on EVERY exit path below. The old code left it set when no text was
+    // found, so a later unrelated messages-change re-ran extraction.
+    runEndedRef.current = false;
+    // The reply THIS run produced: search only messages added AFTER the
+    // pre-run boundary. Never reach back past the boundary — a run that
+    // produced no speakable text says nothing (the old code walked back to
+    // the PREVIOUS turn's reply and spoke it).
     const msgs = messagesRef.current;
+    const from =
+      busyTailRef.current != null
+        ? Math.max(busyTailRef.current, 0)
+        : 0;
+    // Regenerate/stall-recovery replace the tail in place: the length may
+    // equal the boundary while the OBJECT differs. Treat any assistant
+    // message after `from` OR replacing the boundary object as this run's.
+    const boundaryObj = busyLastAssistantRef.current;
     let text = "";
-    for (let i = msgs.length - 1; i >= 0 && !text; i--) {
+    let spokenId: string | null = null;
+    for (let i = msgs.length - 1; i >= from && !text; i--) {
       const m = msgs[i];
       if (m.role !== "assistant") continue;
       // Multi-step runs accumulate EVERY step's text parts into the one
       // assistant message — narrations like "Let me check that…" land
       // alongside the final answer. Speak only the LAST text part (the
-      // actual reply), not the join of all parts (the step-by-step lead-up).
+      // actual reply), not the join of all parts (the step-by-step
+      // lead-up).
       for (let j = m.parts.length - 1; j >= 0; j--) {
         const p = m.parts[j];
         if (p.type === "text" && typeof p.text === "string" && p.text.trim()) {
           text = p.text.trim();
+          spokenId = m.id;
           break;
         }
       }
     }
-    if (!text) return; // final message not landed yet (throttle trailing edge)
-    const key = `${sessionId}:${msgs.length}`;
-    runEndedRef.current = false;
-    if (spokenForRef.current === key) return;
-    spokenForRef.current = key;
+    // In-place tail replacement (regenerate / stall-recovery retry): the
+    // array is no longer than the boundary but the boundary assistant
+    // object was replaced by a new one with fresh text. That new object IS
+    // this run's reply.
+    if (!text && from > 0 && boundaryObj != null) {
+      // Walk from the end; the first assistant found at/after the boundary
+      // position that is NOT the same object is the regenerated reply.
+      for (let i = msgs.length - 1; i >= from - 1 && !text; i--) {
+        if (i < 0 || i >= msgs.length) break;
+        const m = msgs[i];
+        if (m.role !== "assistant") continue;
+        if (m === boundaryObj) break; // reached the pre-run reply — stop
+        for (let j = m.parts.length - 1; j >= 0; j--) {
+          const p = m.parts[j];
+          if (p.type === "text" && typeof p.text === "string" && p.text.trim()) {
+            text = p.text.trim();
+            spokenId = m.id;
+            break;
+          }
+        }
+      }
+    }
+    busyTailRef.current = null;
+    busyLastAssistantRef.current = null;
+    if (!text) return; // THIS run produced nothing speakable — say nothing
+    if (spokenForRef.current === spokenId) return;
+    spokenForRef.current = spokenId;
     void speakText(text);
   }, [status, ttsActive, messages, sessionId]);
 
