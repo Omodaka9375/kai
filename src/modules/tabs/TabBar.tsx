@@ -101,19 +101,64 @@ export function TabBar({
     active?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [activeId, tabs.length]);
 
-  // --- Drag-to-reorder via pointer events ---
-  // We store drag state in refs to avoid re-renders during the drag, and only
-  // use useState for the draggingId so we can apply visual feedback.
-
+  // --- Drag-to-reorder (VS Code model) ---
+  // Geometry-driven preview + commit-once-at-drop:
+  //  - The dragged tab FOLLOWS the cursor via translateX, clamped to the bar.
+  //  - Neighbors PREVIEW their shift with a CSS transition once the dragged
+  //    tab's center crosses theirs - the array is NOT mutated mid-drag, so
+  //    there are no App-level re-renders and no oscillation on small
+  //    back-and-forth wiggles across a tab edge.
+  //  - The reorder commits ONCE on pointerup through the same onMove.
+  //  - A 4px threshold separates click from drag: plain clicks never flash
+  //    the drag visual.
   const dragIdRef = useRef<number | null>(null);
-  const didDragRef = useRef(false);
-  const lastHoveredTabIdRef = useRef<number | null>(null);
+  const dragStartXRef = useRef(0);
+  const lastDxRef = useRef(0);
+  const lastPointerXRef = useRef(0);
+  const dragStartedRef = useRef(false);
+  const dragIdxRef = useRef(0);
+  /** Content-relative tab centers + widths, snapshotted once at drag start. */
+  const centersRef = useRef<Array<{ id: number; center: number; width: number }>>([]);
+  const minDxRef = useRef(0);
+  const maxDxRef = useRef(0);
+  const edgeScrollRafRef = useRef<number | null>(null);
+  // True between a real drag's pointerup and the click that follows it -
+  // suppresses Radix's tab activation so reordering a background tab never
+  // steals focus (VS Code behavior).
+  const dragJustEndedRef = useRef(false);
 
-  const tabIdFromPoint = useCallback((x: number, y: number): number | null => {
-    const el = document.elementFromPoint(x, y);
-    const trigger = el?.closest<HTMLElement>("[data-tab-id]");
-    const raw = trigger?.dataset.tabId;
-    return raw !== undefined ? Number(raw) : null;
+  /** Local-only preview state - re-renders TabBar alone, never the App. */
+  const [dragPreview, setDragPreview] = useState<{
+    dx: number;
+    shifts: Map<number, number>;
+  }>({ dx: 0, shifts: new Map() });
+
+  const DRAG_THRESHOLD_PX = 4;
+  const EDGE_ZONE_PX = 40;
+  const EDGE_SPEED_PX = 10;
+
+  const stopEdgeScroll = useCallback(() => {
+    if (edgeScrollRafRef.current != null) {
+      cancelAnimationFrame(edgeScrollRafRef.current);
+      edgeScrollRafRef.current = null;
+    }
+  }, []);
+
+  /** rAF ticker: auto-scroll the bar while the pointer parks at an edge. */
+  const startEdgeScroll = useCallback(() => {
+    if (edgeScrollRafRef.current != null) return;
+    const tick = () => {
+      edgeScrollRafRef.current = null;
+      const el = scrollRef.current;
+      if (!el || dragIdRef.current === null || !dragStartedRef.current) return;
+      const rect = el.getBoundingClientRect();
+      const x = lastPointerXRef.current;
+      if (x < rect.left + EDGE_ZONE_PX) el.scrollLeft -= EDGE_SPEED_PX;
+      else if (x > rect.right - EDGE_ZONE_PX) el.scrollLeft += EDGE_SPEED_PX;
+      else return; // left the zone - the next pointermove re-arms the ticker
+      edgeScrollRafRef.current = requestAnimationFrame(tick);
+    };
+    edgeScrollRafRef.current = requestAnimationFrame(tick);
   }, []);
 
   const onPointerDown = useCallback(
@@ -123,9 +168,10 @@ export function TabBar({
       if (closeBtn) return;
 
       dragIdRef.current = tabId;
-      didDragRef.current = false;
-      lastHoveredTabIdRef.current = tabId;
-      setDraggingId(tabId);
+      dragStartXRef.current = e.clientX;
+      lastPointerXRef.current = e.clientX;
+      lastDxRef.current = 0;
+      dragStartedRef.current = false;
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     },
     [],
@@ -133,28 +179,152 @@ export function TabBar({
 
   const onPointerMove = useCallback(
     (e: React.PointerEvent<HTMLElement>) => {
-      if (dragIdRef.current === null) return;
-      didDragRef.current = true;
-      const hoverId = tabIdFromPoint(e.clientX, e.clientY);
-      // Only reorder when we cross into a NEW tab's area, not on every pixel move
-      if (hoverId !== null && hoverId !== dragIdRef.current && hoverId !== lastHoveredTabIdRef.current) {
-        onMove(dragIdRef.current, hoverId);
-        lastHoveredTabIdRef.current = hoverId;
+      const dragId = dragIdRef.current;
+      if (dragId === null) return;
+      lastPointerXRef.current = e.clientX;
+      const rawDx = e.clientX - dragStartXRef.current;
+
+      if (!dragStartedRef.current) {
+        if (Math.abs(rawDx) < DRAG_THRESHOLD_PX) return;
+        // Drag start: snapshot content-relative geometry once. Content-
+        // relative (viewport offset + scrollLeft folded in) so auto-scroll
+        // never invalidates the math.
+        const el = scrollRef.current;
+        const list = el?.querySelector<HTMLElement>('[role="tablist"]');
+        if (!el || !list) return;
+        const scrollRect = el.getBoundingClientRect();
+        const triggers = Array.from(
+          list.querySelectorAll<HTMLElement>("[data-tab-id]"),
+        );
+        centersRef.current = triggers.map((tEl) => {
+          const r = tEl.getBoundingClientRect();
+          return {
+            id: Number(tEl.dataset.tabId),
+            center: r.left + r.width / 2 - scrollRect.left + el.scrollLeft,
+            width: r.width,
+          };
+        });
+        const mine = centersRef.current.find((c) => c.id === dragId);
+        const first = centersRef.current[0];
+        const last = centersRef.current[centersRef.current.length - 1];
+        if (!mine || !first || !last) return;
+        dragIdxRef.current = centersRef.current.findIndex((c) => c.id === dragId);
+        minDxRef.current = first.center - mine.center;
+        maxDxRef.current = last.center - mine.center;
+        dragStartedRef.current = true;
+        setDraggingId(dragId);
+      }
+
+      // Clamp so the dragged tab stays within the bar's content bounds.
+      const dx = Math.min(maxDxRef.current, Math.max(minDxRef.current, rawDx));
+
+      // Same dx ⇒ same preview (shifts derive purely from dx + the start
+      // snapshot): skip the state update entirely while the cursor is
+      // parked beyond a clamp edge.
+      if (dx !== lastDxRef.current) {
+        lastDxRef.current = dx;
+
+        // Neighbor shift preview: a tab whose center the dragged tab has
+        // passed slides over by exactly one slot.
+        const centers = centersRef.current;
+        const mine = centers.find((c) => c.id === dragId);
+        const shifts = new Map<number, number>();
+        if (mine) {
+          const centerNow = mine.center + dx;
+          for (let i = 0; i < centers.length; i++) {
+            const c = centers[i]!;
+            if (c.id === dragId) continue;
+            if (i < dragIdxRef.current && centerNow < c.center) {
+              shifts.set(c.id, mine.width); // slides right into the freed slot
+            } else if (i > dragIdxRef.current && centerNow > c.center) {
+              shifts.set(c.id, -mine.width); // slides left into the freed slot
+            }
+          }
+        }
+        setDragPreview({ dx, shifts });
+      }
+
+      // Auto-scroll while parked at the bar's edges.
+      const el = scrollRef.current;
+      if (el) {
+        const rect = el.getBoundingClientRect();
+        if (e.clientX < rect.left + EDGE_ZONE_PX || e.clientX > rect.right - EDGE_ZONE_PX) {
+          startEdgeScroll();
+        }
       }
     },
-    [onMove, tabIdFromPoint],
+    [startEdgeScroll],
+  );
+
+  const endDrag = useCallback(
+    (commit: boolean) => {
+      const dragId = dragIdRef.current;
+      const started = dragStartedRef.current;
+      stopEdgeScroll();
+      dragIdRef.current = null;
+      dragStartedRef.current = false;
+      if (started) {
+        // Suppress the click Radix fires right after a real drag.
+        dragJustEndedRef.current = true;
+        setTimeout(() => {
+          dragJustEndedRef.current = false;
+        }, 0);
+        if (commit && dragId !== null) {
+          const centers = centersRef.current;
+          const mine = centers.find((c) => c.id === dragId);
+          if (mine) {
+            const centerNow = mine.center + lastDxRef.current;
+            const insertIdx = centers.filter(
+              (o) => o.id !== dragId && o.center < centerNow,
+            ).length;
+            // insertIdx is the dragged tab's FINAL index; the tab currently
+            // OCCUPYING that slot is the move target (moveTab's splice
+            // semantics land the item exactly there, both directions).
+            const hoverId = tabs[insertIdx]?.id;
+            if (hoverId !== undefined && hoverId !== dragId) {
+              onMove(dragId, hoverId);
+            }
+          }
+        }
+      }
+      setDraggingId(null);
+      setDragPreview({ dx: 0, shifts: new Map() });
+    },
+    [tabs, onMove, stopEdgeScroll],
   );
 
   const onPointerUp = useCallback(
     (e: React.PointerEvent<HTMLElement>) => {
       if (dragIdRef.current === null) return;
-      dragIdRef.current = null;
-      didDragRef.current = false; // Reset the drag flag so clicks work again
-      setDraggingId(null);
-      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+      endDrag(true);
+      try {
+        (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+      } catch {
+        // Capture already released - nothing to do.
+      }
     },
-    [],
+    [endDrag],
   );
+
+  const onPointerCancel = useCallback(
+    (e: React.PointerEvent<HTMLElement>) => {
+      if (dragIdRef.current === null) return;
+      endDrag(false);
+      try {
+        (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+      } catch {
+        // Same as above.
+      }
+    },
+    [endDrag],
+  );
+
+  // Lostpointercapture covers teardown mid-drag (unmount, capture stolen):
+  // reset without committing. The normal pointerup path nulls dragIdRef
+  // BEFORE releasing capture, so this is a no-op there.
+  const onLostPointerCapture = useCallback(() => {
+    if (dragIdRef.current !== null) endDrag(false);
+  }, [endDrag]);
 
   return (
     <div
@@ -166,14 +336,19 @@ export function TabBar({
         <Tabs
           value={String(activeId)}
           onValueChange={(v) => onSelect(Number(v))}
+          // Manual activation = VS Code semantics: focus (pointerdown) does
+          // NOT activate. Without this, automatic mode activates a background
+          // tab the instant you press on it to drag - which then triggers the
+          // keep-active-visible scroll MID-DRAG and reorders feel like they
+          // fight the cursor.
+          activationMode="manual"
         >
           <TabsList className="h-7 w-max gap-0.5 bg-transparent p-0">
-            {tabs.map((t, idx) => {
+            {tabs.map((t) => {
               const isPreview = t.kind === "editor" && (t as EditorTab).preview;
               const isDragging = t.id === draggingId;
               const isSplit = t.id === splitTabId;
-              // Show drop indicator between tabs when dragging
-              const showDropIndicator = draggingId !== null && !isDragging && idx > 0;
+              const shift = dragPreview.shifts.get(t.id) ?? 0;
               return (
                 <ContextMenu key={t.id}>
                   <ContextMenuTrigger asChild>
@@ -184,14 +359,39 @@ export function TabBar({
                       onPointerDown={(e) => onPointerDown(e, t.id)}
                       onPointerMove={onPointerMove}
                       onPointerUp={onPointerUp}
+                      onPointerCancel={onPointerCancel}
+                      onLostPointerCapture={onLostPointerCapture}
+                      // Radix activates tabs on click, and a click follows
+                      // every pointerup - including the end of a real drag.
+                      // Swallow it so dropping a background tab never
+                      // selects it.
+                      onClickCapture={(e) => {
+                        if (dragJustEndedRef.current) {
+                          e.preventDefault();
+                          e.stopPropagation();
+                        }
+                      }}
+                      style={
+                        isDragging || shift !== 0
+                          ? {
+                              transform: `translateX(${isDragging ? dragPreview.dx : shift}px)`,
+                              zIndex: isDragging ? 20 : undefined,
+                            }
+                          : undefined
+                      }
                       className={cn(
-                        "group h-7 shrink-0 gap-1.5 rounded-md border-0 shadow-none ring-0 text-xs text-muted-foreground transition-colors data-[state=active]:bg-accent data-[state=active]:text-foreground hover:text-foreground/80 justify-between select-none",
+                        "group h-7 shrink-0 gap-1.5 rounded-md border-0 shadow-none ring-0 text-xs text-muted-foreground data-[state=active]:bg-accent data-[state=active]:text-foreground hover:text-foreground/80 justify-between select-none [touch-action:none]",
                         compact
                           ? "px-1.5!"
                           : "ps-2! pe-1!",
                         isSplit && "ring-1 ring-inset ring-foreground/20",
-                        isDragging && "cursor-grabbing opacity-90 shadow-lg scale-105 z-10",
-                        !isDragging && draggingId !== null && "cursor-grabbing opacity-70",
+                        // Neighbors glide when their preview shift changes;
+                        // the dragged tab tracks the cursor 1:1 (no scale -
+                        // scaling distorts the tab and its hit box).
+                        isDragging
+                          ? "transition-none cursor-grabbing shadow-md"
+                          : "transition-[color,background-color,transform,box-shadow] duration-150 ease-out",
+                        draggingId !== null && !isDragging && "cursor-grabbing",
                         draggingId === null && "cursor-grab active:cursor-grabbing",
                       )}
                     >
@@ -233,10 +433,6 @@ export function TabBar({
                       </span>
                     </TabsTrigger>
                   </ContextMenuTrigger>
-                  {/* Drop indicator between tabs when dragging */}
-                  {showDropIndicator && (
-                    <div className="w-0.5 shrink-0 self-stretch bg-primary/60 rounded-full mx-0.5" />
-                  )}
                   <ContextMenuContent className="min-w-40 text-[12px]">
                     <ContextMenuItem
                       className="gap-2 text-[12px]"
