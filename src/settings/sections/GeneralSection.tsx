@@ -466,8 +466,7 @@ function GmailCard() {
         ) : null}
       </div>
       <div className="text-[10.5px] text-muted-foreground">
-        Agent can search your inbox; it cannot send or modify mail. Needs a
-        Google app password (2FA). Stored in your OS keychain.
+        Agent cannot send or modify mail. Needs a Google app password. Stored in your OS keychain.
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <Input
@@ -576,8 +575,7 @@ function SocialCard() {
         ) : null}
       </div>
       <div className="text-[10.5px] text-muted-foreground">
-        Agent can search X and read account timelines; it cannot post, like, or
-        follow. Needs your developer Bearer token. Stored in your OS keychain.
+        Agent cannot post, like, or follow. Needs your developer Bearer token. Stored in your OS keychain.
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <Input
