@@ -272,10 +272,10 @@ export function GroupChatPanel({
                 closeGroupFromStack();
               }}
             />
-            <Transcript group={active} expanded={groupExpanded} />
+            <Transcript group={active} />
             <GroupApprovals group={active} />
             <ActivityStrip group={active} />
-            <Composer group={active} expanded={groupExpanded} />
+            <Composer group={active} />
           </motion.div>
         ) : null}
       </AnimatePresence>
@@ -467,10 +467,8 @@ function ParticipantDot({ participant }: { participant: GroupParticipant }) {
 
 function Transcript({
   group,
-  expanded,
 }: {
   group: GroupChat;
-  expanded: boolean;
 }) {
   const version = useSyncExternalStore(subscribeGroupChats, getGroupStoreVersion, getGroupStoreVersion);
   // Re-read the group each version bump — messages arrays are replaced.
@@ -484,8 +482,6 @@ function Transcript({
     <div
       className={cn(
         "flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4",
-        // Full view: keep transcript lines readable — centered column.
-        expanded && "mx-auto w-full max-w-3xl",
       )}
     >
       {live.messages.length === 0 ? (
@@ -510,10 +506,19 @@ function Transcript({
           ) : (
           <div
             key={m.id}
-            className="flex flex-col gap-0.5"
+            // Main chat layout (message.tsx): user bubbles right-aligned
+            // and capped at 85%, participant replies full-width — the same
+            // shape the normal AI chat uses, at any panel width.
+            className={cn(
+              "flex flex-col gap-0.5",
+              m.from === "user" && "ml-auto max-w-[85%]",
+            )}
             data-msg-author={m.from === "user" ? "You" : nameFor(m.projectId)}
           >
-            <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+            <div className={cn(
+              "flex items-center gap-1.5 text-[10px] text-muted-foreground",
+              m.from === "user" && "justify-end",
+            )}>
               <span className="font-medium text-foreground">
                 {m.from === "user" ? "You" : nameFor(m.projectId)}
               </span>
@@ -748,10 +753,8 @@ export function resolveGroupMentionTarget(
 
 function Composer({
   group,
-  expanded,
 }: {
   group: GroupChat;
-  expanded: boolean;
 }) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -874,9 +877,10 @@ function Composer({
         // Same footprint as the AI input bar (AiInputBar): borderless strip,
         // no boxed input — the textarea is a transparent flex-1 element
         // flanked by the target picker and send button, so it fills the
-        // panel edge-to-edge instead of a small centered box.
+        // panel edge-to-edge instead of a small centered box. No width cap
+        // when expanded — the AI input bar has none either; the strip spans
+        // the whole panel like the main chat.
         "flex shrink-0 flex-col gap-1.5 border-t border-border/60 bg-card/40 px-3 py-2",
-        expanded && "mx-auto w-full max-w-3xl",
       )}
     >
       {pendingQuote && (

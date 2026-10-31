@@ -81,13 +81,20 @@ describe("composer mirrors the AI input bar", () => {
     expect(panel).not.toContain('import { Input } from "@/components/ui/input"');
   });
 
-  it("expanded keeps the centered readable column without extra borders", () => {
+  it("expanded spans the full panel width like the main AI chat (no centered column)", () => {
     // Span the whole composer section (function boundary regexes stop at the
     // first nested brace - anchor to the NEXT function instead).
     const start = panel.indexOf("function Composer");
     const end = panel.indexOf("function GroupListTray");
     const composer = panel.slice(start, end);
-    expect(composer).toContain('expanded && "mx-auto w-full max-w-3xl"');
+    // 2026-10-31: the centered max-w-3xl column was removed - the expanded
+    // panel mirrors the main AI chat layout (full-width strip, user bubbles
+    // ml-auto max-w-[85%], replies full-width), so neither the composer nor
+    // the transcript may reintroduce a width cap.
+    expect(composer).not.toContain("max-w-3xl");
+    expect(panel.indexOf("max-w-3xl", panel.indexOf("function Transcript"))).toBe(-1);
+    // User bubbles get the main chat's right-aligned treatment.
+    expect(panel).toContain('m.from === "user" && "ml-auto max-w-[85%]"');
     expect(composer).not.toContain("border-x");
   });
 });
