@@ -331,13 +331,23 @@ fn settings_panel_title(key: &str) -> String {
     format!("KAI — {name}")
 }
 
+/// Per-panel window height. All panels share the 860-wide default; About has
+/// far less content than the rest, so its window opens shorter instead of
+/// showing a half-empty dialog.
+fn settings_panel_height(key: &str) -> f64 {
+    match key {
+        "about" => 460.0,
+        _ => 640.0,
+    }
+}
+
 #[tauri::command]
 async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Result<(), String> {
     let key = settings_panel_key(tab.as_deref());
     let label = format!("settings-{key}");
     let url_path = format!("settings.html?tab={key}");
     let title = settings_panel_title(&key);
-
+    let height = settings_panel_height(&key);
     if let Some(window) = app.get_webview_window(&label) {
         // SELF-HEAL: if a previous settings-window creation failed partway
         // (e.g. the WebView2 environment mismatch bug this command once had),
@@ -357,8 +367,8 @@ async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Res
     let mut builder =
         WebviewWindowBuilder::new(&app, label.as_str(), WebviewUrl::App(url_path.into()))
             .title(title.as_str())
-        .inner_size(860.0, 640.0)
-        .min_inner_size(720.0, 520.0)
+        .inner_size(860.0, height)
+        .min_inner_size(720.0, 460.0)
         .resizable(true)
         .visible(false)
         .shadow(false)

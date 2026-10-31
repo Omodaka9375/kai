@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { Clock01Icon, GithubIcon, Globe02Icon, RefreshIcon } from "@hugeicons/core-free-icons";
+import { Alert02Icon, Clock01Icon, GithubIcon, Globe02Icon, RefreshIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useUpdater } from "@/modules/updater/useUpdater";
 import { getName, getVersion } from "@tauri-apps/api/app";
@@ -236,6 +236,17 @@ export function AboutSection() {
           <Button
             variant="outline"
             size="sm"
+            onClick={() => void reportIssue()}
+            disabled={reporting}
+            title="Open a new GitHub issue with logs pre-attached"
+            className="gap-1.5"
+          >
+            <HugeiconsIcon icon={Alert02Icon} size={12} strokeWidth={1.75} />
+            Report an issue
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => void openUrl(REPO_URL)}
             className="gap-1.5"
           >
@@ -244,15 +255,6 @@ export function AboutSection() {
           </Button>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => void reportIssue()}
-            disabled={reporting}
-            title="Open a new GitHub issue with logs pre-attached"
-          >
-            Report an issue
-          </Button>
           <Button
             variant="ghost"
             size="sm"
