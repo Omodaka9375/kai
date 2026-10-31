@@ -57,3 +57,36 @@ describe("PreviewPane iframe sandbox", () => {
     expect(iframeJsx).toMatch(/referrerPolicy="no-referrer"/);
   });
 });
+
+describe("dev-server readiness gate (the connection-refused race)", () => {
+  // Opening a preview right after starting a dev server raced the server's
+  // boot: the iframe mounted instantly, got connection-refused, and the user
+  // refreshed manually. The gate: local URLs POLL until the server answers,
+  // showing a waiting state, then mount. Pins:
+  const pane = src;
+
+  it("probes with a no-cors fetch (rejects = refused, resolves = listening)", () => {
+    expect(pane).toContain('await fetch(url, { mode: "no-cors", cache: "no-store" });');
+  });
+
+  it("gates ONLY pollable local hosts (localhost / 127.0.0.1 - CSP allows probing)", () => {
+    expect(pane).toMatch(/u\.hostname === "localhost" \|\| u\.hostname === "127\.0\.0\.1"/);
+  });
+
+  it("waits, then times out with an actionable state", () => {
+    expect(pane).toContain("WAIT_POLL_MS = 500");
+    expect(pane).toContain("WAIT_MAX_ATTEMPTS = 90");
+    expect(pane).toContain("ServerNeverCameUp");
+  });
+
+  it("manual reload skips the gate (explicit user intent)", () => {
+    const reload = pane.split("useImperativeHandle")[1]?.split("}, [url],)")[0] ?? "";
+    expect(reload).toContain('setPhase({ kind: "mount" })');
+  });
+
+  it("remote URLs and empty URLs mount directly (behavior unchanged)", () => {
+    const gate = pane.split("// Readiness gate")[1]?.split("useImperativeHandle")[0] ?? "";
+    expect(gate).toContain('if (!isPollableLocalHost(url))');
+    expect(gate).toContain('setPhase({ kind: "mount" });');
+  });
+});

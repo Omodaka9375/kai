@@ -1,4 +1,4 @@
-import { Alert02Icon, Globe02Icon } from "@hugeicons/core-free-icons";
+import { Alert02Icon, Globe02Icon, Loading03Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   forwardRef,
@@ -25,9 +25,49 @@ type Props = {
   onClose?: () => void;
 };
 
-// Tear the iframe down after this much invisibility — a background dev
+// Tear the iframe down after this much invisibility - a background dev
 // server page can hold hundreds of MB inside the WebView.
 const SUSPEND_AFTER_MS = 30_000;
+
+// ── Dev-server readiness gate ──────────────────────────────────────────────
+// Opening a preview right after starting a dev server raced the server's
+// boot: the iframe mounted, the connection was refused, and the user had to
+// refresh manually. For local URLs we now poll the server FIRST and only
+// mount the iframe once it answers (a "waiting" state covers the gap).
+// A no-cors fetch is the reachability probe: it REJECTS on
+// connection-refused and RESOLVES (opaque response, CORS unreadable by
+// design) once anything is listening - exactly the signal we need, and CSP
+// connect-src already allows localhost/127.0.0.1.
+const WAIT_POLL_MS = 500;
+const WAIT_MAX_ATTEMPTS = 90; // ~45s of waiting before giving up
+
+/** Hosts the CSP connect-src actually allows the webview to probe. Other
+ *  local spellings (0.0.0.0, [::1]) are skipped - a CSP-blocked fetch is
+ *  indistinguishable from a refused one, so they mount directly. */
+function isPollableLocalHost(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return u.hostname === "localhost" || u.hostname === "127.0.0.1";
+  } catch {
+    return false;
+  }
+}
+
+async function serverReachable(url: string): Promise<boolean> {
+  try {
+    // HEAD vs GET: some dev servers answer HEAD with 405 - any response
+    // still proves the server is up, so no-cors GET of "/" is fine.
+    await fetch(url, { mode: "no-cors", cache: "no-store" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+type WaitPhase =
+  | { kind: "mount" }
+  | { kind: "waiting"; url: string }
+  | { kind: "timeout"; url: string };
 
 export const PreviewPane = forwardRef<PreviewPaneHandle, Props>(
   function PreviewPane({ url, visible, onUrlChange, onClose }, ref) {
@@ -36,6 +76,7 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, Props>(
     // contentWindow.location.reload() throws on cross-origin frames).
     const [nonce, setNonce] = useState(0);
     const [loaded, setLoaded] = useState(visible);
+    const [phase, setPhase] = useState<WaitPhase>({ kind: "mount" });
     const addressRef = useRef<PreviewAddressBarHandle>(null);
 
     useEffect(() => {
@@ -47,11 +88,48 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, Props>(
       return () => clearTimeout(t);
     }, [visible]);
 
+    // Readiness gate: runs when the URL CHANGES (open + address-bar
+    // submit). Manual reloads skip the gate - the user asked for this load
+    // right now. Local pollable URLs poll until the dev server answers;
+    // everything else (remote sites, other local spellings) mounts
+    // directly, preserving the old behavior.
+    useEffect(() => {
+      if (!url) {
+        setPhase({ kind: "mount" });
+        return;
+      }
+      if (!isPollableLocalHost(url)) {
+        setPhase({ kind: "mount" });
+        return;
+      }
+      let alive = true;
+      setPhase({ kind: "waiting", url });
+      void (async () => {
+        for (let attempt = 0; attempt < WAIT_MAX_ATTEMPTS; attempt++) {
+          // eslint-disable-next-line no-await-in-loop
+          await new Promise((r) => setTimeout(r, WAIT_POLL_MS));
+          if (!alive) return;
+          // eslint-disable-next-line no-await-in-loop
+          if (await serverReachable(url)) {
+            if (alive) setPhase({ kind: "mount" });
+            return;
+          }
+        }
+        if (alive) setPhase({ kind: "timeout", url });
+      })();
+      return () => {
+        alive = false;
+      };
+    }, [url]);
+
     useImperativeHandle(
       ref,
       () => ({
         reload: () => {
           setLoaded(true);
+          // Manual reload = explicit user intent: mount immediately,
+          // skipping the readiness gate.
+          setPhase({ kind: "mount" });
           setNonce((n) => n + 1);
         },
         focusAddressBar: () => addressRef.current?.focus(),
@@ -112,7 +190,28 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, Props>(
             </div>
           ) : url ? (
             loaded ? (
-              <iframe
+              phase.kind === "waiting" ? (
+                <WaitingForServer
+                  url={phase.url}
+                  onOpenNow={() => {
+                    // The server may answer between polls; the user can
+                    // force the mount.
+                    setPhase({ kind: "mount" });
+                  }}
+                />
+              ) : phase.kind === "timeout" ? (
+                <ServerNeverCameUp
+                  url={phase.url}
+                  onRetry={() => {
+                    setPhase({ kind: "waiting", url: phase.url });
+                    void serverReachable(phase.url).then((up) => {
+                      if (up) setPhase({ kind: "mount" });
+                    });
+                  }}
+                  onOpenNow={() => setPhase({ kind: "mount" })}
+                />
+              ) : (
+                <iframe
                 key={`${iframeSrc}#${nonce}`}
                 src={iframeSrc}
                 title="Preview"
@@ -127,6 +226,7 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, Props>(
                 referrerPolicy="no-referrer"
                 allow="clipboard-read; clipboard-write; fullscreen"
               />
+              )
             ) : (
               <SuspendedState
                 onReload={() => {
@@ -143,6 +243,93 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, Props>(
     );
   },
 );
+
+function WaitingForServer({
+  url,
+  onOpenNow,
+}: {
+  url: string;
+  onOpenNow: () => void;
+}) {
+  const port = (() => {
+    try {
+      return `:${new URL(url).port}`;
+    } catch {
+      return "";
+    }
+  })();
+  return (
+    <div className="flex h-full w-full flex-col items-center justify-center gap-3 px-6 text-center">
+      <div className="flex size-10 items-center justify-center rounded-2xl border border-border/60 bg-card text-muted-foreground">
+        <HugeiconsIcon
+          icon={Loading03Icon}
+          size={18}
+          strokeWidth={1.5}
+          className="animate-spin"
+        />
+      </div>
+      <div className="space-y-1">
+        <p className="text-[12.5px] font-medium text-foreground">
+          Waiting for the dev server{port}
+        </p>
+        <p className="max-w-xs text-[11px] leading-relaxed text-muted-foreground">
+          The page opens by itself the moment the server answers - no manual
+          refresh needed.
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={onOpenNow}
+        className="rounded-md border border-border/60 bg-card px-3 py-1 text-[11px] hover:bg-accent/50"
+      >
+        Open now
+      </button>
+    </div>
+  );
+}
+
+function ServerNeverCameUp({
+  url,
+  onRetry,
+  onOpenNow,
+}: {
+  url: string;
+  onRetry: () => void;
+  onOpenNow: () => void;
+}) {
+  return (
+    <div className="flex h-full w-full flex-col items-center justify-center gap-3 px-6 text-center">
+      <div className="flex size-10 items-center justify-center rounded-2xl border border-border/60 bg-card text-muted-foreground">
+        <HugeiconsIcon icon={Alert02Icon} size={18} strokeWidth={1.5} />
+      </div>
+      <div className="space-y-1">
+        <p className="text-[12.5px] font-medium text-foreground">
+          Server is not responding
+        </p>
+        <p className="max-w-xs text-[11px] leading-relaxed text-muted-foreground">
+          Nothing answered at <span className="font-mono">{url}</span> for
+          45 seconds. Check the server is running, then retry.
+        </p>
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onRetry}
+          className="rounded-md border border-border/60 bg-card px-3 py-1 text-[11px] hover:bg-accent/50"
+        >
+          Retry
+        </button>
+        <button
+          type="button"
+          onClick={onOpenNow}
+          className="rounded-md border border-border/60 bg-card px-3 py-1 text-[11px] hover:bg-accent/50"
+        >
+          Open anyway
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function SuspendedState({ onReload }: { onReload: () => void }) {
   return (
