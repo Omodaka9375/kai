@@ -3,7 +3,6 @@ import { useSyncExternalStore } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Popover,
   PopoverContent,
@@ -27,6 +26,7 @@ import {
   Folder01Icon,
   LeftToRightBlockQuoteIcon,
   Link01Icon,
+  MinusSignIcon,
   SentIcon,
   StopIcon,
   Tick02Icon,
@@ -265,7 +265,8 @@ export function GroupChatPanel({
               onStopAll={() => void stopGroupParticipants(active.id)}
               expanded={groupExpanded}
               onToggleExpand={() => setGroupExpanded(!groupExpanded)}
-              // ✕ hands the slot back to the AI mini window.
+              // Minimize hands the slot back to the AI mini window; the
+              // group keeps running and its pill re-opens it.
               onClose={() => {
                 setOpenGroupId(null);
                 closeGroupFromStack();
@@ -285,6 +286,11 @@ export function GroupChatPanel({
           onOpen={(id) => {
             setOpenGroupId(id);
             openGroupToStack();
+          }}
+          onEnd={(id) => {
+            // End (soft-stop participants) THEN delete (transcript gone,
+            // pill falls to the next group or disappears entirely).
+            return endGroupChat(id).then(() => deleteGroupChat(id));
           }}
         />
       ) : null}
@@ -391,15 +397,20 @@ function PanelHeader({
         >
           <HugeiconsIcon icon={expanded ? ArrowShrink01Icon : ArrowExpand01Icon} size={11} strokeWidth={1.75} />
         </Button>
+        {/* Minimize ( _ ), NOT close: hands the expanded slot back to the
+            AI mini window but the group keeps running — the tray pill at
+            the bottom of the gutter re-opens it. Ending the group lives on
+            the collapsed pill's ✕ (and the End button above). */}
         <Button
           type="button"
           size="icon"
           variant="ghost"
           className="size-5"
-          aria-label="Close group panel"
+          aria-label="Minimize group chat"
+          title="Minimize — the group keeps running in its pill"
           onClick={onClose}
         >
-          <HugeiconsIcon icon={Cancel01Icon} size={11} strokeWidth={1.75} />
+          <HugeiconsIcon icon={MinusSignIcon} size={11} strokeWidth={1.75} />
         </Button>
       </div>
     </div>
@@ -730,8 +741,12 @@ function Composer({
   return (
     <div
       className={cn(
-        "flex shrink-0 flex-col gap-1.5 border-t border-border/60 bg-card/80 p-3",
-        expanded && "mx-auto w-full max-w-3xl border-x",
+        // Same footprint as the AI input bar (AiInputBar): borderless strip,
+        // no boxed input — the textarea is a transparent flex-1 element
+        // flanked by the target picker and send button, so it fills the
+        // panel edge-to-edge instead of a small centered box.
+        "flex shrink-0 flex-col gap-1.5 border-t border-border/60 bg-card/40 px-3 py-2",
+        expanded && "mx-auto w-full max-w-3xl",
       )}
     >
       {pendingQuote && (
@@ -789,7 +804,7 @@ function Composer({
           ))}
         </PopoverContent>
       </Popover>
-      <Input
+      <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
@@ -799,7 +814,18 @@ function Composer({
           }
         }}
         placeholder="Coordinate your project agents…"
-        className="h-8 flex-1 rounded-lg border-border/50 bg-muted/30 px-3 text-[11.5px] placeholder:text-muted-foreground/60 focus-visible:ring-1 focus-visible:ring-ring/50"
+        rows={1}
+        wrap="soft"
+        className={cn(
+          // AiInputBar's textarea contract: transparent, borderless,
+          // flex-1 — reads as one continuous strip with the picker and
+          // send button, not a boxed input. Grows with content up to a
+          // practical cap (the panel stays usable with a long draft).
+          "min-h-8 flex-1 resize-none rounded-lg bg-transparent px-1 text-[12.5px] leading-relaxed outline-none",
+          "overflow-x-hidden whitespace-pre-wrap break-words [overflow-wrap:anywhere]",
+          "placeholder:text-muted-foreground/60 focus-visible:ring-1 focus-visible:ring-ring/50",
+          "max-h-24 overflow-y-auto",
+        )}
       />
       <Button
         type="button"
@@ -821,10 +847,16 @@ function GroupListTray({
   groups,
   activeId,
   onOpen,
+  onEnd,
 }: {
   groups: GroupChat[];
   activeId: string | null;
   onOpen: (id: string) => void;
+  /** END + DELETE the named group (the pill's ✕): the group is torn down,
+   *  its transcript removed, and the pill falls back to the next group or
+   *  disappears. Lives HERE because the tray is the group's collapsed
+   *  surface — minimizing the panel never deletes anything. */
+  onEnd: (id: string) => void | Promise<void>;
 }) {
   // ONE pill for the whole gutter: it names the most recent live group (or
   // the most recent one of any kind) and expands whichever group it names.
@@ -835,10 +867,7 @@ function GroupListTray({
   const g = groups.find((x) => x.endedAt === null) ?? groups[0];
   if (!g) return null;
   return (
-    <button
-      type="button"
-      onClick={() => onOpen(g.id)}
-      title={g.endedAt !== null ? "Resume group chat" : "Open group chat"}
+    <div
       data-group-pill
       className={cn(
         // Twin of the AI pill: same width as the mini window stack, sits at
@@ -849,9 +878,33 @@ function GroupListTray({
         g.endedAt !== null && "opacity-60",
       )}
     >
-      <HugeiconsIcon icon={Link01Icon} size={12} strokeWidth={1.75} className="shrink-0 text-muted-foreground" />
-      <span className="truncate">{g.name}</span>
-    </button>
+      <button
+        type="button"
+        onClick={() => onOpen(g.id)}
+        title={g.endedAt !== null ? "Resume group chat" : "Open group chat"}
+        className="flex min-w-0 flex-1 items-center gap-1.5 self-stretch text-left"
+      >
+        <HugeiconsIcon icon={Link01Icon} size={12} strokeWidth={1.75} className="shrink-0 text-muted-foreground" />
+        <span className="truncate">{g.name}</span>
+      </button>
+      {/* Small ✕ on the pill's right edge: ends AND deletes the group —
+          the true close the panel's minimize is not. Confirmation-free by
+          design (matching the panel's End button), but scoped to THIS
+          click: the pill body is a separate button, so opening still
+          needs a deliberate click on the name. */}
+      <button
+        type="button"
+        aria-label="End and close group chat"
+        title="End & close this group chat"
+        onClick={(e) => {
+          e.stopPropagation();
+          void onEnd(g.id);
+        }}
+        className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:bg-accent hover:text-destructive"
+      >
+        <HugeiconsIcon icon={Cancel01Icon} size={10} strokeWidth={2} />
+      </button>
+    </div>
   );
 }
 

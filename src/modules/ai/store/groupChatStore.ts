@@ -175,9 +175,26 @@ export function getPersonaApprovals(): PersonaApproval[] {
  *  decision — the group transcript can't prove WHO allowed a shell command
  *  inside the persona's scratch dir. */
 export function respondPersonaApproval(approvalId: string, approved: boolean): void {
-  const entry = personaApprovals.get(approvalId);
-  if (!entry) return;
-  personaApprovals.delete(approvalId);
+  let key: string | null = personaApprovals.has(approvalId) ? approvalId : null;
+  if (key === null) {
+    // FALLBACK LOOKUP by the stored approvalId field: the registry used to
+    // be keyed by toolCallId while the unified surface resolves by the SDK's
+    // approvalId (always a distinct generateId()), so every Approve/Deny
+    // click on a persona card was a silent no-op miss (user report:
+    // "couldn't click Approve on the card in the chat"). Registrations are
+    // keyed by approvalId since that fix; the scan keeps any in-flight
+    // pre-fix entry (registered by an older build in the same session)
+    // answerable too.
+    for (const [k, e] of personaApprovals.entries()) {
+      if (e.approvalId === approvalId) {
+        key = k;
+        break;
+      }
+    }
+  }
+  if (key === null) return;
+  const entry = personaApprovals.get(key)!;
+  personaApprovals.delete(key);
   auditAppend(
     approved ? AUDIT_KINDS.approvalApprove : AUDIT_KINDS.approvalDeny,
     entry.toolName,
@@ -756,8 +773,16 @@ async function runPersonaReply(
       const decisionPromises = pendingCalls.map(
         (c) =>
           new Promise<boolean>((resolve) => {
-            personaApprovals.set(c.toolCallId, {
-              approvalId: approvalIdByToolCall.get(c.toolCallId) ?? c.toolCallId,
+            // KEY = THE SDK'S approvalId, not the toolCallId. The unified
+            // approval surface (groupApprovals.personaEntries) exposes
+            // approvalId, and respondPersonaApproval looks the card up by
+            // exactly that. Keying by toolCallId made the lookup miss every
+            // time (the two ids are NEVER equal: the SDK generates a fresh
+            // approvalId per tool-approval-request part).
+            const sdkApprovalId =
+              approvalIdByToolCall.get(c.toolCallId) ?? c.toolCallId;
+            personaApprovals.set(sdkApprovalId, {
+              approvalId: sdkApprovalId,
               groupId: g.id,
               sessionKey: key,
               personaName: p.name,
