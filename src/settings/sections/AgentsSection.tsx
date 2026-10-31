@@ -26,7 +26,7 @@ import {
   SparklesIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { SectionHeader } from "../components/SectionHeader";
 
 const ICON_OPTIONS: AgentIconId[] = [
@@ -321,23 +321,38 @@ function AgentEditorDialog({
 }
 
 function CustomInstructionsBlock({ value }: { value: string }) {
+  const hydrated = usePreferencesStore((s) => s.hydrated);
   const [draft, setDraft] = useState(value);
   const [savedTick, setSavedTick] = useState(0);
-  const hadFirstSync = useRef(false);
-
-  useEffect(() => {
-    if (!hadFirstSync.current) {
-      hadFirstSync.current = true;
-      setDraft(value);
-    }
-  }, [value]);
-
-  const handleSave = async () => {
-    await setCustomInstructions(draft);
-    setSavedTick((n) => n + 1);
-  };
+  const [errorTick, setErrorTick] = useState(0);
 
   const isDirty = draft !== value;
+
+  // Store→draft sync. SettingsApp renders the section BEFORE init()
+  // resolves, so `value` arrives as "" and hydration lands later via the
+  // Tauri event. Sync on every value change EXCEPT while the user has
+  // unsaved edits — the old once-only sync latch captured the
+  // pre-hydration empty string and ignored the real value when it landed,
+  // so the textarea showed BLANK after every restart even though the
+  // instructions were safely on disk: it looked like they were lost.
+  useEffect(() => {
+    if (!isDirty) setDraft(value);
+  }, [value, isDirty]);
+
+  const handleSave = async () => {
+    try {
+      await setCustomInstructions(draft);
+      setErrorTick(0);
+      setSavedTick((n) => n + 1);
+    } catch (err) {
+      // A failed store write must never look like success — the old code
+      // had no handler, so a rejected save silently dropped the edit and
+      // the user only found out after a restart.
+      console.error("[kai] custom instructions save failed:", err);
+      setErrorTick((n) => n + 1);
+    }
+  };
+
   const chars = draft.length;
 
   return (
@@ -345,7 +360,14 @@ function CustomInstructionsBlock({ value }: { value: string }) {
       <div className="flex items-center justify-between">
         <Label>Custom instructions</Label>
         <div className="flex items-center gap-1.5">
-          {savedTick > 0 ? (
+          {errorTick > 0 ? (
+            <span
+              key={`err-${errorTick}`}
+              className="animate-in fade-in text-[10px] text-destructive"
+            >
+              Save failed — try again
+            </span>
+          ) : savedTick > 0 ? (
             <span
               key={savedTick}
               className="animate-in fade-in text-[10px] text-emerald-600 dark:text-emerald-400"
@@ -353,7 +375,9 @@ function CustomInstructionsBlock({ value }: { value: string }) {
               Saved
             </span>
           ) : null}
-          {isDirty && draft ? (
+          {/* isDirty alone (not isDirty && draft): emptying the field is a
+              real edit — clearing instructions must be saveable. */}
+          {isDirty ? (
             <Button size="xs" onClick={handleSave}>
               Save
             </Button>
@@ -363,7 +387,12 @@ function CustomInstructionsBlock({ value }: { value: string }) {
       <Textarea
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
-        placeholder="e.g. Always reply in concise bullet points. Prefer pnpm over npm. My machine is an M-series Mac."
+        disabled={!hydrated}
+        placeholder={
+          hydrated
+            ? "e.g. Always reply in concise bullet points. Prefer pnpm over npm. My machine is an M-series Mac."
+            : "Loading settings…"
+        }
         className="min-h-[120px] h-[200px] max-h-[400px] resize-y overflow-y-auto bg-card/60 font-sans text-[12px] leading-relaxed border border-border [field-sizing:content]"
       />
       <span className="self-end text-[10px] tabular-nums text-muted-foreground/60">
