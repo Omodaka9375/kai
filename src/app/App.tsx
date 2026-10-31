@@ -1915,6 +1915,8 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
       {tabs.length === 0 && (
         <StartPage
           onNewTerminal={() => newTab(inheritedCwdForNewTab())}
+          onNewPrivateTerminal={() => newPrivateTab(inheritedCwdForNewTab())}
+          onNewApiTester={() => newApiTesterTab()}
         />
       )}
       <div

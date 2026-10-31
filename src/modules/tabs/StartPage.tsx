@@ -6,6 +6,8 @@ import { SHORTCUTS, getBindingTokens, type ShortcutId } from "@/modules/shortcut
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   AiChat01Icon,
+  ApiIcon,
+  IncognitoIcon,
   InformationCircleIcon,
   TerminalIcon,
 } from "@hugeicons/core-free-icons";
@@ -14,6 +16,10 @@ import { useCallback, useMemo } from "react";
 type Props = {
   /** Spawn a terminal tab (uses the current workspace cwd). */
   onNewTerminal: () => void;
+  /** Spawn a private terminal tab (hidden from the AI agent). */
+  onNewPrivateTerminal: () => void;
+  /** Spawn an API tester tab. */
+  onNewApiTester: () => void;
 };
 
 /** User bindings override defaults (same resolution as the Header). */
@@ -36,7 +42,11 @@ function useShortcutLabel(id: ShortcutId): string {
  * foreground/ring) — nothing hard-coded; radius and text sizes follow the
  * app's dense compact scale (rounded-md/lg, text-[11..13px]).
  */
-export function StartPage({ onNewTerminal }: Props) {
+export function StartPage({
+  onNewTerminal,
+  onNewPrivateTerminal,
+  onNewApiTester,
+}: Props) {
   const openPanel = useChatStore((s) => s.openPanel);
   const panelOpen = useChatStore((s) => s.panelOpen);
   const focusInput = useChatStore((s) => s.focusInput);
@@ -76,8 +86,22 @@ export function StartPage({ onNewTerminal }: Props) {
         icon: AiChat01Icon,
         onClick: openChat,
       },
+      {
+        key: "private",
+        label: "Private terminal",
+        hint: "",
+        icon: IncognitoIcon,
+        onClick: onNewPrivateTerminal,
+      },
+      {
+        key: "api-tester",
+        label: "API tester",
+        hint: "",
+        icon: ApiIcon,
+        onClick: onNewApiTester,
+      },
     ],
-    [onNewTerminal, openChat, newTerminalHint, chatHint],
+    [onNewTerminal, onNewPrivateTerminal, onNewApiTester, openChat, newTerminalHint, chatHint],
   );
 
   return (
