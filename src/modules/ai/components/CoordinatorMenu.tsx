@@ -8,6 +8,7 @@ import {
 import {
   coordinatorPendingCount,
   delegateCoordination,
+  isPersonaParticipantId,
   reclaimCoordination,
   type GroupChat,
 } from "../store/groupChatStore";
@@ -51,6 +52,21 @@ export function CoordinatorMenu({ group }: { group: GroupChat }) {
             isAgentCoord &&
             group.coordinator.kind === "agent" &&
             group.coordinator.projectId === p.projectId;
+          // Personas can never take the coordinator role (no session, no
+          // bridge — see delegateCoordination's guard). Hide the button
+          // rather than showing one that does nothing.
+          if (isPersonaParticipantId(p.projectId)) {
+            return (
+              <div
+                key={p.projectId}
+                className="flex w-full items-center justify-between rounded px-2 py-1.5 opacity-50"
+                title="Personas cannot coordinate a group"
+              >
+                <span className="min-w-0 flex-1 truncate">{p.name}</span>
+                <span className="text-[9.5px]">persona</span>
+              </div>
+            );
+          }
           return (
             <button
               key={p.projectId}

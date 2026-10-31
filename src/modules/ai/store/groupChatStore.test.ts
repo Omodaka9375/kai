@@ -27,28 +27,50 @@ const injectMessageMock = vi.fn();
 // Mutable per-project active-session map: tests drive WHICH sessions exist
 // (the re-resolve path depends on a session appearing AFTER group creation).
 const activeSessions: Record<string, string | null> = {};
+// Mutable model/keys surface for the persona path (runPersonaReply reads
+// selectedModelId + apiKeys off useChatStore.getState()).
+const personaTestState: { selectedModelId?: string; apiKeys?: Record<string, string> } = {};
 vi.mock("./chatStore", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./chatStore")>();
   return {
     ...actual,
     useChatStore: {
-      getState: () => ({ injectMessage: injectMessageMock }),
+      getState: () => ({
+        injectMessage: injectMessageMock,
+        selectedModelId: personaTestState.selectedModelId,
+        apiKeys: personaTestState.apiKeys,
+      }),
     },
     getSessionAgentMeta: () => ({ status: "idle" }),
     getProjectActiveSession: (id: string) => activeSessions[id] ?? null,
   };
 });
 
+// The persona reply path builds its model through lib/agent's dynamic import.
+// Mock it file-wide: a slow-throwing build keeps the persona BUSY long enough
+// to observe queueing, then surfaces the error note the UI contract promises.
+vi.mock("../lib/agent", () => ({
+  buildLanguageModel: vi.fn(async () => {
+    await new Promise((r) => setTimeout(r, 50));
+    throw new Error("test: model unavailable");
+  }),
+}));
+
+import { getModel, DEFAULT_MODEL_ID } from "../config";
 import {
   __resetGroupChatsForTest,
+  addPersonaParticipants,
   appendGroupMessage,
   createGroupChat,
+  delegateCoordination,
   deleteGroupChat,
   endGroupChat,
   getGroup,
   getGroups,
   getGroupForSession,
   groupsForProject,
+  participantActivity,
+  removeParticipant,
   resumeGroupChat,
   sendGroupMessage,
   flushQueuedForSession,
@@ -292,5 +314,117 @@ describe("source pins — trust boundary & wiring", () => {
     expect(panel).toContain("top-[2.85rem]");
     expect(panel).toContain("ArrowExpand01Icon");
     expect(pill).toContain("groupPanelExpanded");
+  });
+});
+
+describe("persona participants", () => {
+  const PERSONA = "persona:builtin:reviewer";
+
+  it("addPersonaParticipants adds a validated persona with a synthetic identity", async () => {
+    const g = await createGroupChat(
+      { projectId: "a", sessionId: "s1", root: "/a", name: "alpha" },
+      [{ projectId: "b", root: "/b", name: "beta" }],
+    );
+    await addPersonaParticipants(g!.id, ["builtin:reviewer"]);
+    const live = getGroup(g!.id)!;
+    const p = live.participants.find((x) => x.projectId === PERSONA);
+    expect(p).toBeDefined();
+    // Synthetic identity: projectId === sessionId, no root, current name.
+    expect(p!.sessionId).toBe(PERSONA);
+    expect(p!.root).toBe("");
+    // Builtin name resolution (not the raw id).
+    expect(p!.name).not.toBe("builtin:reviewer");
+    // Never indexed as a Chat session.
+    expect(getGroupForSession(PERSONA)).toBeNull();
+    await removeParticipant(g!.id, PERSONA);
+    expect(getGroup(g!.id)!.participants.some((x) => x.projectId === PERSONA)).toBe(false);
+  });
+
+  it("addPersonaParticipants skips unknown ids and is idempotent", async () => {
+    const g = await createGroupChat(
+      { projectId: "a", sessionId: "s1", root: "/a", name: "alpha" },
+      [{ projectId: "b", root: "/b", name: "beta" }],
+    );
+    await addPersonaParticipants(g!.id, ["builtin:reviewer", "ghost:deleted"]);
+    let live = getGroup(g!.id)!;
+    expect(live.participants.filter((x) => x.projectId === PERSONA)).toHaveLength(1);
+    // Second call with the same id adds nothing.
+    await addPersonaParticipants(g!.id, ["builtin:reviewer"]);
+    live = getGroup(g!.id)!;
+    expect(live.participants.filter((x) => x.projectId === PERSONA)).toHaveLength(1);
+    // The unknown id was skipped entirely.
+    expect(live.participants.some((x) => x.projectId === "persona:ghost:deleted")).toBe(false);
+  });
+
+  it("createGroupChat accepts persona invitees without resolving a session", async () => {
+    const g = await createGroupChat(
+      { projectId: "a", sessionId: "s1", root: "/a", name: "alpha" },
+      [{ projectId: "persona:builtin:reviewer", root: "", name: "Code Reviewer" }],
+    );
+    const p = g!.participants.find((x) => x.projectId === PERSONA);
+    expect(p).toBeDefined();
+    expect(p!.sessionId).toBe(PERSONA);
+  });
+
+  it("delegation to a persona is refused by the store guard", async () => {
+    const g = await createGroupChat(
+      { projectId: "a", sessionId: "s1", root: "/a", name: "alpha" },
+      [{ projectId: "b", root: "/b", name: "beta" }],
+    );
+    await addPersonaParticipants(g!.id, ["builtin:reviewer"]);
+    await delegateCoordination(g!.id, PERSONA);
+    const live = getGroup(g!.id)!;
+    expect(live.coordinator.kind).toBe("user");
+  });
+
+  it("persona delivery queues while busy and the store exposes activity", async () => {
+    const g = await createGroupChat(
+      { projectId: "a", sessionId: "s1", root: "/a", name: "alpha" },
+      [{ projectId: "b", root: "/b", name: "beta" }],
+    );
+    await addPersonaParticipants(g!.id, ["builtin:reviewer"]);
+    // Give the persona path a model + key so the run reaches the (mocked,
+    // slow-throwing) model build and stays observably busy.
+    const m = getModel(DEFAULT_MODEL_ID);
+    personaTestState.selectedModelId = DEFAULT_MODEL_ID;
+    personaTestState.apiKeys = { [m.provider]: "test-key" };
+    try {
+      const first = await sendGroupMessage(g!.id, "one");
+      const personaDelivery = first.find((d) => d.projectId === PERSONA);
+      expect(personaDelivery).toBeDefined();
+      expect(participantActivity(PERSONA)).toBe("working");
+      const second = await sendGroupMessage(g!.id, "two");
+      const queuedDelivery = second.find((d) => d.projectId === PERSONA);
+      expect(queuedDelivery).toBeDefined();
+      expect(queuedDelivery!.queued).toBe(true);
+      await new Promise((r) => setTimeout(r, 150));
+      // The failed run surfaced as an error note (never silence).
+      const live = getGroup(g!.id)!;
+      expect(
+        live.messages.some((m) => m.from === "system" && m.text.includes("persona) hit an error")),
+      ).toBe(true);
+    } finally {
+      delete personaTestState.selectedModelId;
+      delete personaTestState.apiKeys;
+    }
+  });
+
+  it("source pins: persona support is wired through panel, store, and tool", () => {
+    const store = readFileSync(new URL("./groupChatStore.ts", import.meta.url), "utf8");
+    const panel = readFileSync(new URL("../components/GroupChatPanelView.tsx", import.meta.url), "utf8");
+    const menu = readFileSync(new URL("../components/CoordinatorMenu.tsx", import.meta.url), "utf8");
+    const groupTool = readFileSync(new URL("../tools/group.ts", import.meta.url), "utf8");
+    // Panel: picker lists personas + participants menu invites them.
+    expect(panel).toContain("addPersonaParticipants");
+    expect(panel).toContain("Invite personas");
+    // Store: persona identity is synthetic and never a Chat session.
+    expect(store).toContain("PERSONA_ID_PREFIX = \"persona:\"");
+    expect(store).toContain("isPersonaParticipantId");
+    // Delegation guard + preamble note both live in the store.
+    expect(store).toContain("isPersonaParticipantId(projectId)) return;");
+    // Menu: personas render inert (can't coordinate).
+    expect(menu).toContain("isPersonaParticipantId(p.projectId)");
+    // Tool: coordinator sees persona-aware participant descriptions.
+    expect(groupTool).toContain("isPersonaParticipantId");
   });
 });

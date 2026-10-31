@@ -29,9 +29,12 @@ import {
   SentIcon,
   StopIcon,
   Tick02Icon,
+  UserMultiple02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { getProjectAgentStatus } from "../store/projectStatus";
+import { useAgentsStore } from "../store/agentsStore";
+import { BUILTIN_AGENTS } from "../lib/agents";
 import {
   useChatStore,
   subscribeSessionAgentMeta,
@@ -39,12 +42,14 @@ import {
 } from "../store/chatStore";
 import {
   addParticipants,
+  addPersonaParticipants,
   createGroupChat,
   deleteGroupChat,
   endGroupChat,
   getGroupStoreVersion,
-  getGroups,
   getGroup,
+  getGroups,
+  isPersonaParticipantId,
   participantActivity,
   removeParticipant,
   resumeGroupChat,
@@ -152,9 +157,18 @@ export function GroupChatPanel({
   }, [openGroupToStack]);
 
   const onCreate = useCallback(
-    async (invitees: ProjectSwitcherItem[]) => {
+    async (invitees: ProjectSwitcherItem[], personas: string[]) => {
       const inviter = projects.find((p) => p.id === activeProjectId);
-      if (!inviter || invitees.length === 0) return;
+      if (!inviter) return;
+      if (invitees.length === 0 && personas.length === 0) return;
+      // Persona invitees ride the SAME createGroupChat invitees array — the
+      // store recognizes the synthetic "persona:<id>" projectId and skips
+      // session resolution for them (see createGroupChat's map).
+      const personaItems = personas.map((id) => {
+        const all = [...useAgentsStore.getState().customAgents, ...BUILTIN_AGENTS];
+        const found = all.find((a) => a.id === id);
+        return { projectId: `persona:${id}`, root: "", name: found?.name ?? id };
+      });
       const g = await createGroupChat(
         {
           projectId: inviter.id,
@@ -162,11 +176,17 @@ export function GroupChatPanel({
           root: inviter.root,
           name: inviter.name,
         },
-        invitees.map((i) => ({ projectId: i.id, root: i.root, name: i.name })),
-        `${inviter.name} ↔ ${invitees.map((i) => i.name).join(", ")}`,
+        [
+          ...invitees.map((i) => ({ projectId: i.id, root: i.root, name: i.name })),
+          ...personaItems,
+        ],
+        `${inviter.name} ↔ ${[...invitees, ...personaItems].map((i) => i.name).join(", ")}`,
       );
-      // createGroupChat resolves the inviter's CURRENT active session on
-      // flush; the sessionId passed here is a placeholder replaced in-store.
+      if (g && personas.length > 0) {
+        // Re-add via the validated store path (idempotent per persona) so a
+        // deleted-during-creation persona can't slip in as a zombie.
+        await addPersonaParticipants(g.id, personas);
+      }
       setPickerOpen(false);
       // Claim the expanded slot immediately. Without openGroupToStack the
       // new group is INVISIBLE: the tray pill hides itself while a group is
@@ -294,7 +314,7 @@ function PanelHeader({
           />
           {group.endedAt !== null
             ? "Ended"
-            : `${group.participants.length} projects`}
+            : `${group.participants.length} participant${group.participants.length === 1 ? "" : "s"}`}
         </span>
         {group.coordinator.kind === "agent" && group.endedAt === null ? (
           <span
@@ -372,7 +392,11 @@ function PanelHeader({
 }
 
 function ParticipantDot({ participant }: { participant: GroupParticipant }) {
-  const status = getProjectAgentStatus(participant.projectId);
+  const status = isPersonaParticipantId(participant.projectId)
+    ? participantActivity(participant.sessionId) === "working"
+      ? "streaming"
+      : "idle"
+    : getProjectAgentStatus(participant.projectId);
   return (
     <span
       title={`${participant.name}: ${status}`}
@@ -469,11 +493,17 @@ function Transcript({
  */
 function ActivityStrip({ group }: { group: GroupChat }) {
   // Real version snapshot: the old constant (() => 0) NEVER notified React,
-  // so the strip only refreshed by accident of parent re-renders.
+  // so the strip only refreshed by accident of parent re-renders. The group
+  // store version joins it: persona busy/queue changes bump THAT signal.
   useSyncExternalStore(
     subscribeSessionAgentMeta,
     getSessionMetaVersion,
     getSessionMetaVersion,
+  );
+  useSyncExternalStore(
+    subscribeGroupChats,
+    getGroupStoreVersion,
+    getGroupStoreVersion,
   );
   if (group.endedAt !== null) return null;
   const live = group.participants
@@ -671,21 +701,31 @@ function InvitePicker({
   onOpenChange: (v: boolean) => void;
   projects: ProjectSwitcherItem[];
   activeProjectId: string | null;
-  onCreate: (invitees: ProjectSwitcherItem[]) => void | Promise<void>;
+  onCreate: (invitees: ProjectSwitcherItem[], personas: string[]) => void | Promise<void>;
   onOpenGroup: (groupId: string) => void;
 }) {
   const [picked, setPicked] = useState<string[]>([]);
+  const [pickedPersonas, setPickedPersonas] = useState<string[]>([]);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   // Re-read on every open (the dialog lives outside the version-notify tree).
   const existing = open ? getGroups() : [];
   const candidates = projects.filter((p) => p.id !== activeProjectId);
   const invitees = candidates.filter((p) => picked.includes(p.id));
+  // Existing personas across ALL live groups — dedupe in the picker so the
+  // same persona can't be picked twice into one group from the list.
+  const personas = useAgentsStore((s) =>
+    [...s.customAgents, ...BUILTIN_AGENTS].map((a) => ({
+      id: a.id,
+      name: a.name,
+    })),
+  );
   const inviterName = projects.find((p) => p.id === activeProjectId)?.name ?? "This project";
 
   const handleOpenChange = (nextOpen: boolean) => {
     onOpenChange(nextOpen);
     if (!nextOpen) {
       setPicked([]);
+      setPickedPersonas([]);
       setConfirmDelete(null);
     }
   };
@@ -771,6 +811,7 @@ function InvitePicker({
 
         <div className="flex flex-col gap-2">
           <div className="text-[11px] font-medium text-muted-foreground">Available projects</div>
+          {/* Persona list: agent personas without a project can join too. */}
           <div className="flex max-h-72 flex-col gap-1 overflow-y-auto rounded-xl border border-border/60 bg-background/40 p-1.5">
             {candidates.length > 0 ? (
               candidates.map((project) => {
@@ -817,20 +858,78 @@ function InvitePicker({
           </div>
         </div>
 
+        <div className="flex flex-col gap-2">
+          <div className="text-[11px] font-medium text-muted-foreground">Agent personas</div>
+          <div className="flex max-h-44 flex-col gap-1 overflow-y-auto rounded-xl border border-border/60 bg-background/40 p-1.5">
+            {personas.length > 0 ? (
+              personas.map((persona) => {
+                const selected = pickedPersonas.includes(persona.id);
+                return (
+                  <button
+                    key={persona.id}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() =>
+                      setPickedPersonas((current) =>
+                        current.includes(persona.id)
+                          ? current.filter((id) => id !== persona.id)
+                          : [...current, persona.id],
+                      )
+                    }
+                    className={cn(
+                      "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+                      selected ? "bg-accent text-foreground" : "text-muted-foreground",
+                    )}
+                  >
+                    <HugeiconsIcon icon={UserMultiple02Icon} size={16} strokeWidth={1.75} className="shrink-0" />
+                    <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-foreground">
+                      {persona.name}
+                    </span>
+                    <span className="shrink-0 text-[10px] text-muted-foreground/70">no project</span>
+                    <span
+                      className={cn(
+                        "flex size-4 shrink-0 items-center justify-center rounded border",
+                        selected
+                          ? "border-primary bg-primary text-primary-foreground"
+                          : "border-border bg-background",
+                      )}
+                    >
+                      {selected ? <HugeiconsIcon icon={Tick02Icon} size={11} strokeWidth={2.5} /> : null}
+                    </span>
+                  </button>
+                );
+              })
+            ) : (
+              <div className="px-3 py-4 text-center text-[12px] text-muted-foreground">
+                No personas defined.
+              </div>
+            )}
+          </div>
+          <p className="text-[10.5px] leading-relaxed text-muted-foreground/80">
+            Personas join without a project — they reply from their own
+            persona instructions, using the app's selected model.
+          </p>
+        </div>
+
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
             Cancel
           </Button>
           <Button
             type="button"
-            disabled={invitees.length === 0}
+            disabled={invitees.length === 0 && pickedPersonas.length === 0}
             onClick={() => {
+              const inv = invitees;
+              const per = pickedPersonas;
               setPicked([]);
+              setPickedPersonas([]);
               setConfirmDelete(null);
-              void onCreate(invitees);
+              void onCreate(inv, per);
             }}
           >
-            Create group{invitees.length > 0 ? ` (${invitees.length})` : ""}
+            Create group{invitees.length + pickedPersonas.length > 0
+              ? ` (${invitees.length + pickedPersonas.length})`
+              : ""}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -856,6 +955,17 @@ function ParticipantsMenu({
   const live = getGroup(group.id) ?? group;
   const memberIds = new Set(live.participants.map((p) => p.projectId));
   const invitable = candidates.filter((c) => !memberIds.has(c.id));
+  // Existing personas not yet in this group (synthetic ids are members too).
+  const memberPersonaIds = new Set(
+    live.participants
+      .filter((p) => isPersonaParticipantId(p.projectId))
+      .map((p) => p.projectId.slice("persona:".length)),
+  );
+  const invitablePersonas = useAgentsStore((s) =>
+    [...s.customAgents, ...BUILTIN_AGENTS]
+      .filter((a) => !memberPersonaIds.has(a.id))
+      .map((a) => ({ id: a.id, name: a.name })),
+  );
   void group;
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -907,6 +1017,27 @@ function ParticipantsMenu({
             </div>
           </div>
         ))}
+        {/* Persona invite section: existing personas (custom first, then
+            builtins) that are not yet in this group. */}
+        {invitablePersonas.length > 0 ? (
+          <>
+            <div className="mt-1 px-2 pb-1 pt-0.5 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+              Invite personas
+            </div>
+            {invitablePersonas.map((a) => (
+              <button
+                key={a.id}
+                type="button"
+                onClick={() => void addPersonaParticipants(live.id, [a.id])}
+                className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left hover:bg-accent"
+              >
+                <HugeiconsIcon icon={Add01Icon} size={10} strokeWidth={1.75} />
+                <span className="min-w-0 flex-1 truncate">{a.name}</span>
+                <span className="shrink-0 text-[9.5px] text-muted-foreground/70">persona</span>
+              </button>
+            ))}
+          </>
+        ) : null}
         {invitable.length > 0 ? (
           <>
             <div className="mt-1 px-2 pb-1 pt-0.5 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
