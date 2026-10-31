@@ -84,4 +84,13 @@ describe("composer @-mention targeting (replaces the All dropdown)", () => {
     expect(panel).toContain("All — send to everyone");
     expect(panel).toMatch(/ParticipantDot participant=\{/);
   });
+
+  it("the textarea pads vertically so the caret/placeholder sit centered (not glued to the top)", () => {
+    // min-h-8 (32px) around a ~20px line with no vertical padding left the
+    // caret + placeholder flush with the top edge (textarea content always
+    // renders at the top of its box). py-1.5 centers the single line.
+    expect(panel).toMatch(
+      /bg-transparent px-1 py-1\.5 text-\[12\.5px\]/,
+    );
+  });
 });

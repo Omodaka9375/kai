@@ -990,7 +990,12 @@ function Composer({
           // flex-1 — reads as one continuous strip with the picker and
           // send button, not a boxed input. Grows with content up to a
           // practical cap (the panel stays usable with a long draft).
-          "min-h-8 flex-1 resize-none rounded-lg bg-transparent px-1 text-[12.5px] leading-relaxed outline-none",
+          // py-1.5: a textarea's content sits at the TOP of its box —
+          // with min-h-8 (32px) around a ~20px line and no vertical
+          // padding, the caret and placeholder glued to the top edge.
+          // 6px top/bottom centers the single line; taller drafts scroll
+          // (max-h-24) so the padding never clips.
+          "min-h-8 flex-1 resize-none rounded-lg bg-transparent px-1 py-1.5 text-[12.5px] leading-relaxed outline-none",
           "overflow-x-hidden whitespace-pre-wrap break-words [overflow-wrap:anywhere]",
           "placeholder:text-muted-foreground/60 focus-visible:ring-1 focus-visible:ring-ring/50",
           "max-h-24 overflow-y-auto",
