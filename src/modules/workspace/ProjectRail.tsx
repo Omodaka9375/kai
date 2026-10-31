@@ -117,7 +117,7 @@ export function ProjectRail({
         <div className="flex h-10 shrink-0 items-center justify-center border-b border-border/60">
           {fileMenuTrigger}
         </div>
-        <div className="relative flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto p-1.5">
+        <div className="relative flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto p-1.5 [scrollbar-width:thin] [-ms-overflow-style:none] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border/60">
           {projects.map((project) => (
             <div key={project.id} className="group relative w-full">
               <Tooltip>
