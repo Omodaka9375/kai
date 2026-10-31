@@ -108,7 +108,7 @@ Machine-checked by `src/modules/ai/lib/kaiMdDriftGate.test.ts` against `src/modu
 
 Card carve-outs (never auto-approved, even under auto-approve-all): elevated `bash_run`, `look_at_screen`, commit-signing git commits.
 
-- Auto-execute: `bash_kill`, `bash_list`, `bash_logs`, `display_image`, `generate_image`, `generate_video`, `get_terminal_output`, `gmail_read`, `glob`, `grep`, `list_directory`, `mcp_list_servers`, `open_preview`, `play_radio`, `project_status`, `radio_list_stations`, `radio_now_playing`, `read_file`, `social_read`, `stop_radio`, `suggest_command`, `todo_write`, `voice_settings`, `watch_kill`, `watch_list`, `web_browse`, `web_search`
+- Auto-execute: `bash_kill`, `bash_list`, `bash_logs`, `display_image`, `generate_image`, `generate_video`, `get_terminal_output`, `gmail_read`, `glob`, `grep`, `list_directory`, `mcp_list_servers`, `open_preview`, `play_radio`, `project_status`, `radio_list_stations`, `radio_now_playing`, `read_file`, `reminder_cancel`, `reminder_create`, `reminder_list`, `social_read`, `stop_radio`, `suggest_command`, `todo_write`, `voice_settings`, `watch_kill`, `watch_list`, `web_browse`, `web_search`
 - Approval-required: `bash_background`, `bash_run`, `batch_edit`, `checkpoint_undo`, `convert_image`, `convert_to_pdf`, `create_directory`, `display_video`, `edit`, `look_at_screen`, `mcp_add_server`, `replace_exact`, `run_subagent`, `send_to_project`, `save_memory`, `watch_create`, `write_file`
 
 ### Agent tool reliability

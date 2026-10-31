@@ -370,6 +370,28 @@ const REGISTRY: Record<string, ToolPresentation> = {
     fence: true,
     remoteSurface: false,
   },
+  reminder_create: {
+    label: "Reminder",
+    status: (a) => `Setting reminder: ${ellipsize(String(a.message ?? ""), 40)}`,
+    summary: (a) =>
+      `${str(a, "dueAt") ?? "?"}${a.repeat ? ` (${String(a.repeat)})` : ""}`,
+    effect: "COMMITTED",
+    fence: true,
+    remoteSurface: false,
+  },
+  reminder_list: {
+    label: "Reminders",
+    effect: "NONE",
+    fence: true,
+    remoteSurface: false,
+  },
+  reminder_cancel: {
+    label: "Cancel reminder",
+    summary: (a) => str(a, "id"),
+    effect: "COMMITTED",
+    fence: true,
+    remoteSurface: false,
+  },
   mcp_add_server: {
     label: "Add MCP",
     approvalLabel: "Register MCP server",

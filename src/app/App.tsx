@@ -810,6 +810,13 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
           const { installTelegramProjectMonitor } = await import("@/modules/assistant/projectBridge");
           installTelegramProjectMonitor();
         }
+        // Long-term reminder scheduler (passive, restart-safe): boot
+        // catch-up + Rust-heartbeat tick. The main window is the
+        // long-lived surface and the process is shared — one scheduler.
+        {
+          const { startReminderScheduler } = await import("@/modules/ai/lib/reminders");
+          void startReminderScheduler();
+        }
       })
       .catch((e) => console.warn("[kai:assistant] bridge import failed:", e));
     return () => {

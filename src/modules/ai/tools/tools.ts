@@ -21,6 +21,7 @@ import { buildVoiceTools } from "./voice";
 import { buildGroupTools } from "./group";
 import { buildGmailTools } from "./gmail";
 import { buildSocialTools } from "./social";
+import { buildReminderTools } from "./reminders";
 
 export { resolvePath, type ToolContext } from "./context";
 
@@ -37,6 +38,7 @@ export function buildCoreTools(ctx: import("./context").ToolContext) {
     ...buildTerminalImageTools(ctx),
     ...buildTerminalVideoTools(ctx),
     ...buildWatchTools(ctx),
+    ...buildReminderTools(ctx),
     ...buildScreenTools(ctx),
     ...buildMcpTools(ctx),
     ...buildRadioTools(ctx),

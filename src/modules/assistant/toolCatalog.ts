@@ -62,6 +62,13 @@ export const TOOL_CATALOG: readonly ToolEntry[] = [
   { name: "glob", tier: "read", blurb: "Find files by name pattern." },
   { name: "watch_list", tier: "read", blurb: "List active background watches." },
   {
+    name: "reminder_create",
+    tier: "read",
+    blurb: "Set a persistent long-term reminder (fires on its own, survives restarts).",
+  },
+  { name: "reminder_list", tier: "read", blurb: "List reminders." },
+  { name: "reminder_cancel", tier: "read", blurb: "Cancel a reminder." },
+  {
     name: "gmail_read",
     tier: "read",
     blurb: "Search and read your Gmail (read-only). Off by default — needs the app password from Settings → General.",
