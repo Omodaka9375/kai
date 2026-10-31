@@ -67,13 +67,17 @@ function TileStatusDot({
         hasNews && status !== "awaiting" && status !== "error" && "animate-pulse bg-amber-500",
         // Steady emerald: agent work happening, no action needed.
         !hasNews && status === "running" && "bg-emerald-500",
-        // Idle agent but terminals producing output — sky pulse. ONE dot per
-        // tile: terminal activity surfaces only when there is no agent state
-        // to show; the tooltip always carries the running-command count.
+        // Idle agent but terminals producing output — emerald PULSE, the
+        // same work-in-progress color family as the steady agent dot above
+        // (color sync 2026-10-31: "something is happening in this project"
+        // is green everywhere — steady = agent run, pulse = terminal
+        // command producing output; the sky dot was the only outlier).
+        // ONE dot per tile: terminal activity surfaces only when there is
+        // no agent state to show; the tooltip always carries the count.
         !hasNews &&
           status === "idle" &&
           runningTerminals > 0 &&
-          "animate-pulse bg-sky-500",
+          "animate-pulse bg-emerald-500",
         !hasNews &&
           status === "idle" &&
           runningTerminals === 0 &&
@@ -83,12 +87,13 @@ function TileStatusDot({
   );
 }
 
-/** Tooltip companion to the dot: appends the running-command count. */
+/** Tooltip companion to the dot: appends the running-command count.
+ *  Emerald to match the pulsing terminal dot (color sync 2026-10-31). */
 function TerminalRunningText({ projectId }: { projectId: string }) {
   const running = useProjectRunningTerminals(projectId);
   if (running === 0) return null;
   return (
-    <span className="text-sky-400">
+    <span className="text-emerald-400">
       {" · "}
       {running} terminal {running === 1 ? "command" : "commands"} running
     </span>
