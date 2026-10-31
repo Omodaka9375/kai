@@ -345,19 +345,27 @@ async function monitorBoundSessions(): Promise<void> {
     const settled = meta.status === "idle" && busyPrev;
 
     if (meta.status === "awaiting-approval" && prev !== "awaiting-approval") {
-      // Rich approval ping (Phase 2): the tool + summary + one-tap command
-      // ids for phone-approvable calls; the generic "respond on the
-      // desktop" line remains for privacy/elevated carve-outs.
+      // Rich approval ping (Phase 3): the tool + summary + INLINE Approve /
+      // Deny buttons for phone-approvable calls; the generic "respond on
+      // the desktop" line remains for privacy/elevated carve-outs.
       let text: string | null = null;
+      let approvalId: string | null = null;
       try {
-        const { approvalPingText } = await import("./telegramApprovals");
-        text = await approvalPingText(sessionId);
+        const { approvalPing } = await import("./telegramApprovals");
+        const ping = await approvalPing(sessionId);
+        text = ping?.text ?? null;
+        approvalId = ping?.id ?? null;
       } catch {
         text = null;
       }
-      await pingOwnerBound(
-        text ?? `${binding.name}: agent needs your approval (respond on the desktop).`,
-      );
+      if (text && approvalId) {
+        await pingOwnerApprovalWithButtons(text, approvalId);
+      } else {
+        await pingOwnerBound(
+          text ??
+            `${binding.name}: agent needs your approval (respond on the desktop).`,
+        );
+      }
       continue;
     }
 
@@ -437,6 +445,35 @@ export async function pingOwnerBound(text: string): Promise<void> {
   const prefs = await loadAssistantPrefs();
   if (!token || !prefs.enabled || prefs.ownerChatId == null) return;
   await telegramNative.sendMessage(token, prefs.ownerChatId, text).catch(() => {});
+}
+
+/**
+ * Approval ping WITH inline buttons (Phase 3): Approve / Deny ride the
+ * message as callback_data ("approve:<id>" / "deny:<id>"), handled by the
+ * callback_query event in index.ts through the same audited decision path
+ * as the /approve command. Desktop-only carve-outs send plain text (no
+ * buttons - there is nothing to press).
+ */
+export async function pingOwnerApprovalWithButtons(
+  text: string,
+  approvalId: string,
+): Promise<void> {
+  const token = await getTelegramToken();
+  const prefs = await loadAssistantPrefs();
+  if (!token || !prefs.enabled || prefs.ownerChatId == null) return;
+  const chatId = prefs.ownerChatId;
+  await telegramNative
+    .sendMessageWithButtons(token, chatId, text, [
+      ["Approve", `approve:${approvalId}`],
+      ["Deny", `deny:${approvalId}`],
+    ])
+    .catch(() => {
+      // Button send failed (old bridge / API hiccup): plain text still
+      // delivers the approval notice; the /approve command still works.
+      void telegramNative
+        .sendMessage(token, chatId, text)
+        .catch(() => {});
+    });
 }
 
 /** Proactive-ping gate: is this session bound? (Desktop hook consults this

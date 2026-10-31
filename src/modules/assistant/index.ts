@@ -988,6 +988,23 @@ async function handleTelegramEvent(e: TelegramEvent): Promise<void> {
     // Non-owner: silently ignore (no response = no oracle, no owner leak).
     return;
   }
+  if (e.kind === "callback_query") {
+    // Inline-keyboard button press on an approval card. data is
+    // "approve:<id>" / "deny:<id>"; route through the same decision path
+    // as /approve / /deny (audited, latched, bound-sessions-only), then
+    // answer the callback so the button stops spinning.
+    const token = await getTelegramToken();
+    if (token) {
+      const m = /^(approve|deny):(.+)$/.exec(e.data);
+      let answer = "Unknown action.";
+      if (m) {
+        const { respondTelegramApproval } = await import("./telegramApprovals");
+        answer = await respondTelegramApproval(m[2]!, m[1] === "approve");
+      }
+      await telegramNative.answerCallback(token, e.queryId, answer.slice(0, 180)).catch(() => {});
+    }
+    return;
+  }
   if (e.kind === "error") {
     console.warn("[kai:assistant] telegram loop error:", e.message);
   }

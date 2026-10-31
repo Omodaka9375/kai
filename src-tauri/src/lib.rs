@@ -809,6 +809,8 @@ app.manage(Mutex::new(None::<fs::env_probe::EnvInventory>));
             modules::telegram::telegram_status,
             modules::telegram::telegram_test,
             modules::telegram::telegram_send_message,
+            modules::telegram::telegram_send_message_with_buttons,
+            modules::telegram::telegram_answer_callback,
             modules::telegram::telegram_set_chat_action,
             modules::telegram::telegram_send_voice,
             modules::telegram::telegram_send_photo,

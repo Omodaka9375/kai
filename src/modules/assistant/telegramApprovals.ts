@@ -149,13 +149,13 @@ export async function respondTelegramApproval(
     : `Denied ${target.label} in ${target.projectName} - the agent will see the rejection.`;
 }
 
-/** Rich approval ping on the awaiting-approval transition (replaces the
- *  bare "respond on the desktop" text for phone-approvable calls).
- *  Returns the message text, or null when nothing pending (caller keeps
- *  the old generic ping). */
-export async function approvalPingText(
+/** Rich approval ping on the awaiting-approval transition: returns the
+ *  blocking approval's message text + id (the caller attaches inline
+ *  Approve/Deny buttons via the id), or null when nothing pending /
+ *  desktop-only (caller keeps the generic desktop ping). */
+export async function approvalPing(
   sessionId: string,
-): Promise<string | null> {
+): Promise<{ text: string; id: string } | null> {
   const bound = await listBoundProjects();
   const binding = Object.values(bound).find((b) => b.sessionId === sessionId);
   if (!binding) return null;
@@ -164,7 +164,13 @@ export async function approvalPingText(
   );
   if (pending.length === 0) return null;
   // The OLDEST pending approval is the blocking one.
-  return formatApprovalPing(pending[0]!);
+  const oldest = pending[0]!;
+  if (oldest.desktopOnly) {
+    // Desktop-only carve-outs get NO buttons and NO command ids - the
+    // caller falls back to the generic "respond on the desktop" ping.
+    return null;
+  }
+  return { text: formatApprovalPing(oldest), id: oldest.id };
 }
 
 void analyzeShellCommand;

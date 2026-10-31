@@ -193,7 +193,37 @@ describe("source pins", () => {
     expect(index).toContain("respondTelegramApproval(arg");
     expect(index).toContain('"/approvals - list pending approvals');
     const bridge = read("./projectBridge.ts");
-    expect(bridge).toContain("approvalPingText(sessionId)");
+    expect(bridge).toContain("approvalPing(sessionId)");
+    expect(bridge).toContain("pingOwnerApprovalWithButtons(text, approvalId)");
+  });
+
+  it("Phase 3: inline buttons on the approval ping + callback routing", () => {
+    const bridge = read("./projectBridge.ts");
+    // Buttons carry approve:/deny: callback data referencing the approval id.
+    expect(bridge).toContain('["Approve", `approve:${approvalId}`]');
+    expect(bridge).toContain('["Deny", `deny:${approvalId}`]');
+    // Button-send failure falls back to plain text (approval still visible).
+    expect(bridge).toContain("// Button send failed");
+    const index = read("../assistant/index.ts");
+    // The callback_query event routes through the SAME decision path as
+    // /approve - audited, latched, bound-only.
+    expect(index).toContain('if (e.kind === "callback_query")');
+    expect(index).toContain("/^(approve|deny):(.+)$/");
+    expect(index).toContain("respondTelegramApproval(m[2]!");
+    expect(index).toContain("answerCallback(token, e.queryId");
+    const prefs = read("./prefs.ts");
+    expect(prefs).toContain('kind: "callback_query"');
+    expect(prefs).toContain("sendMessageWithButtons:");
+    expect(prefs).toContain("answerCallback:");
+  });
+
+  it("Phase 3 Rust: callback_query is owner-gated in classify()", () => {
+    const rust = read("../../../src-tauri/src/modules/telegram.rs");
+    expect(rust).toContain("callback_query: Option<TgCallbackQuery>");
+    expect(rust).toContain("Some(id) if owner != -1 && id == owner => id,");
+    expect(rust).toContain('"allowed_updates": ["message", "callback_query"]');
+    expect(rust).toContain("telegram_send_message_with_buttons");
+    expect(rust).toContain("telegram_answer_callback");
   });
 
   it("carve-out set: look_at_screen + bash_run are desktop-only", () => {

@@ -306,6 +306,14 @@ pub enum TelegramEvent {
     StartCandidate { chat_id: i64, message_id: i64, date: i64 },
     /// Message from a non-owner chat (silently ignored by the agent).
     Rejected { chat_id: i64, date: i64 },
+    /// Inline-keyboard button press (approval card). `data` is the button
+    /// payload ("approve:<id>" / "deny:<id>"); `query_id` answers the
+    /// callback (stops the client-side spinner), `chat_id` routes it.
+    CallbackQuery {
+        query_id: String,
+        chat_id: i64,
+        data: String,
+    },
     /// Loop-level error (network down, token revoked). Reportable, not fatal.
     Error { message: String },
 }
@@ -462,6 +470,21 @@ struct TgUpdate {
     update_id: i64,
     #[serde(default)]
     message: Option<TgMessage>,
+    /// Inline-keyboard button press (approval cards). Owner-gated in classify().
+    #[serde(default)]
+    callback_query: Option<TgCallbackQuery>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TgCallbackQuery {
+    #[serde(default)]
+    id: String,
+    /// The data string we attached to the button ("approve:<id>" / "deny:<id>").
+    #[serde(default)]
+    data: Option<String>,
+    /// The message carrying the keyboard: { chat: { id }, ... }.
+    #[serde(default)]
+    message: Option<TgMessage>,
 }
 
 /// Minimal getUpdates result — we only need message updates.
@@ -475,7 +498,7 @@ async fn poll_once(
         .json(&serde_json::json!({
             "offset": offset,
             "timeout": LONG_POLL_SECS as i64,
-            "allowed_updates": ["message"],
+            "allowed_updates": ["message", "callback_query"],
         }))
         .send()
         .await
@@ -502,6 +525,31 @@ async fn poll_once(
 
 /// Classify one update against the owner gate and emit the right event.
 fn classify(update: &TgUpdate) -> Option<i64> {
+    // Inline-keyboard presses (approval cards). The owner gate applies to
+    // callbacks exactly as to messages - a stranger pressing a forwarded
+    // button is dropped before anything decides anything.
+    if let Some(cb) = update.callback_query.as_ref() {
+        let owner = OWNER_CHAT_ID.load(Ordering::SeqCst);
+        let chat_id = cb
+            .message
+            .as_ref()
+            .and_then(|m| m.chat.as_ref())
+            .and_then(|c| c.id);
+        let chat_id = match chat_id {
+            Some(id) if owner != -1 && id == owner => id,
+            _ => return None,
+        };
+        let data = cb.data.clone().unwrap_or_default();
+        if data.is_empty() {
+            return None;
+        }
+        emit_event(TelegramEvent::CallbackQuery {
+            query_id: cb.id.clone(),
+            chat_id,
+            data,
+        });
+        return Some(chat_id);
+    }
     let msg = update.message.as_ref()?;
     let chat_id = msg.chat.as_ref()?.id?;
     let message_id = msg.message_id.unwrap_or(0);
@@ -852,6 +900,57 @@ pub async fn telegram_send_message(token: String, chat_id: i64, text: String) ->
             }
         }
     }
+    Ok(())
+}
+
+/// Send a text message WITH inline keyboard buttons (approval cards).
+/// `buttons` is a flat list rendered as one row: [(label, callback_data)].
+/// Markdown-then-plain fallback exactly like telegram_send_message.
+#[tauri::command]
+pub async fn telegram_send_message_with_buttons(
+    token: &str,
+    chat_id: i64,
+    text: String,
+    buttons: Vec<(String, String)>,
+) -> Result<(), String> {
+    let keyboard: Vec<Vec<serde_json::Value>> = vec![buttons
+        .iter()
+        .map(|(label, data)| {
+            serde_json::json!({ "text": label, "callback_data": data })
+        })
+        .collect()];
+    let payload = serde_json::json!({
+        "chat_id": chat_id,
+        "text": text,
+        "reply_markup": { "inline_keyboard": keyboard },
+    });
+    if let Err(e) = post_json::<serde_json::Value>(token, "sendMessage", &payload).await {
+        if e.contains("can't parse entities") {
+            let plain = serde_json::json!({
+                "chat_id": chat_id,
+                "text": text,
+                "reply_markup": { "inline_keyboard": keyboard },
+            });
+            post_json::<serde_json::Value>(token, "sendMessage", &plain).await?;
+        } else {
+            return Err(e);
+        }
+    }
+    Ok(())
+}
+
+/// Answer a callback query (stops the button's client-side spinner).
+#[tauri::command]
+pub async fn telegram_answer_callback(
+    token: &str,
+    query_id: String,
+    text: Option<String>,
+) -> Result<(), String> {
+    let mut payload = serde_json::json!({ "callback_query_id": query_id });
+    if let Some(t) = text {
+        payload["text"] = serde_json::Value::String(t);
+    }
+    post_json::<serde_json::Value>(token, "answerCallbackQuery", &payload).await?;
     Ok(())
 }
 

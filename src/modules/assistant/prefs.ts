@@ -99,7 +99,17 @@ export type TelegramEvent =
   | { kind: "video"; chatId: number; messageId: number; videoFileId: string; durationSecs: number | null; date: number }
   | { kind: "startCandidate"; chatId: number; messageId: number; date: number }
   | { kind: "rejected"; chatId: number; date: number }
-  | { kind: "error"; message: string };
+  | { kind: "error"; message: string }
+  /** Inline-keyboard button press (approval card). data is the button
+   *  payload ("approve:<id>" / "deny:<id>"); answer the callback via
+   *  telegramNative.answerCallback to stop the client-side spinner. */
+  | {
+      kind: "callback_query";
+      queryId: string;
+      chatId: number;
+      data: string;
+      date: number;
+    };
 
 export const telegramNative = {
   start: async (token: string, ownerChatId: number | null, onEvent: (e: TelegramEvent) => void) => {
@@ -127,6 +137,27 @@ export const telegramNative = {
     ),
   sendMessage: (token: string, chatId: number, text: string) =>
     invoke<void>("telegram_send_message", { token, chatId, text }),
+  /** Send a text message with inline-keyboard buttons (approval cards).
+   *  buttons: [(label, callbackData)] - one row. */
+  sendMessageWithButtons: (
+    token: string,
+    chatId: number,
+    text: string,
+    buttons: Array<[string, string]>,
+  ) =>
+    invoke<void>("telegram_send_message_with_buttons", {
+      token,
+      chatId,
+      text,
+      buttons,
+    }),
+  /** Answer a callback query (stops the button's spinner in the app). */
+  answerCallback: (token: string, queryId: string, text?: string | null) =>
+    invoke<void>("telegram_answer_callback", {
+      token,
+      queryId,
+      text: text ?? null,
+    }),
   /** Typing/upload indicator — best-effort; the Rust side never rejects. */
   sendChatAction: (token: string, chatId: number, action?: "typing" | "upload_document" | "upload_video") =>
     invoke<void>("telegram_set_chat_action", { token, chatId, action: action ?? "typing" }),
