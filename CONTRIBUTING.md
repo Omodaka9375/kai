@@ -129,7 +129,7 @@ src/
 
 ## Security issues
 
-Don't file them as public issues — email **security@kai.ai** directly (see [SECURITY.md](SECURITY.md) once it exists; until then use the email).
+Don't file them as public issues — email **branislav.djalic@gmail.com** directly.
 
 ## License
 

@@ -14,7 +14,7 @@ This applies to everything inside the project: issues, PRs, discussions, commits
 
 ## Reporting
 
-Report violations to **conduct@kai.ai** (or DM a maintainer directly). Reports are handled confidentially, and we follow up with the reporter on the outcome. Nobody flagged for a violation takes part in deciding the response.
+Report violations to **branislav.djalic@gmail.com** (or DM a maintainer directly). Reports are handled confidentially, and we follow up with the reporter on the outcome. Nobody flagged for a violation takes part in deciding the response.
 
 ## Enforcement
 
