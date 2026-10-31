@@ -4,6 +4,21 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [2.1.0]
+
+- Reminders: persistent long-term reminders (reminder_create / list / cancel) that survive restarts and fire passively — from "ping me in 5 minutes" to monthly bills — delivered as an OS notification, an in-session agent wake, and a Telegram ping when the assistant is enabled.
+- Tray: closing the window now minimizes KAI to the tray — the process, assistant, and running agents stay alive; tray "Show KAI" reopens and "Quit KAI" is the only true exit, with a one-shot first-hide notification.
+- Notifications: OS toasts return, but only while the window is minimized/closed to tray, only for approval-needed / run-completely-finished / settled errors, and parallel-project bursts coalesce into one toast.
+- Group chats: persona agents (built-in and custom) join as participants with full agent tool parity via approval-gated headless runs, confined scratch workspaces, and unified approval cards in the group panel.
+- Telegram assistant: project monitoring with /tell routing and reply mirroring, approve/deny commands plus inline keyboard buttons, and write/execute tools auto-run behind the sandbox fence with per-turn audit.
+- Voice: AssemblyAI as a voice-only provider (Sync STT + TTS voices), key card in Models settings, and the voice_settings tool covers it.
+- Rail: the + button now opens a drop-up with New Project (create-and-open a folder) and Open Project; slim overlay scrollbar for many projects.
+- Agent reliability: loop-detection over-firing fixed, punctuation-equivalence edit matching (em-dash / curly-quote / arrow variants survive terminal rendering), dev-server preview readiness gate, and the auto-approved row renders flat from the first frame (no card blink).
+- UI fixes: React #185 crash on opening the group chat, input-bar error dismiss button placement, Gmail/X credential cards link to their token creation pages, ghost "New chat" litter purged, tab clicks shrink expanded panels, VS Code-style tab drag, reply-quoting from transcripts, and quick actions on the start page.
+- Updater: the changelog now renders in the update dialog — CHANGELOG.md is bundled as a resource and empty release notes are patched from it during the release workflow.
+
+---
+
 ## [2.0.0]
 
 - Group chats: added cross-project group chats where multiple agents coordinate (phases 1–3), with a status-bar entry and one merged rail status dot.
