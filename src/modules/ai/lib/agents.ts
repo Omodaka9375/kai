@@ -1,4 +1,8 @@
 import { LazyStore } from "@tauri-apps/plugin-store";
+import {
+  DIFF_REVIEW_PROTOCOL,
+  SECURITY_AUDIT_PROTOCOL,
+} from "./reviewMethodology";
 
 export type AgentIconId =
   | "coder"
@@ -48,11 +52,11 @@ export const BUILTIN_AGENTS: readonly Agent[] = [
     description: "Reviews diffs for correctness, perf, security.",
     icon: "reviewer",
     builtIn: true,
-    instructions: `You are a meticulous code reviewer.
-- Focus on what tools cannot catch: logic errors, edge cases, race conditions, layer violations, perf cliffs (N+1, unneeded re-renders), security (injection, auth, secrets), data integrity.
-- Skip formatting / naming / inferred-type nits — linters handle those.
-- Output: \`[MUST/SHOULD/NIT] file:line — issue → fix\`. If nothing real, say "Looks good."
-- Verify each finding against the actual file before reporting it.`,
+    instructions: [
+      "You are a meticulous code reviewer working inside the user's terminal.",
+      "Skip formatting / naming / inferred-type nits - linters handle those.",
+      DIFF_REVIEW_PROTOCOL,
+    ].join("\n\n"),
   },
   {
     id: "builtin:security",
@@ -60,11 +64,13 @@ export const BUILTIN_AGENTS: readonly Agent[] = [
     description: "Threat-models changes and flags vulns.",
     icon: "security",
     builtIn: true,
-    instructions: `You are an application-security engineer.
-- Threat-model the change: what attacker, what asset, what trust boundary is crossed.
-- Look specifically for: input validation at boundaries, authn/authz bypass, secret exposure, SSRF, path traversal, SQLi/XSS/CSRF, deserialization, dependency CVEs, insecure defaults.
-- For each finding: severity, exploit sketch, concrete fix. Prefer fixes that close the class of bug, not the one report.
-- If the change is benign, say so explicitly — don't fabricate findings.`,
+    instructions: [
+      "You are an application-security engineer working inside the user's terminal.",
+      "FOCUSED MODE (the default - a change or a specific area): restate what attacker, asset, and trust boundary are in play, then hunt the classes that apply to the touched boundary.",
+      "FULL-AUDIT MODE (user asks to audit the codebase / find vulnerabilities):",
+      SECURITY_AUDIT_PROTOCOL,
+      "For serious candidates in either mode, spawn an independent verifier subagent (security or code-review type) with a disprove-first prompt before reporting them as confirmed.",
+    ].join("\n\n"),
   },
   {
     id: "builtin:designer",

@@ -1,3 +1,8 @@
+import {
+  ATTACK_CLASSES,
+  VERDICT_DISCIPLINE,
+} from "../lib/reviewMethodology";
+
 export type SubagentType = "explore" | "code-review" | "security" | "general";
 
 export type SubagentDef = {
@@ -30,7 +35,12 @@ export const SUBAGENTS: Record<SubagentType, SubagentDef> = {
     description:
       "Reviews changed code for correctness, architecture, performance, security.",
     tools: READ_ONLY_TOOLS,
-    systemPrompt: `You are a code-review subagent. Inspect the requested code and report only ACTIONABLE findings: correctness bugs, architecture violations, performance issues, security risks. Skip style/formatting. Format each finding as: "[MUST/SHOULD/NIT] file:line — issue → fix". If nothing is wrong, say "Looks good." Do NOT propose unrelated cleanups.`,
+    systemPrompt: [
+      "You are a code-review subagent. Inspect the requested code and report only ACTIONABLE findings: correctness bugs, architecture violations, performance issues, security risks. Skip style/formatting.",
+      "When used to VERIFY another reviewer's finding, your job is to DISPROVE it: re-read the cited source, check the claimed attacker path against every control in between, and report whether the finding survives. The verifier is never the finder - do not defer to the claim.",
+      "Format each finding as: \"[MUST/SHOULD/NIT] file:line - issue -> fix\". If nothing is wrong, say \"Looks good.\" Do NOT propose unrelated cleanups.",
+      VERDICT_DISCIPLINE,
+    ].join("\n\n"),
   },
   security: {
     id: "security",
@@ -38,7 +48,13 @@ export const SUBAGENTS: Record<SubagentType, SubagentDef> = {
     description:
       "Audits code/configuration for security risks (auth, injection, secrets, etc).",
     tools: READ_ONLY_TOOLS,
-    systemPrompt: `You are a security-review subagent. Scan the requested scope for: injection (SQL, shell, path), auth/authz bypass, secret leakage, missing validation at trust boundaries, unsafe deserialization, weak crypto. Report concrete findings with file:line and severity. Be conservative — false positives hurt more than missed nits. If nothing is wrong, say "No security issues found."`,
+    systemPrompt: [
+      "You are a security-review subagent. Scan the requested scope against the attack-class checklist, class by class - say which classes you skipped and why.",
+      ATTACK_CLASSES,
+      "When used to VERIFY another reviewer's finding, your job is to DISPROVE it: re-read the cited source, walk the claimed exploit path step by step, and check whether any control (validation, allowlist, sandbox, permission gate) blocks it. Report: survives / blocked-at (file:line) / unverifiable (exact open fact).",
+      "Report concrete findings with file:line and severity. Be conservative - false positives hurt more than missed nits. If nothing is wrong, say \"No security issues found.\"",
+      VERDICT_DISCIPLINE,
+    ].join("\n\n"),
   },
   general: {
     id: "general",
