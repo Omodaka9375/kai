@@ -198,10 +198,10 @@ describe("source pins — Phase 2 trust boundary", () => {
   });
 
   it("bridge relays replies via noteParticipantReply and injects the merged wake", () => {
-    // The gate is the PROVISIONED group's coordinator (the group the session
-    // is answering), NOT coordinatorGroupForSession (some other group this
-    // session might coordinate — an ordinary participant never does).
-    expect(bridge).toContain("noteParticipantReply(group.id");
+    // The gate is the MIRRORED group's coordinator (2026-11-01 5th round:
+    // group.id -> mirror.group.id — the mirror outcome now comes from
+    // resolveMirrorReply in the store), NOT coordinatorGroupForSession.
+    expect(bridge).toMatch(/noteParticipantReply\(\s*mirror\.group\.id/);
     expect(bridge).toContain("coordinatorPreamble(coordGroup)");
   });
 

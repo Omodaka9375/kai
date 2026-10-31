@@ -38,6 +38,7 @@ import {
   noteParticipantReply,
   noteSessionBusy,
   noteSessionIdle,
+  resolveMirrorReply,
   peekReplyProvision,
   takeReplyProvision,
   isGroupDeliveryText,
@@ -452,71 +453,64 @@ function Bridge({
   //  2. Flush any group messages that queued while the agent was busy —
   //     deliver-on-idle is the group's no-interruption contract.
     if (runStatus === "idle") {
-      // MIRROR GATE: a reply is mirrored into the group transcript ONLY
-      // when this session had a group delivery awaiting an answer. Without
-      // the gate, any idle reply from a member session — e.g. the user
-      // chatting with that same project's agent locally — would leak into
-      // the group transcript (and relay to the coordinator) uninvited.
+      // MIRROR GATE (resolveMirrorReply — PURE, NON-CONSUMING): a reply is
+      // mirrored into the group transcript ONLY when this session had a
+      // group delivery awaiting an answer. Without the gate, any idle reply
+      // from a member session — e.g. the user chatting with that same
+      // project's agent locally — would leak into the group transcript.
+      //
+      // THROTTLE-RACE CONTRACT (2026-11-01, the 3rd "agent replies outside
+      // the group"): useChat runs with experimental_throttle: 50, so status
+      // can settle to ready BEFORE the final message flush lands in a
+      // re-render. resolve() consumes NOTHING: against a stale messages
+      // array it returns null (last assistant === boundary) and the
+      // provision STAYS ARMED; `messages` is a dep of this effect, so the
+      // late flush re-runs the arm and resolves with fresh messages.
+      // Consumption happens only below, at the append, after the text
+      // exists. An arm that consumed on stale messages burned the
+      // provision against a reply it never saw — the reply then stayed in
+      // the project chat forever.
       const boundary = deliveryBoundaryIdRef.current;
       deliveryBoundaryIdRef.current = null;
-      // PEEK, not take: an idle settle with NO fresh reply (stopped before
-      // emitting text) must not burn the one-shot provision - the delivery
-      // stays armed so the participant's next real reply can claim it.
-      const provisionedGroupId = peekReplyProvision(sessionId);
-      // Look the group up by the PROVISION'S OWN id, not via a second map
-      // (getGroupForSession/sessionGroups). Two maps for one fact is a
-      // silent mirror-killer: any divergence between awaitingReply and
-      // sessionGroups (hot-reload re-instantiating the module, index
-      // ordering, a future writer that updates one but not the other)
-      // drops `group` to null — the reply then lands in the project chat
-      // ALONE and never mirrors into the group transcript, while the
-      // provision stays armed forever. The peeked id IS the group this
-      // reply answers; resolve it directly.
-      const group = provisionedGroupId ? getGroup(provisionedGroupId) : null;
       const coordGroup = coordinatorGroupForSession(sessionId);
-      const lastAssistant = [...messagesRefForGroup.current].reverse().find((m) => m.role === "assistant");
-      const lastText = lastAssistant
-        ? (lastAssistant.parts ?? [])
-            .filter((p): p is { type: "text"; text: string } => p.type === "text")
-            .map((p) => p.text)
-            .join("\n")
-            .trim()
-        : "";
+      const mirror = resolveMirrorReply(
+        sessionId,
+        messagesRefForGroup.current,
+        boundary,
+        lastMirroredIdRef.current,
+      );
       // 1a. PARTICIPANT mirror: this session's reply lands in the transcript.
-      // CAUSALITY: the reply must post-date the delivery (id !== boundary);
-      // a run that produced no new text leaves lastAssistant === boundary,
-      // so the PREVIOUS turn's reply can never masquerade as this round's
-      // answer and the provision is left armed for the next real reply.
-      if (
-        group &&
-        lastText &&
-        lastAssistant &&
-        lastAssistant.id !== boundary &&
-        lastAssistant.id !== lastMirroredIdRef.current
-      ) {
+      // CAUSALITY (inside resolveMirrorReply): the reply must post-date the
+      // delivery (id !== boundary) and differ from the last mirrored id —
+      // the PREVIOUS turn's reply can never masquerade as this round's
+      // answer, and the provision stays armed for the next real reply.
+      if (mirror) {
         takeReplyProvision(sessionId); // consume: this delivery is answered
-        lastMirroredIdRef.current = lastAssistant.id;
-        void appendGroupMessage(group.id, {
+        lastMirroredIdRef.current = mirror.assistantId;
+        void appendGroupMessage(mirror.group.id, {
           from: "agent",
-          projectId: group.participants.find((p) => p.sessionId === sessionId)?.projectId ?? "",
+          projectId: mirror.projectId,
           sessionId,
-          text: lastText,
+          text: mirror.text,
         });
         // 1b. RELAY (Phase 2): if an agent-coordinator is waiting on this
         // participant, feed the reply to the coalescing buffer. When all
         // expected participants answered, the store returns ONE merged wake
         // message — injected here, the yield-and-resume contract (no polling).
-        // The gate is the PROVISIONED group's coordinator (the group this
-        // session is answering a delivery for) — the old coordGroup check
-        // asked whether THIS session coordinates some OTHER group, which an
-        // ordinary participant never does, so replies never relayed.
-        if (group && group.coordinator.kind === "agent" && group.coordinator.sessionId !== sessionId) {
-          const myProjectId =
-            group.participants.find((p) => p.sessionId === sessionId)?.projectId ?? "";
-          const wake = noteParticipantReply(group.id, myProjectId, lastText);
+        // The gate is the MIRRORED group's coordinator — the group this
+        // session is answering a delivery for.
+        if (
+          mirror.group.coordinator.kind === "agent" &&
+          mirror.group.coordinator.sessionId !== sessionId
+        ) {
+          const wake = noteParticipantReply(
+            mirror.group.id,
+            mirror.projectId,
+            mirror.text,
+          );
           if (wake) {
             void useChatStore.getState().injectMessage(
-              group.coordinator.sessionId,
+              mirror.group.coordinator.sessionId,
               wake,
             );
           }

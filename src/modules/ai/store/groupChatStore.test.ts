@@ -265,15 +265,28 @@ describe("source pins — trust boundary & wiring", () => {
   });
 
   it("bridge mirrors agent replies into the group and flushes queues on idle", () => {
-    // 2026-11-01 (r2): the mirror must resolve the group by the PROVISION'S
-    // OWN id (getGroup(provisionedGroupId)) — the old getGroupForSession lookup
-    // went through a SECOND map (sessionGroups) whose divergence from
-    // awaitingReply silently dropped the mirror (reply stayed in the
-    // project chat). The two-map form must not return.
-    expect(bridge).toContain("getGroup(provisionedGroupId)");
+    // 2026-11-01 (5th round): the mirror gate now lives in the STORE as
+    // resolveMirrorReply (pure, NON-consuming) — behavioral coverage in
+    // groupChatStore.mirror.test.ts drives the full delivery->arm->reply->
+    // mirror->consume->re-arm cycle. The bridge's duty here: call resolve on
+    // the idle arm with (messages, boundary, lastMirroredId) and consume
+    // ONLY when it returns a mirror (append happens). The old bridge-local
+    // two-map lookup (getGroupForSession) must not return.
+    expect(bridge).toContain("const mirror = resolveMirrorReply(");
+    expect(bridge).toContain("if (mirror) {");
+    expect(bridge).toContain("takeReplyProvision(sessionId)");
     expect(bridge).not.toContain("getGroupForSession(sessionId)");
-    expect(bridge).toContain("appendGroupMessage(group.id");
+    expect(bridge).toContain("appendGroupMessage(mirror.group.id");
     expect(bridge).toContain("noteSessionIdle(sessionId)");
+    // The store's resolve must stay NON-CONSUMING (throttle-race contract):
+    // resolveMirrorReply must not take/delete the provision itself.
+    const resolveBlock = store.slice(
+      store.indexOf("export function resolveMirrorReply("),
+      store.indexOf("/** The bridge asks this before mirroring"),
+    );
+    expect(resolveBlock).not.toMatch(/\b(?:take|awaitingReply)\.delete/);
+    // One arming site for the three arm paths (no inline copies).
+    expect(store.match(/awaitingReply\.set\(/g)).toHaveLength(1);
   });
 
   it("the status effect re-runs when throttled messages land late (throttle race)", () => {

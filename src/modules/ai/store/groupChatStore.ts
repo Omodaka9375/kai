@@ -23,7 +23,7 @@ import {
 import { auditAppend, AUDIT_KINDS } from "../lib/audit";
 import { predictAutoApproval } from "../lib/autoApprovePrediction";
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import { generateText, stepCountIs, type ModelMessage } from "ai";
+import { generateText, stepCountIs, type ModelMessage, type UIMessage } from "ai";
 
 /**
  * Cross-project group chats — a coordination layer OVER existing per-project
@@ -583,7 +583,7 @@ function deliverToParticipant(
   }
   // Delivered: arm the mirror provision NOW (the injected message is the
   // next thing the agent answers).
-  awaitingReply.set(p.sessionId, g.id);
+  armReplyProvision(p.sessionId, g.id);
   void useChatStore.getState().injectMessage(p.sessionId, prefixed);
   return false;
 }
@@ -950,9 +950,66 @@ export function flushQueuedForSession(sessionId: string): void {
   const groupId = q[q.length - 1].groupId;
   const g = groups.get(groupId);
   if (g && g.endedAt === null) {
-    awaitingReply.set(sessionId, groupId);
+    armReplyProvision(sessionId, groupId);
   }
   void useChatStore.getState().injectMessage(sessionId, merged);
+}
+
+/** Arm the one-shot mirror provision: the session received a group delivery
+ *  and its NEXT settled assistant reply answers it. Exported so the bridge's
+ *  idle/error arms route through ONE arming site (not three inline copies)
+ *  and so tests can drive the arm->reply->mirror cycle behaviorally.
+ *  Idempotent per session (one outstanding delivery at a time). */
+export function armReplyProvision(sessionId: string, groupId: string): void {
+  awaitingReply.set(sessionId, groupId);
+}
+
+/** Everything the bridge needs to mirror one settled participant reply. */
+export type MirrorReplyOutcome = {
+  group: GroupChat;
+  /** The participant's project (resolved from the group's roster). */
+  projectId: string;
+  text: string;
+  assistantId: string;
+};
+
+/** Resolve the participant mirror for a session that just settled idle.
+ *  PURE with respect to the provision: NOTHING is consumed here — the bridge
+ *  consumes (takeReplyProvision) only when it actually appends, so a STALE
+ *  messages array (the useChat throttle race: status settles before the final
+ *  message flush lands) returns null WITHOUT burning the provision; the
+ *  bridge re-runs this when the throttled flush updates `messages`, and the
+ *  provision is still armed for it. This is the 3rd "agent replies outside
+ *  the group" root cause (throttle race) — the resolve/consume split is what
+ *  makes the late flush recoverable.
+ *
+ *  Returns null when: no provision (this session answered no delivery), the
+ *  provisioned group is gone/ended, messages hold no assistant text, the
+ *  last assistant predates the delivery (id === boundary: previous turn),
+ *  or it was already mirrored (id === lastMirroredId). */
+export function resolveMirrorReply(
+  sessionId: string,
+  messages: readonly UIMessage[],
+  boundaryId: string | null,
+  lastMirroredId: string | null,
+): MirrorReplyOutcome | null {
+  const provisionedGroupId = awaitingReply.get(sessionId) ?? null;
+  if (!provisionedGroupId) return null;
+  const group = groups.get(provisionedGroupId);
+  if (!group || group.endedAt !== null) return null;
+  const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+  if (!lastAssistant) return null;
+  const text = (lastAssistant.parts ?? [])
+    .filter((p): p is { type: "text"; text: string } => p.type === "text")
+    .map((p) => p.text)
+    .join("\n")
+    .trim();
+  if (!text) return null;
+  if (lastAssistant.id === boundaryId) return null;
+  if (lastAssistant.id === lastMirroredId) return null;
+  const projectId =
+    group.participants.find((p) => p.sessionId === sessionId)?.projectId ?? "";
+  return { group, projectId, text, assistantId: lastAssistant.id };
 }
 
 /** The bridge asks this before mirroring a settled reply: true only when the

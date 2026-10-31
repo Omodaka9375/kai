@@ -131,14 +131,16 @@ describe("mirror gate — takeReplyProvision", () => {
       "utf8",
     );
     // Idle-delivery arm: AFTER the busy branch, before injectMessage.
-    const idleArm = /if \(busy\) \{[\s\S]*?\}\s*\/\/ Delivered: arm the mirror provision NOW[\s\S]*?awaitingReply\.set\(p\.sessionId, g\.id\);\s*void useChatStore[\s\S]*?injectMessage/;
+    // (2026-11-01 5th round: the inline awaitingReply.set is now
+    // armReplyProvision — ONE exported arming site; the pin follows it.)
+    const idleArm = /if \(busy\) \{[\s\S]*?\}\s*\/\/ Delivered: arm the mirror provision NOW[\s\S]*?armReplyProvision\(p\.sessionId, g\.id\);\s*void useChatStore[\s\S]*?injectMessage/;
     expect(src).toMatch(idleArm);
     // Queue arm must NOT arm: the old `awaitingReply.set` before the busy
     // check is exactly the regression.
     const queueArm = /const prefixed[\s\S]{0,200}?awaitingReply\.set/;
     expect(src).not.toMatch(queueArm);
-    // Flush arms for the queued group's delivery.
-    expect(src).toMatch(/export function flushQueuedForSession[\s\S]{0,800}?awaitingReply\.set\(sessionId, groupId\)/);
+    // Flush arms for the queued group's delivery (same arming site).
+    expect(src).toMatch(/export function flushQueuedForSession[\s\S]{0,800}?armReplyProvision\(sessionId, groupId\)/);
   });
 
   it("no provision before any delivery: an idle local reply is NOT mirrored", async () => {
