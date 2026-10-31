@@ -47,6 +47,17 @@ export type AssistantPrefs = {
   allowedTools: string[];
   /** MCP server ids whose tools the assistant may call (empty = no MCP). */
   mcpAllowedServers: string[];
+  /**
+   * Projects bound for Telegram monitoring ("send project to assistant").
+   * A binding routes OWNER messages to the project's agent session via
+   * /tell (or /use + plain text) and mirrors that session's replies back to
+   * Telegram. The assistant's OWN fenced toolset never touches these
+   * projects - the phone prompt rides the project agent, which keeps its own
+   * sandbox, approvals, and model config. Keyed by project id (matches
+   * chatStore's projectIdFor), value = { root, name } + the session at bind
+   * time (re-resolved on use, group-chat style).
+   */
+  boundProjects: Record<string, { root: string; name: string; sessionId: string | null }>;
 };
 
 const DEFAULT_PREFS: AssistantPrefs = {
@@ -60,6 +71,7 @@ const DEFAULT_PREFS: AssistantPrefs = {
   // writes a copy), but a new list per default keeps references independent.
   allowedTools: [...DEFAULT_ALLOWED_TOOLS],
   mcpAllowedServers: [],
+  boundProjects: {},
 };
 
 /** Shared store instance — sessions/history (index.ts) use the same one. */
@@ -68,7 +80,7 @@ export const prefsStore = new LazyStore(ASSISTANT_PREFS_STORE, { defaults: {}, a
 export async function loadAssistantPrefs(): Promise<AssistantPrefs> {
   try {
     const raw = (await prefsStore.get<AssistantPrefs>("prefs")) ?? DEFAULT_PREFS;
-    return { ...DEFAULT_PREFS, ...raw };
+    return { ...DEFAULT_PREFS, ...raw, boundProjects: raw.boundProjects ?? {} };
   } catch {
     return DEFAULT_PREFS;
   }

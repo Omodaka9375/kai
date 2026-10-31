@@ -61,6 +61,10 @@ import {
   telegramNative,
   type TelegramEvent,
 } from "./prefs";
+import {
+  formatProjectsStatus,
+  tellProject,
+} from "./projectBridge";
 
 // ── Assistant root + preferences ────────────────────────────────────────────
 
@@ -921,7 +925,9 @@ export async function stopAssistantBridge(): Promise<void> {
 async function handleTelegramEvent(e: TelegramEvent): Promise<void> {
   if (e.kind === "message") {
     if (e.voiceFileId) {
-      // Voice note: transcribe first, then queue the transcript.
+      // Voice note: transcribe, then queue. When exactly ONE project is
+      // bound, the transcript routes to that project's agent instead of an
+      // assistant turn (the phone is that project's remote input).
       await enqueueVoiceMessage(e.chatId, e.voiceFileId);
       return;
     }
@@ -931,6 +937,19 @@ async function handleTelegramEvent(e: TelegramEvent): Promise<void> {
       return;
     }
     if (!text.trim()) return;
+    // Plain text to a SOLE bound project routes to that project's agent
+    // (no assistant turn); with zero or several bound projects it is an
+    // assistant message as before. /tell names the target explicitly.
+    const sole = await soleBoundTarget();
+    if (sole) {
+      const outcome = await tellProject(sole, text.trim(), e.chatId, true);
+      await telegramNative.sendMessage(
+        (await getTelegramToken()) ?? "",
+        e.chatId,
+        outcome,
+      ).catch(() => {});
+      return;
+    }
     pendingQueue.push({ chatId: e.chatId, text, isVoice: false });
     void drainQueue();
     return;
@@ -973,6 +992,25 @@ async function handleTelegramEvent(e: TelegramEvent): Promise<void> {
   }
 }
 
+// ── Sole-bound-project routing ─────────────────────────────────────
+
+/** When EXACTLY ONE project is bound, plain text and voice route to it
+ *  ("send project to assistant" - the phone becomes that project's remote
+ *  input). With zero or several bindings, text stays an assistant message
+ *  and /tell picks the target. Lazy import keeps prefs.ts light for the
+ *  settings window (projectBridge pulls chatStore).
+ */
+async function soleBoundTarget(): Promise<string | null> {
+  try {
+    const { listBoundProjects } = await import("./projectBridge");
+    const bound = await listBoundProjects();
+    const entries = Object.entries(bound);
+    return entries.length === 1 ? entries[0]![0] : null;
+  } catch {
+    return null;
+  }
+}
+
 // ── Slash commands (session + misc control from Telegram) ──────────────────
 
 async function handleCommand(chatId: number, raw: string): Promise<void> {
@@ -985,6 +1023,30 @@ async function handleCommand(chatId: number, raw: string): Promise<void> {
   };
 
   switch (cmd) {
+    case "/projects": {
+      await reply(await formatProjectsStatus());
+      return;
+    }
+    case "/tell": {
+      // /tell <project name|id> <message> - routes into the bound project's
+      // agent session; no assistant turn is consumed. The first token is
+      // the target; /tell with no message lists the project status.
+      const firstSpace = arg.indexOf(" ");
+      if (!arg || firstSpace === -1) {
+        await reply("Usage: /tell <project-name> <message> - prompt a monitored project's agent.");
+        await reply(await formatProjectsStatus());
+        return;
+      }
+      const target = arg.slice(0, firstSpace);
+      const message = arg.slice(firstSpace + 1).trim();
+      if (!message) {
+        await reply("Usage: /tell <project-name> <message>");
+        return;
+      }
+      const outcome = await tellProject(target, message, chatId);
+      await reply(outcome);
+      return;
+    }
     case "/new": {
       const session = await newSession(arg || undefined);
       await reply(`New chat: *${session.title}*`);
@@ -1035,6 +1097,8 @@ async function handleCommand(chatId: number, raw: string): Promise<void> {
           "/sessions — list chats",
           "/use <id> — switch chat",
           "/del <id> — delete a chat",
+          "/projects - list monitored projects",
+          "/tell <name> <msg> - prompt a monitored project's agent",
         ].join("\n"),
       );
       return;
@@ -1213,6 +1277,10 @@ async function drainQueue(): Promise<void> {
 // ── Voice message intake (called from the bridge for voiceFileId events) ────
 
 export async function enqueueVoiceMessage(chatId: number, fileId: string): Promise<void> {
+  // Voice transcription is shared by both routes; the routing decision is
+  // made after the transcript exists (sole bound project -> project agent,
+  // else an assistant turn).
+  const soleTarget = await soleBoundTarget();
   const token = await getTelegramToken();
   if (!token) return;
   try {
@@ -1220,6 +1288,14 @@ export async function enqueueVoiceMessage(chatId: number, fileId: string): Promi
     const text = await transcribeVoice(wavB64);
     if (!text.trim()) {
       await telegramNative.sendMessage(token, chatId, "…(couldn't make out the audio)");
+      return;
+    }
+    // Sole bound project: the voice transcript routes to the project agent
+    // (no assistant turn). Otherwise it is an assistant message.
+    if (soleTarget) {
+      const { tellProject } = await import("./projectBridge");
+      const outcome = await tellProject(soleTarget, text.trim(), chatId, true);
+      await telegramNative.sendMessage(token, chatId, outcome).catch(() => {});
       return;
     }
     pendingQueue.push({ chatId, text, isVoice: true });

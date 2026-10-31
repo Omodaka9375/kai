@@ -803,6 +803,13 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
         // Bridge may already be running (started from Settings) — take over
         // delivery either way.
         if (r.ok) await reclaimAssistantEvents();
+        // Project monitor: bound projects ping the owner on replies /
+        // approvals and mirror /tell replies. Installs with the delivery
+        // ownership, in the long-lived main window only.
+        if (r.ok) {
+          const { installTelegramProjectMonitor } = await import("@/modules/assistant/projectBridge");
+          installTelegramProjectMonitor();
+        }
       })
       .catch((e) => console.warn("[kai:assistant] bridge import failed:", e));
     return () => {

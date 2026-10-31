@@ -45,6 +45,7 @@ import {
 } from "react";
 import { SandboxBadge } from "./SandboxBadge";
 import { ShadowStrip, ShadowSessionMenuItem } from "./ShadowStrip";
+import { TelegramMonitorMenuItem } from "./TelegramMonitorMenuItem";
 import { estimateCost, getModel, getModelContextLimit } from "../config";
 import { effectiveContextLimit, SYSTEM_OVERHEAD_TOKENS } from "../lib/compact";
 import { type SessionMeta } from "../lib/sessions";
@@ -601,6 +602,7 @@ function SessionPicker() {
           New session
         </DropdownMenuItem>
         <ShadowSessionMenuItem close={() => setMenuOpen(false)} />
+        <TelegramMonitorMenuItem />
         {sorted.length > 0 ? <DropdownMenuSeparator /> : null}
         {sorted.map((s) => (
           <SessionRow
