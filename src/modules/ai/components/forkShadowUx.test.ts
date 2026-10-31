@@ -8,13 +8,20 @@ import { readFileSync } from "node:fs";
  * Shadow mode, so they don't use either; (2) Fork is hard to notice.
  *
  * The two features isolate DIFFERENT things and that distinction must be
- * visible at every entry point, not only in hover tooltips:
+ * discoverable at every entry point:
  *
  *   Fork   - branches the CONVERSATION from a message into a new chat.
  *            Same project files. One click per message.
  *   Shadow - isolates the FILES (an isolated copy the agent edits) AND
  *            branches the conversation in one action. Apply copies the
  *            changes back; Discard deletes them.
+ *
+ * Layout contract (user report 2026-10-31): the session-menu entry must
+ * stay a SINGLE-LINE item like its siblings - a stacked multi-line
+ * description inside the 224px dropdown stretched the whole menu
+ * vertically. The full Fork-vs-Shadow explanation rides the entry's
+ * tooltip; the always-visible ShadowStrip carries the working-state
+ * wording. Never re-introduce a flex-col description block in the menu.
  *
  * Vocabulary contract (KAI.md): Shadow's strip actions are Apply/Discard -
  * "Merge" belongs exclusively to the session menu's merge-into-another-chat.
@@ -57,14 +64,25 @@ describe("fork discoverability", () => {
 });
 
 describe("shadow mode discoverability", () => {
-  it("the session-menu entry carries a visible description, not tooltip-only", () => {
-    expect(strip).toContain("Isolated copy of your FILES + a branched chat");
-    expect(strip).toContain("Fork branches the");
+  it("the session-menu entry is a single-line item - no stacked description block", () => {
+    // User report: the stacked flex-col description stretched the dropdown
+    // vertically. The entry must stay a plain single-line sibling.
+    const item = strip.slice(
+      strip.indexOf("export function ShadowSessionMenuItem"),
+    );
+    expect(item).not.toContain("flex flex-col gap-0.5");
+    expect(item).not.toContain("text-[10px] leading-snug text-muted-foreground");
   });
 
-  it("the description distinguishes Apply from Discard outcomes", () => {
-    expect(strip).toContain("Apply copies");
-    expect(strip).toContain("Discard deletes");
+  it("the full Fork-vs-Shadow explanation rides the entry tooltip", () => {
+    expect(strip).toContain(
+      "isolated copy of the files and a branched conversation",
+    );
+    expect(strip).toContain("(Fork branches the conversation only.)");
+  });
+
+  it("the tooltip distinguishes Apply from Discard outcomes", () => {
+    expect(strip).toContain("Apply copies the changes back, Discard deletes them");
   });
 
   it("vocabulary contract holds: strip actions stay Apply/Discard, never Merge", () => {

@@ -233,6 +233,9 @@ export function ShadowSessionMenuItem({ close }: { close: () => void }) {
 
   if (!root || state !== false) return null;
 
+  // Single-line item, matching the sibling entries: the long Apply/Discard
+  // explanation lives in the tooltip — a stacked multi-line block here
+  // stretched the whole dropdown vertically.
   return (
     <>
       <DropdownMenuItem
@@ -242,21 +245,17 @@ export function ShadowSessionMenuItem({ close }: { close: () => void }) {
         }}
         disabled={busy}
         className="gap-2 text-xs"
-        title="Try changes safely: edits go to an isolated copy of the files and a branched conversation — apply or discard at the end"
+        title="Try changes safely: edits go to an isolated copy of the files and a branched conversation. Apply copies the changes back, Discard deletes them. (Fork branches the conversation only.)"
       >
         <HugeiconsIcon icon={Shield01Icon} size={12} strokeWidth={1.75} />
-        <span className="flex flex-col gap-0.5">
-          <span>{busy ? "Starting Shadow mode…" : "Shadow mode"}</span>
-          <span className="text-[10px] leading-snug text-muted-foreground">
-            Isolated copy of your FILES + a branched chat — Apply copies
-            the changes back, Discard deletes them. (Fork branches the
-            conversation only.)
-          </span>
-        </span>
+        {busy ? "Starting Shadow mode…" : "Shadow mode"}
       </DropdownMenuItem>
       {error ? (
-        <div className="px-2 py-1 text-[10.5px] leading-snug text-red-500">
-          {error}
+        <div
+          className="px-2 py-1 text-[10.5px] text-red-500"
+          title={error}
+        >
+          <span className="block truncate">{error}</span>
         </div>
       ) : null}
     </>
