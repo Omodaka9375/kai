@@ -17,8 +17,10 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import type { ToolUIPart } from "ai";
 import { memo, useCallback, useState } from "react";
 import { useChatStore } from "../store/chatStore";
-import { abortSession } from "../store/chatStore";
+import { abortSession, getSessionAutoApprove } from "../store/chatStore";
 import { setEditedToolInput } from "../lib/toolInputOverrides";
+import { predictAutoApproval } from "../lib/autoApprovePrediction";
+import { usePreferencesStore } from "@/modules/settings/preferences";
 import { getToolActionInfo, analyzeShellCommand } from "../lib/policy";
 import { presentationFor } from "../lib/toolPresentations";
 
@@ -60,6 +62,28 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue, proxy }: Props) 
   const input = part.input as Record<string, unknown>;
   const autoApprovedIds = useChatStore((s) => s.autoApprovedIds);
   const wasAutoApproved = autoApprovedIds.has(part.approval.id);
+  // First-frame prediction (anti-blink): in autoApprove "all" mode the
+  // bridge approves this call within a tick or two of the part appearing;
+  // rendering the full card for that window and then collapsing it read as
+  // a blink on every tool call. predictAutoApproval MIRRORS the bridge's
+  // carve-outs (elevated / privacy / signed commit) so exactly the calls
+  // the bridge WILL approve render the flat row from the start. PROXY
+  // cards are exempt: their sessions run behind the group panel / Telegram
+  // with their own approval routing, never this window's auto-approve.
+  const sessionAutoApprove = useChatStore((s) =>
+    getSessionAutoApprove(s.activeSessionId ?? ""),
+  );
+  const signingApprovalRequired = usePreferencesStore(
+    (s) => s.commitSigningEnabled && s.commitSigningMode === "approval",
+  );
+  const willBeAutoApproved =
+    !proxy &&
+    predictAutoApproval({
+      autoApprove: sessionAutoApprove,
+      toolName,
+      input,
+      signingApprovalRequired,
+    });
 
   const isShell = toolName === "bash_run" || toolName === "bash_background";
   const isMemory = toolName === "save_memory";
@@ -113,7 +137,39 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue, proxy }: Props) 
     }
   }, [isMemory, isShell, isEditing, editedCommand, commandText, part.toolCallId, onRespond]);
 
+  // Flat one-row state — rendered from the FIRST frame when the bridge is
+  // guaranteed to auto-approve (prediction), and on the approval-responded
+  // transition (wasAutoApproved) for the rest. Must be checked BEFORE the
+  // queue branch: in "all" mode every position renders flat, never a chip.
+  // NO border/box: the Tool row that replaces this card on the
+  // approval-responded transition has no border and uses px-2 py-1.5 — a
+  // bordered box here made the whole row visibly jump when the state
+  // flipped. Match the Tool row geometry so the swap is dot-color only.
+  if (wasAutoApproved || willBeAutoApproved) {
+    return (
+      <div className="flex w-full items-center gap-2 rounded-md px-2 py-1.5">
+          {/* Dot language, matching the tool cards — a green check-circle
+              icon here flashed between the approval and execution states
+              and read as a glitch. */}
+          <span className="size-1.5 shrink-0 rounded-full bg-emerald-500" />
+          <HugeiconsIcon
+            icon={Icon}
+            size={13}
+            strokeWidth={1.75}
+            className="shrink-0 text-muted-foreground"
+          />
+          <span className="text-[12px] font-medium text-foreground">
+            {label}
+          </span>
+          <span className="ml-auto text-[10px] text-emerald-600 dark:text-emerald-400">
+            auto-approved
+          </span>
+      </div>
+    );
+  }
+
   // Queued behind an earlier approval — compact placeholder, no actions.
+  // (Manual mode only in practice: auto-approved positions render flat above.)
   if (queue?.queued) {
     return (
       <div className="flex items-center gap-2 rounded-lg border border-dashed border-border/60 bg-muted/30 px-3 py-1.5 opacity-70">
@@ -145,33 +201,6 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue, proxy }: Props) 
   const elevatedInfo = isElevated
     ? { riskLevel: "critical" as const, description: "Administrator/root privileges — OS prompt will appear" }
     : null;
-
-  if (wasAutoApproved) {
-    // NO border/box: the Tool row that replaces this card on the
-    // approval-responded transition has no border and uses px-2 py-1.5 — a
-    // bordered box here made the whole row visibly jump when the state
-    // flipped. Match the Tool row geometry so the swap is dot-color only.
-    return (
-      <div className="flex w-full items-center gap-2 rounded-md px-2 py-1.5">
-          {/* Dot language, matching the tool cards — a green check-circle
-              icon here flashed between the approval and execution states
-              and read as a glitch. */}
-          <span className="size-1.5 shrink-0 rounded-full bg-emerald-500" />
-          <HugeiconsIcon
-            icon={Icon}
-            size={13}
-            strokeWidth={1.75}
-            className="shrink-0 text-muted-foreground"
-          />
-          <span className="text-[12px] font-medium text-foreground">
-            {label}
-          </span>
-          <span className="ml-auto text-[10px] text-emerald-600 dark:text-emerald-400">
-            auto-approved
-          </span>
-      </div>
-    );
-  }
 
   return (
     <div className="rounded-lg border border-border bg-card shadow-sm">
