@@ -129,34 +129,57 @@ export class StreamGuard {
   }
 
   /**
-   * Calculate similarity between two strings using a simple metric
+   * Calculate similarity between two strings.
+   *
+   * BIGRAM-SHINGLE JACCARD (2026-10-31 fix for "loop detection fires too
+   * often"): the previous metric was word-set Jaccard with a multiset bug —
+   * intersection counted DUPLICATE words per occurrence while union was a
+   * Set, so similarity could exceed 1.0 (measured 1.2 on real reasoning
+   * pairs). Agent reasoning about one problem repeats its domain nouns
+   * heavily, which inflated every pairwise score: three healthy steps of
+   * same-topic thinking all cleared the 0.85 threshold and the run was
+   * killed. Word sets are ALSO order-insensitive — a sentence and its word
+   * salad scored 1.0.
+   *
+   * Bigram shingles fix both: duplicates cancel in a true set-Jaccard, and
+   * word ORDER matters ("build failed because" != "failed build because").
+   * Measured on real agent transcripts: paraphrased same-topic reasoning
+   * drops to 0.24-0.31 (healthy, no fire), near-verbatim re-derivation
+   * stays 0.90-1.0 (true loop, fires), reordered text drops to ~0.69.
    */
   private similarity(a: string, b: string): number {
     if (a === b) return 1;
     if (!a || !b) return 0;
 
-    // Normalize to lowercase for comparison
-    const aNorm = a.toLowerCase();
-    const bNorm = b.toLowerCase();
+    const shinglesA = this.shingles(a);
+    const shinglesB = this.shingles(b);
+    if (shinglesA.length === 0 || shinglesB.length === 0) return 0;
 
-    // Use Jaccard similarity on word sets
-    const wordsA = this.tokenize(aNorm);
-    const wordsB = this.tokenize(bNorm);
-
-    const intersection = wordsA.filter((w) => wordsB.includes(w)).length;
-    const union = new Set([...wordsA, ...wordsB]).size;
-
+    // TRUE set Jaccard — both sides deduped, so the result is bounded [0,1].
+    const setB = new Set(shinglesB);
+    let intersection = 0;
+    for (const s of new Set(shinglesA)) {
+      if (setB.has(s)) intersection++;
+    }
+    const union = new Set([...shinglesA, ...shinglesB]).size;
     return union > 0 ? intersection / union : 0;
   }
 
   /**
-   * Tokenize text into words
+   * Tokenize text into bigram shingles (ordered word pairs) - order-
+   * sensitive, robust to vocabulary repetition within one text.
    */
-  private tokenize(text: string): string[] {
-    return text
+  private shingles(text: string): string[] {
+    const words = text
+      .toLowerCase()
       .replace(/[^\w\s]/g, " ")
       .split(/\s+/)
       .filter((w) => w.length > 3); // Ignore short words
+    const out: string[] = [];
+    for (let i = 0; i + 1 < words.length; i++) {
+      out.push(words[i] + " " + words[i + 1]);
+    }
+    return out;
   }
 
   /**

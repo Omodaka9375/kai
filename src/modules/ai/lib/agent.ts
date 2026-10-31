@@ -931,14 +931,25 @@ export async function runAgentStream(opts: RunAgentOptions) {
       // A "thinking loop" (model stuck re-deriving the same reasoning with no
       // visible text) is exactly the runaway case the user reported — reasoning
       // can blow past the context window while `step.text` stays empty.
-      // GATE: only substantive text enters the similarity window. Short step
+      // GATE 1: only substantive text enters the similarity window. Short step
       // narrations ("Let me check that.") share almost their entire vocabulary,
       // so word-set Jaccard collide at >=0.85 across unrelated steps and the
       // guard killed healthy runs — which surfaced as "the agent just stops
       // after a tool call" (the stop wipes the error patch, see chatRuntime).
+      // GATE 2 (2026-10-31, "loop detection fires too often"): a step that
+      // made TOOL CALLS is progress by definition — the output-aware tool
+      // fingerprint above owns "same call, same result" detection. Thinking
+      // models legitimately recap the same plan each step WHILE doing
+      // different tool work; accumulating those recaps in the text window
+      // fired the guard on healthy runs. So tool steps RESET the text window;
+      // only a model narrating/reasoning with NO tool calls across 3+
+      // consecutive steps can trip the text guard.
+      const stepHadToolCalls = (step.toolCalls?.length ?? 0) > 0;
       const loopCandidate =
         step.text || (step as { reasoningText?: string }).reasoningText;
-      if (
+      if (stepHadToolCalls) {
+        streamGuard.reset();
+      } else if (
         loopCandidate &&
         loopCandidate.length >= GUARD_MIN_STEP_TEXT &&
         opts.onLoopDetected

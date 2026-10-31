@@ -39,6 +39,22 @@ describe("loop-detector false-positive gates (agent.ts)", () => {
     expect(src).toMatch(/loopCandidate\.length >= GUARD_MIN_STEP_TEXT/);
   });
 
+  it("steps with tool calls RESET the text-repetition window (2026-10-31 over-firing fix)", () => {
+    // Thinking models legitimately recap the same plan across steps
+    // WHILE doing different, progressing tool work. Those recaps used to
+    // accumulate in the text window and fire the kill mid-productive-run.
+    // A step that made tool calls is progress by definition — the
+    // output-aware fingerprint above owns "same call, same result".
+    expect(src).toContain("const stepHadToolCalls = (step.toolCalls?.length ?? 0) > 0;");
+    expect(src).toMatch(/if \(stepHadToolCalls\) \{\s*\n\s*streamGuard\.reset\(\);/);
+    // And the reset must run BEFORE the text check (else the current step's
+    // own text still lands in the window).
+    const resetIdx = src.indexOf("streamGuard.reset();");
+    const checkIdx = src.indexOf("streamGuard.check(loopCandidate)");
+    expect(resetIdx).toBeGreaterThan(-1);
+    expect(checkIdx).toBeGreaterThan(resetIdx);
+  });
+
   it("tool-loop detection uses the OUTPUT-AWARE fingerprint helper", () => {
     expect(src).toContain("toolLoopFingerprint(step)");
     // The old inline input-only fingerprint must not come back — it killed

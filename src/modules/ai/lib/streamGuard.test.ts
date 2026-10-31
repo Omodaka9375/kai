@@ -135,18 +135,68 @@ describe("StreamGuard", () => {
   });
 
   describe("similarity calculation", () => {
-    it("should detect high similarity for similar content", () => {
+    // NOTE (2026-10-31 fix): similarity is bigram-shingle Jaccard. The old
+    // word-set metric had a multiset bug (intersection counted duplicates,
+    // union deduped) that pushed scores ABOVE 1.0 on noun-heavy reasoning
+    // and over-fired the loop kill on healthy same-topic thinking. Toy-size
+    // strings where a single word differs by form ("configuration" vs
+    // "config") legitimately score ~0.5 now; production gates feed the
+    // guard only 300+-char step text, where one swapped word is ~2 shingles
+    // out of dozens and near-duplicates stay >0.9.
+    it("should detect high similarity for near-identical long content", () => {
       const guard = new StreamGuard({ windowSize: 5, similarityThreshold: 0.7 });
-      
-      const output1 = "I need to read the configuration file to understand the project structure";
-      const output2 = "I need to read the config file to understand the project structure";
-      const output3 = "I need to read the configuration file to understand the project structure";
-      
+
+      const output1 =
+        "I need to read the failing test first to understand what the expected behavior is, then read the implementation module that the test imports so I can see where the returned value diverges from the assertion, and after that make the smallest possible change that satisfies the test before running the full suite again.";
+      // output2 differs by ONE word ("configuration" -> "setup").
+      const output2 = output1.replace("the test imports", "the test consumes");
+      const output3 = output1;
+
       guard.check(output1);
       guard.check(output2);
       const result = guard.check(output3);
-      
+
       expect(result.isLooping).toBe(true);
+    });
+
+    it("similarity is bounded to [0,1] even for heavily repeated vocabulary", () => {
+      // The old multiset-intersection bug measured >1.0 on exactly this
+      // shape (domain nouns repeated per occurrence). True set-Jaccard on
+      // shingles can never exceed 1.
+      const guard = new StreamGuard({
+        windowSize: 5,
+        similarityThreshold: 0.99,
+      });
+      const a =
+        "check the terminal output, then check the terminal output again, because the terminal output shows the build result and the terminal output must be checked";
+      const b =
+        "check the terminal output and then check the terminal output again, because the terminal output shows the build result and the terminal output must be checked";
+      // Drive two private-similarity invocations through the public path.
+      guard.check(a);
+      guard.check(b);
+      // No throw, no NaN, and a third identical text still fires at 0.99 —
+      // meaning a === a scored exactly 1.0, not >1.
+      const r = guard.check(a);
+      expect(r.isLooping).toBe(true);
+      expect(r.confidence).toBeLessThanOrEqual(1);
+    });
+
+    it("paraphrased same-topic reasoning does NOT fire (the over-firing regression)", () => {
+      // Real-world shape from the report: a thinking model iterating over
+      // one problem reuses most of its vocabulary but changes order and
+      // conclusions. Word-set Jaccard scored these >=0.9 (and >1.0 with
+      // duplicates); shingles keep them far below threshold.
+      const guard = new StreamGuard({ windowSize: 5, similarityThreshold: 0.85 });
+      const r1 =
+        "The test failure is in the parser module. Looking at the stack trace, the error happens when the tokenizer receives an empty string. I should check the guard clause at the top of the function and see whether the caller can pass an empty value in production. The most likely cause is the config loader stripping quotes before the parser runs.";
+      const r2 =
+        "Looking deeper at the failing test, the error is thrown from the tokenizer when it receives an empty input string. Before the parser runs, the config loader may strip quotes and produce an empty value. I will add a guard clause at the top of the function and check whether the caller can pass an empty string in production.";
+      const r3 =
+        "I think the root cause is confirmed: the config loader strips quotes before the tokenizer sees its input, so the parser receives an empty string in production. A guard clause at the top of the function should handle this. Let me write the fix and check the failing test again after the change.";
+      guard.check(r1);
+      guard.check(r2);
+      const result = guard.check(r3);
+      expect(result.isLooping).toBe(false);
     });
 
     it("should not detect loop for different content", () => {
