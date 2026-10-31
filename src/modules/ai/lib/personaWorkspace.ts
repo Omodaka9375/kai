@@ -1,55 +1,38 @@
 /**
- * Confined scratch workspace for persona participants in cross-project
- * group chats.
+ * Confined scratch workspace + tool policy for persona participants in
+ * cross-project group chats.
  *
- * Personas own no project. Their toolset for group replies is:
- *   - read_file / list_directory: allowed ANYWHERE on the machine (same
- *     security deny-lists as project agents: .env, .ssh, credentials…)
- *   - write_file: allowed ONLY inside their per-persona scratch dir under
- *     `~/.kai/personas/<agentId-hash>/` — created lazily on first use.
+ * Personas own no project, but since the "full tool parity" change they run
+ * with the REAL agent toolset (buildTools) against a ToolContext built here:
  *
- * The write confinement reuses the production sandbox machinery instead of
- * hand-rolling it: `checkWritableCanonical` with a `readOnly`
- * SandboxOverride rooted at the scratch dir. readOnly mode is exactly this
- * contract (reads pass, writes confined), and passing the override also
- * neutralizes the global desktop sandbox (owned by App.tsx for the visible
- * project — a headless persona turn must never be confined to, or by, the
- * desktop project).
+ *   - Workspace/cwd = their per-persona scratch dir under
+ *     `~/.kai/personas/<agentId-hash>/` (created lazily; persists while the
+ *     persona is a member of any group, swept when it leaves its last one).
+ *   - Sandbox = a `readOnly` SandboxOverride rooted at the scratch dir:
+ *     READS pass anywhere the security deny-lists permit; WRITES are
+ *     confined to the scratch dir. Because it is an OVERRIDE, the persona
+ *     is also immune to the desktop's global sandbox root/mode (a headless
+ *     persona turn must never be confined to - or by - the visible
+ *     project).
+ *   - Desktop-UI-bound tools (terminal IO, watches, screen capture, radio,
+ *     voice, previews, terminal image/video) are EXCLUDED: they act on the
+ *     foreground window's live surfaces, which a headless persona has no
+ *     access to. Everything else - fs, edits, shell, search, subagents,
+ *     web, memory, todos, MCP, media gen, mail/social reads - is
+ *     available, with its production `needsApproval` flags intact: the
+ *     persona's generateText run pauses and the group panel shows an
+ *     approval card (see groupChatStore's persona approval registry).
  *
- * Containment is defense-in-depth, same pair as the project fs tools:
- * the literal path is checked, then the canonicalized path re-checked, so
- * traversal (`..`) and symlink escapes are caught after resolution.
- *
- * Tool results are fenced by the CALLER (runPersonaReply) via
- * withToolGuard + the persona run's own fence state — scratch files can
- * contain content the persona fetched from elsewhere, so they are
- * untrusted from the model's perspective.
- *
- * Sweep: scratch dirs persist across runs (a persona in two groups shares
- * one dir — sweeping on group end would destroy the other group's work).
- * They are removed when the persona is no longer a member of ANY group
- * (live or ended), see `sweepPersonaWorkspace`.
+ * Tool results are fenced by the CALLER (runPersonaReply) with the persona
+ * run's own fence state — scratch files can contain content fetched from
+ * elsewhere, so they are untrusted from the model's perspective.
  */
 
 import { homeDir } from "@tauri-apps/api/path";
-import { z } from "zod";
-import { native } from "./native";
-import { checkReadableCanonical, checkWritableCanonical } from "./security";
+import type { WorkspaceEnv } from "@/modules/workspace/env";
+import { FileTracker } from "./fileTracker";
 import type { SandboxOverride } from "./sandbox";
-
-const PERSONA_READ_SCHEMA = z.object({
-  path: z.string().describe("Absolute path, or a path relative to your scratch workspace."),
-});
-const PERSONA_WRITE_SCHEMA = z.object({
-  path: z.string().describe("Path inside your scratch workspace (absolute or relative to it)."),
-  content: z.string().describe("Full file content to write. Parent folders are created automatically."),
-});
-const PERSONA_LIST_SCHEMA = z.object({
-  path: z
-    .string()
-    .optional()
-    .describe("Absolute directory path, or a path relative to your scratch workspace. Defaults to the workspace root."),
-});
+import type { ToolContext } from "../tools/context";
 
 /** Hash a path string into a safe filename component (DJB2, same as kaiPaths). */
 function djb2(s: string): number {
@@ -93,10 +76,6 @@ function collapse(p: string): string {
   return out.join("/");
 }
 
-function isAbsolute(p: string): boolean {
-  return p.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(p) || p.startsWith("\\\\");
-}
-
 const resolved = new Map<string, string>();
 
 /**
@@ -120,115 +99,98 @@ export async function personaWorkspaceRoot(agentId: string): Promise<string | nu
   }
 }
 
-/** Resolve a persona tool path: absolute passes through; relative joins the
- *  scratch root and is collapsed so `..` stays verifiable. */
-function resolvePersonaToolPath(root: string, requested: string): string {
-  if (isAbsolute(requested)) return collapse(requested);
-  return collapse(`${root}/${requested}`);
-}
-
-export type PersonaToolDef = {
-  description: string;
-  inputSchema: unknown;
-  execute: (input: never) => Promise<unknown>;
-};
-
-/**
- * Build the persona's confined toolset. Results are fenced by the caller
- * (runPersonaReply) with the persona run's own fence state via
- * withToolGuard — never passed to generateText unwrapped.
- *
- * Policy (user-specified):
- *   - READS (read_file, list_directory): anywhere on the machine, through
- *     the same security deny-lists + canonical re-checks as project agents.
- *     The readOnly override means no global sandbox can confine the persona
- *     to the desktop project.
- *   - WRITES (write_file): inside the scratch root ONLY. The readOnly
- *     sandbox override enforces this at the security layer — a write outside
- *     the root is refused before any filesystem call happens.
- */
-export function buildPersonaTools(
-  agentId: string,
-  root: string,
-  options: { readLimitBytes?: number } = {},
-): Record<string, PersonaToolDef> {
-  const readLimit = options.readLimitBytes ?? 2_000_000;
-  // The readOnly override is the whole write policy: reads pass, writes
-  // must stay within `root`. It also decouples the persona from the
-  // desktop's global sandbox root/mode.
-  const override: SandboxOverride = { root, mode: "readOnly" };
-  void agentId;
-  return {
-    read_file: {
-      description:
-        "Read a file's content. Absolute paths may point anywhere on this machine (sensitive paths like .env or .ssh are refused); relative paths resolve against your scratch workspace.",
-      inputSchema: PERSONA_READ_SCHEMA,
-      execute: async (input: { path: string }) => {
-        const abs = resolvePersonaToolPath(root, input.path);
-        const check = await checkReadableCanonical(abs, (p) => native.canonicalize(p), override);
-        if (!check.ok) return { error: check.reason };
-        try {
-          const r = await native.readFile(check.canonical);
-          if (r.kind === "binary") {
-            return { error: `binary file (${r.size} bytes) - not readable as text` };
-          }
-          if (r.kind === "toolarge") {
-            return { error: `file too large (${r.size} bytes, limit ${r.limit})` };
-          }
-          const truncated = r.size > readLimit;
-          const content = truncated ? r.content.slice(0, readLimit) : r.content;
-          return { path: check.canonical, content, truncated, size: r.size };
-        } catch (e) {
-          return { error: String(e) };
-        }
-      },
-    },
-    write_file: {
-      description:
-        "Write a file (full content) into your personal scratch workspace — the ONLY place you may write. Parent folders are created automatically. Absolute paths are accepted only when they are inside the scratch workspace.",
-      inputSchema: PERSONA_WRITE_SCHEMA,
-      execute: async (input: { path: string; content: string }) => {
-        const abs = resolvePersonaToolPath(root, input.path);
-        const check = await checkWritableCanonical(abs, (p) => native.canonicalize(p), override);
-        if (!check.ok) return { error: check.reason };
-        try {
-          await native.writeFile(check.canonical, input.content);
-          return { path: check.canonical, bytesWritten: input.content.length };
-        } catch (e) {
-          return { error: String(e) };
-        }
-      },
-    },
-    list_directory: {
-      description:
-        "List the immediate entries of a directory. Absolute paths may point anywhere on this machine; relative paths resolve against your scratch workspace. Defaults to the scratch workspace root.",
-      inputSchema: PERSONA_LIST_SCHEMA,
-      execute: async (input: { path?: string }) => {
-        const abs = resolvePersonaToolPath(root, input.path ?? ".");
-        const check = await checkReadableCanonical(abs, (p) => native.canonicalize(p), override);
-        if (!check.ok) return { error: check.reason };
-        try {
-          const entries = await native.readDir(check.canonical);
-          return {
-            path: check.canonical,
-            entries: entries.map((e) => ({ name: e.name, kind: e.kind })),
-          };
-        } catch (e) {
-          return { error: String(e) };
-        }
-      },
-    },
-  };
-}
-
 /** True when `path` (after collapse) stays inside the scratch root.
- *  Exposed for store-level guards (queue telemetry, sweeps). */
+ *  Exposed for store-level guards and tests. */
 export function personaPathWithin(path: string, root: string): boolean {
   return isWithin(collapse(path), root);
 }
 
-/** Test seam: resolvePersonaToolPath without a full ToolContext. */
-export const resolvePersonaPathForTest = resolvePersonaToolPath;
+/** Test seam: collapse + containment without a full ToolContext. */
+export const resolvePersonaPathForTest = (requested: string, root: string) =>
+  personaPathWithin(requested, root)
+    ? collapse(norm(requested).startsWith(norm(root).toLowerCase())
+        ? requested
+        : `${root}/${requested}`)
+    : collapse(requested);
+
+/**
+ * Desktop-UI-bound tools a headless persona CANNOT meaningfully use. They
+ * act on the foreground window's live surfaces (the visible terminal, the
+ * user's display, the status-bar radio, the preview tab) or on machinery
+ * keyed to a real Chat session (watches inject into the session's chat;
+ * a persona has no chat). Removing them keeps the model from calling a
+ * tool whose result would always be "unavailable" - and, for screen
+ * capture, from grabbing the display without the interactive context a
+ * foreground agent has.
+ */
+export const PERSONA_EXCLUDED_TOOLS: readonly string[] = [
+  // terminal.ts - active-tab surfaces
+  "get_terminal_output",
+  "suggest_command",
+  "open_preview",
+  // terminalImage.ts / terminalVideo.ts - render INTO the active terminal
+  "display_image",
+  "display_video",
+  // watch.ts - watch results inject into the owning session's Chat
+  "watch_create",
+  "watch_list",
+  "watch_kill",
+  // screen.ts - captures the user's whole display
+  "look_at_screen",
+  // radio.ts - status-bar music player
+  "play_radio",
+  "stop_radio",
+  "radio_list_stations",
+  "radio_now_playing",
+  // voice.ts - global TTS preferences
+  "voice_settings",
+];
+
+/**
+ * Build the persona's ToolContext. Same shape a project session gets from
+ * makeChatSync, minus the live-UI surfaces, plus the scratch-confinement
+ * override. Fresh readCache + FileTracker per call (per RUN, matching the
+ * per-session lifetime of the project path).
+ */
+export function buildPersonaToolContext(
+  agentId: string,
+  root: string,
+  sessionId: string,
+): ToolContext {
+  void agentId;
+  // The readOnly override is the whole write policy: reads pass, writes
+  // must stay within `root`. Passed through getSandboxOverrideAsync so
+  // every fs/shell/edit tool inherits it via sandboxOverrideForContext.
+  const override: SandboxOverride = { root, mode: "readOnly" };
+  const env: WorkspaceEnv = { kind: "local" };
+  return {
+    getCwd: () => root,
+    getWorkspaceRoot: () => root,
+    getRealWorkspaceRoot: () => root,
+    workspaceEnv: env,
+    getSandboxOverrideAsync: async () => override,
+    // Live-UI surfaces: no desktop window follows a headless persona.
+    // The tools that would call these are in PERSONA_EXCLUDED_TOOLS; the
+    // stubs exist only to satisfy the ToolContext contract.
+    getTerminalContext: () => null,
+    isActiveTerminalPrivate: () => false,
+    injectIntoActivePty: () => false,
+    writeToActiveTerminalDisplay: () => false,
+    openPreview: () => false,
+    // Session-scoped machinery keys off the synthetic persona id: shell
+    // sessions, todos, subagent shells. It is a stable, unique key, so
+    // the same persona reuses its shell session across runs.
+    getSessionId: () => sessionId,
+    readCache: new Map(),
+    fileTracker: new FileTracker(),
+    // Generous static budget: persona replies are short; tools use this
+    // only to truncate their own output when context is tight.
+    getRemainingContextTokens: () => 128_000,
+    // Persona tool results stringify on the generateText path - hand the
+    // model OCR text instead of image parts (matches text-only local models).
+    supportsToolResultImages: () => false,
+  };
+}
 
 /**
  * Remove a persona's scratch workspace. Called when the persona is no
@@ -243,6 +205,7 @@ export async function sweepPersonaWorkspace(agentId: string): Promise<void> {
   if (!root) return;
   resolved.delete(agentId);
   try {
+    const { native } = await import("./native");
     await native.deleteFile(root);
   } catch {
     // Already gone or FS hiccup - the sweep is best-effort.

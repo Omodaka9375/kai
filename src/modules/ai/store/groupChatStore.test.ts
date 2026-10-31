@@ -236,9 +236,12 @@ describe("source pins — trust boundary & wiring", () => {
 
   it("membership stays human-granted: no tool code path calls createGroupChat", () => {
     // The store is the only creator; the panel (user UI) is the only caller
-    // outside tests. Tools directory must not reference group creation.
+    // outside tests. The store may DYNAMICALLY import the persona toolset
+    // (import("../tools/tools") - the persona run path), but must never
+    // statically import tool code, which would hand tool modules a cycle
+    // into membership grant paths.
     expect(panel).toContain("createGroupChat");
-    expect(store).not.toContain("tools/");
+    expect(store).not.toContain('from "../tools/');
   });
 
   it("the group panel is mounted exactly once, at app level", () => {
@@ -397,9 +400,18 @@ describe("persona participants", () => {
       const queuedDelivery = second.find((d) => d.projectId === PERSONA);
       expect(queuedDelivery).toBeDefined();
       expect(queuedDelivery!.queued).toBe(true);
-      await new Promise((r) => setTimeout(r, 150));
-      // The failed run surfaced as an error note (never silence).
-      const live = getGroup(g!.id)!;
+      // The failed run surfaced as an error note (never silence). Poll:
+      // the run cold-imports the full tool registry on its first execution,
+      // which can take longer than the mocked 50ms model-build delay.
+      const deadline = Date.now() + 4_000;
+      let live = getGroup(g!.id)!;
+      while (
+        !live.messages.some((m) => m.from === "system" && m.text.includes("persona) hit an error")) &&
+        Date.now() < deadline
+      ) {
+        await new Promise((r) => setTimeout(r, 50));
+        live = getGroup(g!.id)!;
+      }
       expect(
         live.messages.some((m) => m.from === "system" && m.text.includes("persona) hit an error")),
       ).toBe(true);

@@ -49,9 +49,11 @@ import {
   getGroupStoreVersion,
   getGroup,
   getGroups,
+  getPersonaApprovals,
   isPersonaParticipantId,
   participantActivity,
   removeParticipant,
+  respondPersonaApproval,
   resumeGroupChat,
   sendGroupMessage,
   stopGroupParticipant,
@@ -258,6 +260,7 @@ export function GroupChatPanel({
               }}
             />
             <Transcript group={active} expanded={groupExpanded} />
+            <PersonaApprovals groupId={active.id} />
             <ActivityStrip group={active} />
             <Composer group={active} expanded={groupExpanded} />
           </motion.div>
@@ -480,6 +483,64 @@ function Transcript({
           )
         )
       )}
+    </div>
+  );
+}
+
+/**
+ * Persona approval cards: tools a persona participant wants to run that
+ *  need the human coordinator's decision (shell commands, writes, edits,
+ *  MCP...). Mirrors the project agents' approval cards, but headless: the
+ *  persona run is a generateText loop paused in groupChatStore, and the
+ *  decision resumes it. Version-driven off the group store (the registry
+ *  bumps the same notify() the panel already subscribes to).
+ */
+function PersonaApprovals({ groupId }: { groupId: string }) {
+  const version = useSyncExternalStore(subscribeGroupChats, getGroupStoreVersion, getGroupStoreVersion);
+  const pending = useMemo(
+    () => getPersonaApprovals().filter((a) => a.groupId === groupId),
+    [groupId, version],
+  );
+  if (pending.length === 0) return null;
+  return (
+    <div className="flex shrink-0 flex-col gap-1.5 border-t border-border/60 px-3 py-2">
+      {pending.map((a) => (
+        <div
+          key={a.approvalId}
+          className="rounded-xl border border-amber-500/40 bg-amber-500/[0.06] px-3 py-2"
+        >
+          <div className="flex items-center gap-1.5 text-[10.5px] font-medium text-foreground/90">
+            <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-amber-500" />
+            <span className="truncate">{a.personaName}</span>
+            <span className="text-muted-foreground">wants to run</span>
+            <span className="truncate font-mono text-[10px] text-foreground">{a.toolName}</span>
+          </div>
+          {a.summary ? (
+            <div className="mt-1 max-h-20 overflow-y-auto whitespace-pre-wrap rounded-md bg-muted/50 px-2 py-1 font-mono text-[10px] leading-relaxed text-muted-foreground">
+              {a.summary}
+            </div>
+          ) : null}
+          <div className="mt-1.5 flex items-center justify-end gap-1.5">
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-6 px-2 text-[11px]"
+              onClick={() => respondPersonaApproval(a.approvalId, false)}
+            >
+              Deny
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              className="h-6 px-2.5 text-[11px]"
+              onClick={() => respondPersonaApproval(a.approvalId, true)}
+            >
+              Approve
+            </Button>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

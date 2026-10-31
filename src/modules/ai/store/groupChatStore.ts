@@ -15,12 +15,14 @@ import { EMPTY_PROVIDER_KEYS, type ProviderKeys } from "../lib/keyring";
 import { createFenceState, fence, fenceSystemPrompt } from "../lib/fence";
 import { withToolGuard, withToolRedaction } from "../lib/toolFencing";
 import {
-  buildPersonaTools,
+  PERSONA_EXCLUDED_TOOLS,
+  buildPersonaToolContext,
   personaWorkspaceRoot,
   sweepPersonaWorkspace,
 } from "../lib/personaWorkspace";
+import { auditAppend, AUDIT_KINDS } from "../lib/audit";
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import { generateText, stepCountIs } from "ai";
+import { generateText, stepCountIs, type ModelMessage } from "ai";
 
 /**
  * Cross-project group chats — a coordination layer OVER existing per-project
@@ -129,10 +131,68 @@ function personaKey(groupId: string, sessionId: string): string {
 
 /** Per (group, persona) delivery queue — mirrors the project-agent sendQueues. */
 const personaQueues = new Map<string, string[]>();
-/** Step cap for persona reply runs (they own no approvals loop, so a hard
- *  cap is the only loop guard; sub-agents default to 24, personas get the
- *  same ceiling). */
+/** Step cap per generateText call in a persona run (the approval-resume
+ *  loop starts a fresh call each round, so the total is unbounded while
+ *  the coordinator keeps engaging — same as a Chat session). */
 const PERSONA_MAX_STEPS = 24;
+
+// ── Persona approvals ───────────────────────────────────────────────────
+// Personas run headless generateText, not a Chat — the SDK's approval pause
+// has no UI of its own. The run loop (runPersonaReply) registers each
+// tool-approval-request here, the group panel renders a card, and the
+// user's click resolves the promise; the loop then resumes generateText
+// with tool-approval-response parts (the exact protocol the react Chat
+// uses via addToolApprovalResponse). This registry is module-level, like
+// chatStore's approvalResponders — no React lifecycle involved.
+export type PersonaApproval = {
+  approvalId: string;
+  groupId: string;
+  /** "groupId::personaSessionId" — the run's key (teardown + activity). */
+  sessionKey: string;
+  personaName: string;
+  toolName: string;
+  /** Short human summary of the tool input (command / path / prompt). */
+  summary: string;
+  at: number;
+};
+const personaApprovals = new Map<string, PersonaApproval & { decide: (approved: boolean) => void }>();
+
+/** Pending persona approvals for the panel (ordered oldest first). */
+export function getPersonaApprovals(): PersonaApproval[] {
+  return [...personaApprovals.values()]
+    .sort((a, b) => a.at - b.at)
+    .map(({ decide, ...rest }) => {
+      void decide;
+      return rest;
+    });
+}
+
+/** Human decision on a persona approval card (panel only). Audits the
+ *  decision — the group transcript can't prove WHO allowed a shell command
+ *  inside the persona's scratch dir. */
+export function respondPersonaApproval(approvalId: string, approved: boolean): void {
+  const entry = personaApprovals.get(approvalId);
+  if (!entry) return;
+  personaApprovals.delete(approvalId);
+  auditAppend(
+    approved ? AUDIT_KINDS.approvalApprove : AUDIT_KINDS.approvalDeny,
+    entry.toolName,
+    `persona ${entry.personaName}: ${entry.summary}`.slice(0, 200),
+    "",
+  );
+  entry.decide(approved);
+  notify();
+}
+
+/** Resolve every pending approval for a run as DENIED (teardown: stop,
+ *  group end/delete, persona removal). Absence of permission is denial. */
+function denyPersonaApprovals(sessionKey: string): void {
+  for (const [id, entry] of [...personaApprovals.entries()]) {
+    if (entry.sessionKey !== sessionKey) continue;
+    personaApprovals.delete(id);
+    entry.decide(false);
+  }
+}
 /** AbortController per in-flight persona run (stop support). */
 const personaAborters = new Map<string, AbortController>();
 /** In-flight runs, keyed "groupId::personaSessionId". */
@@ -140,14 +200,21 @@ const personaBusy = new Set<string>();
 /** Session-keyed busy view for participantActivity (any group). */
 const personaBusyBySession = new Set<string>();
 
-/** Stop + clear one persona's machinery for a specific group. */
+/** Stop + clear one persona's machinery for a specific group: abort the
+ *  run, deny its pending approvals (a decision, not a hang), and kill any
+ *  shell sessions the persona's tools opened (the same cleanup a project
+ *  session gets from cancelAllShellSessions). */
 function abortPersonaMachinery(groupId: string, sessionId: string): void {
   const key = personaKey(groupId, sessionId);
   personaQueues.delete(key);
+  denyPersonaApprovals(key);
   personaAborters.get(key)?.abort();
   personaAborters.delete(key);
   personaBusy.delete(key);
   personaBusyBySession.delete(sessionId);
+  void import("../tools/shell")
+    .then(({ cancelAllShellSessions }) => cancelAllShellSessions(sessionId))
+    .catch(() => undefined);
 }
 
 /** Flush whatever the buffer holds as one merged wake (timeout or complete). */
@@ -497,11 +564,28 @@ function deliverToPersonaParticipant(
   return false;
 }
 
-/** Generate a persona participant's reply with a fenced one-shot call and
- *  append it to the transcript. No tools (a persona owns no workspace), no
- *  session, no persistence of its own — the group transcript is the record.
- *  Uses the app's currently selected model + keys; failures surface as a
- *  system note instead of silence. */
+/** Short human summary of a pending tool call for the approval card. */
+function summarizePersonaToolCall(input: unknown): string {
+  try {
+    const i = (input ?? {}) as Record<string, unknown>;
+    if (typeof i.command === "string") return i.command.slice(0, 160);
+    if (typeof i.path === "string") return i.path;
+    if (typeof i.prompt === "string") return i.prompt.slice(0, 160);
+    if (typeof i.query === "string") return i.query.slice(0, 160);
+    if (typeof i.url === "string") return i.url;
+    return JSON.stringify(i).slice(0, 160);
+  } catch {
+    return "";
+  }
+}
+
+/** Generate a persona participant's reply and append it to the transcript.
+ *  Runs the FULL agent toolset (buildTools minus desktop-UI-bound tools)
+ *  against a scratch-confined ToolContext; approval-gated tool calls pause
+ *  the run and surface a card in the group panel. No Chat session, no
+ *  persistence of its own - the group transcript is the record. Uses the
+ *  app's currently selected model + keys; failures surface as a system
+ *  note instead of silence. */
 async function runPersonaReply(
   g: GroupChat,
   p: GroupParticipant,
@@ -518,7 +602,7 @@ async function runPersonaReply(
       BUILTIN_AGENTS.find((x) => x.id === agentId) ??
       null;
     if (!persona) {
-      throw new Error("this persona no longer exists — remove it from the group");
+      throw new Error("this persona no longer exists - remove it from the group");
     }
     const state = useChatStore.getState() as {
       selectedModelId?: ModelId;
@@ -538,14 +622,19 @@ async function runPersonaReply(
     } else if (m.id === "openai-compatible-custom" && prefs.openaiCompatibleModelId?.trim()) {
       resolved = prefs.openaiCompatibleModelId.trim();
     }
-    // Dynamic import: lib/agent pulls the whole tool registry; importing it
-    // statically here would cycle back into this module via the group tool.
-    const { buildLanguageModel } = await import("../lib/agent");
+    // Dynamic imports: lib/agent + tools/tools pull the whole registry and
+    // would cycle back into this module statically (the group tool imports
+    // the store).
+    const [{ buildLanguageModel }, { buildTools }, mcpModule] = await Promise.all([
+      import("../lib/agent"),
+      import("../tools/tools"),
+      import("../lib/mcpManager"),
+    ]);
     const model = await buildLanguageModel(m.provider, keys, resolved, {
       lmstudioBaseURL: prefs.lmstudioBaseURL,
       openaiCompatibleBaseURL: prefs.openaiCompatibleBaseURL,
     });
-    // The transcript contains OTHER agents' output — fence it so a malicious
+    // The transcript contains OTHER agents' output - fence it so a malicious
     // repo reply can't hijack the persona run (same trust rule as the bridge).
     const fenceState = createFenceState(null);
     const transcript = personaTranscriptSnippet(g, p.sessionId);
@@ -554,24 +643,34 @@ async function runPersonaReply(
     // anywhere (production security deny-lists apply); writes stay inside
     // the scratch dir (readOnly sandbox override, see personaWorkspace.ts).
     const scratchRoot = await personaWorkspaceRoot(agentId);
-    const tools = scratchRoot
-      ? withToolGuard(
-          withToolRedaction(
-            buildPersonaTools(agentId, scratchRoot) as Record<string, unknown> as Record<
-              string,
-              Parameters<typeof withToolGuard>[0][string]
-            >,
-          ),
-          fenceState,
-          null,
-        )
-      : undefined;
-    const scratchLines = scratchRoot
-      ? [
-          `Your scratch workspace is "${scratchRoot}" - the ONLY place you may write. Use it for intermediate files, notes, drafts of your analysis; it persists across group sessions.`,
-          "You may READ files anywhere on this machine when the task needs it (sensitive paths are refused).",
-        ]
-      : [];
+    if (!scratchRoot) {
+      throw new Error("no home directory - scratch workspace unavailable");
+    }
+    const toolContext = buildPersonaToolContext(agentId, scratchRoot, p.sessionId);
+    // Full agent toolset, minus desktop-UI-bound tools (PERSONA_EXCLUDED_TOOLS)
+    // and minus the group tools (a persona can never coordinate a group).
+    const mcpTools = mcpModule.mcpManager.getActiveTools();
+    const excluded = new Set<string>([...PERSONA_EXCLUDED_TOOLS, "send_to_project", "project_status"]);
+    const allTools = buildTools(toolContext, mcpTools) as Record<string, unknown>;
+    const personaToolset: Record<string, unknown> = {};
+    for (const [name, def] of Object.entries(allTools)) {
+      if (excluded.has(name)) continue;
+      personaToolset[name] = def;
+    }
+    // Production wrapping order: redaction innermost -> central deny guards
+    // -> fence/annotation outermost (identical to runAgentStream).
+    const redacted = withToolRedaction(personaToolset as never);
+    const { withCentralToolGuards } = await import("../lib/toolGuards");
+    const guarded = withCentralToolGuards(redacted as never, undefined, (name, reason) => {
+      auditAppend(AUDIT_KINDS.securityDeny, "tool-guard", `${name}: ${reason}`.slice(0, 200), "");
+    });
+    const tools = withToolGuard(guarded as never, fenceState, toolContext.getWorkspaceRoot);
+    const scratchLines = [
+      `Your scratch workspace is "${scratchRoot}" - the ONLY place you may write. Use it for intermediate files, notes, drafts, and running commands (its cwd is your working directory). It persists across group sessions.`,
+      "You may READ files anywhere on this machine when the task needs it (sensitive paths are refused).",
+      "You have the full agent toolset (files, edits, shell, search, web, subagents, MCP, media). Tools that act on the interactive terminal or the user's screen are not available.",
+      "Some tool calls require the coordinator's approval - they will pause until approved or denied.",
+    ];
     const system = [
       persona.instructions,
       fenceSystemPrompt(fenceState),
@@ -589,15 +688,96 @@ async function runPersonaReply(
       "",
       `Reply to the group as ${persona.name}.`,
     ].join("\n");
-    const result = await generateText({
-      model,
-      system,
-      prompt,
-      tools: tools as Parameters<typeof generateText>[0]["tools"],
-      stopWhen: stepCountIs(PERSONA_MAX_STEPS),
-      abortSignal: controller.signal,
-    });
-    const reply = (result.text ?? "").trim() || "(no output)";
+
+    // ── Approval-resume loop ───────────────────────────────────────────
+    // generateText pauses when a tool needs approval (approval-request
+    // parts sit in the last step; unexecuted tool calls). The react Chat
+    // resumes via addToolApprovalResponse; here the loop re-calls
+    // generateText with the accumulated response messages + a tool message
+    // carrying tool-approval-response parts - the same wire protocol the
+    // SDK implements for Chat (verified against ai@6.0.168's
+    // collectToolApprovals / executeTools).
+    let accumulated: ModelMessage[] = [
+      { role: "system", content: system },
+      { role: "user", content: prompt },
+    ];
+    let reply = "";
+    for (;;) {
+      const result = await generateText({
+        model,
+        messages: accumulated,
+        tools: tools as Parameters<typeof generateText>[0]["tools"],
+        stopWhen: stepCountIs(PERSONA_MAX_STEPS),
+        abortSignal: controller.signal,
+      });
+      reply = (result.text ?? "").trim() || reply;
+      accumulated = [...accumulated, ...result.response.messages] as ModelMessage[];
+      // Approval requests: tool calls that produced no result. The SDK put
+      // a tool-approval-request part (with its OWN generated approvalId)
+      // into the response's assistant message - map toolCallId -> that
+      // approvalId so the responses below reference it (the SDK's
+      // collectToolApprovals matches responses to requests by approvalId).
+      const approvalIdByToolCall = new Map<string, string>();
+      for (const msg of accumulated) {
+        if (msg.role !== "assistant") continue;
+        const parts = (msg.content ?? []) as Array<{
+          type?: string;
+          approvalId?: string;
+          toolCallId?: string;
+        }>;
+        for (const part of parts) {
+          if (part.type === "tool-approval-request" && part.toolCallId && part.approvalId) {
+            approvalIdByToolCall.set(part.toolCallId, part.approvalId);
+          }
+        }
+      }
+      const executedIds = new Set(
+        result.steps.flatMap((s) => s.toolResults.map((r) => r.toolCallId)),
+      );
+      const pendingCalls = (result.steps[result.steps.length - 1]?.toolCalls ?? []).filter(
+        (c) => !executedIds.has(c.toolCallId),
+      );
+      if (pendingCalls.length === 0) break;
+      if (controller.signal.aborted) return;
+      // Group ended/deleted while the run was mid-flight: deny the cards
+      // (denyPersonaApprovals already did on teardown) and stop - resuming
+      // would burn a model call for a dead group.
+      const liveGroup = groups.get(g.id);
+      if (!liveGroup || liveGroup.endedAt !== null) {
+        denyPersonaApprovals(key);
+        return;
+      }
+      // Register a card per un-executed call, THEN wait for every decision
+      // (approve / deny / teardown-deny all resolve the promise).
+      const decisionPromises = pendingCalls.map(
+        (c) =>
+          new Promise<boolean>((resolve) => {
+            personaApprovals.set(c.toolCallId, {
+              approvalId: approvalIdByToolCall.get(c.toolCallId) ?? c.toolCallId,
+              groupId: g.id,
+              sessionKey: key,
+              personaName: p.name,
+              toolName: c.toolName,
+              summary: summarizePersonaToolCall(c.input),
+              at: Date.now(),
+              decide: (approved) => resolve(approved),
+            });
+          }),
+      );
+      notify(); // render the cards BEFORE the await
+      const decisions = await Promise.all(decisionPromises);
+      const responses = pendingCalls.map((c, i) => ({
+        type: "tool-approval-response" as const,
+        approvalId: approvalIdByToolCall.get(c.toolCallId) ?? c.toolCallId,
+        approved: decisions[i] ?? false,
+      }));
+      accumulated = [
+        ...accumulated,
+        { role: "tool" as const, content: responses },
+      ] as ModelMessage[];
+      notify(); // cards resolved - drop them from the panel
+    }
+    if (!reply) reply = "(no output)";
     const live = groups.get(g.id);
     if (live && live.endedAt === null) {
       await appendGroupMessage(live.id, {
@@ -610,7 +790,7 @@ async function runPersonaReply(
       noteParticipantReply(live.id, p.projectId, reply);
     }
   } catch (err) {
-    // The stop path writes its own note — don't double-report an abort.
+    // The stop path writes its own note - don't double-report an abort.
     if (controller.signal.aborted) return;
     const msg = err instanceof Error ? err.message : String(err);
     const live = groups.get(g.id);
@@ -627,7 +807,7 @@ async function runPersonaReply(
     personaBusy.delete(key);
     personaBusyBySession.delete(p.sessionId);
     notify();
-    // Flush the queue exactly like flushQueuedForSession — merged, once.
+    // Flush the queue exactly like flushQueuedForSession - merged, once.
     const queued = personaQueues.get(key);
     if (queued && queued.length > 0) {
       personaQueues.delete(key);
@@ -683,8 +863,12 @@ export type ParticipantActivity =
   | "idle";
 
 export function participantActivity(sessionId: string): ParticipantActivity {
-  // Personas have no session meta — their activity is the run/queue state.
+  // Personas have no session meta — their activity is the run/queue state,
+  // with pending approval cards taking precedence over "working".
   if (isPersonaParticipantId(sessionId)) {
+    for (const entry of personaApprovals.values()) {
+      if (entry.sessionKey.endsWith(`::${sessionId}`)) return "approval";
+    }
     if (personaBusyBySession.has(sessionId)) return "working";
     for (const k of personaQueues.keys()) {
       if (k.endsWith(`::${sessionId}`)) return "queued";
@@ -1063,6 +1247,10 @@ export function __resetGroupChatsForTest(): void {
   personaQueues.clear();
   personaBusy.clear();
   personaBusyBySession.clear();
+  for (const [id, entry] of [...personaApprovals.entries()]) {
+    personaApprovals.delete(id);
+    entry.decide(false);
+  }
   // Armed 90s coalesce timers survive a state reset and can fire
   // flushCoalesced into the NEXT test's state.
   for (const t of coalesceTimers.values()) clearTimeout(t);
