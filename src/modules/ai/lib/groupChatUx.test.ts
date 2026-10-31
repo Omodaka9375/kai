@@ -129,6 +129,19 @@ describe("composer mirrors the AI input bar", () => {
     // The OLD unscoped gate (any group anywhere shows the pill) must not return.
     expect(panel).not.toMatch(/\{groups\.length > 0 && stackSurface !== "group" \? \(/);
   });
+
+  it("an ENDED group does not paint the collapsed pill (X closes for good)", () => {
+    // 2026-10-31 regression: "when I close chat on X the whole collapsed pill
+    // was still there on all projects". GroupListTray used `?? groups[0]` so a
+    // just-ENDED group kept advertising itself (dimmed, "Resume") on every
+    // participant project. The pill names LIVE groups only - resume is an
+    // explicit re-entry, not an always-on pill.
+    const start = panel.indexOf("function GroupListTray");
+    // GroupListTray is the LAST function in the file — slice to the end.
+    const tray = panel.slice(start);
+    expect(tray).toContain("groups.find((x) => x.endedAt === null)");
+    expect(tray).not.toContain("?? groups[0]");
+  });
 });
 
 describe("the pill unmounts when the last group is gone", () => {

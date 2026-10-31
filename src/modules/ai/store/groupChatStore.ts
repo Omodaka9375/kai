@@ -499,11 +499,18 @@ export async function sendGroupMessage(
   const out: Array<{ projectId: string; sessionId: string; queued: boolean }> = [];
   const undeliverable: string[] = [];
   for (const p of picked) {
-    // Re-resolve: a participant with no active session at creation (its AI
-    // panel had never been opened) may have one now — pick it up instead of
-    // skipping silently. The participant record is updated so the group
-    // keeps pointing at the session that actually received the delivery.
-    const sid = p.sessionId || getProjectActiveSession(p.projectId) || "";
+    // RE-RESOLVE like the stop paths: the project's CURRENT active session
+    // WINS over the frozen record (which can be STALE — the project switched
+    // chats since the group was created). The participant project's
+    // AgentRunBridge follows the CURRENT active session, and it is the ONLY
+    // thing that mirrors the provoked reply into the group transcript and
+    // settles the session's meta back to idle — a delivery into a stale
+    // session is answered by an agent NO bridge watches, so the reply lands
+    // in that project chat alone ("agent never responds inside group chat"),
+    // never mirrors, and the stale session's meta stays busy so every later
+    // delivery queues forever. Record re-pointed below so the group keeps
+    // tracking the session that actually received the delivery.
+    const sid = getProjectActiveSession(p.projectId) || p.sessionId || "";
     if (!sid) {
       undeliverable.push(p.name);
       out.push({ projectId: p.projectId, sessionId: "", queued: false });

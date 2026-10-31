@@ -100,6 +100,31 @@ describe("mirror gate — takeReplyProvision", () => {
     expect(stops[1]).not.toMatch(/^    if \(!p\.sessionId\) continue;$/m);
   });
 
+  // DELIVERY RE-RESOLUTION (same regression class): sendGroupMessage used
+  // to deliver into the RECORDED session (`p.sessionId || current`), so a
+  // STALE record (project switched chats) routed the delivery into a
+  // session no AgentRunBridge watches — the reply never mirrored into the
+  // group and the stale session's meta stayed busy forever. The delivery
+  // path must prefer the project's CURRENT active session (the session
+  // the bridge follows) and re-point the record.
+  it("delivery prefers the project's CURRENT active session over the stale record (source pin)", () => {
+    const src = readFileSync(
+      new URL("./groupChatStore.ts", import.meta.url),
+      "utf8",
+    );
+    const deliveryStart = src.indexOf("export async function sendGroupMessage(");
+    const delivery = src.slice(
+      deliveryStart,
+      src.indexOf("/** Fan-out copy inside sendGroupMessage"),
+    );
+    // Current-wins re-resolution, not record-wins.
+    expect(delivery).toContain("getProjectActiveSession(p.projectId) || p.sessionId");
+    // The old record-wins form must not return.
+    expect(delivery).not.toContain("p.sessionId || getProjectActiveSession");
+    // Record re-pointing keeps the group tracking the real session.
+    expect(delivery).toMatch(/p\.sessionId = sid/);
+  });
+
   it("the provision is armed at INJECTION, never at queue time (source pin)", () => {
     const src = readFileSync(
       new URL("./groupChatStore.ts", import.meta.url),

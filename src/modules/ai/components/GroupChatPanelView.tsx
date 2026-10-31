@@ -1056,13 +1056,17 @@ function GroupListTray({
    *  surface — minimizing the panel never deletes anything. */
   onEnd: (id: string) => void | Promise<void>;
 }) {
-  // ONE pill for the whole gutter: it names the most recent live group (or
-  // the most recent one of any kind) and expands whichever group it names.
-  // While a group is expanded it is the panel, not the pill - so with a
-  // group owning the slot the pill is hidden entirely (App renders the AI
-  // pill instead).
+  // ONE pill for the whole gutter: it names the most recent live group and
+  // expands whichever group it names. While a group is expanded it is the
+  // panel, not the pill - so with a group owning the slot the pill is hidden
+  // entirely (App renders the AI pill instead).
+  // ENDED groups do NOT paint the pill (2026-10-31 regression report: "when
+  //  I close chat on X the collapsed pill is still there"): the old
+  //  any-group fallback kept a just-ended group advertising itself on every
+  //  project in it. Resume is an explicit re-entry (picker/status bar), not
+  //  an always-on pill.
   if (activeId !== null) return null;
-  const g = groups.find((x) => x.endedAt === null) ?? groups[0];
+  const g = groups.find((x) => x.endedAt === null);
   if (!g) return null;
   return (
     <div
@@ -1073,13 +1077,12 @@ function GroupListTray({
         "fixed z-40 flex h-8 items-center gap-1.5 rounded-lg border border-border/60 bg-card px-2.5",
         "text-[11px] text-muted-foreground shadow-md transition-colors hover:bg-accent hover:text-foreground",
         "right-2 w-[min(34rem,calc(100vw-2rem))] bottom-[calc(var(--kai-input-bar-h,0px)+42px)]",
-        g.endedAt !== null && "opacity-60",
       )}
     >
       <button
         type="button"
         onClick={() => onOpen(g.id)}
-        title={g.endedAt !== null ? "Resume group chat" : "Open group chat"}
+        title="Open group chat"
         className="flex min-w-0 flex-1 items-center gap-1.5 self-stretch text-left"
       >
         <HugeiconsIcon icon={Link01Icon} size={12} strokeWidth={1.75} className="shrink-0 text-muted-foreground" />
