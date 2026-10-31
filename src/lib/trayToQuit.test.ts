@@ -59,9 +59,16 @@ describe("Rust tray + close backstop (modules/tray.rs)", () => {
   });
 
   it("show reopens, unminimizes, and focuses the main window", () => {
-    expect(tray).toMatch(/"show" => \{[\s\S]*?win\.show\(\)/);
-    expect(tray).toMatch(/"show" => \{[\s\S]*?win\.unminimize\(\)/);
-    expect(tray).toMatch(/"show" => \{[\s\S]*?win\.set_focus\(\)/);
+    // Both the menu item and a LEFT click on the icon route through the
+    // shared show_main_window helper (show + unminimize + set_focus).
+    expect(tray).toMatch(/fn show_main_window[\s\S]*?win\.show\(\)[\s\S]*?win\.unminimize\(\)[\s\S]*?win\.set_focus\(\)/);
+    expect(tray).toMatch(/"show" => show_main_window\(app\)/);
+    expect(tray).toMatch(/MouseButton::Left[\s\S]*?show_main_window\(tray\.app_handle\(\)\)/);
+  });
+
+  it("a plain left click reopens the window (menu stays on right click)", () => {
+    expect(tray).toContain("show_menu_on_left_click(false)");
+    expect(tray).toMatch(/TrayIconEvent::Click \{[\s\S]*?MouseButton::Left[\s\S]*?MouseButtonState::Up/);
   });
 
   it("the close backstop only guards the main window (settings close for real)", () => {
