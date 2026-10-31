@@ -877,13 +877,21 @@ function InvitePicker({
   const existing = open ? getGroups() : [];
   const candidates = projects.filter((p) => p.id !== activeProjectId);
   const invitees = candidates.filter((p) => picked.includes(p.id));
-  // Existing personas across ALL live groups — dedupe in the picker so the
-  // same persona can't be picked twice into one group from the list.
-  const personas = useAgentsStore((s) =>
-    [...s.customAgents, ...BUILTIN_AGENTS].map((a) => ({
-      id: a.id,
-      name: a.name,
-    })),
+  // CRITICAL (React #185 fix): the selector must return a STABLE reference —
+  // zustand v5 feeds it to useSyncExternalStore, and a selector that builds
+  // a fresh array per call makes the snapshot "change" after every render:
+  // React re-renders, re-runs the selector, and after ~50 nested updates
+  // throws "Maximum update depth exceeded" (minified React error #185 — the
+  // crash users saw on opening the group picker). Select the STORE's stable
+  // array, derive the mapped shape in useMemo.
+  const customAgents = useAgentsStore((s) => s.customAgents);
+  const personas = useMemo(
+    () =>
+      [...customAgents, ...BUILTIN_AGENTS].map((a) => ({
+        id: a.id,
+        name: a.name,
+      })),
+    [customAgents],
   );
   const inviterName = projects.find((p) => p.id === activeProjectId)?.name ?? "This project";
 
@@ -1127,10 +1135,17 @@ function ParticipantsMenu({
       .filter((p) => isPersonaParticipantId(p.projectId))
       .map((p) => p.projectId.slice("persona:".length)),
   );
-  const invitablePersonas = useAgentsStore((s) =>
-    [...s.customAgents, ...BUILTIN_AGENTS]
-      .filter((a) => !memberPersonaIds.has(a.id))
-      .map((a) => ({ id: a.id, name: a.name })),
+  // CRITICAL (React #185 fix, same as InvitePicker): select the store's
+  // stable customAgents array; build the filtered/mapped shape in useMemo.
+  // An array-building selector = fresh snapshot every render = max update
+  // depth crash (#185) as soon as this menu mounts.
+  const customAgents = useAgentsStore((s) => s.customAgents);
+  const invitablePersonas = useMemo(
+    () =>
+      [...customAgents, ...BUILTIN_AGENTS]
+        .filter((a) => !memberPersonaIds.has(a.id))
+        .map((a) => ({ id: a.id, name: a.name })),
+    [customAgents, memberPersonaIds],
   );
   void group;
   return (
