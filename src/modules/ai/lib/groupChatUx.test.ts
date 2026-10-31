@@ -113,6 +113,22 @@ describe("composer mirrors the AI input bar", () => {
     // same as the main chat's user bubbles).
     expect(body).not.toContain("whitespace-pre-wrap rounded-lg");
   });
+
+  it("the collapsed pill shows only in projects ENGAGED in a group", () => {
+    // 2026-10-31: the panel is app-level (rendered once above all projects),
+    // so the old `groups.length > 0` gate advertised any group - including
+    // one between two OTHER projects - under every project's AI window.
+    // The pill/tray must gate on the ACTIVE project being a participant,
+    // and the tray lists only that project's groups. Creation is unaffected
+    // (it enters via the status-bar window event, not the pill).
+    // The tray gate is the full JSX condition line.
+    const gate = panel.match(/\{activeProjectInGroup && activeProjectGroups\.length > 0 && stackSurface !== "group" \? \(/);
+    expect(gate).not.toBeNull();
+    expect(panel).toContain("const activeProjectGroups = useMemo(");
+    expect(panel).toMatch(/groups=\{activeProjectGroups\}/);
+    // The OLD unscoped gate (any group anywhere shows the pill) must not return.
+    expect(panel).not.toMatch(/\{groups\.length > 0 && stackSurface !== "group" \? \(/);
+  });
 });
 
 describe("the pill unmounts when the last group is gone", () => {

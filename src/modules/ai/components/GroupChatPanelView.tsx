@@ -119,6 +119,31 @@ export function GroupChatPanel({
   // The group pill always sits at the bottom of the right-gutter stack;
   // the expanded surface (whoever owns the slot) renders above it.
   const groups = useMemo(() => getGroups(), [version]);
+  // PILL SCOPING (2026-10-31): the collapsed pill (and the panel entry
+  // surfaces) show ONLY when the ACTIVE project is engaged in a group —
+  // not on every project just because SOME group exists. The panel is
+  // app-level, so without this gate a group between two OTHER projects
+  // advertised itself under the active project's AI window too. The tray
+  // itself lists only the ACTIVE project's groups (same filter the pill
+  // names from); creation is unaffected - it enters via the status-bar
+  // button's window event, not the pill.
+  const activeProjectInGroup = useMemo(
+    () =>
+      activeProjectId !== null &&
+      groups.some((g) =>
+        g.participants.some((p) => p.projectId === activeProjectId),
+      ),
+    [groups, activeProjectId],
+  );
+  const activeProjectGroups = useMemo(
+    () =>
+      activeProjectId === null
+        ? []
+        : groups.filter((g) =>
+            g.participants.some((p) => p.projectId === activeProjectId),
+          ),
+    [groups, activeProjectId],
+  );
   const active = useMemo(
     () => (openGroupId ? getGroup(openGroupId) : null),
     [openGroupId, version],
@@ -280,9 +305,9 @@ export function GroupChatPanel({
           </motion.div>
         ) : null}
       </AnimatePresence>
-      {groups.length > 0 && stackSurface !== "group" ? (
+      {activeProjectInGroup && activeProjectGroups.length > 0 && stackSurface !== "group" ? (
         <GroupListTray
-          groups={groups}
+          groups={activeProjectGroups}
           activeId={active?.id ?? null}
           onOpen={(id) => {
             setOpenGroupId(id);
