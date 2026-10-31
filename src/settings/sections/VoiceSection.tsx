@@ -19,7 +19,6 @@ import {
 import { Channel } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { SectionHeader } from "../components/SectionHeader";
-
 /** Local STT models (whisper.cpp quantized ggml — mirrors Rust STT_MODELS). */
 const STT_MODELS = [
   { id: "tiny.en", label: "Tiny (English)", size: "31 MB", note: "fastest" },
@@ -40,7 +39,8 @@ const STT_API_MODELS = [
 ];
 
 import { ASSEMBLY_VOICES } from "@/modules/ai/lib/assemblyai";
-
+import { getKey } from "@/modules/ai/lib/keyring";
+import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 /** OpenAI TTS models + voices. */
 const TTS_API_MODELS = [
   { id: "gpt-4o-mini-tts", label: "gpt-4o-mini-tts" },
@@ -144,15 +144,24 @@ function formatBytes(n: number): string {
 export function VoiceSection() {
   const prefs = usePreferencesStore();
   const [status, setStatus] = useState<VoiceStatus | null>(null);
-  const [busy, setBusy] = useState<"" | "stt" | "tts" | "remove">("");
+  const [busy, setBusy] = useState<"" | "stt" | "tts" | "remove" | "voice">("");
   const [progress, setProgress] = useState<VoiceSetupEvent | null>(null);
   const [error, setError] = useState("");
+  const [hasOpenaiKey, setHasOpenaiKey] = useState<boolean | null>(null);
+  const [hasAssemblyKey, setHasAssemblyKey] = useState<boolean | null>(null);
 
   const refreshStatus = () => {
     void native.voiceStatus().then(setStatus).catch(() => setStatus(null));
   };
   useEffect(() => {
     refreshStatus();
+  }, []);
+
+  // API-mode availability: surface "no key set" up front instead of letting
+  // the user discover it as a mic/TTS error later.
+  useEffect(() => {
+    void getKey("openai").then((k) => setHasOpenaiKey(!!k));
+    void getKey("assemblyai").then((k) => setHasAssemblyKey(!!k));
   }, []);
 
   // The install button reflects the SELECTED voice, not "any" voice — with
@@ -214,10 +223,8 @@ export function VoiceSection() {
     }
   };
 
-  // ── TTS preview / test ──────────────────────────────────────────────
-  // speakText reads its mode from live prefs, so a preview of a NEWLY picked
-  // voice must persist it first, then speak. onError surfaces the failure in
-  // the section (speakText is fail-safe and would otherwise stay silent).
+  // Voice selection only SAVES the preference - the spoken preview belongs
+  // to the explicit "Test voice" button (selecting a voice must not speak).
   const onTestVoice = async () => {
     setError("");
     const m = await import("@/modules/ai/lib/voiceTts");
@@ -227,30 +234,25 @@ export function VoiceSection() {
     );
   };
 
-  const onPreviewAssemblyVoice = async (voice: string) => {
-    await setVoiceTtsAssemblyVoice(voice);
-    setError("");
-    const m = await import("@/modules/ai/lib/voiceTts");
-    await m.speakText(
-      `Hello, this is the ${voice.replace(/^aai-/, "")} voice.`,
-      (msg) => setError(msg),
-    );
-  };
-
-  const onPreviewApiVoice = async (voice: string) => {
-    await setVoiceTtsApiVoice(voice);
-    setError("");
-    const m = await import("@/modules/ai/lib/voiceTts");
-    await m.speakText(
-      `Hello, this is the ${voice} voice.`,
-      (msg) => setError(msg),
-    );
-  };
-
   const sttMode = prefs.voiceSttMode;
   const ttsMode = prefs.voiceTtsMode;
   const setSttMode = (m: SttMode) => void setVoiceSttMode(m);
   const setTtsMode = (m: TtsMode) => void setVoiceTtsMode(m);
+
+  const missingKeyWarning = (label: string) => (
+    <div className="flex items-center gap-2 text-[11.5px] text-amber-500">
+      <span>No {label} API key set - add it in Settings › Models.</span>
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        className="h-6 px-2 text-[11px] text-amber-500 hover:text-amber-600"
+        onClick={() => void openSettingsWindow("models")}
+      >
+        Open Models
+      </Button>
+    </div>
+  );
 
   return (
     <div className="flex flex-col gap-6">
@@ -290,15 +292,22 @@ export function VoiceSection() {
         </div>
 
         {sttMode === "api" ? (
-          <div className="flex items-center justify-between text-[12px]">
-            <span className="text-muted-foreground">STT model</span>
-            <Select
-              ariaLabel="API STT model"
-              value={prefs.voiceSttApiModel}
-              onChange={(v) => void setVoiceSttApiModel(v)}
-              options={STT_API_MODELS}
-            />
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between text-[12px]">
+              <span className="text-muted-foreground">STT model</span>
+              <Select
+                ariaLabel="API STT model"
+                value={prefs.voiceSttApiModel}
+                onChange={(v) => void setVoiceSttApiModel(v)}
+                options={STT_API_MODELS}
+              />
+            </div>
+            {hasOpenaiKey === false ? missingKeyWarning("OpenAI") : null}
           </div>
+        ) : null}
+
+        {sttMode === "assemblyai" ? (
+          hasAssemblyKey === false ? missingKeyWarning("AssemblyAI") : null
         ) : null}
 
         {sttMode === "local" ? (
@@ -408,7 +417,7 @@ export function VoiceSection() {
               <Select
                 ariaLabel="API TTS voice"
                 value={prefs.voiceTtsApiVoice}
-                onChange={(v) => void onPreviewApiVoice(v)}
+                onChange={(v) => void setVoiceTtsApiVoice(v)}
                 options={TTS_API_VOICES.map((v) => ({ id: v, label: v }))}
               />
             </div>
@@ -424,9 +433,10 @@ export function VoiceSection() {
               Test voice
             </Button>
             <span className="text-[11px] text-muted-foreground/70">
-              Picking a voice speaks a short sample.
+              Test voice speaks a short sample.
             </span>
           </div>
+          {hasOpenaiKey === false ? missingKeyWarning("OpenAI") : null}
         </div>
       ) : null}
 
@@ -438,7 +448,7 @@ export function VoiceSection() {
               <Select
                 ariaLabel="AssemblyAI TTS voice"
                 value={prefs.voiceTtsAssemblyVoice || "aai-jane"}
-                onChange={(v) => void onPreviewAssemblyVoice(v)}
+                onChange={(v) => void setVoiceTtsAssemblyVoice(v)}
                 options={ASSEMBLY_VOICES.map((v) => ({
                   id: v.id,
                   label: `${v.label} - ${v.note}`,
@@ -457,9 +467,10 @@ export function VoiceSection() {
               Test voice
             </Button>
             <span className="text-[11px] text-muted-foreground/70">
-              Picking a voice speaks a short sample.
+              Test voice speaks a short sample.
             </span>
           </div>
+          {hasAssemblyKey === false ? missingKeyWarning("AssemblyAI") : null}
         </div>
       ) : null}
 

@@ -162,7 +162,26 @@ describe("source pins - wiring", () => {
     expect(section).toContain('active={sttMode === "assemblyai"}');
     expect(section).toContain('active={ttsMode === "assemblyai"}');
     expect(section).toContain("ASSEMBLY_VOICES");
-    expect(section).toContain("onPreviewAssemblyVoice");
+  });
+
+  it("selecting a voice only SAVES the pref - no auto-speak on select", () => {
+    const section = read("../../../settings/sections/VoiceSection.tsx");
+    // The auto-preview handlers must not return: selecting a voice saved
+    // AND spoke immediately, which the user didn't ask for.
+    expect(section).not.toContain("onPreviewAssemblyVoice");
+    expect(section).not.toContain("onPreviewApiVoice");
+    expect(section).toContain("onChange={(v) => void setVoiceTtsAssemblyVoice(v)}");
+    expect(section).toContain("onChange={(v) => void setVoiceTtsApiVoice(v)}");
+    // Preview belongs to the explicit Test voice button only.
+    expect(section).toContain("Test voice speaks a short sample.");
+  });
+
+  it("missing API keys are surfaced with a link to Settings > Models", () => {
+    const section = read("../../../settings/sections/VoiceSection.tsx");
+    expect(section).toContain("missingKeyWarning");
+    expect(section).toContain('hasOpenaiKey === false ? missingKeyWarning("OpenAI")');
+    expect(section).toContain('hasAssemblyKey === false ? missingKeyWarning("AssemblyAI")');
+    expect(section).toContain('openSettingsWindow("models")');
   });
 
   it("the mode unions + pref plumbing exist end-to-end", () => {
