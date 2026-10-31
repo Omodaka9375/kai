@@ -78,6 +78,11 @@ type Props = {
     originalPath: string | null;
     title?: string;
   }) => void;
+  /** Explicit refresh request - fired when the user clicks into the panel
+   *  (pointerdown anywhere inside it). Together with the Refresh icon and
+   *  the rail icon click, these are the ONLY triggers (no background
+   *  focus/file-change polling - the user asked for no blinking). */
+  onRequestRefresh?: () => void;
 };
 
 const SOURCE_CONTROL_TOOLTIP_CLASS =
@@ -169,10 +174,26 @@ export const SourceControlPanel = memo(function SourceControlPanel({
   open,
   sourceControl,
   onOpenDiff,
+  onRequestRefresh,
 }: Props) {
   const scm = useSourceControlPanel(open, sourceControl, onOpenDiff);
   const refreshAnimationRef = useRef<number | null>(null);
   const [refreshAnimating, setRefreshAnimating] = useState(false);
+
+  // Click-into-the-panel refresh: any pointerdown inside the panel is the
+  // user "focusing" Source Control - refresh once (debounced by the App-
+  // supplied scheduler). Registered on the WINDOW with a check that the
+  // event lands inside THIS panel, so it survives React portals (branch
+  // switcher popovers render in portals but are panel-scoped UX).
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as Element | null;
+      if (target?.closest("[data-source-control-panel]")) onRequestRefresh?.();
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => window.removeEventListener("pointerdown", onPointerDown);
+  }, [open, onRequestRefresh]);
   const [stagedOpen, setStagedOpen] = useState(true);
   const [unstagedOpen, setUnstagedOpen] = useState(true);
   const [stashesOpen, setStashesOpen] = useState(false);
@@ -579,7 +600,10 @@ export const SourceControlPanel = memo(function SourceControlPanel({
 
   return (
     <TooltipProvider delayDuration={800} skipDelayDuration={300}>
-      <aside className="flex h-full min-w-0 flex-col bg-card/80 backdrop-blur [contain:layout_style]">
+      <aside
+        data-source-control-panel
+        className="flex h-full min-w-0 flex-col bg-card/80 backdrop-blur [contain:layout_style]"
+      >
         <header className="flex shrink-0 items-center justify-between gap-2 border-b border-border/50 px-3 pb-2.5 pt-3">
           <div className="flex min-w-0 items-center gap-1.5">
             {scm.status ? (

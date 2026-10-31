@@ -597,6 +597,15 @@ export function useSourceControl(
     [refresh],
   );
 
+  // ── When refreshes fire (user request: no background blinking) ──
+  // The hook used to refresh on EVERY dependency change (mount, context
+  // path settle, workspace key) and on every window focus - a constant
+  // background churn that visibly blinked the panel. Now the ONLY automatic
+  // refresh is a boot-once idle load so the rail badge has data on startup;
+  // everything else is user-triggered (panel click-in, rail icon click,
+  // refresh icon) via App.tsx, plus a repo-null re-resolve when the git
+  // context switches (the panel must never show the previous project's
+  // repo under a new context).
   useEffect(() => {
     if (!enabled) {
       requestIdRef.current++;
@@ -631,24 +640,21 @@ export function useSourceControl(
         window.clearTimeout(idle as number);
       }
     };
-  }, [refresh, contextPath, enabled, workspaceKey]);
+    // BOOT-ONCE: no contextPath/workspaceKey in the deps. The context-change
+    // re-resolve lives in its own effect below (repo-null gated, local-only).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled]);
 
+  // Context switch with no repo resolved for it: re-resolve locally (no
+  // network). Fires when the settled context moves to a different repo
+  // (terminal `cd`, project switch) - the null-repo gate makes this a
+  // one-shot per context change, not a background poll.
   useEffect(() => {
-    if (!enabled) return;
-    let timer = 0;
-    const onFocus = () => {
-      if (timer) window.clearTimeout(timer);
-      timer = window.setTimeout(() => {
-        timer = 0;
-        void refresh({ remote: "auto" });
-      }, 400);
-    };
-    window.addEventListener("focus", onFocus);
-    return () => {
-      window.removeEventListener("focus", onFocus);
-      if (timer) window.clearTimeout(timer);
-    };
-  }, [refresh, enabled]);
+    if (!enabled || !settledContextPath) return;
+    if (stateRef.current.repo) return;
+    void refresh({ remote: "never" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settledContextPath, enabled]);
 
   return useMemo<SourceControlSummary>(
     () => ({

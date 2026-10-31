@@ -87,3 +87,49 @@ describe("useSourceControl identity-preserving refresh (focus blink)", () => {
     );
   });
 });
+
+describe("useSourceControl refresh triggers (no background blinking)", () => {
+  // User request: the panel "blinked a lot trying to refresh and check
+  // state". Refreshes must fire ONLY on explicit user action (panel click,
+  // rail icon, refresh icon) plus a boot-once load and a repo-null
+  // re-resolve on context switch. The old triggers are REMOVED:
+  const src = read("./useSourceControl.ts");
+  const app = read("../../app/App.tsx");
+
+  it("no window-focus refresh listener", () => {
+    expect(src).not.toContain('window.addEventListener("focus"');
+  });
+
+  it("no per-context-change auto refresh (boot-once only, repo-null re-resolve)", () => {
+    // The boot effect is keyed on `enabled` ALONE - no contextPath /
+    // workspaceKey churn re-fires it on every tab switch or cd.
+    expect(src).toMatch(
+      /BOOT-ONCE: no contextPath\/workspaceKey in the deps/,
+    );
+    // The context-change re-resolve is repo-null gated (one-shot per
+    // context switch, local-only).
+    expect(src).toMatch(/if \(stateRef\.current\.repo\) return;/);
+    expect(src).toMatch(/void refresh\(\{ remote: "never" \}\);\n\s*\/\/ eslint-disable/);
+  });
+
+  it("no save/terminal-command file-change listeners in App", () => {
+    // The old Kai:sc-file-change / Kai:term-command-end schedule hooks are
+    // gone; the events themselves remain (other consumers).
+    const sc = app.slice(app.indexOf("Explicit refresh triggers"));
+    expect(sc).not.toContain('window.addEventListener("Kai:sc-file-change"');
+    expect(sc).not.toContain('window.addEventListener("Kai:term-command-end"');
+  });
+
+  it("explicit triggers exist: panel click-in, rail icon, refresh icon", () => {
+    // Panel component: pointerdown inside the panel requests a refresh.
+    const panel = read("./SourceControlPanel.tsx");
+    expect(panel).toContain("data-source-control-panel");
+    expect(panel).toContain("onRequestRefresh?.()");
+    // App: rail icon click refreshes (even when the panel is already open).
+    expect(app).toContain("handleSourceControlIconClick");
+    expect(app).toMatch(/if \(view === "source-control"\) \{\n\s*void manualScRefreshRef\.current/);
+    // The panel's own Refresh icon path (handleRefresh -> scm.refresh) is
+    // unchanged and remains one of the three triggers.
+    expect(panel).toContain("onClick={handleRefresh}");
+  });
+});

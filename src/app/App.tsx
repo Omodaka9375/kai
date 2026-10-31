@@ -1390,31 +1390,56 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
 
   const sourceControl = useSourceControl(sourceControlPath, true);
 
-  // File-change-driven SCM refresh. The panel previously refreshed only on
-  // mount and window FOCUS — editing inside KAI keeps the window focused,
-  // so the git panel stayed stale until an alt-tab happened to fire. Two
-  // targeted hooks: editor save (file written by KAI itself) and OSC 133 D
-  // (a terminal command finished — git/build/codegen may have touched the
-  // worktree). Debounced so a save+command burst fires one refresh.
-  const scRefreshRef = useRef(sourceControl.refresh);
-  scRefreshRef.current = sourceControl.refresh;
-  useEffect(() => {
+  // ── Explicit refresh triggers (user request: no background blinking) ──
+  // The panel used to refresh on mount, on every window FOCUS, and on every
+  // editor save / finished terminal command - a wall of background git calls
+  // that visibly blinked the panel ("trying to refresh and check state").
+  // Now it refreshes ONLY when the user asks for it:
+  //   1. the panel is clicked into (focus / any pointerdown inside it),
+  //   2. the Source Control rail icon is clicked (even when the panel is
+  //      already open), or
+  //   3. the panel's Refresh icon is clicked.
+  // Plus the one automatic refresh that must survive: a change of the git
+  // CONTEXT (terminal `cd` into another repo / switching projects) must
+  // re-resolve, or the panel would show the old repo forever. That refresh is
+  // local-only (remote: "never" - no network), so it cannot blink a sync.
+  // The boot-time first load also runs once (idle-scheduled) so the rail
+  // badge is populated on startup.
+  const manualScRefreshRef = useRef(sourceControl.refresh);
+  manualScRefreshRef.current = sourceControl.refresh;
+  const scheduleScRefresh = useCallback(() => {
+    // Debounced (not per-event): a save+command burst fires ONE refresh.
     let timer = 0;
-    const schedule = () => {
+    return () => {
       if (timer) window.clearTimeout(timer);
       timer = window.setTimeout(() => {
         timer = 0;
-        void scRefreshRef.current({ remote: "never" });
-      }, 300);
-    };
-    window.addEventListener("Kai:sc-file-change", schedule);
-    window.addEventListener("Kai:term-command-end", schedule);
-    return () => {
-      window.removeEventListener("Kai:sc-file-change", schedule);
-      window.removeEventListener("Kai:term-command-end", schedule);
-      if (timer) window.clearTimeout(timer);
+        void manualScRefreshRef.current({ remote: "never" });
+      }, 250);
     };
   }, []);
+  const scheduleScRefreshRef = useRef(scheduleScRefresh());
+  scheduleScRefreshRef.current = scheduleScRefresh();
+
+  // Rail icon click = switch to (or collapse) the Source Control view AND
+  // an explicit refresh request - the user is asking to look at git state.
+  const handleSourceControlIconClick = useCallback(
+    (view: SidebarViewId) => {
+      cycleSidebarView(view);
+      if (view === "source-control") {
+        void manualScRefreshRef.current({ remote: "auto" });
+      }
+    },
+    [cycleSidebarView],
+  );
+
+  // Context-switch refreshes: re-resolve the repo when the git context
+  // (active tab cwd / project) changes - local-only, no network fetch, so
+  // it cannot produce the syncing blink. Keyed on the settled path.
+  useEffect(() => {
+    if (sourceControl.repo) return; // already resolved for this context
+    void manualScRefreshRef.current({ remote: "never" });
+  }, [sourceControl.repo, sourceControlPath]);
 
   const toggleSourceControl = useCallback(() => {
     cycleSidebarView("source-control");
@@ -2069,6 +2094,7 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
                         open
                         sourceControl={sourceControl}
                         onOpenDiff={openGitDiffTab}
+                        onRequestRefresh={scheduleScRefreshRef.current}
                       />
                     ) : (
                       <ExtensionsView />
@@ -2077,7 +2103,7 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
                   <div style={{ height: SIDEBAR_RAIL_HEIGHT }} className="shrink-0">
                     <SidebarRail
                       activeView={sidebarView}
-                      onSelectView={persistSidebarView}
+                      onSelectView={handleSourceControlIconClick}
                       changedCount={sourceControl.changedCount}
                       onOpenGitGraph={openGitGraphFromContext}
                     />
