@@ -403,4 +403,120 @@ describe("edit punctuation near-miss diagnosis", () => {
     expect(result.replacements).toBe(1);
     expect(files.get(path)).toBe("const flow = a \u2192 b;\n");
   });
+
+  // ── Session-evidence classes (2026-10-31 tuning) ──────────────────────────
+
+  it("REGRESSION: a 2-char needle member vs 1-char file variant never splices leftovers (\u2192>)", async () => {
+    // The old carry guard checked the FILE side's length only: needle "->"
+    // matching file "\u2192" harmonized just the "-" into "\u2192" and left
+    // the ">" behind, splicing "\u2192>" when the model REPEATED its own
+    // variant in new_string. The both-sides guard now skips the member
+    // entirely (multi-char variants never harmonize) - the edit still
+    // APPLIES with the model's ASCII form, and no corruption is possible.
+    const path = "/ws/arrow-repeat.ts";
+    files.set(path, "// flow \u2192 here\n");
+    ctx.readCache.set(path, readCacheEntry(files.get(path)!));
+    const tools = batchEditModule.buildBatchEditTools(ctx);
+    const result = (await tools.batch_edit.execute!(
+      {
+        edits: [
+          {
+            path,
+            old_string: "// flow -> here",
+            // Model repeats its own ASCII variant in the replacement.
+            new_string: "// flow -> onward",
+          },
+        ],
+      },
+      {} as never,
+    )) as { ok?: boolean; replacements?: number; error?: string };
+    expect(result.ok).toBe(true);
+    const out = files.get(path)!;
+    // The corruption signature: "\u2192>" (half-harmonized arrow) must
+    // never appear. The safe outcome is the model's own form, unharmonized.
+    expect(out).not.toContain("\u2192>");
+    expect(out).toBe("// flow -> onward\n");
+  });
+
+  it("minus sign and en-dash match the bar cluster (terminal renders them identically)", async () => {
+    const path = "/ws/minus.ts";
+    // U+2212 minus sign - the glyph math text uses, rendered as "-" by the
+    // terminal. A hyphen needle must MATCH it (single-char members carry,
+    // so the file's minus sign survives).
+    files.set(path, "// temp = 25\u2212C cold\n");
+    ctx.readCache.set(path, readCacheEntry(files.get(path)!));
+    const tools = batchEditModule.buildBatchEditTools(ctx);
+    const result = (await tools.batch_edit.execute!(
+      {
+        edits: [
+          { path, old_string: "// temp = 25-C cold", new_string: "// temp = 25-C chilly" },
+        ],
+      },
+      {} as never,
+    )) as { ok?: boolean; replacements?: number; error?: string };
+    expect(result.ok).toBe(true);
+    expect(result.replacements).toBe(1);
+    // Single-char member: carry harmonizes the model's hyphen to the
+    // file's REAL minus sign.
+    expect(files.get(path)).toContain("25\u2212C chilly");
+  });
+
+  it("ellipsis (\u2026 vs ... vs .) matches", async () => {
+    const path = "/ws/ellip.ts";
+    files.set(path, "// waiting\u2026 done\n");
+    ctx.readCache.set(path, readCacheEntry(files.get(path)!));
+    const tools = batchEditModule.buildBatchEditTools(ctx);
+    const result = (await tools.batch_edit.execute!(
+      {
+        edits: [{ path, old_string: "// waiting... done", new_string: "// waiting... finished" }],
+      },
+      {} as never,
+    )) as { ok?: boolean; replacements?: number };
+    expect(result.ok).toBe(true);
+    expect(result.replacements).toBe(1);
+    // Applied; the multi-char member lands as typed (no corruption).
+    expect(files.get(path)).toBe("// waiting... finished\n");
+  });
+
+  it("left-right arrow (\u2194 vs <->) matches - group names use it", async () => {
+    const path = "/ws/lr.ts";
+    // The group-chat default name format is "a \u2194 b" - a model reading
+    // it from terminal output often sends "<->".
+    files.set(path, "// alpha \u2194 beta\n");
+    ctx.readCache.set(path, readCacheEntry(files.get(path)!));
+    const tools = batchEditModule.buildBatchEditTools(ctx);
+    const result = (await tools.batch_edit.execute!(
+      {
+        edits: [{ path, old_string: "// alpha <-> beta", new_string: "// alpha <-> gamma" }],
+      },
+      {} as never,
+    )) as { ok?: boolean; replacements?: number };
+    expect(result.ok).toBe(true);
+    expect(result.replacements).toBe(1);
+    expect(files.get(path)).toBe("// alpha <-> gamma\n");
+    // Never a half-harmonized arrow.
+    expect(files.get(path)).not.toContain("\u2194>");
+  });
+
+  it("middle dot vs em-dash cross-match (both render as the same ambiguous glyph)", async () => {
+    const path = "/ws/dotdash.ts";
+    // AiChat.tsx uses \u00B7 in real content ("3L" separator); terminal
+    // output shows it as an em-dash-looking glyph. A needle carrying "-"
+    // must match the file's "\u00B7", and the single-char carry keeps the
+    // FILE's variant.
+    files.set(path, "// stats \u00B7 3L\n");
+    ctx.readCache.set(path, readCacheEntry(files.get(path)!));
+    const tools = batchEditModule.buildBatchEditTools(ctx);
+    const result = (await tools.batch_edit.execute!(
+      {
+        edits: [{ path, old_string: "// stats - 3L", new_string: "// stats - 3L total" }],
+      },
+      {} as never,
+    )) as { ok?: boolean; replacements?: number };
+    expect(result.ok).toBe(true);
+    expect(result.replacements).toBe(1);
+    // Single-char members on both sides: carry harmonizes the needle's
+    // hyphen to the file's middle dot.
+    expect(files.get(path)).toContain("\u00B7 3L total");
+  });
 });

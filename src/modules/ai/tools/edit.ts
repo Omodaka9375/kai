@@ -328,13 +328,30 @@ function normEol(s: string): string {
  *  OCR make visually indistinguishable (em/en dash vs hyphen, curly vs
  *  straight quotes). Compared against the needle's trimmed lines. */
 const PUNCT_CLASSES: string[][] = [
-  ["\u2014", "\u2013", "-"], // em dash / en dash / hyphen
+  // Dots BEFORE dashes: flattenPunct canonicalizes per class in array
+  // order, and the middle dot lives in BOTH clusters - dot-first keeps
+  // the DIAGNOSIS (punctEquivalent) seeing the middle dot as a dot,
+  // which is the likelier model guess. Matching is needle-side (member
+  // -> union of its own classes), so this order never widens matching.
+  ["\u00B7", "."], // middle dot vs period
+  // Horizontal-bar cluster. Terminal output renders em-dash, en-dash,
+  // minus sign, AND middle dot as the SAME ambiguous glyph, so an
+  // anchor copied from tool output can carry any of them where the
+  // file has another (three separate session failures traced to this).
+  // ASCII "-" joins because it is the habitual model guess for a bar.
+  ["\u2014", "\u2013", "\u2212", "\u00B7", "-"],
   ["\u201C", '\"'], // curly double quotes / straight
   ["\u201D", '\"'],
   ["\u2018", "'"], // curly single quotes / straight
   ["\u2019", "'"],
   ["\u2192", "->"], // arrow vs ASCII arrow
-  ["\u00B7", "."], // middle dot vs period
+  // Left-right arrow (group default names use "a \u2194 b"); "<->"
+  // is the ASCII guess a model types for the same glyph.
+  ["\u2194", "<->"],
+  // Ellipsis: \u2026 renders as an ambiguous dot-run in terminal
+  // output; models habitually type "." or "..." for it. Canon is
+  // the single dot (last member) so all three forms flatten equal.
+  ["\u2026", "...", "."],
 ];
 
 function flattenPunct(s: string): string {
@@ -527,7 +544,22 @@ function applyPunctCarry(
   for (let g = 0; g < hit.punctIdx.length; g++) {
     const i = hit.punctIdx[g]!;
     const fileVariant = hit.captures[g] ?? "";
-    if (fileVariant.length !== 1) continue; // multi-char variant: skip
+    // Length guard, BOTH sides: resolve the needle's own member at
+    // this punct index and require it to match the file variant's
+    // length. The old check was file-side only, so a needle "->"
+    // (one member, 2 chars) matching a file "\u2192" (1 char)
+    // harmonized just the "-" to "\u2192" and left the ">" behind
+    // - splicing "\u2192>" into new_string (same for "..." vs
+    // "\u2026"). Multi-char matches still apply as a whole - only
+    // the single-char HARMONIZATION is gated.
+    let memberLen = 1;
+    for (const member of PUNCT_MEMBERS_LONGEST) {
+      if (oldTrimmed.startsWith(member, i)) {
+        memberLen = member.length;
+        break;
+      }
+    }
+    if (fileVariant.length !== memberLen) continue;
     const needleChar = oldTrimmed[i] ?? "";
     if (needleChar === fileVariant) continue; // not a real variant diff
     if (i >= out.length) continue;
@@ -625,7 +657,13 @@ function getDidYouMeanHint(haystack: string, needle: string): string {
     // edits forever with a "not found" that named a visually identical
     // block. Point at the actual difference instead.
     const punctuationDiag = getPunctuationNearMiss(hLines, nLines);
-    return `${wsDiag}${punctuationDiag} Read the file again to get the exact content and indentation.`;
+    // Recovery guidance for the punct-tier escape hatch: since these
+    // variants render identically in tool output, re-reading alone
+    // does not always fix a repeat - the terminal renders the fresh
+    // read's dashes/quotes as the same ambiguous glyph. The reliable
+    // fix is to build old_string from the RAW read (copy the exact
+    // bytes), or use replace_exact with byte-true anchors.
+    return `${wsDiag}${punctuationDiag} Fix: re-read the file and cut the changed characters from the fresh read (terminal output renders these characters ambiguously), or fall back to replace_exact with byte-exact strings.`;
   }
 
   matches.sort((a, b) => b.score - a.score);
