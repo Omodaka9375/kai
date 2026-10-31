@@ -22,6 +22,7 @@ import { buildGroupTools } from "./group";
 import { buildGmailTools } from "./gmail";
 import { buildSocialTools } from "./social";
 import { buildReminderTools } from "./reminders";
+import { buildAgentReachTools } from "./agentReach";
 
 export { resolvePath, type ToolContext } from "./context";
 
@@ -58,6 +59,7 @@ export function buildExtendedTools(ctx: import("./context").ToolContext) {
     ...buildWebTools(ctx),
     ...buildImageGenTools(ctx),
     ...buildVideoGenTools(ctx),
+    ...buildAgentReachTools(ctx),
   } as const;
 }
 

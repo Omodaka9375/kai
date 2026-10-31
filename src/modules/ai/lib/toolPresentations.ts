@@ -215,6 +215,39 @@ const REGISTRY: Record<string, ToolPresentation> = {
   web_fetch: { effect: "NONE", fence: true, remoteSurface: true },
   web_search: { effect: "NONE", fence: true, remoteSurface: true },
 
+  // Agent Reach bridge (read-only CLI into login-walled / Chinese /
+  // video platforms). Results are remote content - fence + provenance
+  // exactly like the web tools above.
+  agent_reach: {
+    label: "Agent Reach",
+    approvalLabel: "Search via Agent Reach",
+    status: (a) => {
+      const channel = str(a, "channel");
+      const action = str(a, "action");
+      const url = str(a, "url");
+      const target = url ?? str(a, "query") ?? "";
+      if (channel && action) {
+        return `Agent Reach: ${channel} ${action}${target ? ` - ${ellipsize(target, 30)}` : ""}`;
+      }
+      return url
+        ? `Agent Reach: reading ${ellipsize(url, 40)}`
+        : "Agent Reach";
+    },
+    summary: (a) => str(a, "url") ?? str(a, "query") ?? `${str(a, "channel") ?? ""} ${str(a, "action") ?? ""}`.trim(),
+    effect: "NONE",
+    fence: true,
+    remoteSurface: true,
+  },
+  agent_reach_list: {
+    label: "Agent Reach",
+    approvalLabel: "List Agent Reach channels",
+    status: () => "Agent Reach: listing channels",
+    summary: () => "channels",
+    effect: "NONE",
+    fence: true,
+    remoteSurface: true,
+  },
+
   // Mail (read-only IMAP bridge). Bodies are sender-authored text — fence
   // like web content, flag injection-exposure provenance like any remote
   // surface.
