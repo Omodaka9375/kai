@@ -345,7 +345,19 @@ async function monitorBoundSessions(): Promise<void> {
     const settled = meta.status === "idle" && busyPrev;
 
     if (meta.status === "awaiting-approval" && prev !== "awaiting-approval") {
-      await pingOwnerBound(`${binding.name}: agent needs your approval (respond on the desktop).`);
+      // Rich approval ping (Phase 2): the tool + summary + one-tap command
+      // ids for phone-approvable calls; the generic "respond on the
+      // desktop" line remains for privacy/elevated carve-outs.
+      let text: string | null = null;
+      try {
+        const { approvalPingText } = await import("./telegramApprovals");
+        text = await approvalPingText(sessionId);
+      } catch {
+        text = null;
+      }
+      await pingOwnerBound(
+        text ?? `${binding.name}: agent needs your approval (respond on the desktop).`,
+      );
       continue;
     }
 

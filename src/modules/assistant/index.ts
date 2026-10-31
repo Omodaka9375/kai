@@ -1067,6 +1067,26 @@ async function handleCommand(chatId: number, raw: string): Promise<void> {
       await reply(outcome);
       return;
     }
+    case "/approvals": {
+      // Phase 2: list pending approvals across monitored projects.
+      const { formatApprovalsList } = await import("./telegramApprovals");
+      await reply(await formatApprovalsList());
+      return;
+    }
+    case "/approve":
+    case "/deny": {
+      // Phase 2: decide a monitored project's approval by id. Routes
+      // through the same audited, latched responder as the desktop card;
+      // privacy/elevated calls are refused here (desktop only).
+      if (!arg) {
+        const { formatApprovalsList } = await import("./telegramApprovals");
+        await reply(await formatApprovalsList());
+        return;
+      }
+      const { respondTelegramApproval } = await import("./telegramApprovals");
+      await reply(await respondTelegramApproval(arg, cmd === "/approve"));
+      return;
+    }
     case "/new": {
       const session = await newSession(arg || undefined);
       await reply(`New chat: *${session.title}*`);
@@ -1119,6 +1139,8 @@ async function handleCommand(chatId: number, raw: string): Promise<void> {
           "/del <id> — delete a chat",
           "/projects - list monitored projects",
           "/tell <msg> - message the monitored project (add its name first when several are bound)",
+          "/approvals - list pending approvals in monitored projects",
+          "/approve <id> / /deny <id> - decide one from here",
         ].join("\n"),
       );
       return;
