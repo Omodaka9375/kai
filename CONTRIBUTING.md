@@ -17,6 +17,7 @@ Run these and make sure they pass:
 
 ```bash
 pnpm exec tsc --noEmit          # frontend types
+pnpm test                       # unit + contract suite
 cd src-tauri && cargo clippy    # Rust lint
 cd src-tauri && cargo fmt       # Rust format
 ```
@@ -54,7 +55,7 @@ If an issue already exists for what you want to do, comment "I'll take this" bef
 - **Bug fixes** — always.
 - **Features** — open an issue first if it's non-trivial. We'd rather discuss the approach than reject a finished PR.
 - **Docs / typos / small UX fixes** — just send the PR.
-- **New AI providers** — see `src/modules/ai/providers/`. Keep BYOK; no hardcoded keys.
+- **New AI providers** — see `src/modules/ai/config/providers.ts` (provider list) and `src/modules/ai/config/models.ts` (model registry). Keep BYOK; no hardcoded keys.
 - **Themes / icon packs** — yes, but keep the bundle size in check.
 
 ## What we don't want
@@ -128,7 +129,7 @@ src/
 
 ## Security issues
 
-Don't file them as issues — see [SECURITY.md](SECURITY.md).
+Don't file them as public issues — email **security@kai.ai** directly (see [SECURITY.md](SECURITY.md) once it exists; until then use the email).
 
 ## License
 

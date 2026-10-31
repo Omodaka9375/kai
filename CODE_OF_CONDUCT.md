@@ -12,6 +12,10 @@ KAI is a small open-source project and we want it to stay a place people enjoy c
 
 This applies to everything inside the project: issues, PRs, discussions, commits, and any community space we create later (Discord, etc.).
 
+## Reporting
+
+Report violations to **conduct@kai.ai** (or DM a maintainer directly). Reports are handled confidentially, and we follow up with the reporter on the outcome. Nobody flagged for a violation takes part in deciding the response.
+
 ## Enforcement
 
 Maintainers may, at their discretion:
