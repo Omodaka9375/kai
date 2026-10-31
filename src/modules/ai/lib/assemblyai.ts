@@ -42,6 +42,45 @@ export const ASSEMBLY_VOICES: ReadonlyArray<{ id: string; label: string; note: s
  *  their side can't silently alter behavior). */
 const SYNC_STT_MODEL = "universal-3-5-pro";
 
+/**
+ * Build a multipart/form-data body BY HAND, byte-exact.
+ *
+ * proxyFetch's IPC encoder cannot carry FormData: its fallback runs the body
+ * through `new Response(body).text()`, which drops the multipart boundary
+ * (generated inside the Response's Content-Type header, never forwarded)
+ * and corrupts binary parts through a UTF-8 text round-trip. AssemblyAI
+ * answered that with a 415. So the boundary is ours, the parts are ours,
+ * and the outer Content-Type header is set explicitly by the caller.
+ */
+function buildMultipartAudio(
+  boundary: string,
+  audio: Uint8Array,
+  filename: string,
+  contentType: string,
+): Uint8Array {
+  const enc = new TextEncoder();
+  const head = enc.encode(
+    `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="audio"; filename="${filename}"\r\n` +
+      `Content-Type: ${contentType}\r\n\r\n`,
+  );
+  const tail = enc.encode(`\r\n--${boundary}--\r\n`);
+  const out = new Uint8Array(head.length + audio.length + tail.length);
+  out.set(head, 0);
+  out.set(audio, head.length);
+  out.set(tail, head.length + audio.length);
+  return out;
+}
+
+/** File extension matching the recorder's MIME (cosmetic - the part's
+ *  Content-Type is what the server reads). */
+function extFromMime(mime: string): string {
+  if (mime.includes("ogg")) return "ogg";
+  if (mime.includes("wav")) return "wav";
+  if (mime.includes("mp4")) return "m4a";
+  return "webm";
+}
+
 async function requireKey(): Promise<string> {
   const key = await getKey("assemblyai");
   if (!key) {
@@ -59,20 +98,23 @@ async function requireKey(): Promise<string> {
  */
 export async function transcribeViaAssemblyAi(blob: Blob): Promise<string> {
   const key = await requireKey();
-  const form = new FormData();
-  const ext = blob.type.includes("webm") ? "webm" : "wav";
-  form.append(
-    "audio",
-    new Blob([blob], { type: blob.type || "audio/webm" }),
-    `clip.${ext}`,
+  const mime = blob.type || "audio/webm";
+  const audio = new Uint8Array(await blob.arrayBuffer());
+  const boundary = `kai-${crypto.randomUUID()}`;
+  const body = buildMultipartAudio(
+    boundary,
+    audio,
+    `clip.${extFromMime(mime)}`,
+    mime,
   );
   const resp = await proxyFetch("https://sync.assemblyai.com/v1/transcribe", {
     method: "POST",
     headers: {
       Authorization: key,
       "X-AAI-Model": SYNC_STT_MODEL,
+      "Content-Type": `multipart/form-data; boundary=${boundary}`,
     },
-    body: form,
+    body,
   });
   if (!resp.ok) {
     let detail = "";

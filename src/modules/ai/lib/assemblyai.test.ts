@@ -43,7 +43,7 @@ import { transcribeViaAssemblyAi, speakViaAssemblyAi } from "./assemblyai";
 const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
 
 describe("transcribeViaAssemblyAi (Sync STT)", () => {
-  it("posts multipart audio to the SYNC endpoint with the required model header", async () => {
+  it("posts byte-exact multipart audio to the SYNC endpoint with the required model header", async () => {
     proxyFetchMock.mockClear();
     proxyFetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ text: "hello world" }), { status: 200 }),
@@ -58,10 +58,23 @@ describe("transcribeViaAssemblyAi (Sync STT)", () => {
     // Bare key (no Bearer - AssemblyAI's scheme) + the REQUIRED model header.
     expect(headers.Authorization).toBe("test-key");
     expect(headers["X-AAI-Model"]).toBe("universal-3-5-pro");
-    // Multipart body, audio part named "audio".
-    expect(init.body).toBeInstanceOf(FormData);
-    const form = init.body as FormData;
-    expect(form.has("audio")).toBe(true);
+    // Hand-assembled multipart (proxyFetch mangles FormData through a UTF-8
+    // text round-trip and drops the boundary -> AssemblyAI 415). The body
+    // must be raw bytes with an EXPLICIT boundary that matches the header.
+    expect(init.body).toBeInstanceOf(Uint8Array);
+    expect(init.body).not.toBeInstanceOf(FormData);
+    const boundary = /boundary=(.+)$/.exec(headers["Content-Type"])![1];
+    expect(headers["Content-Type"]).toBe(
+      `multipart/form-data; boundary=${boundary}`,
+    );
+    const raw = new TextDecoder().decode(init.body as Uint8Array);
+    expect(raw.startsWith(`--${boundary}\r\n`)).toBe(true);
+    expect(raw).toContain(
+      'Content-Disposition: form-data; name="audio"; filename="clip.webm"',
+    );
+    expect(raw).toContain("Content-Type: audio/webm");
+    expect(raw).toContain("audio-bytes");
+    expect(raw.endsWith(`\r\n--${boundary}--\r\n`)).toBe(true);
   });
 
   it("surfaces problem-details errors with status and title", async () => {
@@ -139,6 +152,15 @@ describe("voice picker catalog", () => {
     }
     expect(ids).toContain("aai-jane");
     expect(ids).toContain("aai-audrey");
+  });
+});
+
+describe("regression pins - the 415", () => {
+  it("the STT path never passes FormData to proxyFetch (IPC-safe body)", () => {
+    const src = read("./assemblyai.ts");
+    expect(src).not.toContain("new FormData()");
+    expect(src).toContain("multipart/form-data; boundary=${boundary}");
+    expect(src).toContain("buildMultipartAudio(");
   });
 });
 
