@@ -37,7 +37,7 @@ describe("persona approval ids route by the SDK approvalId", () => {
   it("respondPersonaApproval falls back to a stored-approvalId scan (pre-fix entries)", () => {
     // Direct key hit first, then the e.approvalId scan — never a silent miss.
     expect(store).toMatch(
-      /respondPersonaApproval\(approvalId: string, approved: boolean\): void \{\s*\n\s*let key: string \| null = personaApprovals\.has\(approvalId\) \? approvalId : null;/,
+      /respondPersonaApproval\(\s*approvalId: string,\s*approved: boolean,\s*\): void \{\s*\n\s*let key: string \| null = personaApprovals\.has\(approvalId\) \? approvalId : null;/,
     );
     expect(store).toMatch(/if \(e\.approvalId === approvalId\) \{/);
   });

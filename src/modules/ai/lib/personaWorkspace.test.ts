@@ -156,7 +156,8 @@ describe("source pins - wiring & approval protocol", () => {
     // Full registry, minus exclusions + group tools.
     expect(store).toContain("buildTools(toolContext, mcpTools)");
     expect(store).toContain("PERSONA_EXCLUDED_TOOLS");
-    expect(store).toContain('"send_to_project", "project_status"');
+    // Prettier splits the excluded list one-per-line — match either shape.
+    expect(store).toMatch(/"send_to_project",\s*"project_status"/);
     // Production wrapping order preserved.
     expect(store).toContain("withToolRedaction(");
     expect(store).toContain("withCentralToolGuards(");

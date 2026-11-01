@@ -167,7 +167,25 @@ pub fn spawn(
     let pair = pty_system.openpty(size).map_err(|e| e.to_string())?;
 
     let cmd = shell_init::build_command(cwd, workspace, shell)?;
-    let mut child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
+    // On spawn_command failure, unwinding `pair` would drop the master
+    // INLINE — while SPAWN_LOCK is still held (released below at the settle
+    // gate). ClosePseudoConsole can block for hundreds of ms, serializing
+    // every later spawn behind it (2026-11-01 audit). Hand the master to a
+    // background thread like cleanup_failed_spawn does.
+    let mut child = match pair.slave.spawn_command(cmd) {
+        Ok(c) => c,
+        Err(e) => {
+            let master = pair.master;
+            drop(pair.slave);
+            let _ = thread::Builder::new()
+                .name("KAI-pty-spawn-fail".into())
+                .spawn(move || {
+                    let _t = begin_teardown();
+                    drop(master);
+                });
+            return Err(e.to_string());
+        }
+    };
     drop(pair.slave);
 
     // ConPTY settle — rapid sequential ConPTY spawns can leave the second PTY's
@@ -345,6 +363,9 @@ pub fn spawn(
             format!("spawn pty flusher thread: {e}")
         })?;
 
+    let on_data_wf = on_data.clone();
+    let pending_wf = pending.clone();
+    let done_wf = done.clone();
     let on_data_exit = on_data;
     let pending_e = pending;
     let done_e = done;
@@ -414,6 +435,15 @@ pub fn spawn(
             // thread fails to spawn — it closes handles without killing.
             // `session.killer` still covers the kill: drop a session Arc
             // off-thread so the child dies and the master closes async.
+            // ALSO (2026-11-01 audit): the flusher's exit predicate is
+            // `done && pending empty` — with the waiter dead, nobody would
+            // ever set `done` and the flusher would spin forever. Signal
+            // done and drain the pending tail so it exits cleanly.
+            let tail = std::mem::take(&mut *mutex_lock(&pending_wf));
+            if !tail.is_empty() {
+                let _ = on_data_wf.send(Response::new(tail));
+            }
+            done_wf.store(true, Ordering::Release);
             let s = session_fail;
             thread::Builder::new()
                 .name("KAI-pty-spawn-fail".into())

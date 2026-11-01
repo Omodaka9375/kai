@@ -2,11 +2,7 @@ import type { UIMessage } from "@ai-sdk/react";
 import { convertToModelMessages } from "ai";
 import { invoke } from "@tauri-apps/api/core";
 import { getModel, getModelContextLimit, type ModelId } from "../config";
-import {
-  runAgentStream,
-  type AgentUsageDelta,
-  type StackInfo,
-} from "./agent";
+import { runAgentStream, type AgentUsageDelta, type StackInfo } from "./agent";
 import { compactModelMessagesDetailed } from "./compact";
 import type { ProviderKeys } from "./keyring";
 import { mcpManager } from "./mcpManager";
@@ -22,9 +18,13 @@ import {
 import { IS_WINDOWS, IS_MAC, IS_LINUX } from "@/lib/platform";
 
 import { extensionRegistry } from "./extensions";
-import { createFenceState } from "./fence";
+import { createFenceState, fence, type FenceState } from "./fence";
 import { clearSessionProvenance } from "./provenance";
-import { loadProjectRules, formatRulesForPrompt, type ProjectRules } from "./projectRules";
+import {
+  loadProjectRules,
+  formatRulesForPrompt,
+  type ProjectRules,
+} from "./projectRules";
 import { cleanOldCheckpoints, sweepLegacyCheckpoints } from "./checkpoints";
 import { getRelevantFiles, formatRelevantFiles } from "./relevance";
 import { loadProjectMemoryCached } from "./memory";
@@ -35,7 +35,10 @@ import { workspaceScopeKey } from "@/modules/workspace/env";
 type RulesCacheEntry = { rules: ProjectRules | null; mtime: number };
 const projectRulesCache = new Map<string, RulesCacheEntry>();
 
-async function readProjectRules(workspaceRoot: string | null, client: ReturnType<typeof nativeForContext>): Promise<ProjectRules | null> {
+async function readProjectRules(
+  workspaceRoot: string | null,
+  client: ReturnType<typeof nativeForContext>,
+): Promise<ProjectRules | null> {
   if (!workspaceRoot) return null;
   const key = `${workspaceScopeKey(client.env)}:${workspaceRoot}`;
   const cached = projectRulesCache.get(key);
@@ -102,7 +105,8 @@ type Deps = {
   getLive: () => LiveSnapshot;
   getOpenaiCompatibleBaseURL?: () => string | undefined;
   getOpenaiCompatibleModelId?: () => string | undefined;
-  getCustomVisionOverride?: () => import("@/modules/ai/config").VisionOverride | null;
+  getCustomVisionOverride?: () =>
+    import("@/modules/ai/config").VisionOverride | null;
   onStep?: (step: string | null) => void;
   onUsage?: (delta: AgentUsageDelta) => void;
   onTextDelta?: (text: string) => void;
@@ -123,6 +127,25 @@ type SendOptions = {
 
 /** Per-session fence state cache. Created once per session, never rotated. */
 const fenceStateCache = new Map<string, import("./fence").FenceState>();
+
+/**
+ * Fence AGENT-AUTHORED cross-project group text as UNTRUSTED data for a
+ * receiving session (2026-11-01 audit, Code Reviewer: multi-hop injection
+ * laundering). The fence uses the TARGET session's OWN trusted tool nonce —
+ * declared in its system prompt — so the model treats the delivered text
+ * (which may quote hostile fenced tool output from another project) as
+ * data, never instructions. User-sent text is NOT fenced (the user is in
+ * the trust zone per fence.ts's boundary model).
+ */
+export function fenceGroupText(sessionId: string, content: string): string {
+  return fence("tool", getFenceState(sessionId).nonces.tool, content, {
+    source: "cross-project group chat",
+  });
+}
+
+export function getFenceStateForTest(sessionId: string): FenceState {
+  return getFenceState(sessionId);
+}
 
 function getFenceState(sessionId: string): import("./fence").FenceState {
   let state = fenceStateCache.get(sessionId);
@@ -153,13 +176,14 @@ export function createContextAwareTransport(deps: Deps) {
     // no-op (status is neither streaming nor submitted). We listen to the
     // SDK's signal too so either path aborts the other.
     const runController = new AbortController();
-    if (sessionId !== "unknown") registerRunController(sessionId, runController);
+    if (sessionId !== "unknown")
+      registerRunController(sessionId, runController);
     const sdkSignal = options.abortSignal;
     const forwardAbort = () => runController.abort();
     sdkSignal?.addEventListener("abort", forwardAbort, { once: true });
     const effectiveSignal = runController.signal;
 
-      // Fire extension hooks (fire-and-forget, errors logged internally).
+    // Fire extension hooks (fire-and-forget, errors logged internally).
     for (const ext of extensionRegistry.getAll()) {
       if (ext.onAgentStart) void ext.onAgentStart({ sessionId, modelId });
     }
@@ -168,14 +192,23 @@ export function createContextAwareTransport(deps: Deps) {
 
     const live = deps.getLive();
     const projectNative = nativeForContext(deps.toolContext);
-    const projectRules = await readProjectRules(live.workspaceRoot, projectNative);
-    const projectMemory = projectRules ? formatRulesForPrompt(projectRules) : null;
+    const projectRules = await readProjectRules(
+      live.workspaceRoot,
+      projectNative,
+    );
+    const projectMemory = projectRules
+      ? formatRulesForPrompt(projectRules)
+      : null;
     // Load auto-memory (agent-written persistent project knowledge).
-    const autoMemory = await loadProjectMemoryCached(live.workspaceRoot, projectNative);
+    const autoMemory = await loadProjectMemoryCached(
+      live.workspaceRoot,
+      projectNative,
+    );
     const autoMemoryBlock = autoMemory?.trim()
       ? `\n\n## AUTO MEMORY — Agent-written project knowledge\n${autoMemory.trim()}`
       : "";
-    const effectiveMemory = [projectMemory, autoMemoryBlock].filter(Boolean).join("\n") || null;
+    const effectiveMemory =
+      [projectMemory, autoMemoryBlock].filter(Boolean).join("\n") || null;
     // Clean old checkpoints (>1h) in background — fire-and-forget.
     if (live.workspaceRoot) {
       void cleanOldCheckpoints(live.workspaceRoot);
@@ -189,7 +222,8 @@ export function createContextAwareTransport(deps: Deps) {
         ? getRelevantFiles(lastUserText, deps.toolContext.fileTracker, [])
         : [];
     const relevantBlock = formatRelevantFiles(relevantFiles);
-    const envWithRelevance = [envBlock, relevantBlock].filter(Boolean).join("\n") || null;
+    const envWithRelevance =
+      [envBlock, relevantBlock].filter(Boolean).join("\n") || null;
     // ── Context summarization ───────────────────────────────────────
     // Check if the conversation is approaching the context limit. If so,
     // summarize older messages and replace the history before running.
@@ -242,8 +276,14 @@ export function createContextAwareTransport(deps: Deps) {
       onFinishMeta: (info) => {
         deps.onFinishMeta?.(info);
         const finishReason = info.finishReason;
-              for (const ext of extensionRegistry.getAll()) {
-          if (ext.onAgentEnd) void ext.onAgentEnd({ sessionId, modelId, stepCount: extensionStepCount, finishReason });
+        for (const ext of extensionRegistry.getAll()) {
+          if (ext.onAgentEnd)
+            void ext.onAgentEnd({
+              sessionId,
+              modelId,
+              stepCount: extensionStepCount,
+              finishReason,
+            });
         }
       },
       openaiCompatibleBaseURL: deps.getOpenaiCompatibleBaseURL?.(),
@@ -365,14 +405,18 @@ function formatEnvBlock(live: LiveSnapshot): string | null {
 export function envLocalDate(now: Date = new Date()): string {
   const iso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   try {
-    const weekday = new Intl.DateTimeFormat("en-US", { weekday: "short" }).format(now);
+    const weekday = new Intl.DateTimeFormat("en-US", {
+      weekday: "short",
+    }).format(now);
     const tzName = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "";
     // UTC offset in ±HH:MM form.
     const offsetMin = -now.getTimezoneOffset();
     const sign = offsetMin >= 0 ? "+" : "-";
     const abs = Math.abs(offsetMin);
     const offset = `UTC${sign}${String(Math.floor(abs / 60)).padStart(2, "0")}:${String(abs % 60).padStart(2, "0")}`;
-    return tzName ? `${iso} (${weekday}, ${offset} ${tzName})` : `${iso} (${weekday}, ${offset})`;
+    return tzName
+      ? `${iso} (${weekday}, ${offset} ${tzName})`
+      : `${iso} (${weekday}, ${offset})`;
   } catch {
     return iso;
   }
@@ -380,7 +424,13 @@ export function envLocalDate(now: Date = new Date()): string {
 
 function formatEnvBlockInner(live: LiveSnapshot): string | null {
   const lines: string[] = [];
-  const os = IS_WINDOWS ? "windows" : IS_MAC ? "macos" : IS_LINUX ? "linux" : "unknown";
+  const os = IS_WINDOWS
+    ? "windows"
+    : IS_MAC
+      ? "macos"
+      : IS_LINUX
+        ? "linux"
+        : "unknown";
   // Local date at snapshot time. LLMs have no clock and otherwise guess a
   // stale training-cutoff date when asked "what day is it" or when a task is
   // time-sensitive (cutoffs, "today", "this week"). Computed per build so a
@@ -391,14 +441,20 @@ function formatEnvBlockInner(live: LiveSnapshot): string | null {
   const inv = envInventoryCache;
   const shell = inv?.shell ?? (IS_WINDOWS ? "powershell" : "bash");
   lines.push(`os: ${os}`);
-  lines.push(`shell: ${shell}${inv?.shellVersion ? ` (${inv.shellVersion})` : ""}`);
+  lines.push(
+    `shell: ${shell}${inv?.shellVersion ? ` (${inv.shellVersion})` : ""}`,
+  );
   if (inv) {
     const present = inv.tools.filter((t) => t.present);
     const absent = inv.tools.filter((t) => !t.present);
     if (present.length > 0) {
       lines.push(
         `installed: ${present
-          .map((t) => (t.version ? `${t.name} ${t.version.split(" ").slice(-1)[0]}` : t.name))
+          .map((t) =>
+            t.version
+              ? `${t.name} ${t.version.split(" ").slice(-1)[0]}`
+              : t.name,
+          )
           .join(", ")}`,
       );
     }
@@ -452,7 +508,8 @@ export function summarizeMessagesNow(
   let chars = 0;
   for (const m of messages) {
     for (const p of m.parts) {
-      if (p.type === "text") chars += (p as { text?: string }).text?.length ?? 0;
+      if (p.type === "text")
+        chars += (p as { text?: string }).text?.length ?? 0;
     }
   }
   if (chars / 4 < 2_000) return null;
@@ -533,7 +590,6 @@ async function maybeSummarize(
   // is too small for it to be worth the overhead.
   const tokenEstimate = JSON.stringify(modelMsgs).length / 4;
   if (tokenEstimate < MIN_TOKEN_ESTIMATE_FOR_SUMMARY) return messages;
-
 
   // Surface the compressing state in the chat UI (spinner + notice).
   useChatStore.getState().patchAgentMeta({ summarizing: true });

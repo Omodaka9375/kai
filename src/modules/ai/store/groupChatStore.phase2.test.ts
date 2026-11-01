@@ -206,7 +206,8 @@ describe("source pins — Phase 2 trust boundary", () => {
   });
 
   it("the coalesce timeout routes through the shared flush", () => {
-    expect(store).toContain("setTimeout(() => flushCoalesced(coord.sessionId)");
+    // Prettier-safe (prettier splits the arg list across lines).
+    expect(store).toMatch(/setTimeout\(\s*\(\) => flushCoalesced\(coord\.sessionId\),\s*\n\s*GROUP_COALESCE_TIMEOUT_MS,/);
     expect(store).toContain("GROUP_COALESCE_TIMEOUT_MS = 90_000");
   });
 

@@ -70,8 +70,8 @@ describe("auto decisions are audited", () => {
 describe("scope: personas only, persisted, human-toggled", () => {
   it("the flag lives on GroupChat and persists with the group", () => {
     expect(store).toMatch(/autoApprove\?: boolean;/);
-    expect(store).toContain(
-      "export async function setGroupAutoApprove(groupId: string, value: boolean)",
+    expect(store).toMatch(
+      /export async function setGroupAutoApprove\(\s*groupId: string,\s*\n\s*value: boolean,\s*\n\s*\)/,
     );
     // setGroupAutoApprove persists before notifying.
     expect(store).toMatch(
