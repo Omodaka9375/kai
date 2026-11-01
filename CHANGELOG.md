@@ -4,6 +4,13 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [2.1.1]
+
+- Group chats: persona invites are discoverable at any roster size — the invite dropdown's scroll viewport fit ~6 rows with an invisible fold that read as a hard cap; the popover now has a filter box, a taller viewport, and a count row ("17 personas" / "2 of 17" while filtering), and the live-group Members popover is scroll-bounded instead of overflowing the screen.
+- Group chats: agent replies no longer render as black slabs — bubbles sit on the panel gray exactly like the main AI chat, and embedded quote previews use the main chat's muted treatment.
+
+---
+
 ## [2.1.0]
 
 - Reminders: persistent long-term reminders (reminder_create / list / cancel) that survive restarts and fire passively — from "ping me in 5 minutes" to monthly bills — delivered as an OS notification, an in-session agent wake, and a Telegram ping when the assistant is enabled.
