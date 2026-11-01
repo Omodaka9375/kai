@@ -4,11 +4,20 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [2.1.2]
+
+- Group chats: a slow participant no longer stalls the conversation — the 90s reply-timeout always wakes the coordinator (even when nobody answered yet), and a reply landing after the timeout is delivered immediately instead of being silently dropped while the group waits forever.
+- Group chats: agents learn each other's project folders — the delivery roster carries `Name (path)` (personas marked "no project folder"), and persona prompts list the group's project folders, so cross-project reads need no "where is the repo?" round-trip.
+- Group chats: the header's expand toggle moved to the far right, matching the AI mini window.
+
+---
+
 ## [2.1.1]
 
 - Group chats: persona invites are discoverable at any roster size — the invite dropdown's scroll viewport fit ~6 rows with an invisible fold that read as a hard cap; the popover now has a filter box, a taller viewport, and a count row ("17 personas" / "2 of 17" while filtering), and the live-group Members popover is scroll-bounded instead of overflowing the screen.
 - Group chats: agent replies no longer render as black slabs — bubbles sit on the panel gray exactly like the main AI chat, and embedded quote previews use the main chat's muted treatment.
 - AI tools: domain_check and domain_find — keyless domain research with no API key or MCP server: check up to 10 names for registered/available with registrar, dates, and nameservers (registry RDAP with DNS corroboration), or sweep keywords across practical TLDs and get the available ones sorted exact-first.
+- Security: agent-authored group text (coordinator wakes, send_to_project, @-mention routing, persona deliveries) now arrives fenced with the receiving model's own nonce — fenced hostile content can no longer launder into trusted instructions across model hops — plus two PTY spawn-path fixes (master no longer dropped inline under the spawn lock; the output flusher no longer leaks when the waiter thread fails to spawn). Joint audit report: docs/2.1.1-review.md.
 
 ---
 
