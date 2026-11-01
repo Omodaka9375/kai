@@ -59,7 +59,9 @@ describe("panel ✕ is minimize; the pill ✕ ends and deletes", () => {
     expect(panel).toMatch(
       /onEnd=\{\(id\) => \{\s*\n\s*\/\/ End \(soft-stop participants\) THEN delete/,
     );
-    expect(panel).toMatch(/return endGroupChat\(id\)\.then\(\(\) => deleteGroupChat\(id\)\);/);
+    expect(panel).toMatch(
+      /return endGroupChat\(id\)\.then\(\(\) => deleteGroupChat\(id\)\);/,
+    );
   });
 
   it("minimizing never deletes (the onEnd path lives only on the pill)", () => {
@@ -78,7 +80,9 @@ describe("panel ✕ is minimize; the pill ✕ ends and deletes", () => {
 
 describe("composer mirrors the AI input bar", () => {
   it("borderless transparent textarea (no boxed Input element)", () => {
-    expect(panel).toMatch(/min-h-8 flex-1 resize-none rounded-lg bg-transparent/);
+    expect(panel).toMatch(
+      /min-h-8 flex-1 resize-none rounded-lg bg-transparent/,
+    );
     // The boxed <Input from ui/input is gone from the COMPOSER. Scoped to
     // the composer slice (2026-11-01): the InvitePicker persona filter is a
     // legitimate consumer of the Input primitive — but the composer's chat
@@ -102,10 +106,35 @@ describe("composer mirrors the AI input bar", () => {
     // ml-auto max-w-[85%], replies full-width), so neither the composer nor
     // the transcript may reintroduce a width cap.
     expect(composer).not.toContain("max-w-3xl");
-    expect(panel.indexOf("max-w-3xl", panel.indexOf("function Transcript"))).toBe(-1);
+    expect(
+      panel.indexOf("max-w-3xl", panel.indexOf("function Transcript")),
+    ).toBe(-1);
     // User bubbles get the main chat's right-aligned treatment.
     expect(panel).toContain('m.from === "user" && "ml-auto max-w-[85%]"');
     expect(composer).not.toContain("border-x");
+  });
+
+  it("agent reply bubbles sit on the panel gray — never a bg-background slab (2026-11-01)", () => {
+    // User report: "responses from agents in group chat all have black
+    // background. In AI chat it's rendered with gray." --background is the
+    // near-black app base; both windows are bg-card (gray) and the main
+    // chat renders assistant text with NO fill — the gray IS the panel
+    // showing through. Agent bubbles must stay transparent so the panel
+    // gray reads exactly like the AI chat, and the embedded quote preview
+    // matches the main chat's (bg-muted/50, not near-black bg-background/80).
+    const start = panel.indexOf("function GroupMessageBody");
+    const end = panel.indexOf("function ActivityStrip");
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const body = panel.slice(start, end);
+    expect(body).toMatch(
+      /from === "user"\s*\?\s*"border-border\/60 bg-muted\/40"\s*:\s*"border-border\/60 bg-transparent"/,
+    );
+    // The black-slab fill must not return in any bubble arm (note:
+    // bg-muted-foreground/… does NOT contain the substring bg-background).
+    expect(body).not.toContain("bg-background");
+    // Quote preview: the main chat's gray treatment.
+    expect(body).toContain("border-l-2 border-primary/60 bg-muted/50");
   });
 
   it("agent markdown renders with the main chat's renderer (MessageResponse/Streamdown)", () => {
@@ -117,7 +146,9 @@ describe("composer mirrors the AI input bar", () => {
     const start = panel.indexOf("function GroupMessageBody");
     const end = panel.indexOf("function ActivityStrip");
     const body = panel.slice(start, end);
-    expect(panel).toContain('import { MessageResponse } from "@/components/ai-elements/message";');
+    expect(panel).toContain(
+      'import { MessageResponse } from "@/components/ai-elements/message";',
+    );
     expect(body).toContain("<MessageResponse>{body}</MessageResponse>");
     // The raw pre-wrap dump is gone (user text also rides the renderer -
     // same as the main chat's user bubbles).
@@ -143,7 +174,9 @@ describe("composer mirrors the AI input bar", () => {
     expect(panel).toContain("const activeProjectGroups = useMemo(");
     expect(panel).toMatch(/groups=\{activeProjectGroups\}/);
     // The OLD unscoped gate (any group anywhere shows the pill) must not return.
-    expect(panel).not.toMatch(/\{groups\.length > 0 && stackSurface !== "group" \? \(/);
+    expect(panel).not.toMatch(
+      /\{groups\.length > 0 && stackSurface !== "group" \? \(/,
+    );
   });
 
   it("an ENDED group does not paint the collapsed pill (X closes for good)", () => {
@@ -162,7 +195,9 @@ describe("composer mirrors the AI input bar", () => {
 
 describe("the pill unmounts when the last group is gone", () => {
   it("the panel renders nothing without groups (delete clears the pill)", () => {
-    expect(panel).toContain('if (groups.length === 0 && !pickerOpen) return null;');
+    expect(panel).toContain(
+      "if (groups.length === 0 && !pickerOpen) return null;",
+    );
   });
 
   it("AiMiniWindow reserves the pill strip by the SAME predicate the pill paints by", () => {
@@ -174,7 +209,9 @@ describe("the pill unmounts when the last group is gone", () => {
     // project's LIVE groups: two predicates = a reserved empty strip with
     // nothing in it. Both surfaces must use groupsForProject(active) —
     // live groups the active project participates in, nothing else.
-    expect(mini).toContain("groupsForProject(activeProjectId() ?? \"\").length > 0");
+    expect(mini).toContain(
+      'groupsForProject(activeProjectId() ?? "").length > 0',
+    );
     expect(mini).not.toContain("getGroups().length");
     expect(mini).not.toMatch(/groupCount > 0/);
     // 2026-11-01 round-trip fix: the lift flag must SUBSCRIBE to everything
@@ -184,7 +221,9 @@ describe("the pill unmounts when the last group is gone", () => {
     // other project; stale-false sat it at +42px ON the pill's strip,
     // covering the pill after switching back.
     expect(mini).toMatch(/useSyncExternalStore\(\s*subscribeActiveProject,/);
-    expect(mini).toMatch(/\[groupStoreVersion, activeProjectVersion, stackSurface\]/);
+    expect(mini).toMatch(
+      /\[groupStoreVersion, activeProjectVersion, stackSurface\]/,
+    );
     expect(mini).not.toMatch(/\[groupStoreVersion\],\s*\n\s*\);/);
   });
 });
@@ -269,7 +308,9 @@ describe("the pill survives a project round-trip (2026-11-01)", () => {
   it("chatStore notifies active-project switches (subscribe + version)", () => {
     expect(chat).toContain("export function subscribeActiveProject");
     expect(chat).toContain("export function getActiveProjectVersion");
-    expect(chat).toMatch(/const changed = activeProjectRuntime\?\.id !== runtime\.id;/);
+    expect(chat).toMatch(
+      /const changed = activeProjectRuntime\?\.id !== runtime\.id;/,
+    );
     expect(chat).toMatch(/if \(changed\) \{\s*activeProjectVersion\+\+;/);
   });
 

@@ -756,13 +756,20 @@ function GroupMessageBody({
     <div
       className={cn(
         "rounded-lg border px-2.5 py-1.5",
+        // FILL (2026-11-01 report: "responses from agents all have black
+        // background, in AI chat it's rendered with gray"): the app-base
+        // token is near-black; the panel is bg-card (gray). The main
+        // chat renders assistant text with NO fill on that gray — the group
+        // bubble must not paint the near-black base over it. Transparent =
+        // the panel gray shows through exactly like the AI chat; the border
+        // keeps per-agent separation the main chat doesn't need.
         from === "user"
           ? "border-border/60 bg-muted/40"
-          : "border-border/60 bg-background",
+          : "border-border/60 bg-transparent",
       )}
     >
       {parsed ? (
-        <div className="mb-1.5 flex items-start gap-1.5 rounded-md border-l-2 border-primary/60 bg-background/80 px-2 py-1">
+        <div className="mb-1.5 flex items-start gap-1.5 rounded-md border-l-2 border-primary/60 bg-muted/50 px-2 py-1">
           <HugeiconsIcon
             icon={LeftToRightBlockQuoteIcon}
             size={10}
