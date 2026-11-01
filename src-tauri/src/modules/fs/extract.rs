@@ -237,7 +237,9 @@ fn image_ext_from_magic(bytes: &[u8]) -> Option<&'static str> {
 /// Returns Ok(None) when the bytes aren't a recognized image so the caller
 /// can surface its fallback text.
 #[tauri::command]
-pub fn fs_extract_image_bytes(bytes: Vec<u8>) -> Result<Option<ExtractMeta>, String> {
+// Async: image decode + tesseract OCR can take seconds. Sync would block
+// the main thread for that whole span.
+pub async fn fs_extract_image_bytes(bytes: Vec<u8>) -> Result<Option<ExtractMeta>, String> {
     let Some(ext) = image_ext_from_magic(&bytes) else {
         return Ok(None);
     };

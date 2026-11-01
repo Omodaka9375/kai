@@ -45,7 +45,10 @@ fn build_globset(patterns: &[String]) -> Result<Option<GlobSet>, String> {
 }
 
 #[tauri::command]
-pub fn fs_grep(
+// Async: this walks the whole tree and regexes every candidate file. As a
+// sync command it ran on the MAIN thread and froze the entire UI for the
+// duration of the search; async commands run on the runtime's worker pool.
+pub async fn fs_grep(
     pattern: String,
     root: String,
     glob: Option<Vec<String>>,

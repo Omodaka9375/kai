@@ -204,12 +204,14 @@ fn probe() -> EnvInventory {
 /// Caches the probe result per process lifetime. First call runs the probe
 /// (a few hundred ms); every later call is instant.
 #[tauri::command]
-pub fn fs_env_inventory(cache: State<'_, Mutex<Option<EnvInventory>>>) -> EnvInventory {
+// Async: the uncached probe shells out / walks toolchains for a few hundred
+// ms — sync would land that on the main thread.
+pub async fn fs_env_inventory(cache: State<'_, Mutex<Option<EnvInventory>>>) -> Result<EnvInventory, String> {
     let mut guard = crate::modules::lock::mutex_lock(&cache);
     if let Some(inv) = guard.clone() {
-        return inv;
+        return Ok(inv);
     }
     let inv = probe();
     *guard = Some(inv.clone());
-    inv
+    Ok(inv)
 }

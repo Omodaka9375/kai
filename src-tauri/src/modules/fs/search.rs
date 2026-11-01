@@ -43,7 +43,9 @@ const PRUNE_DIRS: &[&str] = &[
 ];
 
 #[tauri::command]
-pub fn fs_search(
+// Async: walks the tree until the match cap — or the ENTIRE tree when nothing
+// matches. Sync would pin that walk on the main thread and freeze the UI.
+pub async fn fs_search(
     root: String,
     query: String,
     limit: Option<usize>,
