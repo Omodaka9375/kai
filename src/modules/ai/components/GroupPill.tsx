@@ -9,7 +9,7 @@ import {
   getPersonaApprovals,
   subscribeGroupChats,
 } from "../store/groupChatStore";
-import { useChatStore } from "../store/chatStore";
+import { useChatStore, getSessionAgentMeta } from "../store/chatStore";
 
 /**
  * The AI surface's collapsed pill. When a group chat owns the expanded slot
@@ -30,14 +30,30 @@ export function GroupPill() {
   // panel is the expanded surface.
   const groups = useMemo(() => getGroups(), [version]);
   const liveCount = groups.filter((g) => g.endedAt === null).length;
-  // Pending approvals across ALL live groups (persona registry) - the pill is
-  // the group system's attention surface when the panel is collapsed behind
-  // the AI window. Same violet as the rail's "needs your input" dot: one
-  // meaning, one color.
-  const pendingApprovals = useMemo(
-    () => getPersonaApprovals().length,
-    [version],
-  );
+  // Pending approvals across ALL live groups — personas (registry) PLUS
+  // background participant sessions awaiting approval cards (2026-11-02
+  // audit NIT: the badge counted only persona cards, so a background
+  // participant's approval was invisible behind the collapsed pill — its
+  // tooltip under-promised "waiting in group chats"). The pill is the group
+  // system's attention surface when the panel is collapsed behind the AI
+  // window. Same violet as the rail's "needs your input" dot: one meaning,
+  // one color.
+  const pendingApprovals = useMemo(() => {
+    const personas = getPersonaApprovals().length;
+    // Background participant sessions: any live group participant whose
+    // session meta reports awaiting-approval. Personas are already counted
+    // via the registry; skip their synthetic ids here.
+    const sessions = groups
+      .filter((g) => g.endedAt === null)
+      .flatMap((g) => g.participants)
+      .filter(
+        (p) =>
+          !p.projectId.startsWith("persona:") &&
+          p.sessionId &&
+          getSessionAgentMeta(p.sessionId).status === "awaiting-approval",
+      ).length;
+    return personas + sessions;
+  }, [version, groups]);
 
   // Full view: the group panel overlays the workspace down to the +42px
   // strip — the pill's own strip. Hide instead of painting over/below it.

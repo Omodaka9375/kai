@@ -167,7 +167,11 @@ describe("TTS is reserved for one-to-one chats — group runs never speak", () =
 
   it("the store's markers match every group injection template", () => {
     // The three injection shapes, in lockstep with isGroupDeliveryText.
+    // 2026-11-02 audit NIT: the cross-project marker is ANCHORED at the
+    // start of the message now (GROUP_DELIVERY_PREFIX_RE) — a pasted
+    // transcript line no longer false-positives the group check.
     expect(store).toContain(" · cross-project group] ");
+    expect(store).toContain("GROUP_DELIVERY_PREFIX_RE");
     expect(store).toContain("`[group] ${r.name} replied:");
     expect(store).toContain("[group: ");
     expect(store).toContain("export function isGroupDeliveryText");

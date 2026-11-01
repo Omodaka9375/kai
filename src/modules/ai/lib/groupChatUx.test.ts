@@ -383,6 +383,50 @@ describe("2026-11-02 audit SHOULDs 4-11: scroll, memo, rejections, preamble, non
   });
 });
 
+describe("2026-11-02 audit NITs: pill badge, rename cap, pure updater, proxy preview", () => {
+  it("the pill badge counts background participant sessions, not just personas", () => {
+    const pill = readFileSync(
+      new URL("../components/GroupPill.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(pill).toMatch(/getSessionAgentMeta\(p\.sessionId\)\.status === "awaiting-approval"/);
+    expect(pill).toContain("getPersonaApprovals().length");
+  });
+
+  it("the rename input caps at the store's 120-char limit", () => {
+    expect(panel).toMatch(/<input\s+autoFocus\s+value=\{nameDraft\}\s+maxLength=\{120\}/);
+  });
+
+  it("pickMention is a pure updater (side effects outside setMention)", () => {
+    // setText/queueMicrotask must not run inside the updater — React may
+    // double-invoke updaters (StrictMode); idempotent today, fatal tomorrow.
+    const fn = panel.slice(
+      panel.indexOf("const pickMention = useCallback("),
+      panel.indexOf("const onTextChange = useCallback("),
+    );
+    // The single setMention call must be a plain close — no updater fn at
+    // all (the pure-updater fix removed it), and setText/queueMicrotask sit
+    // outside any setMention argument.
+    const setMentionIdx = fn.indexOf("setMention(");
+    const updaterEnd = fn.indexOf(");", setMentionIdx);
+    const updaterCall = fn.slice(setMentionIdx, updaterEnd);
+    expect(updaterCall).not.toContain("=>");
+    expect(updaterCall).not.toContain("setText");
+    expect(updaterCall).not.toContain("queueMicrotask");
+    expect(fn).toMatch(/setMention\(\{ open: false, start: 0, query: "" \}\);/);
+  });
+
+  it("proxy approval cards preview file edits inline (no diff tab exists for headless runs)", () => {
+    const approval = readFileSync(
+      new URL("../components/AiToolApproval.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(approval).toMatch(/proxy=\{proxy\}/);
+    expect(approval).toMatch(/PROXY INLINE PREVIEW/);
+    expect(approval).toMatch(/no diff tab to/);
+  });
+});
+
 describe("2026-11-02 audit SHOULDs: delivery gates, hydrate guard, debounced persist", () => {
   it("deliveries gate on isProjectOpen — a closed project's frozen id is never used", () => {
     // Both send fan-out paths: the user/coordinator send and the routed

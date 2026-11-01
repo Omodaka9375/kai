@@ -179,17 +179,24 @@ export function isPersonaParticipantId(id: string): boolean {
 //   deliverToParticipant   `[${g.name} · cross-project group] …`
 //   flushCoalesced         `[group] ${name} replied: …`
 //   coordinatorPrompt      `[group: ${g.name}] You are now the COORDINATOR…`
-const GROUP_DELIVERY_MARKER_CROSS_PROJECT = " · cross-project group] ";
 const GROUP_DELIVERY_MARKER_WAKE = "[group] ";
 const GROUP_DELIVERY_MARKER_PROMPT = "[group: ";
 
 /** True when a chat message's text identifies it as a GROUP delivery
  *  (participant delivery, coordinator wake, or coordinator prompt). The
  *  bridge snapshots this at busy-arm: a run whose triggering user message
- *  is a group delivery never speaks its reply. */
+ *  is a group delivery never speaks its reply.
+ *
+ *  ANCHORED (2026-11-02 audit NIT): the cross-project check used a bare
+ *  includes(), so a user-PASTED transcript line ("…as alpha said in [x ·
+ *  cross-project group] yesterday…") silenced TTS for that reply. Real
+ *  deliveries always START with "[<group> · cross-project group] " — the
+ *  prefix sits before any fence wrapper — so anchor it and a mid-message
+ *  paste no longer matches. */
+const GROUP_DELIVERY_PREFIX_RE = /^\[[^\n]*? · cross-project group\] /;
 export function isGroupDeliveryText(text: string): boolean {
   return (
-    text.includes(GROUP_DELIVERY_MARKER_CROSS_PROJECT) ||
+    GROUP_DELIVERY_PREFIX_RE.test(text) ||
     text.startsWith(GROUP_DELIVERY_MARKER_WAKE) ||
     text.startsWith(GROUP_DELIVERY_MARKER_PROMPT)
   );
@@ -1368,11 +1375,18 @@ export function armReplyProvision(sessionId: string, groupId: string): void {
 }
 
 /**
- * AGENT @-MENTION shared matcher (2026-11-01): the SAME relaxed matching the
- * composer's resolveGroupMentionTarget (GroupChatPanelView) uses — equality,
- * space-stripped prefix, substring — applied to a raw token (the part after
- * @, which may be a partial name while an agent types "@Sec…"). Exported so
- * the composer resolver and the store router stay one matching rule.
+ * AGENT @-MENTION shared matcher (2026-11-01): the SAME matching the
+ * composer's resolveGroupMentionTarget (GroupChatPanelView) uses — exact
+ * equality, then a UNIQUE space-stripped prefix — applied to a raw token
+ * (the part after @, which may be a partial name while an agent types
+ * "@Sec…"). Exported so the composer resolver and the store router stay
+ * one matching rule.
+ *
+ * 2026-11-02 audit NIT: the old bare-substring fallback let a short token
+ * ("@b") silently misroute to whichever participant happened to match
+ * first. Prefix matches now route ONLY when unique; an ambiguous prefix
+ * routes to nobody (the sender sees no delivery and can name the target
+ * precisely).
  */
 export function matchParticipantByToken(
   participants: GroupParticipant[],
@@ -1380,12 +1394,11 @@ export function matchParticipantByToken(
 ): GroupParticipant | undefined {
   const t = token.toLowerCase().replace(/\s+/g, "");
   if (!t) return undefined;
-  return participants.find(
-    (p) =>
-      p.name.toLowerCase() === t ||
-      p.name.toLowerCase().replace(/\s+/g, "").startsWith(t) ||
-      p.name.toLowerCase().includes(t),
-  );
+  const norm = (s: string) => s.toLowerCase().replace(/\s+/g, "");
+  const exact = participants.find((p) => norm(p.name) === t);
+  if (exact) return exact;
+  const prefixed = participants.filter((p) => norm(p.name).startsWith(t));
+  return prefixed.length === 1 ? prefixed[0] : undefined;
 }
 
 /**
@@ -1473,6 +1486,16 @@ export async function deliverAgentMentions(
   const deliveries: MentionDeliveryOutcome[] = [];
   const skipped: string[] = [];
   for (const token of tokens) {
+    // ALIAS RESERVED (2026-11-02 audit NIT): with a USER coordinator there
+    // is no session behind the alias — route to NOBODY rather than fall
+    // through to the name matcher, where a participant whose name merely
+    // CONTAINS "coordinator" used to catch it.
+    const normalized = token
+      .toLowerCase()
+      .replace(/\s+/g, "")
+      .replace(/[\p{P}]+$/u, "");
+    if (normalized === COORDINATOR_ALIAS && g.coordinator.kind !== "agent")
+      continue;
     // @coordinator resolves BEFORE the name matcher (alias priority —
     // see coordinatorByAlias); every other token matches by display name.
     const target =
@@ -1593,10 +1616,27 @@ export function noteSessionIdle(sessionId: string): void {
 export type ParticipantActivity =
   "working" | "approval" | "queued" | "error" | "idle";
 
-export function participantActivity(sessionId: string): ParticipantActivity {
+export function participantActivity(
+  sessionId: string,
+  groupId?: string,
+): ParticipantActivity {
   // Personas have no session meta — their activity is the run/queue state,
   // with pending approval cards taking precedence over "working".
   if (isPersonaParticipantId(sessionId)) {
+    // GROUP-SCOPED (2026-11-02 audit NIT): a persona may sit in several
+    // groups at once; the old suffix matches bled state across groups
+    // (busy in A read "working" in B's strip). With a groupId the
+    // composite key is checked exactly; without one (aggregating
+    // surfaces) the any-group view is intentional.
+    if (groupId) {
+      const key = personaKey(groupId, sessionId);
+      for (const entry of personaApprovals.values()) {
+        if (entry.sessionKey === key) return "approval";
+      }
+      if (personaBusy.has(key)) return "working";
+      if (personaQueues.has(key)) return "queued";
+      return "idle";
+    }
     for (const entry of personaApprovals.values()) {
       if (entry.sessionKey.endsWith(`::${sessionId}`)) return "approval";
     }
@@ -1769,6 +1809,9 @@ export async function endGroupChat(groupId: string): Promise<void> {
     // Term ends with the group: resume + re-delegate re-arm the preamble.
     g.preambleGiven = false;
   }
+  // NIT SWEEP (2026-11-02): the mention-chain counter is group-keyed —
+  // a resumed group starts a fresh chain instead of resuming at the cap.
+  mentionChain.delete(groupId);
   await persist();
   notify();
 }
@@ -1863,6 +1906,14 @@ export async function deleteGroupChat(groupId: string): Promise<void> {
   if (g.coordinator.kind === "agent") {
     teardownSessionMachinery(g.coordinator.sessionId);
     sessionGroups.delete(g.coordinator.sessionId);
+  }
+  // NIT SWEEP (2026-11-02): both maps are group-keyed and previously leaked
+  // one entry per (group × persona) / per group for the app's lifetime —
+  // swept only by the test reset. The fence-state cache deliberately
+  // SURVIVES end/resume (nonce stability) but dies with the group.
+  mentionChain.delete(groupId);
+  for (const k of [...personaFenceStates.keys()]) {
+    if (k.startsWith(`${groupId}::`)) personaFenceStates.delete(k);
   }
   groups.delete(groupId);
   await persist();

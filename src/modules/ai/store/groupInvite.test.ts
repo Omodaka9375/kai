@@ -160,9 +160,10 @@ describe("invite_agent — behavior", () => {
     // The membership landed (same store path as the human panel invite).
     const live = getGroup(g.id)!;
     expect(live.participants.some((p) => p.projectId === "p-alpha")).toBe(true);
-    // The announce note is in the transcript.
+    // The announce note is in the transcript, AGENT-LABELED (2026-11-02
+    // audit NIT: the coordinator's own words were mislabeled "system").
     expect(
-      live.messages.some((m) => m.from === "system" && m.text.includes("joining to help")),
+      live.messages.some((m) => m.from === "agent" && m.text.includes("joining to help")),
     ).toBe(true);
     // THE ASK: the panel opened on the user's screen, same event the
     // rail/status bar dispatches, carrying the group id.

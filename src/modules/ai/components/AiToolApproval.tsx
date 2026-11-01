@@ -257,6 +257,7 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue, proxy }: Props) 
           editing={isEditing}
           editedValue={editedCommand}
           onEditChange={setEditedCommand}
+          proxy={proxy}
         />
 
         {/* Policy risk level and warnings */}
@@ -403,13 +404,70 @@ function PreviewBlock({
   editing,
   editedValue,
   onEditChange,
+  proxy,
 }: {
   toolName: string;
   input: Record<string, unknown>;
   editing?: boolean;
   editedValue?: string;
   onEditChange?: (v: string) => void;
+  /** Proxy mode (group personas / background sessions): file-mutation
+   *  previews render INLINE — a headless run never opens the AI diff tab
+   *  (no bridge), so "review in the diff tab" pointed nowhere. The
+   *  diff-tab hint stays for foreground (non-proxy) cards. */
+  proxy?: { requester: string; context?: string } | null;
 }) {
+  // PROXY INLINE PREVIEW (2026-11-02 audit NIT): show the actual before /
+  // after (capped) for edit/write/batch_edit when there is no diff tab to
+  // review in. Bounded so a giant write cannot flood the card.
+  if (
+    proxy &&
+    (toolName === "edit" ||
+      toolName === "write_file" ||
+      toolName === "batch_edit" ||
+      toolName === "replace_exact")
+  ) {
+    const cap = (s: string, n: number) =>
+      s.length > n ? `${s.slice(0, n)}… (${s.length - n} more chars)` : s;
+    const oldStr = typeof input.old_string === "string" ? input.old_string : "";
+    const newStr = typeof input.new_string === "string" ? input.new_string : "";
+    const content = typeof input.content === "string" ? input.content : "";
+    const edits = Array.isArray(input.edits)
+      ? (input.edits as Array<Record<string, unknown>>)
+      : [];
+    return (
+      <div className="space-y-1 font-mono text-[11px]">
+        <div className="text-muted-foreground">{String(input.path ?? "")}</div>
+        {edits.length > 0 ? (
+          <div className="text-[10.5px] text-muted-foreground/80">
+            {edits.length} edit{edits.length === 1 ? "" : "s"}:
+          </div>
+        ) : null}
+        {toolName === "edit" || toolName === "replace_exact" ? (
+          <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/60 p-2 text-destructive/90">
+            {cap(oldStr, 1200)}
+          </pre>
+        ) : null}
+        {newStr ? (
+          <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/60 p-2 text-emerald-600 dark:text-emerald-400">
+            {cap(newStr, 1200)}
+          </pre>
+        ) : null}
+        {content ? (
+          <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/60 p-2">
+            {cap(content, 2000)}
+          </pre>
+        ) : null}
+        {edits.length > 0
+          ? edits.slice(0, 3).map((e, i) => (
+              <div key={i} className="truncate text-[10.5px] text-muted-foreground">
+                {i + 1}. {String(e.path ?? "")}
+              </div>
+            ))
+          : null}
+      </div>
+    );
+  }
   if (toolName === "bash_run" || toolName === "bash_background") {
     const cwd = typeof input.cwd === "string" ? input.cwd : null;
     const command = String(input.command ?? "");

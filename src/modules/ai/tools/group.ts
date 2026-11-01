@@ -127,10 +127,15 @@ export function buildGroupTools(ctx: ToolContext) {
         }
         if (announce?.trim()) {
           const { appendGroupMessage } = await import("../store/groupChatStore");
+          // AGENT-AUTHORED, AGENT-LABELED (2026-11-02 audit NIT): the
+          // announce note is the COORDINATOR's own words, not machinery
+          // output. "system" mislabeled model text; attribute the author
+          // so the transcript (and any future consumer) sees who spoke.
+          const coord = live.coordinator;
           await appendGroupMessage(group.id, {
-            from: "system",
-            projectId: "",
-            sessionId: "",
+            from: "agent",
+            projectId: coord.kind === "agent" ? coord.projectId : "",
+            sessionId: coord.kind === "agent" ? coord.sessionId : "",
             text: announce.trim().slice(0, 200),
           });
         }
@@ -175,7 +180,9 @@ export function buildGroupTools(ctx: ToolContext) {
       execute: async ({ project }) => {
         const target = group.participants.find((p) => p.projectId === project);
         const status = isPersonaParticipantId(project)
-          ? participantActivity(target?.sessionId ?? project)
+          ? // groupId-scoped (2026-11-02 audit NIT): a persona in two groups
+            // reports THIS group's state, not the any-group bleed.
+            participantActivity(target?.sessionId ?? project, group.id)
           : getProjectAgentStatus(project);
         const name = target?.name ?? project;
         return { project, name, status };

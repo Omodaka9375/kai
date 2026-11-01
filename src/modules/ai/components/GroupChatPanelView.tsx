@@ -471,6 +471,7 @@ function PanelHeader({
           <input
             autoFocus
             value={nameDraft}
+            maxLength={120}
             onChange={(e) => setNameDraft(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
@@ -675,11 +676,19 @@ function GroupAutoApproveToggle({ group }: { group: GroupChat }) {
   );
 }
 
-function ParticipantDot({ participant }: { participant: GroupParticipant }) {
+function ParticipantDot({
+  participant,
+  groupId,
+}: {
+  participant: GroupParticipant;
+  groupId: string;
+}) {
   const status = isPersonaParticipantId(participant.projectId)
-    ? participantActivity(participant.sessionId) === "working"
+    ? participantActivity(participant.sessionId, groupId) === "working"
       ? "streaming"
-      : "idle"
+      : participantActivity(participant.sessionId, groupId) === "approval"
+        ? "awaiting-approval"
+        : "idle"
     : getProjectAgentStatus(participant.projectId);
   return (
     <span
@@ -966,7 +975,7 @@ function ActivityStrip({ group }: { group: GroupChat }) {
   );
   if (group.endedAt !== null) return null;
   const live = group.participants
-    .map((p) => ({ p, act: participantActivity(p.sessionId) }))
+    .map((p) => ({ p, act: participantActivity(p.sessionId, group.id) }))
     .filter((x) => x.act !== "idle");
   if (live.length === 0) return null;
   return (
@@ -1103,26 +1112,31 @@ function Composer({ group }: { group: GroupChat }) {
       : [];
   // Pick a candidate: replace the "@query" token at mention.start with
   // "@Name " ("All" inserts nothing — clearing targeting is the point).
+  // PURE UPDATER (2026-11-02 audit NIT): setText/queueMicrotask used to run
+  // INSIDE the setMention updater — React may call updaters twice (StrictMode
+  // double-invoke), so side effects belong outside. Compute from the CURRENT
+  // mention state, mutate text, then close the picker.
   const pickMention = useCallback(
     (name: string) => {
-      setMention((m) => {
-        if (!m.open) return m;
-        const before = text.slice(0, m.start);
-        const insertion = name === "All" ? "" : `@${name} `;
-        setText(before + insertion + text.slice(m.start + 1 + m.query.length));
-        // Restore the caret after the inserted mention.
-        queueMicrotask(() => {
-          const el = textRef.current;
-          if (el) {
-            el.focus();
-            const at = (before + insertion).length;
-            el.setSelectionRange(at, at);
-          }
-        });
-        return { open: false, start: 0, query: "" };
+      const m = mention;
+      if (!m.open) return;
+      const before = text.slice(0, m.start);
+      const insertion = name === "All" ? "" : `@${name} `;
+      const next =
+        before + insertion + text.slice(m.start + 1 + m.query.length);
+      setText(next);
+      setMention({ open: false, start: 0, query: "" });
+      // Restore the caret after the inserted mention.
+      queueMicrotask(() => {
+        const el = textRef.current;
+        if (el) {
+          el.focus();
+          const at = (before + insertion).length;
+          el.setSelectionRange(at, at);
+        }
       });
     },
-    [text],
+    [mention, text],
   );
   // Detect an open @-token at the caret on every edit.
   const onTextChange = useCallback((value: string, caret: number) => {
@@ -1305,7 +1319,9 @@ function Composer({ group }: { group: GroupChat }) {
                 <span className="truncate">
                   {"projectId" in c ? `@${c.name}` : "All — send to everyone"}
                 </span>
-                {"projectId" in c ? <ParticipantDot participant={c} /> : null}
+                {"projectId" in c ? (
+                  <ParticipantDot participant={c} groupId={group.id} />
+                ) : null}
               </button>
             ))}
           </div>
@@ -2077,8 +2093,8 @@ function ParticipantsMenu({
           >
             <span className="min-w-0 flex-1 truncate">{p.name}</span>
             <div className="flex items-center gap-1.5">
-              <ParticipantDot participant={p} />
-              {participantActivity(p.sessionId) !== "idle" ? (
+              <ParticipantDot participant={p} groupId={live.id} />
+              {participantActivity(p.sessionId, live.id) !== "idle" ? (
                 <button
                   type="button"
                   aria-label={`Stop ${p.name}'s agent`}
