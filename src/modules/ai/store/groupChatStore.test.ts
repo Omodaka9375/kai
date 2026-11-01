@@ -318,6 +318,26 @@ describe("source pins — trust boundary & wiring", () => {
     expect(groupTool).not.toContain("deleteGroupChat");
   });
 
+  it("the create dialog is COMPACT: dropdown triggers + chips, no stacked scroll boxes (2026-11-01)", () => {
+    // "Start Group popup with big sections vertically to scroll through —
+    // use dropdown lists to save on space." Each section is ONE trigger row
+    // (Popover overlay carries the list); the selection shows as chips.
+    // The old layout stacked three max-h-* scroll boxes inside the dialog.
+    const picker = panel.slice(
+      panel.indexOf("function InvitePicker("),
+      panel.indexOf("function ParticipantsMenu("),
+    );
+    // Dropdown triggers per section (with the collapse arrow icon).
+    expect(picker).toMatch(/icon=\{ArrowDown01Icon\}/);
+    // Multi-select dropdowns stay OPEN on pick (onOpenChange state-driven).
+    expect(picker).toMatch(/const \[projectsOpen, setProjectsOpen\]/);
+    expect(picker).toMatch(/const \[personasOpen, setPersonasOpen\]/);
+    // Selection chips beside the triggers (removable, not scroll-box rows).
+    expect(picker).toMatch(/aria-label=\{`Remove \$\{p2\.name\}`\}/);
+    // The old in-dialog stacked scroll boxes must not return.
+    expect(picker).not.toMatch(/max-h-(?:40|72|44) /);
+  });
+
   it("closing a project removes it from groups before unmount", () => {
     expect(shell).toContain("removeProjectFromGroups(id)");
   });

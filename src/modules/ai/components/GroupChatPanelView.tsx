@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   Add01Icon,
+  ArrowDown01Icon,
   ArrowExpand01Icon,
   ArrowShrink01Icon,
   Cancel01Icon,
@@ -1253,6 +1254,11 @@ function InvitePicker({
   const [picked, setPicked] = useState<string[]>([]);
   const [pickedPersonas, setPickedPersonas] = useState<string[]>([]);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  // Dropdown open states (compact layout): each section's list lives in a
+  // Popover; the dialog itself stays three rows tall with no scroll boxes.
+  const [groupsOpen, setGroupsOpen] = useState(false);
+  const [projectsOpen, setProjectsOpen] = useState(false);
+  const [personasOpen, setPersonasOpen] = useState(false);
   // Re-read on every open (the dialog lives outside the version-notify tree).
   const existing = open ? getGroups() : [];
   const candidates = projects.filter((p) => p.id !== activeProjectId);
@@ -1285,9 +1291,15 @@ function InvitePicker({
     }
   };
 
+  // COMPACT LAYOUT (2026-11-01): the dialog used to stack three scrolling
+  // list boxes (existing groups max-h-40, projects max-h-72, personas
+  // max-h-44) — a wall of vertical scrollbars for what is usually a
+  // two-click flow. Now each section is a single dropdown trigger row; the
+  // list lives in a Popover overlay, and the selection shows as removable
+  // chips beside the trigger. The dialog itself stays three rows tall.
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-md gap-5 rounded-2xl p-5">
+      <DialogContent className="max-w-md gap-4 rounded-2xl p-5">
         <DialogHeader className="pr-8">
           <DialogTitle>Start group chat</DialogTitle>
           <DialogDescription>
@@ -1296,220 +1308,354 @@ function InvitePicker({
         </DialogHeader>
 
         {existing.length > 0 ? (
-          <div className="flex flex-col gap-2">
-            <div className="text-[11px] font-medium text-muted-foreground">
+          <div className="flex flex-col gap-1.5">
+            <span className="text-[11px] font-medium text-muted-foreground">
               Your groups
-            </div>
-            <div className="flex max-h-40 flex-col gap-1 overflow-y-auto rounded-xl border border-border/60 bg-background/40 p-1.5">
-              {existing.map((g) => {
-                const confirming = confirmDelete === g.id;
-                return (
-                  <div
-                    key={g.id}
-                    className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPicked([]);
-                        setConfirmDelete(null);
-                        onOpenGroup(g.id);
-                      }}
-                      title={
-                        g.endedAt !== null
-                          ? "Resume and open this group"
-                          : "Open this group"
-                      }
-                      className="flex min-w-0 flex-1 items-center gap-1.5 rounded px-1 py-0.5 text-left transition-colors hover:bg-accent"
-                    >
-                      <HugeiconsIcon
-                        icon={Link01Icon}
-                        size={12}
-                        strokeWidth={1.75}
-                        className="shrink-0 text-muted-foreground"
-                      />
-                      <span className="min-w-0 flex-1 truncate text-[12px]">
-                        {g.name}
-                      </span>
-                      {g.endedAt !== null ? (
-                        <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                          ended
-                        </span>
-                      ) : null}
-                    </button>
-                    {confirming ? (
-                      <div className="flex shrink-0 items-center gap-1">
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          className="h-6 px-1.5 text-[10.5px]"
-                          onClick={() => setConfirmDelete(null)}
-                        >
-                          Keep
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="destructive"
-                          className="h-6 px-1.5 text-[10.5px]"
-                          onClick={() => {
-                            void deleteGroupChat(g.id);
-                            setConfirmDelete(null);
-                          }}
-                        >
-                          Delete
-                        </Button>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        aria-label={`Delete group ${g.name}`}
-                        title="Delete this group (removes its transcript)"
-                        onClick={() => setConfirmDelete(g.id)}
-                        className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-destructive"
+            </span>
+            <Popover
+              open={groupsOpen}
+              onOpenChange={(v) => {
+                setGroupsOpen(v);
+                if (!v) setConfirmDelete(null);
+              }}
+            >
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-full justify-between text-[12px]"
+                >
+                  <span className="truncate">Open an existing group…</span>
+                  <HugeiconsIcon
+                    icon={ArrowDown01Icon}
+                    size={12}
+                    strokeWidth={1.75}
+                    className="shrink-0 text-muted-foreground"
+                  />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent
+                align="start"
+                className="w-80 gap-0 p-1 text-xs"
+                onOpenAutoFocus={(e) => e.preventDefault()}
+              >
+                <div className="flex max-h-56 flex-col gap-1 overflow-y-auto">
+                  {existing.map((g) => {
+                    const confirming = confirmDelete === g.id;
+                    return (
+                      <div
+                        key={g.id}
+                        className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 hover:bg-accent"
                       >
-                        <HugeiconsIcon
-                          icon={Delete02Icon}
-                          size={11}
-                          strokeWidth={1.75}
-                        />
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPicked([]);
+                            setPickedPersonas([]);
+                            setConfirmDelete(null);
+                            setGroupsOpen(false);
+                            onOpenGroup(g.id);
+                          }}
+                          title={
+                            g.endedAt !== null
+                              ? "Resume and open this group"
+                              : "Open this group"
+                          }
+                          className="flex min-w-0 flex-1 items-center gap-1.5 rounded px-1 py-0.5 text-left transition-colors"
+                        >
+                          <HugeiconsIcon
+                            icon={Link01Icon}
+                            size={12}
+                            strokeWidth={1.75}
+                            className="shrink-0 text-muted-foreground"
+                          />
+                          <span className="min-w-0 flex-1 truncate text-[12px]">
+                            {g.name}
+                          </span>
+                          {g.endedAt !== null ? (
+                            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                              ended
+                            </span>
+                          ) : null}
+                        </button>
+                        {confirming ? (
+                          <div className="flex shrink-0 items-center gap-1">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 px-1.5 text-[10.5px]"
+                              onClick={() => setConfirmDelete(null)}
+                            >
+                              Keep
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="destructive"
+                              className="h-6 px-1.5 text-[10.5px]"
+                              onClick={() => {
+                                void deleteGroupChat(g.id);
+                                setConfirmDelete(null);
+                              }}
+                            >
+                              Delete
+                            </Button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            aria-label={`Delete group ${g.name}`}
+                            title="Delete this group (removes its transcript)"
+                            onClick={() => setConfirmDelete(g.id)}
+                            className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-destructive"
+                          >
+                            <HugeiconsIcon
+                              icon={Delete02Icon}
+                              size={11}
+                              strokeWidth={1.75}
+                            />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </PopoverContent>
+            </Popover>
           </div>
         ) : null}
 
-        <div className="flex flex-col gap-2">
-          <div className="text-[11px] font-medium text-muted-foreground">
-            Available projects
-          </div>
-          {/* Persona list: agent personas without a project can join too. */}
-          <div className="flex max-h-72 flex-col gap-1 overflow-y-auto rounded-xl border border-border/60 bg-background/40 p-1.5">
-            {candidates.length > 0 ? (
-              candidates.map((project) => {
-                const selected = picked.includes(project.id);
-                return (
-                  <button
-                    key={project.id}
-                    type="button"
-                    aria-pressed={selected}
-                    onClick={() =>
-                      setPicked((current) =>
-                        current.includes(project.id)
-                          ? current.filter((id) => id !== project.id)
-                          : [...current, project.id],
-                      )
-                    }
-                    className={cn(
-                      "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
-                      selected
-                        ? "bg-accent text-foreground"
-                        : "text-muted-foreground",
-                    )}
-                  >
-                    <HugeiconsIcon
-                      icon={Folder01Icon}
-                      size={17}
-                      strokeWidth={1.75}
-                      className="shrink-0"
-                    />
-                    <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-foreground">
-                      {project.name}
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[11px] font-medium text-muted-foreground">
+            Invite projects
+          </span>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Popover open={projectsOpen} onOpenChange={setProjectsOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="justify-between gap-2 text-[12px]"
+                >
+                  <span className="truncate">Select projects…</span>
+                  {invitees.length > 0 ? (
+                    <span className="rounded bg-primary/10 px-1.5 py-px text-[10px] font-medium text-primary">
+                      {invitees.length}
                     </span>
-                    <span
-                      className={cn(
-                        "flex size-4 shrink-0 items-center justify-center rounded border",
-                        selected
-                          ? "border-primary bg-primary text-primary-foreground"
-                          : "border-border bg-background",
-                      )}
-                    >
-                      {selected ? (
-                        <HugeiconsIcon
-                          icon={Tick02Icon}
-                          size={11}
-                          strokeWidth={2.5}
-                        />
-                      ) : null}
-                    </span>
-                  </button>
-                );
-              })
-            ) : (
-              <div className="px-3 py-6 text-center text-[12px] text-muted-foreground">
-                Open another project to start a group chat.
-              </div>
-            )}
+                  ) : null}
+                  <HugeiconsIcon
+                    icon={ArrowDown01Icon}
+                    size={12}
+                    strokeWidth={1.75}
+                    className="shrink-0 text-muted-foreground"
+                  />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent
+                align="start"
+                className="w-80 gap-0 p-1 text-xs"
+                onOpenAutoFocus={(e) => e.preventDefault()}
+              >
+                <div className="flex max-h-64 flex-col gap-1 overflow-y-auto">
+                  {candidates.length > 0 ? (
+                    candidates.map((project) => {
+                      const selected = picked.includes(project.id);
+                      return (
+                        <button
+                          key={project.id}
+                          type="button"
+                          aria-pressed={selected}
+                          onClick={() =>
+                            setPicked((current) =>
+                              current.includes(project.id)
+                                ? current.filter((id) => id !== project.id)
+                                : [...current, project.id],
+                            )
+                          }
+                          className={cn(
+                            "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+                            selected
+                              ? "bg-accent text-foreground"
+                              : "text-muted-foreground",
+                          )}
+                        >
+                          <HugeiconsIcon
+                            icon={Folder01Icon}
+                            size={16}
+                            strokeWidth={1.75}
+                            className="shrink-0"
+                          />
+                          <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-foreground">
+                            {project.name}
+                          </span>
+                          <span
+                            className={cn(
+                              "flex size-4 shrink-0 items-center justify-center rounded border",
+                              selected
+                                ? "border-primary bg-primary text-primary-foreground"
+                                : "border-border bg-background",
+                            )}
+                          >
+                            {selected ? (
+                              <HugeiconsIcon
+                                icon={Tick02Icon}
+                                size={11}
+                                strokeWidth={2.5}
+                              />
+                            ) : null}
+                          </span>
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <div className="px-3 py-6 text-center text-[12px] text-muted-foreground">
+                      Open another project to start a group chat.
+                    </div>
+                  )}
+                </div>
+              </PopoverContent>
+            </Popover>
+            {invitees.map((p2) => (
+              <span
+                key={p2.id}
+                className="flex items-center gap-1 rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[11px] text-foreground"
+              >
+                <span className="max-w-32 truncate">{p2.name}</span>
+                <button
+                  type="button"
+                  aria-label={`Remove ${p2.name}`}
+                  onClick={() =>
+                    setPicked((current) => current.filter((id) => id !== p2.id))
+                  }
+                  className="text-muted-foreground/70 transition-colors hover:text-destructive"
+                >
+                  <HugeiconsIcon icon={Cancel01Icon} size={9} strokeWidth={2} />
+                </button>
+              </span>
+            ))}
           </div>
         </div>
 
-        <div className="flex flex-col gap-2">
-          <div className="text-[11px] font-medium text-muted-foreground">
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[11px] font-medium text-muted-foreground">
             Agent personas
-          </div>
-          <div className="flex max-h-44 flex-col gap-1 overflow-y-auto rounded-xl border border-border/60 bg-background/40 p-1.5">
-            {personas.length > 0 ? (
-              personas.map((persona) => {
-                const selected = pickedPersonas.includes(persona.id);
-                return (
+          </span>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Popover open={personasOpen} onOpenChange={setPersonasOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="justify-between gap-2 text-[12px]"
+                >
+                  <span className="truncate">Add personas…</span>
+                  {pickedPersonas.length > 0 ? (
+                    <span className="rounded bg-primary/10 px-1.5 py-px text-[10px] font-medium text-primary">
+                      {pickedPersonas.length}
+                    </span>
+                  ) : null}
+                  <HugeiconsIcon
+                    icon={ArrowDown01Icon}
+                    size={12}
+                    strokeWidth={1.75}
+                    className="shrink-0 text-muted-foreground"
+                  />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent
+                align="start"
+                className="w-80 gap-0 p-1 text-xs"
+                onOpenAutoFocus={(e) => e.preventDefault()}
+              >
+                <div className="flex max-h-56 flex-col gap-1 overflow-y-auto">
+                  {personas.length > 0 ? (
+                    personas.map((persona) => {
+                      const selected = pickedPersonas.includes(persona.id);
+                      return (
+                        <button
+                          key={persona.id}
+                          type="button"
+                          aria-pressed={selected}
+                          onClick={() =>
+                            setPickedPersonas((current) =>
+                              current.includes(persona.id)
+                                ? current.filter((id) => id !== persona.id)
+                                : [...current, persona.id],
+                            )
+                          }
+                          className={cn(
+                            "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+                            selected
+                              ? "bg-accent text-foreground"
+                              : "text-muted-foreground",
+                          )}
+                        >
+                          <HugeiconsIcon
+                            icon={UserMultiple02Icon}
+                            size={16}
+                            strokeWidth={1.75}
+                            className="shrink-0"
+                          />
+                          <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-foreground">
+                            {persona.name}
+                          </span>
+                          <span
+                            className={cn(
+                              "flex size-4 shrink-0 items-center justify-center rounded border",
+                              selected
+                                ? "border-primary bg-primary text-primary-foreground"
+                                : "border-border bg-background",
+                            )}
+                          >
+                            {selected ? (
+                              <HugeiconsIcon
+                                icon={Tick02Icon}
+                                size={11}
+                                strokeWidth={2.5}
+                              />
+                            ) : null}
+                          </span>
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <div className="px-3 py-4 text-center text-[12px] text-muted-foreground">
+                      No personas defined.
+                    </div>
+                  )}
+                </div>
+              </PopoverContent>
+            </Popover>
+            {personas
+              .filter((a) => pickedPersonas.includes(a.id))
+              .map((a) => (
+                <span
+                  key={a.id}
+                  className="flex items-center gap-1 rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[11px] text-foreground"
+                >
+                  <span className="max-w-32 truncate">{a.name}</span>
                   <button
-                    key={persona.id}
                     type="button"
-                    aria-pressed={selected}
+                    aria-label={`Remove ${a.name}`}
                     onClick={() =>
                       setPickedPersonas((current) =>
-                        current.includes(persona.id)
-                          ? current.filter((id) => id !== persona.id)
-                          : [...current, persona.id],
+                        current.filter((id) => id !== a.id),
                       )
                     }
-                    className={cn(
-                      "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
-                      selected
-                        ? "bg-accent text-foreground"
-                        : "text-muted-foreground",
-                    )}
+                    className="text-muted-foreground/70 transition-colors hover:text-destructive"
                   >
                     <HugeiconsIcon
-                      icon={UserMultiple02Icon}
-                      size={16}
-                      strokeWidth={1.75}
-                      className="shrink-0"
+                      icon={Cancel01Icon}
+                      size={9}
+                      strokeWidth={2}
                     />
-                    <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-foreground">
-                      {persona.name}
-                    </span>
-                    <span className="shrink-0 text-[10px] text-muted-foreground/70">
-                      no project
-                    </span>
-                    <span
-                      className={cn(
-                        "flex size-4 shrink-0 items-center justify-center rounded border",
-                        selected
-                          ? "border-primary bg-primary text-primary-foreground"
-                          : "border-border bg-background",
-                      )}
-                    >
-                      {selected ? (
-                        <HugeiconsIcon
-                          icon={Tick02Icon}
-                          size={11}
-                          strokeWidth={2.5}
-                        />
-                      ) : null}
-                    </span>
                   </button>
-                );
-              })
-            ) : (
-              <div className="px-3 py-4 text-center text-[12px] text-muted-foreground">
-                No personas defined.
-              </div>
-            )}
+                </span>
+              ))}
           </div>
           <p className="text-[10.5px] leading-relaxed text-muted-foreground/80">
             Personas join without a project — they reply from their own persona
