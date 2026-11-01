@@ -31,6 +31,7 @@ import { speakText } from "../lib/voiceTts";
 import { useProjectRuntime } from "@/modules/workspace";
 import {
   appendGroupMessage,
+  deliverAgentMentions,
   coordinatorGroupForSession,
   coordinatorPreamble,
   getGroup,
@@ -515,6 +516,18 @@ function Bridge({
             );
           }
         }
+        // AGENT @-MENTION ROUTING (2026-11-01): the mirrored reply may
+        // @-mention another member (the delivery prefix taught it the
+        // roster + convention) — route those mentions so agents can
+        // address each other in the group, not just the coordinator.
+        // Fire-and-forget: routing must never fail the mirror itself.
+        // PERSONAS are routed where their reply is produced
+        // (runPersonaReply) — they never settle here.
+        void deliverAgentMentions(
+          mirror.group.id,
+          mirror.projectId,
+          mirror.text,
+        ).catch(() => {});
       }
       // 2. COORDINATOR round bookkeeping: its own run settled — reset hop
       // depth for the next round.

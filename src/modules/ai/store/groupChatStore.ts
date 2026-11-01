@@ -105,6 +105,18 @@ const GROUP_RELAY_MAX_HOPS = 24;
 const relayDepth = new Map<string, number>();
 
 /**
+ * AGENT @-MENTION chain guard (2026-11-01): every @-mention routed from one
+ * participant's reply to another increments the group's chain counter; past
+ * MENTION_CHAIN_MAX routed exchanges the store refuses to relay further
+ * (system note) — two agents @-ping-ponging each other must surface to the
+ * user, not loop silently. A human message into the group resets the chain
+ * (same circuit-breaker contract as the coordinator relayDepth reset).
+ */
+export const MENTION_CHAIN_MAX = 8;
+/** groupId -> routed @-mention exchanges since the last human message. */
+const mentionChain = new Map<string, number>();
+
+/**
  * Reply-coalescing buffer: participant replies awaiting delivery to the
  * coordinator. When the coordinator messages N participants, the bridge
  * buffers each reply; the wake fires ONCE — when every expected participant
@@ -485,7 +497,9 @@ export async function sendGroupMessage(
   const g = groups.get(groupId);
   if (!g || g.endedAt !== null) return [];
   // USER intervention is the relay-cap circuit breaker: any human message
-  // into the group resets the agent-driven hop depth of its coordinator.
+  // into the group resets the agent-driven hop depth of its coordinator AND
+  // the @-mention chain (the agents may have been ping-ponging below).
+  mentionChain.delete(groupId);
   if (g.coordinator.kind === "agent") {
     relayDepth.delete(g.coordinator.sessionId);
   }
@@ -559,6 +573,19 @@ function deliverToParticipant(
     return deliverToPersonaParticipant(g, p, text);
   }
   const prefixed = `[${g.name} · cross-project group] ${text}`;
+  // AGENT @-MENTION ROSTER (2026-11-01): teach the delivery target WHO is in
+  // the group and that @Name routes. Agents can then address each other in
+  // their replies (the store routes @-mentions on the mirror path) instead
+  // of only answering the coordinator. Keep it terse — one roster line.
+  const roster = g.participants
+    .filter((x) => x.sessionId !== p.sessionId)
+    .map((x) => (isPersonaParticipantId(x.projectId) ? x.name : x.name))
+    .join(", ");
+  const exampleName =
+    g.participants.find((x) => x.sessionId !== p.sessionId)?.name ?? "Name";
+  const mentionHint =
+    `\n[group members: ${roster}] You may @-mention another member by name (e.g. \`@${exampleName} ...\`) — your reply is delivered to them.`;
+  const payload = prefixed + mentionHint;
   // Busy check: a LIVE chat object is the source of truth — the mirrored
   // agentMeta can go stale (the stop path historically never patched it
   // back to idle), which queued deliveries forever with zero feedback.
@@ -571,7 +598,7 @@ function deliverToParticipant(
       meta.status === "thinking";
   if (busy) {
     const q = sendQueues.get(p.sessionId) ?? [];
-    q.push({ groupId: g.id, sessionId: p.sessionId, text: prefixed, at: Date.now() });
+    q.push({ groupId: g.id, sessionId: p.sessionId, text: payload, at: Date.now() });
     sendQueues.set(p.sessionId, q);
     notify();
     // DELIBERATELY no awaitingReply here: the provision must be armed only
@@ -584,7 +611,7 @@ function deliverToParticipant(
   // Delivered: arm the mirror provision NOW (the injected message is the
   // next thing the agent answers).
   armReplyProvision(p.sessionId, g.id);
-  void useChatStore.getState().injectMessage(p.sessionId, prefixed);
+  void useChatStore.getState().injectMessage(p.sessionId, payload);
   return false;
 }
 
@@ -742,6 +769,7 @@ async function runPersonaReply(
       `[group: ${g.name}] You are "${persona.name}", an agent persona participating in a cross-project group chat.`,
       "You have NO project workspace of your own.",
       ...scratchLines,
+      `Group members: ${g.participants.filter((x) => x.sessionId !== p.sessionId).map((x) => x.name).join(", ")}. You may @-mention another member by name (e.g. \`@${g.participants.find((x) => x.sessionId !== p.sessionId)?.name ?? "Name"} please review\`) — your reply is delivered to them.`,
       "Keep replies concise and addressed to the whole group.",
     ].join("\n\n");
     const prompt = [
@@ -897,6 +925,11 @@ async function runPersonaReply(
         sessionId: p.sessionId,
         text: reply,
       });
+      // AGENT @-MENTION ROUTING (2026-11-01): a persona's reply may @-mention
+      // another member (the transcript teaches the roster) — route it here:
+      // personas have no session, so the mirror-arm path never runs for
+      // them. Fire-and-forget: routing failures must not fail the reply.
+      void deliverAgentMentions(live.id, p.projectId, reply).catch(() => {});
       // Feed the agent-coordinator's coalescing buffer when one is waiting.
       noteParticipantReply(live.id, p.projectId, reply);
     }
@@ -962,6 +995,101 @@ export function flushQueuedForSession(sessionId: string): void {
  *  Idempotent per session (one outstanding delivery at a time). */
 export function armReplyProvision(sessionId: string, groupId: string): void {
   awaitingReply.set(sessionId, groupId);
+}
+
+/**
+ * AGENT @-MENTION shared matcher (2026-11-01): the SAME relaxed matching the
+ * composer's resolveGroupMentionTarget (GroupChatPanelView) uses — equality,
+ * space-stripped prefix, substring — applied to a raw token (the part after
+ * @, which may be a partial name while an agent types "@Sec…"). Exported so
+ * the composer resolver and the store router stay one matching rule.
+ */
+export function matchParticipantByToken(
+  participants: GroupParticipant[],
+  token: string,
+): GroupParticipant | undefined {
+  const t = token.toLowerCase().replace(/\s+/g, "");
+  if (!t) return undefined;
+  return participants.find(
+    (p) =>
+      p.name.toLowerCase() === t ||
+      p.name.toLowerCase().replace(/\s+/g, "").startsWith(t) ||
+      p.name.toLowerCase().includes(t),
+  );
+}
+
+/** One routed @-mention delivery. */
+export type MentionDeliveryOutcome = {
+  /** The mentioned participant that received the delivery. */
+  target: GroupParticipant;
+  /** Whether the target's agent was busy (queued for idle flush). */
+  queued: boolean;
+};
+
+/**
+ * AGENT @-MENTION ROUTING (2026-11-01): route the @-mentions inside a
+ * participant agent's reply to the OTHER participants it names, so agents
+ * can address each other in the group (the same convention the composer
+ * uses for the user). One mention per target (a repeated @Name routes once).
+ *
+ * Callers: the bridge's mirror arm (project participants — their reply was
+ * just mirrored into the transcript) and the persona reply path (personas
+ * have no session, so the routing runs where the reply is produced).
+ * Coordinators delegate with send_to_project instead; a @-mention aimed at
+ * the coordinator routes to it like any participant.
+ *
+ * Returns the deliveries that were made (skipped targets included in
+ * `skipped`). Appends a system note when the group's @-mention chain cap is
+ * hit, so a two-agent ping-pong surfaces to the user instead of looping.
+ */
+export async function deliverAgentMentions(
+  groupId: string,
+  fromParticipantId: string,
+  replyText: string,
+): Promise<{ deliveries: MentionDeliveryOutcome[]; skipped: string[] }> {
+  const g = groups.get(groupId);
+  if (!g || g.endedAt !== null) return { deliveries: [], skipped: [] };
+  // Cap: count ROUTED exchanges; a human message resets the chain.
+  const chain = (mentionChain.get(groupId) ?? 0) + 1;
+  mentionChain.set(groupId, chain);
+  if (chain > MENTION_CHAIN_MAX) {
+    await appendGroupMessage(groupId, {
+      from: "system",
+      projectId: "",
+      sessionId: "",
+      text: `@-mention routing paused after ${MENTION_CHAIN_MAX} agent-to-agent exchanges — send a message to the group to reset the chain.`,
+    });
+    return { deliveries: [], skipped: [] };
+  }
+  const others = g.participants.filter((p) => p.projectId !== fromParticipantId);
+  const tokens = [...new Set(
+    [...replyText.matchAll(/@([^\s@]+)/g)].map((m) => m[1]),
+  )];
+  const deliveries: MentionDeliveryOutcome[] = [];
+  const skipped: string[] = [];
+  for (const token of tokens) {
+    const target = matchParticipantByToken(others, token);
+    if (!target) continue;
+    // Re-resolve the CURRENT active session like every other delivery path
+    // (the record can be empty/stale — same frozen-record class the stop/
+    // delivery/steering paths already fixed). Personas route via their own
+    // runner inside deliverToParticipant; only project sessions re-resolve.
+    if (!isPersonaParticipantId(target.projectId)) {
+      const sid = getProjectActiveSession(target.projectId) || target.sessionId || "";
+      if (sid && sid !== target.sessionId) {
+        target.sessionId = sid;
+        sessionGroups.set(sid, g.id);
+      }
+    }
+    const prefixed =
+      `[${g.name} · cross-project group] ${g.participants.find((p) => p.projectId === fromParticipantId)?.name ?? "a participant"} @-mentioned you in the group: ` +
+      replyText;
+    // Busy check + queue + provision arming live in deliverToParticipant —
+    // one delivery contract for user sends, coordinator sends, mentions.
+    const queued = deliverToParticipant(g, target, prefixed);
+    deliveries.push({ target, queued });
+  }
+  return { deliveries, skipped };
 }
 
 /** Everything the bridge needs to mirror one settled participant reply. */
@@ -1324,6 +1452,7 @@ export function coordinatorPreamble(g: GroupChat): string {
     `You coordinate these projects' agents (each works only inside its own repo):`,
     others.map((s) => `  - ${s}`).join("\n"),
     `Rules:`,
+    `- You may @-mention another member by name (e.g. "@${others[0]?.split(" (")[0] ?? "Name"} please check the build") — your message is delivered to them; they can reply to you the same way.`,
     `- Use send_to_project(project, message) to delegate a task or ask a question. It is FIRE-AND-FORGET: the reply arrives as your NEXT user message — do not poll, do not wait, do not call anything to check.`,
     `- After send_to_project, state that you are waiting and END YOUR TURN. Never declare the overall task complete while a delegation is outstanding.`,
     `- project_status(project) tells you whether a participant's agent is busy before you send.`,
@@ -1454,11 +1583,11 @@ export function noteCoordinatorRoundDone(sessionId: string): void {
     coalesceTimers.delete(sessionId);
   }
 }
-export function __resetGroupChatsForTest(): void {
-  groups = new Map();
+export function __resetGroupChatsForTest(): void {  groups = new Map();
   sendQueues.clear();
   sessionGroups.clear();
   relayDepth.clear();
+  mentionChain.clear();
   pendingReplies.clear();
   awaitingReply.clear();
   for (const c of personaAborters.values()) c.abort();
