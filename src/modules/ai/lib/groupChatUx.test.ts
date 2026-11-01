@@ -20,6 +20,7 @@ const read = (rel: string) =>
   readFileSync(new URL(rel, import.meta.url), "utf8") as string;
 
 const store = read("../store/groupChatStore.ts");
+const chat = read("../store/chatStore.ts");
 const panel = read("../components/GroupChatPanelView.tsx");
 const mini = read("../components/AiMiniWindow.tsx");
 const lib = read("./groupApprovals.ts");
@@ -125,8 +126,11 @@ describe("composer mirrors the AI input bar", () => {
     // The tray gate is the full JSX condition (prettier wraps it across
     // lines — match with \s*, not the one-line literal).
     const gate = panel.match(
-      /\{activeProjectInGroup &&\s*activeProjectGroups\.length > 0 &&\s*stackSurface !== "group" \? \(/,
+      /\{activeProjectInGroup &&\s*activeProjectGroups\.length > 0 &&\s*!expanded \? \(/,
     );
+    // 2026-11-01: the pill derives from the panel's OWN expanded boolean —
+    // the cross-store surface term is gone (see the round-trip describe).
+    expect(panel).not.toMatch(/stackSurface !== "group" \? \(/);
     expect(gate).not.toBeNull();
     expect(panel).toContain("const activeProjectGroups = useMemo(");
     expect(panel).toMatch(/groups=\{activeProjectGroups\}/);
@@ -165,6 +169,15 @@ describe("the pill unmounts when the last group is gone", () => {
     expect(mini).toContain("groupsForProject(activeProjectId() ?? \"\").length > 0");
     expect(mini).not.toContain("getGroups().length");
     expect(mini).not.toMatch(/groupCount > 0/);
+    // 2026-11-01 round-trip fix: the lift flag must SUBSCRIBE to everything
+    // it reads imperatively. A memo keyed [groupStoreVersion] alone froze
+    // across project switches (the active project is module state — no
+    // store bump): stale-true lifted the window over an empty strip on the
+    // other project; stale-false sat it at +42px ON the pill's strip,
+    // covering the pill after switching back.
+    expect(mini).toMatch(/useSyncExternalStore\(\s*subscribeActiveProject,/);
+    expect(mini).toMatch(/\[groupStoreVersion, activeProjectVersion, stackSurface\]/);
+    expect(mini).not.toMatch(/\[groupStoreVersion\],\s*\n\s*\);/);
   });
 });
 
@@ -226,5 +239,35 @@ describe("project switch closes a non-participant group panel (2026-11-01)", () 
     expect(store).toMatch(/reply = unfence\(reply\)\.trim\(\);/);
     expect(store).toMatch(/const text = unfence\(/);
     expect(store).toMatch(/const clean = unfence\(message\);/);
+  });
+});
+
+describe("the pill survives a project round-trip (2026-11-01)", () => {
+  // "If I switch to a normal project and come back to group chat project,
+  //  the collapsed group chat is not there — just a visual gap in its
+  //  place. Effectively the group chat disappeared." Two freezes:
+  //   1. AiMiniWindow's lift flag read activeProjectId() imperatively
+  //      inside a memo keyed on the group store only — a project switch
+  //      bumps neither input, so the flag froze at the old project:
+  //      stale-true = the window lifted over an empty strip (the gap on the
+  //      normal project); stale-false = the window back at +42px, COVERING
+  //      the pill that painted correctly underneath after the return.
+  //   2. The pill gated on chatStore's surface field, which can desync
+  //      from the panel's own open-group state (surface "group" + nothing
+  //      selected = panel AND pill both hidden = the gap).
+  // Fix: chatStore signals active-project changes; the window subscribes;
+  // the pill derives from the panel's expanded boolean ("copy the regular
+  // AI chat patterns" — one derived boolean drives window + pill).
+  it("chatStore notifies active-project switches (subscribe + version)", () => {
+    expect(chat).toContain("export function subscribeActiveProject");
+    expect(chat).toContain("export function getActiveProjectVersion");
+    expect(chat).toMatch(/const changed = activeProjectRuntime\?\.id !== runtime\.id;/);
+    expect(chat).toMatch(/if \(changed\) \{\s*activeProjectVersion\+\+;/);
+  });
+
+  it("the pill gate uses the panel's expanded boolean (not the store surface)", () => {
+    expect(panel).toMatch(
+      /activeProjectGroups\.length > 0 &&\s*!expanded \? \(/,
+    );
   });
 });

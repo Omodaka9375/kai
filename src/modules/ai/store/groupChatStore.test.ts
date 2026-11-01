@@ -360,10 +360,11 @@ describe("source pins — trust boundary & wiring", () => {
     expect(panel).toContain('stackSurface === "group" && active !== null');
     expect(panel).toContain("closeGroupFromStack();");
     // The group pill and the expanded group panel are the same width as the
-    // AI mini window; the pill hides while the group is expanded.
+    // AI mini window; the pill hides while the group is expanded (gated by
+    // the panel's OWN expanded boolean — 2026-11-01, see groupChatUx).
     expect(panel).toContain("w-[min(34rem,calc(100vw-2rem))]");
     expect(pill).toContain("w-[min(34rem,calc(100vw-2rem))]");
-    expect(panel).toContain('stackSurface !== "group" ? (');
+    expect(panel).toMatch(/activeProjectGroups\.length > 0 &&\s*!expanded \? \(/);
     // The mini window shrinks up by one pill height when the group pill is
     // stacked below it.
     expect(mini).toContain("+84px");

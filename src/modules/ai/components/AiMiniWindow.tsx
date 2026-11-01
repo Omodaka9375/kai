@@ -51,7 +51,14 @@ import { effectiveContextLimit, SYSTEM_OVERHEAD_TOKENS } from "../lib/compact";
 import { type SessionMeta } from "../lib/sessions";
 import { absoluteTime, relativeTime } from "../lib/relativeTime";
 import { normalizeWorkspacePath } from "../lib/workspacePath";
-import { activeProjectId, getOrCreateChat, isGhostSession, useChatStore } from "../store/chatStore";
+import {
+  activeProjectId,
+  getActiveProjectVersion,
+  getOrCreateChat,
+  isGhostSession,
+  subscribeActiveProject,
+  useChatStore,
+} from "../store/chatStore";
 import {
   getGroupStoreVersion,
   groupsForProject,
@@ -142,20 +149,34 @@ export function AiMiniWindow() {
     getGroupStoreVersion,
     getGroupStoreVersion,
   );
+  // The ACTIVE PROJECT is chatStore module state — a project switch bumps
+  // NO store this flag reads, so it must be SUBSCRIBED explicitly
+  // (2026-11-01: "switch to a normal project and come back — the collapsed
+  // group chat is not there, just a gap"). A memo keyed on the group store
+  // alone froze across switches: stale-true kept the +84px lift on a
+  // project with no pill (the gap), stale-false sat the window at +42px ON
+  // the pill's strip, covering a pill that painted correctly underneath.
+  const activeProjectVersion = useSyncExternalStore(
+    subscribeActiveProject,
+    getActiveProjectVersion,
+    getActiveProjectVersion,
+  );
+  const stackSurface = useChatStore((s) => s.stackRail.surface);
   // PILL-VISIBLE must use the SAME predicate the pill itself paints by:
   // the ACTIVE project is a participant in a LIVE group (groupsForProject
   // filters endedAt). Counting ALL groups instead reserved the +42px strip
   // for an ended-but-not-deleted group, or a live group between two OTHER
   // projects, while the pill (scoped 2026-10-31) stayed hidden: a reserved
   // empty strip under the window with nothing in it ("the gap where the
-  // pill was"). One predicate, no split-brain. Read imperatively
-  // (groupsForProject is not a hook) — the group-store subscription above
-  // re-runs this on every group change.
+  // pill was"). One predicate, no split-brain. groupsForProject/
+  // activeProjectId are read imperatively (not hooks) — the two
+  // subscriptions above re-run this on every group change AND every
+  // project switch; the surface arrives via its zustand selector.
   const groupPillVisible = useMemo(
     () =>
-      useChatStore.getState().stackRail.surface !== "group" &&
+      stackSurface !== "group" &&
       groupsForProject(activeProjectId() ?? "").length > 0,
-    [groupStoreVersion],
+    [groupStoreVersion, activeProjectVersion, stackSurface],
   );
   const setMiniExpanded = useChatStore((s) => s.setMiniExpanded);
   const toggleExpand = useCallback(

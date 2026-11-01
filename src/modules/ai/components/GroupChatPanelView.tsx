@@ -351,9 +351,19 @@ export function GroupChatPanel({
           </motion.div>
         ) : null}
       </AnimatePresence>
+      {/* PILL-VISIBLE derives from the panel's OWN expanded boolean, never
+          from chatStore's surface field (2026-11-01: "come back to the
+          group project — the collapsed group chat is not there, just a
+          gap"). surface==="group" with no group selected is a desync state
+          the close paths can leave behind; gating the pill on the surface
+          then hid BOTH surfaces (panel needs a group, pill needed the
+          surface) — a gap with nothing in it. With !expanded the pill
+          self-heals: it paints whenever no group is actually open, and
+          opening one re-syncs the surface. Same rule as the AI window: one
+          derived boolean drives the window and its pill. */}
       {activeProjectInGroup &&
       activeProjectGroups.length > 0 &&
-      stackSurface !== "group" ? (
+      !expanded ? (
         <GroupListTray
           groups={activeProjectGroups}
           activeId={active?.id ?? null}

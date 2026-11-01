@@ -732,9 +732,29 @@ export function setProjectActiveSession(projectId: string, sessionId: string | n
   for (const listener of projectActiveSessionListeners) listener();
 }
 
+// Reactive signal for the ACTIVE PROJECT. activeProjectRuntime is module
+// state — a project switch bumps no zustand field, so cross-project
+// surfaces that read activeProjectId() imperatively (AiMiniWindow's
+// group-pill strip reservation) had no way to notice a switch: their memos
+// froze at the last-computed project (2026-11-01: the frozen lift = the
+// empty-strip gap, or the window squatting on the pill's strip hiding it).
+const activeProjectListeners = new Set<() => void>();
+let activeProjectVersion = 0;
+export function subscribeActiveProject(listener: () => void): () => void {
+  activeProjectListeners.add(listener);
+  return () => activeProjectListeners.delete(listener);
+}
+export function getActiveProjectVersion(): number {
+  return activeProjectVersion;
+}
 export function setActiveProjectRuntime(runtime: import("@/modules/workspace").ProjectRuntime): void {
+  const changed = activeProjectRuntime?.id !== runtime.id;
   activeProjectRuntime = runtime;
   projectRuntimes.set(runtime.id, runtime);
+  if (changed) {
+    activeProjectVersion++;
+    for (const listener of activeProjectListeners) listener();
+  }
 }
 export function getActiveProjectRuntime(): import("@/modules/workspace").ProjectRuntime | undefined {
   return activeProjectRuntime;
