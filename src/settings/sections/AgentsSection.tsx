@@ -26,7 +26,7 @@ import {
   SparklesIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { SectionHeader } from "../components/SectionHeader";
 
 const ICON_OPTIONS: AgentIconId[] = [
@@ -325,23 +325,32 @@ function CustomInstructionsBlock({ value }: { value: string }) {
   const [draft, setDraft] = useState(value);
   const [savedTick, setSavedTick] = useState(0);
   const [errorTick, setErrorTick] = useState(0);
+  // TRUE only when the USER typed in the textarea since the last successful
+  // save. This is the sync gate — NOT `isDirty` (draft !== value): the
+  // section renders BEFORE hydration, so the mount sees value="" and
+  // draft=""; when the real value lands, draft("") !== value(real) made
+  // isDirty spuriously TRUE, the sync was skipped, and the textarea showed
+  // BLANK after every restart even though the instructions were safely on
+  // disk ("custom instructions disappear on reset") — worse, the phantom
+  // Save button would overwrite the stored value with the empty draft.
+  // A ref (not state): it must not re-render, only gate the effect.
+  const touchedRef = useRef(false);
 
   const isDirty = draft !== value;
 
-  // Store→draft sync. SettingsApp renders the section BEFORE init()
-  // resolves, so `value` arrives as "" and hydration lands later via the
-  // Tauri event. Sync on every value change EXCEPT while the user has
-  // unsaved edits — the old once-only sync latch captured the
-  // pre-hydration empty string and ignored the real value when it landed,
-  // so the textarea showed BLANK after every restart even though the
-  // instructions were safely on disk: it looked like they were lost.
+  // Store→draft sync: follow every external value change UNLESS the user
+  // has unsaved edits of their own (touched since last save). Hydration
+  // landing late is just an external change — sync it.
   useEffect(() => {
-    if (!isDirty) setDraft(value);
-  }, [value, isDirty]);
+    if (!touchedRef.current) setDraft(value);
+  }, [value]);
 
   const handleSave = async () => {
     try {
       await setCustomInstructions(draft);
+      // Saved: re-arm the external sync so a LATER change from another
+      // window (or a future re-hydrate) flows into the textarea again.
+      touchedRef.current = false;
       setErrorTick(0);
       setSavedTick((n) => n + 1);
     } catch (err) {
@@ -386,7 +395,12 @@ function CustomInstructionsBlock({ value }: { value: string }) {
       </div>
       <Textarea
         value={draft}
-        onChange={(e) => setDraft(e.target.value)}
+        onChange={(e) => {
+          // USER edit: arm the sync gate so late external values (hydrate,
+          // cross-window changes) never clobber what they're typing.
+          touchedRef.current = true;
+          setDraft(e.target.value);
+        }}
         disabled={!hydrated}
         placeholder={
           hydrated

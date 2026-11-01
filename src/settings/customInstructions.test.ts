@@ -82,7 +82,15 @@ describe("AgentsSection CustomInstructionsBlock (hydration + save UX)", () => {
     // ignored the real value when it landed (textarea showed blank after
     // restart).
     expect(section).not.toContain("hadFirstSync");
-    expect(section).toMatch(/if \(!isDirty\) setDraft\(value\);/);
+    // 2026-11-01 (r2): the isDirty GATE had the same blank-after-restart
+    // bug via a different route — mount sees value="" (pre-hydrate),
+    // draft=""; the real value lands → draft("") !== value(real) →
+    // isDirty spuriously TRUE → sync skipped → textarea blank (and the
+    // phantom Save button would overwrite the stored value with "").
+    // The gate is now touchedRef (set ONLY by user onChange, cleared on
+    // successful save) — hydration/cross-window changes always sync.
+    expect(section).toMatch(/if \(!touchedRef\.current\) setDraft\(value\);/);
+    expect(section).not.toMatch(/if \(!isDirty\) setDraft\(value\);/);
   });
 
   it("the textarea is gated on hydration — blank + 'Loading' placeholder until prefs land", () => {
