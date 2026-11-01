@@ -80,8 +80,8 @@ describe("tool context policy", () => {
   });
 });
 
-describe("excluded tools - desktop-UI-bound only", () => {
-  it("excludes exactly the desktop/session-bound tools", () => {
+describe("excluded tools - desktop-UI-bound + global user-surface", () => {
+  it("excludes exactly the desktop/session-bound and user-surface tools", () => {
     expect(PERSONA_EXCLUDED_TOOLS).toEqual([
       "get_terminal_output",
       "suggest_command",
@@ -102,6 +102,15 @@ describe("excluded tools - desktop-UI-bound only", () => {
       "settings",
       "settings_update",
       "settings_update_restricted",
+      // persona.ts - global agent registry mutations, no approval
+      "create_persona",
+      "set_persona",
+      // reminders.ts - persistent Telegram-pinging artifacts, no approval
+      "reminder_create",
+      "reminder_list",
+      "reminder_cancel",
+      // mcpTools.ts - global MCP config from a headless context
+      "mcp_add_server",
     ]);
   });
 

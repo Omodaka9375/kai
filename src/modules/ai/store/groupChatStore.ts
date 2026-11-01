@@ -870,6 +870,10 @@ async function runPersonaReply(
       ...PERSONA_EXCLUDED_TOOLS,
       "send_to_project",
       "project_status",
+      // invite_agent is coordinator-only via buildGroupTools' gate, but a
+      // persona must never invite agents even if that gate ever loosens -
+      // exclude by name, same defense-in-depth as the two above.
+      "invite_agent",
     ]);
     const allTools = buildTools(toolContext, mcpTools) as Record<
       string,
@@ -1004,8 +1008,9 @@ async function runPersonaReply(
       if (pendingCalls.length === 0) break;
       if (controller.signal.aborted) return;
       // Group ended/deleted while the run was mid-flight: deny the cards
-      // (denyPersonaApprovals already did on teardown) and stop - resuming
-      // would burn a model call for a dead group.
+      // (teardownSessionMachinery already denied this session's cards when
+      // the group ended/deleted) and stop - resuming would burn a model
+      // call for a dead group.
       const liveGroup = groups.get(g.id);
       if (!liveGroup || liveGroup.endedAt !== null) {
         denyPersonaApprovals(key);
@@ -1956,6 +1961,21 @@ function teardownSessionMachinery(sessionId: string): void {
     if (k.endsWith(`::${sessionId}`)) personaBusy.delete(k);
   }
   personaBusyBySession.delete(sessionId);
+  // Pending persona approval cards park the run at `await Promise.all` —
+  // the aborter sweep above does NOT resolve them (the round that armed the
+  // aborter already finished; a parked run sits between generateText calls).
+  // Deny + drop every card for this session so the parked run completes as
+  // denied instead of hanging forever with a phantom GroupPill badge
+  // (2026-11-01 audit M1: end/delete/remove previously never touched the
+  // registry — only the human Stop paths did, via abortPersonaMachinery).
+  let droppedCards = false;
+  for (const [id, entry] of [...personaApprovals.entries()]) {
+    if (!entry.sessionKey.endsWith(`::${sessionId}`)) continue;
+    personaApprovals.delete(id);
+    entry.decide(false);
+    droppedCards = true;
+  }
+  if (droppedCards) notify();
   const timer = coalesceTimers.get(sessionId);
   if (timer) {
     clearTimeout(timer);

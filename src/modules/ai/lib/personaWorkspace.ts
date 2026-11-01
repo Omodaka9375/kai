@@ -118,14 +118,25 @@ export const resolvePersonaPathForTest = (requested: string, root: string) =>
     : collapse(requested);
 
 /**
- * Desktop-UI-bound tools a headless persona CANNOT meaningfully use. They
- * act on the foreground window's live surfaces (the visible terminal, the
- * user's display, the status-bar radio, the preview tab) or on machinery
- * keyed to a real Chat session (watches inject into the session's chat;
- * a persona has no chat). Removing them keeps the model from calling a
- * tool whose result would always be "unavailable" - and, for screen
- * capture, from grabbing the display without the interactive context a
- * foreground agent has.
+ * Tools a headless persona must not reach. Two classes:
+ *
+ * 1. Desktop-UI-bound tools a headless run CANNOT meaningfully use. They
+ *    act on the foreground window's live surfaces (the visible terminal,
+ *    the user's display, the status-bar radio, the preview tab) or on
+ *    machinery keyed to a real Chat session (watches inject into the
+ *    session's chat; a persona has no chat). Removing them keeps the model
+ *    from calling a tool whose result would always be "unavailable" - and,
+ *    for screen capture, from grabbing the display without the interactive
+ *    context a foreground agent has.
+ *
+ * 2. Global user-surface tools that mutate state OUTLIVING the group run
+ *    with no approval card in between (2026-11-01 audit M2): settings
+ *    (global app config), create_persona/set_persona (the global agent
+ *    registry - a headless participant re-writing the user's personas),
+ *    reminder_* (persistent, restart-surviving, Telegram-pinging
+ *    notifications), mcp_add_server (global MCP config). A headless group
+ *    participant has no business re-configuring the user's app or leaving
+ *    scheduled artifacts behind.
  */
 export const PERSONA_EXCLUDED_TOOLS: readonly string[] = [
   // terminal.ts - active-tab surfaces
@@ -153,6 +164,21 @@ export const PERSONA_EXCLUDED_TOOLS: readonly string[] = [
   "settings",
   "settings_update",
   "settings_update_restricted",
+  // persona.ts - create_persona/set_persona mutate the GLOBAL agent
+  // registry (useAgentsStore.upsert) and persist a session preference;
+  // needsApproval is false on both. Same user-surface class as settings.
+  "create_persona",
+  "set_persona",
+  // reminders.ts - persistent, restart-surviving, Telegram-pinging
+  // scheduled notifications, all auto-execute. A headless participant
+  // must not leave scheduled artifacts behind (radio/voice class).
+  "reminder_create",
+  "reminder_list",
+  "reminder_cancel",
+  // mcpTools.ts - mutates global MCP server config from a headless
+  // context (defense-in-depth: it is approval-gated, but the card would
+  // land in the group panel with no desktop context).
+  "mcp_add_server",
 ];
 
 /**
