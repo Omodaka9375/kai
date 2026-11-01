@@ -80,6 +80,23 @@ describe("composer @-mention targeting (replaces the All dropdown)", () => {
     expect(panel).toMatch(/"Escape"[\s\S]{0,120}setMention/);
   });
 
+  it("the picker is a real positioned dropdown (not an anchorless Radix Popover)", () => {
+    // 2026-11-01 fix: the picker rendered as <Popover open> with NO
+    // PopoverTrigger/PopoverAnchor — Radix PopoverContent without an anchor
+    // renders unpositioned in the portal, so the dropdown was INVISIBLE
+    // ("@ mention doesn't work visually, there is no dropdown"). The picker
+    // must be a plain absolutely-positioned div inside the composer strip.
+    const picker = panel.slice(
+      panel.indexOf("role=\"listbox\"") - 40,
+      panel.indexOf("role=\"listbox\"") + 700,
+    );
+    expect(picker).toMatch(/absolute bottom-full/);
+    expect(picker).toMatch(/role="listbox"/);
+    // The anchorless form must not return: <Popover open={true}> with no
+    // trigger wrapping PopoverContent.
+    expect(panel).not.toContain("<Popover open={true}>");
+  });
+
   it("the picker offers All (clear targeting) plus participants", () => {
     expect(panel).toContain("All — send to everyone");
     expect(panel).toMatch(/ParticipantDot participant=\{/);

@@ -932,43 +932,50 @@ function Composer({
       )}
       <div className="relative flex items-center gap-2">
       {mention.open && mentionList.length > 0 ? (
-        <Popover open={true}>
-          {/* @-mention picker: anchored under the composer strip (not the
-              caret — absolute anchoring inside a 1-row textarea is not worth
-              the complexity; the list is small and keyboard-driven). */}
-          <PopoverContent
-            align="start"
-            className="w-52 gap-0 p-1 text-xs"
-            onOpenAutoFocus={(e) => e.preventDefault()}
-            onEscapeKeyDown={() => setMention((m) => ({ ...m, open: false }))}
-          >
-            {mentionList.map((c, i) => (
-              <button
-                key={"projectId" in c ? c.projectId : c.id}
-                type="button"
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  pickMention(c.name);
-                }}
-                onMouseEnter={() => {
-                  mentionIndexRef.current = i;
-                  setMentionIndex(i);
-                }}
-                className={cn(
-                  "flex w-full items-center justify-between rounded px-2 py-1.5 text-left hover:bg-accent",
-                  i === mentionIndex && "bg-accent",
-                )}
-              >
-                <span className="truncate">
-                  {"projectId" in c ? `@${c.name}` : "All — send to everyone"}
-                </span>
-                {"projectId" in c ? (
-                  <ParticipantDot participant={c} />
-                ) : null}
-              </button>
-            ))}
-          </PopoverContent>
-        </Popover>
+        // @-mention picker: an absolutely-positioned dropdown INSIDE the
+        // composer strip (bottom-full = above the textarea), NOT a Radix
+        // Popover. The 2026-10-31 cut used <Popover open> with NO
+        // trigger/anchor — Radix PopoverContent has no anchor element, so
+        // the portal rendered unpositioned and the picker was INVISIBLE
+        // ("no dropdown in group chat input"). A plain absolute div anchored
+        // in the relative strip is simpler and always visible; the picker's
+        // buttons use onMouseDown preventDefault so focus never leaves the
+        // textarea (no blur-close race).
+        <div
+          role="listbox"
+          aria-label="Mention picker"
+          className={cn(
+            "absolute bottom-full left-0 z-50 mb-1 w-52 overflow-hidden rounded-lg border border-border/70 bg-popover p-1 text-xs shadow-lg",
+          )}
+        >
+          {mentionList.map((c, i) => (
+            <button
+              key={"projectId" in c ? c.projectId : c.id}
+              type="button"
+              role="option"
+              aria-selected={i === mentionIndex}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                pickMention(c.name);
+              }}
+              onMouseEnter={() => {
+                mentionIndexRef.current = i;
+                setMentionIndex(i);
+              }}
+              className={cn(
+                "flex w-full items-center justify-between rounded px-2 py-1.5 text-left hover:bg-accent",
+                i === mentionIndex && "bg-accent",
+              )}
+            >
+              <span className="truncate">
+                {"projectId" in c ? `@${c.name}` : "All — send to everyone"}
+              </span>
+              {"projectId" in c ? (
+                <ParticipantDot participant={c} />
+              ) : null}
+            </button>
+          ))}
+        </div>
       ) : null}
       <textarea
         ref={textRef}
