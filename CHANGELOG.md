@@ -10,6 +10,7 @@ All notable changes to the KAI terminal emulator project are documented in this 
 - Group chats: agents learn each other's project.
 - Group chats: the header's expand toggle moved to the far right, matching the AI mini window.
 - Settings: the agent can now read and change KAI's settings — theme, editor, terminal, and more — when you ask.
+- Settings: the agent can also switch the app's color palette.
 
 ---
 

@@ -44,6 +44,7 @@ vi.mock("@/modules/settings/store", () => ({
   setTerminalWebglEnabled: vi.fn(async () => undefined),
   setTheme: vi.fn(async () => undefined),
   setThinkingMode: vi.fn(async () => undefined),
+  setUiThemeId: vi.fn(async () => undefined),
   setVimMode: vi.fn(async () => undefined),
   setZoomLevel: vi.fn(async () => undefined),
   TERMINAL_FONT_SIZE_MAX: 32,
@@ -57,6 +58,7 @@ vi.mock("@/modules/settings/preferences", () => ({
   usePreferencesStore: {
     getState: () => ({
       theme: "system",
+      uiThemeId: "default",
       editorTheme: "atomone",
       vimMode: false,
       editorWordWrap: true,
@@ -78,6 +80,14 @@ vi.mock("@/modules/settings/preferences", () => ({
 }));
 vi.mock("@/modules/ai/config", () => ({
   DEFAULT_MODEL_ID: "anthropic/claude-4.5-sonnet",
+}));
+vi.mock("@/modules/theme/palettes", () => ({
+  UI_THEMES: [
+    { id: "default", label: "Kai" },
+    { id: "tokyo-night", label: "Tokyo Night" },
+    { id: "nord", label: "Nord" },
+    { id: "emerald", label: "Emerald" },
+  ],
 }));
 vi.mock("../lib/audit", () => ({
   auditAppend: vi.fn(() => undefined),
@@ -112,6 +122,14 @@ describe("settings (read) - coverage & options", () => {
       options: Record<string, unknown>;
     };
     expect(out.options.theme).toEqual(["system", "light", "dark"]);
+    // The color PALETTE registry (uiThemeId) rides along with labels.
+    expect(out.options.uiTheme).toEqual([
+      { id: "default", label: "Kai" },
+      { id: "tokyo-night", label: "Tokyo Night" },
+      { id: "nord", label: "Nord" },
+      { id: "emerald", label: "Emerald" },
+    ]);
+    expect(out.settings.uiThemeId).toBe("default");
     expect(out.options.editorTheme).toEqual([
       "atomone",
       "aura",
@@ -149,17 +167,20 @@ describe("settings (read) - coverage & options", () => {
 });
 
 describe("settings_update - cosmetics auto-execute", () => {
-  it("applies theme + editor theme + vim mode in one call", async () => {
+  it("applies palette + theme + editor theme + vim mode in one call", async () => {
     const store = await import("@/modules/settings/store");
     const tools = buildSettingsTools({} as never);
     const out = (await execLoose(tools.settings_update, {
+      uiThemeId: "emerald",
       theme: "dark",
       editorTheme: "nord",
       vimMode: true,
     })) as { changed: string[] | null; settings: Record<string, unknown> };
+    expect(vi.mocked(store.setUiThemeId)).toHaveBeenCalledWith("emerald");
     expect(vi.mocked(store.setTheme)).toHaveBeenCalledWith("dark");
     expect(vi.mocked(store.setEditorTheme)).toHaveBeenCalledWith("nord");
     expect(vi.mocked(store.setVimMode)).toHaveBeenCalledWith(true);
+    expect(out.changed).toContain("uiThemeId=emerald");
     expect(out.changed).toContain("theme=dark");
     expect(out.changed).toContain("editorTheme=nord");
     expect(out.changed).toContain("vimMode=true");

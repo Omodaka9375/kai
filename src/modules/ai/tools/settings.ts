@@ -34,6 +34,7 @@
 
 import { z } from "zod";
 import { tool } from "ai";
+import { UI_THEMES } from "@/modules/theme/palettes";
 import {
   EDITOR_THEMES,
   setAutostart,
@@ -50,6 +51,7 @@ import {
   setTerminalWebglEnabled,
   setTheme,
   setThinkingMode,
+  setUiThemeId,
   setVimMode,
   setZoomLevel,
   TERMINAL_FONT_SIZE_MAX,
@@ -85,6 +87,7 @@ function currentSettings() {
   const p = usePreferencesStore.getState();
   return {
     theme: p.theme,
+    uiThemeId: p.uiThemeId,
     editorTheme: p.editorTheme,
     vimMode: p.vimMode,
     editorWordWrap: p.editorWordWrap,
@@ -117,6 +120,7 @@ export function buildSettingsTools(_ctx: ToolContext) {
           settings: currentSettings(),
           options: {
             theme: THEMES,
+            uiTheme: UI_THEMES.map((t) => ({ id: t.id, label: t.label })),
             editorTheme: EDITOR_THEMES,
             defaultShell: SHELLS,
             thinkingMode: THINKING_MODES,
@@ -136,11 +140,17 @@ export function buildSettingsTools(_ctx: ToolContext) {
     settings_update: tool({
       needsApproval: false,
       description:
-        "Change KAI's APPEARANCE and editor/terminal comfort settings: theme (system/light/dark), editorTheme (one of the listed editor themes), vimMode, editorWordWrap, showHidden, terminalWebglEnabled, terminalFontSize, terminalScrollback, zoomLevel, restoreWindowState. All reversible cosmetics - call `settings` first to see current values and options. Applies immediately across windows.",
+        "Change KAI's APPEARANCE and editor/terminal comfort settings: uiThemeId (the app's color palette: emerald, nord, tokyo-night, catppuccin, dracula, rose-pine, amber, or default), theme (light/dark/system mode), editorTheme (the code editor's theme), vimMode, editorWordWrap, showHidden, terminalWebglEnabled, terminalFontSize, terminalScrollback, zoomLevel, restoreWindowState. All reversible cosmetics - call `settings` first to see current values and options. Applies immediately across windows.",
       inputSchema: z.object({
+        uiThemeId: z
+          .enum(UI_THEMES.map((t) => t.id) as [string, ...string[]])
+          .describe(
+            "Color palette for the whole app (emerald, nord, tokyo-night, catppuccin, dracula, rose-pine, amber, or default for the stock Kai palette).",
+          )
+          .optional(),
         theme: z
           .enum(THEMES)
-          .describe("UI color scheme: system, light, or dark.")
+          .describe("Light/dark mode: system, light, or dark.")
           .optional(),
         editorTheme: z
           .enum(EDITOR_THEMES)
@@ -189,6 +199,10 @@ export function buildSettingsTools(_ctx: ToolContext) {
         const int = (v: number, min: number, max: number, def: number) =>
           clampNumber(v, min, max, def);
 
+        if (input.uiThemeId !== undefined && input.uiThemeId !== p.uiThemeId) {
+          await setUiThemeId(input.uiThemeId);
+          changed.push(`uiThemeId=${input.uiThemeId}`);
+        }
         if (input.theme !== undefined && input.theme !== p.theme) {
           await setTheme(input.theme);
           changed.push(`theme=${input.theme}`);
