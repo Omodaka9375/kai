@@ -6,8 +6,8 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ## [2.1.2]
 
-- Group chats: a slow participant no longer stalls the conversation — the 90s reply-timeout always wakes the coordinator (even when nobody answered yet), and a reply landing after the timeout is delivered immediately instead of being silently dropped while the group waits forever.
-- Group chats: agents learn each other's project folders — the delivery roster carries `Name (path)` (personas marked "no project folder"), and persona prompts list the group's project folders, so cross-project reads need no "where is the repo?" round-trip.
+- Group chats: a slow participant no longer stalls the conversation.
+- Group chats: agents learn each other's project.
 - Group chats: the header's expand toggle moved to the far right, matching the AI mini window.
 
 ---
