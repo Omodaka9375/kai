@@ -475,21 +475,6 @@ function PanelHeader({
             </Button>
           </>
         )}
-        <Button
-          type="button"
-          size="icon"
-          variant="ghost"
-          className="size-5"
-          aria-label={expanded ? "Collapse to mini window" : "Expand to panel"}
-          title={expanded ? "Collapse to mini window" : "Expand to panel"}
-          onClick={onToggleExpand}
-        >
-          <HugeiconsIcon
-            icon={expanded ? ArrowShrink01Icon : ArrowExpand01Icon}
-            size={11}
-            strokeWidth={1.75}
-          />
-        </Button>
         {/* Minimize ( _ ), NOT close: hands the expanded slot back to the
             AI mini window but the group keeps running — the tray pill at
             the bottom of the gutter re-opens it. Ending the group lives on
@@ -504,6 +489,23 @@ function PanelHeader({
           onClick={onClose}
         >
           <HugeiconsIcon icon={MinusSignIcon} size={11} strokeWidth={1.75} />
+        </Button>
+        {/* Expand toggle LAST on the right — same trailing position as the
+            AI mini window's header (consistency ask, 2026-11-01). */}
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          className="size-5"
+          aria-label={expanded ? "Collapse to mini window" : "Expand to panel"}
+          title={expanded ? "Collapse to mini window" : "Expand to panel"}
+          onClick={onToggleExpand}
+        >
+          <HugeiconsIcon
+            icon={expanded ? ArrowShrink01Icon : ArrowExpand01Icon}
+            size={11}
+            strokeWidth={1.75}
+          />
         </Button>
       </div>
     </div>
