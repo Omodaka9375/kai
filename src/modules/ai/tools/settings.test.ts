@@ -93,6 +93,11 @@ vi.mock("../lib/audit", () => ({
   auditAppend: vi.fn(() => undefined),
   AUDIT_KINDS: { sandboxChange: "sandbox.change" },
 }));
+vi.mock("@tauri-apps/plugin-autostart", () => ({
+  enable: vi.fn(async () => undefined),
+  disable: vi.fn(async () => undefined),
+  isEnabled: vi.fn(async () => false),
+}));
 
 import { buildSettingsTools } from "./settings";
 
@@ -214,21 +219,45 @@ describe("settings_update - cosmetics auto-execute", () => {
 });
 
 describe("settings_update_restricted - behavioral, approval-gated", () => {
-  it("applies shell + instructions + autostart in one call", async () => {
+  it("applies shell + instructions + autostart (OS login item + pref) in one call", async () => {
     const store = await import("@/modules/settings/store");
+    const plugin = await import("@tauri-apps/plugin-autostart");
     const tools = buildSettingsTools({} as never);
     const out = (await execLoose(tools.settings_update_restricted, {
       defaultShell: "pwsh",
       customInstructions: "Prefer pnpm.",
       autostart: true,
-    })) as { changed: string[] | null };
+    })) as { changed: string[] | null; errors: string[] | null };
     expect(vi.mocked(store.setDefaultShell)).toHaveBeenCalledWith("pwsh");
     expect(vi.mocked(store.setCustomInstructions)).toHaveBeenCalledWith(
       "Prefer pnpm.",
     );
+    // The OS registration must actually happen - the pref alone is
+    // reverted by Settings' mount-reconcile (GeneralSection).
+    expect(vi.mocked(plugin.enable)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(store.setAutostart)).toHaveBeenCalledWith(true);
+    expect(out.errors).toBeNull();
     expect(out.changed).toContain("defaultShell=pwsh");
     expect(out.changed).toContain("customInstructions=<updated>");
+    expect(out.changed).toContain("autostart=true");
+  });
+
+  it("autostart failure: OS call rejects -> error reported, pref NOT written", async () => {
+    const store = await import("@/modules/settings/store");
+    const plugin = await import("@tauri-apps/plugin-autostart");
+    vi.mocked(plugin.enable).mockRejectedValueOnce(
+      new Error("OS refused: policy"),
+    );
+    const tools = buildSettingsTools({} as never);
+    const out = (await execLoose(tools.settings_update_restricted, {
+      autostart: true,
+    })) as { changed: string[] | null; errors: string[] | null; hint: string };
+    expect(out.changed).toBeNull();
+    expect(out.errors?.[0]).toContain("OS refused: policy");
+    // Crucially the pref is NOT persisted - otherwise Settings' reconcile
+    // would silently flip it back and the reported success was a lie.
+    expect(vi.mocked(store.setAutostart)).not.toHaveBeenCalled();
+    expect(out.hint).toContain("failed");
   });
 
   it("clamps subagentMaxSteps to 1-200", async () => {
@@ -274,6 +303,9 @@ describe("trust-boundary source pins", () => {
       "openaiCompatibleBaseURL",
       "openaiCompatibleModelId",
       "shortcuts",
+      // DEAD pref: the Rust side registers window-state unconditionally;
+      // the tool must not pretend to flip it.
+      "restoreWindowState",
     ]) {
       for (const block of schemaBlocks) {
         expect(block, `schema must not accept "${banned}"`).not.toContain(

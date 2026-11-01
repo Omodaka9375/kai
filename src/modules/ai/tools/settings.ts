@@ -22,6 +22,9 @@
  *     exfiltration vector: the next request ships the conversation to the
  *     new URL)
  *   - shortcuts, sidebar/window layout, recent projects, updater internals
+ *   - restoreWindowState (DEAD pref: the Rust side registers
+ *     tauri_plugin_window_state unconditionally and never reads it - claiming
+ *     to change it would be a lie; surfaced read-only in the read tool)
  *
  * Writes go through the store setters (persist + cross-window event), so
  * the main window and Settings window both update live. Every change is
@@ -34,6 +37,10 @@
 
 import { z } from "zod";
 import { tool } from "ai";
+import {
+  disable as disableOsAutostart,
+  enable as enableOsAutostart,
+} from "@tauri-apps/plugin-autostart";
 import { UI_THEMES } from "@/modules/theme/palettes";
 import {
   EDITOR_THEMES,
@@ -43,7 +50,6 @@ import {
   setDefaultShell,
   setEditorTheme,
   setEditorWordWrap,
-  setRestoreWindowState,
   setShowHidden,
   setSubagentMaxSteps,
   setTerminalFontSize,
@@ -96,6 +102,7 @@ function currentSettings() {
     terminalFontSize: p.terminalFontSize,
     terminalScrollback: p.terminalScrollback,
     zoomLevel: p.zoomLevel,
+    // Display-only: this pref is not wired (see the NEVER list above).
     restoreWindowState: p.restoreWindowState,
     defaultShell: p.defaultShell,
     customInstructions: p.customInstructions,
@@ -129,10 +136,12 @@ export function buildSettingsTools(_ctx: ToolContext) {
           },
           settable: {
             cosmetic:
-              "theme, editorTheme, vimMode, editorWordWrap, showHidden, terminalWebglEnabled, terminalFontSize, terminalScrollback, zoomLevel, restoreWindowState (settings_update - no approval)",
+              "uiThemeId, theme, editorTheme, vimMode, editorWordWrap, showHidden, terminalWebglEnabled, terminalFontSize, terminalScrollback, zoomLevel (settings_update - no approval)",
             restricted:
-              "defaultShell, customInstructions, autostart, defaultModelId, thinkingMode, subagentMaxSteps (settings_update_restricted - needs approval)",
+              "defaultShell, customInstructions, autostart (registers the OS login item), defaultModelId, thinkingMode, subagentMaxSteps (settings_update_restricted - needs approval)",
           },
+          notSettable:
+            "restoreWindowState is displayed but cannot be changed (not currently wired beyond the Settings UI); networkPolicy, commit signing, and model endpoint settings are user-only.",
         };
       },
     }),
@@ -140,7 +149,7 @@ export function buildSettingsTools(_ctx: ToolContext) {
     settings_update: tool({
       needsApproval: false,
       description:
-        "Change KAI's APPEARANCE and editor/terminal comfort settings: uiThemeId (the app's color palette: emerald, nord, tokyo-night, catppuccin, dracula, rose-pine, amber, or default), theme (light/dark/system mode), editorTheme (the code editor's theme), vimMode, editorWordWrap, showHidden, terminalWebglEnabled, terminalFontSize, terminalScrollback, zoomLevel, restoreWindowState. All reversible cosmetics - call `settings` first to see current values and options. Applies immediately across windows.",
+        "Change KAI's APPEARANCE and editor/terminal comfort settings: uiThemeId (the app's color palette: emerald, nord, tokyo-night, catppuccin, dracula, rose-pine, amber, or default), theme (light/dark/system mode), editorTheme (the code editor's theme), vimMode, editorWordWrap, showHidden, terminalWebglEnabled, terminalFontSize, terminalScrollback, zoomLevel. All reversible cosmetics - call `settings` first to see current values and options. Applies immediately across windows.",
       inputSchema: z.object({
         uiThemeId: z
           .enum(UI_THEMES.map((t) => t.id) as [string, ...string[]])
@@ -187,10 +196,6 @@ export function buildSettingsTools(_ctx: ToolContext) {
         zoomLevel: z
           .number()
           .describe("App zoom (0.5-2.0, 1 = default).")
-          .optional(),
-        restoreWindowState: z
-          .boolean()
-          .describe("Restore window size/position on launch.")
           .optional(),
       }),
       execute: async (input) => {
@@ -272,13 +277,6 @@ export function buildSettingsTools(_ctx: ToolContext) {
           await setZoomLevel(v);
           changed.push(`zoomLevel=${v}`);
         }
-        if (
-          input.restoreWindowState !== undefined &&
-          input.restoreWindowState !== p.restoreWindowState
-        ) {
-          await setRestoreWindowState(input.restoreWindowState);
-          changed.push(`restoreWindowState=${input.restoreWindowState}`);
-        }
 
         if (changed.length > 0) {
           auditAppend(
@@ -326,7 +324,9 @@ export function buildSettingsTools(_ctx: ToolContext) {
           .optional(),
         thinkingMode: z
           .enum(THINKING_MODES)
-          .describe("Extended thinking: off, low, medium, or high.")
+          .describe(
+            "Extended thinking (off/low/medium/high). This is the GLOBAL default - a per-model override set in Settings > Models takes precedence for that model.",
+          )
           .optional(),
         subagentMaxSteps: z
           .number()
@@ -335,6 +335,8 @@ export function buildSettingsTools(_ctx: ToolContext) {
       }),
       execute: async (input) => {
         const changed: string[] = [];
+        // Per-key failures (OS-side calls can fail) - reported, never swallowed.
+        const errors: string[] = [];
         const p = usePreferencesStore.getState();
 
         if (
@@ -354,8 +356,20 @@ export function buildSettingsTools(_ctx: ToolContext) {
           );
         }
         if (input.autostart !== undefined && input.autostart !== p.autostart) {
-          await setAutostart(input.autostart);
-          changed.push(`autostart=${input.autostart}`);
+          // The pref alone is a LIE: the OS login item is registered by the
+          // autostart PLUGIN, and Settings' mount-reconcile overwrites the
+          // pref back to the actual OS state. Register/unregister for real
+          // (same calls GeneralSection's toggle makes), then persist.
+          try {
+            if (input.autostart) await enableOsAutostart();
+            else await disableOsAutostart();
+            await setAutostart(input.autostart);
+            changed.push(`autostart=${input.autostart}`);
+          } catch (e) {
+            errors.push(
+              `autostart: ${e instanceof Error ? e.message : String(e)}`,
+            );
+          }
         }
         if (
           input.defaultModelId !== undefined &&
@@ -391,11 +405,14 @@ export function buildSettingsTools(_ctx: ToolContext) {
 
         return {
           changed: changed.length > 0 ? changed : null,
+          errors: errors.length > 0 ? errors : null,
           settings: currentSettings(),
           hint:
-            changed.length === 0
-              ? "Nothing changed. Call `settings` to see current values."
-              : "Applied. Behavioral changes take effect per their scope (new terminals, next launches, future runs).",
+            errors.length > 0
+              ? "Some changes failed - see errors."
+              : changed.length === 0
+                ? "Nothing changed. Call `settings` to see current values."
+                : "Applied. Behavioral changes take effect per their scope (new terminals, next launches, future runs).",
         };
       },
     }),
