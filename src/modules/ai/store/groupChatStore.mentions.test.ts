@@ -360,6 +360,21 @@ describe("agents LEARN the convention (prompt surfaces)", () => {
     expect(store).toMatch(/text: payload,\s*\n\s*at: Date\.now\(\),/);
   });
 
+  it("the roster names member ROOTS so project agents can find peer repos (2026-11-01)", () => {
+    // "how about between projects agents" — the participant payload is a
+    // project agent's ONLY recurring group-teaching surface (user sends,
+    // send_to_project, and routed @-mentions all ride it). Roots ride the
+    // roster entries (`Name (path)`), personas are marked folder-less, and
+    // a read-for-context sentence makes the paths actionable.
+    expect(store).toMatch(
+      /isPersonaParticipantId\(x\.projectId\)\s*\?\s*`\$\{x\.name\} \(persona — no project folder\)/,
+    );
+    expect(store).toMatch(/x\.root\s*\?\s*`\$\{x\.name\} \(\$\{x\.root\}\)/);
+    expect(store).toMatch(
+      /Member project folders above are readable for context/,
+    );
+  });
+
   it("the persona system prompt teaches the roster + convention", () => {
     expect(store).toMatch(/Group members: .*\$\{g\.participants/);
   });

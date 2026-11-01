@@ -652,7 +652,13 @@ function deliverToParticipant(
   // of only answering the coordinator. Keep it terse — one roster line.
   const roster = g.participants
     .filter((x) => x.sessionId !== p.sessionId)
-    .map((x) => (isPersonaParticipantId(x.projectId) ? x.name : x.name))
+    .map((x) =>
+      isPersonaParticipantId(x.projectId)
+        ? `${x.name} (persona — no project folder)`
+        : x.root
+          ? `${x.name} (${x.root})`
+          : x.name,
+    )
     .join(", ");
   const exampleName =
     g.participants.find((x) => x.sessionId !== p.sessionId)?.name ?? "Name";
@@ -665,7 +671,17 @@ function deliverToParticipant(
     g.coordinator.kind === "agent" && p.projectId !== g.coordinator.projectId
       ? ` Address the group's coordinator as \`@coordinator\` — it is delivered like any member mention.`
       : "";
-  const mentionHint = `\n[group members: ${roster}] You may @-mention another member by name (e.g. \`@${exampleName} ...\`) — your reply is delivered to them.${coordTeaching}`;
+  // MEMBER ROOTS (2026-11-01, "between projects agents"): same awareness
+  // the persona prompt got — a project agent asked to "check alpha's
+  // build" needs the PATH, not just the name. Read-for-context framing:
+  // each agent still works inside its own repo (the containment rule);
+  // reads elsewhere were always possible, they just had no address.
+  const rootsHint = g.participants.some(
+    (x) => x.sessionId !== p.sessionId && x.root,
+  )
+    ? " Member project folders above are readable for context when a task needs it — your own repo stays your workspace."
+    : "";
+  const mentionHint = `\n[group members: ${roster}] You may @-mention another member by name (e.g. \`@${exampleName} ...\`) — your reply is delivered to them.${coordTeaching}${rootsHint}`;
   const payload = prefixed + mentionHint;
   // Busy check: a LIVE chat object is the source of truth — the mirrored
   // agentMeta can go stale (the stop path historically never patched it
