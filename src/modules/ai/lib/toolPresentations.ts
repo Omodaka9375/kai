@@ -316,6 +316,22 @@ const REGISTRY: Record<string, ToolPresentation> = {
     fence: false,
     remoteSurface: false,
   },
+  create_persona: {
+    label: "New persona",
+    status: (a) => `Creating ${String(a.name ?? "persona")} persona`,
+    summary: (a) => str(a, "instructions"),
+    effect: "COMMITTED",
+    fence: false,
+    remoteSurface: false,
+  },
+  set_persona: {
+    label: "Switch persona",
+    status: (a) => `Switching to ${String(a.persona ?? "persona")}`,
+    summary: (a) => str(a, "persona"),
+    effect: "COMMITTED",
+    fence: false,
+    remoteSurface: false,
+  },
   project_status: {
     label: "Group status",
     status: (a) => `Checking ${String(a.project ?? "project")}`,

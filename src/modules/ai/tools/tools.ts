@@ -23,6 +23,7 @@ import { buildGmailTools } from "./gmail";
 import { buildSocialTools } from "./social";
 import { buildReminderTools } from "./reminders";
 import { buildPlatformReachTools } from "./platformReach";
+import { buildPersonaTools } from "./persona";
 
 export { resolvePath, type ToolContext } from "./context";
 
@@ -45,6 +46,7 @@ export function buildCoreTools(ctx: import("./context").ToolContext) {
     ...buildRadioTools(ctx),
     ...buildVoiceTools(ctx),
     ...buildGroupTools(ctx),
+    ...buildPersonaTools(ctx),
     ...buildGmailTools(ctx),
     ...buildSocialTools(ctx),
   } as const;
