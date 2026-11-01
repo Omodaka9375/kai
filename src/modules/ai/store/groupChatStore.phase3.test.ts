@@ -117,8 +117,13 @@ describe("mirror gate — takeReplyProvision", () => {
       deliveryStart,
       src.indexOf("/** Fan-out copy inside sendGroupMessage"),
     );
-    // Current-wins re-resolution, not record-wins.
-    expect(delivery).toContain("getProjectActiveSession(p.projectId) || p.sessionId");
+    // Current-wins re-resolution, not record-wins. The 2026-11-02 closed-
+    // project guard wraps the same current-first contract: the frozen id
+    // is only trusted while the project is OPEN (isProjectOpen gate).
+    expect(delivery).toContain("getProjectActiveSession(p.projectId)");
+    expect(delivery).toContain(
+      "isProjectOpen(p.projectId) ? p.sessionId : \"\"",
+    );
     // The old record-wins form must not return.
     expect(delivery).not.toContain("p.sessionId || getProjectActiveSession");
     // Record re-pointing keeps the group tracking the real session.

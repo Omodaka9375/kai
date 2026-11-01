@@ -709,6 +709,16 @@ function persistActiveSessionId(id: string | null): void {
 export function getProjectActiveSession(projectId: string): string | null {
   return projectActiveSessions.get(projectId) ?? null;
 }
+/** True when the project workspace is currently OPEN (runtime registered).
+ *  Group deliveries use this to distinguish "open but no active session
+ *  YET" (safe to deliver into the persisted session id — the project's
+ *  bridge is mounting) from "project CLOSED since the record was written"
+ *  (the persisted id is stale — delivering into it fabricates a chat no
+ *  bridge watches: the run fires, the reply never mirrors, and the panel
+ *  still reports "delivered"). 2026-11-02 group-chat audit SHOULD. */
+export function isProjectOpen(projectId: string): boolean {
+  return projectRuntimes.has(projectId);
+}
 /** The currently ACTIVE project id (null when no project is open).
  *  Used by cross-project surfaces (watch firings) to decide whether an
  *  event lands in the project the user is looking at. */

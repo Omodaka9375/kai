@@ -50,8 +50,13 @@ vi.mock("./chatStore", async (importOriginal) => {
     },
     getSessionAgentMeta: () => ({ status: "idle" }),
     getProjectActiveSession: (id: string) => activeSessions[id] ?? null,
+    // 2026-11-02 closed-project gate: projects default to OPEN (the running
+    // app registers every open workspace); tests may delete to simulate a
+    // closed project.
+    isProjectOpen: (id: string) => openProjects.has(id),
   };
 });
+const openProjects = new Set<string>(["a", "b", "c"]);
 
 // The persona reply path builds its model through lib/agent's dynamic import.
 // Mock it file-wide: a slow-throwing build keeps the persona BUSY long enough
@@ -90,6 +95,10 @@ beforeEach(() => {
   activeSessions["b"] = "active-b";
   activeSessions["c"] = "active-c";
   delete activeSessions["nosession"];
+  openProjects.clear();
+  openProjects.add("a");
+  openProjects.add("b");
+  openProjects.add("c");
 });
 
 describe("group chat store — lifecycle", () => {
@@ -189,6 +198,7 @@ describe("group chat store — lifecycle", () => {
   });
 
   it("names undeliverable participants in a system note instead of silently dropping", async () => {
+    // OPEN project, no active session yet: the "open the AI panel" note.
     activeSessions["b"] = null;
     const g = await createGroupChat(
       { projectId: "a", sessionId: "", root: "/a", name: "alpha" },
@@ -205,6 +215,32 @@ describe("group chat store — lifecycle", () => {
       expect.stringContaining("hello?"),
     );
     void appendGroupMessage;
+  });
+
+  it("names CLOSED projects in their own system note and never delivers into their frozen session", async () => {
+    // 2026-11-02 audit SHOULD: a closed project's persisted session id is a
+    // black hole — injecting would fabricate a chat no bridge watches.
+    activeSessions["b"] = null;
+    openProjects.delete("b");
+    const g = await createGroupChat(
+      { projectId: "a", sessionId: "", root: "/a", name: "alpha" },
+      [{ projectId: "b", root: "/b", name: "beta" }],
+    );
+    // Pin b's record to a stale id so the guard is what saves us, not the
+    // empty record.
+    const live0 = getGroup(g!.id)!;
+    live0.participants[1]!.sessionId = "frozen-dead-session";
+    const out = await sendGroupMessage(g!.id, "hello?");
+    expect(out.find((d) => d.projectId === "b")!.sessionId).toBe("");
+    const live = getGroup(g!.id)!;
+    expect(
+      live.messages.some(
+        (m) =>
+          m.from === "system" &&
+          m.text.includes("beta is not open in this window"),
+      ),
+    ).toBe(true);
+    expect(injectMessageMock).not.toHaveBeenCalledWith("frozen-dead-session", expect.anything());
   });
 
   it("deleteGroupChat removes the group entirely (live or ended), end keeps it", async () => {

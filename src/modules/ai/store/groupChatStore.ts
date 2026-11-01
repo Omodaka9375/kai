@@ -4,6 +4,7 @@ import {
   getChat,
   getProjectActiveSession,
   getSessionAgentMeta,
+  isProjectOpen,
   setChatPinner,
   stopSession,
   useChatStore,
@@ -382,6 +383,12 @@ export function coordinatorGroupForSession(
 }
 
 const store = new LazyStore("kai-groups.json", { defaults: {}, autoSave: 200 });
+// NOTE on persistence: appendGroupMessage debounces the file write via
+// schedulePersist (in-memory reads stay synchronous). Corrupted-file
+// recovery: a failed read yields NO groups (hydrateGroups' .catch) and the
+// next scheduled persist rewrites the file — while a malformed RECORD only
+// skips itself (per-record guard above), so one bad entry can no longer
+// wedge hydration for the whole app.
 
 let groups = new Map<string, GroupChat>();
 const listeners = new Set<() => void>();
@@ -479,7 +486,30 @@ export async function hydrateGroups(): Promise<void> {
       // Personas are exempt (composite-keyed machinery, multi-group by
       // design). ENDED groups claim nothing.
       const claimed = new Set<string>();
-      const ordered = [...saved].sort(
+      // PER-RECORD GUARD (2026-11-02 audit SHOULD): one malformed record
+      // (null, non-object, missing/!array participants, missing id/name)
+      // used to throw mid-loop — earlier groups already inserted, `hydrated`
+      // never set, and the REJECTED hydratePromise cached for the app's
+      // lifetime: partial group state forever, no retry. Filter BEFORE the
+      // sort (the sort reads createdAt — a null record would throw there)
+      // and skip bad records with a console warn; good ones always hydrate.
+      const valid = saved.filter(
+        (g): g is GroupChat =>
+          !!g &&
+          typeof g === "object" &&
+          typeof g.id === "string" &&
+          typeof g.name === "string" &&
+          Array.isArray(g.participants),
+      );
+      for (const bad of saved) {
+        if (!valid.includes(bad as GroupChat)) {
+          console.warn(
+            "[Kai-groups] skipping malformed persisted group record",
+            (bad as { id?: string } | null)?.id ?? bad,
+          );
+        }
+      }
+      const ordered = [...valid].sort(
         (a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : 1),
       );
       for (const g of ordered) {
@@ -546,6 +576,27 @@ async function persist(): Promise<void> {
   // Strip live session-resolution fields; keep the group shape stable.
   await store.set("groups", [...groups.values()]);
   await store.save();
+}
+
+/** DEBOUNCED persist (2026-11-02 audit SHOULD: O(history) rewrite per
+ *  message). appendGroupMessage serialized EVERY group's ENTIRE transcript
+ *  on every single message — a months-long group made each send
+ *  O(total-history). Debounce the file write; in-memory state stays
+ *  synchronous (readers see the message immediately, the notify() fires
+ *  now). The store's own autoSave (200ms) is a backstop, not the fix:
+ *  appendGroupMessage awaited a full save inline. */
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
+let persistInFlight: Promise<void> | null = null;
+function schedulePersist(): void {
+  if (persistTimer) return;
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    // Chain onto any in-flight write so a rapid-fire round cannot drop a
+    // later state (the next write must observe the previous one's slot).
+    persistInFlight = (persistInFlight ?? Promise.resolve())
+      .then(() => persist())
+      .catch(() => undefined);
+  }, 200);
 }
 
 function reindex(group: GroupChat): void {
@@ -640,7 +691,7 @@ export async function appendGroupMessage(
   if (!g || g.endedAt !== null) return null;
   const m: GroupMessage = { id: newMessageId(), at: Date.now(), ...msg };
   g.messages = [...g.messages, m];
-  await persist();
+  schedulePersist();
   notify();
   return m;
 }
@@ -676,6 +727,7 @@ export async function sendGroupMessage(
   const out: Array<{ projectId: string; sessionId: string; queued: boolean }> =
     [];
   const undeliverable: string[] = [];
+  const closed: string[] = [];
   for (const p of picked) {
     // RE-RESOLVE like the stop paths: the project's CURRENT active session
     // WINS over the frozen record (which can be STALE — the project switched
@@ -688,9 +740,21 @@ export async function sendGroupMessage(
     // never mirrors, and the stale session's meta stays busy so every later
     // delivery queues forever. Record re-pointed below so the group keeps
     // tracking the session that actually received the delivery.
-    const sid = getProjectActiveSession(p.projectId) || p.sessionId || "";
+    const sessionKnown = getProjectActiveSession(p.projectId);
+    // CLOSED-PROJECT GUARD (2026-11-02 audit SHOULD): a CLOSED project's
+    // persisted id is a BLACK HOLE — injectMessage fabricates a chat no
+    // bridge watches; the run burns tokens and the reply never mirrors,
+    // while the panel reports "delivered". Only an OPEN project's frozen
+    // id is trustworthy (its bridge is mounting; the session will attach).
+    // PERSONAS BYPASS: their participant id IS their synthetic session;
+    // there is no project to be open or closed.
+    const sid = isPersonaParticipantId(p.projectId)
+      ? p.sessionId
+      : sessionKnown || (isProjectOpen(p.projectId) ? p.sessionId : "");
     if (!sid) {
-      undeliverable.push(p.name);
+      if (!isPersonaParticipantId(p.projectId) && !isProjectOpen(p.projectId))
+        closed.push(p.name);
+      else undeliverable.push(p.name);
       out.push({ projectId: p.projectId, sessionId: "", queued: false });
       continue;
     }
@@ -721,6 +785,14 @@ export async function sendGroupMessage(
       projectId: "",
       sessionId: "",
       text: `${undeliverable.join(", ")} ${undeliverable.length === 1 ? "has" : "have"} no active chat session — open the AI panel in that project; its agent joins the group once a session exists.`,
+    });
+  }
+  if (closed.length > 0) {
+    await appendGroupMessage(groupId, {
+      from: "system",
+      projectId: "",
+      sessionId: "",
+      text: `${closed.join(", ")} ${closed.length === 1 ? "is" : "are"} not open in this window — reopen ${closed.length === 1 ? "that project" : "those projects"} to bring ${closed.length === 1 ? "its agent back" : "their agents back"} into the group.`,
     });
   }
   return out;
@@ -1406,9 +1478,17 @@ export async function deliverAgentMentions(
     // delivery/steering paths already fixed). Personas route via their own
     // runner inside deliverToParticipant; only project sessions re-resolve.
     if (!isPersonaParticipantId(target.projectId)) {
+      const known = getProjectActiveSession(target.projectId);
+      // Same CLOSED-PROJECT GUARD as sendGroupMessage: a closed project's
+      // frozen id never receives a routed mention (black hole).
       const sid =
-        getProjectActiveSession(target.projectId) || target.sessionId || "";
-      if (sid && sid !== target.sessionId) {
+        known ||
+        (isProjectOpen(target.projectId) ? target.sessionId : "");
+      if (!sid) {
+        skipped.push(target.name);
+        continue;
+      }
+      if (sid !== target.sessionId) {
         target.sessionId = sid;
         sessionGroups.set(sid, g.id);
       }
@@ -1607,7 +1687,11 @@ export async function stopGroupParticipants(groupId: string): Promise<void> {
       // Personas ARE their own identity — no session to re-resolve.
       if (!p.sessionId) continue;
     } else {
-      const sid = getProjectActiveSession(p.projectId) || p.sessionId;
+      const known = getProjectActiveSession(p.projectId);
+      // CLOSED-PROJECT GUARD: no active session AND the project not open —
+      // stop cannot reach a closed project's frozen session; skip rather
+      // than probe a dead id.
+      const sid = known || (isProjectOpen(p.projectId) ? p.sessionId : "");
       if (!sid) continue;
       if (sid !== p.sessionId) {
         sessionGroups.delete(p.sessionId);
@@ -2107,6 +2191,11 @@ export function __resetGroupChatsForTest(): void {
   for (const t of coalesceTimers.values()) clearTimeout(t);
   coalesceTimers.clear();
   lastRefusalReason = null;
+  if (persistTimer) {
+    clearTimeout(persistTimer);
+    persistTimer = null;
+  }
+  persistInFlight = null;
   hydrated = false;
   hydratePromise = null;
   nextGroupSeq = 1;

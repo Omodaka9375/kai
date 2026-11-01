@@ -321,6 +321,39 @@ describe("single membership: conflicted rows disable at the picker (2026-11-01 M
   });
 });
 
+describe("2026-11-02 audit SHOULDs: delivery gates, hydrate guard, debounced persist", () => {
+  it("deliveries gate on isProjectOpen — a closed project's frozen id is never used", () => {
+    // Both send fan-out paths: the user/coordinator send and the routed
+    // @-mention. The frozen record id is only trusted while the project is
+    // OPEN (its bridge is mounting); a closed project's id is a black hole.
+    expect(store).toMatch(
+      /sessionKnown \|\| \(isProjectOpen\(p\.projectId\) \? p\.sessionId : ""\)/,
+    );
+    expect(store).toMatch(
+      /known \|\|\n\s*\(isProjectOpen\(target\.projectId\) \? target\.sessionId : ""\)/,
+    );
+  });
+
+  it("hydrate filters malformed records BEFORE the sort, then sorts deterministically", () => {
+    // The 2026-11-02 wedge fix: a null/garbage record used to throw inside
+    // the sort's createdAt read, leaving a rejected hydratePromise cached
+    // for the app lifetime. Filter first; sort only valid records.
+    expect(store).toMatch(/const valid = saved\.filter\(/);
+    expect(store).toMatch(
+      /const ordered = \[\.\.\.valid\]\.sort\(/,
+    );
+  });
+
+  it("appendGroupMessage debounces the file write (never awaits a full save)", () => {
+    // O(history) fix: every message used to serialize EVERY group's entire
+    // transcript inline. The in-memory append + notify stay synchronous;
+    // the write is scheduled and chained so rapid rounds cannot drop state.
+    expect(store).toMatch(/schedulePersist\(\);\s*\n\s*notify\(\);\s*\n\s*return m;/);
+    expect(store).toMatch(/function schedulePersist\(\): void \{/);
+    expect(store).toMatch(/persistInFlight = \(persistInFlight \?\? Promise\.resolve\(\)\)/);
+  });
+});
+
 describe("the pill survives a project round-trip (2026-11-01)", () => {
   // "If I switch to a normal project and come back to group chat project,
   //  the collapsed group chat is not there — just a visual gap in its
