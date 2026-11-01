@@ -16,8 +16,12 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 vi.mock("@tauri-apps/plugin-store", () => {
   class FakeLazyStore {
     private map = new Map<string, unknown>();
-    async get() { return null; }
-    async set(key: string, value: unknown) { this.map.set(key, value); }
+    async get() {
+      return null;
+    }
+    async set(key: string, value: unknown) {
+      this.map.set(key, value);
+    }
     async save() {}
   }
   return { LazyStore: FakeLazyStore };
@@ -29,7 +33,10 @@ const injectMessageMock = vi.fn();
 const activeSessions: Record<string, string | null> = {};
 // Mutable model/keys surface for the persona path (runPersonaReply reads
 // selectedModelId + apiKeys off useChatStore.getState()).
-const personaTestState: { selectedModelId?: string; apiKeys?: Record<string, string> } = {};
+const personaTestState: {
+  selectedModelId?: string;
+  apiKeys?: Record<string, string>;
+} = {};
 vi.mock("./chatStore", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./chatStore")>();
   return {
@@ -102,10 +109,12 @@ describe("group chat store — lifecycle", () => {
   });
 
   it("refuses to create a group with no invitees", async () => {
-    expect(await createGroupChat(
-      { projectId: "a", sessionId: "s1", root: "/a", name: "alpha" },
-      [],
-    )).toBeNull();
+    expect(
+      await createGroupChat(
+        { projectId: "a", sessionId: "s1", root: "/a", name: "alpha" },
+        [],
+      ),
+    ).toBeNull();
   });
 
   it("delivers to idle participants immediately via injectMessage", async () => {
@@ -144,7 +153,14 @@ describe("group chat store — lifecycle", () => {
     expect(getGroup(g!.id)!.endedAt).not.toBeNull();
     expect(getGroupForSession("s1")).toBeNull();
     expect(await sendGroupMessage(g!.id, "anyone there?")).toEqual([]);
-    expect(await appendGroupMessage(g!.id, { from: "user", projectId: "a", sessionId: "s1", text: "x" })).toBeNull();
+    expect(
+      await appendGroupMessage(g!.id, {
+        from: "user",
+        projectId: "a",
+        sessionId: "s1",
+        text: "x",
+      }),
+    ).toBeNull();
     await resumeGroupChat(g!.id);
     expect(getGroup(g!.id)!.endedAt).toBeNull();
     expect(getGroupForSession("s1")!.id).toBe(g!.id);
@@ -161,10 +177,14 @@ describe("group chat store — lifecycle", () => {
     activeSessions["b"] = "late-b";
     const delivered = await sendGroupMessage(g!.id, "anyone there?");
     // Not silently skipped — the late session was picked up and used.
-    expect(delivered.find((d) => d.projectId === "b")!.sessionId).toBe("late-b");
+    expect(delivered.find((d) => d.projectId === "b")!.sessionId).toBe(
+      "late-b",
+    );
     expect(getGroup(g!.id)!.participants[1]!.sessionId).toBe("late-b");
     expect(getGroupForSession("late-b")!.id).toBe(g!.id);
-    const betaCall = injectMessageMock.mock.calls.find((c) => c[0] === "late-b");
+    const betaCall = injectMessageMock.mock.calls.find(
+      (c) => c[0] === "late-b",
+    );
     expect(betaCall).toBeTruthy();
   });
 
@@ -212,11 +232,52 @@ describe("group chat store — lifecycle", () => {
     void groupsForProject;
   });
 
+  it("renameGroupChat renames, trims/caps, and refuses empty or duplicate names (2026-11-01)", async () => {
+    const { renameGroupChat } = await import("./groupChatStore");
+    const g = await createGroupChat(
+      { projectId: "a", sessionId: "s1", root: "/a", name: "alpha" },
+      [{ projectId: "b", root: "/b", name: "beta" }],
+      "alpha ↔ beta, gamma, delta",
+    );
+    // Rename round-trips.
+    await renameGroupChat(g!.id, "  release crew  ");
+    expect(getGroup(g!.id)!.name).toBe("release crew");
+    // Empty / whitespace-only keeps the old name.
+    await renameGroupChat(g!.id, "   ");
+    expect(getGroup(g!.id)!.name).toBe("release crew");
+    // Unchanged name is a no-op.
+    await renameGroupChat(g!.id, "release crew");
+    expect(getGroup(g!.id)!.name).toBe("release crew");
+    // 130-char draft caps at 120.
+    await renameGroupChat(g!.id, "x".repeat(130));
+    expect(getGroup(g!.id)!.name).toHaveLength(120);
+    // Unknown group: silent no-op.
+    await expect(renameGroupChat("nope", "x")).resolves.toBeUndefined();
+  });
+
+  it("the auto-name is BOUNDED: first invitee + count, never every participant (2026-11-01)", async () => {
+    // The panel builds the default name; the STORE fallback must stay short
+    // too ("X + N more" shape, no name list).
+    const g = await createGroupChat(
+      { projectId: "a", sessionId: "s1", root: "/a", name: "alpha" },
+      [
+        { projectId: "b", root: "/b", name: "beta" },
+        { projectId: "c", root: "/c", name: "gamma" },
+        { projectId: "d", root: "/d", name: "delta" },
+      ],
+      "", // empty groupName → the store fallback
+    );
+    expect(g!.name).toBe("alpha + 3 more");
+    expect(g!.name.length).toBeLessThan(30);
+  });
+
   it("flushQueuedForSession delivers queued messages as one merged wake", async () => {
     const q = await import("./groupChatStore");
     // Queue directly through the busy path: patch the meta mock for one call.
     const chatStore = await import("./chatStore");
-    (chatStore.getSessionAgentMeta as unknown as ReturnType<typeof vi.fn>)?.mockRestore?.();
+    (
+      chatStore.getSessionAgentMeta as unknown as ReturnType<typeof vi.fn>
+    )?.mockRestore?.();
     // Simplest robust route: use the module's internal queue via send when
     // busy. We simulate by patching getSessionAgentMeta through vi.doMock —
     // instead, directly exercise the flush contract on an empty queue first.
@@ -228,11 +289,26 @@ describe("group chat store — lifecycle", () => {
 });
 
 describe("source pins — trust boundary & wiring", () => {
-  const store = readFileSync(new URL("./groupChatStore.ts", import.meta.url), "utf8");
-  const panel = readFileSync(new URL("../components/GroupChatPanelView.tsx", import.meta.url), "utf8");
-  const rail = readFileSync(new URL("../../workspace/ProjectRail.tsx", import.meta.url), "utf8");
-  const bridge = readFileSync(new URL("../components/AgentRunBridge.tsx", import.meta.url), "utf8");
-  const shell = readFileSync(new URL("../../../app/AppShell.tsx", import.meta.url), "utf8");
+  const store = readFileSync(
+    new URL("./groupChatStore.ts", import.meta.url),
+    "utf8",
+  );
+  const panel = readFileSync(
+    new URL("../components/GroupChatPanelView.tsx", import.meta.url),
+    "utf8",
+  );
+  const rail = readFileSync(
+    new URL("../../workspace/ProjectRail.tsx", import.meta.url),
+    "utf8",
+  );
+  const bridge = readFileSync(
+    new URL("../components/AgentRunBridge.tsx", import.meta.url),
+    "utf8",
+  );
+  const shell = readFileSync(
+    new URL("../../../app/AppShell.tsx", import.meta.url),
+    "utf8",
+  );
 
   it("membership stays human-granted: no tool code path calls createGroupChat", () => {
     // The store is the only creator; the panel (user UI) is the only caller
@@ -245,7 +321,9 @@ describe("source pins — trust boundary & wiring", () => {
   });
 
   it("the group panel is mounted exactly once, at app level", () => {
-    expect(shell).toContain("<GroupChatPanel projects={items} activeProjectId={activeId} />");
+    expect(shell).toContain(
+      "<GroupChatPanel projects={items} activeProjectId={activeId} />",
+    );
     // JSX mounts (import-path mentions don't count).
     const mounts = shell.split("<GroupChatPanel").length - 1;
     expect(mounts).toBe(1);
@@ -297,7 +375,9 @@ describe("source pins — trust boundary & wiring", () => {
     // re-runs the idle arm — the reply stayed in the project chat alone
     // ("agent replies outside the group") on every run whose last chunk
     // landed inside the throttle window.
-    expect(bridge).toMatch(/\}, \[isActive, status, approvalsPending, patch, openMini, sessionId, messages\]\);/);
+    expect(bridge).toMatch(
+      /\}, \[isActive, status, approvalsPending, patch, openMini, sessionId, messages\]\);/,
+    );
   });
 
   it("the causality boundary snapshots ONLY on the idle->busy transition", () => {
@@ -306,7 +386,9 @@ describe("source pins — trust boundary & wiring", () => {
     // a message the run itself produced: the final reply would equal the
     // boundary and never mirror. prevBusyRef gates the snapshot.
     expect(bridge).toContain("const justWentBusy =");
-    expect(bridge).toMatch(/prevBusyRef\.current = \{ sid: sessionId, busy: true \};/);
+    expect(bridge).toMatch(
+      /prevBusyRef\.current = \{ sid: sessionId, busy: true \};/,
+    );
   });
 
   it("the create dialog lists existing groups with open + delete (deletion is human-only)", () => {
@@ -314,7 +396,10 @@ describe("source pins — trust boundary & wiring", () => {
     expect(panel).toContain("deleteGroupChat(g.id)");
     // Trust boundary: the store's delete is human-triggered via the panel;
     // tool code must never gain a delete path.
-    const groupTool = readFileSync(new URL("../tools/group.ts", import.meta.url), "utf8");
+    const groupTool = readFileSync(
+      new URL("../tools/group.ts", import.meta.url),
+      "utf8",
+    );
     expect(groupTool).not.toContain("deleteGroupChat");
   });
 
@@ -370,15 +455,48 @@ describe("source pins — trust boundary & wiring", () => {
     expect(menu).toMatch(/max-h-96 gap-0 overflow-y-auto/);
   });
 
+  it("group naming is SHORT + renamable (2026-11-01): bounded auto-name, header rename, no tool-code rename", () => {
+    // The panel's auto-name formula: first invitee + count — never every name.
+    expect(panel).toMatch(
+      /\$\{inviter\.name\} ↔ \$\{inviteeNames\[0\]\}\$\{inviteeNames\.length > 1 \? ` \+\$\{inviteeNames\.length - 1\}` : ""\}/,
+    );
+    // The header has the inline rename UI (edit → renameGroupChat).
+    expect(panel).toContain('title="Rename group"');
+    expect(panel).toMatch(/renameGroupChat\(group\.id, nameDraft\)/);
+    // Store mutation exists with the human-only guard comment.
+    expect(store).toContain("export async function renameGroupChat(");
+    expect(store).toMatch(/Rename a group\. HUMAN action only/);
+    // TRUST BOUNDARY: tool code must never gain a rename path (same class
+    // as the deleteGroupChat ban).
+    const groupTool = readFileSync(
+      new URL("../tools/group.ts", import.meta.url),
+      "utf8",
+    );
+    expect(groupTool).not.toContain("renameGroupChat");
+    expect(groupTool).not.toContain("renameGroup(");
+  });
+
   it("closing a project removes it from groups before unmount", () => {
     expect(shell).toContain("removeProjectFromGroups(id)");
   });
 
   it("right-gutter stack: one expanded slot, mutual-exclusive swap, AI auto-restores", () => {
-    const app = readFileSync(new URL("../../../app/App.tsx", import.meta.url), "utf8");
-    const pill = readFileSync(new URL("../components/GroupPill.tsx", import.meta.url), "utf8");
-    const mini = readFileSync(new URL("../components/AiMiniWindow.tsx", import.meta.url), "utf8");
-    const chatStore = readFileSync(new URL("./chatStore.ts", import.meta.url), "utf8");
+    const app = readFileSync(
+      new URL("../../../app/App.tsx", import.meta.url),
+      "utf8",
+    );
+    const pill = readFileSync(
+      new URL("../components/GroupPill.tsx", import.meta.url),
+      "utf8",
+    );
+    const mini = readFileSync(
+      new URL("../components/AiMiniWindow.tsx", import.meta.url),
+      "utf8",
+    );
+    const chatStore = readFileSync(
+      new URL("./chatStore.ts", import.meta.url),
+      "utf8",
+    );
     // Store owns the slot; surfaces swap via the store, never local state.
     expect(chatStore).toContain('stackRail: { surface: "ai" }');
     expect(chatStore).toContain("closeGroupFromStack");
@@ -396,7 +514,9 @@ describe("source pins — trust boundary & wiring", () => {
     // the panel's OWN expanded boolean — 2026-11-01, see groupChatUx).
     expect(panel).toContain("w-[min(34rem,calc(100vw-2rem))]");
     expect(pill).toContain("w-[min(34rem,calc(100vw-2rem))]");
-    expect(panel).toMatch(/activeProjectGroups\.length > 0 &&\s*!expanded \? \(/);
+    expect(panel).toMatch(
+      /activeProjectGroups\.length > 0 &&\s*!expanded \? \(/,
+    );
     // The mini window shrinks up by one pill height when the group pill is
     // stacked below it.
     expect(mini).toContain("+84px");
@@ -432,7 +552,9 @@ describe("persona participants", () => {
     // Never indexed as a Chat session.
     expect(getGroupForSession(PERSONA)).toBeNull();
     await removeParticipant(g!.id, PERSONA);
-    expect(getGroup(g!.id)!.participants.some((x) => x.projectId === PERSONA)).toBe(false);
+    expect(
+      getGroup(g!.id)!.participants.some((x) => x.projectId === PERSONA),
+    ).toBe(false);
   });
 
   it("addPersonaParticipants skips unknown ids and is idempotent", async () => {
@@ -442,19 +564,31 @@ describe("persona participants", () => {
     );
     await addPersonaParticipants(g!.id, ["builtin:reviewer", "ghost:deleted"]);
     let live = getGroup(g!.id)!;
-    expect(live.participants.filter((x) => x.projectId === PERSONA)).toHaveLength(1);
+    expect(
+      live.participants.filter((x) => x.projectId === PERSONA),
+    ).toHaveLength(1);
     // Second call with the same id adds nothing.
     await addPersonaParticipants(g!.id, ["builtin:reviewer"]);
     live = getGroup(g!.id)!;
-    expect(live.participants.filter((x) => x.projectId === PERSONA)).toHaveLength(1);
+    expect(
+      live.participants.filter((x) => x.projectId === PERSONA),
+    ).toHaveLength(1);
     // The unknown id was skipped entirely.
-    expect(live.participants.some((x) => x.projectId === "persona:ghost:deleted")).toBe(false);
+    expect(
+      live.participants.some((x) => x.projectId === "persona:ghost:deleted"),
+    ).toBe(false);
   });
 
   it("createGroupChat accepts persona invitees without resolving a session", async () => {
     const g = await createGroupChat(
       { projectId: "a", sessionId: "s1", root: "/a", name: "alpha" },
-      [{ projectId: "persona:builtin:reviewer", root: "", name: "Code Reviewer" }],
+      [
+        {
+          projectId: "persona:builtin:reviewer",
+          root: "",
+          name: "Code Reviewer",
+        },
+      ],
     );
     const p = g!.participants.find((x) => x.projectId === PERSONA);
     expect(p).toBeDefined();
@@ -498,14 +632,20 @@ describe("persona participants", () => {
       const deadline = Date.now() + 4_000;
       let live = getGroup(g!.id)!;
       while (
-        !live.messages.some((m) => m.from === "system" && m.text.includes("persona) hit an error")) &&
+        !live.messages.some(
+          (m) =>
+            m.from === "system" && m.text.includes("persona) hit an error"),
+        ) &&
         Date.now() < deadline
       ) {
         await new Promise((r) => setTimeout(r, 50));
         live = getGroup(g!.id)!;
       }
       expect(
-        live.messages.some((m) => m.from === "system" && m.text.includes("persona) hit an error")),
+        live.messages.some(
+          (m) =>
+            m.from === "system" && m.text.includes("persona) hit an error"),
+        ),
       ).toBe(true);
     } finally {
       delete personaTestState.selectedModelId;
@@ -514,15 +654,27 @@ describe("persona participants", () => {
   });
 
   it("source pins: persona support is wired through panel, store, and tool", () => {
-    const store = readFileSync(new URL("./groupChatStore.ts", import.meta.url), "utf8");
-    const panel = readFileSync(new URL("../components/GroupChatPanelView.tsx", import.meta.url), "utf8");
-    const menu = readFileSync(new URL("../components/CoordinatorMenu.tsx", import.meta.url), "utf8");
-    const groupTool = readFileSync(new URL("../tools/group.ts", import.meta.url), "utf8");
+    const store = readFileSync(
+      new URL("./groupChatStore.ts", import.meta.url),
+      "utf8",
+    );
+    const panel = readFileSync(
+      new URL("../components/GroupChatPanelView.tsx", import.meta.url),
+      "utf8",
+    );
+    const menu = readFileSync(
+      new URL("../components/CoordinatorMenu.tsx", import.meta.url),
+      "utf8",
+    );
+    const groupTool = readFileSync(
+      new URL("../tools/group.ts", import.meta.url),
+      "utf8",
+    );
     // Panel: picker lists personas + participants menu invites them.
     expect(panel).toContain("addPersonaParticipants");
     expect(panel).toContain("Invite personas");
     // Store: persona identity is synthetic and never a Chat session.
-    expect(store).toContain("PERSONA_ID_PREFIX = \"persona:\"");
+    expect(store).toContain('PERSONA_ID_PREFIX = "persona:"');
     expect(store).toContain("isPersonaParticipantId");
     // Delegation guard + preamble note both live in the store.
     expect(store).toContain("isPersonaParticipantId(projectId)) return;");

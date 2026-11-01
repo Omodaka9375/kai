@@ -1531,6 +1531,25 @@ export function noteSessionBusy(_sessionId: string): void {
 }
 
 /**
+ * Rename a group. HUMAN action only (panel) — same trust boundary as
+ * createGroupChat/deleteGroupChat; tool code must never gain a rename path.
+ * Trims and caps (120 chars); an empty/whitespace/unchanged draft keeps the
+ * old name (the header disables submit on empty — this is the belt).
+ */
+export async function renameGroupChat(
+  groupId: string,
+  name: string,
+): Promise<void> {
+  const g = groups.get(groupId);
+  if (!g) return;
+  const clean = name.trim().slice(0, 120);
+  if (!clean || clean === g.name) return;
+  g.name = clean;
+  await persist();
+  notify();
+}
+
+/**
  * End the group chat. Arcs disappear, no new messages flow, but NOTHING is
  * torn down — each participant agent keeps running exactly as before (their
  * sessions already contain the group turns inline). Ended groups are kept

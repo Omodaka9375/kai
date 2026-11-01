@@ -28,6 +28,7 @@ import {
   LeftToRightBlockQuoteIcon,
   Link01Icon,
   MinusSignIcon,
+  PencilEdit01Icon,
   SentIcon,
   StopIcon,
   Tick02Icon,
@@ -67,6 +68,7 @@ import {
   isPersonaParticipantId,
   participantActivity,
   removeParticipant,
+  renameGroupChat,
   resumeGroupChat,
   setGroupAutoApprove,
   sendGroupMessage,
@@ -251,6 +253,17 @@ export function GroupChatPanel({
           name: found?.name ?? id,
         };
       });
+      // SHORT AUTO-NAME (2026-11-01 report: "group names are too long"):
+      // the old default joined EVERY participant name into the group name,
+      // and that name rides every delivery prefix into each session — a
+      // 5-member group burned a full line of context per message. Bounded
+      // now: "KAI ↔ Code Reviewer +2" — first invitee plus a count — and
+      // renamable inline from the header.
+      const inviteeNames = [...invitees, ...personaItems].map((i) => i.name);
+      const shortName =
+        inviteeNames.length === 0
+          ? inviter.name
+          : `${inviter.name} ↔ ${inviteeNames[0]}${inviteeNames.length > 1 ? ` +${inviteeNames.length - 1}` : ""}`;
       const g = await createGroupChat(
         {
           projectId: inviter.id,
@@ -266,7 +279,7 @@ export function GroupChatPanel({
           })),
           ...personaItems,
         ],
-        `${inviter.name} ↔ ${[...invitees, ...personaItems].map((i) => i.name).join(", ")}`,
+        shortName,
       );
       if (g && personas.length > 0) {
         // Re-add via the validated store path (idempotent per persona) so a
@@ -398,18 +411,61 @@ function PanelHeader({
   onToggleExpand: () => void;
   onClose: () => void;
 }) {
+  // Inline rename (2026-11-01): the auto-name is bounded but the user's
+  // own label always beats a generated one. Human-only, like every group
+  // mutation; Enter commits, Escape cancels, blur cancels.
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
   return (
     <div className="flex h-11 shrink-0 items-center gap-3 border-b border-border/60 px-3">
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted/70 text-muted-foreground">
           <HugeiconsIcon icon={Link01Icon} size={13} strokeWidth={1.75} />
         </span>
-        <span
-          className="min-w-0 truncate text-[12px] font-medium"
-          title={group.name}
-        >
-          {group.name}
-        </span>
+        {editingName ? (
+          <input
+            autoFocus
+            value={nameDraft}
+            onChange={(e) => setNameDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                void renameGroupChat(group.id, nameDraft);
+                setEditingName(false);
+              } else if (e.key === "Escape") {
+                setEditingName(false);
+              }
+            }}
+            onBlur={() => setEditingName(false)}
+            placeholder="Group name"
+            aria-label="Group name"
+            className="min-w-0 flex-1 rounded-md border border-border/70 bg-background/60 px-1.5 py-0.5 text-[12px] font-medium outline-none focus:border-primary/50"
+          />
+        ) : (
+          <>
+            <span
+              className="min-w-0 truncate text-[12px] font-medium"
+              title={group.name}
+            >
+              {group.name}
+            </span>
+            <button
+              type="button"
+              title="Rename group"
+              aria-label="Rename group"
+              onClick={() => {
+                setNameDraft(group.name);
+                setEditingName(true);
+              }}
+              className="shrink-0 rounded p-0.5 text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <HugeiconsIcon
+                icon={PencilEdit01Icon}
+                size={11}
+                strokeWidth={1.75}
+              />
+            </button>
+          </>
+        )}
       </div>
       <div className="flex shrink-0 items-center gap-0.5">
         <span className="flex h-6 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-border/60 px-2.5 text-[10.5px] font-medium text-muted-foreground">
