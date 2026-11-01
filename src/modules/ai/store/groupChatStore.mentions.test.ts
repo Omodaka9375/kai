@@ -364,6 +364,15 @@ describe("agents LEARN the convention (prompt surfaces)", () => {
     expect(store).toMatch(/Group members: .*\$\{g\.participants/);
   });
 
+  it("the persona prompt names each project's folder path (2026-11-01: invited personas must know the roots)", () => {
+    // The roster line is names-only for @-mention matching; the roots ride a
+    // dedicated line so a persona can read project files without asking
+    // "where is the repo?" first. Skipped when no member has a root.
+    expect(store).toMatch(/Project folders in this group/);
+    expect(store).toMatch(/\$\{x\.name\} — \$\{x\.root\}/);
+    expect(store).toMatch(/x\.sessionId !== p\.sessionId && x\.root/);
+  });
+
   it("the coordinator preamble teaches the @-mention convention", () => {
     expect(store).toMatch(/You may @-mention another member by name/);
   });

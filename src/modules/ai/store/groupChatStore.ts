@@ -903,6 +903,17 @@ async function runPersonaReply(
         .join(
           ", ",
         )}. You may @-mention another member by name (e.g. \`@${g.participants.find((x) => x.sessionId !== p.sessionId)?.name ?? "Name"} please review\`) — your reply is delivered to them.${g.coordinator.kind === "agent" ? " Address the group's coordinator as \`@coordinator\` — it is delivered like any member mention." : ""}`,
+      ...(g.participants.some((x) => x.sessionId !== p.sessionId && x.root)
+        ? [
+            // 2026-11-01: personas are invited WITHOUT a project of their
+            // own, so they must be TOLD where the group's projects live —
+            // "read files anywhere" is useless without the folder paths.
+            `Project folders in this group (READ them for context when a task needs it; your own writes stay in your scratch workspace): ${g.participants
+              .filter((x) => x.sessionId !== p.sessionId && x.root)
+              .map((x) => `${x.name} — ${x.root}`)
+              .join("; ")}`,
+          ]
+        : []),
       "Keep replies concise and addressed to the whole group.",
     ].join("\n\n");
     const prompt = [
