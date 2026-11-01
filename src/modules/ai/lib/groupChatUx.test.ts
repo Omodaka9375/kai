@@ -59,8 +59,13 @@ describe("panel ✕ is minimize; the pill ✕ ends and deletes", () => {
     expect(panel).toMatch(
       /onEnd=\{\(id\) => \{\s*\n\s*\/\/ End \(soft-stop participants\) THEN delete/,
     );
-    expect(panel).toMatch(
+    // 2026-11-02 SHOULD 9: the raw-return chain is gone; the end→delete
+    // sequence now rides the shared rejection-surfacing wrapper.
+    expect(panel).not.toMatch(
       /return endGroupChat\(id\)\.then\(\(\) => deleteGroupChat\(id\)\);/,
+    );
+    expect(panel).toMatch(
+      /runGroupAction\("Ending the group", \(\) =>\s*\n\s*endGroupChat\(id\)\.then\(\(\) => deleteGroupChat\(id\)\),/,
     );
   });
 
@@ -244,9 +249,12 @@ describe("group transcript auto-scrolls like the main AI chat (2026-11-01)", () 
     );
   });
 
-  it("new user/agent messages jump to bottom (own-send visibility rule)", () => {
+  it("new USER messages jump to bottom (own-send visibility rule; agent replies follow via stick-to-bottom only)", () => {
+    // 2026-11-02 audit SHOULD 5: force-scrolling on agent replies yanked
+    // the user out of a manual scroll-up on every participant reply. Only
+    // the user's OWN send force-jumps; agent traffic rides the stick lock.
     expect(panel).toMatch(
-      /newest && \(newest\.from === "user" \|\| newest\.from === "agent"\)/,
+      /newest && newest\.from === "user"/,
     );
     expect(panel).toMatch(/scrollCtx\.current\?\.scrollToBottom\(\)/);
   });
@@ -317,6 +325,60 @@ describe("single membership: conflicted rows disable at the picker (2026-11-01 M
     );
     expect(store).toMatch(
       /export function lastGroupRefusal\(\): string \| null/,
+    );
+  });
+});
+
+describe("2026-11-02 audit SHOULDs 4-11: scroll, memo, rejections, preamble, nonces", () => {
+  it("agent replies no longer force-scroll (only the user's own send jumps)", () => {
+    // The effect force-scrolled on from === "agent" too, yanking the user
+    // out of a manual scroll-up on every participant reply — contradicting
+    // its own comment. Stick-to-bottom follows agent traffic at-bottom.
+    expect(panel).toMatch(/newest\.from === "user"[\s\S]{0,120}scrollToBottom/);
+    // The old dual-author force-scroll must not return.
+    expect(panel).not.toMatch(
+      /newest\.from === "user" \|\| newest\.from === "agent"/,
+    );
+  });
+
+  it("GroupMessageBody is memoized (stable string props must not re-parse markdown)", () => {
+    expect(panel).toMatch(/const GroupMessageBody = memo\(function GroupMessageBody/);
+    // The map must render it as an element (not a bare call) so memo works.
+    expect(panel).toMatch(/<GroupMessageBody text=\{m\.text\} from=\{m\.from\} \/>/);
+  });
+
+  it("group actions surface rejections instead of unhandled promises", () => {
+    // The shared action wrapper + strip in the panel, the composer catch
+    // keeping the draft, and the tray's end→delete chain no longer throw
+    // unhandled rejections. (The tray's `void onEnd` is safe now: onEnd
+    // catches internally via runGroupAction.)
+    expect(panel).toMatch(/const runGroupAction = useCallback/);
+    expect(panel).toMatch(/runGroupAction\("Ending the group"/);
+    expect(panel).toMatch(/runGroupAction\("Stopping participants"/);
+    expect(panel).toMatch(/setSendError\(/);
+    expect(panel).not.toMatch(/void endGroupChat\(active\.id\)/);
+    expect(panel).toMatch(
+      /\.catch\(\(e: unknown\) =>[\s\S]{0,80}console\.error\("\[Kai-groups\] /,
+    );
+  });
+
+  it("the bridge gates the preamble on the STORE term flag, not a React ref", () => {
+    // A ref resets every boot → re-inject → unrequested model run per
+    // restart. consumeCoordinatorPreamble is atomic per term and
+    // persisted; cleared on reclaim/re-delegate/end.
+    const bridge = readFileSync(
+      new URL("../../ai/components/AgentRunBridge.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(bridge).toMatch(/consumeCoordinatorPreamble\(coordGroup\.id\)/);
+    expect(bridge).not.toMatch(/preambleGivenRef/);
+    // Store side: the flag + accessor + term clears.
+    expect(store).toMatch(/preambleGiven\?: boolean;/);
+    expect(store).toMatch(
+      /export function consumeCoordinatorPreamble\(groupId: string\): boolean/,
+    );
+    expect(store).toMatch(
+      /export function resolveCoordinator\(g: GroupChat\): string \| null/,
     );
   });
 });

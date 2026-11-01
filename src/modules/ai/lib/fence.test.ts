@@ -12,6 +12,7 @@ import {
   countInjectionMarkers,
   extractRedactionNotices,
 } from "./fence";
+import { readFileSync } from "node:fs";
 import { parseDsmlToolCalls } from "./dsmlMiddleware";
 
 describe("neutralizeInjectionMarkers — DSML meta-injection", () => {
@@ -251,5 +252,32 @@ describe("visible redaction — counts + notices surface, never a silent drop", 
     for (let i = 0; i < 6; i++) many[`k${i}`] = `[kai: notice ${i}]`;
     expect(extractRedactionNotices(many).length).toBe(4);
     expect(extractRedactionNotices({ clean: "no markers" })).toEqual([]);
+  });
+});
+
+describe("fence nonce entropy (2026-11-02 audit SHOULD 10)", () => {
+  it("nonces draw from crypto.getRandomValues, not the SDK's Math.random generateId", () => {
+    const src = readFileSync(new URL("./fence.ts", import.meta.url), "utf8");
+    expect(src).toMatch(/crypto\.getRandomValues\(bytes\)/);
+    // The GENERATOR must not call generateId (doc comments may mention the
+    // old source; scope the pin to the function body).
+    const body = src.slice(
+      src.indexOf("function generateFenceNonce"),
+      src.indexOf("/** System prompt fragment"),
+    );
+    expect(body).not.toMatch(/generateId/);
+    // Alphabet stays alphanumeric-only (FENCE_LIKE_RE + unfencers agree).
+    expect(src).toMatch(/FENCE_NONCE_ALPHABET/);
+    const state = createFenceState();
+    for (const tag of ["tool", "web", "watch", "mcp"] as const) {
+      expect(state.nonces[tag]).toMatch(/^[A-Za-z0-9]{8}$/);
+    }
+  });
+
+  it("nonces are unique across sessions (no reuse)", () => {
+    const a = createFenceState("s1");
+    const b = createFenceState("s2");
+    expect(a.nonces.tool).not.toBe(b.nonces.tool);
+    expect(a.nonces.tool).not.toBe(a.nonces.web);
   });
 });

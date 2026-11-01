@@ -203,6 +203,28 @@ describe("single-membership invariant (audit M3 Option A)", () => {
     expect(lastGroupRefusal()).toBeNull();
   });
 
+  it("the coordinator preamble injects once per delegation TERM, not per boot (SHOULD 4)", async () => {
+    const id = await mkGroup("a", ["b"]);
+    await delegateCoordination(id, "b");
+    const { consumeCoordinatorPreamble, endGroupChat } = await import(
+      "./groupChatStore"
+    );
+    // First call in a fresh term: true (the bridge injects).
+    expect(consumeCoordinatorPreamble(id)).toBe(true);
+    // Every later call — including after a RESTART (fresh module maps read
+    // the persisted flag) — is false until the term changes.
+    expect(consumeCoordinatorPreamble(id)).toBe(false);
+    // End + resume = a new term: re-armed.
+    await endGroupChat(id);
+    expect(consumeCoordinatorPreamble(id)).toBe(false); // ended group: no
+    const ok = await import("./groupChatStore").then((m) =>
+      m.resumeGroupChat(id),
+    );
+    expect(ok).toBe(true);
+    expect(consumeCoordinatorPreamble(id)).toBe(true);
+    expect(consumeCoordinatorPreamble(id)).toBe(false);
+  });
+
   it("delegateCoordination tears down the OLD coordinator's armed coalesce state (no spurious wake)", async () => {
     const id = await mkGroup("a", ["b", "c"]);
     // Agent-coordinator for group `id`: delegate to b.

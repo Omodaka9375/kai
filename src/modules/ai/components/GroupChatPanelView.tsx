@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSyncExternalStore } from "react";
+import { memo, useSyncExternalStore } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -120,6 +120,22 @@ export function GroupChatPanel({
   );
   const [openGroupId, setOpenGroupId] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  // SURFACE ERRORS (2026-11-02 audit SHOULD 8-9): every void-async group
+  // action relied on the store promise never rejecting — an end/persist
+  // failure was an unhandled rejection and the user saw nothing. One
+  // shared transient strip, one line, dismissible.
+  const [actionError, setActionError] = useState<string | null>(null);
+  const runGroupAction = useCallback(
+    (label: string, fn: () => Promise<unknown>) => {
+      Promise.resolve(fn()).catch((e) => {
+        console.error(`[Kai-groups] ${label} failed:`, e);
+        setActionError(
+          `${label} failed${e instanceof Error ? `: ${e.message}` : ""}`,
+        );
+      });
+    },
+    [],
+  );
   // Right-gutter stack: the group panel and the AI mini window share ONE
   // expanded slot. Whichever surface owns it renders as the window; the
   // other is a pill. `expanded` = the group panel owns the slot.
@@ -331,7 +347,7 @@ export function GroupChatPanel({
             data-group-id={active.id}
             className={cn(
               "fixed z-40 flex flex-col overflow-hidden",
-              "rounded-2xl border border-border/60 bg-card text-[12px] shadow-lg",
+              "relative rounded-2xl border border-border/60 bg-card text-[12px] shadow-lg",
               "ring-1 ring-black/5 dark:ring-white/5",
               // Twin of the AI mini window in BOTH states: expanded mirrors
               // the mini window's full-workspace overlay (and owns the
@@ -346,11 +362,32 @@ export function GroupChatPanel({
               aria-hidden
               className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-foreground/[0.03] to-transparent"
             />
+            {actionError ? (
+              <div className="absolute inset-x-0 top-11 z-20 flex items-center justify-between gap-1.5 border-b border-destructive/30 bg-destructive/10 px-3 py-1.5 text-[10.5px] text-destructive">
+                <span className="min-w-0 flex-1 truncate">{actionError}</span>
+                <button
+                  type="button"
+                  aria-label="Dismiss"
+                  onClick={() => setActionError(null)}
+                  className="shrink-0 rounded p-0.5 hover:text-foreground"
+                >
+                  <HugeiconsIcon icon={Cancel01Icon} size={9} strokeWidth={2} />
+                </button>
+              </div>
+            ) : null}
             <PanelHeader
               group={active}
               candidates={projects}
-              onEnd={() => void endGroupChat(active.id)}
-              onStopAll={() => void stopGroupParticipants(active.id)}
+              onEnd={() =>
+                runGroupAction("Ending the group", () =>
+                  endGroupChat(active.id),
+                )
+              }
+              onStopAll={() =>
+                runGroupAction("Stopping participants", () =>
+                  stopGroupParticipants(active.id),
+                )
+              }
               expanded={groupExpanded}
               onToggleExpand={() => setGroupExpanded(!groupExpanded)}
               // Minimize hands the slot back to the AI mini window; the
@@ -387,8 +424,12 @@ export function GroupChatPanel({
           }}
           onEnd={(id) => {
             // End (soft-stop participants) THEN delete (transcript gone,
-            // pill falls to the next group or disappears entirely).
-            return endGroupChat(id).then(() => deleteGroupChat(id));
+            // pill falls to the next group or disappears entirely). A
+            // failed end must surface AND the pill must not strand the
+            // group live (SHOULD 9).
+            runGroupAction("Ending the group", () =>
+              endGroupChat(id).then(() => deleteGroupChat(id)),
+            );
           }}
         />
       ) : null}
@@ -433,7 +474,15 @@ function PanelHeader({
             onChange={(e) => setNameDraft(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
-                void renameGroupChat(group.id, nameDraft);
+                // Rename rejections (persist failure) reuse the header's
+                // dismissal strip — the input still closes, the name retries
+                // on the next edit.
+                Promise.resolve(renameGroupChat(group.id, nameDraft)).catch(
+                  (err: unknown) => {
+                    console.error("[Kai-groups] rename failed:", err);
+                    setResumeRefusal("Rename failed — try again.");
+                  },
+                );
                 setEditingName(false);
               } else if (e.key === "Escape") {
                 setEditingName(false);
@@ -499,14 +548,20 @@ function PanelHeader({
             size="sm"
             variant="ghost"
             className="h-6 shrink-0 rounded-full border border-border/60 px-2.5 text-[11px]"
-            onClick={() => {
-              // Audit M3: resume may refuse when every project member now
-              // belongs to another live group — surface the reason instead
-              // of a silent no-op.
-              void resumeGroupChat(group.id).then((ok) => {
-                if (!ok) setResumeRefusal(lastGroupRefusal());
-              });
-            }}
+              onClick={() => {
+                // Audit M3: resume may refuse when every project member now
+                // belongs to another live group — surface the reason instead
+                // of a silent no-op. SHOULD 9: a resume REJECTION (not just
+                // a refusal reason) also surfaces now.
+                Promise.resolve(resumeGroupChat(group.id))
+                  .then((ok) => {
+                    if (!ok) setResumeRefusal(lastGroupRefusal());
+                  })
+                  .catch((e: unknown) => {
+                    console.error("[Kai-groups] resume failed:", e);
+                    setResumeRefusal("Resume failed — try again.");
+                  });
+              }}
           >
             Resume
           </Button>
@@ -659,12 +714,16 @@ function Transcript({ group }: { group: GroupChat }) {
   const scrollCtx = useRef<StickToBottomContext | null>(null);
   // A NEW message from the USER always jumps to the bottom (their own send
   // must be visible — same rule as the main chat). Agent/system messages
-  // just grow the bottom and follow via the stick-to-bottom lock.
+  // just grow the bottom and follow via the stick-to-bottom lock — the
+  // 2026-11-02 audit SHOULD 5 fix: force-scrolling on `from === "agent"`
+  // yanked the user out of any manual scroll-up whenever a participant
+  // replied, contradicting the comment above. Stick-to-bottom already
+  // follows agent traffic WHEN the user is at the bottom.
   const prevCountRef = useRef(live.messages.length);
   useEffect(() => {
     if (live.messages.length > prevCountRef.current) {
       const newest = live.messages[live.messages.length - 1];
-      if (newest && (newest.from === "user" || newest.from === "agent")) {
+      if (newest && newest.from === "user") {
         scrollCtx.current?.scrollToBottom();
       }
     }
@@ -819,7 +878,7 @@ function GroupApprovals({ group }: { group: GroupChat }) {
 /** One group message bubble: renders a leading <quote author="..."> block as
  *  a reply-quote preview (accent bar + author + excerpt) when present - the
  *  same wire shape the regular composer emits. */
-function GroupMessageBody({
+const GroupMessageBody = memo(function GroupMessageBody({
   text,
   from,
 }: {
@@ -878,7 +937,11 @@ function GroupMessageBody({
       ) : null}
     </div>
   );
-}
+  // MEMO (2026-11-02 audit SHOULD 6): the transcript renders EVERY message
+  // on every store-version bump — and the version fires on participant
+  // status changes, not just message adds. Markdown parsing is not free;
+  // unchanged messages (stable string props) must not re-parse.
+});
 
 /**
  * Live per-participant presence, rendered between transcript and composer:
@@ -1000,6 +1063,8 @@ export function resolveGroupMentionTarget(
 function Composer({ group }: { group: GroupChat }) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
+  // SHOULD 8: transient send-failure line (draft preserved on failure).
+  const [sendError, setSendError] = useState<string | null>(null);
   // Reply-quote from the group transcript (right-click → Quote). The quote
   // rides the sent text as a <quote author="..."> block so every participant
   // agent sees WHO is being quoted from the earlier conversation.
@@ -1120,10 +1185,22 @@ function Composer({ group }: { group: GroupChat }) {
         ? buildQuoteBlock(pendingQuote.author, pendingQuote.text)
         : null;
       const composed = [quoteBlock, trimmed].filter(Boolean).join("\n\n");
-      await sendGroupMessage(group.id, composed, mentionedTarget);
+      try {
+        await sendGroupMessage(group.id, composed, mentionedTarget);
+      } catch (e) {
+        // SHOULD 8: a delivery rejection (bridge throw, persist failure) was
+        // an unhandled promise from every Enter keydown. Keep the draft
+        // (text preserved) and surface the failure.
+        console.error("[Kai-groups] send failed:", e);
+        setSendError(
+          e instanceof Error ? `Send failed: ${e.message}` : "Send failed",
+        );
+        return;
+      }
       setText("");
       setPendingQuote(null);
       setMention({ open: false, start: 0, query: "" });
+      setSendError(null);
     } finally {
       setSending(false);
     }
@@ -1175,6 +1252,19 @@ function Composer({ group }: { group: GroupChat }) {
           </button>
         </div>
       )}
+      {sendError ? (
+        <div className="flex items-center gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-[10.5px] text-destructive">
+          <span className="min-w-0 flex-1 truncate">{sendError}</span>
+          <button
+            type="button"
+            aria-label="Dismiss"
+            onClick={() => setSendError(null)}
+            className="shrink-0 rounded p-0.5 hover:text-foreground"
+          >
+            <HugeiconsIcon icon={Cancel01Icon} size={9} strokeWidth={2} />
+          </button>
+        </div>
+      ) : null}
       <div className="relative flex items-center gap-2">
         {mention.open && mentionList.length > 0 ? (
           // @-mention picker: an absolutely-positioned dropdown INSIDE the
@@ -1559,7 +1649,13 @@ function InvitePicker({
                               variant="destructive"
                               className="h-6 px-1.5 text-[10.5px]"
                               onClick={() => {
-                                void deleteGroupChat(g.id);
+                                Promise.resolve(deleteGroupChat(g.id)).catch(
+                                  (e: unknown) =>
+                                    console.error(
+                                      "[Kai-groups] delete group failed:",
+                                      e,
+                                    ),
+                                );
                                 setConfirmDelete(null);
                               }}
                             >
@@ -1998,7 +2094,12 @@ function ParticipantsMenu({
                   type="button"
                   aria-label={`Remove ${p.name}`}
                   title={`Remove ${p.name} from the group`}
-                  onClick={() => void removeParticipant(live.id, p.projectId)}
+                  onClick={() =>
+                  Promise.resolve(removeParticipant(live.id, p.projectId)).catch(
+                    (e: unknown) =>
+                      console.error("[Kai-groups] remove participant failed:", e),
+                  )
+                }
                   className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-destructive"
                 >
                   <HugeiconsIcon icon={Cancel01Icon} size={9} strokeWidth={2} />
@@ -2018,7 +2119,13 @@ function ParticipantsMenu({
               <button
                 key={a.id}
                 type="button"
-                onClick={() => void addPersonaParticipants(live.id, [a.id])}
+                onClick={() =>
+                  Promise.resolve(
+                    addPersonaParticipants(live.id, [a.id]),
+                  ).catch((e: unknown) =>
+                    console.error("[Kai-groups] invite persona failed:", e),
+                  )
+                }
                 className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left hover:bg-accent"
               >
                 <HugeiconsIcon icon={Add01Icon} size={10} strokeWidth={1.75} />
@@ -2040,9 +2147,13 @@ function ParticipantsMenu({
                 key={c.id}
                 type="button"
                 onClick={() =>
-                  void addParticipants(live.id, [
-                    { projectId: c.id, root: c.root, name: c.name },
-                  ])
+                  Promise.resolve(
+                    addParticipants(live.id, [
+                      { projectId: c.id, root: c.root, name: c.name },
+                    ]),
+                  ).catch((e: unknown) =>
+                    console.error("[Kai-groups] invite project failed:", e),
+                  )
                 }
                 className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left hover:bg-accent"
               >

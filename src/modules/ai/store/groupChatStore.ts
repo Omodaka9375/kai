@@ -97,6 +97,12 @@ export type GroupChat = {
    *  decide with their per-chat auto-approve setting. Persisted with the
    *  group in kai-groups.json. */
   autoApprove?: boolean;
+  /** COORDINATOR PREAMBLE (2026-11-02 audit SHOULD 4): true once the
+   *  delegation preamble has been injected for the CURRENT delegation
+   *  term. PERSISTED so a restart does not re-inject (the old React-ref
+   *  gate reset every boot and woke the coordinator with an unrequested
+   *  model run). Cleared by reclaim/re-delegate/end so a NEW term re-arms. */
+  preambleGiven?: boolean;
 };
 
 /** Message queued for a participant whose agent is busy; flushed on idle. */
@@ -1758,8 +1764,11 @@ export async function endGroupChat(groupId: string): Promise<void> {
     teardownSessionMachinery(p.sessionId);
     sessionGroups.delete(p.sessionId);
   }
-  if (g.coordinator.kind === "agent")
+  if (g.coordinator.kind === "agent") {
     teardownSessionMachinery(g.coordinator.sessionId);
+    // Term ends with the group: resume + re-delegate re-arm the preamble.
+    g.preambleGiven = false;
+  }
   await persist();
   notify();
 }
@@ -1944,6 +1953,8 @@ export async function delegateCoordination(
       coalesceTimers.delete(g.coordinator.sessionId);
     }
     relayDepth.delete(g.coordinator.sessionId);
+    // A NEW delegation term starts: the preamble must arm again.
+    g.preambleGiven = false;
   }
   if (sid !== p.sessionId) {
     p.sessionId = sid;
@@ -1958,8 +1969,11 @@ export async function delegateCoordination(
 export async function reclaimCoordination(groupId: string): Promise<void> {
   const g = groups.get(groupId);
   if (!g || g.endedAt !== null) return;
-  if (g.coordinator.kind === "agent")
+  if (g.coordinator.kind === "agent") {
     teardownSessionMachinery(g.coordinator.sessionId);
+    // Term ends: a future re-delegation re-arms the preamble.
+    g.preambleGiven = false;
+  }
   g.coordinator = { kind: "user" };
   await persist();
   notify();
@@ -1992,6 +2006,43 @@ export function coordinatorPreamble(g: GroupChat): string {
     `- Relayed replies may themselves contain work you should delegate onward — but keep total delegation hops minimal.`,
     `- End-to-end: when the multi-repo goal is met, summarize what each project did.`,
   ].join("\n");
+}
+
+/** PREAMBLE TERM GATE (2026-11-02 audit SHOULD 4): true exactly once
+ *  per delegation term — the bridge injects the preamble only when this
+ *  returns true, then the flag stays set (persisted) until the term ends
+ *  (reclaim / re-delegate / end). A restart no longer re-injects, which
+ *  used to wake the coordinator with an unrequested model run per boot. */
+export function consumeCoordinatorPreamble(groupId: string): boolean {
+  const g = groups.get(groupId);
+  if (!g || g.endedAt !== null) return false;
+  if (g.coordinator.kind !== "agent") return false;
+  if (g.preambleGiven) return false;
+  g.preambleGiven = true;
+  schedulePersist();
+  return true;
+}
+
+/** COORDINATOR SESSION RE-RESOLVE (2026-11-02 audit SHOULD 11): the
+ *  coordinator's sessionId is a frozen record like any participant's —
+ *  if the coordinator project switched chats, delegation silently rotted
+ *  (wakes/buffers/tools targeted a dead session). resolveCoordinator
+ *  re-points the record to the project's CURRENT active session, or null
+ *  when the project has none (the caller falls back to the frozen id only
+ *  while the project is OPEN — same closed-project rule as deliveries). */
+export function resolveCoordinator(g: GroupChat): string | null {
+  if (g.coordinator.kind !== "agent") return null;
+  const current = getProjectActiveSession(g.coordinator.projectId);
+  const sid =
+    current ||
+    (isProjectOpen(g.coordinator.projectId) ? g.coordinator.sessionId : null);
+  if (sid && sid !== g.coordinator.sessionId) {
+    sessionGroups.delete(g.coordinator.sessionId);
+    g.coordinator.sessionId = sid;
+    sessionGroups.set(sid, g.id);
+    schedulePersist();
+  }
+  return g.coordinator.sessionId;
 }
 
 /**

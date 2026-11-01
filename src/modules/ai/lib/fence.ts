@@ -41,7 +41,7 @@
  *    they're already in the user's trust zone.
  */
 
-import { generateId } from "ai";
+// generateId is no longer used here (crypto nonce, 2026-11-02) — kept out.
 
 /** A fence nonce — per-session random token. */
 export type FenceNonce = string;
@@ -78,9 +78,24 @@ export function createFenceState(sessionId: string | null = null): FenceState {
  *  can emit — `generateId()` also produces `-`/`_`, which those regexes have
  *  historically NOT matched (a forged `[start tool_ab-cd12]` was neither
  *  neutralized nor counted). Stripping to [a-zA-Z0-9] keeps all three
- *  surfaces in agreement. */
+ *  surfaces in agreement.
+ *
+ *  ENTROPY (2026-11-02 audit SHOULD): the old source was the SDK's
+ *  generateId() — Math.random-based and explicitly "not cryptographically
+ *  secure". The neutralizer makes a KNOWN nonce non-exploitable, but the
+ *  whole injection defense is anchored on these tokens, so draw from
+ *  crypto.getRandomValues instead (no Math.random oracle for a peer agent
+ *  that can run JS via tools). */
+const FENCE_NONCE_ALPHABET =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 function generateFenceNonce(): FenceNonce {
-  return generateId().replace(/[^a-zA-Z0-9]/g, "").slice(0, 8);
+  const bytes = new Uint8Array(8);
+  crypto.getRandomValues(bytes);
+  let out = "";
+  for (let i = 0; i < 8; i++) {
+    out += FENCE_NONCE_ALPHABET[bytes[i]! % FENCE_NONCE_ALPHABET.length];
+  }
+  return out;
 }
 
 /** System prompt fragment declaring the active fence nonces. */

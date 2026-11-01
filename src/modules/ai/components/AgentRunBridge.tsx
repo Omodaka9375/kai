@@ -33,6 +33,7 @@ import {
   appendGroupMessage,
   deliverAgentMentions,
   coordinatorGroupForSession,
+  consumeCoordinatorPreamble,
   coordinatorPreamble,
   getGroup,
   noteCoordinatorRoundDone,
@@ -368,15 +369,17 @@ function Bridge({
   // TOP LEVEL on purpose: this block previously lived INSIDE the status-patch
   // effect below — hooks called from an effect callback hit a null dispatcher
   // ("Invalid hook call", minified React #321) and crashed the app on mount.
-  const preambleGivenRef = useRef<string | null>(null);
+  //
+  // PREAMBLE TERM GATE (2026-11-02 audit SHOULD 4): the flag lives in the
+  // STORE (persisted per group, cleared on reclaim/re-delegate/end) — the
+  // old React-ref gate reset every boot and re-injected the preamble,
+  // waking the coordinator with an unrequested model run per restart.
+  // consumeCoordinatorPreamble is atomic: exactly one injection per term
+  // even if this effect re-runs on every status change.
   useEffect(() => {
     const coordGroup = coordinatorGroupForSession(sessionId);
-    if (!coordGroup) {
-      preambleGivenRef.current = null;
-      return;
-    }
-    if (preambleGivenRef.current === coordGroup.id) return;
-    preambleGivenRef.current = coordGroup.id;
+    if (!coordGroup) return;
+    if (!consumeCoordinatorPreamble(coordGroup.id)) return;
     void useChatStore.getState().injectMessage(sessionId, coordinatorPreamble(coordGroup));
   }, [sessionId, status]);
 
