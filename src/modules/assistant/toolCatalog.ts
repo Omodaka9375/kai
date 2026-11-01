@@ -49,57 +49,127 @@ export const HARD_EXCLUDED_TOOLS: ReadonlySet<string> = new Set([
   "mcp_add_server",
   "mcp_list_servers",
   "todo_write",
+  // Behavioral app settings (shell, custom instructions, boot) - approval
+  // cards from Telegram for APP behavior changes is a wider surface than
+  // the remote assistant needs; cosmetics (settings_update) are offered.
+  "settings_update_restricted",
 ]);
 
 /** Every selectable tool, grouped by tier. Order here is the picker order. */
 export const TOOL_CATALOG: readonly ToolEntry[] = [
   // ── READ: no side effects — the safe default surface. ──────────────────
-  { name: "web_search", tier: "read", blurb: "Search the web (Bing, DDG fallback)." },
+  {
+    name: "web_search",
+    tier: "read",
+    blurb: "Search the web (Bing, DDG fallback).",
+  },
   { name: "web_browse", tier: "read", blurb: "Fetch a web page's text." },
-  { name: "domain_check", tier: "read", blurb: "Check domain registration/availability via registry RDAP (registrar, dates, nameservers)." },
-  { name: "domain_find", tier: "read", blurb: "Find available domain names from keywords across common TLDs." },
+  {
+    name: "domain_check",
+    tier: "read",
+    blurb:
+      "Check domain registration/availability via registry RDAP (registrar, dates, nameservers).",
+  },
+  {
+    name: "domain_find",
+    tier: "read",
+    blurb: "Find available domain names from keywords across common TLDs.",
+  },
   { name: "read_file", tier: "read", blurb: "Read a file (scratch dir only)." },
   { name: "list_directory", tier: "read", blurb: "List a directory." },
   { name: "grep", tier: "read", blurb: "Search file contents." },
   { name: "glob", tier: "read", blurb: "Find files by name pattern." },
-  { name: "watch_list", tier: "read", blurb: "List active background watches." },
+  {
+    name: "watch_list",
+    tier: "read",
+    blurb: "List active background watches.",
+  },
   {
     name: "reminder_create",
     tier: "read",
-    blurb: "Set a persistent long-term reminder (fires on its own, survives restarts).",
+    blurb:
+      "Set a persistent long-term reminder (fires on its own, survives restarts).",
   },
   { name: "reminder_list", tier: "read", blurb: "List reminders." },
   { name: "reminder_cancel", tier: "read", blurb: "Cancel a reminder." },
   {
     name: "gmail_read",
     tier: "read",
-    blurb: "Search and read your Gmail (read-only). Off by default — needs the app password from Settings → General.",
+    blurb:
+      "Search and read your Gmail (read-only). Off by default — needs the app password from Settings → General.",
   },
   {
     name: "social_read",
     tier: "read",
-    blurb: "Search X/Twitter and read account timelines — read-only. Off by default — needs the developer Bearer token from Settings → General.",
+    blurb:
+      "Search X/Twitter and read account timelines — read-only. Off by default — needs the developer Bearer token from Settings → General.",
   },
 
   // ── WRITE: mutate files / state / spend API credits (fenced to scratch). ─
   { name: "write_file", tier: "write", blurb: "Create or overwrite a file." },
   { name: "edit", tier: "write", blurb: "Replace text in a file." },
-  { name: "batch_edit", tier: "write", blurb: "Several edits — one file or many — applied atomically." },
+  {
+    name: "batch_edit",
+    tier: "write",
+    blurb: "Several edits — one file or many — applied atomically.",
+  },
   { name: "create_directory", tier: "write", blurb: "Create a directory." },
-  { name: "convert_to_pdf", tier: "write", blurb: "Convert md/txt/docx to PDF." },
+  {
+    name: "convert_to_pdf",
+    tier: "write",
+    blurb: "Convert md/txt/docx to PDF.",
+  },
   { name: "convert_image", tier: "write", blurb: "Convert / resize an image." },
-  { name: "save_memory", tier: "write", blurb: "Persist a note to project memory." },
-  { name: "generate_image", tier: "write", blurb: "Generate an image (API cost)." },
-  { name: "generate_video", tier: "write", blurb: "Generate a video (API cost)." },
-  { name: "voice_settings", tier: "write", blurb: "Change the reply voice / TTS." },
+  {
+    name: "save_memory",
+    tier: "write",
+    blurb: "Persist a note to project memory.",
+  },
+  {
+    name: "generate_image",
+    tier: "write",
+    blurb: "Generate an image (API cost).",
+  },
+  {
+    name: "generate_video",
+    tier: "write",
+    blurb: "Generate a video (API cost).",
+  },
+  {
+    name: "voice_settings",
+    tier: "write",
+    blurb: "Change the reply voice / TTS.",
+  },
+  { name: "settings", tier: "read", blurb: "Read app settings and options." },
+  {
+    name: "settings_update",
+    tier: "write",
+    blurb: "Change appearance settings (theme, editor, terminal).",
+  },
 
   // ── EXECUTE: run shell commands / schedules — highest risk. ────────────
-  { name: "bash_run", tier: "execute", blurb: "Run a foreground shell command." },
-  { name: "bash_background", tier: "execute", blurb: "Spawn a background process." },
-  { name: "bash_logs", tier: "execute", blurb: "Read a background process's logs." },
+  {
+    name: "bash_run",
+    tier: "execute",
+    blurb: "Run a foreground shell command.",
+  },
+  {
+    name: "bash_background",
+    tier: "execute",
+    blurb: "Spawn a background process.",
+  },
+  {
+    name: "bash_logs",
+    tier: "execute",
+    blurb: "Read a background process's logs.",
+  },
   { name: "bash_list", tier: "execute", blurb: "List background processes." },
   { name: "bash_kill", tier: "execute", blurb: "Kill a background process." },
-  { name: "watch_create", tier: "execute", blurb: "Schedule a recurring command watch." },
+  {
+    name: "watch_create",
+    tier: "execute",
+    blurb: "Schedule a recurring command watch.",
+  },
   { name: "watch_kill", tier: "execute", blurb: "Stop a watch." },
 ] as const;
 
@@ -111,8 +181,10 @@ export const TIER_LABELS: Record<ToolTier, string> = {
 
 export const TIER_HINTS: Record<ToolTier, string> = {
   read: "Look things up and read — no side effects. Safe to leave on.",
-  write: "Create / modify files and spend API credits (files stay in the assistant's scratch folder).",
-  execute: "Run shell commands and schedules. Most powerful — enable only if you trust the model on your machine.",
+  write:
+    "Create / modify files and spend API credits (files stay in the assistant's scratch folder).",
+  execute:
+    "Run shell commands and schedules. Most powerful — enable only if you trust the model on your machine.",
 };
 
 /** Tools enabled on a fresh install: the READ tier only — minus gmail_read,
@@ -121,9 +193,7 @@ export const TIER_HINTS: Record<ToolTier, string> = {
  *  allowedTools is a persisted explicit list). */
 export const DEFAULT_ALLOWED_TOOLS: readonly string[] = TOOL_CATALOG.filter(
   (t) =>
-    t.tier === "read" &&
-    t.name !== "gmail_read" &&
-    t.name !== "social_read",
+    t.tier === "read" && t.name !== "gmail_read" && t.name !== "social_read",
 ).map((t) => t.name);
 
 /** Names in a given tier (used by the picker's per-tier master toggle). */

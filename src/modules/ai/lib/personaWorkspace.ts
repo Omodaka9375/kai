@@ -85,7 +85,9 @@ const resolved = new Map<string, string>();
  * Returns null when the home dir is unavailable (headless tests) — callers
  * treat that as "no scratch workspace; persona runs without tools".
  */
-export async function personaWorkspaceRoot(agentId: string): Promise<string | null> {
+export async function personaWorkspaceRoot(
+  agentId: string,
+): Promise<string | null> {
   const cached = resolved.get(agentId);
   if (cached) return cached;
   try {
@@ -108,9 +110,11 @@ export function personaPathWithin(path: string, root: string): boolean {
 /** Test seam: collapse + containment without a full ToolContext. */
 export const resolvePersonaPathForTest = (requested: string, root: string) =>
   personaPathWithin(requested, root)
-    ? collapse(norm(requested).startsWith(norm(root).toLowerCase())
-        ? requested
-        : `${root}/${requested}`)
+    ? collapse(
+        norm(requested).startsWith(norm(root).toLowerCase())
+          ? requested
+          : `${root}/${requested}`,
+      )
     : collapse(requested);
 
 /**
@@ -144,6 +148,11 @@ export const PERSONA_EXCLUDED_TOOLS: readonly string[] = [
   "radio_now_playing",
   // voice.ts - global TTS preferences
   "voice_settings",
+  // settings.ts - global app configuration (theme, shell, instructions);
+  // a headless group participant has no business re-configuring the app
+  "settings",
+  "settings_update",
+  "settings_update_restricted",
 ];
 
 /**

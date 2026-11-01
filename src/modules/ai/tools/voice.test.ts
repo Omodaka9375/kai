@@ -106,8 +106,9 @@ describe("source pins", () => {
 
   it("the Telegram assistant catalog still offers it (write tier, auto-run)", () => {
     const catalog = read("../../assistant/toolCatalog.ts");
-    expect(catalog).toContain(
-      '{ name: "voice_settings", tier: "write", blurb: "Change the reply voice / TTS." }',
+    // Prettier reflows catalog entry lines - whitespace-tolerant match.
+    expect(catalog).toMatch(
+      /name:\s*"voice_settings",\s*tier:\s*"write",\s*blurb:\s*"Change the reply voice \/ TTS\."/,
     );
   });
 });

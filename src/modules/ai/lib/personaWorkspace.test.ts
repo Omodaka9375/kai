@@ -97,6 +97,11 @@ describe("excluded tools - desktop-UI-bound only", () => {
       "radio_list_stations",
       "radio_now_playing",
       "voice_settings",
+      // settings.ts - global app configuration; a headless group
+      // participant has no business re-configuring the app
+      "settings",
+      "settings_update",
+      "settings_update_restricted",
     ]);
   });
 

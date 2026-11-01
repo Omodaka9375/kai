@@ -187,7 +187,8 @@ const REGISTRY: Record<string, ToolPresentation> = {
   bash_logs: {
     label: "Logs",
     status: () => `Reading logs`,
-    summary: (a) => str(a, "id") ?? (a.handle !== undefined ? String(a.handle) : null),
+    summary: (a) =>
+      str(a, "id") ?? (a.handle !== undefined ? String(a.handle) : null),
     effect: "NONE",
     fence: true,
     remoteSurface: false,
@@ -202,7 +203,8 @@ const REGISTRY: Record<string, ToolPresentation> = {
   bash_kill: {
     label: "Kill",
     status: () => `Stopping background process`,
-    summary: (a) => str(a, "id") ?? (a.handle !== undefined ? String(a.handle) : null),
+    summary: (a) =>
+      str(a, "id") ?? (a.handle !== undefined ? String(a.handle) : null),
     effect: "UNKNOWN",
     fence: false,
     remoteSurface: false,
@@ -360,8 +362,7 @@ const REGISTRY: Record<string, ToolPresentation> = {
   },
   save_memory: {
     approvalLabel: "Save memory",
-    status: (a) =>
-      `Saving to memory: ${ellipsize(String(a.entry ?? ""), 40)}`,
+    status: (a) => `Saving to memory: ${ellipsize(String(a.entry ?? ""), 40)}`,
     effect: "COMMITTED",
     fence: true,
     remoteSurface: false,
@@ -370,8 +371,7 @@ const REGISTRY: Record<string, ToolPresentation> = {
   // ── Terminal surfaces / media ─────────────────────────────────────────
   suggest_command: {
     label: "Suggest",
-    status: (a) =>
-      `Suggesting ${ellipsize(String(a.command ?? ""), 60)}`,
+    status: (a) => `Suggesting ${ellipsize(String(a.command ?? ""), 60)}`,
     summary: (a) => str(a, "intent") ?? str(a, "description"),
     effect: "NONE",
     fence: true,
@@ -392,7 +392,12 @@ const REGISTRY: Record<string, ToolPresentation> = {
     fence: true,
     remoteSurface: false,
   },
-  display_video: { label: "Display vid", effect: "NONE", fence: true, remoteSurface: false },
+  display_video: {
+    label: "Display vid",
+    effect: "NONE",
+    fence: true,
+    remoteSurface: false,
+  },
   look_at_screen: {
     summary: (a) => str(a, "display") ?? "screen",
     effect: "NONE",
@@ -441,7 +446,8 @@ const REGISTRY: Record<string, ToolPresentation> = {
   },
   reminder_create: {
     label: "Reminder",
-    status: (a) => `Setting reminder: ${ellipsize(String(a.message ?? ""), 40)}`,
+    status: (a) =>
+      `Setting reminder: ${ellipsize(String(a.message ?? ""), 40)}`,
     summary: (a) =>
       `${str(a, "dueAt") ?? "?"}${a.repeat ? ` (${String(a.repeat)})` : ""}`,
     effect: "COMMITTED",
@@ -480,6 +486,34 @@ const REGISTRY: Record<string, ToolPresentation> = {
   voice_settings: {
     label: "Voice",
     effect: "NONE", // read/list calls have no effect; changed[] → COMMITTED
+    fence: true,
+    remoteSurface: false,
+  },
+  settings: {
+    label: "Settings",
+    summary: () => null,
+    effect: "NONE",
+    fence: true,
+    remoteSurface: false,
+  },
+  settings_update: {
+    label: "Settings",
+    summary: (a) => {
+      const keys = Object.keys(a).filter((k) => k !== "list");
+      return keys.length ? keys.join(", ") : null;
+    },
+    effect: "COMMITTED",
+    fence: true,
+    remoteSurface: false,
+  },
+  settings_update_restricted: {
+    label: "Settings",
+    approvalLabel: "Change app settings",
+    summary: (a) => {
+      const keys = Object.keys(a);
+      return keys.length ? keys.join(", ") : null;
+    },
+    effect: "COMMITTED",
     fence: true,
     remoteSurface: false,
   },

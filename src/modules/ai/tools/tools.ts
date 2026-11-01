@@ -17,6 +17,7 @@ import { buildWatchTools } from "./watch";
 import { buildScreenTools } from "./screen";
 import { buildMcpTools } from "./mcpTools";
 import { buildRadioTools } from "./radio";
+import { buildSettingsTools } from "./settings";
 import { buildVoiceTools } from "./voice";
 import { buildGroupTools } from "./group";
 import { buildGmailTools } from "./gmail";
@@ -45,6 +46,7 @@ export function buildCoreTools(ctx: import("./context").ToolContext) {
     ...buildScreenTools(ctx),
     ...buildMcpTools(ctx),
     ...buildRadioTools(ctx),
+    ...buildSettingsTools(ctx),
     ...buildVoiceTools(ctx),
     ...buildGroupTools(ctx),
     ...buildPersonaTools(ctx),

@@ -319,7 +319,8 @@ describe("registrations", () => {
       new URL("../../assistant/toolCatalog.ts", import.meta.url),
       "utf8",
     );
-    expect(catalog).toContain('name: "domain_check", tier: "read"');
-    expect(catalog).toContain('name: "domain_find", tier: "read"');
+    // Prettier reflows catalog entry lines - whitespace-tolerant match.
+    expect(catalog).toMatch(/name:\s*"domain_check",\s*tier:\s*"read"/);
+    expect(catalog).toMatch(/name:\s*"domain_find",\s*tier:\s*"read"/);
   });
 });
