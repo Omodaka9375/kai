@@ -68,8 +68,12 @@ describe("Settings override precedence (source pins)", () => {
     // resolveAssistantPersona: customAgents-first for builtin:general.
     expect(src).toContain("resolveAssistantPersona");
     expect(src).toContain('custom.find((c) => c.id === "builtin:general")');
-    // The name must reach the assistant's system prompt.
-    expect(src).toContain('`Your name is "${persona.name}"');
+    // The name must reach the assistant's system prompt. (2026-11-01:
+    // the prompt name is now resolveAssistantDisplayName(persona.name, prefs)
+    // — the persisted custom name set via set_my_name beats the persona.)
+    expect(src).toContain(
+      "`Your name is \"${resolveAssistantDisplayName(persona.name, prefs)}\"",
+    );
     expect(src).toContain("await resolveAssistantPersona()");
   });
 });

@@ -27,7 +27,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { UIMessage } from "@ai-sdk/react";
-import { generateText, stepCountIs, type ModelMessage } from "ai";
+import { generateText, stepCountIs, tool, type ModelMessage } from "ai";
+import { z } from "zod";
 import { getModel, type ModelId } from "@/modules/ai/config";
 import { buildLanguageModel } from "@/modules/ai/lib/agent";
 import {
@@ -57,6 +58,7 @@ import {
   prefsStore,
   loadAssistantPrefs,
   saveAssistantPrefs,
+  setAssistantName,
   getTelegramToken,
   telegramNative,
   type TelegramEvent,
@@ -330,6 +332,52 @@ export async function resolveAssistantPersona(): Promise<{
 
 const ASSISTANT_MAX_STEPS = 24;
 
+// ── Assistant NAME (2026-11-01) ────────────────────────────────────────────
+// The owner names/renames the assistant CONVERSATIONALLY — "call me... no,
+// YOUR name is Bob", "I'll call you Nova" — via set_my_name. There is
+// deliberately NO settings UI for this (the Assistant panel is genderless
+// "Assistant"); the name persists in kai-assistant.json and rides every
+// future turn's system prompt.
+
+/** Resolve the assistant's display name: the persisted custom name (set
+ *  via set_my_name) over the persona default (a Settings-renamed
+ *  builtin:general still wins when no custom name exists). */
+export function resolveAssistantDisplayName(
+  personaName: string,
+  prefs: { assistantName?: string | null },
+): string {
+  const custom = prefs.assistantName?.trim();
+  return custom ? custom : personaName;
+}
+
+const NAME_TOOL = tool;
+
+/** The set_my_name tool: the ONLY path to a custom assistant name. Auto-run
+ *  (no approval pause — it is a trivial, reversible prefs write), fenced
+ *  like every other assistant tool. Returns the confirmed name so the
+ *  model can echo it back naturally in its reply. */
+export function buildAssistantNameTool(): Record<string, unknown> {
+  const nameTool = NAME_TOOL({
+    description:
+      "Set or change YOUR OWN name — what the user should call you. Use it when the user names you, renames you, or asks you to pick a name for yourself. Pass the new name (short, one or two words). The change is saved permanently and applies to all future conversations.",
+    inputSchema: z.object({
+      name: z
+        .string()
+        .min(1)
+        .max(40)
+        .describe("The new name for you (the assistant). One or two words."),
+    }),
+    needsApproval: false,
+    execute: async ({ name }) => {
+      const clean = name.trim().slice(0, 40);
+      if (!clean) return { ok: false, error: "empty name" };
+      await setAssistantName(clean);
+      return { ok: true, name: clean };
+    },
+  });
+  return { set_my_name: nameTool };
+}
+
 // The assistant's usable-tool set is owned by toolCatalog.ts (HARD_EXCLUDED
 // for desktop-coupled tools, tier-grouped SELECTABLE tools gated by the
 // owner's prefs.allowedTools + prefs.mcpAllowedServers). runAssistantTurn
@@ -474,6 +522,10 @@ export async function runAssistantTurn(
     }
     tools[id] = tool;
   }
+  // Assistant-NATIVE tools: set_my_name (the ONLY name path — the user
+  // names/renames the assistant conversationally; no settings UI exists).
+  // Attached BEFORE the media tools so it survives the media swap below.
+  Object.assign(tools, buildAssistantNameTool());
   // Assistant-NATIVE media tools replace the desktop ones here: the desktop
   // tools are async fire-and-forget (spawnMediaTask patches a chat-UI part
   // that doesn't exist headless — payloads were silently dropped). These run
@@ -542,7 +594,8 @@ export async function runAssistantTurn(
   } as UIMessage;
 
   const system = [
-    `Your name is "${persona.name}". When the user asks your name or addresses you, answer with it.`,
+    `Your name is "${resolveAssistantDisplayName(persona.name, prefs)}". When the user asks your name or addresses you, answer with it.`,
+    `If the user wants to name or rename you, call set_my_name with the new name — it is saved permanently. Do not ask permission twice; just set it and confirm.`,
     persona.instructions,
     fenceSystemPrompt(fenceState),
     // Phase 4: approval-gated tools in the owner's allowlist AUTO-RUN

@@ -37,7 +37,6 @@ import { cn } from "@/lib/utils";
  */
 export function ExternalSection() {
   const ttsMode = usePreferencesStore((s) => s.voiceTtsMode);
-  const globalDefaultModelId = usePreferencesStore((s) => s.defaultModelId);
   const [prefs, setPrefs] = useState<AssistantPrefs | null>(null);
   const [token, setToken] = useState("");
   const [tokenSet, setTokenSet] = useState(false);
@@ -239,38 +238,6 @@ export function ExternalSection() {
             onChange={(id) => void patch({ modelId: id })}
           />
         </SettingRow>
-
-        {(prefs.modelId ?? globalDefaultModelId) ===
-        "openai-compatible-custom" ? (
-          <>
-            <SettingRow
-              title="Assistant model name"
-              description="Overrides the model id sent to the endpoint for the ASSISTANT only. Blank = inherit Settings → Models. Set it to stop the assistant drifting when you switch the desktop chat between local models."
-            >
-              <Input
-                value={prefs.customModelId ?? ""}
-                placeholder="inherit global"
-                onChange={(e) =>
-                  void patch({ customModelId: e.target.value.trim() || null })
-                }
-                className="w-56 font-mono text-xs"
-              />
-            </SettingRow>
-            <SettingRow
-              title="Assistant base URL"
-              description="Overrides the OpenAI-compatible base URL for the ASSISTANT only. Blank = inherit Settings → Models (e.g. http://127.0.0.1:1234/v1)."
-            >
-              <Input
-                value={prefs.customBaseUrl ?? ""}
-                placeholder="inherit global"
-                onChange={(e) =>
-                  void patch({ customBaseUrl: e.target.value.trim() || null })
-                }
-                className="w-56 font-mono text-xs"
-              />
-            </SettingRow>
-          </>
-        ) : null}
 
         <SettingRow
           title="Allowed tools"

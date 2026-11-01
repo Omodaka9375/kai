@@ -28,6 +28,15 @@ export type AssistantPrefs = {
   /** Model override for the assistant (null = default model). */
   modelId: string | null;
   /**
+   * The assistant's CUSTOM NAME (2026-11-01): set conversationally by the
+   * owner ("your name is Bob now" / "I'll call you Bob") via the
+   * set_my_name tool — the ONLY way to set it; there is deliberately NO
+   * settings UI for it (the panel is intentionally genderless/"Assistant").
+   * Persisted here so it survives restarts and rides every future turn's
+   * system prompt. null = the persona default name.
+   */
+  assistantName: string | null;
+  /**
    * Assistant's OWN custom-endpoint identity. When the resolved model is a
    * custom endpoint (lmstudio-local / openai-compatible-custom) these win over
    * the app-wide Settings → Models endpoint, so flipping the DESKTOP chat
@@ -64,6 +73,7 @@ const DEFAULT_PREFS: AssistantPrefs = {
   enabled: false,
   ownerChatId: null,
   modelId: null,
+  assistantName: null,
   customModelId: null,
   customBaseUrl: null,
   voiceReplies: true,
@@ -88,6 +98,14 @@ export async function loadAssistantPrefs(): Promise<AssistantPrefs> {
 
 export async function saveAssistantPrefs(prefs: AssistantPrefs): Promise<void> {
   await prefsStore.set("prefs", prefs);
+}
+
+/** Set (or clear, with null) the assistant's custom name. Merged onto the
+ *  CURRENT persisted prefs — load-then-save, never a stale in-memory copy —
+ *  so a name set mid-conversation can't clobber a concurrent pref write. */
+export async function setAssistantName(name: string | null): Promise<void> {
+  const current = await loadAssistantPrefs();
+  await saveAssistantPrefs({ ...current, assistantName: name });
 }
 
 // ── Native bridge (typed) ──────────────────────────────────────────────────

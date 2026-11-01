@@ -50,6 +50,64 @@ describe("assistant persona", () => {
   });
 });
 
+// 2026-11-01: the assistant's NAME is set conversationally (set_my_name
+// tool), NOT in Settings — the Assistant panel is deliberately genderless
+// "Assistant" with no name/model-name/base-URL rows.
+describe("assistant custom name (conversational rename, no settings UI)", () => {
+  it("resolveAssistantDisplayName: custom name wins, falls back to persona", () => {
+    const { resolveAssistantDisplayName } = assistant;
+    // Custom name (set via set_my_name) beats the persona default.
+    expect(resolveAssistantDisplayName("Assistant", { assistantName: "Nova" })).toBe("Nova");
+    // Trimmed; blank/whitespace = persona default.
+    expect(resolveAssistantDisplayName("Assistant", { assistantName: "  " })).toBe("Assistant");
+    // No custom name = persona default (incl. a Settings-renamed persona).
+    expect(resolveAssistantDisplayName("Jarvis", { assistantName: null })).toBe("Jarvis");
+    expect(resolveAssistantDisplayName("Jarvis", {})).toBe("Jarvis");
+  });
+
+  it("set_my_name tool exists, auto-runs, and persists via setAssistantName", async () => {
+    const { buildAssistantNameTool } = assistant;
+    const tools = buildAssistantNameTool() as Record<string, { description: string; needsApproval?: boolean; execute: (i: { name: string }) => Promise<unknown> }>;
+    const t = tools["set_my_name"];
+    expect(t).toBeDefined();
+    // Auto-run: no approval pause (it is a trivial, reversible prefs write).
+    expect(t.needsApproval).not.toBe(true);
+    expect(t.description.length).toBeGreaterThan(20);
+    const res = (await t.execute({ name: "Test Name" })) as { ok: boolean; name: string };
+    expect(res.ok).toBe(true);
+    expect(res.name).toBe("Test Name");
+    // The name actually PERSISTED (prefs round-trip), not just returned.
+    const prefs = await assistant.loadAssistantPrefs();
+    expect(prefs.assistantName).toBe("Test Name");
+    // Cleanup: restore null.
+    await assistant.setAssistantName(null);
+    expect(await assistant.loadAssistantPrefs()).toMatchObject({
+      assistantName: null,
+    });
+  });
+
+  it("the system prompt carries the resolved name + the rename instruction", async () => {
+    const idx = await (await import("node:fs")).readFileSync(
+      new URL("./index.ts", import.meta.url),
+      "utf8",
+    );
+    expect(idx).toContain("resolveAssistantDisplayName(persona.name, prefs)");
+    expect(idx).toMatch(/call set_my_name with the new name/);
+  });
+
+  it("the Settings Assistant panel has NO name/model-name/base-URL rows (source pin)", async () => {
+    const { readFileSync } = await import("node:fs");
+    const section = readFileSync(
+      new URL("../../settings/sections/ExternalSection.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(section).not.toContain("Assistant model name");
+    expect(section).not.toContain("Assistant base URL");
+    expect(section).not.toMatch(/patch\(\{ customModelId/);
+    expect(section).not.toMatch(/patch\(\{ customBaseUrl/);
+  });
+});
+
 describe("assistant history", () => {
   it("resets via resetAssistantHistory", async () => {
     await assistant.resetAssistantHistory();
