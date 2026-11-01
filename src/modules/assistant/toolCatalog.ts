@@ -56,6 +56,8 @@ export const TOOL_CATALOG: readonly ToolEntry[] = [
   // ── READ: no side effects — the safe default surface. ──────────────────
   { name: "web_search", tier: "read", blurb: "Search the web (Bing, DDG fallback)." },
   { name: "web_browse", tier: "read", blurb: "Fetch a web page's text." },
+  { name: "domain_check", tier: "read", blurb: "Check domain registration/availability via registry RDAP (registrar, dates, nameservers)." },
+  { name: "domain_find", tier: "read", blurb: "Find available domain names from keywords across common TLDs." },
   { name: "read_file", tier: "read", blurb: "Read a file (scratch dir only)." },
   { name: "list_directory", tier: "read", blurb: "List a directory." },
   { name: "grep", tier: "read", blurb: "Search file contents." },

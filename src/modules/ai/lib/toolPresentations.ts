@@ -214,6 +214,24 @@ const REGISTRY: Record<string, ToolPresentation> = {
   web_browse: { effect: "NONE", fence: true, remoteSurface: true },
   web_fetch: { effect: "NONE", fence: true, remoteSurface: true },
   web_search: { effect: "NONE", fence: true, remoteSurface: true },
+  domain_check: {
+    label: "Domain check",
+    status: (a) =>
+      `Checking ${Array.isArray(a.domains) ? a.domains.length : 1} domain${Array.isArray(a.domains) && a.domains.length === 1 ? "" : "s"}`,
+    summary: (a) => (Array.isArray(a.domains) ? a.domains.join(", ") : null),
+    effect: "NONE",
+    fence: true,
+    remoteSurface: true,
+  },
+  domain_find: {
+    label: "Domain find",
+    status: (a) =>
+      `Finding domains for ${Array.isArray(a.keywords) ? a.keywords.join(" ") : "keywords"}`,
+    summary: (a) => (Array.isArray(a.keywords) ? a.keywords.join(" ") : null),
+    effect: "NONE",
+    fence: true,
+    remoteSurface: true,
+  },
 
   // Platform reach (KAI-native channel adapters: GitHub issues+PRs with
   // comments, Reddit threads, V2EX topics, HN, Stack Overflow, YouTube

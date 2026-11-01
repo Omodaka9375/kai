@@ -23,6 +23,7 @@ import { buildGmailTools } from "./gmail";
 import { buildSocialTools } from "./social";
 import { buildReminderTools } from "./reminders";
 import { buildPlatformReachTools } from "./platformReach";
+import { buildDomainTools } from "./domain";
 import { buildPersonaTools } from "./persona";
 
 export { resolvePath, type ToolContext } from "./context";
@@ -59,6 +60,7 @@ export function buildExtendedTools(ctx: import("./context").ToolContext) {
     ...buildSubagentTools(ctx),
     ...buildTodoTools(ctx),
     ...buildWebTools(ctx),
+    ...buildDomainTools(),
     ...buildImageGenTools(ctx),
     ...buildVideoGenTools(ctx),
     ...buildPlatformReachTools(ctx),
