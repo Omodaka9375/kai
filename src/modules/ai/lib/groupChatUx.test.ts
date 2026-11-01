@@ -122,8 +122,11 @@ describe("composer mirrors the AI input bar", () => {
     // The pill/tray must gate on the ACTIVE project being a participant,
     // and the tray lists only that project's groups. Creation is unaffected
     // (it enters via the status-bar window event, not the pill).
-    // The tray gate is the full JSX condition line.
-    const gate = panel.match(/\{activeProjectInGroup && activeProjectGroups\.length > 0 && stackSurface !== "group" \? \(/);
+    // The tray gate is the full JSX condition (prettier wraps it across
+    // lines — match with \s*, not the one-line literal).
+    const gate = panel.match(
+      /\{activeProjectInGroup &&\s*activeProjectGroups\.length > 0 &&\s*stackSurface !== "group" \? \(/,
+    );
     expect(gate).not.toBeNull();
     expect(panel).toContain("const activeProjectGroups = useMemo(");
     expect(panel).toMatch(/groups=\{activeProjectGroups\}/);
@@ -162,5 +165,29 @@ describe("the pill unmounts when the last group is gone", () => {
     expect(mini).toContain("groupsForProject(activeProjectId() ?? \"\").length > 0");
     expect(mini).not.toContain("getGroups().length");
     expect(mini).not.toMatch(/groupCount > 0/);
+  });
+});
+
+describe("group transcript auto-scrolls like the main AI chat (2026-11-01)", () => {
+  // "Group chat window needs same autoscroll regular ai window has."
+  // The transcript is built on the SAME primitives the main chat uses —
+  // Conversation/ConversationContent/ConversationScrollButton (StickToBottom
+  // under the hood) — not a hand-rolled scroll effect. User/agent sends jump
+  // to bottom; a scrolled-up reader gets the catch-up arrow.
+  it("the transcript renders through Conversation + ConversationScrollButton", () => {
+    expect(panel).toMatch(/<Conversation contextRef=\{scrollCtx\}>/);
+    expect(panel).toMatch(/<\/ConversationContent>/);
+    expect(panel).toMatch(/<ConversationScrollButton \/>/);
+    // The old plain-div scroller must not return.
+    expect(panel).not.toMatch(
+      /"flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4"/,
+    );
+  });
+
+  it("new user/agent messages jump to bottom (own-send visibility rule)", () => {
+    expect(panel).toMatch(
+      /newest && \(newest\.from === "user" \|\| newest\.from === "agent"\)/,
+    );
+    expect(panel).toMatch(/scrollCtx\.current\?\.scrollToBottom\(\)/);
   });
 });

@@ -33,6 +33,12 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { MessageResponse } from "@/components/ai-elements/message";
+import {
+  Conversation,
+  ConversationContent,
+  ConversationScrollButton,
+} from "@/components/ai-elements/conversation";
+import type { StickToBottomContext } from "use-stick-to-bottom";
 import { getProjectAgentStatus } from "../store/projectStatus";
 import { useAgentsStore } from "../store/agentsStore";
 import { BUILTIN_AGENTS } from "../lib/agents";
@@ -204,9 +210,16 @@ export function GroupChatPanel({
       // store recognizes the synthetic "persona:<id>" projectId and skips
       // session resolution for them (see createGroupChat's map).
       const personaItems = personas.map((id) => {
-        const all = [...useAgentsStore.getState().customAgents, ...BUILTIN_AGENTS];
+        const all = [
+          ...useAgentsStore.getState().customAgents,
+          ...BUILTIN_AGENTS,
+        ];
         const found = all.find((a) => a.id === id);
-        return { projectId: `persona:${id}`, root: "", name: found?.name ?? id };
+        return {
+          projectId: `persona:${id}`,
+          root: "",
+          name: found?.name ?? id,
+        };
       });
       const g = await createGroupChat(
         {
@@ -216,7 +229,11 @@ export function GroupChatPanel({
           name: inviter.name,
         },
         [
-          ...invitees.map((i) => ({ projectId: i.id, root: i.root, name: i.name })),
+          ...invitees.map((i) => ({
+            projectId: i.id,
+            root: i.root,
+            name: i.name,
+          })),
           ...personaItems,
         ],
         `${inviter.name} ↔ ${[...invitees, ...personaItems].map((i) => i.name).join(", ")}`,
@@ -305,7 +322,9 @@ export function GroupChatPanel({
           </motion.div>
         ) : null}
       </AnimatePresence>
-      {activeProjectInGroup && activeProjectGroups.length > 0 && stackSurface !== "group" ? (
+      {activeProjectInGroup &&
+      activeProjectGroups.length > 0 &&
+      stackSurface !== "group" ? (
         <GroupListTray
           groups={activeProjectGroups}
           activeId={active?.id ?? null}
@@ -347,7 +366,10 @@ function PanelHeader({
         <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted/70 text-muted-foreground">
           <HugeiconsIcon icon={Link01Icon} size={13} strokeWidth={1.75} />
         </span>
-        <span className="min-w-0 truncate text-[12px] font-medium" title={group.name}>
+        <span
+          className="min-w-0 truncate text-[12px] font-medium"
+          title={group.name}
+        >
           {group.name}
         </span>
       </div>
@@ -356,7 +378,9 @@ function PanelHeader({
           <span
             className={cn(
               "size-1.5 shrink-0 rounded-full",
-              group.endedAt !== null ? "bg-muted-foreground/40" : "bg-emerald-500",
+              group.endedAt !== null
+                ? "bg-muted-foreground/40"
+                : "bg-emerald-500",
             )}
           />
           {group.endedAt !== null
@@ -422,7 +446,11 @@ function PanelHeader({
           title={expanded ? "Collapse to mini window" : "Expand to panel"}
           onClick={onToggleExpand}
         >
-          <HugeiconsIcon icon={expanded ? ArrowShrink01Icon : ArrowExpand01Icon} size={11} strokeWidth={1.75} />
+          <HugeiconsIcon
+            icon={expanded ? ArrowShrink01Icon : ArrowExpand01Icon}
+            size={11}
+            strokeWidth={1.75}
+          />
         </Button>
         {/* Minimize ( _ ), NOT close: hands the expanded slot back to the
             AI mini window but the group keeps running — the tray pill at
@@ -483,85 +511,115 @@ function ParticipantDot({ participant }: { participant: GroupParticipant }) {
       title={`${participant.name}: ${status}`}
       className={cn(
         "size-1.5 shrink-0 rounded-full",
-        status === "streaming" || status === "thinking" ? "bg-emerald-500 animate-pulse" :
-        status === "awaiting-approval" ? "bg-amber-500" :
-        status === "error" ? "bg-destructive" : "bg-muted-foreground/40",
+        status === "streaming" || status === "thinking"
+          ? "bg-emerald-500 animate-pulse"
+          : status === "awaiting-approval"
+            ? "bg-amber-500"
+            : status === "error"
+              ? "bg-destructive"
+              : "bg-muted-foreground/40",
       )}
     />
   );
 }
 
-function Transcript({
-  group,
-}: {
-  group: GroupChat;
-}) {
-  const version = useSyncExternalStore(subscribeGroupChats, getGroupStoreVersion, getGroupStoreVersion);
+function Transcript({ group }: { group: GroupChat }) {
+  const version = useSyncExternalStore(
+    subscribeGroupChats,
+    getGroupStoreVersion,
+    getGroupStoreVersion,
+  );
   // Re-read the group each version bump — messages arrays are replaced.
   const live = useMemo(() => getGroup(group.id) ?? group, [group.id, version]);
+  // AUTO-SCROLL (2026-11-01): the SAME stick-to-bottom machinery the main
+  // AI chat uses (Conversation/ConversationContent/ConversationScrollButton
+  // — StickToBottom under the hood), so the group transcript follows new
+  // messages while the user is at the bottom and shows the catch-up arrow
+  // when they scroll up — instead of the plain div that never auto-scrolled.
+  const scrollCtx = useRef<StickToBottomContext | null>(null);
+  // A NEW message from the USER always jumps to the bottom (their own send
+  // must be visible — same rule as the main chat). Agent/system messages
+  // just grow the bottom and follow via the stick-to-bottom lock.
+  const prevCountRef = useRef(live.messages.length);
+  useEffect(() => {
+    if (live.messages.length > prevCountRef.current) {
+      const newest = live.messages[live.messages.length - 1];
+      if (newest && (newest.from === "user" || newest.from === "agent")) {
+        scrollCtx.current?.scrollToBottom();
+      }
+    }
+    prevCountRef.current = live.messages.length;
+  }, [live.messages]);
   const nameFor = useCallback(
     (projectId: string) =>
-      live.participants.find((p) => p.projectId === projectId)?.name ?? projectId,
+      live.participants.find((p) => p.projectId === projectId)?.name ??
+      projectId,
     [live],
   );
   return (
-    <div
-      className={cn(
-        "flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4",
-      )}
-    >
-      {live.messages.length === 0 ? (
-        <div className="flex flex-1 flex-col items-center justify-center px-8 text-center">
-          <span className="mb-3 flex size-10 items-center justify-center rounded-xl bg-muted/50 text-muted-foreground/70">
-            <HugeiconsIcon icon={Link01Icon} size={20} strokeWidth={1.5} />
-          </span>
-          <span className="text-[12px] font-medium text-foreground/80">
-            Coordinate your projects together
-          </span>
-          <span className="mt-1 max-w-64 text-[11px] leading-relaxed text-muted-foreground">
-            Send a message and each project's agent receives it in its own
-            session.
-          </span>
-        </div>
-      ) : (
-        live.messages.map((m) =>
-          m.from === "system" ? (
-            <div key={m.id} className="px-1 text-center text-[10px] italic text-muted-foreground/70">
-              {m.text}
-            </div>
-          ) : (
-          <div
-            key={m.id}
-            // Main chat layout (message.tsx): user bubbles right-aligned
-            // and capped at 85%, participant replies full-width — the same
-            // shape the normal AI chat uses, at any panel width.
-            className={cn(
-              "flex flex-col gap-0.5",
-              m.from === "user" && "ml-auto max-w-[85%]",
-            )}
-            data-msg-author={m.from === "user" ? "You" : nameFor(m.projectId)}
-          >
-            <div className={cn(
-              "flex items-center gap-1.5 text-[10px] text-muted-foreground",
-              m.from === "user" && "justify-end",
-            )}>
-              <span className="font-medium text-foreground">
-                {m.from === "user" ? "You" : nameFor(m.projectId)}
-              </span>
-              <span>
-                {m.from === "user"
-                  ? m.projectId === "all"
-                    ? "→ all"
-                    : `→ ${nameFor(m.projectId)}`
-                  : "replied"}
-              </span>
-            </div>
-            <GroupMessageBody text={m.text} from={m.from} />
+    <Conversation contextRef={scrollCtx}>
+      <ConversationContent className="gap-3 px-4 py-4">
+        {live.messages.length === 0 ? (
+          <div className="flex flex-1 flex-col items-center justify-center px-8 text-center">
+            <span className="mb-3 flex size-10 items-center justify-center rounded-xl bg-muted/50 text-muted-foreground/70">
+              <HugeiconsIcon icon={Link01Icon} size={20} strokeWidth={1.5} />
+            </span>
+            <span className="text-[12px] font-medium text-foreground/80">
+              Coordinate your projects together
+            </span>
+            <span className="mt-1 max-w-64 text-[11px] leading-relaxed text-muted-foreground">
+              Send a message and each project's agent receives it in its own
+              session.
+            </span>
           </div>
+        ) : (
+          live.messages.map((m) =>
+            m.from === "system" ? (
+              <div
+                key={m.id}
+                className="px-1 text-center text-[10px] italic text-muted-foreground/70"
+              >
+                {m.text}
+              </div>
+            ) : (
+              <div
+                key={m.id}
+                // Main chat layout (message.tsx): user bubbles right-aligned
+                // and capped at 85%, participant replies full-width — the same
+                // shape the normal AI chat uses, at any panel width.
+                className={cn(
+                  "flex flex-col gap-0.5",
+                  m.from === "user" && "ml-auto max-w-[85%]",
+                )}
+                data-msg-author={
+                  m.from === "user" ? "You" : nameFor(m.projectId)
+                }
+              >
+                <div
+                  className={cn(
+                    "flex items-center gap-1.5 text-[10px] text-muted-foreground",
+                    m.from === "user" && "justify-end",
+                  )}
+                >
+                  <span className="font-medium text-foreground">
+                    {m.from === "user" ? "You" : nameFor(m.projectId)}
+                  </span>
+                  <span>
+                    {m.from === "user"
+                      ? m.projectId === "all"
+                        ? "→ all"
+                        : `→ ${nameFor(m.projectId)}`
+                      : "replied"}
+                  </span>
+                </div>
+                <GroupMessageBody text={m.text} from={m.from} />
+              </div>
+            ),
           )
-        )
-      )}
-    </div>
+        )}
+      </ConversationContent>
+      <ConversationScrollButton />
+    </Conversation>
   );
 }
 
@@ -581,14 +639,25 @@ function Transcript({
  * session-meta store (background approvals land in chat history).
  */
 function GroupApprovals({ group }: { group: GroupChat }) {
-  const version = useSyncExternalStore(subscribeGroupChats, getGroupStoreVersion, getGroupStoreVersion);
-  const metaVersion = useSyncExternalStore(subscribeSessionAgentMeta, getSessionMetaVersion, getSessionMetaVersion);
+  const version = useSyncExternalStore(
+    subscribeGroupChats,
+    getGroupStoreVersion,
+    getGroupStoreVersion,
+  );
+  const metaVersion = useSyncExternalStore(
+    subscribeSessionAgentMeta,
+    getSessionMetaVersion,
+    getSessionMetaVersion,
+  );
   const foregroundSessionId = useChatStore((s) => s.activeSessionId);
   const pending = useMemo(
     () =>
       unifiedGroupApprovals({
         personaApprovals: getPersonaApprovals(),
-        participants: group.participants.map((p) => ({ name: p.name, sessionId: p.sessionId })),
+        participants: group.participants.map((p) => ({
+          name: p.name,
+          sessionId: p.sessionId,
+        })),
         foregroundSessionId,
       }).filter((a) => a.groupId === null || a.groupId === group.id),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -609,10 +678,17 @@ function GroupApprovals({ group }: { group: GroupChat }) {
           }}
           toolName={a.toolName}
           onRespond={(approved) => respondUnifiedApproval(a, approved)}
-          queue={pending.length > 1 ? { queued: false, position: i + 1, total: pending.length } : null}
+          queue={
+            pending.length > 1
+              ? { queued: false, position: i + 1, total: pending.length }
+              : null
+          }
           proxy={{
             requester: a.requester,
-            context: a.source === "group-persona" ? "persona \u00B7 no project" : undefined,
+            context:
+              a.source === "group-persona"
+                ? "persona \u00B7 no project"
+                : undefined,
           }}
         />
       ))}
@@ -623,7 +699,13 @@ function GroupApprovals({ group }: { group: GroupChat }) {
 /** One group message bubble: renders a leading <quote author="..."> block as
  *  a reply-quote preview (accent bar + author + excerpt) when present - the
  *  same wire shape the regular composer emits. */
-function GroupMessageBody({ text, from }: { text: string; from: GroupMessage["from"] }) {
+function GroupMessageBody({
+  text,
+  from,
+}: {
+  text: string;
+  from: GroupMessage["from"];
+}) {
   const parsed = splitQuoteBlock(text);
   const body = parsed ? parsed.rest : text;
   return (
@@ -698,25 +780,33 @@ function ActivityStrip({ group }: { group: GroupChat }) {
           {act === "working" ? (
             <>
               <TypingDots />
-              <span className="truncate font-medium text-foreground/80">{p.name}</span>
+              <span className="truncate font-medium text-foreground/80">
+                {p.name}
+              </span>
               <span>is working…</span>
             </>
           ) : act === "approval" ? (
             <>
               <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-amber-500" />
-              <span className="truncate font-medium text-foreground/80">{p.name}</span>
+              <span className="truncate font-medium text-foreground/80">
+                {p.name}
+              </span>
               <span>needs your approval</span>
             </>
           ) : act === "queued" ? (
             <>
               <span className="size-1.5 shrink-0 rounded-full bg-muted-foreground/50" />
-              <span className="truncate font-medium text-foreground/80">{p.name}</span>
+              <span className="truncate font-medium text-foreground/80">
+                {p.name}
+              </span>
               <span>queued (busy)</span>
             </>
           ) : (
             <>
               <span className="size-1.5 shrink-0 rounded-full bg-destructive" />
-              <span className="truncate font-medium text-foreground/80">{p.name}</span>
+              <span className="truncate font-medium text-foreground/80">
+                {p.name}
+              </span>
               <span>stopped on error</span>
             </>
           )}
@@ -760,7 +850,10 @@ export function resolveGroupMentionTarget(
     return participants.find(
       (p) =>
         p.name.toLowerCase() === token ||
-        p.name.toLowerCase().replace(/\s+/g, "").startsWith(token.replace(/\s+/g, "")) ||
+        p.name
+          .toLowerCase()
+          .replace(/\s+/g, "")
+          .startsWith(token.replace(/\s+/g, "")) ||
         p.name.toLowerCase().includes(token),
     );
   };
@@ -771,24 +864,27 @@ export function resolveGroupMentionTarget(
   return hit ? hit.projectId : undefined; // default: all
 }
 
-function Composer({
-  group,
-}: {
-  group: GroupChat;
-}) {
+function Composer({ group }: { group: GroupChat }) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   // Reply-quote from the group transcript (right-click → Quote). The quote
   // rides the sent text as a <quote author="..."> block so every participant
   // agent sees WHO is being quoted from the earlier conversation.
-  const [pendingQuote, setPendingQuote] = useState<{ author: string; text: string } | null>(null);
+  const [pendingQuote, setPendingQuote] = useState<{
+    author: string;
+    text: string;
+  } | null>(null);
   // ── @-MENTION TARGETING (replaces the "All" dropdown) ───────────────────
   // Typing "@" at the caret opens a picker over the group's participants
   // (plus "All" to clear targeting). Picking inserts "@Name " into the text.
   // On send, the LAST @-mention in the text targets that participant (same
   // single-target semantics the dropdown had); no mentions = everyone. The
   // mention itself stays in the text so the targeted agent sees it addressed.
-  const [mention, setMention] = useState<{ open: boolean; start: number; query: string }>({
+  const [mention, setMention] = useState<{
+    open: boolean;
+    start: number;
+    query: string;
+  }>({
     open: false,
     start: 0,
     query: "",
@@ -803,9 +899,10 @@ function Composer({
   }, [group.participants, mention.query]);
   const mentionIndexRef = useRef(0);
   const [mentionIndex, setMentionIndex] = useState(0);
-  const mentionList = mentionCandidates.length > 0 || mention.query
-    ? [{ id: "all" as const, name: "All" }, ...mentionCandidates]
-    : [];
+  const mentionList =
+    mentionCandidates.length > 0 || mention.query
+      ? [{ id: "all" as const, name: "All" }, ...mentionCandidates]
+      : [];
   // Pick a candidate: replace the "@query" token at mention.start with
   // "@Name " ("All" inserts nothing — clearing targeting is the point).
   const pickMention = useCallback(
@@ -834,10 +931,17 @@ function Composer({
     const beforeCaret = value.slice(0, caret);
     const m = /(^|\s)@([^\s]*)$/.exec(beforeCaret);
     if (m) {
-      setMention((prev) => ({ ...prev, open: true, start: caret - m[2].length, query: m[2] }));
+      setMention((prev) => ({
+        ...prev,
+        open: true,
+        start: caret - m[2].length,
+        query: m[2],
+      }));
       setMentionIndex(0);
     } else {
-      setMention((prev) => (prev.open ? { ...prev, open: false, query: "" } : prev));
+      setMention((prev) =>
+        prev.open ? { ...prev, open: false, query: "" } : prev,
+      );
     }
     setText(value);
   }, []);
@@ -859,7 +963,9 @@ function Composer({
   // groupId so quoting in one group doesn't seed another group's composer.
   useEffect(() => {
     const onQuote = (e: Event) => {
-      const detail = (e as CustomEvent<{ groupId: string; author: string; text: string }>).detail;
+      const detail = (
+        e as CustomEvent<{ groupId: string; author: string; text: string }>
+      ).detail;
       if (detail?.groupId !== group.id || !detail.text) return;
       setPendingQuote({ author: detail.author, text: detail.text });
     };
@@ -868,7 +974,8 @@ function Composer({
   }, [group.id]);
   const send = useCallback(async () => {
     const trimmed = text.trim();
-    if ((!trimmed && !pendingQuote) || group.endedAt !== null || sending) return;
+    if ((!trimmed && !pendingQuote) || group.endedAt !== null || sending)
+      return;
     setSending(true);
     try {
       const quoteBlock = pendingQuote
@@ -931,118 +1038,122 @@ function Composer({
         </div>
       )}
       <div className="relative flex items-center gap-2">
-      {mention.open && mentionList.length > 0 ? (
-        // @-mention picker: an absolutely-positioned dropdown INSIDE the
-        // composer strip (bottom-full = above the textarea), NOT a Radix
-        // Popover. The 2026-10-31 cut used <Popover open> with NO
-        // trigger/anchor — Radix PopoverContent has no anchor element, so
-        // the portal rendered unpositioned and the picker was INVISIBLE
-        // ("no dropdown in group chat input"). A plain absolute div anchored
-        // in the relative strip is simpler and always visible; the picker's
-        // buttons use onMouseDown preventDefault so focus never leaves the
-        // textarea (no blur-close race).
-        <div
-          role="listbox"
-          aria-label="Mention picker"
-          className={cn(
-            "absolute bottom-full left-0 z-50 mb-1 w-52 overflow-hidden rounded-lg border border-border/70 bg-popover p-1 text-xs shadow-lg",
-          )}
-        >
-          {mentionList.map((c, i) => (
-            <button
-              key={"projectId" in c ? c.projectId : c.id}
-              type="button"
-              role="option"
-              aria-selected={i === mentionIndex}
-              onMouseDown={(e) => {
+        {mention.open && mentionList.length > 0 ? (
+          // @-mention picker: an absolutely-positioned dropdown INSIDE the
+          // composer strip (bottom-full = above the textarea), NOT a Radix
+          // Popover. The 2026-10-31 cut used <Popover open> with NO
+          // trigger/anchor — Radix PopoverContent has no anchor element, so
+          // the portal rendered unpositioned and the picker was INVISIBLE
+          // ("no dropdown in group chat input"). A plain absolute div anchored
+          // in the relative strip is simpler and always visible; the picker's
+          // buttons use onMouseDown preventDefault so focus never leaves the
+          // textarea (no blur-close race).
+          <div
+            role="listbox"
+            aria-label="Mention picker"
+            className={cn(
+              "absolute bottom-full left-0 z-50 mb-1 w-52 overflow-hidden rounded-lg border border-border/70 bg-popover p-1 text-xs shadow-lg",
+            )}
+          >
+            {mentionList.map((c, i) => (
+              <button
+                key={"projectId" in c ? c.projectId : c.id}
+                type="button"
+                role="option"
+                aria-selected={i === mentionIndex}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  pickMention(c.name);
+                }}
+                onMouseEnter={() => {
+                  mentionIndexRef.current = i;
+                  setMentionIndex(i);
+                }}
+                className={cn(
+                  "flex w-full items-center justify-between rounded px-2 py-1.5 text-left hover:bg-accent",
+                  i === mentionIndex && "bg-accent",
+                )}
+              >
+                <span className="truncate">
+                  {"projectId" in c ? `@${c.name}` : "All — send to everyone"}
+                </span>
+                {"projectId" in c ? <ParticipantDot participant={c} /> : null}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        <textarea
+          ref={textRef}
+          value={text}
+          onChange={(e) =>
+            onTextChange(
+              e.target.value,
+              e.target.selectionStart ?? e.target.value.length,
+            )
+          }
+          onKeyDown={(e) => {
+            if (mention.open && mentionList.length > 0) {
+              if (e.key === "ArrowDown") {
                 e.preventDefault();
-                pickMention(c.name);
-              }}
-              onMouseEnter={() => {
-                mentionIndexRef.current = i;
-                setMentionIndex(i);
-              }}
-              className={cn(
-                "flex w-full items-center justify-between rounded px-2 py-1.5 text-left hover:bg-accent",
-                i === mentionIndex && "bg-accent",
-              )}
-            >
-              <span className="truncate">
-                {"projectId" in c ? `@${c.name}` : "All — send to everyone"}
-              </span>
-              {"projectId" in c ? (
-                <ParticipantDot participant={c} />
-              ) : null}
-            </button>
-          ))}
-        </div>
-      ) : null}
-      <textarea
-        ref={textRef}
-        value={text}
-        onChange={(e) => onTextChange(e.target.value, e.target.selectionStart ?? e.target.value.length)}
-        onKeyDown={(e) => {
-          if (mention.open && mentionList.length > 0) {
-            if (e.key === "ArrowDown") {
-              e.preventDefault();
-              const next = (mentionIndex + 1) % mentionList.length;
-              mentionIndexRef.current = next;
-              setMentionIndex(next);
-              return;
+                const next = (mentionIndex + 1) % mentionList.length;
+                mentionIndexRef.current = next;
+                setMentionIndex(next);
+                return;
+              }
+              if (e.key === "ArrowUp") {
+                e.preventDefault();
+                const prev =
+                  (mentionIndex - 1 + mentionList.length) % mentionList.length;
+                mentionIndexRef.current = prev;
+                setMentionIndex(prev);
+                return;
+              }
+              if (e.key === "Enter" || e.key === "Tab") {
+                e.preventDefault();
+                pickMention(mentionList[mentionIndex]?.name ?? "All");
+                return;
+              }
+              if (e.key === "Escape") {
+                e.preventDefault();
+                setMention((m) => ({ ...m, open: false }));
+                return;
+              }
             }
-            if (e.key === "ArrowUp") {
+            if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
-              const prev = (mentionIndex - 1 + mentionList.length) % mentionList.length;
-              mentionIndexRef.current = prev;
-              setMentionIndex(prev);
-              return;
+              void send();
             }
-            if (e.key === "Enter" || e.key === "Tab") {
-              e.preventDefault();
-              pickMention(mentionList[mentionIndex]?.name ?? "All");
-              return;
-            }
-            if (e.key === "Escape") {
-              e.preventDefault();
-              setMention((m) => ({ ...m, open: false }));
-              return;
-            }
-          }
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            void send();
-          }
-        }}
-        placeholder="Coordinate your project agents… use @ to address one"
-        rows={1}
-        wrap="soft"
-        className={cn(
-          // AiInputBar's textarea contract: transparent, borderless,
-          // flex-1 — reads as one continuous strip with the picker and
-          // send button, not a boxed input. Grows with content up to a
-          // practical cap (the panel stays usable with a long draft).
-          // py-1.5: a textarea's content sits at the TOP of its box —
-          // with min-h-8 (32px) around a ~20px line and no vertical
-          // padding, the caret and placeholder glued to the top edge.
-          // 6px top/bottom centers the single line; taller drafts scroll
-          // (max-h-24) so the padding never clips.
-          "min-h-8 flex-1 resize-none rounded-lg bg-transparent px-1 py-1.5 text-[12.5px] leading-relaxed outline-none",
-          "overflow-x-hidden whitespace-pre-wrap break-words [overflow-wrap:anywhere]",
-          "placeholder:text-muted-foreground/60 focus-visible:ring-1 focus-visible:ring-ring/50",
-          "max-h-24 overflow-y-auto",
-        )}
-      />
-      <Button
-        type="button"
-        size="icon"
-        variant="ghost"
-        className="size-8 shrink-0 rounded-lg"
-        aria-label="Send to group"
-        disabled={!text.trim() || sending}
-        onClick={() => void send()}
-      >
+          }}
+          placeholder="Coordinate your project agents… use @ to address one"
+          rows={1}
+          wrap="soft"
+          className={cn(
+            // AiInputBar's textarea contract: transparent, borderless,
+            // flex-1 — reads as one continuous strip with the picker and
+            // send button, not a boxed input. Grows with content up to a
+            // practical cap (the panel stays usable with a long draft).
+            // py-1.5: a textarea's content sits at the TOP of its box —
+            // with min-h-8 (32px) around a ~20px line and no vertical
+            // padding, the caret and placeholder glued to the top edge.
+            // 6px top/bottom centers the single line; taller drafts scroll
+            // (max-h-24) so the padding never clips.
+            "min-h-8 flex-1 resize-none rounded-lg bg-transparent px-1 py-1.5 text-[12.5px] leading-relaxed outline-none",
+            "overflow-x-hidden whitespace-pre-wrap break-words [overflow-wrap:anywhere]",
+            "placeholder:text-muted-foreground/60 focus-visible:ring-1 focus-visible:ring-ring/50",
+            "max-h-24 overflow-y-auto",
+          )}
+        />
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          className="size-8 shrink-0 rounded-lg"
+          aria-label="Send to group"
+          disabled={!text.trim() || sending}
+          onClick={() => void send()}
+        >
           <HugeiconsIcon icon={SentIcon} size={15} strokeWidth={1.75} />
-      </Button>
+        </Button>
       </div>
     </div>
   );
@@ -1092,7 +1203,12 @@ function GroupListTray({
         title="Open group chat"
         className="flex min-w-0 flex-1 items-center gap-1.5 self-stretch text-left"
       >
-        <HugeiconsIcon icon={Link01Icon} size={12} strokeWidth={1.75} className="shrink-0 text-muted-foreground" />
+        <HugeiconsIcon
+          icon={Link01Icon}
+          size={12}
+          strokeWidth={1.75}
+          className="shrink-0 text-muted-foreground"
+        />
         <span className="truncate">{g.name}</span>
       </button>
       {/* Small ✕ on the pill's right edge: ends AND deletes the group —
@@ -1128,7 +1244,10 @@ function InvitePicker({
   onOpenChange: (v: boolean) => void;
   projects: ProjectSwitcherItem[];
   activeProjectId: string | null;
-  onCreate: (invitees: ProjectSwitcherItem[], personas: string[]) => void | Promise<void>;
+  onCreate: (
+    invitees: ProjectSwitcherItem[],
+    personas: string[],
+  ) => void | Promise<void>;
   onOpenGroup: (groupId: string) => void;
 }) {
   const [picked, setPicked] = useState<string[]>([]);
@@ -1154,7 +1273,8 @@ function InvitePicker({
       })),
     [customAgents],
   );
-  const inviterName = projects.find((p) => p.id === activeProjectId)?.name ?? "This project";
+  const inviterName =
+    projects.find((p) => p.id === activeProjectId)?.name ?? "This project";
 
   const handleOpenChange = (nextOpen: boolean) => {
     onOpenChange(nextOpen);
@@ -1177,7 +1297,9 @@ function InvitePicker({
 
         {existing.length > 0 ? (
           <div className="flex flex-col gap-2">
-            <div className="text-[11px] font-medium text-muted-foreground">Your groups</div>
+            <div className="text-[11px] font-medium text-muted-foreground">
+              Your groups
+            </div>
             <div className="flex max-h-40 flex-col gap-1 overflow-y-auto rounded-xl border border-border/60 bg-background/40 p-1.5">
               {existing.map((g) => {
                 const confirming = confirmDelete === g.id;
@@ -1193,13 +1315,26 @@ function InvitePicker({
                         setConfirmDelete(null);
                         onOpenGroup(g.id);
                       }}
-                      title={g.endedAt !== null ? "Resume and open this group" : "Open this group"}
+                      title={
+                        g.endedAt !== null
+                          ? "Resume and open this group"
+                          : "Open this group"
+                      }
                       className="flex min-w-0 flex-1 items-center gap-1.5 rounded px-1 py-0.5 text-left transition-colors hover:bg-accent"
                     >
-                      <HugeiconsIcon icon={Link01Icon} size={12} strokeWidth={1.75} className="shrink-0 text-muted-foreground" />
-                      <span className="min-w-0 flex-1 truncate text-[12px]">{g.name}</span>
+                      <HugeiconsIcon
+                        icon={Link01Icon}
+                        size={12}
+                        strokeWidth={1.75}
+                        className="shrink-0 text-muted-foreground"
+                      />
+                      <span className="min-w-0 flex-1 truncate text-[12px]">
+                        {g.name}
+                      </span>
                       {g.endedAt !== null ? (
-                        <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">ended</span>
+                        <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                          ended
+                        </span>
                       ) : null}
                     </button>
                     {confirming ? (
@@ -1234,7 +1369,11 @@ function InvitePicker({
                         onClick={() => setConfirmDelete(g.id)}
                         className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-destructive"
                       >
-                        <HugeiconsIcon icon={Delete02Icon} size={11} strokeWidth={1.75} />
+                        <HugeiconsIcon
+                          icon={Delete02Icon}
+                          size={11}
+                          strokeWidth={1.75}
+                        />
                       </button>
                     )}
                   </div>
@@ -1245,7 +1384,9 @@ function InvitePicker({
         ) : null}
 
         <div className="flex flex-col gap-2">
-          <div className="text-[11px] font-medium text-muted-foreground">Available projects</div>
+          <div className="text-[11px] font-medium text-muted-foreground">
+            Available projects
+          </div>
           {/* Persona list: agent personas without a project can join too. */}
           <div className="flex max-h-72 flex-col gap-1 overflow-y-auto rounded-xl border border-border/60 bg-background/40 p-1.5">
             {candidates.length > 0 ? (
@@ -1265,10 +1406,17 @@ function InvitePicker({
                     }
                     className={cn(
                       "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
-                      selected ? "bg-accent text-foreground" : "text-muted-foreground",
+                      selected
+                        ? "bg-accent text-foreground"
+                        : "text-muted-foreground",
                     )}
                   >
-                    <HugeiconsIcon icon={Folder01Icon} size={17} strokeWidth={1.75} className="shrink-0" />
+                    <HugeiconsIcon
+                      icon={Folder01Icon}
+                      size={17}
+                      strokeWidth={1.75}
+                      className="shrink-0"
+                    />
                     <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-foreground">
                       {project.name}
                     </span>
@@ -1280,7 +1428,13 @@ function InvitePicker({
                           : "border-border bg-background",
                       )}
                     >
-                      {selected ? <HugeiconsIcon icon={Tick02Icon} size={11} strokeWidth={2.5} /> : null}
+                      {selected ? (
+                        <HugeiconsIcon
+                          icon={Tick02Icon}
+                          size={11}
+                          strokeWidth={2.5}
+                        />
+                      ) : null}
                     </span>
                   </button>
                 );
@@ -1294,7 +1448,9 @@ function InvitePicker({
         </div>
 
         <div className="flex flex-col gap-2">
-          <div className="text-[11px] font-medium text-muted-foreground">Agent personas</div>
+          <div className="text-[11px] font-medium text-muted-foreground">
+            Agent personas
+          </div>
           <div className="flex max-h-44 flex-col gap-1 overflow-y-auto rounded-xl border border-border/60 bg-background/40 p-1.5">
             {personas.length > 0 ? (
               personas.map((persona) => {
@@ -1313,14 +1469,23 @@ function InvitePicker({
                     }
                     className={cn(
                       "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
-                      selected ? "bg-accent text-foreground" : "text-muted-foreground",
+                      selected
+                        ? "bg-accent text-foreground"
+                        : "text-muted-foreground",
                     )}
                   >
-                    <HugeiconsIcon icon={UserMultiple02Icon} size={16} strokeWidth={1.75} className="shrink-0" />
+                    <HugeiconsIcon
+                      icon={UserMultiple02Icon}
+                      size={16}
+                      strokeWidth={1.75}
+                      className="shrink-0"
+                    />
                     <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-foreground">
                       {persona.name}
                     </span>
-                    <span className="shrink-0 text-[10px] text-muted-foreground/70">no project</span>
+                    <span className="shrink-0 text-[10px] text-muted-foreground/70">
+                      no project
+                    </span>
                     <span
                       className={cn(
                         "flex size-4 shrink-0 items-center justify-center rounded border",
@@ -1329,7 +1494,13 @@ function InvitePicker({
                           : "border-border bg-background",
                       )}
                     >
-                      {selected ? <HugeiconsIcon icon={Tick02Icon} size={11} strokeWidth={2.5} /> : null}
+                      {selected ? (
+                        <HugeiconsIcon
+                          icon={Tick02Icon}
+                          size={11}
+                          strokeWidth={2.5}
+                        />
+                      ) : null}
                     </span>
                   </button>
                 );
@@ -1341,13 +1512,17 @@ function InvitePicker({
             )}
           </div>
           <p className="text-[10.5px] leading-relaxed text-muted-foreground/80">
-            Personas join without a project — they reply from their own
-            persona instructions, using the app's selected model.
+            Personas join without a project — they reply from their own persona
+            instructions, using the app's selected model.
           </p>
         </div>
 
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => handleOpenChange(false)}
+          >
             Cancel
           </Button>
           <Button
@@ -1362,7 +1537,8 @@ function InvitePicker({
               void onCreate(inv, per);
             }}
           >
-            Create group{invitees.length + pickedPersonas.length > 0
+            Create group
+            {invitees.length + pickedPersonas.length > 0
               ? ` (${invitees.length + pickedPersonas.length})`
               : ""}
           </Button>
@@ -1475,7 +1651,9 @@ function ParticipantsMenu({
               >
                 <HugeiconsIcon icon={Add01Icon} size={10} strokeWidth={1.75} />
                 <span className="min-w-0 flex-1 truncate">{a.name}</span>
-                <span className="shrink-0 text-[9.5px] text-muted-foreground/70">persona</span>
+                <span className="shrink-0 text-[9.5px] text-muted-foreground/70">
+                  persona
+                </span>
               </button>
             ))}
           </>

@@ -190,7 +190,7 @@ describe("source pins - unified surface wiring", () => {
     expect(panel).toContain("<GroupApprovals group={active} />");
     expect(panel).toContain("<AiToolApproval");
     expect(panel).toContain("unifiedGroupApprovals({");
-    expect(panel).toContain('context: a.source === "group-persona"');
+    expect(panel).toMatch(/a\.source === "group-persona"/,);
     // The old persona-only simple card is gone.
     expect(panel).not.toContain("wants to run");
   });
@@ -203,8 +203,8 @@ describe("source pins - unified surface wiring", () => {
 
   it("queue chips mirror the regular chat for multi-approval steps", () => {
     const panel = read("../components/GroupChatPanelView.tsx");
-    expect(panel).toContain(
-      "queue={pending.length > 1 ? { queued: false, position: i + 1, total: pending.length } : null}",
+    expect(panel).toMatch(
+      /queue=\{\s*pending\.length > 1\s*\? \{ queued: false, position: i \+ 1, total: pending\.length \}\s*: null\s*\}/,
     );
   });
 
