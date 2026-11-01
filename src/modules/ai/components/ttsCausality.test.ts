@@ -49,9 +49,13 @@ describe("AgentRunBridge auto-speak: causality boundary (source pins)", () => {
     // Extraction lives in voiceTts.pickSpeakSegments (2026-11-01): the
     // bridge passes the busy-snapshot boundary (from + the pre-run
     // assistant object) — never the whole history.
-    expect(src).toContain("const seg = pickSpeakSegments(msgs, from, boundaryObj);");
+    expect(src).toContain(
+      "const seg = pickSpeakSegments(msgs, from, boundaryObj);",
+    );
     expect(src).not.toContain("i >= 0 && !text");
-    expect(tts).toContain("for (let i = start; i < msgs.length; i++) {");
+    // The tail-walk to the final message starts at the boundary, never
+    // at the array head.
+    expect(tts).toContain("for (let i = msgs.length - 1; i >= start; i--) {");
   });
 
   it("no speakable text: the arm stays for the throttled late flush, never walks back", () => {
@@ -73,7 +77,9 @@ describe("AgentRunBridge auto-speak: causality boundary (source pins)", () => {
 
   it("spokenFor dedupes by MESSAGE ID, not array length", () => {
     expect(src).not.toContain("${sessionId}:${msgs.length}");
-    expect(src).toContain("if (spokenForRef.current === seg.lastMessageId) return;");
+    expect(src).toContain(
+      "if (spokenForRef.current === seg.lastMessageId) return;",
+    );
     expect(src).toContain("spokenForRef.current = seg.lastMessageId;");
   });
 
@@ -93,7 +99,11 @@ describe("AgentRunBridge auto-speak: causality boundary (source pins)", () => {
     // object; anything newer (new object, same slot) is the regenerated
     // reply. The bridge hands the snapshot object to the helper.
     expect(src).toContain("const boundaryObj = busyLastAssistantRef.current;");
-    expect(tts).toContain("if (m === boundaryObj) break;");
+    // The regenerated reply is detected by slot identity: the boundary
+    // slot (start-1) holding a NEW object counts as this run's answer.
+    expect(tts).toContain(
+      "if (slot && slot !== boundaryObj && isAnswer(slot)) finalMsg = slot;",
+    );
   });
 
   it("mid-run state clears any stale arm (a new run supersedes a prior settle)", () => {
@@ -121,7 +131,9 @@ describe("TTS is reserved for one-to-one chats — group runs never speak", () =
   });
 
   it("group-provoked is snapshotted at busy-arm BEFORE the ttsActive gate", () => {
-    const armIdx = src.indexOf("busyWasGroupRef.current = !!text && isGroupDeliveryText(text);");
+    const armIdx = src.indexOf(
+      "busyWasGroupRef.current = !!text && isGroupDeliveryText(text);",
+    );
     const gateIdx = src.indexOf("if (!ttsActive) return;");
     expect(armIdx).toBeGreaterThan(-1);
     expect(gateIdx).toBeGreaterThan(armIdx);
@@ -136,7 +148,9 @@ describe("TTS is reserved for one-to-one chats — group runs never speak", () =
     // speaks normally: the read immediately precedes the boundary clears.
     // (lastIndexOf: the session-switch block also clears the ref, EARLIER
     // in the file — the decision block's clear is the last one.)
-    const readIdx = src.lastIndexOf("const wasGroupRun = busyWasGroupRef.current;");
+    const readIdx = src.lastIndexOf(
+      "const wasGroupRun = busyWasGroupRef.current;",
+    );
     const clearIdx = src.lastIndexOf("busyWasGroupRef.current = false;");
     expect(readIdx).toBeGreaterThan(-1);
     expect(clearIdx).toBeGreaterThan(readIdx);
@@ -185,34 +199,50 @@ describe("speakText supersede semantics (the replies-after case)", () => {
   });
 });
 
-describe("speak the FIRST part and the LAST part — the middle is skipped (2026-11-01)", () => {
-  // "Voice TTS is only saying one random sentence after my reply; if the
-  //  agent is going fast it never says anything after that. Can we make it
-  //  say the first part after and the last part — skip the middle, but
-  //  need the final?"
-  // A multi-step run accumulates every step's text parts into ONE
-  // assistant message; last-part-only said a random middle narration, and
-  // the settle-vs-throttled-flush race lost the voice entirely. The speak
-  // plan is FIRST (lead-in) + LAST (final answer); extraction is shared
-  // with the boundary contract in voiceTts.pickSpeakSegments.
+describe("speak the FINAL message in full, with length tiers (2026-11-01 redesign)", () => {
+  // Research pass: the industry's three models are speech-native
+  // generation (ChatGPT Live), a voice layer over summaries (VS Code Voice
+  // Mode), or verbatim read-aloud with user-paced controls (Safari
+  // Listen-to-Page). KAI narrates its own agent's prose, so the fit is
+  // the third: READ the reply — the run's FINAL assistant message, all
+  // its text parts — and give the user pacing controls. First+last read
+  // as an incoherent abridgment and is retired.
   const src = read("./AgentRunBridge.tsx");
   const tts = read("../lib/voiceTts.ts");
 
-  it("the bridge picks first+last via the shared helper (old part loops gone)", () => {
-    expect(src).toContain("const seg = pickSpeakSegments(msgs, from, boundaryObj);");
+  it("the bridge picks the plan via the shared helper (old part loops gone)", () => {
+    expect(src).toContain(
+      "const seg = pickSpeakSegments(msgs, from, boundaryObj);",
+    );
     expect(src).toContain("void speakText(seg.text);");
     // The hand-rolled backwards part scans are banned from the bridge.
-    expect(src).not.toMatch(/for \(let j = m\.parts\.length - 1; j >= 0; j--\) \{/);
+    expect(src).not.toMatch(
+      /for \(let j = m\.parts\.length - 1; j >= 0; j--\) \{/,
+    );
     expect(src).not.toContain("void speakText(text);");
   });
 
-  it("the helper joins first with last; a lone text speaks once", () => {
-    expect(tts).toContain("const first = texts[0]!;");
+  it("the helper speaks the final message's parts joined; tiers trim long answers honestly", () => {
+    // Full-final-message contract + the length-tier machinery live in
+    // pickSpeakSegments (behaviorally pinned in voiceTts.test.ts). Here:
+    // the retired first+last join must not return, the tier constants
+    // exist, and the sign-off names what's on screen.
+    expect(tts).not.toContain("const first = texts[0]!;");
+    expect(tts).toContain("export const SPEAK_FULL_CHARS = 700;");
     expect(tts).toContain(
-      "const last = texts.length === 1 ? first : texts[texts.length - 1]!;",
+      'const LONG_REPLY_SIGNOFF = "The full answer is on screen."',
     );
-    expect(tts).toContain(
-      "texts.length === 1 ? first : `${first}\\n\\n${last}`",
-    );
+    expect(tts).toMatch(/text\.length > SPEAK_FULL_CHARS/);
+  });
+
+  it("pacing controls exist: pause/resume/skip/rate, and stop clears them", () => {
+    // Safari Listen-to-Page parity: the user paces the narration.
+    expect(tts).toContain("export function ttsPause(): void");
+    expect(tts).toContain("export function ttsResume(): void");
+    expect(tts).toContain("export function ttsSkip(): void");
+    expect(tts).toContain("export function ttsSetRate(rate: number): void");
+    // Stop must clear pause/skip so a stopped utterance can't leave the
+    // next one latched.
+    expect(tts).toMatch(/ttsStop[\s\S]*?skipRequested = false;/);
   });
 });

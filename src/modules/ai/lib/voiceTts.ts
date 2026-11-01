@@ -35,15 +35,16 @@ export function encodeWav(samples: Float32Array, sampleRate: number): Blob {
   const buffer = new ArrayBuffer(44 + dataSize);
   const view = new DataView(buffer);
   const writeStr = (offset: number, s: string) => {
-    for (let i = 0; i < s.length; i++) view.setUint8(offset + i, s.charCodeAt(i));
+    for (let i = 0; i < s.length; i++)
+      view.setUint8(offset + i, s.charCodeAt(i));
   };
   writeStr(0, "RIFF");
   view.setUint32(4, 36 + dataSize, true);
   writeStr(8, "WAVE");
   writeStr(12, "fmt ");
   view.setUint32(16, 16, true); // fmt chunk size
-  view.setUint16(20, 1, true);  // PCM
-  view.setUint16(22, 1, true);  // mono
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, 1, true); // mono
   view.setUint32(24, targetRate, true);
   view.setUint32(28, targetRate * bytesPerSample, true); // byte rate
   view.setUint16(32, bytesPerSample, true); // block align
@@ -113,7 +114,10 @@ export function toSpeechText(raw: string): string {
   s = s.replace(/<think>[\s\S]*?<\/think>/gi, " ");
   s = s.replace(/<think>[\s\S]*$/i, " ");
   // Fenced code blocks (with language tag), incl. an unterminated tail.
-  s = s.replace(/(?:^|\n)[ \t]*(?:```|~~~)[^\n]*(?:\n[\s\S]*?)?(?:```|~~~)/g, " ");
+  s = s.replace(
+    /(?:^|\n)[ \t]*(?:```|~~~)[^\n]*(?:\n[\s\S]*?)?(?:```|~~~)/g,
+    " ",
+  );
   s = s.replace(/(?:^|\n)[ \t]*(?:```|~~~)[\s\S]*$/g, " ");
   // Images before links (![alt](url) contains [alt](url)).
   s = s.replace(/!\[[^\]]*\]\([^)]*\)/g, " ");
@@ -198,7 +202,8 @@ export type SpeakMsg = {
   parts?: ReadonlyArray<{ type?: string; text?: unknown }>;
 };
 
-/** What to speak for one settled run: first part + last part, middle skipped. */
+/** What to speak for one settled run: the run's FINAL message, in full —
+ *  with a length tier for long answers (2026-11-01 research pass). */
 export type SpeakPlan = {
   text: string;
   /** Message id of the LAST text part's message — the run's final answer,
@@ -206,17 +211,40 @@ export type SpeakPlan = {
   lastMessageId: string;
 };
 
+/** Below this, an answer reads in under a minute — speak it in FULL. */
+export const SPEAK_FULL_CHARS = 700;
+/** The spoken sign-off when a long answer is trimmed to its lead paragraph. */
+const LONG_REPLY_SIGNOFF = "The full answer is on screen.";
+
+/** Trim a long answer to its lead paragraph (through the first blank-line
+ *  break, ~1–2 sentences — the direct answer) for the spoken tier. */
+function leadParagraph(s: string): string {
+  const idx = s.search(/\n\s*\n/);
+  return (idx > 0 ? s.slice(0, idx) : s).trim();
+}
+
 /**
- * Pick what a settled agent run should SAY (2026-11-01: "voice only says
- * one random sentence, and a fast agent never says anything after that").
+ * Pick what a settled agent run should SAY (2026-11-01, redesign after the
+ * narration research pass).
  *
- * A multi-step run accumulates every step's text parts into ONE assistant
- * message — short narrations like "Let me check that…" sit alongside the
- * final answer. Speaking only the LAST part made the voice say a random
- * middle narration while the actual conclusion was skipped, or nothing at
- * all when the settle raced the throttled final-message flush. The user
- * contract: say the FIRST part (the immediate lead-in) and the LAST part
- * (the final answer); the step-by-step middle is skipped.
+ * PREVIOUS contract: FIRST part + LAST part of the run, middle skipped.
+ * That answered "say the lead-in and the final" — but in practice a
+ * multi-part reply reads as an incoherent abridgment: "Let me check…"
+ * glued to a conclusion the middle set up, and the step narrations the
+ * user DID want context for are gone. The industry splits into three
+ * models (speech-native generation; a voice layer over summaries like
+ * VS Code Voice Mode; verbatim read-aloud with user-paced controls like
+ * Safari Listen-to-Page). KAI is a narrator of its own agent's prose, so
+ * the closest fit is the third — READ THE REPLY, and give the user the
+ * pace controls.
+ *
+ * NEW contract: speak the COMPLETE text of the FINAL assistant message of
+ * the run (all its text parts, in order). The step-by-step narrations in
+ * EARLIER messages are not the reply — the final message is. Length
+ * tiers: short answers (<= SPEAK_FULL_CHARS) speak in full; long answers
+ * speak the lead paragraph + a short sign-off pointing at the screen
+ * ("The full answer is on screen.") — honest about what was cut, instead
+ * of silently swallowing the middle.
  *
  * Causality is the bridge's boundary contract, passed in: only messages at
  * index >= `from` are this run's, EXCEPT an in-place tail replacement
@@ -231,41 +259,52 @@ export function pickSpeakSegments(
   from: number,
   boundaryObj: SpeakMsg | null,
 ): SpeakPlan | null {
-  const texts: string[] = [];
-  let lastMessageId: string | null = null;
-  const collect = (m: SpeakMsg) => {
-    for (const p of m.parts ?? []) {
-      if (p.type === "text" && typeof p.text === "string" && p.text.trim()) {
-        texts.push(p.text.trim());
-        lastMessageId = m.id;
-      }
-    }
-  };
+  // The run's final assistant message: the last message (at or after the
+  // boundary) holding any text part. Walked from the tail; the boundary
+  // object itself is replaced-in-place for regenerate, so a NEW object in
+  // that slot counts as this run's too.
   const start = Math.max(from, 0);
-  for (let i = start; i < msgs.length; i++) {
-    const m = msgs[i];
-    if (!m || m.role !== "assistant" || m === boundaryObj) continue;
-    collect(m);
-  }
-  // In-place tail replacement: the array is no longer than the boundary,
-  // but the boundary assistant object was replaced by a new one with fresh
-  // text. That new object IS this run's reply.
-  if (boundaryObj != null && start > 0) {
-    for (let i = msgs.length - 1; i >= start - 1 && texts.length === 0; i--) {
-      if (i < 0 || i >= msgs.length) break;
-      const m = msgs[i];
-      if (!m || m.role !== "assistant") continue;
-      if (m === boundaryObj) break; // reached the pre-run reply — stop
-      collect(m);
+  const isAnswer = (m: SpeakMsg | undefined): m is SpeakMsg =>
+    !!m &&
+    m.role === "assistant" &&
+    m !== boundaryObj &&
+    (m.parts ?? []).some(
+      (p) => p.type === "text" && typeof p.text === "string" && p.text.trim(),
+    );
+  let finalMsg: SpeakMsg | null = null;
+  for (let i = msgs.length - 1; i >= start; i--) {
+    if (isAnswer(msgs[i])) {
+      finalMsg = msgs[i]!;
+      break;
     }
   }
+  // Regenerate/stall-recovery: no assistant after `from`, but the boundary
+  // slot itself holds a NEW object (identity swap, same id) with fresh
+  // text — that object IS this run's reply.
+  if (!finalMsg && boundaryObj != null && start > 0) {
+    const slot = msgs[start - 1];
+    if (slot && slot !== boundaryObj && isAnswer(slot)) finalMsg = slot;
+  }
+  if (!finalMsg) return null;
+  const texts = (finalMsg.parts ?? [])
+    .filter(
+      (p): p is { type: "text"; text: string } =>
+        p.type === "text" && typeof p.text === "string" && !!p.text.trim(),
+    )
+    .map((p) => p.text.trim());
   if (texts.length === 0) return null;
-  const first = texts[0]!;
-  const last = texts.length === 1 ? first : texts[texts.length - 1]!;
-  return {
-    text: texts.length === 1 ? first : `${first}\n\n${last}`,
-    lastMessageId: lastMessageId ?? "",
-  };
+  let text = texts.join("\n\n");
+  // LENGTH TIERS: short answers speak in full; long answers speak the lead
+  // paragraph + sign-off. The sign-off names WHAT WAS CUT (everything after
+  // the lead) — never a silent elision.
+  if (text.length > SPEAK_FULL_CHARS) {
+    const lead = leadParagraph(text);
+    text =
+      lead.length > 0 && lead.length < text.length
+        ? `${lead} ${LONG_REPLY_SIGNOFF}`
+        : `${text.slice(0, SPEAK_FULL_CHARS)}… ${LONG_REPLY_SIGNOFF}`;
+  }
+  return { text, lastMessageId: finalMsg.id };
 }
 
 // ── TTS playback ───────────────────────────────────────────────────────────
@@ -278,6 +317,64 @@ let runToken = 0;
 /** Highest token still synthesizing/queueing — lets ttsPlaying() report
  *  in-flight synthesis for the current run. 0 = idle. */
 let synthesizingRun = 0;
+/** Chunk boundary skip: set by ttsSkip() while a chunk is playing; consumed
+ *  by playBuffer's ended-listener so the promise resolves immediately. */
+let skipRequested = false;
+/** Pause/resume: paused playback keeps the element + blob URL alive; the
+ *  run loop holds at the await until resumed (or superseded/stopped). */
+let pauseRequested = false;
+let resumeResolve: (() => void) | null = null;
+/** Playback rate (pacing control) — clamped, applied to every chunk. */
+let playbackRate = 1;
+
+/** User pause/resume of the current utterance. Fail-safe no-ops. */
+export function ttsPause(): void {
+  if (!ttsPlaying()) return;
+  pauseRequested = true;
+  try {
+    sharedAudio?.pause();
+  } catch {
+    // ignore
+  }
+  notifyTtsListeners();
+}
+export function ttsResume(): void {
+  if (!pauseRequested) return;
+  pauseRequested = false;
+  try {
+    void sharedAudio?.play().catch(() => {});
+  } catch {
+    // ignore
+  }
+  const r = resumeResolve;
+  resumeResolve = null;
+  r?.();
+  notifyTtsListeners();
+}
+/** True when the current utterance is PAUSED (a paused player is not
+ *  "playing", but the run is still alive). */
+export function ttsPaused(): boolean {
+  return pauseRequested;
+}
+/** Skip the REMAINDER of the current chunk (jump to the next one). */
+export function ttsSkip(): void {
+  if (!ttsPlaying()) return;
+  skipRequested = true;
+  try {
+    sharedAudio?.pause();
+  } catch {
+    // ignore
+  }
+}
+/** Set the playback rate for current + future utterances (0.5–2). */
+export function ttsSetRate(rate: number): void {
+  playbackRate = Math.min(2, Math.max(0.5, rate || 1));
+  try {
+    if (sharedAudio) sharedAudio.playbackRate = playbackRate;
+  } catch {
+    // ignore
+  }
+}
 
 function getAudioEl(): HTMLAudioElement | null {
   if (typeof window === "undefined") return null;
@@ -302,6 +399,15 @@ function releaseUrl(): void {
 /** Stop any in-flight playback and discard the queued remainder. Fail-safe. */
 export function ttsStop(): void {
   runToken++; // invalidates every queued/synthesizing chunk of older runs
+  // Clear the pacing state so a stopped utterance can't leave pause/skip
+  // latched for the NEXT speak.
+  skipRequested = false;
+  if (pauseRequested) {
+    pauseRequested = false;
+    const r = resumeResolve;
+    resumeResolve = null;
+    r?.();
+  }
   const el = getAudioEl();
   if (!el) return;
   try {
@@ -314,11 +420,17 @@ export function ttsStop(): void {
   notifyTtsListeners();
 }
 
-/** True when a TTS utterance is playing (or synthesizing, for the latest run). */
+/** True when a TTS utterance is playing (or synthesizing, for the latest
+ *  run). A PAUSED utterance reports false — the run is alive but silent;
+ *  ttsPaused() distinguishes the two. */
 export function ttsPlaying(): boolean {
   try {
-    const audioActive = !!sharedAudio && !sharedAudio.paused && !sharedAudio.ended;
-    return audioActive || (synthesizingRun >= runToken && synthesizingRun !== 0);
+    if (pauseRequested) return false;
+    const audioActive =
+      !!sharedAudio && !sharedAudio.paused && !sharedAudio.ended;
+    return (
+      audioActive || (synthesizingRun >= runToken && synthesizingRun !== 0)
+    );
   } catch {
     return false;
   }
@@ -390,20 +502,21 @@ export async function speakText(
     for (const chunk of splitForSpeech(cleaned)) {
       // Superseded by a newer utterance (or stopped) — abandon the rest.
       if (token !== runToken) return true;
-    let bytes: ArrayBuffer;
-    if (mode === "local") {
-      const b64 = await native.voiceTts(chunk, prefs.voiceTtsLocalVoice);
-      bytes = base64ToBytes(b64);
-    } else if (mode === "assemblyai") {
-      bytes = await speakViaAssemblyAi(
-        chunk,
-        prefs.voiceTtsAssemblyVoice,
-      );
-    } else {
-      bytes = await speakViaOpenAi(chunk, prefs.voiceTtsApiModel, prefs.voiceTtsApiVoice);
-    }
+      let bytes: ArrayBuffer;
+      if (mode === "local") {
+        const b64 = await native.voiceTts(chunk, prefs.voiceTtsLocalVoice);
+        bytes = base64ToBytes(b64);
+      } else if (mode === "assemblyai") {
+        bytes = await speakViaAssemblyAi(chunk, prefs.voiceTtsAssemblyVoice);
+      } else {
+        bytes = await speakViaOpenAi(
+          chunk,
+          prefs.voiceTtsApiModel,
+          prefs.voiceTtsApiVoice,
+        );
+      }
       if (token !== runToken) return true;
-      await playBuffer(bytes);
+      await playBuffer(bytes, token);
     }
     return true;
   } catch (e) {
@@ -417,8 +530,10 @@ export async function speakText(
   }
 }
 
-/** Blob → shared <audio> playback, resolved when the chunk finishes. */
-function playBuffer(bytes: ArrayBuffer): Promise<void> {
+/** Blob → shared <audio> playback, resolved when the chunk finishes,
+ *  is skipped, or the run is superseded. Honors pause/resume (holds the
+ *  promise while paused) and the playback rate. */
+function playBuffer(bytes: ArrayBuffer, token: number): Promise<void> {
   return new Promise((resolve) => {
     const el = getAudioEl();
     if (!el) {
@@ -428,8 +543,35 @@ function playBuffer(bytes: ArrayBuffer): Promise<void> {
     releaseUrl();
     currentUrl = URL.createObjectURL(new Blob([bytes], { type: "audio/wav" }));
     el.src = currentUrl;
+    try {
+      el.playbackRate = playbackRate;
+    } catch {
+      // ignore
+    }
+    skipRequested = false;
+    const finish = () => {
+      el.removeEventListener("ended", finish);
+      el.removeEventListener("pause", onPaused);
+      resolve();
+    };
+    const onPaused = () => {
+      // Skip wins over pause (skip already paused the element): resolve now.
+      if (skipRequested) {
+        finish();
+        return;
+      }
+      // A pause requested via ttsPause holds this chunk open until resumed.
+      if (pauseRequested && !resumeResolve) {
+        resumeResolve = finish;
+      }
+    };
+    el.addEventListener("ended", finish);
+    el.addEventListener("pause", onPaused);
     void el.play().catch(() => resolve());
-    el.addEventListener("ended", () => resolve(), { once: true });
+    // Superseded while synthesizing this chunk: resolve so the loop exits.
+    if (token !== runToken) {
+      finish();
+    }
     el.addEventListener("ended", () => notifyTtsListeners(), { once: true });
     // `play` can reject even on success path (autoplay quirks) — notify on
     // the next tick either way so the icon follows reality, not intent.
@@ -460,10 +602,15 @@ async function speakViaAssemblyAi(
  *  settings window is a separate webview whose chatStore never hydrates
  *  apiKeys, so a store read silently fails there. keyring.getKey works in
  *  every window. */
-async function speakViaOpenAi(text: string, model: string, voice: string): Promise<ArrayBuffer> {
+async function speakViaOpenAi(
+  text: string,
+  model: string,
+  voice: string,
+): Promise<ArrayBuffer> {
   const { getKey } = await import("../lib/keyring");
   const apiKey = await getKey("openai");
-  if (!apiKey) throw new Error("TTS needs an OpenAI API key (Settings → Models).");
+  if (!apiKey)
+    throw new Error("TTS needs an OpenAI API key (Settings → Models).");
   const { proxyFetch } = await import("./proxyFetch");
   const resp = await proxyFetch("https://api.openai.com/v1/audio/speech", {
     method: "POST",
@@ -480,7 +627,9 @@ async function speakViaOpenAi(text: string, model: string, voice: string): Promi
   });
   if (!resp.ok) {
     const detail = await resp.text().catch(() => "");
-    throw new Error(`OpenAI TTS failed (${resp.status}): ${detail.slice(0, 200)}`);
+    throw new Error(
+      `OpenAI TTS failed (${resp.status}): ${detail.slice(0, 200)}`,
+    );
   }
   return await resp.arrayBuffer();
 }

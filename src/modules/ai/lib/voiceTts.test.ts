@@ -26,27 +26,33 @@ describe("toSpeechText", () => {
   });
 
   it("strips an unterminated code fence (tail of a part)", () => {
-    expect(toSpeechText(`Intro\n${BQ}${BQ}${BQ}js\nnever closed`)).toBe("Intro");
+    expect(toSpeechText(`Intro\n${BQ}${BQ}${BQ}js\nnever closed`)).toBe(
+      "Intro",
+    );
   });
 
   it("strips paired thinking tags", () => {
-    expect(toSpeechText("<thinking>internal notes</thinking>The answer is 42.")).toBe(
-      "The answer is 42.",
-    );
+    expect(
+      toSpeechText("<thinking>internal notes</thinking>The answer is 42."),
+    ).toBe("The answer is 42.");
   });
 
   it("strips an unterminated thinking tail (everything after is thought)", () => {
-    expect(toSpeechText("<thinking>secret\nmore secret\nThe answer is 42.")).toBe("");
+    expect(
+      toSpeechText("<thinking>secret\nmore secret\nThe answer is 42."),
+    ).toBe("");
   });
 
   it("strips trust-boundary fence blocks (tool output echo)", () => {
-    expect(toSpeechText("[start tool_abc]junk output[end tool_abc] visible text")).toBe(
-      "visible text",
-    );
+    expect(
+      toSpeechText("[start tool_abc]junk output[end tool_abc] visible text"),
+    ).toBe("visible text");
   });
 
   it("keeps inline code content but drops backticks, links keep label", () => {
-    const out = toSpeechText(`Run ${BQ}pnpm test${BQ} and see [docs](https://x.com).`);
+    const out = toSpeechText(
+      `Run ${BQ}pnpm test${BQ} and see [docs](https://x.com).`,
+    );
     expect(out).toBe("Run pnpm test and see docs.");
   });
 
@@ -75,7 +81,9 @@ describe("toSpeechText", () => {
 
 describe("splitForSpeech", () => {
   it("returns a single chunk for short text", () => {
-    expect(splitForSpeech("One sentence only.")).toEqual(["One sentence only."]);
+    expect(splitForSpeech("One sentence only.")).toEqual([
+      "One sentence only.",
+    ]);
   });
 
   it("returns no chunks for empty or whitespace-only text", () => {
@@ -128,30 +136,32 @@ function msg(id: string, role: "assistant" | "user", ...texts: string[]) {
   };
 }
 
-describe("pickSpeakSegments — first + last, middle skipped (2026-11-01)", () => {
-  // "Voice TTS is only saying one random sentence after my reply; if the
-  //  agent is going fast it never says anything after that. Say the first
-  //  part and the last part — skip the middle, but need the final."
-  it("speaks the FIRST part joined with the LAST; the middle is skipped", () => {
+describe("pickSpeakSegments — the run's FINAL message, in full (2026-11-01 redesign)", () => {
+  // Research pass conclusion: first+last read as an incoherent
+  // abridgment. New contract: speak the complete text of the FINAL
+  // assistant message (all text parts); earlier step narrations are not
+  // the reply. Long answers tier down to lead paragraph + sign-off.
+  it("speaks EVERY text part of the final message — nothing silently skipped", () => {
     const msgs = [
       msg("u1", "user", "fix it"),
+      msg("a1", "assistant", "Let me check the tests first."),
       msg(
-        "a1",
+        "a2",
         "assistant",
-        "Let me check the tests first.",
-        "Running the suite now…",
+        "Here is the full answer.",
+        "It has two paragraphs of substance.",
         "All tests pass — the fix is verified.",
       ),
     ];
     const seg = pickSpeakSegments(msgs, 1, null);
     expect(seg).not.toBeNull();
     expect(seg!.text).toBe(
-      "Let me check the tests first.\n\nAll tests pass — the fix is verified.",
+      "Here is the full answer.\n\nIt has two paragraphs of substance.\n\nAll tests pass — the fix is verified.",
     );
-    expect(seg!.lastMessageId).toBe("a1");
+    expect(seg!.lastMessageId).toBe("a2");
   });
 
-  it("a lone text part speaks once (first === last, no duplication)", () => {
+  it("a lone text part speaks once", () => {
     const msgs = [msg("u1", "user", "hi"), msg("a1", "assistant", "Done.")];
     const seg = pickSpeakSegments(msgs, 1, null);
     expect(seg!.text).toBe("Done.");
@@ -181,5 +191,32 @@ describe("pickSpeakSegments — first + last, middle skipped (2026-11-01)", () =
       { id: "a1", role: "assistant", parts: [{ type: "tool-call" }] },
     ];
     expect(pickSpeakSegments(msgs, 1, null)).toBeNull();
+  });
+
+  it("LENGTH TIER: a short answer (≤ 700 chars) speaks in full — no sign-off", () => {
+    const short = "A short answer. ".repeat(10); // ~170 chars
+    const msgs = [msg("u1", "user", "q"), msg("a1", "assistant", short.trim())];
+    const seg = pickSpeakSegments(msgs, 1, null)!;
+    expect(seg.text).toBe(short.trim());
+    expect(seg.text).not.toContain("on screen");
+  });
+
+  it("LENGTH TIER: a long answer speaks the lead paragraph + sign-off naming what's on screen", () => {
+    const lead = "The build fails because the lock is held during spawn.";
+    const rest = " Detailed paragraph two. ".repeat(80);
+    const long = `${lead}\n\n${rest.trim()}`;
+    const msgs = [msg("u1", "user", "q"), msg("a1", "assistant", long)];
+    const seg = pickSpeakSegments(msgs, 1, null)!;
+    expect(seg.text).toBe(`${lead} The full answer is on screen.`);
+    expect(seg.text).not.toContain("Detailed paragraph two");
+  });
+
+  it("LENGTH TIER: no blank-line break in a long wall of text → hard cut at the cap + sign-off", () => {
+    const wall = "word ".repeat(400).trim(); // 2000 chars, no paragraphs
+    const msgs = [msg("u1", "user", "q"), msg("a1", "assistant", wall)];
+    const seg = pickSpeakSegments(msgs, 1, null)!;
+    expect(seg.text.startsWith("word")).toBe(true);
+    expect(seg.text).toContain("The full answer is on screen.");
+    expect(seg.text.length).toBeLessThan(900);
   });
 });

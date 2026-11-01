@@ -6,6 +6,10 @@ import {
   Add01Icon,
   Cancel01Icon,
   ClipboardIcon,
+  NextIcon,
+  PauseIcon,
+  PlayCircleIcon,
+  Timer01Icon,
   CodeIcon,
   Copy01Icon,
   HashtagIcon,
@@ -40,7 +44,15 @@ import {
 } from "../lib/inputTriggers";
 import { useChatStore } from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
-import { subscribeTtsPlaying, ttsStop } from "../lib/voiceTts";
+import {
+  subscribeTtsPlaying,
+  ttsPause,
+  ttsPaused,
+  ttsResume,
+  ttsSetRate,
+  ttsSkip,
+  ttsStop,
+} from "../lib/voiceTts";
 import { AutoApproveToggle } from "./AutoApproveToggle";
 import { FilePickerContent } from "./FilePicker";
 import { SnippetPickerContent, type PickerItem } from "./SnippetPicker";
@@ -60,6 +72,17 @@ export function AiInputBar() {
   // the AI's voice response is speaking. Subscribes to transitions only.
   const [ttsPlaying, setTtsPlaying] = useState(false);
   useEffect(() => subscribeTtsPlaying(setTtsPlaying), []);
+  // Playback rate for the pacing control (persisted across utterances by
+  // voiceTts's module state; this local copy only re-renders the label).
+  const [ttsRate, setTtsRate] = useState(1);
+  const adjustRate = (delta: number) => {
+    const next = Math.min(
+      2,
+      Math.max(0.5, Math.round((ttsRate + delta) * 10) / 10),
+    );
+    setTtsRate(next);
+    ttsSetRate(next);
+  };
   const workspaceFiles = useWorkspaceFiles(workspaceRoot, fileTrigger !== null);
 
   const [fileQuery, setFileQuery] = useState("");
@@ -189,7 +212,10 @@ export function AiInputBar() {
     if (it) onPickItem(it);
   };
 
-  const hasChips = c.files.length > 0 || c.pickedSnippets.length > 0 || c.pickedCommands.length > 0;
+  const hasChips =
+    c.files.length > 0 ||
+    c.pickedSnippets.length > 0 ||
+    c.pickedCommands.length > 0;
   // Warn when an image is attached but the selected model can't see it —
   // the agent will send extracted text instead of the picture itself.
   const selectedModelId = useChatStore((s) => s.selectedModelId);
@@ -211,7 +237,7 @@ export function AiInputBar() {
     <div
       className={cn(
         "shrink-0 border-t border-border/60 bg-card/40 px-3 flex flex-col justify-center",
-        hasChips ? "py-2 min-h-[42px]" : "min-h-[42px] py-0"
+        hasChips ? "py-2 min-h-[42px]" : "min-h-[42px] py-0",
       )}
     >
       <div
@@ -296,14 +322,88 @@ export function AiInputBar() {
               />
 
               {ttsPlaying && !c.voice.recording ? (
+                <div className="flex shrink-0 items-center">
+                  {/* Pacing controls (2026-11-01, research pass): pause/
+                      resume, skip-chunk, rate -, rate label, rate + —
+                      Safari Listen-to-Page parity for a narrator of agent
+                      prose. Stop (discard the rest) stays the loudest. */}
+                  <button
+                    type="button"
+                    title="Pause voice response"
+                    onClick={() => ttsPause()}
+                    className="size-6 flex items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                  >
+                    <HugeiconsIcon
+                      icon={PauseIcon}
+                      size={14}
+                      strokeWidth={1.75}
+                    />
+                  </button>
+                  <button
+                    type="button"
+                    title="Skip to next part"
+                    onClick={() => ttsSkip()}
+                    className="size-6 flex items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                  >
+                    <HugeiconsIcon
+                      icon={NextIcon}
+                      size={14}
+                      strokeWidth={1.75}
+                    />
+                  </button>
+                  <button
+                    type="button"
+                    title="Slower narration"
+                    onClick={() => adjustRate(-0.25)}
+                    className="size-6 flex items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                  >
+                    <HugeiconsIcon
+                      icon={Timer01Icon}
+                      size={14}
+                      strokeWidth={1.75}
+                      className="rotate-180"
+                    />
+                  </button>
+                  <span
+                    className="w-8 text-center text-[10px] tabular-nums text-muted-foreground"
+                    title="Narration speed"
+                  >
+                    {ttsRate.toFixed(2).replace(/0$/, "")}×
+                  </span>
+                  <button
+                    type="button"
+                    title="Faster narration"
+                    onClick={() => adjustRate(0.25)}
+                    className="size-6 flex items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                  >
+                    <HugeiconsIcon
+                      icon={Timer01Icon}
+                      size={14}
+                      strokeWidth={1.75}
+                    />
+                  </button>
+                  <button
+                    type="button"
+                    title="Stop voice response"
+                    onClick={() => ttsStop()}
+                    className="size-6 flex items-center justify-center rounded-md bg-amber-500/15 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 hover:text-amber-600 dark:hover:text-amber-400 transition-colors"
+                  >
+                    <HugeiconsIcon
+                      icon={VolumeHighIcon}
+                      size={14}
+                      strokeWidth={1.75}
+                    />
+                  </button>
+                </div>
+              ) : ttsPaused() && !c.voice.recording ? (
                 <button
                   type="button"
-                  title="Stop voice response"
-                  onClick={() => ttsStop()}
+                  title="Resume voice response"
+                  onClick={() => ttsResume()}
                   className="shrink-0 size-6 flex items-center justify-center rounded-md bg-amber-500/15 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 hover:text-amber-600 dark:hover:text-amber-400 transition-colors"
                 >
                   <HugeiconsIcon
-                    icon={VolumeHighIcon}
+                    icon={PlayCircleIcon}
                     size={14}
                     strokeWidth={1.75}
                   />
@@ -347,7 +447,11 @@ export function AiInputBar() {
                       strokeWidth={1.75}
                     />
                   ) : (
-                    <HugeiconsIcon icon={Mic01Icon} size={14} strokeWidth={1.75} />
+                    <HugeiconsIcon
+                      icon={Mic01Icon}
+                      size={14}
+                      strokeWidth={1.75}
+                    />
                   )}
                 </button>
               ) : null}
@@ -524,11 +628,7 @@ export function AiInputBar() {
                 onClick={c.voice.clearError}
                 className="shrink-0 rounded p-0.5 text-amber-600/70 hover:bg-accent hover:text-amber-600 dark:text-amber-400/70 dark:hover:text-amber-400"
               >
-                <HugeiconsIcon
-                  icon={Cancel01Icon}
-                  size={11}
-                  strokeWidth={2}
-                />
+                <HugeiconsIcon icon={Cancel01Icon} size={11} strokeWidth={2} />
               </button>
             </motion.div>
           )}
@@ -542,7 +642,8 @@ export function AiInputBar() {
           textareaRef={c.textareaRef}
           hasSelection={
             c.textareaRef.current
-              ? c.textareaRef.current.selectionStart !== c.textareaRef.current.selectionEnd
+              ? c.textareaRef.current.selectionStart !==
+                c.textareaRef.current.selectionEnd
               : false
           }
           onDismiss={() => setCtxMenu(null)}
