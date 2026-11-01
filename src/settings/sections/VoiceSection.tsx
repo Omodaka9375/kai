@@ -19,6 +19,12 @@ import {
 import { Channel } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { SectionHeader } from "../components/SectionHeader";
+import {
+  VoiceEnginePanel,
+  VoicePanelRow,
+  VoiceTestRow,
+} from "../components/VoiceEnginePanel";
+import { useVoiceMicTest } from "../components/useVoiceMicTest";
 /** Local STT models (whisper.cpp quantized ggml — mirrors Rust STT_MODELS). */
 const STT_MODELS = [
   { id: "tiny.en", label: "Tiny (English)", size: "31 MB", note: "fastest" },
@@ -144,11 +150,12 @@ function formatBytes(n: number): string {
 export function VoiceSection() {
   const prefs = usePreferencesStore();
   const [status, setStatus] = useState<VoiceStatus | null>(null);
-  const [busy, setBusy] = useState<"" | "stt" | "tts" | "remove" | "voice">("");
+  const [busy, setBusy] = useState<"" | "stt" | "tts" | "remove">("");
   const [progress, setProgress] = useState<VoiceSetupEvent | null>(null);
   const [error, setError] = useState("");
   const [hasOpenaiKey, setHasOpenaiKey] = useState<boolean | null>(null);
   const [hasAssemblyKey, setHasAssemblyKey] = useState<boolean | null>(null);
+  const micTest = useVoiceMicTest();
 
   const refreshStatus = () => {
     void native.voiceStatus().then(setStatus).catch(() => setStatus(null));
@@ -254,6 +261,49 @@ export function VoiceSection() {
     </div>
   );
 
+  // ── Shared test-row elements (the unification core) ─────────────────────
+  // Every engine card renders the SAME test affordance: identical button
+  // style, identical caption, identical result/error rendering. One element
+  // per engine family; only the active mode's card is in the tree at a time.
+
+  const micTestRow = (
+    <VoiceTestRow
+      onTest={micTest.toggle}
+      busy={micTest.state === "transcribing" ? "Transcribing…" : null}
+      disabled={busy !== "" || (sttMode === "local" && !status?.sttInstalled)}
+      disabledReason={
+        sttMode === "local" && !status?.sttInstalled
+          ? "Install the local engine first — mic input falls back to Browser mode until installed."
+          : undefined
+      }
+      testLabel={micTest.state === "recording" ? "Stop & transcribe" : "Test mic"}
+      hint="Record a short clip - the transcript shows what the engine heard."
+      statusText={
+        micTest.transcript != null
+          ? micTest.transcript
+            ? `Heard: “${micTest.transcript}”`
+            : "(nothing heard)"
+          : undefined
+      }
+      error={micTest.error}
+    />
+  );
+
+  const testVoiceRow = (
+    <VoiceTestRow
+      onTest={() => void onTestVoice()}
+      busy={busy === "tts" ? "Downloading…" : null}
+      disabled={busy !== "" || (ttsMode === "local" && !status?.ttsInstalled)}
+      disabledReason={
+        ttsMode === "local" && !status?.ttsInstalled
+          ? "Piper isn't installed - TTS stays off until installed."
+          : undefined
+      }
+      testLabel="Test voice"
+      hint="Test voice speaks a short sample."
+    />
+  );
+
   return (
     <div className="flex flex-col gap-6">
       <SectionHeader
@@ -292,28 +342,30 @@ export function VoiceSection() {
         </div>
 
         {sttMode === "api" ? (
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between text-[12px]">
-              <span className="text-muted-foreground">STT model</span>
+          <VoiceEnginePanel label="API (OpenAI) setup">
+            <VoicePanelRow label="STT model" last>
               <Select
                 ariaLabel="API STT model"
                 value={prefs.voiceSttApiModel}
                 onChange={(v) => void setVoiceSttApiModel(v)}
                 options={STT_API_MODELS}
               />
-            </div>
+            </VoicePanelRow>
             {hasOpenaiKey === false ? missingKeyWarning("OpenAI") : null}
-          </div>
+            {micTestRow}
+          </VoiceEnginePanel>
         ) : null}
 
         {sttMode === "assemblyai" ? (
-          hasAssemblyKey === false ? missingKeyWarning("AssemblyAI") : null
+          <VoiceEnginePanel label="API (AssemblyAI) setup">
+            {hasAssemblyKey === false ? missingKeyWarning("AssemblyAI") : null}
+            {micTestRow}
+          </VoiceEnginePanel>
         ) : null}
 
         {sttMode === "local" ? (
-          <div className="flex flex-col gap-2 rounded-lg border border-border/60 bg-card/60 px-3 py-2.5">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[12px] text-muted-foreground">Model</span>
+          <VoiceEnginePanel label="Local (whisper.cpp) setup">
+            <VoicePanelRow label="Model" last>
               <Select
                 ariaLabel="Local STT model"
                 value={prefs.voiceSttModel}
@@ -333,7 +385,7 @@ export function VoiceSection() {
                     ? "Reinstall"
                     : "Install local STT"}
               </Button>
-            </div>
+            </VoicePanelRow>
             {status?.sttInstalled ? (
               <span className="text-[11.5px] text-emerald-500">
                 Engine installed{status.sttModel ? ` — model: ${status.sttModel}` : " — no model yet"}
@@ -344,7 +396,14 @@ export function VoiceSection() {
               </span>
             )}
             {busy === "stt" && progress ? <Progress ev={progress} /> : null}
-          </div>
+            {micTestRow}
+          </VoiceEnginePanel>
+        ) : null}
+
+        {sttMode === "browser" ? (
+          <VoiceEnginePanel label="Browser (WebView) setup">
+            {micTestRow}
+          </VoiceEnginePanel>
         ) : null}
       </div>
 
@@ -401,13 +460,10 @@ export function VoiceSection() {
             onClick={() => setTtsMode("local")}
           />
         </div>
-      </div>
 
-      {ttsMode === "api" ? (
-        <div className="flex flex-col gap-2 rounded-lg border border-border/60 bg-card/60 px-3 py-2.5">
-          <div className="flex flex-wrap items-center justify-between gap-2 text-[12px]">
-            <span className="text-muted-foreground">TTS model / voice</span>
-            <div className="flex items-center gap-2">
+        {ttsMode === "api" ? (
+          <VoiceEnginePanel label="API (OpenAI) setup">
+            <VoicePanelRow label="TTS model / voice" last>
               <Select
                 ariaLabel="API TTS model"
                 value={prefs.voiceTtsApiModel}
@@ -420,31 +476,15 @@ export function VoiceSection() {
                 onChange={(v) => void setVoiceTtsApiVoice(v)}
                 options={TTS_API_VOICES.map((v) => ({ id: v, label: v }))}
               />
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              className="-ml-2"
-              onClick={() => void onTestVoice()}
-            >
-              Test voice
-            </Button>
-            <span className="text-[11px] text-muted-foreground/70">
-              Test voice speaks a short sample.
-            </span>
-          </div>
-          {hasOpenaiKey === false ? missingKeyWarning("OpenAI") : null}
-        </div>
-      ) : null}
+            </VoicePanelRow>
+            {testVoiceRow}
+            {hasOpenaiKey === false ? missingKeyWarning("OpenAI") : null}
+          </VoiceEnginePanel>
+        ) : null}
 
-      {ttsMode === "assemblyai" ? (
-        <div className="flex flex-col gap-2 rounded-lg border border-border/60 bg-card/60 px-3 py-2.5">
-          <div className="flex flex-wrap items-center justify-between gap-2 text-[12px]">
-            <span className="text-muted-foreground">Voice</span>
-            <div className="flex items-center gap-2">
+        {ttsMode === "assemblyai" ? (
+          <VoiceEnginePanel label="API (AssemblyAI) setup">
+            <VoicePanelRow label="Voice" last>
               <Select
                 ariaLabel="AssemblyAI TTS voice"
                 value={prefs.voiceTtsAssemblyVoice || "aai-jane"}
@@ -454,71 +494,49 @@ export function VoiceSection() {
                   label: `${v.label} - ${v.note}`,
                 }))}
               />
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              className="-ml-2"
-              onClick={() => void onTestVoice()}
-            >
-              Test voice
-            </Button>
-            <span className="text-[11px] text-muted-foreground/70">
-              Test voice speaks a short sample.
-            </span>
-          </div>
-          {hasAssemblyKey === false ? missingKeyWarning("AssemblyAI") : null}
-        </div>
-      ) : null}
+            </VoicePanelRow>
+            {testVoiceRow}
+            {hasAssemblyKey === false ? missingKeyWarning("AssemblyAI") : null}
+          </VoiceEnginePanel>
+        ) : null}
 
-      {ttsMode === "local" ? (
-        <div className="flex flex-col gap-2 rounded-lg border border-border/60 bg-card/60 px-3 py-2.5">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[12px] text-muted-foreground">Voice</span>
-            <Select
-              ariaLabel="Local TTS voice"
-              value={prefs.voiceTtsLocalVoice}
-              onChange={(v) => void setVoiceTtsLocalVoice(v)}
-              options={TTS_VOICES.map((v) => ({ id: v.id, label: `${v.label} — ${v.size}` }))}
-            />
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={busy !== ""}
-              onClick={() => void onSetupTts(prefs.voiceTtsLocalVoice)}
-            >
-              {busy === "tts"
-                ? "Downloading…"
-                : selectedVoiceInstalled
-                  ? "Reinstall"
-                  : "Install local TTS"}
-            </Button>
-          </div>
-          {status?.ttsInstalled ? (
-            <span className="text-[11.5px] text-emerald-500">
-              Piper installed{installedVoicesSummary}
-            </span>
-          ) : (
-            <span className="text-[11.5px] text-muted-foreground/70">
-              Piper not installed — TTS stays off until installed.
-            </span>
-          )}
-          {busy === "tts" && progress ? <Progress ev={progress} /> : null}
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            disabled={busy !== "" || !status?.ttsInstalled}
-            onClick={() => void onTestVoice()}
-          >
-            Test voice
-          </Button>
-        </div>
-      ) : null}
+        {ttsMode === "local" ? (
+          <VoiceEnginePanel label="Local (Piper) setup">
+            <VoicePanelRow label="Voice" last>
+              <Select
+                ariaLabel="Local TTS voice"
+                value={prefs.voiceTtsLocalVoice}
+                onChange={(v) => void setVoiceTtsLocalVoice(v)}
+                options={TTS_VOICES.map((v) => ({ id: v.id, label: `${v.label} — ${v.size}` }))}
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={busy !== ""}
+                onClick={() => void onSetupTts(prefs.voiceTtsLocalVoice)}
+              >
+                {busy === "tts"
+                  ? "Downloading…"
+                  : selectedVoiceInstalled
+                    ? "Reinstall"
+                    : "Install local TTS"}
+              </Button>
+            </VoicePanelRow>
+            {status?.ttsInstalled ? (
+              <span className="text-[11.5px] text-emerald-500">
+                Piper installed{installedVoicesSummary}
+              </span>
+            ) : (
+              <span className="text-[11.5px] text-muted-foreground/70">
+                Piper not installed — TTS stays off until installed.
+              </span>
+            )}
+            {busy === "tts" && progress ? <Progress ev={progress} /> : null}
+            {testVoiceRow}
+          </VoiceEnginePanel>
+        ) : null}
+      </div>
 
       {ttsMode !== "off" ? (
         <div className="flex items-center justify-between text-[12px]">
