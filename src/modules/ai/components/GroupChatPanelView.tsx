@@ -3,6 +3,7 @@ import { useSyncExternalStore } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Popover,
   PopoverContent,
@@ -361,9 +362,7 @@ export function GroupChatPanel({
           self-heals: it paints whenever no group is actually open, and
           opening one re-syncs the surface. Same rule as the AI window: one
           derived boolean drives the window and its pill. */}
-      {activeProjectInGroup &&
-      activeProjectGroups.length > 0 &&
-      !expanded ? (
+      {activeProjectInGroup && activeProjectGroups.length > 0 && !expanded ? (
         <GroupListTray
           groups={activeProjectGroups}
           activeId={active?.id ?? null}
@@ -1328,6 +1327,21 @@ function InvitePicker({
       })),
     [customAgents],
   );
+  // Persona FILTER + COUNT (2026-11-01 report: "the invite dropdown shows
+  // only 6 of my 10 personas, plus the built-ins"). The list itself always
+  // carried every persona — the popover's scroll VIEWPORT fits ~6 rows and
+  // the overlay scrollbar is invisible until hovered, so the fold READ as
+  // a hard cap. With a double-digit roster the list needs a filter, a
+  // taller viewport, and a count row that states the full roster size so
+  // a fold can never masquerade as the whole list again.
+  const [personaQuery, setPersonaQuery] = useState("");
+  const filteredPersonas = useMemo(
+    () =>
+      personas.filter((p) =>
+        p.name.toLowerCase().includes(personaQuery.trim().toLowerCase()),
+      ),
+    [personas, personaQuery],
+  );
   const inviterName =
     projects.find((p) => p.id === activeProjectId)?.name ?? "This project";
 
@@ -1593,7 +1607,15 @@ function InvitePicker({
             Agent personas
           </span>
           <div className="flex flex-wrap items-center gap-1.5">
-            <Popover open={personasOpen} onOpenChange={setPersonasOpen}>
+            <Popover
+              open={personasOpen}
+              onOpenChange={(v) => {
+                setPersonasOpen(v);
+                // Reopen clean: a stale filter would look like personas
+                // vanishing between opens (same misread as the fold).
+                if (!v) setPersonaQuery("");
+              }}
+            >
               <PopoverTrigger asChild>
                 <Button
                   type="button"
@@ -1620,9 +1642,26 @@ function InvitePicker({
                 className="w-80 gap-0 p-1 text-xs"
                 onOpenAutoFocus={(e) => e.preventDefault()}
               >
-                <div className="flex max-h-56 flex-col gap-1 overflow-y-auto">
-                  {personas.length > 0 ? (
-                    personas.map((persona) => {
+                <div className="pb-1">
+                  <Input
+                    value={personaQuery}
+                    onChange={(e) => setPersonaQuery(e.target.value)}
+                    placeholder="Filter personas…"
+                    aria-label="Filter personas"
+                    className="h-7 rounded-md px-2 text-[12px]"
+                  />
+                </div>
+                <div className="flex max-h-80 flex-col gap-1 overflow-y-auto">
+                  {personas.length === 0 ? (
+                    <div className="px-3 py-4 text-center text-[12px] text-muted-foreground">
+                      No personas defined.
+                    </div>
+                  ) : filteredPersonas.length === 0 ? (
+                    <div className="px-3 py-4 text-center text-[12px] text-muted-foreground">
+                      No personas match “{personaQuery}”.
+                    </div>
+                  ) : (
+                    filteredPersonas.map((persona) => {
                       const selected = pickedPersonas.includes(persona.id);
                       return (
                         <button
@@ -1671,12 +1710,15 @@ function InvitePicker({
                         </button>
                       );
                     })
-                  ) : (
-                    <div className="px-3 py-4 text-center text-[12px] text-muted-foreground">
-                      No personas defined.
-                    </div>
                   )}
                 </div>
+                {personas.length > 0 ? (
+                  <div className="px-2 pb-0.5 pt-1 text-[10.5px] text-muted-foreground/70">
+                    {filteredPersonas.length === personas.length
+                      ? `${personas.length} personas`
+                      : `${filteredPersonas.length} of ${personas.length}`}
+                  </div>
+                ) : null}
               </PopoverContent>
             </Popover>
             {personas
@@ -1793,7 +1835,10 @@ function ParticipantsMenu({
           Members
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-60 gap-0 p-1 text-xs">
+      <PopoverContent
+        align="end"
+        className="w-60 max-h-96 gap-0 overflow-y-auto p-1 text-xs"
+      >
         <div className="px-2 pb-1 pt-0.5 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
           Participants
         </div>

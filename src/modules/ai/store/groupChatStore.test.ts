@@ -338,6 +338,38 @@ describe("source pins — trust boundary & wiring", () => {
     expect(picker).not.toMatch(/max-h-(?:40|72|44) /);
   });
 
+  it("persona invites are discoverable at ANY roster size: filter, taller viewport, count row (2026-11-01)", () => {
+    // User report: "group chat invite shows only 6 personas and I have 10
+    // plus the built-in ones." The list carried every persona all along —
+    // the popover's max-h-56 VIEWPORT fit ~6 rows and the overlay scrollbar
+    // is invisible until hovered, so the fold read as a hard cap. Contract:
+    // a filter input over the list, a taller scroll region, and a count row
+    // stating the full roster size ("N of M"), so a fold can never
+    // masquerade as the whole roster again.
+    const picker = panel.slice(
+      panel.indexOf("function InvitePicker("),
+      panel.indexOf("function ParticipantsMenu("),
+    );
+    expect(picker).toContain("Filter personas…");
+    expect(picker).toMatch(/const \[personaQuery, setPersonaQuery\]/);
+    // The rows render the FILTERED set, and reopening resets the filter
+    // (a stale filter would look like personas vanishing between opens).
+    expect(picker).toMatch(/filteredPersonas\.map\(\(persona\) => \{/);
+    expect(picker).toMatch(/if \(!v\) setPersonaQuery\(""\);/);
+    // Taller viewport (~9 rows instead of ~6).
+    expect(picker).toMatch(/max-h-80 /);
+    // Count row: filtered/total once typing, plain total otherwise.
+    expect(picker).toMatch(
+      /\$\{filteredPersonas\.length\} of \$\{personas\.length\}`/,
+    );
+    expect(picker).toMatch(/\$\{personas\.length\} personas`/);
+    // The OTHER persona invite surface — the live-group Members popover —
+    // had NO scroll bound at all: a 17-persona roster overflowed the
+    // screen with the tail unreachable. It must be scroll-bounded.
+    const menu = panel.slice(panel.indexOf("function ParticipantsMenu("));
+    expect(menu).toMatch(/max-h-96 gap-0 overflow-y-auto/);
+  });
+
   it("closing a project removes it from groups before unmount", () => {
     expect(shell).toContain("removeProjectFromGroups(id)");
   });

@@ -79,8 +79,16 @@ describe("panel ✕ is minimize; the pill ✕ ends and deletes", () => {
 describe("composer mirrors the AI input bar", () => {
   it("borderless transparent textarea (no boxed Input element)", () => {
     expect(panel).toMatch(/min-h-8 flex-1 resize-none rounded-lg bg-transparent/);
-    // The boxed <Input from ui/input is gone from the composer.
-    expect(panel).not.toContain('import { Input } from "@/components/ui/input"');
+    // The boxed <Input from ui/input is gone from the COMPOSER. Scoped to
+    // the composer slice (2026-11-01): the InvitePicker persona filter is a
+    // legitimate consumer of the Input primitive — but the composer's chat
+    // input must stay a borderless transparent textarea.
+    const start = panel.indexOf("function Composer");
+    const end = panel.indexOf("function GroupListTray");
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const composer = panel.slice(start, end);
+    expect(composer).not.toContain("<Input");
   });
 
   it("expanded spans the full panel width like the main AI chat (no centered column)", () => {
