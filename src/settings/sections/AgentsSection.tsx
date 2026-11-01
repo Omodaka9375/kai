@@ -367,7 +367,13 @@ function CustomInstructionsBlock({ value }: { value: string }) {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
-        <Label>Custom instructions</Label>
+        <div className="flex flex-col gap-0.5">
+          <Label>Custom instructions</Label>
+          <p className="text-[10.5px] text-muted-foreground">
+            Appended to the system prompt of every agent run — followed
+            unless it conflicts with safety rules.
+          </p>
+        </div>
         <div className="flex items-center gap-1.5">
           {errorTick > 0 ? (
             <span

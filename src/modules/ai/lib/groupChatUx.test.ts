@@ -383,6 +383,45 @@ describe("2026-11-02 audit SHOULDs 4-11: scroll, memo, rejections, preamble, non
   });
 });
 
+describe("2026-11-02 user asks: compact InvitePicker dropdowns + custom-instructions hint", () => {
+  it("both dropdowns gate their filters on roster size and cap their viewports", () => {
+    // Filters only appear when the list warrants one (>6 rows) — a small
+    // roster stays tight, a large one stays scannable.
+    expect(panel).toMatch(/showProjectFilter = candidates\.length > 6/);
+    expect(panel).toMatch(/showPersonaFilter = personas\.length > 6/);
+    // Viewports are bounded short (max-h-56), not the old 64/80 walls.
+    expect(panel).not.toMatch(/max-h-64/);
+    expect(panel).not.toMatch(/max-h-80/);
+    expect(panel).toMatch(/max-h-56/);
+    expect(panel).toMatch(/Filter projects…/);
+  });
+
+  it("selection chips cap at 4 with a +N overflow chip", () => {
+    expect(panel).toMatch(/invitees\.slice\(0, 4\)\.map/);
+    // JSX text: `+{invitees.length - 4} more` (no space before the brace).
+    expect(panel).toMatch(/\+\{invitees\.length - 4\} more/);
+    expect(panel).toMatch(/\+\{pickedPersonas\.length - 4\} more/);
+  });
+
+  it("the settings section explains where custom instructions apply", () => {
+    const section = readFileSync(
+      new URL("../../../settings/sections/AgentsSection.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(section).toMatch(
+      /Appended to the system prompt of every agent run/,
+    );
+  });
+
+  it("message responses render links through ChatFileLink", () => {
+    const message = readFileSync(
+      new URL("../../../components/ai-elements/message.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(message).toMatch(/a: ChatFileLink/);
+  });
+});
+
 describe("2026-11-02 audit NITs: pill badge, rename cap, pure updater, proxy preview", () => {
   it("the pill badge counts background participant sessions, not just personas", () => {
     const pill = readFileSync(

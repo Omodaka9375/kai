@@ -91,13 +91,16 @@ describe("splitForSpeech", () => {
     expect(splitForSpeech("   \n  ")).toEqual([]);
   });
 
-  it("packs multiple sentences under the chunk cap", () => {
-    const sentence = "This is a moderately long sentence about build tooling. ";
-    const text = sentence.repeat(80); // ~4560 chars → 2 chunks
+  it("SENTENCE-SIZED chunks (2026-11-02): a reply longer than ~2 sentences splits so Skip advances to a real next part", () => {
+    // The 3800-char cap made a whole reply ONE chunk — "Skip to next part"
+    // skipped to the END and the pacing menu collapsed (user report).
+    const sentence =
+      "The build failed in the type checker and the error points at the pty module. ";
+    const text = sentence.repeat(10).trim(); // ~670 chars → multiple chunks
     const chunks = splitForSpeech(text);
     expect(chunks.length).toBeGreaterThan(1);
     for (const c of chunks) {
-      expect(c.length).toBeLessThanOrEqual(3800);
+      expect(c.length).toBeLessThanOrEqual(380);
     }
     // No text lost: reassembly (ignoring boundary whitespace) covers input.
     expect(chunks.join(" ").split(/\s+/).length).toBe(
@@ -110,13 +113,13 @@ describe("splitForSpeech", () => {
     const chunks = splitForSpeech(long.trim());
     expect(chunks.length).toBeGreaterThan(1);
     for (const c of chunks) {
-      expect(c.length).toBeLessThanOrEqual(3800);
+      expect(c.length).toBeLessThanOrEqual(380);
     }
   });
 
   it("breaks at sentence boundaries, not mid-sentence", () => {
-    const a = "First sentence ends here. ".repeat(100);
-    const b = "Second distinct paragraph sentence. ".repeat(100);
+    const a = "First sentence ends here. ".repeat(20);
+    const b = "Second distinct paragraph sentence. ".repeat(20);
     const chunks = splitForSpeech((a + b).trim());
     expect(chunks.length).toBeGreaterThan(1);
     // Every chunk except possibly the last ends with sentence punctuation.

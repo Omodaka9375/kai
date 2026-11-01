@@ -473,12 +473,16 @@ describe("source pins — trust boundary & wiring", () => {
     );
     expect(picker).toContain("Filter personas…");
     expect(picker).toMatch(/const \[personaQuery, setPersonaQuery\]/);
-    // The rows render the FILTERED set, and reopening resets the filter
+    // The rows render the FILTERED set (via personaList — the 2026-11-02
+    // compaction gates the filter input on roster size but the mapped set
+    // is always the filtered one), and reopening resets the filter
     // (a stale filter would look like personas vanishing between opens).
-    expect(picker).toMatch(/filteredPersonas\.map\(\(persona\) => \{/);
+    expect(picker).toMatch(/personaList\.map\(\(persona\) => \{/);
+    expect(picker).toMatch(/personaList = showPersonaFilter \? filteredPersonas : personas/);
     expect(picker).toMatch(/if \(!v\) setPersonaQuery\(""\);/);
-    // Taller viewport (~9 rows instead of ~6).
-    expect(picker).toMatch(/max-h-80 /);
+    // Scroll-bounded viewport (the 2026-11-02 compaction tightened the old
+    // max-h-80 wall to max-h-56 — still ~7 rows, no unbounded growth).
+    expect(picker).toMatch(/max-h-56 /);
     // Count row: filtered/total once typing, plain total otherwise.
     expect(picker).toMatch(
       /\$\{filteredPersonas\.length\} of \$\{personas\.length\}`/,

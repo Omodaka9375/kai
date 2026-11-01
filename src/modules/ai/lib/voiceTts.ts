@@ -77,10 +77,14 @@ export async function transcribeLocal(wav: Blob): Promise<string> {
 
 // ── Speech sanitization ─────────────────────────────────────────────────
 
-/** OpenAI /v1/audio/speech rejects inputs over 4096 chars, so chunks stay
- *  under it with headroom. Piper has no hard limit, but chunking also keeps
- *  first-audio latency low (speak chunk 1 while later chunks synthesize). */
-const SPEECH_CHUNK_CHARS = 3800;
+/** SENTENCE-SIZED narration chunks (2026-11-02 user report: "Skip to next
+ *  part stops the agent speaking and the menu collapses"). At the old 3800
+ *  chars a whole reply was ONE chunk, so skip = skip-to-end and the pacing
+ *  menu vanished the moment it was used. ~2 sentences per chunk keeps
+ *  first-audio latency low (chunk 1 synthesizes while later chunks queue)
+ *  and gives skip a real next part to land on. Engines cap at 4096; the
+ *  splitter hard-splits any sentence above this. */
+const SPEECH_CHUNK_CHARS = 300;
 /** Pathological-dump guard (~15+ min of audio). A reply beyond this is a
  *  file dump, not prose; cut at a sentence boundary rather than reading it. */
 const SPEECH_TOTAL_CAP = 24000;
@@ -365,6 +369,10 @@ export function ttsSkip(): void {
   } catch {
     // ignore
   }
+  // Chunk-level skip keeps the RUN alive: the pacing menu stays up while
+  // the next sentence chunk starts. (No notifyTtsListeners here — the
+  // paused element would read "not playing" and flash the menu off; the
+  // play loop notifies when the next chunk starts.)
 }
 /** Set the playback rate for current + future utterances (0.5–2). */
 export function ttsSetRate(rate: number): void {
@@ -499,23 +507,50 @@ export async function speakText(
   synthesizingRun = token;
   notifyTtsListeners();
   try {
-    for (const chunk of splitForSpeech(cleaned)) {
-      // Superseded by a newer utterance (or stopped) — abandon the rest.
+    const chunks = splitForSpeech(cleaned);
+    const synth = (text: string): Promise<ArrayBuffer> => {
+      if (mode === "local") {
+        return native
+          .voiceTts(text, prefs.voiceTtsLocalVoice)
+          .then((b64) => base64ToBytes(b64));
+      }
+      if (mode === "assemblyai") {
+        return speakViaAssemblyAi(text, prefs.voiceTtsAssemblyVoice);
+      }
+      return speakViaOpenAi(
+        text,
+        prefs.voiceTtsApiModel,
+        prefs.voiceTtsApiVoice,
+      );
+    };
+    // PREFETCH PIPELINE (2026-11-02, with sentence-sized chunks): synthesize
+    // chunk N+1 while chunk N plays, so skip lands on audio that is already
+    // buffered instead of a synthesis gap that reads as "it stopped". The
+    // loop only awaits the CURRENT chunk's synthesis when no prefetch is
+    // in flight; superseded prefetches self-discard on the token check.
+    let prefetch: Promise<ArrayBuffer> | null = null;
+    for (let i = 0; i < chunks.length; i++) {
       if (token !== runToken) return true;
       let bytes: ArrayBuffer;
-      if (mode === "local") {
-        const b64 = await native.voiceTts(chunk, prefs.voiceTtsLocalVoice);
-        bytes = base64ToBytes(b64);
-      } else if (mode === "assemblyai") {
-        bytes = await speakViaAssemblyAi(chunk, prefs.voiceTtsAssemblyVoice);
+      if (prefetch) {
+        bytes = await prefetch;
+        prefetch = null;
       } else {
-        bytes = await speakViaOpenAi(
-          chunk,
-          prefs.voiceTtsApiModel,
-          prefs.voiceTtsApiVoice,
-        );
+        bytes = await synth(chunks[i]!);
       }
       if (token !== runToken) return true;
+      if (i + 1 < chunks.length) {
+        const next = chunks[i + 1]!;
+        const t = token;
+        prefetch = synth(next).then((b) => {
+          if (t !== runToken) {
+            // Superseded while buffering — drop silently so the awaited
+            // result never resurrects a dead run.
+            return new ArrayBuffer(0);
+          }
+          return b;
+        });
+      }
       await playBuffer(bytes, token);
     }
     return true;

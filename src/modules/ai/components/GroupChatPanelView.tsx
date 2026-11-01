@@ -1548,6 +1548,23 @@ function InvitePicker({
       ),
     [personas, personaQuery],
   );
+  // COMPACT DROPDOWNS (2026-11-02 ask: "dropdowns unbounded and grow
+  // endlessly? need usable, compact and tight"): filters appear only when
+  // the list actually warrants one (>6 rows), viewports stay short, and the
+  // row count states the full list size — the same treatment the persona
+  // roster got for its invisible fold.
+  const [projectQuery, setProjectQuery] = useState("");
+  const filteredProjects = useMemo(
+    () =>
+      candidates.filter((p) =>
+        p.name.toLowerCase().includes(projectQuery.trim().toLowerCase()),
+      ),
+    [candidates, projectQuery],
+  );
+  const showProjectFilter = candidates.length > 6;
+  const showPersonaFilter = personas.length > 6;
+  const projectList = showProjectFilter ? filteredProjects : candidates;
+  const personaList = showPersonaFilter ? filteredPersonas : personas;
   const inviterName =
     projects.find((p) => p.id === activeProjectId)?.name ?? "This project";
 
@@ -1734,9 +1751,21 @@ function InvitePicker({
                 className="w-80 gap-0 p-1 text-xs"
                 onOpenAutoFocus={(e) => e.preventDefault()}
               >
-                <div className="flex max-h-64 flex-col gap-1 overflow-y-auto">
-                  {candidates.length > 0 ? (
-                    candidates.map((project) => {
+                <div className="flex flex-col gap-1">
+                  {showProjectFilter ? (
+                    <div className="pb-1">
+                      <Input
+                        value={projectQuery}
+                        onChange={(e) => setProjectQuery(e.target.value)}
+                        placeholder="Filter projects…"
+                        aria-label="Filter projects"
+                        className="h-7 rounded-md px-2 text-[12px]"
+                      />
+                    </div>
+                  ) : null}
+                  <div className="flex max-h-56 flex-col gap-1 overflow-y-auto">
+                  {projectList.length > 0 ? (
+                    projectList.map((project) => {
                       const selected = picked.includes(project.id);
                       const ownerName = owners.get(project.id);
                       return (
@@ -1808,10 +1837,16 @@ function InvitePicker({
                       Open another project to start a group chat.
                     </div>
                   )}
+                  <div className="px-2 pb-0.5 pt-1 text-[10.5px] text-muted-foreground/70">
+                    {projectList.length === candidates.length
+                      ? `${candidates.length} project${candidates.length === 1 ? "" : "s"}`
+                      : `${projectList.length} of ${candidates.length}`}
+                  </div>
+                  </div>
                 </div>
               </PopoverContent>
             </Popover>
-            {invitees.map((p2) => (
+            {invitees.slice(0, 4).map((p2) => (
               <span
                 key={p2.id}
                 className="flex items-center gap-1 rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[11px] text-foreground"
@@ -1829,6 +1864,11 @@ function InvitePicker({
                 </button>
               </span>
             ))}
+            {invitees.length > 4 ? (
+              <span className="rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                +{invitees.length - 4} more
+              </span>
+            ) : null}
           </div>
         </div>
 
@@ -1872,26 +1912,28 @@ function InvitePicker({
                 className="w-80 gap-0 p-1 text-xs"
                 onOpenAutoFocus={(e) => e.preventDefault()}
               >
-                <div className="pb-1">
-                  <Input
-                    value={personaQuery}
-                    onChange={(e) => setPersonaQuery(e.target.value)}
-                    placeholder="Filter personas…"
-                    aria-label="Filter personas"
-                    className="h-7 rounded-md px-2 text-[12px]"
-                  />
-                </div>
-                <div className="flex max-h-80 flex-col gap-1 overflow-y-auto">
+                {showPersonaFilter ? (
+                  <div className="pb-1">
+                    <Input
+                      value={personaQuery}
+                      onChange={(e) => setPersonaQuery(e.target.value)}
+                      placeholder="Filter personas…"
+                      aria-label="Filter personas"
+                      className="h-7 rounded-md px-2 text-[12px]"
+                    />
+                  </div>
+                ) : null}
+                <div className="flex max-h-56 flex-col gap-1 overflow-y-auto">
                   {personas.length === 0 ? (
                     <div className="px-3 py-4 text-center text-[12px] text-muted-foreground">
                       No personas defined.
                     </div>
-                  ) : filteredPersonas.length === 0 ? (
+                  ) : personaList.length === 0 ? (
                     <div className="px-3 py-4 text-center text-[12px] text-muted-foreground">
                       No personas match “{personaQuery}”.
                     </div>
                   ) : (
-                    filteredPersonas.map((persona) => {
+                    personaList.map((persona) => {
                       const selected = pickedPersonas.includes(persona.id);
                       return (
                         <button
@@ -1953,6 +1995,7 @@ function InvitePicker({
             </Popover>
             {personas
               .filter((a) => pickedPersonas.includes(a.id))
+              .slice(0, 4)
               .map((a) => (
                 <span
                   key={a.id}
@@ -1977,6 +2020,11 @@ function InvitePicker({
                   </button>
                 </span>
               ))}
+            {pickedPersonas.length > 4 ? (
+              <span className="rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                +{pickedPersonas.length - 4} more
+              </span>
+            ) : null}
           </div>
           <p className="text-[10.5px] leading-relaxed text-muted-foreground/80">
             Personas join without a project — they reply from their own persona

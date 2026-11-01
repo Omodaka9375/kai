@@ -31,6 +31,7 @@ import type { ModelId } from "@/modules/ai/config";
 import { CustomContextMenu } from "@/modules/ai/components/CustomContextMenu";
 import { ApiTesterPane } from "@/modules/api-tester/ApiTesterPane";
 import { AiComposerProvider } from "@/modules/ai/components/composer";
+import { registerChatFileOpen } from "@/modules/ai/components/ChatFileLink";
 import { AiErrorBoundary } from "@/modules/ai/components/AiErrorBoundary";
 import { redactSensitive } from "@/modules/ai/lib/redact";
 import { setSandboxRoot } from "@/modules/ai/lib/sandbox";
@@ -1290,6 +1291,16 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
     },
     [openFileTab, activeId],
   );
+
+  // CHAT FILE LINKS (2026-11-02): agent-written relative paths (e.g.
+  // docs/report.md in a [label](docs/report.md) markdown link) resolve
+  // against the active project and open in the editor through the SAME
+  // handler as explorer opens — same collapse rules, same line jumping.
+  // Registered once; ChatFileLink degrades to plain text without it.
+  useEffect(() => {
+    registerChatFileOpen((path, line) => handleOpenFile(path, false, line));
+    return () => registerChatFileOpen(null);
+  }, [handleOpenFile]);
 
   // Clicking a tab follows the same visibility rule as opening a file from
   // the explorer (handleOpenFile): an expanded AI window or group panel

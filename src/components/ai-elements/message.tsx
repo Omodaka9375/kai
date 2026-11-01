@@ -26,6 +26,9 @@ import { Streamdown } from "streamdown";
 import { ChatStreamingProvider } from "./chat-code";
 import { ChatTable } from "./chat-table";
 import { MarkdownCode } from "./markdown-code";
+// ChatFileLink lives in modules/ai (composition layer) — registry components
+// don't import app code, and the link's open-file routing is app business.
+import { ChatFileLink } from "@/modules/ai/components/ChatFileLink";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage["role"];
@@ -322,7 +325,11 @@ export type MessageResponseProps = ComponentProps<typeof Streamdown> & {
   streaming?: boolean;
 };
 
-const streamdownComponents = { code: MarkdownCode, table: ChatTable };
+const streamdownComponents = {
+  code: MarkdownCode,
+  table: ChatTable,
+  a: ChatFileLink,
+};
 
 /**
  * Disable table download — blob-URL anchor clicks don't trigger downloads
