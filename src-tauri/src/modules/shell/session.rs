@@ -195,6 +195,20 @@ fn parse_failure_hint(exit_code: Option<i32>, stderr: &str) -> Option<&'static s
     if lower.contains("not a valid statement separator") {
         return Some("[Kai hint: this is Windows PowerShell 5.1, which does not support `&&` or `||` as statement separators (pwsh 7+ does). Rewrite the chained command as either: (a) separate statements with `;` — but that runs the second command UNCONDITIONALLY (no short-circuit on failure), or (b) split into multiple bash_run calls, checking the first's exit_code before the second, or (c) `if ($?) { <next> }` to emulate short-circuit. Do NOT try to quote your way around it.]");
     }
+    // 2026-11-01: single-line here-strings are the #1 remaining quoting
+    // failure after the backslash-quote fix — agents write @'...'@ (or
+    // @"..."@) on ONE line (in most languages a string is one line) and
+    // PowerShell rejects it. The header error matched NO prior pattern,
+    // so the exact case that needs coaching got no hint at all; the
+    // terminator errors deserve the here-string-specific advice over the
+    // general quoting coaching.
+    if lower.contains("no characters are allowed after a here-string header")
+        || lower.contains("missing the terminator: \"@")
+        || lower.contains("missing the terminator: '@")
+    {
+        return Some("[Kai hint: a PowerShell here-string spans MULTIPLE lines: the opening @' (or @\") must be the last thing on its line, and the closing '@ (or \"@) must start at the very beginning of its own line — no leading spaces, nothing else on that line. A here-string written on one line is never valid. For single-line JSON payloads prefer single-quoted strings with doubled single quotes, or write_file the payload and pass the path.]");
+    }
+
     let general = lower.contains("parsererror")
         || lower.contains("parse error")
         || lower.contains("unexpected token")
@@ -203,7 +217,7 @@ fn parse_failure_hint(exit_code: Option<i32>, stderr: &str) -> Option<&'static s
         || lower.contains("an expression was expected")
         || lower.contains("you must provide a value");
     if general {
-        return Some("[Kai hint: PowerShell failed to parse the command. It runs under PowerShell, NOT bash: use PowerShell syntax (backtick-quote (`\") for a literal quote in a double-quoted string, a doubled backtick for a literal backtick; never bash \\\" or \\` escapes — that is the usual cause). Prefer single-quoted strings, keep each command to one responsibility instead of chaining long ;/&& pipelines, and use the grep/glob/edit tools instead of PowerShell text-wrangling.]");
+        return Some("[Kai hint: PowerShell failed to parse the command. It runs under PowerShell, NOT bash. Quoting, most reliable first: (1) single-quoted strings keep everything literal — a literal single quote is written as two single quotes (''); (2) for JSON or any text with many embedded quotes or newlines, use a single-quoted here-string: the opening @' must end its line and the closing '@ must start at the very beginning of its own line — a here-string written on one line is never valid; (3) inside a double-quoted string escape a double quote with a backtick immediately before it (`\"), a literal backtick as a doubled backtick — never escape with a backslash, that is bash syntax and the usual cause of this error; (4) for heavy payloads write_file the content to a temp file and pass the path — no quoting at all. Keep each command to one responsibility, and use the grep/glob/edit tools instead of PowerShell text-wrangling.]");
     }
     None
 }
@@ -395,6 +409,29 @@ mod tests {
 // the wrapper depends on.
 #[cfg(test)]
 mod hint_tests {
+
+    #[test]
+    fn parse_failure_hint_here_string() {
+        // Single-line here-string: header must end the line. This error
+        // matched NO pattern before 2026-11-01 — the exact case that
+        // needs coaching got silence.
+        let h = parse_failure_hint(
+            Some(1),
+            "No characters are allowed after a here-string header but before the end of the line.",
+        )
+        .expect("here-string header hint");
+        assert!(h.contains("spans MULTIPLE lines"), "{h}");
+        assert!(h.contains("start at the very beginning of its own line"), "{h}");
+        // Missing closer: the terminator error names the closer glyph —
+        // route it to the here-string advice, not the general coaching.
+        let h2 = parse_failure_hint(
+            Some(1),
+            "The string is missing the terminator: \"@.",
+        )
+        .expect("here-string terminator hint");
+        assert!(h2.contains("spans MULTIPLE lines"), "{h2}");
+        assert!(h2.contains("one line is never valid"), "{h2}");
+    }
     use super::parse_failure_hint;
 
     #[test]
@@ -413,8 +450,19 @@ mod hint_tests {
             "The string is missing the terminator: \".",
         )
         .expect("hint");
-        assert!(h.contains("backtick-quote"), "{h}");
         assert!(h.contains("PowerShell, NOT bash"), "{h}");
+        // 2026-11-01 rewrite: the coaching hierarchy is single quotes >
+        // here-string > backtick-escape > payload file. The old hint
+        // showed the BASH escape glyphs (\" and \`) inline as the
+        // "never do this" example — the most copyable characters in
+        // the hint — and agents copied them straight into the next
+        // command and re-broke it. The new hint names the mistake in
+        // words and shows only the correct glyphs.
+        assert!(h.contains("single-quoted"), "{h}");
+        assert!(h.contains("here-string"), "{h}");
+        assert!(h.contains("start at the very beginning of its own line"), "{h}");
+        assert!(h.contains("write_file the content to a temp file"), "{h}");
+        assert!(h.contains("never escape with a backslash"), "{h}");
     }
 
     #[test]

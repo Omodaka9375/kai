@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { splitForSpeech, toSpeechText } from "./voiceTts";
+import { pickSpeakSegments, splitForSpeech, toSpeechText } from "./voiceTts";
 
 // native + preferences are not touched by toSpeechText (pure), but the
 // module imports them at top level — mock before import.
@@ -115,5 +115,71 @@ describe("splitForSpeech", () => {
     for (const c of chunks.slice(0, -1)) {
       expect(/[.!?]$/.test(c)).toBe(true);
     }
+  });
+});
+
+// Minimal message shape pickSpeakSegments consumes (structural, like the
+// real UIMessage parts it reads).
+function msg(id: string, role: "assistant" | "user", ...texts: string[]) {
+  return {
+    id,
+    role,
+    parts: texts.map((t) => ({ type: "text", text: t })),
+  };
+}
+
+describe("pickSpeakSegments — first + last, middle skipped (2026-11-01)", () => {
+  // "Voice TTS is only saying one random sentence after my reply; if the
+  //  agent is going fast it never says anything after that. Say the first
+  //  part and the last part — skip the middle, but need the final."
+  it("speaks the FIRST part joined with the LAST; the middle is skipped", () => {
+    const msgs = [
+      msg("u1", "user", "fix it"),
+      msg(
+        "a1",
+        "assistant",
+        "Let me check the tests first.",
+        "Running the suite now…",
+        "All tests pass — the fix is verified.",
+      ),
+    ];
+    const seg = pickSpeakSegments(msgs, 1, null);
+    expect(seg).not.toBeNull();
+    expect(seg!.text).toBe(
+      "Let me check the tests first.\n\nAll tests pass — the fix is verified.",
+    );
+    expect(seg!.lastMessageId).toBe("a1");
+  });
+
+  it("a lone text part speaks once (first === last, no duplication)", () => {
+    const msgs = [msg("u1", "user", "hi"), msg("a1", "assistant", "Done.")];
+    const seg = pickSpeakSegments(msgs, 1, null);
+    expect(seg!.text).toBe("Done.");
+    expect(seg!.lastMessageId).toBe("a1");
+  });
+
+  it("never reaches back past the pre-run boundary", () => {
+    const msgs = [
+      msg("a0", "assistant", "previous turn reply"),
+      msg("u1", "user", "again"),
+    ];
+    expect(pickSpeakSegments(msgs, 2, msgs[0]!)).toBeNull();
+  });
+
+  it("an in-place tail replacement (new object in the boundary slot) is this run's reply", () => {
+    const old = msg("a0", "assistant", "stalled partial");
+    const regenerated = msg("a0", "assistant", "the recovered final answer");
+    const msgs = [msg("u1", "user", "continue"), regenerated];
+    const seg = pickSpeakSegments(msgs, 2, old);
+    expect(seg!.text).toBe("the recovered final answer");
+    expect(seg!.lastMessageId).toBe("a0");
+  });
+
+  it("a tool-only run says nothing (null, no walk-back)", () => {
+    const msgs = [
+      msg("u1", "user", "run it"),
+      { id: "a1", role: "assistant", parts: [{ type: "tool-call" }] },
+    ];
+    expect(pickSpeakSegments(msgs, 1, null)).toBeNull();
   });
 });

@@ -15,7 +15,10 @@ import { describe, expect, it } from "vitest";
  *     every busy transition, and extraction never reaches back past it.
  *  2. STALE ARM: the `!text` path returned WITHOUT consuming runEndedRef, so
  *     the next unrelated messages-change re-ran extraction and spoke the old
- *     reply from nowhere. Fix: the arm is consumed on every decision path.
+ *     reply from nowhere. Fix (2026-11-01): resolve-then-consume — a pass
+ *     that finds nothing KEEPS the arm (the throttled late flush re-runs
+ *     the decision and speaks then); it is consumed only when a speak
+ *     actually happens, and the next busy transition voids it.
  *  3. LENGTH-KEYED DEDUPE: `${sessionId}:${msgs.length}` collided across
  *     compaction / steering strips and skipped real replies; spokenFor is
  *     now the spoken MESSAGE ID.
@@ -29,6 +32,7 @@ const read = (rel: string) =>
 
 describe("AgentRunBridge auto-speak: causality boundary (source pins)", () => {
   const src = read("./AgentRunBridge.tsx");
+  const tts = read("../lib/voiceTts.ts");
 
   it("snapshots the pre-run tail (length + last assistant object) on busy transitions", () => {
     expect(src).toContain("busyTailRef.current = msgs.length;");
@@ -42,22 +46,35 @@ describe("AgentRunBridge auto-speak: causality boundary (source pins)", () => {
   });
 
   it("extraction never reaches back past the pre-run boundary", () => {
-    // The search loop is bounded by `from`, derived from the busy snapshot —
-    // NOT the old `i >= 0 && !text` whole-history walk.
-    expect(src).toContain("for (let i = msgs.length - 1; i >= from && !text; i--) {");
+    // Extraction lives in voiceTts.pickSpeakSegments (2026-11-01): the
+    // bridge passes the busy-snapshot boundary (from + the pre-run
+    // assistant object) — never the whole history.
+    expect(src).toContain("const seg = pickSpeakSegments(msgs, from, boundaryObj);");
     expect(src).not.toContain("i >= 0 && !text");
+    expect(tts).toContain("for (let i = start; i < msgs.length; i++) {");
   });
 
-  it("a run with no speakable text says NOTHING (arm consumed, no walk-back)", () => {
-    expect(src).toContain("if (!text) return; // THIS run produced nothing speakable — say nothing");
-    // The arm is consumed BEFORE extraction, on every exit path.
-    const consumeIdx = src.indexOf("runEndedRef.current = false;\n    // The reply THIS run produced");
-    expect(consumeIdx).toBeGreaterThan(-1);
+  it("no speakable text: the arm stays for the throttled late flush, never walks back", () => {
+    // RESOLVE-THEN-CONSUME (2026-11-01): the old code consumed the arm
+    // before extraction, so the settle-vs-throttled-flush race permanently
+    // lost the reply's voice ("a fast agent never says anything"). A null
+    // pick now returns WITHOUT consuming; the consume sits after the null
+    // gate on the spoke path.
+    const nullGate = src.indexOf("if (!seg) {");
+    const consume = src.indexOf("runEndedRef.current = false;", nullGate);
+    expect(nullGate).toBeGreaterThan(-1);
+    expect(consume).toBeGreaterThan(nullGate);
+    // The old consume-first + no-text forms are gone.
+    expect(src).not.toContain("if (!text) return;");
+    expect(src).not.toMatch(
+      /runEndedRef\.current = false;\s*\n\s*\/\/ The reply THIS run produced/,
+    );
   });
 
   it("spokenFor dedupes by MESSAGE ID, not array length", () => {
     expect(src).not.toContain("${sessionId}:${msgs.length}");
-    expect(src).toContain("if (spokenForRef.current === spokenId) return;");
+    expect(src).toContain("if (spokenForRef.current === seg.lastMessageId) return;");
+    expect(src).toContain("spokenForRef.current = seg.lastMessageId;");
   });
 
   it("session switch resets the boundary AND spokenFor (key has no session)", () => {
@@ -71,10 +88,12 @@ describe("AgentRunBridge auto-speak: causality boundary (source pins)", () => {
   });
 
   it("regenerate / stall-recovery in-place tail replacement is still this run's reply", () => {
-    // Object-identity compare against the boundary object: the loop stops at
-    // the pre-run assistant object; anything newer (new object, same slot)
-    // is the regenerated reply.
-    expect(src).toContain("if (m === boundaryObj) break;");
+    // Object-identity compare against the boundary object lives in
+    // pickSpeakSegments now: the walk stops at the pre-run assistant
+    // object; anything newer (new object, same slot) is the regenerated
+    // reply. The bridge hands the snapshot object to the helper.
+    expect(src).toContain("const boundaryObj = busyLastAssistantRef.current;");
+    expect(tts).toContain("if (m === boundaryObj) break;");
   });
 
   it("mid-run state clears any stale arm (a new run supersedes a prior settle)", () => {
@@ -163,5 +182,37 @@ describe("speakText supersede semantics (the replies-after case)", () => {
 
   it("speakText reads the mode lazily — a mid-conversation enable applies to the next reply", () => {
     expect(tts).toContain('if (mode === "off") return false;');
+  });
+});
+
+describe("speak the FIRST part and the LAST part — the middle is skipped (2026-11-01)", () => {
+  // "Voice TTS is only saying one random sentence after my reply; if the
+  //  agent is going fast it never says anything after that. Can we make it
+  //  say the first part after and the last part — skip the middle, but
+  //  need the final?"
+  // A multi-step run accumulates every step's text parts into ONE
+  // assistant message; last-part-only said a random middle narration, and
+  // the settle-vs-throttled-flush race lost the voice entirely. The speak
+  // plan is FIRST (lead-in) + LAST (final answer); extraction is shared
+  // with the boundary contract in voiceTts.pickSpeakSegments.
+  const src = read("./AgentRunBridge.tsx");
+  const tts = read("../lib/voiceTts.ts");
+
+  it("the bridge picks first+last via the shared helper (old part loops gone)", () => {
+    expect(src).toContain("const seg = pickSpeakSegments(msgs, from, boundaryObj);");
+    expect(src).toContain("void speakText(seg.text);");
+    // The hand-rolled backwards part scans are banned from the bridge.
+    expect(src).not.toMatch(/for \(let j = m\.parts\.length - 1; j >= 0; j--\) \{/);
+    expect(src).not.toContain("void speakText(text);");
+  });
+
+  it("the helper joins first with last; a lone text speaks once", () => {
+    expect(tts).toContain("const first = texts[0]!;");
+    expect(tts).toContain(
+      "const last = texts.length === 1 ? first : texts[texts.length - 1]!;",
+    );
+    expect(tts).toContain(
+      "texts.length === 1 ? first : `${first}\\n\\n${last}`",
+    );
   });
 });

@@ -594,7 +594,7 @@ fn validate_powershell_script(shell: &Path, command: &str) -> Result<(), String>
     let line = parts.next().unwrap_or("?");
     let column = parts.next().unwrap_or("?");
     Err(format!(
-        "PowerShell parse error at line {line}, column {column}: {message}. The command was NOT run or rewritten. Use single-quoted strings for literal text and backtick-quote for quotes inside double-quoted strings; avoid bash-style quote escapes."
+        "PowerShell parse error at line {line}, column {column}: {message}. The command was NOT run or rewritten. Use single-quoted strings for literal text (a literal single quote is two single quotes); for JSON or many embedded quotes use a single-quoted here-string (the opening @' ends its line, the closing '@ starts at the very beginning of its own line) or write_file the payload; inside double-quoted strings escape a quote with a backtick immediately before it (`\") — never a backslash, which is bash syntax."
     ))
 }
 

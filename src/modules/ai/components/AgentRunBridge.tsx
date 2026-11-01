@@ -27,7 +27,7 @@ import { setProjectHasNews } from "../store/projectStatus";
 import { offerToDigest } from "../lib/desktopDigest";
 import { activeProjectId, projectIdForSession } from "../store/chatStore";
 import { isApprovalDenied, noteApprovalDenied } from "../lib/approvalLatch";
-import { speakText } from "../lib/voiceTts";
+import { pickSpeakSegments, speakText } from "../lib/voiceTts";
 import { useProjectRuntime } from "@/modules/workspace";
 import {
   appendGroupMessage,
@@ -791,73 +791,52 @@ function Bridge({
       runEndedRef.current = true;
     }
     if (!runEndedRef.current) return;
-    // THE SPEAK DECISION happens exactly once per settle: consume the arm
-    // on EVERY exit path below. The old code left it set when no text was
-    // found, so a later unrelated messages-change re-ran extraction.
-    runEndedRef.current = false;
-    // The reply THIS run produced: search only messages added AFTER the
-    // pre-run boundary. Never reach back past the boundary — a run that
-    // produced no speakable text says nothing (the old code walked back to
-    // the PREVIOUS turn's reply and spoke it).
+    // THE SPEAK DECISION is resolve-then-consume (the group-mirror throttle
+    // contract, 2026-11-01): useChat throttles message flushes, so status
+    // can settle BEFORE the final text lands. A pass that finds nothing
+    // keeps the arm AND the boundary — `messages` is a dep of this effect,
+    // so the late flush re-runs and speaks then. The arm is consumed only
+    // when a speak actually happens; the next busy transition voids it.
     const msgs = messagesRef.current;
     const from =
       busyTailRef.current != null
         ? Math.max(busyTailRef.current, 0)
         : 0;
     // Regenerate/stall-recovery replace the tail in place: the length may
-    // equal the boundary while the OBJECT differs. Treat any assistant
-    // message after `from` OR replacing the boundary object as this run's.
+    // equal the boundary while the OBJECT differs. pickSpeakSegments treats
+    // any assistant message after `from` OR replacing the boundary object
+    // as this run's.
     const boundaryObj = busyLastAssistantRef.current;
-    let text = "";
-    let spokenId: string | null = null;
-    for (let i = msgs.length - 1; i >= from && !text; i--) {
-      const m = msgs[i];
-      if (m.role !== "assistant") continue;
-      // Multi-step runs accumulate EVERY step's text parts into the one
-      // assistant message — narrations like "Let me check that…" land
-      // alongside the final answer. Speak only the LAST text part (the
-      // actual reply), not the join of all parts (the step-by-step
-      // lead-up).
-      for (let j = m.parts.length - 1; j >= 0; j--) {
-        const p = m.parts[j];
-        if (p.type === "text" && typeof p.text === "string" && p.text.trim()) {
-          text = p.text.trim();
-          spokenId = m.id;
-          break;
-        }
+    // FIRST + LAST (2026-11-01 report: "voice says one random sentence, and
+    // a fast agent never speaks at all"): multi-step runs accumulate every
+    // step's text parts, and speaking only the last said a random middle
+    // narration while the final answer was skipped — or nothing at all when
+    // the settle raced the throttled flush. The shared helper speaks the
+    // FIRST part (the immediate lead-in) joined with the LAST (the final
+    // answer); the step-by-step middle is skipped.
+    const seg = pickSpeakSegments(msgs, from, boundaryObj);
+    if (!seg) {
+      // Stale pass: keep the arm for the throttled late flush — UNLESS the
+      // array was rewritten under us (compaction removed the pre-run reply
+      // object), in which case `from` no longer means anything: void the
+      // arm rather than risk speaking a stale tail.
+      if (boundaryObj != null && from > 0 && !msgs.includes(boundaryObj)) {
+        runEndedRef.current = false;
+        busyTailRef.current = null;
+        busyLastAssistantRef.current = null;
+        busyWasGroupRef.current = false;
       }
+      return;
     }
-    // In-place tail replacement (regenerate / stall-recovery retry): the
-    // array is no longer than the boundary but the boundary assistant
-    // object was replaced by a new one with fresh text. That new object IS
-    // this run's reply.
-    if (!text && from > 0 && boundaryObj != null) {
-      // Walk from the end; the first assistant found at/after the boundary
-      // position that is NOT the same object is the regenerated reply.
-      for (let i = msgs.length - 1; i >= from - 1 && !text; i--) {
-        if (i < 0 || i >= msgs.length) break;
-        const m = msgs[i];
-        if (m.role !== "assistant") continue;
-        if (m === boundaryObj) break; // reached the pre-run reply — stop
-        for (let j = m.parts.length - 1; j >= 0; j--) {
-          const p = m.parts[j];
-          if (p.type === "text" && typeof p.text === "string" && p.text.trim()) {
-            text = p.text.trim();
-            spokenId = m.id;
-            break;
-          }
-        }
-      }
-    }
+    runEndedRef.current = false;
     const wasGroupRun = busyWasGroupRef.current;
     busyTailRef.current = null;
     busyLastAssistantRef.current = null;
     busyWasGroupRef.current = false;
-    if (!text) return; // THIS run produced nothing speakable — say nothing
     if (wasGroupRun) return; // group chats never speak — reserved for 1:1
-    if (spokenForRef.current === spokenId) return;
-    spokenForRef.current = spokenId;
-    void speakText(text);
+    if (spokenForRef.current === seg.lastMessageId) return;
+    spokenForRef.current = seg.lastMessageId;
+    void speakText(seg.text);
   }, [status, ttsActive, messages, sessionId]);
 
   // ---- Auto-approve effect --------------------------------------------------

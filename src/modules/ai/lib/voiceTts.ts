@@ -189,6 +189,85 @@ export function splitForSpeech(s: string): string[] {
   return chunks;
 }
 
+// ── Auto-speak extraction (bridge contract) ────────────────────────────────
+
+/** Structural slice of UIMessage pickSpeakSegments consumes. */
+export type SpeakMsg = {
+  id: string;
+  role: string;
+  parts?: ReadonlyArray<{ type?: string; text?: unknown }>;
+};
+
+/** What to speak for one settled run: first part + last part, middle skipped. */
+export type SpeakPlan = {
+  text: string;
+  /** Message id of the LAST text part's message — the run's final answer,
+   *  used as the speak dedupe key (a new run's answer id is always fresh). */
+  lastMessageId: string;
+};
+
+/**
+ * Pick what a settled agent run should SAY (2026-11-01: "voice only says
+ * one random sentence, and a fast agent never says anything after that").
+ *
+ * A multi-step run accumulates every step's text parts into ONE assistant
+ * message — short narrations like "Let me check that…" sit alongside the
+ * final answer. Speaking only the LAST part made the voice say a random
+ * middle narration while the actual conclusion was skipped, or nothing at
+ * all when the settle raced the throttled final-message flush. The user
+ * contract: say the FIRST part (the immediate lead-in) and the LAST part
+ * (the final answer); the step-by-step middle is skipped.
+ *
+ * Causality is the bridge's boundary contract, passed in: only messages at
+ * index >= `from` are this run's, EXCEPT an in-place tail replacement
+ * (regenerate/stall-recovery rewrites the boundary assistant object into
+ * a NEW object with fresh text — same slot, new identity), which is still
+ * this run's reply. The boundary OBJECT is matched by identity, never id:
+ * the SDK deep-clones on replaceMessage, so a regenerated reply has the
+ * same id but a new object.
+ */
+export function pickSpeakSegments(
+  msgs: readonly SpeakMsg[],
+  from: number,
+  boundaryObj: SpeakMsg | null,
+): SpeakPlan | null {
+  const texts: string[] = [];
+  let lastMessageId: string | null = null;
+  const collect = (m: SpeakMsg) => {
+    for (const p of m.parts ?? []) {
+      if (p.type === "text" && typeof p.text === "string" && p.text.trim()) {
+        texts.push(p.text.trim());
+        lastMessageId = m.id;
+      }
+    }
+  };
+  const start = Math.max(from, 0);
+  for (let i = start; i < msgs.length; i++) {
+    const m = msgs[i];
+    if (!m || m.role !== "assistant" || m === boundaryObj) continue;
+    collect(m);
+  }
+  // In-place tail replacement: the array is no longer than the boundary,
+  // but the boundary assistant object was replaced by a new one with fresh
+  // text. That new object IS this run's reply.
+  if (boundaryObj != null && start > 0) {
+    for (let i = msgs.length - 1; i >= start - 1 && texts.length === 0; i--) {
+      if (i < 0 || i >= msgs.length) break;
+      const m = msgs[i];
+      if (!m || m.role !== "assistant") continue;
+      if (m === boundaryObj) break; // reached the pre-run reply — stop
+      collect(m);
+    }
+  }
+  if (texts.length === 0) return null;
+  const first = texts[0]!;
+  const last = texts.length === 1 ? first : texts[texts.length - 1]!;
+  return {
+    text: texts.length === 1 ? first : `${first}\n\n${last}`,
+    lastMessageId: lastMessageId ?? "",
+  };
+}
+
 // ── TTS playback ───────────────────────────────────────────────────────────
 
 let sharedAudio: HTMLAudioElement | null = null;
