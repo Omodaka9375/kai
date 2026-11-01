@@ -8,6 +8,7 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 - Group chats: persona invites are discoverable at any roster size — the invite dropdown's scroll viewport fit ~6 rows with an invisible fold that read as a hard cap; the popover now has a filter box, a taller viewport, and a count row ("17 personas" / "2 of 17" while filtering), and the live-group Members popover is scroll-bounded instead of overflowing the screen.
 - Group chats: agent replies no longer render as black slabs — bubbles sit on the panel gray exactly like the main AI chat, and embedded quote previews use the main chat's muted treatment.
+- AI tools: domain_check and domain_find — keyless domain research with no API key or MCP server: check up to 10 names for registered/available with registrar, dates, and nameservers (registry RDAP with DNS corroboration), or sweep keywords across practical TLDs and get the available ones sorted exact-first.
 
 ---
 
