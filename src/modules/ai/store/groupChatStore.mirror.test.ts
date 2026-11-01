@@ -261,3 +261,27 @@ describe("multi-turn conversation flow (delivery -> reply -> next delivery)", ()
     expect(peekReplyProvision("sess-b")).toBeNull();
   });
 });
+
+describe("mirrored text is free of fence markers (2026-11-01)", () => {
+  it("strips echoed fence markers from the reply before it becomes group content", async () => {
+    // User report: an agent's group reply arrived wrapped in literal fence
+    // markers. Models echo the wrapper they were taught (their own session's
+    // tool output is fenced, and the group delivery prefix references it);
+    // markers are a model-context trust device, NEVER transcript content.
+    // The mirror hands the bridge CLEAN text — it feeds mention routing and
+    // the coordinator wake too, so the strip must happen at the source.
+    const g = await makeGroup();
+    armReplyProvision("sess-b", g.id);
+    const messages = [
+      msg(
+        "asst-new",
+        "assistant",
+        "[start tool_Zopwpqn4] B: hello [end tool_Zopwpqn4]",
+      ),
+    ];
+    const m = resolveMirrorReply("sess-b", messages, "asst-old", null);
+    expect(m).not.toBeNull();
+    expect(m!.text).toBe("B: hello");
+    expect(m!.text).not.toMatch(/\[start |\[end /);
+  });
+});

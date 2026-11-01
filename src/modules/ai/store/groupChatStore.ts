@@ -12,7 +12,7 @@ import { useAgentsStore } from "./agentsStore";
 import { BUILTIN_AGENTS } from "../lib/agents";
 import { getModel, providerNeedsKey, type ModelId } from "../config";
 import { EMPTY_PROVIDER_KEYS, type ProviderKeys } from "../lib/keyring";
-import { createFenceState, fence, fenceSystemPrompt } from "../lib/fence";
+import { createFenceState, fence, fenceSystemPrompt, unfence } from "../lib/fence";
 import { withToolGuard, withToolRedaction } from "../lib/toolFencing";
 import {
   PERSONA_EXCLUDED_TOOLS,
@@ -916,6 +916,14 @@ async function runPersonaReply(
       ] as ModelMessage[];
       notify(); // cards resolved - drop them from the panel
     }
+    // Fence-marker hygiene (2026-11-01 report: a persona's group reply
+    // arrived wrapped in literal fence markers): this run's own system
+    // prompt teaches the nonce (fenceSystemPrompt) and wraps the transcript
+    // in markers, and models ECHO the wrapper when quoting a line. Markers
+    // are a model-context trust device, never group content — strip them
+    // before the reply reaches the transcript, mention routing, or the
+    // coordinator wake.
+    reply = unfence(reply).trim();
     if (!reply) reply = "(no output)";
     const live = groups.get(g.id);
     if (live && live.endedAt === null) {
@@ -1127,11 +1135,16 @@ export function resolveMirrorReply(
   if (!group || group.endedAt !== null) return null;
   const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
   if (!lastAssistant) return null;
-  const text = (lastAssistant.parts ?? [])
-    .filter((p): p is { type: "text"; text: string } => p.type === "text")
-    .map((p) => p.text)
-    .join("\n")
-    .trim();
+  // Same marker hygiene as the persona path: a project agent that echoed
+  // fence markers (its own session's tool output is fenced) must not paint
+  // them into the group transcript — and the bridge reuses this text for
+  // mention routing and the coordinator wake, so clean it at the source.
+  const text = unfence(
+    (lastAssistant.parts ?? [])
+      .filter((p): p is { type: "text"; text: string } => p.type === "text")
+      .map((p) => p.text)
+      .join("\n"),
+  ).trim();
   if (!text) return null;
   if (lastAssistant.id === boundaryId) return null;
   if (lastAssistant.id === lastMirroredId) return null;
@@ -1498,7 +1511,12 @@ export async function sendFromCoordinator(
   if (depth >= GROUP_RELAY_MAX_HOPS) {
     return `relay cap reached (${GROUP_RELAY_MAX_HOPS} hops) — the group is bouncing between projects. Summarize the current state to the user instead of delegating further.`;
   }
-  const queued = deliverToParticipant(g, p, message);
+  // Marker hygiene: send_to_project input is agent-authored text — fence
+  // markers echoed from the coordinator's own fenced tool output are never
+  // content, and this text is delivered into the target's project chat AND
+  // recorded in the group transcript.
+  const clean = unfence(message);
+  const queued = deliverToParticipant(g, p, clean);
   // Arm the coalescing buffer for this target (+ the safety timeout: a slow
   // participant must not hold the coordinator hostage forever).
   const buf = pendingReplies.get(coord.sessionId) ?? { expected: new Set<string>(), replies: [] };
@@ -1514,7 +1532,7 @@ export async function sendFromCoordinator(
     from: "agent",
     projectId: targetProjectId,
     sessionId: coord.sessionId,
-    text: message,
+    text: clean,
   });
   return queued
     ? `Delivered (queued) to ${p.name} — its agent is busy; your message will wake it when idle. The reply arrives as your next message.`

@@ -83,6 +83,7 @@ import {
   quoteExcerpt,
   splitQuoteBlock,
 } from "../lib/chatText";
+import { unfence } from "../lib/fence";
 
 /**
  * Cross-project group chat panel — app-level surface (mounted once in
@@ -180,6 +181,33 @@ export function GroupChatPanel({
       setOpenGroupId(null);
     }
   }, [stackSurface, openGroupId]);
+
+  // PROJECT-SWITCH CLOSE (2026-11-01 report: "when a group chat is active
+  // and I switch project it doesn't close"): the expanded panel is a
+  // participant-scoped surface — the pill already hides on projects that
+  // aren't in the group, but the panel kept owning the right-gutter slot
+  // across every switch. On a REAL project switch (prev-project ref — the
+  // invite picker's "open existing group" may open a group this project
+  // isn't in, and that explicit open must survive), close the panel when the
+  // newly active project is NOT a participant of the open group; switching
+  // between the group's own projects keeps it open. The pill re-opens it
+  // wherever the new project is engaged.
+  const prevProjectRef = useRef<string | null>(activeProjectId);
+  useEffect(() => {
+    if (activeProjectId === prevProjectRef.current) return; // not a switch
+    prevProjectRef.current = activeProjectId;
+    if (!openGroupId) return;
+    const g = getGroup(openGroupId);
+    if (!g) return; // the vanish effect above handles deletion
+    const inGroup =
+      activeProjectId !== null &&
+      g.participants.some((p) => p.projectId === activeProjectId);
+    if (inGroup) return;
+    setOpenGroupId(null);
+    if (useChatStore.getState().stackRail.surface === "group") {
+      closeGroupFromStack();
+    }
+  }, [activeProjectId, openGroupId, closeGroupFromStack]);
 
   // Cross-surface entries via window events (the rail and the status bar
   // live inside project workspaces; the panel is app-level — events keep
@@ -707,8 +735,14 @@ function GroupMessageBody({
   text: string;
   from: GroupMessage["from"];
 }) {
-  const parsed = splitQuoteBlock(text);
-  const body = parsed ? parsed.rest : text;
+  // Agent lines render UNFENCED: fence markers are a model-context trust
+  // device, never content — a model that echoed the wrapper it was taught
+  // must not paint raw markers into the group UI, and PERSISTED history
+  // (written before the store's production sites stripped at the source)
+  // is cleaned here too. User text renders exactly as typed.
+  const raw = from === "agent" ? unfence(text) : text;
+  const parsed = splitQuoteBlock(raw);
+  const body = parsed ? parsed.rest : raw;
   return (
     <div
       className={cn(
@@ -935,7 +969,12 @@ function Composer({ group }: { group: GroupChat }) {
       setMention((prev) => ({
         ...prev,
         open: true,
-        start: caret - m[2].length,
+        // start points AT the typed "@" (not at the first char after it):
+        // pickMention's insertion carries its own "@" (`@${name} `), so
+        // the replaced token range must swallow the typed one. Pointing
+        // past the "@" left it in place and the insert prepended a second
+        // one — a doubled "@@" in the composer.
+        start: caret - m[2].length - 1,
         query: m[2],
       }));
       setMentionIndex(0);

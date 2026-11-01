@@ -111,3 +111,16 @@ describe("composer @-mention targeting (replaces the All dropdown)", () => {
     );
   });
 });
+
+describe("picking a mention yields exactly ONE @ (no doubled @@)", () => {
+  it("the replaced token range starts AT the typed @ (2026-11-01)", () => {
+    // User report: "When I type @ in group chat and pick an agent I get
+    // double @@". pickMention's insertion carries its own "@" (`@${name} `),
+    // so the replaced token range must swallow the typed @ too — the
+    // pre-fix start (the first char AFTER the @) left it in place and the
+    // insert prepended a second one: "@@alpha ".
+    expect(panel).toMatch(/start:\s*caret\s*-\s*m\[2\]\.length\s*-\s*1,/);
+    // The @-EXCLUSIVE start form must not return.
+    expect(panel).not.toMatch(/start:\s*caret\s*-\s*m\[2\]\.length,/);
+  });
+});

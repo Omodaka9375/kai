@@ -191,3 +191,40 @@ describe("group transcript auto-scrolls like the main AI chat (2026-11-01)", () 
     expect(panel).toMatch(/scrollCtx\.current\?\.scrollToBottom\(\)/);
   });
 });
+
+describe("project switch closes a non-participant group panel (2026-11-01)", () => {
+  // "When a group chat is active and I switch project it doesn't close."
+  // The collapsed pill is participant-scoped; the EXPANDED panel must be
+  // too. The close effect fires on a REAL project switch (prev-project
+  // ref) and hands the right-gutter slot back when the newly active
+  // project is not a participant of the open group.
+  it("the switch effect re-checks the open group against the new project", () => {
+    expect(panel).toMatch(
+      /const inGroup =\s*activeProjectId !== null &&\s*g\.participants\.some\(\(p\) => p\.projectId === activeProjectId\);/,
+    );
+    expect(panel).toMatch(/if \(inGroup\) return;\s*setOpenGroupId\(null\);/);
+    // Only real switches close — the picker's explicit "open existing
+    // group" (possibly a group this project isn't in) must survive its own
+    // openGroupId change.
+    expect(panel).toMatch(
+      /if \(activeProjectId === prevProjectRef\.current\) return;/,
+    );
+  });
+
+  it("agent lines render UNFENCED (markers never paint into the group UI)", () => {
+    // A model echoed the fence wrapper it was taught into its group reply
+    // (user report: a reply arrived wrapped in literal tool-fence markers).
+    // New replies are stripped at the store's production sites; the
+    // display unfences agent lines so PERSISTED history is clean too.
+    expect(panel).toMatch(/from === "agent" \? unfence\(text\) : text/);
+  });
+
+  it("the store strips markers at every agent-text production site", () => {
+    // Persona reply, bridge mirror (resolveMirrorReply), and coordinator
+    // send_to_project are the three places agent text is produced — all
+    // three unfence before the text reaches the transcript.
+    expect(store).toMatch(/reply = unfence\(reply\)\.trim\(\);/);
+    expect(store).toMatch(/const text = unfence\(/);
+    expect(store).toMatch(/const clean = unfence\(message\);/);
+  });
+});
