@@ -66,6 +66,8 @@ import {
   getGroups,
   getPersonaApprovals,
   isPersonaParticipantId,
+  lastGroupRefusal,
+  liveGroupForProject,
   participantActivity,
   removeParticipant,
   renameGroupChat,
@@ -416,8 +418,10 @@ function PanelHeader({
   // mutation; Enter commits, Escape cancels, blur cancels.
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
+  // Audit M3: resume refusal reason (single-membership) — transient.
+  const [resumeRefusal, setResumeRefusal] = useState<string | null>(null);
   return (
-    <div className="flex h-11 shrink-0 items-center gap-3 border-b border-border/60 px-3">
+    <div className="relative flex h-11 shrink-0 items-center gap-3 border-b border-border/60 px-3">
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted/70 text-muted-foreground">
           <HugeiconsIcon icon={Link01Icon} size={13} strokeWidth={1.75} />
@@ -495,7 +499,14 @@ function PanelHeader({
             size="sm"
             variant="ghost"
             className="h-6 shrink-0 rounded-full border border-border/60 px-2.5 text-[11px]"
-            onClick={() => void resumeGroupChat(group.id)}
+            onClick={() => {
+              // Audit M3: resume may refuse when every project member now
+              // belongs to another live group — surface the reason instead
+              // of a silent no-op.
+              void resumeGroupChat(group.id).then((ok) => {
+                if (!ok) setResumeRefusal(lastGroupRefusal());
+              });
+            }}
           >
             Resume
           </Button>
@@ -564,6 +575,19 @@ function PanelHeader({
           />
         </Button>
       </div>
+      {resumeRefusal ? (
+        <div className="absolute inset-x-0 top-full z-10 flex items-start justify-center gap-1.5 border-b border-border/60 bg-muted/95 px-3 py-1.5 text-[10.5px] text-muted-foreground">
+          <span className="max-w-full truncate">{resumeRefusal}</span>
+          <button
+            type="button"
+            aria-label="Dismiss"
+            className="shrink-0 rounded p-0.5 hover:text-foreground"
+            onClick={() => setResumeRefusal(null)}
+          >
+            <HugeiconsIcon icon={Cancel01Icon} size={9} strokeWidth={2} />
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1376,6 +1400,17 @@ function InvitePicker({
   const existing = open ? getGroups() : [];
   const candidates = projects.filter((p) => p.id !== activeProjectId);
   const invitees = candidates.filter((p) => picked.includes(p.id));
+  // SINGLE MEMBERSHIP (audit M3, Option A): a project already live in
+  // another group cannot join this one. Rows render disabled with the
+  // owning group's name — prevention beats a refusal after Create.
+  const owners = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of candidates) {
+      const g = liveGroupForProject(p.id);
+      if (g) m.set(p.id, g.name);
+    }
+    return m;
+  }, [candidates, existing.length]);
   // CRITICAL (React #185 fix): the selector must return a STABLE reference —
   // zustand v5 feeds it to useSyncExternalStore, and a selector that builds
   // a fresh array per call makes the snapshot "change" after every render:
@@ -1591,11 +1626,18 @@ function InvitePicker({
                   {candidates.length > 0 ? (
                     candidates.map((project) => {
                       const selected = picked.includes(project.id);
+                      const ownerName = owners.get(project.id);
                       return (
                         <button
                           key={project.id}
                           type="button"
                           aria-pressed={selected}
+                          disabled={!!ownerName}
+                          title={
+                            ownerName
+                              ? `Already in the live group "${ownerName}". End that group first.`
+                              : undefined
+                          }
                           onClick={() =>
                             setPicked((current) =>
                               current.includes(project.id)
@@ -1608,6 +1650,8 @@ function InvitePicker({
                             selected
                               ? "bg-accent text-foreground"
                               : "text-muted-foreground",
+                            ownerName &&
+                              "cursor-not-allowed opacity-50 hover:bg-transparent",
                           )}
                         >
                           <HugeiconsIcon
@@ -1619,22 +1663,31 @@ function InvitePicker({
                           <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-foreground">
                             {project.name}
                           </span>
-                          <span
-                            className={cn(
-                              "flex size-4 shrink-0 items-center justify-center rounded border",
-                              selected
-                                ? "border-primary bg-primary text-primary-foreground"
-                                : "border-border bg-background",
-                            )}
-                          >
-                            {selected ? (
-                              <HugeiconsIcon
-                                icon={Tick02Icon}
-                                size={11}
-                                strokeWidth={2.5}
-                              />
-                            ) : null}
-                          </span>
+                          {ownerName ? (
+                            <span
+                              className="max-w-28 shrink-0 truncate rounded bg-muted/70 px-1.5 py-px text-[9.5px] text-muted-foreground"
+                              title={`In "${ownerName}"`}
+                            >
+                              in {ownerName}
+                            </span>
+                          ) : (
+                            <span
+                              className={cn(
+                                "flex size-4 shrink-0 items-center justify-center rounded border",
+                                selected
+                                  ? "border-primary bg-primary text-primary-foreground"
+                                  : "border-border bg-background",
+                              )}
+                            >
+                              {selected ? (
+                                <HugeiconsIcon
+                                  icon={Tick02Icon}
+                                  size={11}
+                                  strokeWidth={2.5}
+                                />
+                              ) : null}
+                            </span>
+                          )}
                         </button>
                       );
                     })
@@ -1867,7 +1920,21 @@ function ParticipantsMenu({
   const [open, setOpen] = useState(false);
   const live = getGroup(group.id) ?? group;
   const memberIds = new Set(live.participants.map((p) => p.projectId));
-  const invitable = candidates.filter((c) => !memberIds.has(c.id));
+  // SINGLE MEMBERSHIP (audit M3, Option A): projects live in ANOTHER group
+  // are not invitable here either; the row renders disabled with the owner.
+  const invitable = candidates.filter(
+    (c) => !memberIds.has(c.id) && !liveGroupForProject(c.id),
+  );
+  const foreignMembers = useMemo(
+    () =>
+      candidates
+        .filter((c) => !memberIds.has(c.id) && liveGroupForProject(c.id))
+        .map((c) => {
+          const owner = liveGroupForProject(c.id);
+          return { id: c.id, name: c.name, ownerName: owner ? owner.name : "" };
+        }),
+    [candidates, memberIds],
+  );
   // Existing personas not yet in this group (synthetic ids are members too).
   const memberPersonaIds = new Set(
     live.participants
@@ -1982,6 +2049,26 @@ function ParticipantsMenu({
                 <HugeiconsIcon icon={Add01Icon} size={10} strokeWidth={1.75} />
                 <span className="min-w-0 flex-1 truncate">{c.name}</span>
               </button>
+            ))}
+          </>
+        ) : null}
+        {foreignMembers.length > 0 ? (
+          <>
+            <div className="mt-1 px-2 pb-1 pt-0.5 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+              In another group
+            </div>
+            {foreignMembers.map((c) => (
+              <div
+                key={c.id}
+                title={`Already in the live group "${c.ownerName}". End that group first.`}
+                className="flex w-full cursor-not-allowed items-center gap-1.5 rounded px-2 py-1.5 opacity-50"
+              >
+                <HugeiconsIcon icon={Folder01Icon} size={10} strokeWidth={1.75} />
+                <span className="min-w-0 flex-1 truncate">{c.name}</span>
+                <span className="max-w-24 shrink-0 truncate text-[9.5px] text-muted-foreground/70">
+                  in {c.ownerName}
+                </span>
+              </div>
             ))}
           </>
         ) : null}

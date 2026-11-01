@@ -7,6 +7,7 @@ import {
   coordinatorGroupForSession,
   getGroup,
   isPersonaParticipantId,
+  liveGroupForProject,
   participantActivity,
   sendFromCoordinator,
 } from "../store/groupChatStore";
@@ -67,6 +68,10 @@ export function buildGroupTools(ctx: ToolContext) {
   const allRuntimes = ctx.getAllProjectRuntimes?.() ?? [];
   const invitableProjects = allRuntimes
     .filter((r) => !memberIds.has(r.id))
+    // SINGLE MEMBERSHIP (audit M3, Option A): a project already live in
+    // ANOTHER group cannot join this one either — leaving it in the roster
+    // invites an approval card that can only end in a refusal note.
+    .filter((r) => !liveGroupForProject(r.id))
     .map((r) => `${runtimeName(r.root)} (project id: ${r.id})`);
   const invitablePersonas = [
     ...useAgentsStore.getState().customAgents,

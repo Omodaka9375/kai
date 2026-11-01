@@ -435,16 +435,102 @@ export function groupsForProject(projectId: string): GroupChat[] {
   return out;
 }
 
+/** The live group a project currently belongs to, if any. Lookup behind
+ *  the single-membership invariant (audit M3, Option A): one project may
+ *  be a member of one LIVE group at a time, because every session-keyed
+ *  mechanism (reply provision, coalesce buffer, send queue) is
+ *  single-answer per session — dual membership cross-routes deliveries.
+ *  Personas are exempt: their machinery is composite-keyed and a persona
+ *  may sit in any number of groups. ENDED groups hold no membership
+ *  (resume re-checks). */
+export function liveGroupForProject(projectId: string): GroupChat | null {
+  for (const g of groups.values()) {
+    if (g.endedAt !== null) continue;
+    for (const p of g.participants) {
+      if (isPersonaParticipantId(p.projectId)) continue;
+      if (p.projectId === projectId) return g;
+    }
+  }
+  return null;
+}
+
+/** Reason for the most recent createGroupChat refusal (single-membership
+ *  invariant) or resumeGroupChat refusal. The picker disables conflicted
+ *  rows pre-emptively; this surfaces the rare race (a project joined
+ *  another group while the dialog was open). Cleared on success. */
+let lastRefusalReason: string | null = null;
+export function lastGroupRefusal(): string | null {
+  return lastRefusalReason;
+}
+
 export async function hydrateGroups(): Promise<void> {
   if (hydrated) return;
   if (hydratePromise) return hydratePromise;
   hydratePromise = (async () => {
     const saved = await store.get<GroupChat[]>("groups").catch(() => null);
     if (saved) {
-      for (const g of saved) {
+      // SINGLE MEMBERSHIP (audit M3, Option A): persisted state may predate
+      // the invariant — a crash before removeProjectFromGroups, or a file
+      // written by an older build, can leave one project in two live
+      // groups. Prune deterministically at hydrate: the earlier group wins
+      // (createdAt, then id), conflicted members of later groups drop with
+      // a system note, a group left with no project member ends, and an
+      // agent coordinator whose project dropped falls back to the user.
+      // Personas are exempt (composite-keyed machinery, multi-group by
+      // design). ENDED groups claim nothing.
+      const claimed = new Set<string>();
+      const ordered = [...saved].sort(
+        (a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : 1),
+      );
+      for (const g of ordered) {
         groups.set(g.id, g);
+        if (g.endedAt !== null) continue;
+        const keep: typeof g.participants = [];
         for (const p of g.participants) {
-          if (g.endedAt === null && !isPersonaParticipantId(p.sessionId)) {
+          if (
+            !isPersonaParticipantId(p.projectId) &&
+            claimed.has(p.projectId)
+          ) {
+            void appendGroupMessage(g.id, {
+              from: "system",
+              projectId: p.projectId,
+              sessionId: "",
+              text: `${p.name} was dropped at startup — it is already a member of another live group.`,
+            });
+            continue;
+          }
+          if (!isPersonaParticipantId(p.projectId))
+            claimed.add(p.projectId);
+          keep.push(p);
+        }
+        g.participants = keep;
+        const coord = g.coordinator;
+        if (
+          coord.kind === "agent" &&
+          !keep.some((p) => p.projectId === coord.projectId)
+        ) {
+          g.coordinator = { kind: "user" };
+          void appendGroupMessage(g.id, {
+            from: "system",
+            projectId: "",
+            sessionId: "",
+            text: "Coordination returned to you at startup — the delegated coordinator was dropped.",
+          });
+        }
+        if (!keep.some((p) => !isPersonaParticipantId(p.projectId))) {
+          // Every project member now belongs to an earlier live group: the
+          // group cannot function, so it ends (transcript stays readable).
+          g.endedAt = Date.now();
+          void appendGroupMessage(g.id, {
+            from: "system",
+            projectId: "",
+            sessionId: "",
+            text: "The group ended at startup — every project member now belongs to another live group.",
+          });
+          continue;
+        }
+        for (const p of keep) {
+          if (!isPersonaParticipantId(p.sessionId)) {
             sessionGroups.set(p.sessionId, g.id);
           }
         }
@@ -492,6 +578,26 @@ export async function createGroupChat(
   groupName?: string,
 ): Promise<GroupChat | null> {
   if (invitees.length === 0) return null;
+  // SINGLE MEMBERSHIP (audit M3, Option A): refuse when the inviter or any
+  // project invitee already belongs to a live group. The picker disables
+  // conflicted rows pre-emptively; this store-side backstop also covers
+  // roster drift between render and click (and any future caller).
+  const inviterOwner = liveGroupForProject(inviter.projectId);
+  if (inviterOwner) {
+    lastRefusalReason = `${inviter.name} is already a member of the live group "${inviterOwner.name}". End that group first.`;
+    return null;
+  }
+  const conflicted = invitees.filter(
+    (i) => !isPersonaParticipantId(i.projectId) && liveGroupForProject(i.projectId),
+  );
+  if (conflicted.length > 0) {
+    lastRefusalReason =
+      conflicted.length === 1
+        ? `${conflicted[0].name} is already a member of another live group. End that group first.`
+        : `${conflicted.map((c) => c.name).join(", ")} are already members of other live groups. End those groups first.`;
+    return null;
+  }
+  lastRefusalReason = null;
   // The inviter's sessionId is resolved HERE (not trusted from the caller):
   // the panel passes a placeholder; the active session at creation time is
   // the one that owns the group.
@@ -1587,15 +1693,63 @@ export async function setGroupAutoApprove(
   notify();
 }
 
-/** Resume an ended group. */
-export async function resumeGroupChat(groupId: string): Promise<void> {
+/** Resume an ended group. SINGLE MEMBERSHIP (audit M3): members whose
+ *  project now belongs to another live group drop with a note; if no
+ *  project member would remain, the resume is REFUSED (returns false,
+ *  reason via lastGroupRefusal()) and the group stays ended. Returns
+ *  true on success or when there was nothing to do. */
+export async function resumeGroupChat(groupId: string): Promise<boolean> {
   const g = groups.get(groupId);
-  // Only ENDED groups can resume — a live group is a no-op.
-  if (!g || g.endedAt === null) return;
+  // Only ENDED groups can resume — a live group is a no-op (not a refusal).
+  if (!g || g.endedAt === null) return true;
+  const keep: typeof g.participants = [];
+  const dropped: string[] = [];
+  for (const p of g.participants) {
+    if (isPersonaParticipantId(p.projectId)) {
+      keep.push(p);
+      continue;
+    }
+    if (liveGroupForProject(p.projectId)) {
+      dropped.push(p.name);
+      continue;
+    }
+    keep.push(p);
+  }
+  if (
+    dropped.length > 0 &&
+    !keep.some((p) => !isPersonaParticipantId(p.projectId))
+  ) {
+    lastRefusalReason =
+      "Could not resume — every project member now belongs to another live group.";
+    return false;
+  }
   g.endedAt = null;
+  g.participants = keep;
+  for (const name of dropped) {
+    void appendGroupMessage(g.id, {
+      from: "system",
+      projectId: "",
+      sessionId: "",
+      text: `${name} was removed on resume — it is now a member of another live group.`,
+    });
+  }
+  const coord = g.coordinator;
+  if (
+    coord.kind === "agent" &&
+    !keep.some((p) => p.projectId === coord.projectId)
+  ) {
+    g.coordinator = { kind: "user" };
+    void appendGroupMessage(g.id, {
+      from: "system",
+      projectId: "",
+      sessionId: "",
+      text: "Coordination returned to you — the delegated coordinator is no longer a member.",
+    });
+  }
   reindex(g);
   await persist();
   notify();
+  return true;
 }
 
 /** Hard-delete a group (live or ended): transcript and machinery are
@@ -1690,6 +1844,23 @@ export async function delegateCoordination(
   // string. Re-resolve once, then refuse.
   const sid = p.sessionId || getProjectActiveSession(p.projectId) || "";
   if (!sid) return;
+  // OLD-COORDINATOR TEARDOWN (audit M3): armed round machinery must not
+  // survive the handoff — a coalesce buffer/timer armed before delegation
+  // would fire a spurious "[group] …" wake into a now-plain participant
+  // (reclaimCoordination already tears down; delegation did not).
+  // Surgical: clear the coordinator-SCOPED armed state (coalesce buffer,
+  // timer, relay depth) but KEEP participant-scoped state (sendQueues,
+  // awaitingReply) — the delegate remains a member, and queued deliveries
+  // still flush when it goes idle. Same-session re-delegation is a no-op.
+  if (g.coordinator.kind === "agent" && g.coordinator.sessionId !== sid) {
+    pendingReplies.delete(g.coordinator.sessionId);
+    const timer = coalesceTimers.get(g.coordinator.sessionId);
+    if (timer) {
+      clearTimeout(timer);
+      coalesceTimers.delete(g.coordinator.sessionId);
+    }
+    relayDepth.delete(g.coordinator.sessionId);
+  }
   if (sid !== p.sessionId) {
     p.sessionId = sid;
     sessionGroups.set(sid, g.id);
@@ -1907,6 +2078,12 @@ export function noteCoordinatorRoundDone(sessionId: string): void {
     coalesceTimers.delete(sessionId);
   }
 }
+/** Test seam: preload the persisted `groups` record so hydrateGroups can
+ *  be exercised against shapes the public API can no longer produce (the
+ *  single-membership invariant refuses to build them). */
+export function __seedGroupsForHydrate(saved: unknown[]): void {
+  void store.set("groups", saved);
+}
 export function __resetGroupChatsForTest(): void {
   groups = new Map();
   sendQueues.clear();
@@ -1929,6 +2106,7 @@ export function __resetGroupChatsForTest(): void {
   // flushCoalesced into the NEXT test's state.
   for (const t of coalesceTimers.values()) clearTimeout(t);
   coalesceTimers.clear();
+  lastRefusalReason = null;
   hydrated = false;
   hydratePromise = null;
   nextGroupSeq = 1;
@@ -2135,8 +2313,19 @@ export async function addParticipants(
   const g = groups.get(groupId);
   if (!g || g.endedAt !== null || invitees.length === 0) return;
   const added: string[] = [];
+  const refused: string[] = [];
   for (const i of invitees) {
     if (g.participants.some((p) => p.projectId === i.projectId)) continue;
+    // SINGLE MEMBERSHIP (audit M3, Option A): a project already live in
+    // another group cannot join this one — skip it and say so in the
+    // transcript (this is also invite_agent's store-side backstop).
+    if (!isPersonaParticipantId(i.projectId)) {
+      const owner = liveGroupForProject(i.projectId);
+      if (owner) {
+        refused.push(`${i.name} (in "${owner.name}")`);
+        continue;
+      }
+    }
     // Resolve ONCE — two calls to getProjectActiveSession can race a session
     // switch between them, leaving the record pointing at session A while
     // the index maps session B (or the "" key, polluting the map).
@@ -2153,6 +2342,14 @@ export async function addParticipants(
     ];
     if (sid) sessionGroups.set(sid, groupId);
     added.push(i.name);
+  }
+  if (refused.length) {
+    void appendGroupMessage(g.id, {
+      from: "system",
+      projectId: "",
+      sessionId: "",
+      text: `Not added — already a member of another live group: ${refused.join(", ")}.`,
+    });
   }
   if (added.length) {
     void appendGroupMessage(g.id, {

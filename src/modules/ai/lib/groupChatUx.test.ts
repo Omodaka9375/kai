@@ -289,6 +289,38 @@ describe("project switch closes a non-participant group panel (2026-11-01)", () 
   });
 });
 
+describe("single membership: conflicted rows disable at the picker (2026-11-01 M3)", () => {
+  // The picker pre-empts the store refusal: rows for projects already live
+  // in another group render DISABLED with the owning group's name, in both
+  // invite surfaces (InvitePicker + ParticipantsMenu). The store backstop
+  // is pinned in singleMembership.test.ts.
+  it("InvitePicker rows disable with the owning group's name", () => {
+    expect(panel).toMatch(/const owners = useMemo\(\(\) => \{/);
+    expect(panel).toMatch(/const ownerName = owners\.get\(project\.id\);/);
+    expect(panel).toMatch(/disabled=\{!!ownerName\}/);
+    // Conflicted rows are still readable, never invisible: the badge names
+    // the owning group, the row keeps the project name visible at 50%.
+    expect(panel).toMatch(/in \{ownerName\}/);
+    expect(panel).toMatch(
+      /"cursor-not-allowed opacity-50 hover:bg-transparent"/,
+    );
+  });
+
+  it("ParticipantsMenu lists conflicted projects as non-invitable", () => {
+    expect(panel).toMatch(/!liveGroupForProject\(c\.id\)/);
+    expect(panel).toMatch(/In another group/);
+  });
+
+  it("the store exposes the lookup the picker uses", () => {
+    expect(store).toMatch(
+      /export function liveGroupForProject\(projectId: string\): GroupChat \| null/,
+    );
+    expect(store).toMatch(
+      /export function lastGroupRefusal\(\): string \| null/,
+    );
+  });
+});
+
 describe("the pill survives a project round-trip (2026-11-01)", () => {
   // "If I switch to a normal project and come back to group chat project,
   //  the collapsed group chat is not there — just a visual gap in its
