@@ -13,6 +13,14 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
  *
  * Guard: a MENTION_CHAIN_MAX cap on agent-to-agent exchanges (two agents
  * ping-ponging must surface, not loop); a human message resets the chain.
+ *
+ * @coordinator alias (2026-11-01): "in group chat make agents refer to
+ * coordinator with @coordinator to mention or tag him" — a STABLE token
+ * resolved BEFORE the name matcher (no display name needed, cannot be
+ * shadowed by a member whose name contains "coordinator"), routed only
+ * when coordination is delegated to an agent (a user coordinator reads
+ * the transcript directly). Taught in the delivery roster hint, the
+ * persona system prompt, and the coordinator preamble.
  */
 
 vi.mock("@tauri-apps/plugin-store", () => {
@@ -46,6 +54,7 @@ vi.mock("./chatStore", async (importOriginal) => {
 import {
   __resetGroupChatsForTest,
   createGroupChat,
+  delegateCoordination,
   deliverAgentMentions,
   getGroup,
   matchParticipantByToken,
@@ -149,6 +158,84 @@ describe("deliverAgentMentions — routing engine", () => {
     injectMessageMock.mockClear();
     const resumed = await deliverAgentMentions(g.id, "proj-a", "@beta what is the status?");
     expect(resumed.deliveries).toHaveLength(1);
+  });
+});
+
+describe("@coordinator alias — agents address the coordinator without its display name (2026-11-01)", () => {
+  /** makeGroup + delegation of coordination to proj-a's agent. */
+  async function makeCoordinatedGroup() {
+    const g = await makeGroup();
+    await delegateCoordination(g.id, "proj-a");
+    shared.activeSessions.set("proj-a", "sess-a");
+    shared.activeSessions.set("proj-b", "sess-b");
+    return getGroup(g.id)!;
+  }
+
+  it("routes a participant's @coordinator to the coordinator's session (delivery + provision armed)", async () => {
+    const g = await makeCoordinatedGroup();
+    const out = await deliverAgentMentions(g.id, "proj-b", "@coordinator the build is green");
+    expect(out.deliveries).toHaveLength(1);
+    expect(out.deliveries[0]!.target.projectId).toBe("proj-a");
+    expect(out.deliveries[0]!.queued).toBe(false);
+    expect(injectMessageMock).toHaveBeenCalledWith(
+      "sess-a",
+      expect.stringContaining("@coordinator the build is green"),
+    );
+    expect(injectMessageMock).toHaveBeenCalledWith(
+      "sess-a",
+      expect.stringContaining("beta @-mentioned you"),
+    );
+    // The mirror provision is armed — the coordinator's answer mirrors back.
+    const { peekReplyProvision } = await import("./groupChatStore");
+    expect(peekReplyProvision("sess-a")).toBe(g.id);
+  });
+
+  it("tolerates direct-address punctuation (@coordinator: / @coordinator,)", async () => {
+    const g = await makeCoordinatedGroup();
+    await deliverAgentMentions(g.id, "proj-b", "@coordinator: status?");
+    await deliverAgentMentions(g.id, "proj-b", "@coordinator, please advise");
+    expect(injectMessageMock).toHaveBeenCalledWith("sess-a", expect.stringContaining("status?"));
+    expect(injectMessageMock).toHaveBeenCalledWith("sess-a", expect.stringContaining("please advise"));
+  });
+
+  it("user-coordinated groups route nothing — the user reads the transcript directly", async () => {
+    const g = await makeGroup(); // coordinator kind: "user"
+    const out = await deliverAgentMentions(g.id, "proj-b", "@coordinator hello");
+    expect(out.deliveries).toHaveLength(0);
+    expect(injectMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("the coordinator's own @coordinator token never self-delivers", async () => {
+    const g = await makeCoordinatedGroup();
+    const out = await deliverAgentMentions(g.id, "proj-a", "@coordinator checking in");
+    expect(out.deliveries).toHaveLength(0);
+    expect(injectMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("the alias outranks name matches — a member named 'coordinator-helper' cannot shadow it", async () => {
+    const g = await createGroupChat(
+      { projectId: "proj-a", sessionId: "sess-a", root: "/a", name: "alpha" },
+      [
+        { projectId: "proj-b", root: "/b", name: "beta" },
+        { projectId: "proj-help", root: "/h", name: "coordinator-helper" },
+      ],
+    );
+    await delegateCoordination(g!.id, "proj-a");
+    shared.activeSessions.set("proj-help", "sess-help");
+    const out = await deliverAgentMentions(g!.id, "proj-b", "@coordinator ping");
+    expect(out.deliveries).toHaveLength(1);
+    // The COORDINATOR (proj-a), not the substring-matched helper.
+    expect(out.deliveries[0]!.target.projectId).toBe("proj-a");
+  });
+
+  it("every teaching surface names the alias (roster hint, persona prompt, coordinator preamble)", () => {
+    const store = readFileSync(new URL("./groupChatStore.ts", import.meta.url), "utf8");
+    // In-source the backticks are escaped (\`) inside the template literals.
+    expect(store).toContain("Address the group's coordinator as \\`@coordinator\\`");
+    // Two teaching surfaces use that phrase (roster hint + persona prompt)…
+    expect(store.split("Address the group's coordinator as").length - 1).toBe(2);
+    // …and the preamble tells the COORDINATOR that participants may use it.
+    expect(store).toContain("Participants may address you as \\`@coordinator\\`");
   });
 });
 

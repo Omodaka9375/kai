@@ -583,8 +583,17 @@ function deliverToParticipant(
     .join(", ");
   const exampleName =
     g.participants.find((x) => x.sessionId !== p.sessionId)?.name ?? "Name";
+  // @coordinator teaching (2026-11-01): members learn the stable alias for
+  // the coordinator — no display name needed. Only taught when the
+  // coordinator is an agent (a user coordinator reads the transcript
+  // directly; there is nothing to route) and never TO the coordinator
+  // itself (it does not need to tag itself).
+  const coordTeaching =
+    g.coordinator.kind === "agent" && p.projectId !== g.coordinator.projectId
+      ? ` Address the group's coordinator as \`@coordinator\` — it is delivered like any member mention.`
+      : "";
   const mentionHint =
-    `\n[group members: ${roster}] You may @-mention another member by name (e.g. \`@${exampleName} ...\`) — your reply is delivered to them.`;
+    `\n[group members: ${roster}] You may @-mention another member by name (e.g. \`@${exampleName} ...\`) — your reply is delivered to them.${coordTeaching}`;
   const payload = prefixed + mentionHint;
   // Busy check: a LIVE chat object is the source of truth — the mirrored
   // agentMeta can go stale (the stop path historically never patched it
@@ -769,7 +778,7 @@ async function runPersonaReply(
       `[group: ${g.name}] You are "${persona.name}", an agent persona participating in a cross-project group chat.`,
       "You have NO project workspace of your own.",
       ...scratchLines,
-      `Group members: ${g.participants.filter((x) => x.sessionId !== p.sessionId).map((x) => x.name).join(", ")}. You may @-mention another member by name (e.g. \`@${g.participants.find((x) => x.sessionId !== p.sessionId)?.name ?? "Name"} please review\`) — your reply is delivered to them.`,
+      `Group members: ${g.participants.filter((x) => x.sessionId !== p.sessionId).map((x) => x.name).join(", ")}. You may @-mention another member by name (e.g. \`@${g.participants.find((x) => x.sessionId !== p.sessionId)?.name ?? "Name"} please review\`) — your reply is delivered to them.${g.coordinator.kind === "agent" ? " Address the group's coordinator as \`@coordinator\` — it is delivered like any member mention." : ""}`,
       "Keep replies concise and addressed to the whole group.",
     ].join("\n\n");
     const prompt = [
@@ -1026,6 +1035,39 @@ export function matchParticipantByToken(
   );
 }
 
+/**
+ * @coordinator alias (2026-11-01): a STABLE token for the group's agent
+ * coordinator — members should not need its display name to address it
+ * ("make agents refer to the coordinator with @coordinator to mention or
+ * tag him"). Resolved BEFORE the name matcher so a participant whose name
+ * merely CONTAINS "coordinator" can never shadow the alias. Trailing
+ * address punctuation is tolerated ("@coordinator:", "@coordinator,") —
+ * models address directly like that constantly; possessive forms keep
+ * their trailing "s" and correctly do NOT match.
+ *
+ * Routes ONLY when coordination is delegated to an agent: a USER
+ * coordinator reads the transcript directly — there is no session to
+ * inject into. The coordinator itself can never self-mention (its own
+ * replies skip the alias), the same contract as the name matcher's
+ * `others` exclusion.
+ */
+const COORDINATOR_ALIAS = "coordinator";
+function coordinatorByAlias(
+  g: GroupChat,
+  fromParticipantId: string,
+  token: string,
+): GroupParticipant | undefined {
+  const t = token
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/[\p{P}]+$/u, "");
+  if (t !== COORDINATOR_ALIAS) return undefined;
+  const coord = g.coordinator;
+  if (coord.kind !== "agent") return undefined;
+  if (coord.projectId === fromParticipantId) return undefined;
+  return g.participants.find((p) => p.projectId === coord.projectId);
+}
+
 /** One routed @-mention delivery. */
 export type MentionDeliveryOutcome = {
   /** The mentioned participant that received the delivery. */
@@ -1076,7 +1118,11 @@ export async function deliverAgentMentions(
   const deliveries: MentionDeliveryOutcome[] = [];
   const skipped: string[] = [];
   for (const token of tokens) {
-    const target = matchParticipantByToken(others, token);
+    // @coordinator resolves BEFORE the name matcher (alias priority —
+    // see coordinatorByAlias); every other token matches by display name.
+    const target =
+      coordinatorByAlias(g, fromParticipantId, token) ??
+      matchParticipantByToken(others, token);
     if (!target) continue;
     // Re-resolve the CURRENT active session like every other delivery path
     // (the record can be empty/stale — same frozen-record class the stop/
@@ -1466,6 +1512,7 @@ export function coordinatorPreamble(g: GroupChat): string {
     others.map((s) => `  - ${s}`).join("\n"),
     `Rules:`,
     `- You may @-mention another member by name (e.g. "@${others[0]?.split(" (")[0] ?? "Name"} please check the build") — your message is delivered to them; they can reply to you the same way.`,
+    `- Participants may address you as \`@coordinator\` — a stable alias (they do not need your display name); such mentions arrive as group deliveries to you.`,
     `- Use send_to_project(project, message) to delegate a task or ask a question. It is FIRE-AND-FORGET: the reply arrives as your NEXT user message — do not poll, do not wait, do not call anything to check.`,
     `- After send_to_project, state that you are waiting and END YOUR TURN. Never declare the overall task complete while a delegation is outstanding.`,
     `- project_status(project) tells you whether a participant's agent is busy before you send.`,
