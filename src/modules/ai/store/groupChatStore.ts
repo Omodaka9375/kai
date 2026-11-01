@@ -324,15 +324,17 @@ function abortPersonaMachinery(groupId: string, sessionId: string): void {
     .catch(() => undefined);
 }
 
-/** Flush whatever the buffer holds as one merged wake (timeout or complete). */
-function flushCoalesced(coordinatorSessionId: string): void {
+/** Flush whatever the buffer holds as one merged wake (timeout or complete).
+ *  Exported so tests can drive the 90s-timeout path behaviorally (the
+ *  timer's callback is this function). */
+export function flushCoalesced(coordinatorSessionId: string): void {
   const buf = pendingReplies.get(coordinatorSessionId);
   const timer = coalesceTimers.get(coordinatorSessionId);
   if (timer) {
     clearTimeout(timer);
     coalesceTimers.delete(coordinatorSessionId);
   }
-  if (!buf || buf.replies.length === 0) {
+  if (!buf || (buf.replies.length === 0 && buf.expected.size === 0)) {
     pendingReplies.delete(coordinatorSessionId);
     return;
   }
@@ -348,11 +350,15 @@ function flushCoalesced(coordinatorSessionId: string): void {
     (relayDepth.get(coordinatorSessionId) ?? 0) + 1,
   );
   const suffix = missing.length
-    ? `\n\n[group] (no reply yet from: ${missing.join(", ")} — ask again if needed)`
+    ? `[group] (no reply yet from: ${missing.join(", ")} — ask again if needed)`
     : "";
-  void useChatStore
-    .getState()
-    .injectMessage(coordinatorSessionId, merged + suffix);
+  // ZERO-ANSWER TIMEOUT (2026-11-01): a round where NO participant answered
+  // used to early-return above (replies.length === 0) and wake the
+  // coordinator with NOTHING — with one slow agent the group sat in pure
+  // silence past the timeout. The who's-missing note is the whole wake text
+  // in that case; when replies exist it keeps its merged + suffix form.
+  const wake = merged && suffix ? `${merged}\n\n${suffix}` : merged || suffix;
+  void useChatStore.getState().injectMessage(coordinatorSessionId, wake);
 }
 
 export function isAgentCoordinator(sessionId: string): boolean {
@@ -1764,6 +1770,19 @@ export async function sendFromCoordinator(
  * settles to idle with a fresh assistant reply, IF that reply was produced
  * after the last delivery to it. Returns the coalesced wake text for the
  * coordinator, or null when still waiting for other participants / cap hit.
+ *
+ * LATE REPLIES (2026-11-01 report: "if one agent takes a lot of time to
+ * answer the convo stops, the agent finished replying in project chat
+ * instead of the group"): the 90s coalesce timeout flushes and DELETES the
+ * buffer, telling the coordinator "no reply yet — ask again if needed".
+ * When the slow participant finally answered, this function found no
+ * buffer and silently DROPPED the reply — the coordinator was never
+ * re-woken, so the reply stayed in the participant's project session and
+ * the group conversation just stopped. A missing buffer now re-opens a
+ * ONE-SHOT buffer: `expected` stays empty, the all-answered check below is
+ * vacuously true, and the shared flush delivers the late reply as its own
+ * wake immediately. Vacuous-truth flush = same wake builder, same relay
+ * accounting, same fencing — no second delivery path to drift.
  */
 export function noteParticipantReply(
   groupId: string,
@@ -1774,8 +1793,11 @@ export function noteParticipantReply(
   if (!g || g.endedAt !== null) return null;
   if (g.coordinator.kind !== "agent") return null;
   const coord = g.coordinator;
-  const buf = pendingReplies.get(coord.sessionId);
-  if (!buf) return null;
+  let buf = pendingReplies.get(coord.sessionId);
+  if (!buf) {
+    buf = { expected: new Set<string>(), replies: [] };
+    pendingReplies.set(coord.sessionId, buf);
+  }
   const name =
     g.participants.find((p) => p.projectId === participantProjectId)?.name ??
     participantProjectId;

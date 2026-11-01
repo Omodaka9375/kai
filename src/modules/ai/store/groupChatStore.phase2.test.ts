@@ -172,6 +172,53 @@ describe("reply coalescing (one merged wake)", () => {
     noteParticipantReply(g.id, "gamma", "gamma late");
     expect(injectMessageMock).toHaveBeenCalledTimes(1);
   });
+
+  it("the timeout wakes the coordinator even when NO participant answered (single slow agent)", async () => {
+    const g = await fixture();
+    const { flushCoalesced } = await import("./groupChatStore");
+    await sendFromCoordinator(g.id, "beta", "deep analysis, take your time");
+    injectMessageMock.mockClear();
+    // Old bug class 1: a zero-answer round early-returned and woke the
+    // coordinator with NOTHING — pure silence past the 90s timeout.
+    flushCoalesced("active-alpha");
+    expect(injectMessageMock).toHaveBeenCalledTimes(1);
+    expect(String(injectMessageMock.mock.calls[0]![1])).toContain(
+      "no reply yet from: beta",
+    );
+  });
+
+  it("a reply that lands AFTER the 90s timeout still wakes the coordinator (2026-11-01 convo-stop report)", async () => {
+    const g = await fixture();
+    const { flushCoalesced } = await import("./groupChatStore");
+    await sendFromCoordinator(g.id, "beta", "deep analysis, take your time");
+    injectMessageMock.mockClear();
+    // The slow agent has NOT answered when the 90s coalesce timeout fires:
+    // flushCoalesced (the timer's callback) flushes the empty round with
+    // the who's-missing note and DELETES the buffer.
+    flushCoalesced("active-alpha");
+    expect(injectMessageMock).toHaveBeenCalledTimes(1);
+    expect(String(injectMessageMock.mock.calls[0]![1])).toContain("no reply yet from: beta");
+    // ...then the slow agent finally settles idle with its reply. The old
+    // code hit `if (!buf) return null` here and DROPPED it — the group
+    // conversation stopped and the reply lived only in beta's project chat.
+    injectMessageMock.mockClear();
+    const out = noteParticipantReply(g.id, "beta", "finally done — here is the analysis");
+    expect(out).toBeNull(); // the flush is shared, the bridge hook stays defensive
+    expect(injectMessageMock).toHaveBeenCalledTimes(1);
+    const [target, text] = injectMessageMock.mock.calls[0]!;
+    expect(target).toBe("active-alpha");
+    expect(String(text)).toContain("beta replied");
+    expect(String(text)).toContain("finally done — here is the analysis");
+    // The late-reply buffer was one-shot: it must be consumed, so a SECOND
+    // late reply (a second idle settle of the same session, e.g. the user
+    // chatting with that project locally) opens its own fresh wake and
+    // does not merge into anything stale.
+    injectMessageMock.mockClear();
+    const out2 = noteParticipantReply(g.id, "beta", "second reply");
+    expect(out2).toBeNull();
+    expect(injectMessageMock).toHaveBeenCalledTimes(1);
+    expect(String(injectMessageMock.mock.calls[0]![1])).toContain("second reply");
+  });
 });
 
 describe("source pins — Phase 2 trust boundary", () => {
