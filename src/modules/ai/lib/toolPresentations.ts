@@ -307,6 +307,15 @@ const REGISTRY: Record<string, ToolPresentation> = {
     fence: true,
     remoteSurface: false,
   },
+  invite_agent: {
+    label: "Group invite",
+    approvalLabel: "Invite agent into group",
+    status: (a) => `Inviting ${String(a.agent ?? "agent")}`,
+    summary: (a) => str(a, "announce") ?? str(a, "agent"),
+    effect: "COMMITTED",
+    fence: false,
+    remoteSurface: false,
+  },
   project_status: {
     label: "Group status",
     status: (a) => `Checking ${String(a.project ?? "project")}`,

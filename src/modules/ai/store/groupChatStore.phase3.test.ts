@@ -291,9 +291,17 @@ describe("join / leave (human-only membership changes)", () => {
     expect(live.endedAt).not.toBeNull();
   });
 
-  it("source pin: no tool file touches membership mutation", () => {
+  it("source pin: tool membership changes ride the approval-gated invite_agent ONLY", () => {
     const tools = readFileSync(new URL("../tools/group.ts", import.meta.url), "utf8");
-    expect(tools).not.toContain("addParticipants");
+    // (2026-11-01) invite_agent is the DELIBERATE exception: the user asked
+    // for agent-driven invites. It is APPROVAL-GATED (needsApproval: true —
+    // the user clicks Allow before anyone joins) and routes through the SAME
+    // store paths as the human panel invite (addParticipants /
+    // addPersonaParticipants — no parallel mutation logic in tool code).
+    expect(tools).toContain("invite_agent");
+    expect(tools).toMatch(/needsApproval: true,\s*\n\s*execute: async \(\{ agent, announce/);
+    expect(tools).toContain("addParticipants(group.id");
+    // REMOVE stays human-only — the tool surface must not gain a kick.
     expect(tools).not.toContain("removeParticipant");
     expect(tools).toContain("sendFromCoordinator");
   });

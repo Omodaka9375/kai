@@ -16,6 +16,14 @@ export type ToolContext = {
   /** Captured owning project identity. Never follows the visible workspace. */
   projectId?: string;
   workspaceEnv?: WorkspaceEnv;
+  /** All OPEN project runtimes (app-wide), for tools that enumerate projects
+   *  (the group invite tool's roster). Providers keep tool code from reaching
+   *  into chatStore's module-private registry; absent = no open projects. */
+  getAllProjectRuntimes?: () => Array<{
+    id: string;
+    root: string;
+    env: WorkspaceEnv;
+  }>;
   /** Project-bound native client. Prefer this over the ambient global client
    * for work initiated by an agent or background scheduler. */
   native?: NativeClient;

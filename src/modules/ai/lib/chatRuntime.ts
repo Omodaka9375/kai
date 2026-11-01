@@ -209,8 +209,24 @@ export function makeChatSync(
     // Load (don't await) — a shadow created mid-session is picked up on the
     // next tool call via getShadow, which reads the resident map lazily.
     void loadShadow(base.getWorkspaceRoot()).catch(() => undefined);
+    // All open project runtimes (the group invite tool's roster source):
+    // chatStore is a heavy module (deliberately NOT statically imported
+    // here — see the header), so the accessor caches the dynamic import's
+    // promise and returns [] until it lands (first call primes it).
+    // All open project runtimes (the group invite tool's roster source):
+    // chatStore is a heavy module (deliberately NOT statically imported
+    // here — see the header), so cache the dynamic import's MODULE and call
+    // through on every access (fresh runtimes, no stale snapshot). []
+    // until the import lands (first call primes it).
+    let chatStoreMod: (typeof import("../store/chatStore")) | null = null;
+    void import("../store/chatStore")
+      .then((m) => {
+        chatStoreMod = m;
+      })
+      .catch(() => undefined);
     return {
       ...redirected,
+      getAllProjectRuntimes: () => chatStoreMod?.getAllProjectRuntimes() ?? [],
       projectId: deps.projectRuntime?.id,
       workspaceEnv: deps.projectRuntime?.env,
       native: deps.projectRuntime?.native,

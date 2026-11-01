@@ -742,6 +742,11 @@ export function getActiveProjectRuntime(): import("@/modules/workspace").Project
 export function registerProjectRuntime(runtime: import("@/modules/workspace").ProjectRuntime): void {
   projectRuntimes.set(runtime.id, runtime);
 }
+/** All registered project runtimes (open workspaces). Used by the group
+ *  invite tool to describe which PROJECTS can be invited into a group. */
+export function getAllProjectRuntimes(): Array<import("@/modules/workspace").ProjectRuntime> {
+  return [...projectRuntimes.values()];
+}
 
 /** Bind live UI handles to their owning project, not the foreground window. */
 export function setProjectLive(projectId: string, live: ChatRuntimeDeps["live"]): void {
