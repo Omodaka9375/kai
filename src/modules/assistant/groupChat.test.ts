@@ -14,7 +14,8 @@ import { describe, expect, it } from "vitest";
  *   2. The allow-list persists in prefs (boundGroups) and is pushed into
  *      the Rust gate on every telegram_start — classify() alone never
  *      mutates it.
- *   3. Members get DEFAULT_ALLOWED_TOOLS (the READ tier) regardless of
+ *   3. Members get GROUP_ALLOWED_TOOLS (a read-tier SUBSET that excludes
+ *      the owner-private channels: reminders, settings) regardless of
  *      what the owner granted THEMSELVES — never shell, file writes,
  *      API-spend tools, MCP, or set_my_name.
  *   4. Slash commands (/tell /sessions /approve...) are owner-only.
@@ -74,11 +75,15 @@ describe("TS: shared per-group session + attribution + read-only member tier", (
     expect(index).toContain('`[${opts.groupSenderName}]: ${userText}`');
   });
 
-  it("members get the READ tier regardless of the owner's allowlist", () => {
-    expect(index).toMatch(
-      /const allowed = opts\?\.isGroup\s*\n\s*\? new Set<string>\(\[\.\.\.DEFAULT_ALLOWED_TOOLS\]\)/,
-    );
-    expect(index).toContain("import { DEFAULT_ALLOWED_TOOLS, isToolAllowed }");
+  it("members get the GROUP SUBSET regardless of the owner's allowlist", () => {
+    // FIX 7 (2026-11-02 review): GROUP_ALLOWED_TOOLS, not the full read
+    // tier (regex-literal escapes don't round-trip through the tool
+    // pipeline; indexOf assertions instead).
+    // The ternary: group turns spread GROUP_ALLOWED_TOOLS (both lines exist,
+    // and the spread references the group set by name).
+    expect(index).toContain("const allowed = opts?.isGroup");
+    expect(index).toContain("? new Set<string>([...GROUP_ALLOWED_TOOLS])");
+    expect(index).toContain('import { GROUP_ALLOWED_TOOLS, isToolAllowed } from "./toolCatalog";');
   });
 
   it("members get NO MCP and NO set_my_name", () => {
@@ -120,5 +125,33 @@ describe("Rust: start payload pushes the persisted group list", () => {
   it("telegram_start accepts bound_group_ids (camelCase maps to snake_case param)", () => {
     // The IPC contract: JS `boundGroupIds` maps to Rust `bound_group_ids`.
     expect(rust).toContain("bound_group_ids: Option<Vec<i64>>");
+  });
+});
+
+describe("group-tier + session hygiene (2026-11-02 review, fixes 7-8)", () => {
+  it("the member tier excludes the owner-private channels", () => {
+    const catalog = readFileSync(new URL("./toolCatalog.ts", import.meta.url), "utf8");
+    expect(catalog).toContain("export const GROUP_ALLOWED_TOOLS");
+    const open = catalog.indexOf("export const GROUP_ALLOWED_TOOLS");
+    const close = catalog.indexOf("];", open);
+    const groupBody = catalog.slice(open, close);
+    // The owner-private channels must NOT be in the group set (they live
+    // elsewhere in the catalog for the owner tier - that's fine).
+    for (const excluded of ["reminder_create", "reminder_list", "reminder_cancel", "settings", "gmail_read", "social_read"]) {
+      expect(groupBody).not.toContain('"' + excluded + '"');
+    }
+    // The group prompt claims ZERO MCP servers and no customInstructions.
+    expect(index).toContain("opts?.isGroup ? 0 : prefs.mcpAllowedServers.length");
+    expect(index).toContain("custom && !opts?.isGroup");
+  });
+
+  it("getOrCreateGroupSession writes the row directly (no ghost placeholder)", () => {
+    // FIX 8: the old flow persisted a random-id ghost via createSession and
+    // filtered the wrong row. The direct write must remain.
+    const fnStart = index.indexOf("export async function getOrCreateGroupSession");
+    const fnEnd = index.indexOf("async function persistHistory", fnStart);
+    const body = index.slice(fnStart, fnEnd);
+    expect(body).not.toContain("createSession(");
+    expect(body).toContain("sessionsCache = [entry, ...list].slice(0, MAX_SESSIONS);");
   });
 });

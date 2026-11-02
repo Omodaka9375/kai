@@ -50,7 +50,7 @@ import { createFenceState, fenceSystemPrompt } from "@/modules/ai/lib/fence";
 import { auditAppend, AUDIT_KINDS } from "@/modules/ai/lib/audit";
 import { buildTools } from "@/modules/ai/tools/tools";
 import type { ToolContext } from "@/modules/ai/tools/context";
-import { DEFAULT_ALLOWED_TOOLS, isToolAllowed } from "./toolCatalog";
+import { GROUP_ALLOWED_TOOLS, isToolAllowed } from "./toolCatalog";
 import { BUILTIN_AGENTS, loadAgents } from "@/modules/ai/lib/agents";
 import { toSpeechText, splitForSpeech, transcribeLocal } from "@/modules/ai/lib/voiceTts";
 import { proxyFetch } from "@/modules/ai/lib/proxyFetch";
@@ -208,22 +208,21 @@ export async function getOrCreateGroupSession(
   const id = groupSessionKey(groupChatId);
   const list = await listSessions();
   if (list.some((s) => s.id === id)) return id;
-  await createSession(`Group ${groupChatId}`);
-  // createSession generates a random id — overwrite the list entry with the
-  // deterministic group id (drop the placeholder it created).
-  const created = await listSessions();
-  const withoutPlaceholder = created.filter((s) => s.id !== id);
-  const placeholder = created.find((s) => s.id !== id);
+  // FIX 8 (2026-11-02 review): write the row DIRECTLY. The old flow called
+  // createSession (which PERSISTED a random-id placeholder row + an orphan
+  // messages: key, and bypassed the MAX_SESSIONS slice), then filtered the
+  // WRONG row (s.id !== id could never match the not-yet-existing
+  // deterministic id) - leaving a permanent ghost "Group N" duplicate on
+  // disk per bind, visible in /sessions.
   const entry: AssistantSession = {
     id,
     title: `Group ${groupChatId}`,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
-  sessionsCache = [entry, ...withoutPlaceholder];
+  sessionsCache = [entry, ...list].slice(0, MAX_SESSIONS);
   await prefsStore.set(KEY_SESSIONS, sessionsCache);
   await prefsStore.set(messagesKey(id), []);
-  void placeholder;
   historyCache.set(id, []);
   return id;
 }
@@ -535,8 +534,12 @@ export async function runAssistantTurn(
   // READ tier regardless of what the owner granted THEMSELVES, and drop
   // MCP + the name tool entirely (a friend renaming the assistant or
   // calling the owner's MCP servers is not their call).
+  // FIX 7 (2026-11-02 review): members get GROUP_ALLOWED_TOOLS - a SUBSET
+  // of the read tier that excludes the owner-private channels (reminders,
+  // settings). The review confirmed DEFAULT_ALLOWED_TOOLS wholesale let a
+  // member DM the owner arbitrary Markdown via reminder_create.
   const allowed = opts?.isGroup
-    ? new Set<string>([...DEFAULT_ALLOWED_TOOLS])
+    ? new Set<string>([...GROUP_ALLOWED_TOOLS])
     : new Set(prefs.allowedTools);
   const tools: Record<string, unknown> = {};
   // TIER HONESTY (Phase 4): approval-gated tools are NOT stripped anymore -
@@ -700,7 +703,10 @@ export async function runAssistantTurn(
       ? "You are in a TELEGRAM GROUP CHAT with the owner and their friends. Messages arrive prefixed with each sender's display name in the shared conversation; address people by name when relevant. The owner is the person who set you up; other members are their guests."
       : "You are chatting with the owner over Telegram. Replies are plain text (Telegram Markdown).",
     "Keep replies conversational and SHORT - a chat message, not a document. Bullet points over essays.",
-    describeAssistantCapabilities(allowed, prefs.mcpAllowedServers.length),
+    // FIX 7b (2026-11-02 review): group turns must not claim the owner's
+    // MCP servers (group MCP tools are zeroed) and must not embed the
+    // owner's private customInstructions in a member-visible context.
+    describeAssistantCapabilities(allowed, opts?.isGroup ? 0 : prefs.mcpAllowedServers.length),
     "Do NOT use code fences with language tags unless the user asks for code — Telegram renders them as monospace blocks.",
     "This is a general personal-assistant conversation, not a coding session.",
     "## EXECUTION CLARITY PROTOCOL (critical):",
@@ -714,7 +720,11 @@ export async function runAssistantTurn(
     "Image/video generation: DO NOT ask the user which provider to use — the tools pick automatically from the configured keys. Generation takes 10-60s; that's normal, just call it.",
     "If generation fails with a missing-key error, tell the user SHORTLY: add a Google key in the desktop app's Settings → Models (or install the engine's official MCP server). One sentence, no essay.",
     "You have no camera or screen access on the user's device — if asked to 'look at my screen', say they can send a photo here and you'll analyze it.",
-    custom ? `\n\n## USER CUSTOM INSTRUCTIONS\n${custom}` : "",
+    // FIX 7b (2026-11-02 review): group turns must not embed the owner's
+    // private customInstructions in a member-visible context.
+    custom && !opts?.isGroup
+      ? `\n\n## USER CUSTOM INSTRUCTIONS\n${custom}`
+      : "",
   ]
     .filter(Boolean)
     .join("\n");

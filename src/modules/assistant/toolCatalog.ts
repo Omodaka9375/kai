@@ -196,6 +196,28 @@ export const DEFAULT_ALLOWED_TOOLS: readonly string[] = TOOL_CATALOG.filter(
     t.tier === "read" && t.name !== "gmail_read" && t.name !== "social_read",
 ).map((t) => t.name);
 
+/**
+ * GROUP MEMBER TIER (2026-11-02 review, FIX 7): the tools allow-listed
+ * groups' members get. NOT the full read tier: DEFAULT_ALLOWED_TOOLS
+ * wholesale leaked channels that cross the "guests are read-only" line -
+ *   - reminder_create pushes member-chosen text into the OWNER's private
+ *     Telegram DM (and Markdown-parsed links render clickable there),
+ *   - reminder_list/reminder_cancel enumerate/sabotage the owner's
+ *     personal reminders,
+ *   - settings reads the owner's global custom instructions.
+ * Members get pure lookup: search, browse, domains, scratch reads.
+ */
+export const GROUP_ALLOWED_TOOLS: readonly string[] = [
+  "web_search",
+  "web_browse",
+  "domain_check",
+  "domain_find",
+  "read_file",
+  "list_directory",
+  "grep",
+  "glob",
+];
+
 /** Names in a given tier (used by the picker's per-tier master toggle). */
 export function toolsInTier(tier: ToolTier): string[] {
   return TOOL_CATALOG.filter((t) => t.tier === tier).map((t) => t.name);
