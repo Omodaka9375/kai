@@ -602,6 +602,23 @@ describe("source pins — trust boundary & wiring", () => {
     expect(panel).toContain("ArrowExpand01Icon");
     expect(pill).toContain("groupPanelExpanded");
   });
+
+  it("the panel root stays FIXED - twMerge demotes a second position class (2026-11-02)", () => {
+    // User report: creating the FIRST group in a project left the group
+    // panel stuck at the workspace's top-left, permanently. Root cause:
+    // the root className carried BOTH `fixed` (string 1) and `relative`
+    // (string 2); cn() = twMerge(clsx(...)), fixed and relative are the
+    // same tailwind-merge position group and the LAST class wins, so the
+    // panel rendered position:relative and its right-2/bottom-[...]
+    // viewport anchors became flow offsets from the workspace's top-left.
+    // The AI mini window twin carries no `relative` either, and `fixed`
+    // alone is already a positioned ancestor for the absolute children.
+    expect(panel).toContain('"fixed z-40 flex flex-col overflow-hidden",');
+    expect(panel).not.toContain('"relative rounded-2xl');
+    expect(panel).toContain(
+      '"rounded-2xl border border-border/60 bg-card text-[12px] shadow-lg",',
+    );
+  });
 });
 
 describe("persona participants", () => {

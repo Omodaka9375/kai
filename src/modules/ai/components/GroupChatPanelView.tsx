@@ -351,7 +351,17 @@ export function GroupChatPanel({
             data-group-id={active.id}
             className={cn(
               "fixed z-40 flex flex-col overflow-hidden",
-              "relative rounded-2xl border border-border/60 bg-card text-[12px] shadow-lg",
+              // NEVER add a second position class (`relative`) here: cn() =
+              // twMerge(clsx(...)), and fixed/relative are the SAME tailwind-
+              // merge position group, so the LAST class silently wins. With
+              // both present the panel rendered position:relative and its
+              // right-2/bottom-[...] viewport anchors offset from the static
+              // flow position instead - the panel appeared stuck at the
+              // workspace's top-left, permanently (2026-11-02 report:
+              // first group created in a project). `fixed` alone is already
+              // a positioned ancestor for the absolute children (the top
+              // gradient, the error strip).
+              "rounded-2xl border border-border/60 bg-card text-[12px] shadow-lg",
               "ring-1 ring-black/5 dark:ring-white/5",
               // Twin of the AI mini window in BOTH states: expanded mirrors
               // the mini window's full-workspace overlay (and owns the
