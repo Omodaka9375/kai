@@ -17,6 +17,22 @@ const read = (rel: string) =>
 const rust = read("../../src-tauri/src/lib.rs");
 const entry = read("../main.tsx");
 
+describe("taskbar window icon (2026-11-02 Windows regression)", () => {
+  // The 2.11→2.12 tauri/tao/wry upgrade stopped applying the implicit
+  // default window icon on Windows — taskbar showed the generic exe icon
+  // while the exe's embedded icon (shortcuts/Explorer) and the tray were
+  // verified fine. The window icon must be set EXPLICITLY from the
+  // compile-time-embedded PNG so no tauri context-icon population is in
+  // the path.
+  it("the main window sets its icon from an embedded PNG", () => {
+    expect(rust).toMatch(
+      /include_bytes!\("\.\.\/icons\/128x128\.png"\)/,
+    );
+    expect(rust).toMatch(/window\.set_icon\(icon\)/);
+    expect(rust).toMatch(/failed to set main window icon/);
+  });
+});
+
 describe("start-hidden-at-login wiring (source pins)", () => {
   it("the autostart registration carries --hidden on every platform", () => {
     // The flag rides the registration verbatim: HKCU Run value on Windows,

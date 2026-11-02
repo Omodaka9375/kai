@@ -664,6 +664,25 @@ pub fn run() {
                 })
                 .map_err(|e| format!("failed to build main window: {e}"))?;
 
+            // TASKBAR ICON (2026-11-02): set the window icon EXPLICITLY from
+            // the compile-time-embedded PNG. The 2.11→2.12 tauri/tao/wry
+            // stack upgrade (between KAI 1.9.7 and 2.0.0) stopped applying
+            // the implicit default window icon at creation on Windows, so
+            // the taskbar showed the generic exe icon — while the exe's own
+            // embedded icon was verified pixel-correct (shortcuts/Explorer
+            // fine) and the tray was fine (it loads its PNG explicitly).
+            // include_bytes removes any dependency on tauri's context icon
+            // population; 128px keeps the taskbar crisp at high-DPI. No-op
+            // on macOS (dock uses the .app bundle icon).
+            {
+                const WINDOW_ICON_PNG: &[u8] = include_bytes!("../icons/128x128.png");
+                if let Ok(icon) = tauri::image::Image::from_bytes(WINDOW_ICON_PNG) {
+                    if let Err(e) = window.set_icon(icon) {
+                        log::warn!("failed to set main window icon: {e}");
+                    }
+                }
+            }
+
             // Grant microphone/camera access on WebView2 (media is denied by
             // default — only clipboard is auto-approved by wry).
             #[cfg(target_os = "windows")]
