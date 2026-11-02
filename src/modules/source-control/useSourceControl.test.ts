@@ -48,8 +48,17 @@ describe("useSourceControl context settle (panel blink)", () => {
   });
 
   it("reusable-root comparison uses the settled path", () => {
+    // 2026-11-02 Windows fix: the raw ===/startsWith comparison never
+    // matched a backslashed Rust root against a forward-slashed OSC 7
+    // context — every refresh blanked the panel and unmounted the commit
+    // textarea on Windows. The comparison now goes through the exported
+    // separator-normalizing helper (behavioral coverage in
+    // repoRootIdentity.test.ts).
     expect(src).toMatch(
-      /settledContextPath === activeRoot \|\|\n\s*settledContextPath\.startsWith/,
+      /reusableRepoRoot\(activeRoot, settledContextPath\)/,
+    );
+    expect(src).not.toMatch(
+      /settledContextPath === activeRoot \|\|/,
     );
   });
 });

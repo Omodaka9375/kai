@@ -185,11 +185,17 @@ export const SourceControlPanel = memo(function SourceControlPanel({
   // supplied scheduler). Registered on the WINDOW with a check that the
   // event lands inside THIS panel, so it survives React portals (branch
   // switcher popovers render in portals but are panel-scoped UX).
+  // EXEMPTION (2026-11-02): interactive TEXT inputs (the commit box) opt out
+  // via [data-no-sc-refresh] — clicking into the commit box to type is not a
+  // "look at git state" gesture, and a refresh here remounts the textarea and
+  // wipes the caret mid-typing.
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (e: PointerEvent) => {
       const target = e.target as Element | null;
-      if (target?.closest("[data-source-control-panel]")) onRequestRefresh?.();
+      if (!target?.closest("[data-source-control-panel]")) return;
+      if (target.closest("[data-no-sc-refresh]")) return;
+      onRequestRefresh?.();
     };
     window.addEventListener("pointerdown", onPointerDown);
     return () => window.removeEventListener("pointerdown", onPointerDown);
@@ -765,6 +771,14 @@ export const SourceControlPanel = memo(function SourceControlPanel({
                   onKeyDown={handleCommitShortcut}
                   placeholder="Commit message"
                   rows={3}
+                  // Click-to-refresh exemption (2026-11-02): the panel treats
+                  // any pointerdown inside it as "user is looking at git" and
+                  // refreshes — but clicking into the commit box is a TYPING
+                  // action. A refresh remounts this textarea (panelState
+                  // cycles through loading) and the caret disappears mid-
+                  // word. Opt out of that trigger; commit/stage actions still
+                  // refresh explicitly on completion.
+                  data-no-sc-refresh
                   className={cn(
                     "min-h-[72px] border-  resize-none rounded-lg  bg-transparent px-3 pb-7 pt-2.5 text-[12.5px] leading-snug shadow-none placeholder:text-muted-foreground/65 focus-visible:ring-0 focus:border-0",
                   )}

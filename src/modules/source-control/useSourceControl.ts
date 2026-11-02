@@ -4,6 +4,7 @@ import {
   type GitRepoInfo,
   type GitStatusSnapshot,
 } from "@/modules/ai/lib/native";
+import { normalizeWorkspacePath } from "@/modules/ai/lib/workspacePath";
 import { useWorkspaceEnvStore, useProjectRuntime, workspaceScopeKey } from "@/modules/workspace";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -137,6 +138,30 @@ function normalizeError(error: unknown): string {
   return "Unknown source control error";
 }
 
+/** Which cached repo root (if any) can serve a refresh for `contextPath`.
+ *
+ *  SEPARATOR-BLIND (2026-11-02 Windows bug: "click the commit box and the
+ *  cursor keeps getting wiped"): Rust's `canonical_dir` returns Windows
+ *  repo roots BACKSLASHED (`D:\repo`) while the panel's context path
+ *  arrives forward-slashed from OSC 7 (`D:/repo`) — the old raw
+ *  `===`/`startsWith` comparison never matched on Windows, so EVERY refresh
+ *  took the blank-and-reload path (repo/status nulled → panelState
+ *  loading → the commit textarea UNMOUNTED, focus gone) and every click
+ *  into the panel re-triggered it. Normalize both sides (same helper the
+ *  session-key comparisons use, matching Rust project_key) before
+ *  comparing; return the ORIGINAL root for the IPC call. */
+export function reusableRepoRoot(
+  activeRoot: string | null,
+  contextPath: string | null,
+): string | null {
+  if (!activeRoot || !contextPath) return null;
+  const root = normalizeWorkspacePath(activeRoot);
+  const ctx = normalizeWorkspacePath(contextPath);
+  if (!root || !ctx) return null;
+  if (ctx === root || ctx.startsWith(`${root}/`)) return activeRoot;
+  return null;
+}
+
 function getContextualAction(
   status: GitStatusSnapshot | null,
 ): SourceControlRemoteAction | null {
@@ -266,11 +291,7 @@ export function useSourceControl(
 
       const activeRoot = stateRef.current.repo?.repoRoot ?? null;
       const reusableRoot =
-        activeRoot &&
-        (settledContextPath === activeRoot ||
-          settledContextPath.startsWith(`${activeRoot}/`))
-          ? activeRoot
-          : undefined;
+        reusableRepoRoot(activeRoot, settledContextPath) ?? undefined;
 
       setState((current) => {
         // Same repo (or nothing stale to clear): keep data, flip the loading
