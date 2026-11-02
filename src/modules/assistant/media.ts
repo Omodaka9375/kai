@@ -91,13 +91,22 @@ async function deliver(
 
 /** The photo attached to the CURRENT Telegram turn (if any) — the natural
  *  editing/animate source headless: no meaningful paths exist in the
- *  assistant scratch dir, so the just-sent photo IS the reference image. */
+ *  assistant scratch dir, so the just-sent photo IS the reference image.
+ *  LAZY RESOLVER (2026-11-02): the caller may pass a getter instead of a
+ *  fixed value — when the current turn carries no photo, it falls back to
+ *  the most recent photo in history (bytes persisted in scratch, see
+ *  photos.ts). The user's flow that broke: photo sent → edit attempt →
+ *  "key expired, get a new one" → user adds the key → "try now" — and the
+ *  model had lost the image reference and asked to re-send, which is
+ *  impossible if the photo was taken in-app and never saved. */
 export type TurnImage = { base64: string; mimeType?: string };
 
-export function buildAssistantMediaTools(turnImage?: TurnImage): Record<string, unknown> {
+export function buildAssistantMediaTools(
+  getTurnImage?: () => Promise<TurnImage | undefined>,
+): Record<string, unknown> {
   const generateImage = tool({
     description:
-      "Generate an image from a text prompt - or EDIT the photo the user attached to this message (edit_attached_image: true). The provider is picked automatically from configured keys (google preferred, then openai, then xai); editing requires google (Nano Banana 2). The result is delivered to the user's Telegram chat immediately; describe it briefly in your reply. Size/quality are optional.",
+      "Generate an image from a text prompt - or EDIT the most recent photo in the conversation (edit_attached_image: true): the photo attached to this message if there is one, else the newest photo the user sent earlier (e.g. a \"try again now\" follow-up after an error). The provider is picked automatically from configured keys (google preferred, then openai, then xai); editing requires google (Nano Banana 2). The result is delivered to the user's Telegram chat immediately; describe it briefly in your reply. Size/quality are optional.",
     inputSchema: z.object({
       prompt: z.string().describe("Detailed description of the image: subject, style, composition, lighting. When edit_attached_image is true, describe the EDITS (restyle, add/remove objects), not the scene."),
       size: z.string().optional().describe("Dimensions like '1024x1024' or '1536x1024'. Default 1024x1024."),
@@ -111,13 +120,16 @@ export function buildAssistantMediaTools(turnImage?: TurnImage): Record<string, 
             "No image key configured. Tell the user: add a Google/OpenAI/xAI key in the desktop app's Settings → Models, or use an engine's official MCP server. Keep it short.",
         };
       }
-      // EDIT path: the attached photo rides as the reference image. Google
-      // only (Nano Banana 2 is natively multimodal INPUT); refuse explicitly
-      // rather than silently dropping the edit intent.
+      // EDIT path: the attached photo rides as the reference image — with a
+      // fallback to the most recent photo in history (getTurnImage resolves
+      // both; see the TurnImage doc above). Google only (Nano Banana 2 is
+      // natively multimodal INPUT); refuse explicitly rather than silently
+      // dropping the edit intent.
+      const turnImage = edit_attached_image ? await getTurnImage?.() : undefined;
       const referenceImage = edit_attached_image ? turnImage?.base64 : undefined;
       if (edit_attached_image) {
         if (!turnImage) {
-          return { error: "No photo attached to this message. Ask the user to attach the image to edit, then call again." };
+          return { error: "No photo available - neither on this message nor earlier in the conversation. Ask the user to attach the image to edit, then call again." };
         }
         if (p.provider !== "google") {
           return { error: "Image editing is google-only (Nano Banana 2). Ask the user to add a Google key in the desktop app's Settings → Models." };
@@ -149,7 +161,7 @@ export function buildAssistantMediaTools(turnImage?: TurnImage): Record<string, 
 
   const generateVideo = tool({
     description:
-      "Generate a short video from a text prompt (4-8s) with Google Veo 3.1 - or ANIMATE the photo attached to this message (animate_attached_image: true; Veo uses it as the opening frame and the prompt describes the motion). Uses the configured Google key; the video is delivered to the chat when ready; generation takes 1-5 minutes. If the user wants a different engine (Kling, Seedance…), tell them to install that vendor's MCP server in the desktop app's Settings → MCP.",
+      "Generate a short video from a text prompt (4-8s) with Google Veo 3.1 - or ANIMATE the most recent photo in the conversation (animate_attached_image: true; the photo attached to this message if there is one, else the newest photo the user sent earlier). Veo uses it as the opening frame and the prompt describes the motion. Uses the configured Google key; the video is delivered to the chat when ready; generation takes 1-5 minutes. If the user wants a different engine (Kling, Seedance…), tell them to install that vendor's MCP server in the desktop app's Settings → MCP.",
     inputSchema: z.object({
       prompt: z.string().describe("Scene description: subject, motion, camera work, mood. When animate_attached_image is true, describe the MOTION, not the scene."),
         duration: z.number().min(4).max(8).optional().describe("Duration in seconds (4-8 only — the provider rejects anything else). Default 8."),     aspect_ratio: z.string().optional().describe("Aspect ratio like '16:9' or '9:16'. Default 16:9."),
@@ -162,10 +174,12 @@ export function buildAssistantMediaTools(turnImage?: TurnImage): Record<string, 
             error: "No Google API key configured. Tell the user: add a Google key in the desktop app's Settings → Models, or use another engine's official MCP server. Keep it short.",
           };
         }
-        // ANIMATE path: the attached photo rides as instances[0].image.
+        // ANIMATE path: the attached photo rides as instances[0].image —
+        // with the same history fallback as the image-edit path.
+        const turnImage = animate_attached_image ? await getTurnImage?.() : undefined;
         const referenceImage = animate_attached_image ? turnImage?.base64 : undefined;
         if (animate_attached_image && !turnImage) {
-          return { error: "No photo attached to this message. Ask the user to attach the image to animate, then call again." };
+          return { error: "No photo available - neither on this message nor earlier in the conversation. Ask the user to attach the image to animate, then call again." };
         }
         try {
           const gen = (await import("@/modules/ai/lib/media/google-video")).generateGoogleVideo;

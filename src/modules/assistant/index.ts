@@ -33,7 +33,9 @@ import { getModel, type ModelId } from "@/modules/ai/config";
 import { buildLanguageModel } from "@/modules/ai/lib/agent";
 import {
   downscalePhotoJpeg,
+  latestPhotoSourcePath,
   prunePhotoScratch,
+  readPhotoBytesAsBase64,
   rehydratePhotoPayloads,
   stripPhotoPayloads,
 } from "./photos";
@@ -543,10 +545,32 @@ export async function runAssistantTurn(
     // The photo attached to THIS turn is the editing/animation source headless:
     // no meaningful paths exist in the assistant scratch dir, so the just-sent
     // photo rides as the reference image when the model asks to edit/animate it.
-    const turnImage = opts?.imageBase64
+    // FOLLOW-UP FALLBACK (2026-11-02): with no photo on THIS turn, fall back
+    // to the most recent photo in history — its bytes are persisted in the
+    // assistant scratch dir (photos.ts) and the sourcePath rides the history
+    // file part. Fixes the flow where the user sends a photo, the edit fails
+    // (expired key), and the "try now" follow-up had NO image reference and
+    // asked for a re-send — impossible when the photo was taken in-app.
+    const turnImageNow = opts?.imageBase64
       ? { base64: opts.imageBase64, mimeType: opts.imageMime }
       : undefined;
-    const assistantMedia = mediaTools.buildAssistantMediaTools(turnImage);
+    const getTurnImage = async (): Promise<
+      { base64: string; mimeType?: string } | undefined
+    > => {
+      if (turnImageNow) return turnImageNow;
+      // No attachment this turn: newest photo in history, read back from
+      // scratch. The history read is cheap (paths only, no bytes) and only
+      // runs when the model actually calls an edit/animate tool.
+      const path = latestPhotoSourcePath(await loadHistory(sessionId));
+      if (!path) return undefined;
+      try {
+        const b64 = await readPhotoBytesAsBase64(path);
+        return { base64: b64, mimeType: "image/jpeg" };
+      } catch {
+        return undefined; // pruned file / disk error: degrade like rehydrate
+      }
+    };
+    const assistantMedia = mediaTools.buildAssistantMediaTools(getTurnImage);
     if (allowed.has("generate_image"))
       tools["generate_image"] = assistantMedia["generate_image"];
     if (allowed.has("generate_video"))

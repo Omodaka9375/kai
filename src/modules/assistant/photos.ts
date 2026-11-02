@@ -188,6 +188,35 @@ export async function rehydratePhotoPayloads(
   });
 }
 
+/**
+ * The scratch-dir path of the MOST RECENT photo in history (user or
+ * assistant turns — generate_image deliveries record sourcePath too when
+ * the provider returns bytes). Returns null when no photo part exists.
+ *
+ * This is the EDIT-FOLLOW-UP SEAM (2026-11-02): the user sends a photo, the
+ * model tries to edit it, the turn fails (e.g. expired key), the user fixes
+ * the key and says "try now" — with NO photo on the new turn. The photo's
+ * bytes still live in scratch (photo-<ts>.jpg) and history carries the
+ * sourcePath; the media tools use this helper + readPhotoBytesAsBase64 to
+ * fall back to that photo instead of telling the user to re-attach
+ * something they may only have as a Telegram cache entry.
+ */
+export function latestPhotoSourcePath(
+  messages: UIMessage[],
+): string | null {
+  for (let mi = messages.length - 1; mi >= 0; mi--) {
+    const parts = messages[mi]!.parts as unknown as Array<
+      Record<string, unknown>
+    >;
+    for (let pi = parts.length - 1; pi >= 0; pi--) {
+      const p = parts[pi]!;
+      if (p.type === "file" && typeof p.sourcePath === "string" && p.sourcePath)
+        return p.sourcePath;
+    }
+  }
+  return null;
+}
+
 /** Delete all but the newest `keep` scratch photos. Best-effort: a prune
  *  failure just leaves disk usage as-is; a rehydrate miss on a vanished
  *  file degrades to "image omitted from context", never an error. */

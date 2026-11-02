@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { UIMessage } from "ai";
 import {
   computePhotoDims,
+  latestPhotoSourcePath,
   PHOTO_CONTEXT_WINDOW,
   rehydratePhotoPayloads,
   stripPhotoPayloads,
@@ -121,5 +122,51 @@ describe("rehydratePhotoPayloads", () => {
     const msgs = [userMsg("t", [{ type: "text", text: "hello" }])];
     const out = await rehydratePhotoPayloads(msgs, 4, vi.fn());
     expect(out).toBe(msgs);
+  });
+});
+
+describe("latestPhotoSourcePath (the edit-follow-up seam)", () => {
+  // 2026-11-02 user report: photo sent → edit attempt → "key expired, get a
+  // new one" → user adds the key → "try now" — and the model asked for the
+  // photo again because the media tools only ever looked at the CURRENT
+  // turn's attachment. The bytes are persisted in scratch and the history
+  // part carries the path; latestPhotoSourcePath finds the newest one so the
+  // "try now" turn can still edit it.
+  it("returns the sourcePath of the newest photo part in history", () => {
+    const history = [
+      userMsg("t1", [
+        { type: "text", text: "look at this" },
+        { type: "file", mediaType: "image/jpeg", data: "", sourcePath: "/p/photo-1.jpg" },
+      ]),
+      userMsg("t2", [{ type: "text", text: "now edit it" }]),
+    ];
+    expect(latestPhotoSourcePath(history)).toBe("/p/photo-1.jpg");
+  });
+
+  it("scans NEWEST-FIRST: the last photo in the last message wins", () => {
+    const history = [
+      userMsg("t1", [
+        { type: "file", mediaType: "image/jpeg", data: "", sourcePath: "/p/photo-old.jpg" },
+      ]),
+      userMsg("t2", [
+        { type: "file", mediaType: "image/png", data: "", sourcePath: "/p/photo-new.png" },
+      ]),
+    ];
+    expect(latestPhotoSourcePath(history)).toBe("/p/photo-new.png");
+  });
+
+  it("null when history has no photo parts (model asks to attach)", () => {
+    expect(latestPhotoSourcePath([userMsg("t", [{ type: "text", text: "hi" }])])).toBeNull();
+    expect(latestPhotoSourcePath([])).toBeNull();
+  });
+
+  it("ignores file parts without a sourcePath (non-photo documents)", () => {
+    const history = [
+      userMsg("t1", [
+        { type: "file", mediaType: "application/pdf", data: "" },
+        { type: "file", mediaType: "image/jpeg", data: "", sourcePath: "/p/only.jpg" },
+      ]),
+    ];
+    expect(latestPhotoSourcePath(history)).toBe("/p/only.jpg");
   });
 });

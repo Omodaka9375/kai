@@ -371,3 +371,55 @@ describe("resolveAssistantEndpoint (assistant endpoint isolation)", () => {
     expect(r.resolvedModelId).toBe("gpt-5.4-mini");
   });
 });
+
+const editFollowupSources = await import("node:fs").then((fs) => ({
+  idx: fs.readFileSync(new URL("./index.ts", import.meta.url), "utf8"),
+  media: fs.readFileSync(new URL("./media.ts", import.meta.url), "utf8"),
+}));
+
+describe("edit-follow-up: the media tools fall back to the newest photo in history (2026-11-02)", () => {
+  // User report: sent a photo, asked the assistant to edit it; the reply said
+  // the Google key was expired and asked for a new one; after adding the key
+  // the user said "try now" - and the assistant asked for the photo AGAIN
+  // because the edit tool only ever looked at the CURRENT turn's attachment.
+  // The bytes are persisted in scratch (photo-<ts>.jpg) with sourcePath on the
+  // history part; the tools must resolve the turn image LAZILY with a history
+  // fallback so the "try now" turn can still edit the photo.
+  const idx = editFollowupSources.idx;
+  const media = editFollowupSources.media;
+
+  it("the media tools receive a LAZY resolver, not a fixed turn image", () => {
+    // media.ts signature: buildAssistantMediaTools(getTurnImage?: () => Promise<TurnImage | undefined>)
+    expect(media).toMatch(
+      /buildAssistantMediaTools\(\s*getTurnImage\?: \(\) => Promise<TurnImage \| undefined>,?\s*\)/,
+    );
+    // The edit/animate paths await the resolver at CALL time (not build time)
+    // so the fallback runs only when the model actually edits/animates.
+    expect(media).toMatch(
+      /edit_attached_image \? await getTurnImage\?\.\(\) : undefined/,
+    );
+    expect(media).toMatch(
+      /animate_attached_image \? await getTurnImage\?\.\(\) : undefined/,
+    );
+    // The no-photo error names BOTH sources - the model asks for a re-attach
+    // only when there genuinely is no photo anywhere in the conversation.
+    expect(media).toContain(
+      "No photo available - neither on this message nor earlier in the conversation.",
+    );
+  });
+
+  it("index.ts wires the resolver: current turn first, then history fallback", () => {
+    // The lazy resolver exists and prefers THIS turn's attachment...
+    expect(idx).toContain("const getTurnImage = async (): Promise<");
+    expect(idx).toContain("if (turnImageNow) return turnImageNow;");
+    // ...falling back to the newest history photo read back from scratch.
+    expect(idx).toContain("latestPhotoSourcePath(await loadHistory(sessionId))");
+    expect(idx).toContain("readPhotoBytesAsBase64(path)");
+    // A pruned/missing file degrades to undefined (same contract as
+    // rehydratePhotoPayloads) - never a thrown error mid-tool-call.
+    expect(idx).toContain("return undefined; // pruned file / disk error: degrade like rehydrate");
+    // buildAssistantMediaTools receives the RESOLVER (lazy), not a value.
+    expect(idx).toContain("mediaTools.buildAssistantMediaTools(getTurnImage)");
+    expect(idx).not.toContain("buildAssistantMediaTools(turnImage)");
+  });
+});

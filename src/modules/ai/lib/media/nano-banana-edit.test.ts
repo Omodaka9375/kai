@@ -57,17 +57,29 @@ describe("Telegram assistant edit/animate wiring", () => {
     // Schema flags (model-visible surface).
     expect(tgMediaSrc).toContain("edit_attached_image");
     expect(tgMediaSrc).toContain("animate_attached_image");
-    // The turn's photo rides as referenceImage (google-gated, explicit refusal).
-    expect(tgMediaSrc).toMatch(/referenceImage = edit_attached_image \? turnImage\?.base64/);
-    expect(tgMediaSrc).toMatch(/referenceImage = animate_attached_image \? turnImage\?.base64/);
+    // 2026-11-02: the edit/animate source is resolved LAZILY at call time -
+    // the current turn's photo first, then the newest photo in history
+    // (photos.ts edit-follow-up seam). The old eager turnImage lost the
+    // photo on follow-up turns ("try now" after an expired-key error) and
+    // asked the user to re-send it.
+    expect(tgMediaSrc).toMatch(/edit_attached_image \? await getTurnImage\?\.\(\)/);
+    expect(tgMediaSrc).toMatch(/animate_attached_image \? await getTurnImage\?\.\(\)/);
+    expect(tgMediaSrc).toMatch(/referenceImage = edit_attached_image \? turnImage\?\.base64/);
+    expect(tgMediaSrc).toMatch(/referenceImage = animate_attached_image \? turnImage\?\.base64/);
     // Both thread through to the underlying gens.
     expect(tgMediaSrc).toContain("gen(p.key, { prompt, size, referenceImage })");
     expect(tgMediaSrc).toContain("referenceImage,");
   });
 
-  it("runAssistantTurn threads the turn's attached image into both tools", () => {
-    expect(tgIndexSrc).toContain("buildAssistantMediaTools(turnImage)");
-    expect(tgIndexSrc).toMatch(/turnImage = opts\?.imageBase64/);
+  it("runAssistantTurn threads a LAZY image resolver into both tools", () => {
+    // 2026-11-02: the resolver prefers the current turn's attachment and
+    // falls back to the newest photo in history (read back from scratch via
+    // sourcePath - latestPhotoSourcePath in photos.ts), so a "try now"
+    // follow-up after an expired-key error still finds the photo.
+    expect(tgIndexSrc).toContain("buildAssistantMediaTools(getTurnImage)");
+    expect(tgIndexSrc).toMatch(/turnImageNow = opts\?\.imageBase64/);
+    expect(tgIndexSrc).toContain("if (turnImageNow) return turnImageNow;");
+    expect(tgIndexSrc).toContain("latestPhotoSourcePath(await loadHistory(sessionId))");
     // Built once and both keys read from it (allowlist-gated), rather than
     // building twice. The photo must reach both the image and video tool.
     expect(tgIndexSrc).toContain(`assistantMedia["generate_image"]`);
