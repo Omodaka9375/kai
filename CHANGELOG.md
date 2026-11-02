@@ -4,6 +4,30 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [2.1.5]
+
+The agent-learnable skills release, plus a hardening pass from a full review of the ten commits since 2.1.4.
+
+### Added
+
+- Skills: snippets grew into an agent-learnable skills system. A skill is a folder with an Anthropic-compatible SKILL.md, stored globally in `~/.kai/skills` (every project) or per-project in `.kai/skills` (committable). `#handle` works in any project exactly as before; agents get a pull-only `list_skills` (metadata only — a skill library never inflates context, no matter its size) and can create/update skills only when you explicitly ask — never offered proactively. Your existing snippets migrated automatically.
+- Telegram groups: allow-listed group chats can now talk to your assistant. Binding is owner-only (`/bindgroup` inside the group after arming it in Settings; also disable the bot's privacy mode in @BotFather). One shared conversation per group, replies attributed by sender, members restricted to a read-only tool subset with no reach into your reminders, settings, or MCP servers.
+- Group hygiene from review: sender names are sanitized so transcript attribution can't be forged, and machine pings (reminders, watches) send as plain text so crafted links can't render clickable from the bot.
+
+### Fixed
+
+- Project switching: switching between two projects with actively streaming agents no longer lags — activation moved from a prop to a context, so a switch no longer reconciles either workspace tree. Follow-up fixes: shortcut routing now resolves at keypress (Cmd+T could spawn tabs in a hidden project), background terminals no longer ghost-paint through the visible workspace, and menus/link interception work in projects that were added while in the background.
+- Sessions: never-visited open projects no longer report "no active chat session" in group chats (sessions resolve lazily from disk), and a guard now refuses to overwrite a populated conversation with an empty one.
+- Terminal: the green activity dot no longer lights on freshly opened idle tabs — it now tracks real command execution (OSC 133 C), including a proper execution marker for PowerShell.
+- Voice: a transcript finishing after a project switch lands in the chat you were dictating in, never in the newly visible project.
+
+### Security
+
+- Skill writes now pass the same security layer as write_file, and refuse symlinked skill folders that resolve outside the skills directory.
+- Telegram group members can no longer reach reminder tools (which could push member-written Markdown text into your private chat) or read your custom instructions via settings; the group prompt embeds neither your instructions nor your MCP configuration.
+
+---
+
 ## [2.1.4]
 
 - Rail: projects can be reordered by dragging their tiles — the manual order persists across restarts.
