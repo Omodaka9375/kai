@@ -83,7 +83,7 @@ export function RadioMarquee() {
     const s = player.status;
     if (s.state === "stopped") return "SomaFM";
     const station = s.station;
-    if (!station) return "SomaFM";
+    if (!station) return "Pick a station";
     if (s.state === "connecting") return `${station.name} · connecting…`;
     if (s.state === "error") return `${station.name} · ${s.message}`;
     const artist = track?.artist?.trim();
