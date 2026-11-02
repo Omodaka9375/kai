@@ -213,3 +213,50 @@ describe("switch-cost contract: a switch re-renders one workspace (2026-11-02)",
     expect(statusBar).not.toContain("useProjectsMenu");
   });
 });
+
+describe("manual rail order: drag-to-sort projects (2026-11-02)", () => {
+  // User-facing feature: drag a project tile onto another to reorder the
+  // sidebar. The `projects` array IS the rail order, and the persistence
+  // effect saves roots in array order — so a splice-based move covers live
+  // preview, persistence, and restore with no extra storage.
+  const shell = readFileSync(new URL("./AppShell.tsx", import.meta.url), "utf8");
+  const menu = readFileSync(new URL("./projectsMenu.ts", import.meta.url), "utf8");
+  const rail = readFileSync(new URL("../modules/workspace/ProjectRail.tsx", import.meta.url), "utf8");
+
+  it("the menu exposes moveProject and AppShell splices the projects array", () => {
+    expect(menu).toContain("moveProject: (dragId: string, overId: string) => void;");
+    expect(shell).toMatch(/const moveProject = useCallback\(\(dragId: string, overId: string\) => \{/);
+    // Splice move: remove at `from`, insert at `to` — the array order is the
+    // rail order AND the persisted roots order, so nothing else is needed.
+    expect(shell).toContain("next.splice(from, 1);");
+    expect(shell).toContain("next.splice(to, 0, moved);");
+    // No-ops are safe: dragging onto itself or an unknown id changes nothing.
+    expect(shell).toContain("if (dragId === overId) return;");
+  });
+
+  it("the rail tiles are draggable and route the drop through the menu action", () => {
+    expect(rail).toContain("draggable");
+    expect(rail).toMatch(/onDrop=\{\(e\) => \{/);
+    expect(rail).toContain("menu?.moveProject(dragId, project.id)");
+    // FireFox requires drag data for a drag to start at all.
+    expect(rail).toContain('e.dataTransfer.setData("text/plain", project.id)');
+    // The drop target must preventDefault or the browser navigates.
+    expect(rail).toMatch(/onDragOver=\{\(e\) => \{[\s\S]*?e\.preventDefault\(\)/);
+    // Visual affordances: a drop underline on the hovered tile and a tint on
+    // the dragged tile.
+    expect(rail).toContain("bg-primary/80");
+    expect(rail).toContain("bg-primary/10");
+    // State resets on both drop and drag end — no stale indicators.
+    expect(rail).toMatch(/onDragEnd=\{\(\) => \{[\s\S]*?setDragId\(null\)/);
+  });
+
+  it("drag handlers stay OUTSIDE the switch button — dragging never triggers a switch", () => {
+    // The draggable wrapper is the tile's parent div; the button inside
+    // keeps its plain onClick. A drag would ALSO fire a click after drop in
+    // some embedders if handlers were on the button itself.
+    const buttonIdx = rail.indexOf("aria-label={`Switch to ${project.name}`}");
+    const dragStartIdx = rail.indexOf("onDragStart=");
+    expect(dragStartIdx).toBeGreaterThan(-1);
+    expect(buttonIdx).toBeGreaterThan(dragStartIdx);
+  });
+});

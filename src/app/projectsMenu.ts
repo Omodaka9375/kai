@@ -13,6 +13,11 @@ export type ProjectsMenu = {
   newProject: () => void | Promise<void>;
   closeProject: (id: string) => void;
   switchProject: (id: string) => void;
+  /** MANUAL RAIL ORDER (2026-11-02): move the dragged project to the
+   *  hovered project's position in the rail. The `projects` array IS the
+   *  display order and persists as the roots order in kai-open-projects.json,
+   *  so a reorder survives restarts with no extra storage. */
+  moveProject: (dragId: string, overId: string) => void;
   changeEnvironment: (id: string, env: import("@/modules/workspace").WorkspaceEnv, home: string | null) => void;
 };
 

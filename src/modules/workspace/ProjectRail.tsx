@@ -20,7 +20,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
 import { useFileMenuTrigger } from "@/app/fileMenu";
-import { useProjectRailItems } from "@/app/projectsMenu";
+import { useProjectsMenu, useProjectRailItems } from "@/app/projectsMenu";
 import { SIDEBAR_RAIL_HEIGHT } from "@/modules/sidebar";
 import { useProjectRunningTerminals } from "@/modules/terminal/lib/terminalActivity";
 
@@ -121,6 +121,12 @@ export function ProjectRail({
   // workspaces (previously the items rode the menu context every
   // workspace consumed, so every status bump re-rendered everything).
   const projects = useProjectRailItems();
+  // MANUAL ORDER (2026-11-02): drag a project tile onto another to swap
+  // its position. The move goes through the menu action (AppShell), so
+  // the reorder persists with the open-projects roots order.
+  const menu = useProjectsMenu();
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [overId, setOverId] = useState<string | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   return (
     <TooltipProvider
@@ -139,7 +145,44 @@ export function ProjectRail({
         </div>
         <div className="relative flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto p-1.5 [scrollbar-width:thin] [-ms-overflow-style:none] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border/60">
           {projects.map((project) => (
-            <div key={project.id} className="group relative w-full">
+            <div
+              key={project.id}
+              className="group relative w-full"
+              draggable
+              onDragStart={(e) => {
+                setDragId(project.id);
+                // FireFox requires data on the drag payload to start a
+                // drag at all; the id doubles as the text fallback.
+                e.dataTransfer.effectAllowed = "move";
+                e.dataTransfer.setData("text/plain", project.id);
+              }}
+              onDragOver={(e) => {
+                if (!dragId || dragId === project.id) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                setOverId(project.id);
+              }}
+              onDragLeave={() => setOverId((id) => (id === project.id ? null : id))}
+              onDrop={(e) => {
+                if (!dragId || dragId === project.id) return;
+                e.preventDefault();
+                menu?.moveProject(dragId, project.id);
+                setDragId(null);
+                setOverId(null);
+              }}
+              onDragEnd={() => {
+                setDragId(null);
+                setOverId(null);
+              }}
+            >
+              {/* Drop indicator: a bright underline on the hovered tile —
+                  the visual "it will land here" affordance. */}
+              {overId === project.id && dragId !== null && dragId !== project.id ? (
+                <span className="pointer-events-none absolute -bottom-0.5 left-1 right-1 h-0.5 rounded-full bg-primary/80" />
+              ) : null}
+              {dragId === project.id ? (
+                <span className="pointer-events-none absolute inset-0 rounded-lg bg-primary/10" />
+              ) : null}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button

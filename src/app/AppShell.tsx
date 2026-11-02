@@ -265,6 +265,21 @@ export default function App() {
     // rail re-render) stays interruptible instead of blocking the frame.
     startTransition(() => setActiveId(id));
   }, []);
+  // MANUAL RAIL ORDER: drag-to-reorder. The projects array IS the rail
+  // order, and the persistence effect below saves roots in array order —
+  // so this single splice covers live preview, persistence, and restore.
+  const moveProject = useCallback((dragId: string, overId: string) => {
+    if (dragId === overId) return;
+    setProjects((current) => {
+      const from = current.findIndex((p) => p.id === dragId);
+      const to = current.findIndex((p) => p.id === overId);
+      if (from < 0 || to < 0 || from === to) return current;
+      const next = current.slice();
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+  }, []);
   const itemsRef = useRef(items);
   itemsRef.current = items;
   const menuActions = useMemo(
@@ -275,8 +290,9 @@ export default function App() {
       closeProject,
       switchProject,
       changeEnvironment,
+      moveProject,
     }),
-    [addProject, newProject, closeProject, switchProject, changeEnvironment],
+    [addProject, newProject, closeProject, switchProject, changeEnvironment, moveProject],
   );
 
   // Entering a project consumes its unseen-news flag: whatever fired while
