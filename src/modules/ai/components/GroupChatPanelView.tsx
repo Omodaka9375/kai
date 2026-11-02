@@ -27,21 +27,25 @@ import {
   Folder01Icon,
   LeftToRightBlockQuoteIcon,
   Link01Icon,
+  Mic01Icon,
   MinusSignIcon,
   PencilEdit01Icon,
   SentIcon,
   StopIcon,
   Tick02Icon,
   UserMultiple02Icon,
+  UserWarning01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { MessageResponse } from "@/components/ai-elements/message";
+import { Spinner } from "@/components/ui/spinner";
 import {
   Conversation,
   ConversationContent,
   ConversationScrollButton,
 } from "@/components/ai-elements/conversation";
 import type { StickToBottomContext } from "use-stick-to-bottom";
+import { useWhisperRecording } from "../hooks/useWhisperRecording";
 import { getProjectAgentStatus } from "../store/projectStatus";
 import { useAgentsStore } from "../store/agentsStore";
 import { BUILTIN_AGENTS } from "../lib/agents";
@@ -1220,6 +1224,21 @@ function Composer({ group }: { group: GroupChat }) {
     }
   }, [text, group, sending, pendingQuote, mentionedTarget]);
 
+  // VOICE INPUT (2026-11-02, STT only): the same mic the main AI input bar
+  // has — record, transcribe, land the text in THIS composer's draft. No
+  // TTS wiring here. Deliberately NOT bound to the global
+  // Kai:ai-voice-toggle (Cmd/Ctrl+M) event: the main AiInputBar (still
+  // mounted while the group owns the slot) also listens for it, and one
+  // shortcut press must never start TWO recordings into two fields — the
+  // group mic is click-only. The hook reads the shared STT prefs/keys
+  // (Settings → Voice), so it routes exactly like the main chat's mic.
+  const voice = useWhisperRecording({
+    onResult: (transcript: string) => {
+      setText((t) => (t ? `${t} ${transcript}` : transcript));
+      requestAnimationFrame(() => textRef.current?.focus());
+    },
+  });
+
   if (group.endedAt !== null) {
     return (
       <div className="shrink-0 border-t border-border/60 px-3 py-2 text-center text-[11px] text-muted-foreground">
@@ -1387,6 +1406,49 @@ function Composer({ group }: { group: GroupChat }) {
             "max-h-24 overflow-y-auto",
           )}
         />
+        {voice.supported ? (
+          <button
+            type="button"
+            title={
+              voice.recording
+                ? "Stop & transcribe"
+                : voice.transcribing
+                  ? "Transcribing."
+                  : voice.error
+                    ? voice.error
+                    : "Voice input"
+            }
+            onClick={() => {
+              if (voice.recording) {
+                voice.stop();
+              } else {
+                if (voice.error) voice.clearError();
+                void voice.start();
+              }
+            }}
+            disabled={voice.transcribing}
+            className={cn(
+              "shrink-0 size-6 flex items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50",
+              voice.recording &&
+                "bg-destructive/15 text-destructive hover:bg-destructive/20 hover:text-destructive animate-pulse",
+              voice.error && "text-amber-600 dark:text-amber-400",
+            )}
+          >
+            {voice.recording ? (
+              <span className="size-1.5 rounded-full bg-destructive" />
+            ) : voice.transcribing ? (
+              <Spinner className="size-3" />
+            ) : voice.error ? (
+              <HugeiconsIcon
+                icon={UserWarning01Icon}
+                size={14}
+                strokeWidth={1.75}
+              />
+            ) : (
+              <HugeiconsIcon icon={Mic01Icon} size={14} strokeWidth={1.75} />
+            )}
+          </button>
+        ) : null}
         <Button
           type="button"
           size="icon"

@@ -530,3 +530,53 @@ describe("the pill survives a project round-trip (2026-11-01)", () => {
     );
   });
 });
+
+describe("group composer has the main chat's STT mic (2026-11-02)", () => {
+  // "I need access to Voice input in group chat like in the main ai input
+  //  chat. I don't need TTS just my STT." The composer reuses the SAME
+  // useWhisperRecording hook (shared Settings → Voice routing: browser /
+  // OpenAI / AssemblyAI / local whisper.cpp) and mirrors AiInputBar's mic
+  // button states. STT only — no TTS wiring.
+  const composer = (() => {
+    const start = panel.indexOf("function Composer");
+    const end = panel.indexOf("function GroupListTray");
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    return panel.slice(start, end);
+  })();
+
+  it("uses the same recording hook with a draft-appending onResult", () => {
+    expect(panel).toMatch(
+      /import \{ useWhisperRecording \} from "\.\.\/hooks\/useWhisperRecording";/,
+    );
+    expect(composer).toContain("const voice = useWhisperRecording({");
+    expect(composer).toMatch(
+      /setText\(\(t\) => \(t \? `\$\{t\} \$\{transcript\}` : transcript\)\);/,
+    );
+  });
+
+  it("the mic button mirrors AiInputBar's states", () => {
+    // The title is a ternary (recording/transcribing/error/default), same
+    // shape as AiInputBar's mic.
+    expect(composer).toContain("? \"Stop & transcribe\"");
+    expect(composer).toMatch(/voice\.recording &&\s*\n\s*"bg-destructive\/15/);
+    expect(composer).toContain("<Spinner className=\"size-3\" />");
+    expect(composer).toContain("icon={UserWarning01Icon}");
+    expect(composer).toContain("icon={Mic01Icon}");
+    expect(composer).toContain("voice.transcribing}");
+    expect(composer).toContain("voice.supported ? (");
+  });
+
+  it("is click-only — the global Ctrl+M shortcut is NOT wired here", () => {
+    // The main AiInputBar (still mounted while the group owns the slot)
+    // already owns Kai:ai-voice-toggle; a second listener would start two
+    // recordings on one shortcut press. The group mic must stay click-only:
+    // no event LISTENER for the toggle (prose may still name the event).
+    expect(composer).not.toMatch(
+      /addEventListener\("Kai:ai-voice-toggle"/,
+    );
+    // The comment documenting WHY it is click-only (prose wraps; pin the
+    // tail phrase on its own line).
+    expect(composer).toContain("group mic is click-only");
+  });
+});
