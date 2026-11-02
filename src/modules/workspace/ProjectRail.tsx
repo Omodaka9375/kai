@@ -193,7 +193,7 @@ export function ProjectRail({
                   aria-label={`Close ${project.name}`}
                   title={`Close ${project.name}`}
                   onClick={() => onClose(project.id)}
-                  className="absolute -right-0.5 -top-0.5 hidden size-3.5 items-center justify-center rounded-full border border-border/70 bg-card text-muted-foreground hover:text-destructive group-hover:flex group-focus-within:flex"
+                  className="absolute -left-0.5 -top-0.5 hidden size-3.5 items-center justify-center rounded-full border border-border/70 bg-card text-muted-foreground hover:text-destructive group-hover:flex group-focus-within:flex"
                 >
                   <HugeiconsIcon icon={Cancel01Icon} size={9} strokeWidth={2} />
                 </button>
