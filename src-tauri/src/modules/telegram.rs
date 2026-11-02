@@ -518,14 +518,50 @@ struct TgUser {
 /// Display name for event attribution: first name, falling back to the
 /// @username, then "Someone" (never empty so the TS side can always
 /// attribute).
+///
+/// SANITIZED (2026-11-03 review hardening): the name is interpolated into
+/// the model transcript as "[Name]: text" - a display name containing
+/// brackets/newlines could forge attribution ("System:", "[Owner", or a
+/// line break that starts a plausible system line). Strip control chars
+/// and bracket-like characters, collapse whitespace, cap at 32 chars.
 fn tg_display_name(from: &Option<TgUser>) -> String {
-    match from {
+    let raw = match from {
         Some(u) => u
             .first_name
             .clone()
             .or_else(|| u.username.clone())
             .unwrap_or_else(|| "Someone".into()),
         None => "Someone".into(),
+    };
+    sanitize_sender_name(&raw)
+}
+
+/// Attribution-safe sender name: no control characters, no brackets (the
+/// attribution wrapper uses them), single spaces, 32-char cap. Empty after
+/// stripping falls back to "Someone".
+fn sanitize_sender_name(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    for ch in raw.chars() {
+        if ch.is_control() {
+            continue; // newlines/tabs could start a new "system" line
+        }
+        if matches!(
+            ch,
+            '[' | ']' | '{' | '}' | '<' | '>' | '"' | '\'' | '`' | '(' | ')' | ':' | '@'
+        ) {
+            continue; // bracket-ish: the [Name]: wrapper must stay unforgeable
+        }
+        out.push(ch);
+    }
+    let collapsed: String = out
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let trimmed = collapsed.trim();
+    if trimmed.is_empty() {
+        "Someone".into()
+    } else {
+        trimmed.chars().take(32).collect()
     }
 }
 
@@ -1012,9 +1048,24 @@ pub async fn telegram_set_chat_action(
 /// Send a text message (agent reply). Errors are surfaced to the caller which
 /// logs them in the session — the user sees the assistant went quiet and why.
 #[tauri::command]
-pub async fn telegram_send_message(token: String, chat_id: i64, text: String) -> Result<(), String> {
+pub async fn telegram_send_message(
+    token: String,
+    chat_id: i64,
+    text: String,
+    plain: Option<bool>,
+) -> Result<(), String> {
     // 4096 is Telegram's hard message cap; split long agent replies.
     for chunk in split_message(&text) {
+        // PLAIN MODE (2026-11-03 review hardening): machine-generated pings
+        // (reminder fires, watch notices) carry text that can include
+        // member-chosen or file-derived words; parsing those as Telegram
+        // Markdown let a well-formed [link](url) render CLICKABLE from the
+        // trusted bot. `plain` skips parse_mode entirely.
+        if plain.unwrap_or(false) {
+            let msg = serde_json::json!({ "chat_id": chat_id, "text": chunk });
+            post_json::<serde_json::Value>(&token, "sendMessage", &msg).await?;
+            continue;
+        }
         // Markdown first (nicer rendering). Agent replies often contain raw
         // backticks / half-written Markdown that Telegram's parser rejects
         // with HTTP 400 "can't parse entities" — fall back to plain text so

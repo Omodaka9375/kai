@@ -1087,9 +1087,13 @@ export async function telegramPing(text: string): Promise<void> {
   if (!prefs.enabled || prefs.ownerChatId == null) return;
   const token = await getTelegramToken();
   if (!token) return;
-  // Telegram Markdown: escape nothing (our text uses ` for labels —
-  // plain text is safest for machine-generated output).
-  await telegramNative.sendMessage(token, prefs.ownerChatId, text).catch(() => {});
+  // PLAIN TEXT (2026-11-03 review hardening): reminder/watch text can carry
+  // member-chosen or file-derived words; Markdown-parsing it let a
+  // well-formed [link](url) render clickable from the trusted bot in the
+  // owner's private chat. Machine pings are never formatted.
+  await telegramNative
+    .sendMessage(token, prefs.ownerChatId, text, true)
+    .catch(() => {});
 }
 
 export async function stopAssistantBridge(): Promise<void> {

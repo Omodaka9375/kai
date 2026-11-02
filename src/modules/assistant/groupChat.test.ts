@@ -155,3 +155,32 @@ describe("group-tier + session hygiene (2026-11-02 review, fixes 7-8)", () => {
     expect(body).toContain("sessionsCache = [entry, ...list].slice(0, MAX_SESSIONS);");
   });
 });
+
+
+describe("attribution + ping hardening (2026-11-03 review follow-up)", () => {
+  const rust = readFileSync(
+    new URL("../../../src-tauri/src/modules/telegram.rs", import.meta.url),
+    "utf8",
+  );
+
+  it("sender display names are sanitized before they reach the transcript", () => {
+    // A display name with brackets/newlines could forge the "[Name]: text"
+    // attribution wrapper ("System:", "[Owner", or a newline that starts a
+    // plausible system line). Strip control + bracket-ish chars, cap 32.
+    expect(rust).toContain("fn sanitize_sender_name(raw: &str) -> String {");
+    expect(rust).toContain("if ch.is_control() {");
+    expect(rust).toContain("trimmed.chars().take(32).collect()");
+    // tg_display_name routes through the sanitizer.
+    expect(rust).toContain("sanitize_sender_name(&raw)");
+  });
+
+  it("machine pings (reminders/watches) go out as PLAIN text, never Markdown", () => {
+    // telegram_send_message gained a plain flag; telegramPing uses it, so a
+    // well-formed [link](url) inside member-chosen reminder text can no
+    // longer render CLICKABLE from the trusted bot in the owner's DM.
+    expect(rust).toContain("plain: Option<bool>");
+    expect(rust).toContain("if plain.unwrap_or(false) {");
+    expect(index).toContain("sendMessage(token, prefs.ownerChatId, text, true)");
+    expect(index).toContain("sendMessage(token, prefs.ownerChatId, text, true)");
+  });
+});

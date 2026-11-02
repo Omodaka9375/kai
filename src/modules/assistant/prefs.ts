@@ -168,8 +168,8 @@ export const telegramNative = {
       "telegram_test",
       { token },
     ),
-  sendMessage: (token: string, chatId: number, text: string) =>
-    invoke<void>("telegram_send_message", { token, chatId, text }),
+  sendMessage: (token: string, chatId: number, text: string, plain?: boolean) =>
+    invoke<void>("telegram_send_message", { token, chatId, text, plain: plain ?? null }),
   /** Send a text message with inline-keyboard buttons (approval cards).
    *  buttons: [(label, callbackData)] - one row. */
   sendMessageWithButtons: (

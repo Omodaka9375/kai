@@ -324,9 +324,10 @@ describe("telegram IPC contract", () => {
       "telegram_download_voice",
       "telegram_download_file",
     ]);
-    // camelCase keys Tauri maps onto snake_case Rust params.
+    // camelCase keys Tauri maps onto snake_case Rust params. `plain` rides
+    // along (2026-11-03 hardening: machine pings skip Markdown parsing).
     const sendArgs = vi.mocked(invoke).mock.calls[4]![1] as Record<string, unknown>;
-    expect(sendArgs).toEqual({ token: "tok", chatId: 1, text: "hi" });
+    expect(sendArgs).toEqual({ token: "tok", chatId: 1, text: "hi", plain: null });
   });
 });
 
