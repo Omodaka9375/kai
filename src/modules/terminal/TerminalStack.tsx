@@ -10,8 +10,11 @@ type Props = {
   tabs: Tab[];
   activeId: number;
   /** DEPRECATED (2026-11-02): activation moved to WorkspaceActiveContext.
-   *  Kept for external callers; when true it forces visible (the split
-   *  pane passes it to keep the secondary terminal interactive). */
+   *  NO DEFAULT: a `= true` default made `projectVisible ?? workspaceActive`
+   *  dead code, so background workspaces kept inline visibility:visible +
+   *  pointerEvents:auto on their active panes - which OVERRODE the
+   *  AppShell wrapper's invisible/pointer-events-none (ghost paint + click
+   *  capture). Only the split-pane caller passes an explicit value. */
   projectVisible?: boolean;
   /** Register/unregister handle by leaf id (not tab id). */
   registerHandle: (leafId: number, handle: TerminalPaneHandle | null) => void;
@@ -32,7 +35,7 @@ type Bundle = {
 export function TerminalStack({
   tabs,
   activeId,
-  projectVisible = true,
+  projectVisible,
   registerHandle,
   onSearchReady,
   onCwd,

@@ -13,7 +13,11 @@ import type { Tab } from "@/modules/tabs";
  * moving it into `modules/shortcuts` would create a cross-module cycle.
  */
 export type AppShortcutDeps = {
-  isActive?: boolean;
+  /** Event-time activation getter (2026-11-02 review FIX 4): the memoized
+   *  workspace body never re-renders on a switch, so a boolean VALUE here
+   *  froze at mount time and shortcuts stayed routed to the pre-switch
+   *  workspace. Pass a ref-reading getter. */
+  isActive?: () => boolean;
   tabsRef: RefObject<Tab[]>;
   activeId: number;
   // Tabs
@@ -53,7 +57,10 @@ export function useAppShortcuts(deps: AppShortcutDeps): {
   const [newEditorOpen, setNewEditorOpen] = useState(false);
 
   const {
-    isActive = true,
+    // Default: active. (A boolean VALUE is no longer accepted - see the
+    // AppShortcutDeps.isActive doc; a mount-time boolean froze the shortcut
+    // routing across project switches.)
+    isActive = () => true,
     tabsRef,
     activeId,
     openNewTab,
@@ -178,7 +185,9 @@ export function useAppShortcuts(deps: AppShortcutDeps): {
     // when the editor has focus. Let those chords through to CM instead of
     // routing them to the header's SearchInline.
     isDisabled: (id, e) => {
-      if (!isActive) return true;
+      // Event-time read: whatever workspace is foreground AT KEYPRESS runs
+      // the shortcut - never a stale mount-time capture.
+      if (isActive && !isActive()) return true;
       if (id !== "search.focus" && id !== "search.replace") return false;
       const t = e.target as HTMLElement | null;
       return !!t?.closest?.(".cm-editor");

@@ -1436,6 +1436,7 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
   // external URLs go to the system browser.
   useEffect(() => {
     const handler = (e: MouseEvent) => {
+      if (!isActiveRef.current) return;
       const anchor = (e.target as HTMLElement)?.closest?.("a[href]");
       if (!anchor) return;
       const href = anchor.getAttribute("href");
@@ -1470,9 +1471,9 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
         );
       }
     };
-    if (!isActiveRef.current) return;
     document.addEventListener("click", handler, true);
     const onCustom = (e: Event) => {
+      if (!isActiveRef.current) return;
       const url = (e as CustomEvent<string>).detail;
       if (url) openPreviewTab(url);
     };
@@ -1511,9 +1512,10 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
 
   const { shortcutsOpen, setShortcutsOpen, newEditorOpen, setNewEditorOpen } =
     useAppShortcuts({
-      // Ref read at event time — the shortcuts hook must not subscribe the
-      // body to activation. (Lazy getters everywhere is the refactor rule.)
-      isActive: isActiveRef.current,
+      // Event-time getter (2026-11-02 review FIX 4): a VALUE here froze at
+      // body-render time; since the memoized body never re-renders on a
+      // switch, shortcuts stayed routed to the pre-switch workspace.
+      isActive: () => isActiveRef.current,
       tabsRef,
       activeId,
       openNewTab,

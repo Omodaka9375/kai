@@ -18,7 +18,7 @@ type Props = {
 export function PreviewStack({
   tabs,
   activeId,
-  projectVisible = true,
+  projectVisible,
   onUrlChange,
   registerHandle,
   onCloseTab,

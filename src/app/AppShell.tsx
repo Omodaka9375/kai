@@ -183,20 +183,30 @@ export default function App() {
     }
   }, [addProject]);
 
+  // FIX 2 (2026-11-02 review): activeId/projects are read at CALL time
+  // only - through refs, so changeEnvironment's identity is STABLE across
+  // switches. It rides menuActions -> ProjectsMenuContext, and an unstable
+  // identity re-rendered EVERY memoized workspace body on every switch
+  // (defeating the activation-context refactor: the body subscribes via
+  // useProjectsMenu()).
+  const activeIdRef = useRef(activeId);
+  activeIdRef.current = activeId;
+  const projectsRef = useRef(projects);
+  projectsRef.current = projects;
   const changeEnvironment = useCallback((id: string, env: WorkspaceEnv, home: string | null) => {
-    const source = projects.find((project) => project.id === id);
+    const source = projectsRef.current.find((project) => project.id === id);
     if (!source) return;
     const next = createProjectRuntime(home ?? source.root, env);
-    const existing = projects.find((project) => project.id === next.id && project.id !== id);
+    const existing = projectsRef.current.find((project) => project.id === next.id && project.id !== id);
     if (existing) {
       // The target workspace is already open: switch to it instead of
       // creating duplicate React keys and duplicate agent runtimes.
-      if (id === activeId) setActiveId(existing.id);
+      if (id === activeIdRef.current) setActiveId(existing.id);
       return;
     }
     setProjects((current) => current.map((project) => project.id === id ? next : project));
-    if (activeId === id) setActiveId(next.id);
-  }, [activeId, projects]);
+    if (activeIdRef.current === id) setActiveId(next.id);
+  }, []);
 
   const closeProject = useCallback((id: string) => {
     const project = projects.find((p) => p.id === id);

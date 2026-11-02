@@ -288,3 +288,44 @@ describe("manual rail order: drag-to-sort projects (2026-11-02)", () => {
     expect(buttonIdx).toBeGreaterThan(dragStartIdx);
   });
 });
+
+
+describe("activation follow-up hardening (2026-11-02 review, fixes 2-5)", () => {
+  const shell = readFileSync(new URL("./AppShell.tsx", import.meta.url), "utf8");
+  const terminalStack = readFileSync(
+    new URL("../modules/terminal/TerminalStack.tsx", import.meta.url),
+    "utf8",
+  );
+  const previewStack = readFileSync(
+    new URL("../modules/preview/PreviewStack.tsx", import.meta.url),
+    "utf8",
+  );
+  const shortcuts = readFileSync(new URL("./useAppShortcuts.ts", import.meta.url), "utf8");
+
+  it("menuActions is identity-stable across switches (changeEnvironment reads refs)", () => {
+    // FIX 2: an unstable changeEnvironment re-rendered EVERY memoized
+    // workspace body on every switch via the ProjectsMenuContext.
+    expect(shell).toMatch(/const changeEnvironment = useCallback\(\(id: string, env: WorkspaceEnv, home: string \| null\) => \{[\s\S]*?\}, \[\]\);/);
+    expect(shell).toContain("activeIdRef.current");
+    expect(shell).toContain("projectsRef.current");
+  });
+
+  it("stacks have NO projectVisible default (the ?? workspaceActive path must be live)", () => {
+    // FIX 3: `projectVisible = true` made `projectVisible ?? workspaceActive`
+    // dead code - background panes kept inline visibility:visible which
+    // OVERRODE the wrapper's invisible class (ghost paint + click capture).
+    expect(terminalStack).not.toContain("projectVisible = true,");
+    expect(previewStack).not.toContain("projectVisible = true,");
+    expect(terminalStack).toContain("const projectActive = projectVisible ?? workspaceActive;");
+    expect(previewStack).toContain("const projectActive = projectVisible ?? workspaceActive;");
+  });
+
+  it("shortcuts read activation at EVENT time (getter, never a mount-time value)", () => {
+    // FIX 4: a boolean frozen at body-render time; the memoized body never
+    // re-renders on a switch, so shortcuts stayed routed to the pre-switch
+    // workspace (Cmd+T spawned tabs in hidden projects).
+    expect(shortcuts).toContain("isActive?: () => boolean;");
+    expect(shortcuts).toContain("if (isActive && !isActive()) return true;");
+    expect(shortcuts).toContain("isActive = () => true,");
+  });
+});
