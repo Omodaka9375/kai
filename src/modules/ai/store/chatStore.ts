@@ -719,6 +719,85 @@ export function getProjectActiveSession(projectId: string): string | null {
 export function isProjectOpen(projectId: string): boolean {
   return projectRuntimes.has(projectId);
 }
+
+/** In-flight lazy resolutions (resolveBackgroundProjectSession) so two
+ *  concurrent group deliveries to the same never-visited project share one
+ *  disk read instead of racing each other. */
+const backgroundSessionResolutions = new Map<string, Promise<string | null>>();
+
+/**
+ * LAZY BACKGROUND-PROJECT RESOLUTION (2026-11-02 group report: "added two
+ * project agents, sent a message, one says it has no active session — but
+ * it does").
+ *
+ * projectActiveSessions is populated ONLY when a project is VISITED
+ * (hydrateSessions gates on isActive; the stamp child stamps on activation).
+ * A project that is OPEN (workspace mounted) but was never switched-to
+ * since boot therefore has NO map entry — so a group created with it froze
+ * sessionId "" at creation and every delivery gate refused it with "no
+ * active chat session", even though its sessions exist on disk in its
+ * scoped kai-sessions file. Delivering into the frozen id WITHOUT binding
+ * the map would be the black hole the closed-project guard exists for
+ * (injectMessage fabricates a chat, but the project's AgentRunBridge binds
+ * getProjectActiveSession(runtime.id) — null — so no bridge watches the
+ * reply: nothing mirrors, meta never settles).
+ *
+ * This makes the unvisited project "visited-equivalent" from disk, WITHOUT
+ * touching the currently scoped sessions file (loadAllForRoot reads the
+ * project's own file):
+ *  1. merge its session metas into the GLOBAL list (hydration's own merge
+ *     semantics: in-memory head, append snapshot-only) so persist routing,
+ *     projectIdForSession, and future hydrations all see them;
+ *  2. noteSessionRoot each merged meta (cross-scope write routing);
+ *  3. setProjectActiveSession(projectId, persistedActiveId) — the project's
+ *     bridge re-binds (useSyncExternalStore fires on the map change) and
+ *     the session becomes deliverable/mirrorable.
+ *
+ * Returns the project's active session id, or null when the project is not
+ * open, has no persisted sessions, or its persisted activeId is a ghost.
+ * The closed-project contract is unchanged: a CLOSED project resolves null
+ * (its runtime is unregistered), so delivery keeps refusing it.
+ */
+export async function resolveBackgroundProjectSession(
+  projectId: string,
+): Promise<string | null> {
+  const known = getProjectActiveSession(projectId);
+  if (known) return known;
+  const runtime = projectRuntimes.get(projectId);
+  if (!runtime) return null; // closed (or never-open) project: no lazy path
+  const inFlight = backgroundSessionResolutions.get(projectId);
+  if (inFlight) return inFlight;
+  const run = (async () => {
+    const loaded = await loadAllForRoot(runtime.root, runtime.env).catch(() => null);
+    if (!loaded) return null;
+    const persistedActiveId =
+      loaded.activeId && loaded.sessions.some((s) => s.id === loaded.activeId)
+        ? loaded.activeId
+        : (loaded.sessions.find((s) => !isGhostSession(s))?.id ?? null);
+    if (!persistedActiveId) return null;
+    // Merge metas into the GLOBAL list — same semantics as hydrateSessions'
+    // re-hydration merge (in-memory head wins; append only snapshot-only
+    // entries) so a session the user just deleted is never resurrected.
+    const inMemory = useChatStore.getState().sessions;
+    const liveIds = new Set(inMemory.map((s) => s.id));
+    const snapshotOnly = loaded.sessions.filter((s) => !liveIds.has(s.id));
+    if (snapshotOnly.length > 0) {
+      for (const s of snapshotOnly) noteSessionRoot(s.id, s.workspaceRoot ?? null);
+      useChatStore.setState({
+        sessions: [...inMemory, ...snapshotOnly],
+      });
+    }
+    setProjectActiveSession(projectId, persistedActiveId);
+    return persistedActiveId;
+  })();
+  backgroundSessionResolutions.set(projectId, run);
+  try {
+    return await run;
+  } finally {
+    backgroundSessionResolutions.delete(projectId);
+  }
+}
+
 /** The currently ACTIVE project id (null when no project is open).
  *  Used by cross-project surfaces (watch firings) to decide whether an
  *  event lands in the project the user is looking at. */

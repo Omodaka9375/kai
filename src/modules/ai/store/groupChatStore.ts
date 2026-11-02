@@ -5,6 +5,7 @@ import {
   getProjectActiveSession,
   getSessionAgentMeta,
   isProjectOpen,
+  resolveBackgroundProjectSession,
   setChatPinner,
   stopSession,
   useChatStore,
@@ -667,18 +668,46 @@ export async function createGroupChat(
   // the one that owns the group.
   const inviterSession =
     inviter.sessionId || getProjectActiveSession(inviter.projectId) || "";
+  // INVITEE SESSION RESOLVE (2026-11-02 report: "added two project agents,
+  // sent a message, one says it has no active session — but it does"): a
+  // project that is OPEN but never switched-to since boot has NO
+  // projectActiveSessions entry, so freezing from the map alone recorded ""
+  // and the very first delivery refused with "no active chat session".
+  // Resolve each invitee lazily from its project's scoped disk store; only
+  // projects with genuinely no sessions keep "" (delivery then surfaces the
+  // open-the-AI-panel guidance). Personas ARE their own identity.
+  const inviteeRecords: Array<{
+    projectId: string;
+    sessionId: string;
+    root: string;
+    name: string;
+  }> = [];
+  for (const i of invitees) {
+    let sid: string | null = null;
+    if (isPersonaParticipantId(i.projectId)) {
+      sid = i.projectId;
+    } else {
+      sid = getProjectActiveSession(i.projectId);
+      if (!sid && isProjectOpen(i.projectId)) {
+        sid = await resolveBackgroundProjectSession(i.projectId);
+      }
+    }
+    inviteeRecords.push({
+      projectId: i.projectId,
+      sessionId: sid ?? "",
+      root: i.root,
+      name: i.name,
+    });
+  }
   const group: GroupChat = {
     id: newGroupId(),
     name: groupName?.trim() || `${inviter.name} + ${invitees.length} more`,
     coordinator: { kind: "user" },
     participants: [
       { ...inviter, sessionId: inviterSession, joinedAt: Date.now() },
-      ...invitees.map((i) => ({
+      ...inviteeRecords.map((i) => ({
         projectId: i.projectId,
-        // Persona invitees ARE their own identity — no session to resolve.
-        sessionId: isPersonaParticipantId(i.projectId)
-          ? i.projectId
-          : (getProjectActiveSession(i.projectId) ?? ""),
+        sessionId: i.sessionId,
         root: i.root,
         name: i.name,
         joinedAt: Date.now(),
@@ -753,7 +782,21 @@ export async function sendGroupMessage(
     // never mirrors, and the stale session's meta stays busy so every later
     // delivery queues forever. Record re-pointed below so the group keeps
     // tracking the session that actually received the delivery.
-    const sessionKnown = getProjectActiveSession(p.projectId);
+    // NEVER-VISITED-PROJECT RESOLVE (2026-11-02 report: "added two project
+    // agents, one says it has no active session — but it does"): a project
+    // that is OPEN but was never switched-to since boot has no
+    // projectActiveSessions entry, so the frozen record holds "". Its
+    // sessions exist on DISK — resolve lazily from the project's scoped
+    // store before declaring undeliverable. Returns null for CLOSED
+    // projects, keeping the closed-project guard intact.
+    let sessionKnown = getProjectActiveSession(p.projectId);
+    if (
+      !sessionKnown &&
+      !isPersonaParticipantId(p.projectId) &&
+      isProjectOpen(p.projectId)
+    ) {
+      sessionKnown = await resolveBackgroundProjectSession(p.projectId);
+    }
     // CLOSED-PROJECT GUARD (2026-11-02 audit SHOULD): a CLOSED project's
     // persisted id is a BLACK HOLE — injectMessage fabricates a chat no
     // bridge watches; the run burns tokens and the reply never mirrors,
@@ -1507,7 +1550,12 @@ export async function deliverAgentMentions(
     // delivery/steering paths already fixed). Personas route via their own
     // runner inside deliverToParticipant; only project sessions re-resolve.
     if (!isPersonaParticipantId(target.projectId)) {
-      const known = getProjectActiveSession(target.projectId);
+      let known = getProjectActiveSession(target.projectId);
+      // NEVER-VISITED-PROJECT RESOLVE (same as sendGroupMessage): an open
+      // project with no map entry yet resolves from disk before the skip.
+      if (!known && isProjectOpen(target.projectId)) {
+        known = await resolveBackgroundProjectSession(target.projectId);
+      }
       // Same CLOSED-PROJECT GUARD as sendGroupMessage: a closed project's
       // frozen id never receives a routed mention (black hole).
       const sid =
@@ -2121,8 +2169,12 @@ export async function sendFromCoordinator(
   // Re-resolve like sendGroupMessage: a participant created before its
   // project ever opened an AI panel has sessionId "" - delivering to ""
   // fabricates a synthetic chat that can never answer (black-hole delivery
-  // reported as "Delivered").
-  const sid = p.sessionId || getProjectActiveSession(p.projectId) || "";
+  // reported as "Delivered"). NEVER-VISITED projects get the same lazy
+  // disk resolution as the user path before refusing.
+  let sid = p.sessionId || getProjectActiveSession(p.projectId) || "";
+  if (!sid && !isPersonaParticipantId(p.projectId) && isProjectOpen(p.projectId)) {
+    sid = (await resolveBackgroundProjectSession(p.projectId)) ?? "";
+  }
   if (!sid) {
     return `${p.name} has no active chat session - open the AI panel in that project first; its agent joins the group once a session exists.`;
   }
@@ -2520,18 +2572,24 @@ export async function addParticipants(
     // Resolve ONCE — two calls to getProjectActiveSession can race a session
     // switch between them, leaving the record pointing at session A while
     // the index maps session B (or the "" key, polluting the map).
-    const sid = getProjectActiveSession(i.projectId) ?? "";
+    // NEVER-VISITED projects (open, no map entry since boot) resolve
+    // lazily from disk — same fix as createGroupChat (2026-11-02).
+    let sid = getProjectActiveSession(i.projectId);
+    if (!sid && !isPersonaParticipantId(i.projectId) && isProjectOpen(i.projectId)) {
+      sid = await resolveBackgroundProjectSession(i.projectId);
+    }
+    const recordSid = sid ?? "";
     g.participants = [
       ...g.participants,
       {
         projectId: i.projectId,
-        sessionId: sid,
+        sessionId: recordSid,
         root: i.root,
         name: i.name,
         joinedAt: Date.now(),
       },
     ];
-    if (sid) sessionGroups.set(sid, groupId);
+    if (recordSid) sessionGroups.set(recordSid, groupId);
     added.push(i.name);
   }
   if (refused.length) {

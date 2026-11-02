@@ -54,9 +54,16 @@ vi.mock("./chatStore", async (importOriginal) => {
     // app registers every open workspace); tests may delete to simulate a
     // closed project.
     isProjectOpen: (id: string) => openProjects.has(id),
+    // 2026-11-02 never-visited-project fix: the lazy disk resolver. Tests
+    // populate this map to simulate a project whose sessions exist in its
+    // scoped store but were never loaded (no projectActiveSessions entry
+    // since boot).
+    resolveBackgroundProjectSession: (id: string) =>
+      Promise.resolve(diskSessions[id] ?? null),
   };
 });
 const openProjects = new Set<string>(["a", "b", "c"]);
+const diskSessions: Record<string, string | null> = {};
 
 // The persona reply path builds its model through lib/agent's dynamic import.
 // Mock it file-wide: a slow-throwing build keeps the persona BUSY long enough
@@ -71,6 +78,7 @@ vi.mock("../lib/agent", () => ({
 import { getModel, DEFAULT_MODEL_ID } from "../config";
 import {
   __resetGroupChatsForTest,
+  addParticipants,
   addPersonaParticipants,
   appendGroupMessage,
   createGroupChat,
@@ -95,6 +103,7 @@ beforeEach(() => {
   activeSessions["b"] = "active-b";
   activeSessions["c"] = "active-c";
   delete activeSessions["nosession"];
+  for (const k of Object.keys(diskSessions)) delete diskSessions[k];
   openProjects.clear();
   openProjects.add("a");
   openProjects.add("b");
@@ -195,6 +204,91 @@ describe("group chat store — lifecycle", () => {
       (c) => c[0] === "late-b",
     );
     expect(betaCall).toBeTruthy();
+  });
+
+  it("sendGroupMessage lazily resolves a NEVER-VISITED project from disk (2026-11-02 report)", async () => {
+    // User report: "added two project agents, sent a message, one says it
+    // has no active session — but it does." Root cause: projectActiveSessions
+    // is populated only when a project is VISITED; an OPEN-but-never-visited
+    // project froze sessionId "" at creation and delivery refused it — even
+    // though its sessions exist on disk in its scoped store. The lazy resolver
+    // must save the delivery BEFORE the undeliverable note.
+    activeSessions["b"] = null; // never visited since boot → no map entry
+    diskSessions["b"] = "disk-b"; // but its scoped store has sessions
+    const g = await createGroupChat(
+      { projectId: "a", sessionId: "", root: "/a", name: "alpha" },
+      [{ projectId: "b", root: "/b", name: "beta" }],
+    );
+    // Creation itself resolves from disk — no empty frozen record.
+    expect(g!.participants[1]!.sessionId).toBe("disk-b");
+    const delivered = await sendGroupMessage(g!.id, "anyone there?");
+    expect(delivered.find((d) => d.projectId === "b")!.sessionId).toBe("disk-b");
+    const live = getGroup(g!.id)!;
+    // No "no active chat session" note — the delivery went through.
+    expect(
+      live.messages.some(
+        (m) => m.from === "system" && m.text.includes("no active chat session"),
+      ),
+    ).toBe(false);
+    expect(injectMessageMock).toHaveBeenCalledWith(
+      "disk-b",
+      expect.stringContaining("anyone there?"),
+    );
+  });
+
+  it("a never-visited project with NO disk sessions still gets the undeliverable note", async () => {
+    // The resolver is not a magic wand: an open project whose scoped store
+    // holds nothing (user truly never chatted there) keeps the honest
+    // "open the AI panel" guidance.
+    activeSessions["b"] = null;
+    diskSessions["b"] = null;
+    const g = await createGroupChat(
+      { projectId: "a", sessionId: "", root: "/a", name: "alpha" },
+      [{ projectId: "b", root: "/b", name: "beta" }],
+    );
+    expect(g!.participants[1]!.sessionId).toBe("");
+    await sendGroupMessage(g!.id, "hello?");
+    const live = getGroup(g!.id)!;
+    expect(
+      live.messages.some(
+        (m) => m.from === "system" && m.text.includes("no active chat session"),
+      ),
+    ).toBe(true);
+  });
+
+  it("the lazy resolver never overrides a CLOSED project (guard intact)", async () => {
+    // Closed projects have no runtime registered — the resolver returns
+    // null regardless of disk state, so the "not open in this window" note
+    // is unchanged.
+    activeSessions["b"] = null;
+    diskSessions["b"] = "disk-b"; // disk sessions exist, but project closed
+    openProjects.delete("b");
+    const g = await createGroupChat(
+      { projectId: "a", sessionId: "", root: "/a", name: "alpha" },
+      [{ projectId: "b", root: "/b", name: "beta" }],
+    );
+    const out = await sendGroupMessage(g!.id, "hello?");
+    expect(out.find((d) => d.projectId === "b")!.sessionId).toBe("");
+    const live = getGroup(g!.id)!;
+    expect(
+      live.messages.some(
+        (m) => m.from === "system" && m.text.includes("beta is not open in this window"),
+      ),
+    ).toBe(true);
+  });
+
+  it("addParticipants resolves never-visited projects from disk too", async () => {
+    activeSessions["b"] = null;
+    diskSessions["b"] = "disk-b";
+    const g = await createGroupChat(
+      { projectId: "a", sessionId: "", root: "/a", name: "alpha" },
+      [{ projectId: "c", root: "/c", name: "gamma" }],
+    );
+    await addParticipants(g!.id, [{ projectId: "b", root: "/b", name: "beta" }]);
+    const live = getGroup(g!.id)!;
+    const beta = live.participants.find((p) => p.projectId === "b")!;
+    expect(beta.sessionId).toBe("disk-b");
+    expect(getGroupForSession("disk-b")!.id).toBe(g!.id);
   });
 
   it("names undeliverable participants in a system note instead of silently dropping", async () => {
