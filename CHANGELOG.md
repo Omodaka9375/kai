@@ -6,7 +6,7 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ## [2.1.5]
 
-The agent-learnable skills release, plus a hardening pass from a full review of the ten commits since 2.1.4.
+The agent-learnable skills release, plus a hardening pass
 
 ### Added
 
