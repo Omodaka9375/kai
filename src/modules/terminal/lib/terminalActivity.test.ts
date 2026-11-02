@@ -43,10 +43,12 @@ describe("terminalActivity — per-project running-command tracking", () => {
   });
 });
 
-/** Source pin: the OSC 133 tracker must fire the begin hook the session
- *  layer uses to light the dot (B/C), or the dot can never turn on. */
-describe("osc-handlers — command-begin hook wiring", () => {
-  it("registerPromptTracker accepts an onCommandBegin callback", async () => {
+/** Source pin: the OSC 133 tracker must fire the start hook the session
+ *  layer uses to light the dot on C ONLY — never B. B fires at every prompt
+ *  render (all shells embed it in PS1/prompt), so wiring it to the dot lit
+ *  freshly opened idle tabs permanently green (2026-11-02 user report). */
+describe("osc-handlers — command-start hook wiring", () => {
+  it("registerPromptTracker fires onCommandStart on C ONLY, never B", async () => {
     const osc = await import("./osc-handlers");
     // Minimal fake terminal: capture the registered OSC 133 handler.
     const handlers = new Map<number, (data: string) => boolean>();
@@ -61,19 +63,26 @@ describe("osc-handlers — command-begin hook wiring", () => {
       },
       registerMarker: () => ({ dispose: () => {}, isDisposed: false }),
     } as never;
-    let began = 0;
+    let started = 0;
     let ended = 0;
     const tracker = osc.registerPromptTracker(
       term,
       undefined,
       () => ended++,
-      () => began++,
+      () => started++,
     );
-    handlers.get(133)?.("B");
-    handlers.get(133)?.("C");
+    // A freshly opened tab's FIRST prompt render: D;0 A ... B. This is the
+    // phantom-dot repro — B must NOT fire the start hook.
     handlers.get(133)?.("D;0");
-    expect(began).toBe(2);
-    expect(ended).toBe(1);
+    handlers.get(133)?.("A");
+    handlers.get(133)?.("B");
+    expect(started).toBe(0);
+    // A real submission: C fires the hook.
+    handlers.get(133)?.("C");
+    expect(started).toBe(1);
+    // And the next prompt render clears it via D.
+    handlers.get(133)?.("D;0");
+    expect(ended).toBe(2); // the initial D;0 plus this one
     tracker.dispose();
     expect(registered).toBe(1);
   });

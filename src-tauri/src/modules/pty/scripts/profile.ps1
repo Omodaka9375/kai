@@ -69,26 +69,49 @@ function global:prompt {
         }
     } catch {}
 
-    $oscD = "$esc]133;D;$lec$esc\"
-    $oscA = "$esc]133;A$esc\"
-    $oscB = "$esc]133;B$esc\"
+$oscD = "$esc]133;D;$lec$esc\"
+$oscA = "$esc]133;A$esc\"
+$oscB = "$esc]133;B$esc\"
 
-    $loc = Get-Location
-    $osc7 = ''
-    if ($loc.Provider.Name -eq 'FileSystem') {
-        $cwd = $loc.ProviderPath -replace '\\','/'
-        if ($cwd -match '^[A-Za-z]:') { $cwd = "/$cwd" }
-        $cwdEnc = __KAI_urlencode $cwd
-        $hostName = [System.Environment]::MachineName
-        $osc7 = "$esc]7;file://$hostName$cwdEnc$esc\"
+$loc = Get-Location
+$osc7 = ''
+if ($loc.Provider.Name -eq 'FileSystem') {
+    $cwd = $loc.ProviderPath -replace '\\','/'
+    if ($cwd -match '^[A-Za-z]:') { $cwd = "/$cwd" }
+    $cwdEnc = __KAI_urlencode $cwd
+    $hostName = [System.Environment]::MachineName
+    $osc7 = "$esc]7;file://$hostName$cwdEnc$esc\"
+}
+
+$original = if (Test-Path Function:__KAI_user_prompt) {
+    try { & __KAI_user_prompt } catch { "PS $((Get-Location).Path)> " }
+} else {
+    "PS $((Get-Location).Path)> "
+}
+
+$global:LASTEXITCODE = $lec
+"$oscD$oscA$osc7${original}${oscB}"
+}
+
+# OSC 133 C — a submitted line is ACTUALLY EXECUTING (2026-11-02
+# phantom-green-dot fix). B above marks the prompt LINE for command-text
+# extraction and fires at every prompt render, so the host deliberately does
+# NOT light the "terminal running" dot on B. This wrapper emits C when the
+# user submits a NON-EMPTY line — Windows parity with zsh preexec / bash PS0
+# (neither fires for an empty Enter, and neither should we: the dot must not
+# blink on empty prompts).
+if (-not (Test-Path Function:__KAI_original_Readline)) {
+    try {
+        Copy-Item Function:PSConsoleHostReadLine Function:__KAI_original_Readline -Force -ErrorAction SilentlyContinue
+    } catch {}
+}
+if (Test-Path Function:__KAI_original_Readline) {
+    function global:PSConsoleHostReadLine {
+        $line = __KAI_original_Readline
+        if ($null -ne $line -and "$line".Trim().Length -gt 0) {
+            $esc = [char]27
+            try { [Console]::Out.Write("$esc]133;C$esc\") } catch {}
+        }
+        $line
     }
-
-    $original = if (Test-Path Function:__KAI_user_prompt) {
-        try { & __KAI_user_prompt } catch { "PS $((Get-Location).Path)> " }
-    } else {
-        "PS $((Get-Location).Path)> "
-    }
-
-    $global:LASTEXITCODE = $lec
-    "$oscD$oscA$osc7${original}${oscB}"
 }

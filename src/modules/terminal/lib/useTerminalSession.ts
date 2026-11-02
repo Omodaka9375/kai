@@ -477,9 +477,13 @@ function bindLeafToSlot(leafId: number, s: Session): void {
         // attacker file, etc.).
         const shellState = createShellIntegrationState();
         // Command-running indicator for the project rail dot: flip the leaf
-        // active while a command runs (OSC 133 B/C) and idle when it ends
-        // (133 D/A). The owner ref (set in useTerminalSession) resolves the
-        // owning project; a null owner keeps the dot dark without erroring.
+        // active when a command ACTUALLY EXECUTES (OSC 133 C — zsh preexec /
+        // bash PS0 / pwsh readline wrapper / fish_preexec) and idle when it
+        // ends (133 D). C only, never B: B marks the prompt line and fires
+        // at EVERY prompt render, which lit the dot on freshly opened idle
+        // tabs (2026-11-02 phantom-green-dot fix). The owner ref (set in
+        // useTerminalSession) resolves the owning project; a null owner
+        // keeps the dot dark without erroring.
         const owner = leafProjectOwners.get(leafId) ?? null;
         const prompt = registerPromptTracker(
           term,

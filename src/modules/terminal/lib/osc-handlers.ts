@@ -46,9 +46,18 @@ export function registerPromptTracker(
    *  host to refresh file-derived UI (source control) since a command
    *  may have touched the worktree. */
   onCommandEnd?: () => void,
-  /** Fires on OSC 133 B/C — a command started in this shell. Used by the
-   *  host to light the project rail's "terminal running" dot. */
-  onCommandBegin?: () => void,
+  /** Fires on OSC 133 C — a command is ACTUALLY EXECUTING. Used by the
+   *  host to light the project rail's "terminal running" dot.
+   *
+   *  C ONLY — never B (2026-11-02 phantom-green-dot fix): B is the
+   *  FinalTerm-spec "prompt line starts here" marker, emitted at EVERY
+   *  prompt render (all three platforms embed it in PS1 / the pwsh
+   *  prompt) so hosts can extract the command text at the cursor. B
+   *  fires when the tab is merely SHOWING its prompt; treating it as
+   *  "running" kept the dot green on every idle tab. C is the true
+   *  execution marker (zsh preexec / bash PS0 / pwsh readline wrapper —
+   *  profile.ps1), and it only fires when a submitted line runs. */
+  onCommandStart?: () => void,
 ): PromptTracker {
   let marker: IMarker | null = null;
   // Soft cap on markers: older ones are disposed but xterm may retain
@@ -71,14 +80,16 @@ export function registerPromptTracker(
         marker = term.registerMarker(0);
       }
     } else if (data.startsWith("B")) {
-      // OSC 133 B — command begins. From here on, treat all output as
-      // untrusted until we see D (command exit) or the next A (new prompt).
+      // OSC 133 B — prompt line starts here (command-text extraction
+      // marker). From here on output is untrusted until D / the next A —
+      // but the dot does NOT light: B fires on every prompt render, even
+      // with no command running (see onCommandStart above).
       if (state) state.inCommand = true;
-      onCommandBegin?.();
     } else if (data.startsWith("C")) {
-      // OSC 133 C — command pre-execution marker; still inside command.
+      // OSC 133 C — the submitted line is executing (pre-exec). This is
+      // the "terminal running" signal for the rail dot.
       if (state) state.inCommand = true;
-      onCommandBegin?.();
+      onCommandStart?.();
     } else if (data.startsWith("D")) {
       // OSC 133 D — command ends.
       if (state) state.inCommand = false;
