@@ -323,3 +323,39 @@ describe("wiring: skills write only inside their two roots", () => {
     expect(toolsSrc).toContain("isValidSkillName(name)");
   });
 });
+
+
+describe("write security (2026-11-02 review, FIX 6)", () => {
+  // Review finding: the skill-authoring tools bypassed the security layer
+  // entirely (no checkWritableCanonical import), and writeSkill wrote
+  // THROUGH pre-planted symlinks. Two layers now guard the write path.
+  const toolsSrc6 = readFileSync(
+    new URL("../tools/skills.ts", import.meta.url),
+    "utf8",
+  );
+  const libSrc6 = readFileSync(new URL("./skills.ts", import.meta.url), "utf8");
+
+  it("the agent write path runs checkWritableCanonical before every skill write", () => {
+    expect(toolsSrc6).toContain("checkWritableCanonical");
+    expect(toolsSrc6).toContain("secureSkillWrite");
+    // (regex-literal backslashes do not survive the tool encoding; indexOf assertions instead)
+  expect(toolsSrc6.indexOf("const skillMdPath = await secureSkillWrite(")).toBeGreaterThan(
+    toolsSrc6.indexOf("create_skill: tool("),
+  );
+    expect(toolsSrc6.indexOf("const skillMdPath = await secureSkillWrite(c.root, draft, c.workspace);")).toBeGreaterThan(
+    toolsSrc6.indexOf("update_skill: tool("),
+  );
+    // The sandbox override follows the tool context (same as write_file).
+    expect(toolsSrc6).toContain("sandboxOverrideForContext(ctx)");
+  });
+
+  it("writeSkill refuses to write through a symlink that escapes the skill folder", () => {
+    expect(libSrc6).toContain("assertInsideDir");
+    // The guard covers the skill dir, each script, and SKILL.md.
+    expect(libSrc6).toContain("await assertInsideDir(root, dir, workspace);");
+    expect(libSrc6).toContain("await assertInsideDir(dir, scriptPath, workspace);");
+    expect(libSrc6).toContain("await assertInsideDir(dir, skillMdPath, workspace);");
+    // Refusal message names the escape (symlink).
+    expect(libSrc6).toContain("resolves outside the skill folder (symlink?)");
+  });
+});

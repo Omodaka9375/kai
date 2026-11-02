@@ -196,6 +196,57 @@ async function ioWriteFile(path: string, content: string, workspace: WorkspaceEn
   await invoke<void>("fs_write_file", { path, content, workspace });
 }
 
+/** Canonicalize a path (null when it doesn't exist yet). */
+async function ioCanonicalize(path: string, workspace: WorkspaceEnv | null): Promise<string | null> {
+  try {
+    return await invoke<string>("fs_canonicalize", { path, workspace });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * SYMLINK-CONTAINMENT GUARD (2026-11-02 review, FIX 6): resolve the
+ * canonical path of a file we are about to write and refuse when it
+ * escapes the skill folder. A pre-placed symlink at
+ * .kai/skills/<name>/SKILL.md (committed to a repo, or planted via one
+ * approved ln -s) would otherwise make ioWriteFile write THROUGH it to
+ * an attacker-chosen target anywhere on disk. Existing targets resolve
+ * to themselves unless they ARE links; for not-yet-existing files the
+ * parent is checked (a symlinked folder is the same attack).
+ */
+async function assertInsideDir(
+  dir: string,
+  target: string,
+  workspace: WorkspaceEnv | null,
+): Promise<void> {
+  const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "");
+  const dirN = norm(dir);
+  const canonFile = await ioCanonicalize(target, workspace);
+  if (canonFile) {
+    const c = norm(canonFile);
+    if (c !== norm(target) && !c.startsWith(dirN + "/")) {
+      throw new Error(
+        "refusing to write " + JSON.stringify(target) + ": it resolves outside the skill folder (symlink?)",
+      );
+    }
+    return;
+  }
+  const slash = norm(target).lastIndexOf("/");
+  if (slash < 0) return;
+  const parent = norm(target).slice(0, slash);
+  if (parent === dirN) return;
+  const canonParent = await ioCanonicalize(parent, workspace);
+  if (canonParent) {
+    const c = norm(canonParent);
+    if (c !== parent && !c.startsWith(dirN + "/")) {
+      throw new Error(
+        "refusing to write " + JSON.stringify(target) + ": its folder resolves outside the skill folder (symlink?)",
+      );
+    }
+  }
+}
+
 async function ioCreateDir(path: string, workspace: WorkspaceEnv | null) {
   try {
     await invoke<void>("fs_create_dir", { path, workspace });
@@ -294,16 +345,22 @@ export async function writeSkill(
   }
   const dir = `${root}/${draft.name}`;
   await ioCreateDir(dir, workspace);
+  // FIX 6: containment on the skill dir itself (a symlinked <name> folder
+  // redirects every file below it).
+  await assertInsideDir(root, dir, workspace);
   if (extraFiles && extraFiles.length > 0) {
     await ioCreateDir(`${dir}/scripts`, workspace);
     for (const f of extraFiles) {
       if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(f.filename)) {
         throw new Error(`invalid script filename "${f.filename}"`);
       }
-      await ioWriteFile(`${dir}/scripts/${f.filename}`, f.content, workspace);
+      const scriptPath = `${dir}/scripts/${f.filename}`;
+      await assertInsideDir(dir, scriptPath, workspace);
+      await ioWriteFile(scriptPath, f.content, workspace);
     }
   }
   const skillMdPath = `${dir}/SKILL.md`;
+  await assertInsideDir(dir, skillMdPath, workspace);
   await ioWriteFile(skillMdPath, serializeSkillMd(draft), workspace);
   return skillMdPath;
 }

@@ -35,6 +35,8 @@
 import { tool } from "ai";
 import { z } from "zod";
 import type { ToolContext } from "./context";
+import { nativeForContext, sandboxOverrideForContext } from "./context";
+import { checkWritableCanonical } from "../lib/security";
 import {
   globalSkillsRoot,
   isValidSkillName,
@@ -61,6 +63,33 @@ function invalidNameError(name: string): string | null {
 }
 
 export function buildSkillTools(ctx: ToolContext) {
+  const native = nativeForContext(ctx);
+  /** FIX 6 (2026-11-02 review): the agent-reachable write path runs the
+   *  SAME security layer write_file uses - checkWritableCanonical (deny
+   *  list + canonicalized re-check) - before any skill file is written.
+   *  Approval alone is not informed consent: the card shows a skill name,
+   *  not a resolved symlink target. */
+  const secureSkillWrite = async (
+    root: string,
+    draft: SkillDraft,
+    workspace: Env,
+    extraFiles?: Array<{ filename: string; content: string }>,
+  ): Promise<string> => {
+    const dir = root + "/" + draft.name;
+    const paths = [dir + "/SKILL.md"];
+    if (extraFiles) for (const f of extraFiles) paths.push(dir + "/scripts/" + f.filename);
+    for (const p of paths) {
+      const safety = await checkWritableCanonical(
+        p,
+        native.canonicalize,
+        await sandboxOverrideForContext(ctx),
+      );
+      if (!safety.ok) {
+        return Promise.reject(new Error(safety.reason));
+      }
+    }
+    return writeSkill(root, draft, workspace, extraFiles);
+  };
   /** Resolve the target root for a scope. */
   const resolveRoot = async (scope: "global" | "project"): Promise<{ root: string | null; workspace: Env }> => {
     if (scope === "global") {
@@ -141,7 +170,7 @@ export function buildSkillTools(ctx: ToolContext) {
           mcpServers: mcp_servers ?? [],
         };
         try {
-          const skillMdPath = await writeSkill(
+          const skillMdPath = await secureSkillWrite(
             root,
             draft,
             workspace,
@@ -205,7 +234,7 @@ export function buildSkillTools(ctx: ToolContext) {
             return { error: "Refusing to write an empty description or instructions body." };
           }
           try {
-            const skillMdPath = await writeSkill(c.root, draft, c.workspace);
+            const skillMdPath = await secureSkillWrite(c.root, draft, c.workspace);
             return { ok: true, scope: c.scope, skillMdPath };
           } catch (e) {
             return { error: e instanceof Error ? e.message : String(e) };
