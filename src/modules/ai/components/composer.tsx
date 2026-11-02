@@ -23,6 +23,10 @@ import { expandSnippetTokens, type Snippet } from "../lib/snippets";
 import { tryRunSlashCommand, type SlashCommandMeta } from "../lib/slashCommands";
 import { buildQuoteBlock } from "../lib/chatText";
 import {
+  mergeDraftTranscript,
+  routeVoiceTranscript,
+} from "../lib/voiceTranscript";
+import {
   getOrCreateChat,
   stopSession,
   setSessionSteeringMessage,
@@ -93,6 +97,11 @@ type ComposerCtx = {
   submit: (options?: { text?: string; background?: boolean }) => void;
   stop: () => void;
   voice: Voice;
+  /** Voice-start wrapper: snapshots the capture session (2026-11-02
+   *  cross-project paste guard). Entry points call this instead of
+   *  voice.start() so a transcript finishing after a project switch
+   *  routes to the CAPTURED session's draft, not the visible one. */
+  startVoiceCapture: () => void;
   canSend: boolean;
   /** Transient slash-command outcome (e.g. "/compact" result), shown under the input. */
   notice: string | null;
@@ -239,13 +248,41 @@ export function AiComposerProvider({ children }: ProviderProps) {
   // same as pressing Enter manually). With approvals on (Ask mode), the
   // transcript lands in the field for review as before.
   const autoApprove = useChatStore((s) => s.autoApprove);
+  // CROSS-PROJECT PASTE GUARD (2026-11-02): snapshot the session the capture
+  // STARTED in. A transcript that finishes while the user has switched to
+  // another project/chat routes into the CAPTURED session's persisted draft
+  // (switching back shows it waiting in the original input) — never into the
+  // now-visible project's field, and never auto-submitted to its agent.
+  const voiceCaptureSidRef = useRef<string | null>(null);
   const voice = useWhisperRecording({
     onResult: (transcript: string) => {
+      const routing = routeVoiceTranscript(
+        voiceCaptureSidRef.current,
+        sessionId,
+      );
+      if (routing.route === "draft") {
+        const prev = getSessionPreferences(routing.sessionId).draft;
+        setSessionPreferences(routing.sessionId, {
+          draft: mergeDraftTranscript(prev, transcript),
+        });
+        showNotice(
+          "Voice transcript saved to the chat you were dictating in",
+        );
+        return;
+      }
       setValue((v) => (v ? `${v} ${transcript}` : transcript));
       requestAnimationFrame(() => textareaRef.current?.focus());
     },
     autoSubmit: autoApprove !== "off",
     onAutoSubmit: (transcript: string) => {
+      // Routed-away captures never auto-submit: sending the user's words to
+      // the WRONG project's agent (from a session they switched away from)
+      // is worse than a one-click resend from the saved draft.
+      const routing = routeVoiceTranscript(
+        voiceCaptureSidRef.current,
+        sessionId,
+      );
+      if (routing.route === "draft") return;
       // Merge with pre-typed text: `value` in this closure is fresh as of
       // the last render (the hook keeps the callback current via ref), so
       // it holds whatever the user typed BEFORE capture started — the
@@ -254,10 +291,22 @@ export function AiComposerProvider({ children }: ProviderProps) {
       void submit({ text: pre ? `${pre} ${transcript}` : transcript });
     },
   });
+  // Wrap the hook's start so BOTH entry points (input-bar mic and the
+  // Kai:ai-voice-toggle shortcut) snapshot the session at capture start.
+  // Starting a capture while routed-away from the previous one is a no-op
+  // guard: the mic button is disabled while transcribing, so this only
+  // fires on odd interleavings (e.g. a stale window event).
+  const startVoiceCapture = useCallback(() => {
+    if (voice.transcribing || voice.recording) return;
+    voiceCaptureSidRef.current = sessionId;
+    voice.start();
+  }, [voice, sessionId]);
 
   // Global shortcut (ai.voice, Cmd/Ctrl+M) dispatches this event — the
   // composer owns the recording state, so the toggle logic lives here.
   // Same decoupling pattern as the Kai:ai-attach-file listener above.
+  // startVoiceCapture (not voice.start) snapshots the session — the
+  // cross-project paste guard (2026-11-02).
   useEffect(() => {
     const onVoiceToggle = () => {
       if (voice.transcribing) return; // a click now would abandon the transcript
@@ -265,13 +314,13 @@ export function AiComposerProvider({ children }: ProviderProps) {
         voice.stop();
       } else {
         if (voice.error) voice.clearError();
-        void voice.start();
+        startVoiceCapture();
       }
     };
     window.addEventListener("Kai:ai-voice-toggle", onVoiceToggle);
     return () =>
       window.removeEventListener("Kai:ai-voice-toggle", onVoiceToggle);
-  }, [voice]);
+  }, [voice, startVoiceCapture]);
 
   const addFiles = async (list: FileList | null) => {
     if (!list) return;
@@ -540,6 +589,9 @@ export function AiComposerProvider({ children }: ProviderProps) {
     submit,
     stop,
     voice,
+    /** Start-voice wrapper that snapshots the capture session (cross-project
+     *  paste guard). Mic buttons and the toggle shortcut must call THIS. */
+    startVoiceCapture,
     canSend,
     notice,
     voiceBusy: voice.recording || voice.transcribing,

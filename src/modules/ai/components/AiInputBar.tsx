@@ -425,7 +425,9 @@ export function AiInputBar() {
                       c.voice.stop();
                     } else {
                       if (c.voice.error) c.voice.clearError();
-                      void c.voice.start();
+                      // startVoiceCapture snapshots the capture session —
+                      // the cross-project paste guard (2026-11-02).
+                      c.startVoiceCapture();
                     }
                   }}
                   disabled={c.voice.transcribing}
