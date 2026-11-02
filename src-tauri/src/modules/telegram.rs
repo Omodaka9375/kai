@@ -39,6 +39,20 @@ static OWNER_CHAT_ID: AtomicI64 = AtomicI64::new(-1);
 /// FIRST `/start` that arrives after it (single-use handshake token).
 static BIND_MODE: AtomicBool = AtomicBool::new(false);
 
+/// ALLOW-LISTED GROUP CHATS (2026-11-02 group support). Persisted in the
+/// assistant prefs as `boundGroups` and pushed into Rust by every
+/// `telegram_start` (same pattern as OWNER_CHAT_ID — Rust owns the gate,
+/// prefs own the persistence). A group chat id in this set receives the
+/// assistant with sender attribution; every other non-owner chat stays
+/// silently rejected.
+static BOUND_GROUP_IDS: LazyLock<Mutex<Vec<i64>>> =
+    LazyLock::new(|| Mutex::new(Vec::new()));
+
+/// Pending GROUP binding: set by `telegram_bind_group`, consumed by the
+/// first `/bindgroup` sent INSIDE a group by the OWNER (single-use).
+/// A member who is not the owner arming bind mode cannot add their group.
+static GROUP_BIND_MODE: AtomicBool = AtomicBool::new(false);
+
 static LAST_UPDATE_ID: LazyLock<Mutex<i64>> = LazyLock::new(|| Mutex::new(0));
 
 /// Incremented by every stop/start cycle. A poll thread exits when the
@@ -265,7 +279,8 @@ const LONG_POLL_SECS: u64 = 40;
 // "missing required key chatId"). Keep both.
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase", tag = "kind")]
 pub enum TelegramEvent {
-    /// An incoming message (text or voice) from the owner.
+    /// An incoming message (text or voice) from the owner or an
+    /// allow-listed group (sender_name set for group attribution).
     Message {
         chat_id: i64,
         message_id: i64,
@@ -275,6 +290,11 @@ pub enum TelegramEvent {
         voice_file_id: Option<String>,
         /// Seconds of voice duration (for the STT size gate).
         voice_duration_secs: Option<i64>,
+        /// Sender display name (group messages: who is talking; the
+        /// owner's own name in private chats). Attribute replies with it.
+        sender_name: String,
+        /// True when this came from an allow-listed GROUP chat.
+        is_group: bool,
         date: i64,
     },
     /// Incoming photo (largest size) — model gets it as a vision part.
@@ -283,6 +303,8 @@ pub enum TelegramEvent {
         message_id: i64,
         photo_file_id: String,
         caption: Option<String>,
+        sender_name: String,
+        is_group: bool,
         date: i64,
     },
     /// Incoming document (any file) — saved to the assistant scratch dir.
@@ -292,6 +314,8 @@ pub enum TelegramEvent {
         document_file_id: String,
         file_name: String,
         mime_type: Option<String>,
+        sender_name: String,
+        is_group: bool,
         date: i64,
     },
     /// Incoming video (mp4 note or regular video).
@@ -300,10 +324,19 @@ pub enum TelegramEvent {
         message_id: i64,
         video_file_id: String,
         duration_secs: Option<i64>,
+        sender_name: String,
+        is_group: bool,
         date: i64,
     },
     /// Owner not yet bound — this /start may claim binding.
     StartCandidate { chat_id: i64, message_id: i64, date: i64 },
+    /// A `/bindgroup` sent INSIDE a group by the OWNER while group-bind
+    /// mode was armed: the TS side persists the group in prefs.
+    GroupBindCandidate {
+        chat_id: i64,
+        group_title: Option<String>,
+        date: i64,
+    },
     /// Message from a non-owner chat (silently ignored by the agent).
     Rejected { chat_id: i64, date: i64 },
     /// Inline-keyboard button press (approval card). `data` is the button
@@ -448,6 +481,11 @@ struct TgMessage {
     message_id: Option<i64>,
     #[serde(default)]
     date: Option<i64>,
+    /// The SENDER. Group messages carry it (the group's members); private
+    /// chats echo the owner's user object. Used for group attribution and
+    /// the /bindgroup owner check.
+    #[serde(default)]
+    from: Option<TgUser>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -462,6 +500,33 @@ struct TgVoice {
 struct TgChat {
     #[serde(default)]
     id: Option<i64>,
+    /// Group/supergroup title (absent in private chats).
+    #[serde(default)]
+    title: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TgUser {
+    #[serde(default)]
+    id: Option<i64>,
+    #[serde(default)]
+    first_name: Option<String>,
+    #[serde(default)]
+    username: Option<String>,
+}
+
+/// Display name for event attribution: first name, falling back to the
+/// @username, then "Someone" (never empty so the TS side can always
+/// attribute).
+fn tg_display_name(from: &Option<TgUser>) -> String {
+    match from {
+        Some(u) => u
+            .first_name
+            .clone()
+            .or_else(|| u.username.clone())
+            .unwrap_or_else(|| "Someone".into()),
+        None => "Someone".into(),
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -569,13 +634,47 @@ fn classify(update: &TgUpdate) -> Option<i64> {
         // Not in bind mode: drop silently (no owner leak, no response).
         return None;
     }
-    if owner != -1 && chat_id != owner {
-        emit_event(TelegramEvent::Rejected { chat_id, date });
+    // GROUP GATE (2026-11-02): allow-listed group chats receive the
+    // assistant with sender attribution. The list is persisted in prefs
+    // (boundGroups) and pushed here by every telegram_start. `/bindgroup`
+    // (sent INSIDE the group, by the owner, while bind mode is armed) is
+    // the ONLY way a group id becomes a bind candidate — never auto-added.
+    let group_allowed = {
+        let groups = crate::modules::lock::mutex_lock(&BOUND_GROUP_IDS);
+        groups.contains(&chat_id)
+    };
+    let sender_name = tg_display_name(&msg.from);
+    let is_bindgroup = msg
+        .text
+        .as_deref()
+        .map(|t| t.trim() == "/bindgroup")
+        .unwrap_or(false);
+    if is_bindgroup {
+        // Handshake: armed by telegram_bind_group (settings), consumed
+        // here. Only the OWNER may add a group — a member arming bind
+        // mode and /bindgroup-ing from any group cannot.
+        let sender_is_owner = msg.from.as_ref().and_then(|u| u.id) == Some(owner);
+        if sender_is_owner && GROUP_BIND_MODE.swap(false, Ordering::SeqCst) {
+            emit_event(TelegramEvent::GroupBindCandidate {
+                chat_id,
+                group_title: group_title_of(msg),
+                date,
+            });
+            return Some(chat_id);
+        }
+        // Not armed or not the owner: drop silently.
         return None;
     }
-    if owner == -1 {
-        // Unbound and not a bindable /start — drop.
-        return None;
+    let is_group = group_allowed && owner != -1 && chat_id != owner;
+    if !is_group {
+        if owner != -1 && chat_id != owner {
+            emit_event(TelegramEvent::Rejected { chat_id, date });
+            return None;
+        }
+        if owner == -1 {
+            // Unbound and not a bindable /start — drop.
+            return None;
+        }
     }
 
     if let Some(voice) = &msg.voice {
@@ -585,6 +684,8 @@ fn classify(update: &TgUpdate) -> Option<i64> {
             text: None,
             voice_file_id: voice.file_id.clone(),
             voice_duration_secs: voice.duration,
+            sender_name,
+            is_group,
             date,
         });
     } else if let Some(text) = &msg.text {
@@ -594,6 +695,8 @@ fn classify(update: &TgUpdate) -> Option<i64> {
             text: Some(text.clone()),
             voice_file_id: None,
             voice_duration_secs: None,
+            sender_name,
+            is_group,
             date,
         });
     } else if let Some(photo) = &msg.photo {
@@ -605,6 +708,8 @@ fn classify(update: &TgUpdate) -> Option<i64> {
                 message_id,
                 photo_file_id: file_id,
                 caption: msg.caption.clone(),
+                sender_name,
+                is_group,
                 date,
             });
         }
@@ -615,6 +720,8 @@ fn classify(update: &TgUpdate) -> Option<i64> {
             document_file_id: doc.file_id.clone().unwrap_or_default(),
             file_name: doc.file_name.clone().unwrap_or_else(|| "file".into()),
             mime_type: doc.mime_type.clone(),
+            sender_name,
+            is_group,
             date,
         });
     } else if let Some(video) = &msg.video {
@@ -623,10 +730,18 @@ fn classify(update: &TgUpdate) -> Option<i64> {
             message_id,
             video_file_id: video.file_id.clone().unwrap_or_default(),
             duration_secs: video.duration,
+            sender_name,
+            is_group,
             date,
         });
     }
     Some(chat_id)
+}
+
+/// Group title for the /bindgroup confirmation ("Group <title> added").
+/// The chat payload carries `title` for groups/supergroups.
+fn group_title_of(msg: &TgMessage) -> Option<String> {
+    msg.chat.as_ref().and_then(|c| c.title.clone())
 }
 
 /// Start the long-poll thread. Called from the settings UI (and app start
@@ -636,12 +751,21 @@ fn classify(update: &TgUpdate) -> Option<i64> {
 pub async fn telegram_start(
     token: String,
     owner_chat_id: Option<i64>,
+    bound_group_ids: Option<Vec<i64>>,
     on_event: Channel<TelegramEvent>,
 ) -> Result<TelegramStatus, String> {
     if token.trim().is_empty() {
         return Err("bot token is empty".into());
     }
     refresh_disable_epoch(true);
+    // GROUP GATE (2026-11-02): refresh Rust's copy of the allow-listed groups
+    // on every start (same pattern as OWNER_CHAT_ID above). The gate in
+    // classify() only ever READS this; /bindgroup alone cannot mutate it —
+    // mutation flows exclusively through this persisted-prefs push.
+    {
+        let mut groups = crate::modules::lock::mutex_lock(&BOUND_GROUP_IDS);
+        *groups = bound_group_ids.unwrap_or_default();
+    }
     // An enable is a strictly NEWER epoch than any observed disable. Never
     // compare raw wall-clock timestamps: same-ms toggles/clock rollback
     // could otherwise disable the replacement loop immediately.
@@ -794,6 +918,15 @@ pub fn telegram_stop() -> Result<TelegramStatus, String> {
 #[tauri::command]
 pub fn telegram_bind_owner() -> Result<(), String> {
     BIND_MODE.store(true, Ordering::SeqCst);
+    Ok(())
+}
+
+/// Arm the GROUP bind handshake: the OWNER's next `/bindgroup` sent INSIDE
+/// a group claims that group (classify verifies the sender is the owner and
+/// emits GroupBindCandidate; the TS side persists it in prefs.boundGroups).
+#[tauri::command]
+pub fn telegram_bind_group() -> Result<(), String> {
+    GROUP_BIND_MODE.store(true, Ordering::SeqCst);
     Ok(())
 }
 

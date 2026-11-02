@@ -57,6 +57,15 @@ export type AssistantPrefs = {
   /** MCP server ids whose tools the assistant may call (empty = no MCP). */
   mcpAllowedServers: string[];
   /**
+   * ALLOW-LISTED GROUP CHATS (2026-11-02 group support): Telegram group
+   * chat ids the assistant responds in (shared session, sender
+   * attribution, read-only tool tier for non-owner members). Entering the
+   * list requires the OWNER's /bindgroup inside the group while bind mode
+   * is armed in Settings — a member can never add their own group.
+   * The Rust gate reads this list on every telegram_start.
+   */
+  boundGroups: number[];
+  /**
    * Projects bound for Telegram monitoring ("send project to assistant").
    * A binding routes OWNER messages to the project's agent session via
    * /tell (or /use + plain text) and mirrors that session's replies back to
@@ -81,6 +90,7 @@ const DEFAULT_PREFS: AssistantPrefs = {
   // writes a copy), but a new list per default keeps references independent.
   allowedTools: [...DEFAULT_ALLOWED_TOOLS],
   mcpAllowedServers: [],
+  boundGroups: [],
   boundProjects: {},
 };
 
@@ -90,7 +100,7 @@ export const prefsStore = new LazyStore(ASSISTANT_PREFS_STORE, { defaults: {}, a
 export async function loadAssistantPrefs(): Promise<AssistantPrefs> {
   try {
     const raw = (await prefsStore.get<AssistantPrefs>("prefs")) ?? DEFAULT_PREFS;
-    return { ...DEFAULT_PREFS, ...raw, boundProjects: raw.boundProjects ?? {} };
+    return { ...DEFAULT_PREFS, ...raw, boundProjects: raw.boundProjects ?? {}, boundGroups: raw.boundGroups ?? [] };
   } catch {
     return DEFAULT_PREFS;
   }
@@ -111,11 +121,12 @@ export async function setAssistantName(name: string | null): Promise<void> {
 // ── Native bridge (typed) ──────────────────────────────────────────────────
 
 export type TelegramEvent =
-  | { kind: "message"; chatId: number; messageId: number; text: string | null; voiceFileId: string | null; voiceDurationSecs: number | null; date: number }
-  | { kind: "photo"; chatId: number; messageId: number; photoFileId: string; caption: string | null; date: number }
-  | { kind: "document"; chatId: number; messageId: number; documentFileId: string; fileName: string; mimeType: string | null; date: number }
-  | { kind: "video"; chatId: number; messageId: number; videoFileId: string; durationSecs: number | null; date: number }
+  | { kind: "message"; chatId: number; messageId: number; text: string | null; voiceFileId: string | null; voiceDurationSecs: number | null; senderName: string; isGroup: boolean; date: number }
+  | { kind: "photo"; chatId: number; messageId: number; photoFileId: string; caption: string | null; senderName: string; isGroup: boolean; date: number }
+  | { kind: "document"; chatId: number; messageId: number; documentFileId: string; fileName: string; mimeType: string | null; senderName: string; isGroup: boolean; date: number }
+  | { kind: "video"; chatId: number; messageId: number; videoFileId: string; durationSecs: number | null; senderName: string; isGroup: boolean; date: number }
   | { kind: "startCandidate"; chatId: number; messageId: number; date: number }
+  | { kind: "groupBindCandidate"; chatId: number; groupTitle: string | null; date: number }
   | { kind: "rejected"; chatId: number; date: number }
   | { kind: "error"; message: string }
   /** Inline-keyboard button press (approval card). data is the button
@@ -136,13 +147,17 @@ export const telegramNative = {
     // ("command telegram_start missing required key onEvent").
     const channel = new Channel<TelegramEvent>();
     channel.onmessage = (e) => onEvent(e);
+    // boundGroupIds: allow-listed group chats (prefs.boundGroups) pushed into
+    // Rust's gate on every start. Pass the CURRENT persisted list.
+    const prefs = await loadAssistantPrefs();
     return await invoke<{ running: boolean; ownerChatId: number | null; botUsername: string | null }>(
       "telegram_start",
-      { token, ownerChatId, onEvent: channel },
+      { token, ownerChatId, boundGroupIds: prefs.boundGroups ?? [], onEvent: channel },
     );
   },
   stop: () => invoke<{ running: boolean }>("telegram_stop"),
   bindOwner: () => invoke<void>("telegram_bind_owner"),
+  bindGroup: () => invoke<void>("telegram_bind_group"),
   clearOwner: () => invoke<void>("telegram_clear_owner"),
   status: () =>
     invoke<{ running: boolean; ownerChatId: number | null; botUsername: string | null }>(

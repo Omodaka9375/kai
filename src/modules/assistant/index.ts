@@ -50,7 +50,7 @@ import { createFenceState, fenceSystemPrompt } from "@/modules/ai/lib/fence";
 import { auditAppend, AUDIT_KINDS } from "@/modules/ai/lib/audit";
 import { buildTools } from "@/modules/ai/tools/tools";
 import type { ToolContext } from "@/modules/ai/tools/context";
-import { isToolAllowed } from "./toolCatalog";
+import { DEFAULT_ALLOWED_TOOLS, isToolAllowed } from "./toolCatalog";
 import { BUILTIN_AGENTS, loadAgents } from "@/modules/ai/lib/agents";
 import { toSpeechText, splitForSpeech, transcribeLocal } from "@/modules/ai/lib/voiceTts";
 import { proxyFetch } from "@/modules/ai/lib/proxyFetch";
@@ -189,6 +189,43 @@ export async function loadHistory(sessionId?: string): Promise<UIMessage[]> {
   const h = (await prefsStore.get<UIMessage[]>(messagesKey(id))) ?? [];
   historyCache.set(id, h);
   return h;
+}
+
+// ── Group sessions (2026-11-02 shared-group-chat support) ──────────────────
+
+/** Deterministic session id per allow-listed group chat. */
+const groupSessionKey = (groupChatId: number) => `group-${groupChatId}`;
+
+/**
+ * The SHARED assistant session for one allow-listed group chat. One
+ * conversation per group (user decision 2026-11-02): all members share
+ * context. Reuses the session machinery (list/persist/history keys), so a
+ * group session is just another session row titled after the group.
+ */
+export async function getOrCreateGroupSession(
+  groupChatId: number,
+): Promise<string> {
+  const id = groupSessionKey(groupChatId);
+  const list = await listSessions();
+  if (list.some((s) => s.id === id)) return id;
+  await createSession(`Group ${groupChatId}`);
+  // createSession generates a random id — overwrite the list entry with the
+  // deterministic group id (drop the placeholder it created).
+  const created = await listSessions();
+  const withoutPlaceholder = created.filter((s) => s.id !== id);
+  const placeholder = created.find((s) => s.id !== id);
+  const entry: AssistantSession = {
+    id,
+    title: `Group ${groupChatId}`,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+  sessionsCache = [entry, ...withoutPlaceholder];
+  await prefsStore.set(KEY_SESSIONS, sessionsCache);
+  await prefsStore.set(messagesKey(id), []);
+  void placeholder;
+  historyCache.set(id, []);
+  return id;
 }
 
 async function persistHistory(messages: UIMessage[], sessionId?: string): Promise<void> {
@@ -453,11 +490,24 @@ export async function runAssistantTurn(
     /** Scratch-dir path of the original photo; recorded on the persisted
      *  file part so the image survives history reloads (photos.ts). */
     imagePath?: string;
+    /** GROUP TURN (2026-11-02): the message came from an allow-listed group
+     *  chat. The turn runs in the group's OWN shared session (one per group
+     *  chat id, so members share context), the sender is attributed in the
+     *  transcript, and the tool surface drops to the READ tier regardless
+     *  of the owner's allowlist — friends never execute/write/spend. */
+    groupChatId?: number;
+    groupSenderName?: string;
+    isGroup?: boolean;
   },
 ): Promise<string> {
   const onNotice = opts?.onNotice;
   const prefs = await loadAssistantPrefs();
-  const sessionId = await getActiveSessionId();
+  // GROUP SESSION: one shared assistant session per allow-listed group —
+  // the whole group shares one conversation (user decision 2026-11-02).
+  // Private chats keep the owner's active session as before.
+  const sessionId = opts?.groupChatId != null
+    ? await getOrCreateGroupSession(opts.groupChatId)
+    : await getActiveSessionId();
   // null = follow the app's DEFAULT MODEL (Settings → Models), NOT the
   // hardcoded registry constant — the picker's "Follow default" entry
   // promises exactly this. getState() is kept current cross-window by
@@ -481,7 +531,13 @@ export async function runAssistantTurn(
   // The owner's allowlist (READ tier by default) — a tool reaches the model
   // only if selected here. isToolAllowed also enforces the hard-excluded set,
   // so a stale/edited allowedTools can't re-enable a desktop-only tool.
-  const allowed = new Set(prefs.allowedTools);
+  // GROUP TURNS (2026-11-02): members are NOT the owner — cap them at the
+  // READ tier regardless of what the owner granted THEMSELVES, and drop
+  // MCP + the name tool entirely (a friend renaming the assistant or
+  // calling the owner's MCP servers is not their call).
+  const allowed = opts?.isGroup
+    ? new Set<string>([...DEFAULT_ALLOWED_TOOLS])
+    : new Set(prefs.allowedTools);
   const tools: Record<string, unknown> = {};
   // TIER HONESTY (Phase 4): approval-gated tools are NOT stripped anymore -
   // they AUTO-EXECUTE (the desktop's "Allow" semantics) behind the
@@ -511,7 +567,11 @@ export async function runAssistantTurn(
   // allowed ids (and only connected servers), so an ungranted server's tools
   // never surface even if the model was told about them. MCP wrappers are
   // approval-required (mcpManager) - same headless rule applies.
-  const mcpTools = mcpManager.getToolsForServers(prefs.mcpAllowedServers);
+  // GROUP TURNS (2026-11-02): no MCP — the owner's MCP servers are the
+  // owner's; a group member must never reach them.
+  const mcpTools = opts?.isGroup
+    ? {}
+    : mcpManager.getToolsForServers(prefs.mcpAllowedServers);
   for (const [id, tool] of Object.entries(mcpTools)) {
     // Same tier-honesty rule as core tools: keep, strip the pause, audit.
     if ((tool as { needsApproval?: boolean }).needsApproval === true) {
@@ -527,7 +587,9 @@ export async function runAssistantTurn(
   // Assistant-NATIVE tools: set_my_name (the ONLY name path — the user
   // names/renames the assistant conversationally; no settings UI exists).
   // Attached BEFORE the media tools so it survives the media swap below.
-  Object.assign(tools, buildAssistantNameTool());
+  // GROUP TURNS (2026-11-02): no name tool — members don't rename the
+  // owner's assistant.
+  if (!opts?.isGroup) Object.assign(tools, buildAssistantNameTool());
   // Assistant-NATIVE media tools replace the desktop ones here: the desktop
   // tools are async fire-and-forget (spawnMediaTask patches a chat-UI part
   // that doesn't exist headless — payloads were silently dropped). These run
@@ -600,8 +662,15 @@ export async function runAssistantTurn(
   const guardedTools = withToolGuard(centrallyGuardedTools, fenceState, null);
 
   const history = await loadHistory(sessionId);
+  // GROUP ATTRIBUTION: a group member's message is prefixed with their
+  // display name so the model (and the persisted transcript) tracks who
+  // said what in the shared session. The owner in private chat stays
+  // unprefixed as before.
+  const attributedText = opts?.isGroup && opts.groupSenderName
+    ? `[${opts.groupSenderName}]: ${userText}`
+    : userText;
   const userParts: Array<{ type: string; text?: string }> = [
-    { type: "text", text: userText },
+    { type: "text", text: attributedText },
   ];
   if (opts?.imageBase64) {
     userParts.push({
@@ -616,6 +685,7 @@ export async function runAssistantTurn(
     role: "user",
     parts: userParts as UIMessage["parts"],
   } as UIMessage;
+  void userParts;
 
   const system = [
     `Your name is "${resolveAssistantDisplayName(persona.name, prefs)}". When the user asks your name or addresses you, answer with it.`,
@@ -626,8 +696,10 @@ export async function runAssistantTurn(
     // (desktop "Allow" semantics) inside the scratch fence - the old
     // "interactive tools unavailable" disclaimer is obsolete.
     "\n\n## CONVERSATION SURFACE — TELEGRAM",
-    "You are chatting with the owner over Telegram. Replies are plain text (Telegram Markdown).",
-    "Keep replies conversational and SHORT — a chat message, not a document. Bullet points over essays.",
+    opts?.isGroup
+      ? "You are in a TELEGRAM GROUP CHAT with the owner and their friends. Messages arrive prefixed with each sender's display name in the shared conversation; address people by name when relevant. The owner is the person who set you up; other members are their guests."
+      : "You are chatting with the owner over Telegram. Replies are plain text (Telegram Markdown).",
+    "Keep replies conversational and SHORT - a chat message, not a document. Bullet points over essays.",
     describeAssistantCapabilities(allowed, prefs.mcpAllowedServers.length),
     "Do NOT use code fences with language tags unless the user asks for code — Telegram renders them as monospace blocks.",
     "This is a general personal-assistant conversation, not a coding session.",
@@ -881,6 +953,12 @@ type QueueItem = {
   imageMime?: string;
   /** Scratch-dir path of the original bytes (the persisted reference). */
   imagePath?: string;
+  /** GROUP attribution (2026-11-02): allow-listed group chat this came
+   *  from, the sender's display name, and the group flag. Set for group
+   *  members' messages; absent for the owner's private chat as before. */
+  groupChatId?: number;
+  groupSenderName?: string;
+  isGroup?: boolean;
 };
 const pendingQueue: QueueItem[] = [];
 
@@ -1010,7 +1088,23 @@ export async function stopAssistantBridge(): Promise<void> {
 }
 
 async function handleTelegramEvent(e: TelegramEvent): Promise<void> {
+  // GROUP events (2026-11-02): allow-listed group chats carry attribution.
+  // Commands (/tell, /sessions...) stay OWNER-ONLY — only the owner's private
+  // chat runs them; a member typing /tell in the group gets no response
+  // (no oracle, no control surface leak).
+  const group = e.kind !== "startCandidate" && e.kind !== "groupBindCandidate" && e.kind !== "rejected" && e.kind !== "error" && e.kind !== "callback_query" && e.isGroup
+    ? { groupChatId: e.chatId, senderName: e.senderName }
+    : undefined;
   if (e.kind === "message") {
+    // GROUP commands are silently dropped (owner-only surface).
+    if (e.isGroup) {
+      const text = e.text ?? "";
+      if (text.trim().startsWith("/")) return;
+      if (!text.trim()) return;
+      pendingQueue.push({ chatId: e.chatId, text, isVoice: false, groupChatId: group?.groupChatId, groupSenderName: group?.senderName, isGroup: true });
+      void drainQueue();
+      return;
+    }
     if (e.voiceFileId) {
       // Voice note: transcribe, then queue. When exactly ONE project is
       // bound, the transcript routes to that project's agent instead of an
@@ -1027,6 +1121,7 @@ async function handleTelegramEvent(e: TelegramEvent): Promise<void> {
     // Plain text to a SOLE bound project routes to that project's agent
     // (no assistant turn); with zero or several bound projects it is an
     // assistant message as before. /tell names the target explicitly.
+    // GROUP chats never route to bound projects (group branches above).
     const sole = await soleBoundTarget();
     if (sole) {
       const outcome = await tellProject(sole, text.trim(), e.chatId, true);
@@ -1044,15 +1139,15 @@ async function handleTelegramEvent(e: TelegramEvent): Promise<void> {
   if (e.kind === "photo") {
     // Photo → vision input: download, attach to the next turn as an image
     // part. The caption (or a default) is the user text.
-    await enqueuePhotoMessage(e.chatId, e.photoFileId, e.caption);
+    await enqueuePhotoMessage(e.chatId, e.photoFileId, e.caption, group);
     return;
   }
   if (e.kind === "document") {
-    await enqueueDocumentMessage(e.chatId, e.documentFileId, e.fileName, e.mimeType);
+    await enqueueDocumentMessage(e.chatId, e.documentFileId, e.fileName, e.mimeType, group);
     return;
   }
   if (e.kind === "video") {
-    await enqueueVideoMessage(e.chatId, e.videoFileId);
+    await enqueueVideoMessage(e.chatId, e.videoFileId, group);
     return;
   }
   if (e.kind === "startCandidate") {
@@ -1068,6 +1163,34 @@ async function handleTelegramEvent(e: TelegramEvent): Promise<void> {
     const prefs = await loadAssistantPrefs();
     prefs.ownerChatId = e.chatId;
     await saveAssistantPrefs(prefs);
+    return;
+  }
+  if (e.kind === "groupBindCandidate") {
+    // The OWNER's /bindgroup inside a group while bind mode was armed
+    // (Rust verified the sender is the owner). Persist the group in the
+    // allow-list; the next telegram_start pushes it into Rust's gate.
+    const token = await getTelegramToken();
+    const prefs = await loadAssistantPrefs();
+    const bound = new Set(prefs.boundGroups ?? []);
+    bound.add(e.chatId);
+    prefs.boundGroups = [...bound];
+    await saveAssistantPrefs(prefs);
+    await getOrCreateGroupSession(e.chatId);
+    if (token) {
+      const label = e.groupTitle ? `"${e.groupTitle}"` : "this group";
+      await telegramNative.sendMessage(
+        token,
+        e.chatId,
+        `👋 Group ${label} added — I'll answer here for everyone.`,
+      ).catch(() => {});
+    }
+    // Re-arm the loop's group list without a full restart: start pushes
+    // the persisted list into the Rust gate on every call (idempotent).
+    if (prefs.enabled) {
+      const onEvent = (ev: TelegramEvent) => void handleTelegramEvent(ev);
+      const st = await telegramNative.start(token ?? "", prefs.ownerChatId, onEvent).catch(() => null);
+      bridgeStarted = st?.running ?? bridgeStarted;
+    }
     return;
   }
   if (e.kind === "rejected") {
@@ -1259,6 +1382,7 @@ async function enqueuePhotoMessage(
   chatId: number,
   fileId: string,
   caption: string | null,
+  group?: { groupChatId: number; senderName: string },
 ): Promise<void> {
   const token = await getTelegramToken();
   if (!token) return;
@@ -1283,6 +1407,9 @@ async function enqueuePhotoMessage(
       imageBase64: small ?? b64,
       imageMime: "image/jpeg",
       imagePath: path,
+      groupChatId: group?.groupChatId,
+      groupSenderName: group?.senderName,
+      isGroup: group != null,
     });
     void drainQueue();
   } catch (e) {
@@ -1296,6 +1423,7 @@ async function enqueueDocumentMessage(
   fileId: string,
   fileName: string,
   mimeType: string | null,
+  group?: { groupChatId: number; senderName: string },
 ): Promise<void> {
   const token = await getTelegramToken();
   if (!token) return;
@@ -1313,6 +1441,9 @@ async function enqueueDocumentMessage(
       text: `I've sent you a file (saved at ${path}, type: ${mimeType ?? "unknown"}). ${""}`.trim() +
         " What should I do with it?",
       isVoice: false,
+      groupChatId: group?.groupChatId,
+      groupSenderName: group?.senderName,
+      isGroup: group != null,
     });
     void drainQueue();
   } catch (e) {
@@ -1321,7 +1452,11 @@ async function enqueueDocumentMessage(
   }
 }
 
-async function enqueueVideoMessage(chatId: number, fileId: string): Promise<void> {
+async function enqueueVideoMessage(
+  chatId: number,
+  fileId: string,
+  group?: { groupChatId: number; senderName: string },
+): Promise<void> {
   const token = await getTelegramToken();
   if (!token) return;
   try {
@@ -1335,6 +1470,9 @@ async function enqueueVideoMessage(chatId: number, fileId: string): Promise<void
       chatId,
       text: `I sent a video (saved at ${path}). You can read its metadata with your file tools. What should I do with it?`,
       isVoice: false,
+      groupChatId: group?.groupChatId,
+      groupSenderName: group?.senderName,
+      isGroup: group != null,
     });
     void drainQueue();
   } catch (e) {
@@ -1398,6 +1536,9 @@ async function drainQueue(): Promise<void> {
       imageBase64: next.imageBase64,
       imageMime: next.imageMime,
       imagePath: next.imagePath,
+      groupChatId: next.groupChatId,
+      groupSenderName: next.groupSenderName,
+      isGroup: next.isGroup,
     });
     const prefs = await loadAssistantPrefs();
     if (next.isVoice && prefs.voiceReplies) {

@@ -174,6 +174,17 @@ export function ExternalSection() {
     setStatus("Owner unbound — the next /start re-binds.");
   };
 
+  // GROUP BIND (2026-11-02): arm the handshake in Rust; the OWNER's next
+  // /bindgroup sent INSIDE a Telegram group claims that group for the
+  // assistant (Rust verifies the sender is the owner; the bridge handler
+  // persists it). One-shot: arming again re-arms after a bind or a timeout.
+  const onBindGroup = async () => {
+    await invoke("telegram_bind_group");
+    setStatus(
+      "Armed — send /bindgroup INSIDE the Telegram group from the owner account to add it. Everyone in an added group can chat with the assistant (read-only tools, shared conversation).",
+    );
+  };
+
   if (!prefs) {
     return (
       <div className="p-6 text-sm text-muted-foreground">Loading…</div>
@@ -266,6 +277,21 @@ export function ExternalSection() {
           ) : (
             <span className="text-xs text-muted-foreground">awaiting /start…</span>
           )}
+        </SettingRow>
+
+        <SettingRow
+          title="Group chats"
+          description={
+            (prefs.boundGroups ?? []).length > 0
+              ? `${prefs.boundGroups!.length} group${prefs.boundGroups!.length === 1 ? "" : "s"} added. Everyone in an added group can chat with the assistant — one shared conversation, sender-attributed, and members get read-only tools (never shell, file writes, or your API-spend tools). You must disable the bot's privacy mode in @BotFather for it to see normal group messages.`
+              : "Add a Telegram group so its members can chat with your assistant too. Bind with Add group, then send /bindgroup inside the group from the owner account. Members get read-only tools; the shared conversation keeps one context for everyone."
+          }
+        >
+          <div className="flex w-full flex-wrap items-center gap-2">
+            <Button variant="outline" size="sm" disabled={busy || prefs.ownerChatId == null} onClick={() => void onBindGroup()}>
+              Add group
+            </Button>
+          </div>
         </SettingRow>
 
         <SettingRow
