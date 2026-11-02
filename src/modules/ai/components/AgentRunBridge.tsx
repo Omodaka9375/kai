@@ -25,6 +25,7 @@ import { verifyIfDirtyAtRunEnd } from "../lib/autoVerify";
 import { hasLeakedToolCall } from "../lib/leakedToolCall";
 import { setProjectHasNews } from "../store/projectStatus";
 import { offerToDigest } from "../lib/desktopDigest";
+import { predictAutoApproval } from "../lib/autoApprovePrediction";
 import { activeProjectId, projectIdForSession } from "../store/chatStore";
 import { isApprovalDenied, noteApprovalDenied } from "../lib/approvalLatch";
 import { pickSpeakSegments, speakText } from "../lib/voiceTts";
@@ -289,6 +290,49 @@ function Bridge({
     (s) => s.commitSigningEnabled && s.commitSigningMode === "approval",
   );
 
+  // ---- Manual-attention count -------------------------------------------
+  // (2026-11-02 report: "left an agent in auto mode, got 'needs your
+  // approval' notification, but switching there showed auto executing
+  // fine - wiring bug".) approvalsPending counts RAW approval-requested
+  // parts; under autoApprove "all" every tool call transiently lands
+  // there before the auto-approve effect resolves it a macrotask later,
+  // so every "needs USER attention" consumer fired on cards nobody
+  // needed to click: the awaiting-approval status (pill/group notes),
+  // the desktop digest's approval toast, and the openMini nudge.
+  // manualApprovalsPending counts ONLY the parts auto-approve will NOT
+  // resolve on its own - the same carve-outs the bridge effect applies
+  // (elevated / privacy / signed commit), mirrored by
+  // predictAutoApproval (kept in lockstep by
+  // autoApprovePrediction.test.ts). Ask mode ("off"):
+  // predictAutoApproval is false for everything, so manual === raw and
+  // behavior is unchanged.
+  const manualApprovalsPending = useMemo(() => {
+    let n = 0;
+    for (const m of messages) {
+      if (m.role !== "assistant") continue;
+      for (const p of m.parts as AnyPart[]) {
+        if ((p as { state?: string }).state !== "approval-requested") continue;
+        const id = (p as { approval?: { id?: string } }).approval?.id;
+        if (!id) continue;
+        const type = (p as { type?: string }).type ?? "";
+        const input = (p as { input?: Record<string, unknown> }).input;
+        if (
+          predictAutoApproval({
+            autoApprove,
+            toolName: type.replace(/^tool-/, ""),
+            input,
+            signingApprovalRequired,
+          })
+        ) {
+          // Auto-approve WILL resolve this one on its own - not manual.
+          continue;
+        }
+        n++;
+      }
+    }
+    return n;
+  }, [messages, autoApprove, signingApprovalRequired]);
+
   // ---- Background completion bookkeeping ---------------------------------
   // OS notification popups were REMOVED here (2026-10-29): they interrupted
   // on every project switch and app focus change. The project rail's status
@@ -385,7 +429,10 @@ function Bridge({
 
   useEffect(() => {
     let runStatus: AgentRunStatus;
-    if (approvalsPending > 0) runStatus = "awaiting-approval";
+    // MANUAL gate (2026-11-02): auto-approvable cards under "all" mode are
+    // resolved by the bridge within a macrotask - they must not pin the
+    // session in awaiting-approval (pill, group delivery notes, digest).
+    if (manualApprovalsPending > 0) runStatus = "awaiting-approval";
     else if (status === "submitted") runStatus = "thinking";
     else if (status === "streaming") runStatus = "streaming";
     else if (status === "error") runStatus = "error";
@@ -412,14 +459,16 @@ function Bridge({
         digestSessionRef.current = sessionId;
       }
       const projectName = digestProjectName(sessionId);
-      // Approval: the pending count ROSE (0 -> 1, or a new card after the
-      // previous one was answered). Prev-count ref mirrors the
-      // news-boundary pattern - mount recomputes must not fire.
-      if (approvalsPending > prevApprovalsPendingRef.current) {
+      // Approval: the MANUAL pending count ROSE (0 -> 1, or a new card
+      // after the previous one was answered) - a card auto-approve will
+      // resolve on its own never pings (2026-11-02 phantom-toast fix).
+      // Prev-count ref mirrors the news-boundary pattern - mount
+      // recomputes must not fire.
+      if (manualApprovalsPending > prevApprovalsPendingRef.current) {
         offerToDigest({
           project: projectName,
           kind: "approval",
-          detail: `${approvalsPending} pending`,
+          detail: `${manualApprovalsPending} pending`,
         });
       }
       // Error / done: the run SETTLED (prev was thinking/streaming - a real
@@ -437,7 +486,7 @@ function Bridge({
         });
       }
     }
-    prevApprovalsPendingRef.current = approvalsPending;
+    prevApprovalsPendingRef.current = manualApprovalsPending;
     prevRunStatusForDigestRef.current = runStatus;
     patch({
       status: runStatus,
@@ -641,11 +690,13 @@ function Bridge({
         );
       }
     }
-  }, [isActive, status, approvalsPending, patch, openMini, sessionId, messages]);
+  }, [isActive, status, approvalsPending, manualApprovalsPending, patch, openMini, sessionId, messages]);
 
   useEffect(() => {
-    if (isActive && approvalsPending > 0) openMini();
-  }, [isActive, approvalsPending, openMini]);
+    // MANUAL gate (2026-11-02): same fix as the digest - an auto-approvable
+    // card must not flash-open the mini window for a bridge-resolved call.
+    if (isActive && manualApprovalsPending > 0) openMini();
+  }, [isActive, manualApprovalsPending, openMini]);
 
   // ---- Watch wake-up flush --------------------------------------------------
   // (REMOVED) A watch that fired mid-run used to queue a self-initiated wake

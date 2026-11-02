@@ -411,9 +411,41 @@ describe("source pins — trust boundary & wiring", () => {
     // re-runs the idle arm — the reply stayed in the project chat alone
     // ("agent replies outside the group") on every run whose last chunk
     // landed inside the throttle window.
+    // (2026-11-02: manualApprovalsPending joined the array when the
+    // awaiting-approval gate + digest approval offer + openMini nudge
+    // switched to the manual count - auto-approvable cards under "all"
+    // mode no longer ping.)
     expect(bridge).toMatch(
-      /\}, \[isActive, status, approvalsPending, patch, openMini, sessionId, messages\]\);/,
+      /\}, \[isActive, status, approvalsPending, manualApprovalsPending, patch, openMini, sessionId, messages\]\);/,
     );
+  });
+
+  it("the phantom-approval wiring is gated on the MANUAL count (2026-11-02)", () => {
+    // "I left an agent in auto mode and got 'needs your approval'
+    // notification; switching there showed auto executing fine."
+    // approvalsPending counts RAW approval-requested parts - under "all"
+    // every tool call transiently lands there before the bridge resolves
+    // it a macrotask later. All three attention signals must read the
+    // MANUAL count (what auto-approve will NOT resolve) instead:
+    // the runStatus gate, the digest approval offer, and the openMini
+    // nudge. The manual count mirrors the bridge's own carve-outs via
+    // predictAutoApproval (elevated / privacy / signed commit).
+    expect(bridge).toContain(
+      "import { predictAutoApproval } from \"../lib/autoApprovePrediction\";",
+    );
+    expect(bridge).toContain("const manualApprovalsPending = useMemo");
+    expect(bridge).toMatch(
+      /if \(manualApprovalsPending > 0\) runStatus = "awaiting-approval";/,
+    );
+    expect(bridge).toMatch(
+      /if \(manualApprovalsPending > prevApprovalsPendingRef\.current\) \{/,
+    );
+    expect(bridge).toMatch(
+      /isActive && manualApprovalsPending > 0\) openMini\(\);/,
+    );
+    // Ask mode unchanged: predictAutoApproval returns false for
+    // everything under "off", so manual === raw there.
+    expect(bridge).toContain("predictAutoApproval({");
   });
 
   it("the causality boundary snapshots ONLY on the idle->busy transition", () => {
