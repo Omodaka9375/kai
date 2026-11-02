@@ -75,6 +75,9 @@ const RUNTIME_STORE_ALLOW = new Set([
   "kai-sessions.json",
   "kai-mcp.json",
   "audit.jsonl",
+  // Legacy snippets store — mentioned by the skills migration note; the file
+  // exists at runtime in app-data (and on legacy installs), never in-repo.
+  "kai-snippets.json",
 ]);
 
 const CODE_EXT = /\.(ts|tsx|js|jsx|rs|json|md|css|scss|html|bash|zsh|ps1|plist|toml|ya?ml|lock)$/;

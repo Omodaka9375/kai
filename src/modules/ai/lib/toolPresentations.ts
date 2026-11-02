@@ -289,6 +289,38 @@ const REGISTRY: Record<string, ToolPresentation> = {
     remoteSurface: true,
   },
 
+  // ── Skills (authoring is approval-gated; listing is a local read) ─────
+  create_skill: {
+    label: "Create skill",
+    approvalLabel: "Create skill",
+    status: (a) => `Creating skill ${str(a, "name") ?? ""}`.trim(),
+    summary: (a) =>
+      [str(a, "name"), str(a, "scope") ? `(${str(a, "scope")})` : null]
+        .filter(Boolean)
+        .join(" "),
+    effect: "COMMITTED",
+    fence: true,
+    remoteSurface: false,
+  },
+  update_skill: {
+    label: "Update skill",
+    approvalLabel: "Update skill",
+    status: (a) => `Updating skill ${str(a, "name") ?? ""}`.trim(),
+    summary: (a) => str(a, "name"),
+    effect: "COMMITTED",
+    fence: true,
+    remoteSurface: false,
+  },
+  list_skills: {
+    label: "Skills",
+    status: (a) =>
+      str(a, "query") ? `Listing skills: ${str(a, "query")}` : "Listing skills",
+    summary: (a) => str(a, "query"),
+    effect: "NONE",
+    fence: true,
+    remoteSurface: false,
+  },
+
   // ── Structure / delegation ────────────────────────────────────────────
   todo_write: {
     label: "Todos",

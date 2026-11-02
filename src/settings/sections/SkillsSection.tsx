@@ -13,13 +13,10 @@ import type { McpServerConfig } from "@/modules/ai/lib/mcp";
 import {
   isValidHandle,
   normalizeHandle,
-  type Snippet,
-} from "@/modules/ai/lib/snippets";
+  type Skill,
+} from "@/modules/ai/lib/skills";
 import { useMcpStore } from "@/modules/ai/store/mcpStore";
-import {
-  newSnippetId,
-  useSnippetsStore,
-} from "@/modules/ai/store/snippetsStore";
+import { useSkillsStore } from "@/modules/ai/store/skillsStore";
 import {
   Add01Icon,
   Delete02Icon,
@@ -37,38 +34,49 @@ function Label({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function SnippetsSection() {
-  const snippets = useSnippetsStore((s) => s.snippets);
-  const upsertSnippet = useSnippetsStore((s) => s.upsert);
-  const removeSnippet = useSnippetsStore((s) => s.remove);
-  const hydrateSnippets = useSnippetsStore((s) => s.hydrate);
+/**
+ * Skills settings (2026-11-02) — the management surface for the
+ * folder-based skills system. Replaces the Snippets section: same editor
+ * shape (handle / name / description / content), now writing SKILL.md
+ * folders in the GLOBAL scope (~/.kai/skills — every project) instead of
+ * kai-snippets.json rows. Project-scope skills are per-repo files
+ * (<root>/.kai/skills) — edit them in the repo, not here.
+ */
+export function SkillsSection() {
+  const skills = useSkillsStore((s) => s.globalSkills);
+  const hydrateSkills = useSkillsStore((s) => s.hydrate);
+  const upsertSkill = useSkillsStore((s) => s.upsert);
+  const removeSkill = useSkillsStore((s) => s.remove);
   const mcpServers = useMcpStore((s) => s.servers);
   const hydrateMcp = useMcpStore((s) => s.hydrate);
 
   useEffect(() => {
-    void hydrateSnippets();
+    void hydrateSkills(null);
     void hydrateMcp();
-  }, [hydrateSnippets, hydrateMcp]);
+  }, [hydrateSkills, hydrateMcp]);
 
-  const [editingSnippet, setEditingSnippet] = useState<Snippet | null>(null);
+  const [editing, setEditing] = useState<Skill | null>(null);
 
   return (
     <div className="flex flex-col gap-7">
       <SectionHeader
-        title="Snippets"
-        description="Reusable instructions you can drop into any prompt."
+        title="Skills"
+        description="Reusable capabilities you can drop into any prompt, in any project."
       />
 
       <section className="flex flex-col gap-2">
         <div className="flex items-center justify-between">
           <div className="flex flex-col">
-            <Label>Snippets</Label>
+            <Label>Skills</Label>
             <span className="text-[10.5px] text-muted-foreground">
               Drop into any prompt with{" "}
               <code className="rounded bg-muted/50 px-1 font-mono">
                 #handle
               </code>
-              .
+              . Stored as folders in{" "}
+              <code className="font-mono">~/.kai/skills</code> — every
+              project sees them. Project skills live in{" "}
+              <code className="font-mono">.kai/skills</code> in the repo.
             </span>
           </div>
           <Button
@@ -76,30 +84,34 @@ export function SnippetsSection() {
             variant="outline"
             className="h-7 gap-1.5 px-2 text-[11px]"
             onClick={() =>
-              setEditingSnippet({
-                id: newSnippetId(),
-                handle: "",
+              setEditing({
                 name: "",
+                handle: "",
                 description: "",
                 content: "",
+                mcpServers: [],
+                agentHidden: false,
+                scope: "global",
+                dir: "",
+                skillMdPath: "",
               })
             }
           >
             <HugeiconsIcon icon={Add01Icon} size={12} strokeWidth={1.75} />
-            New snippet
+            New skill
           </Button>
         </div>
 
-        {snippets.length === 0 ? (
+        {skills.length === 0 ? (
           <div className="rounded-lg border border-dashed border-border/60 bg-card/30 px-4 py-6 text-center text-[11px] text-muted-foreground">
-            No snippets yet. Create one and insert it with{" "}
+            No skills yet. Create one and insert it with{" "}
             <code className="font-mono">#handle</code> in the AI input.
           </div>
         ) : (
           <ul className="flex flex-col gap-1.5">
-            {snippets.map((s) => (
+            {skills.map((s) => (
               <li
-                key={s.id}
+                key={s.name}
                 className="flex items-center gap-2 rounded-lg border border-border/60 bg-card/60 px-3 py-2"
               >
                 <code className="rounded bg-muted/50 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
@@ -115,11 +127,19 @@ export function SnippetsSection() {
                     </span>
                   ) : null}
                 </div>
+                {s.agentHidden ? (
+                  <span
+                    className="text-[10px] text-muted-foreground"
+                    title="Hidden from the agent's list_skills; #handle only"
+                  >
+                    handle-only
+                  </span>
+                ) : null}
                 <Button
                   size="icon"
                   variant="ghost"
                   className="size-7"
-                  onClick={() => setEditingSnippet(s)}
+                  onClick={() => setEditing(s)}
                   title="Edit"
                 >
                   <HugeiconsIcon
@@ -132,7 +152,7 @@ export function SnippetsSection() {
                   size="icon"
                   variant="ghost"
                   className="size-7 text-muted-foreground hover:text-destructive"
-                  onClick={() => removeSnippet(s.id)}
+                  onClick={() => void removeSkill(s.name, "global")}
                   title="Delete"
                 >
                   <HugeiconsIcon
@@ -147,57 +167,68 @@ export function SnippetsSection() {
         )}
       </section>
 
-      <SnippetEditorDialog
-        snippet={editingSnippet}
-        existing={snippets}
+      <SkillEditorDialog
+        skill={editing}
+        existing={skills}
         mcpServers={mcpServers}
-        onClose={() => setEditingSnippet(null)}
+        onClose={() => setEditing(null)}
         onSave={(s) => {
-          upsertSnippet(s);
-          setEditingSnippet(null);
+          void upsertSkill(
+            {
+              name: s.name,
+              handle: s.handle,
+              description: s.description,
+              content: s.content,
+              mcpServers: s.mcpServers,
+              agentHidden: s.agentHidden,
+            },
+            "global",
+          );
+          setEditing(null);
         }}
       />
     </div>
   );
 }
 
-function SnippetEditorDialog({
-  snippet,
+function SkillEditorDialog({
+  skill,
   existing,
   mcpServers,
   onClose,
   onSave,
 }: {
-  snippet: Snippet | null;
-  existing: Snippet[];
+  skill: Skill | null;
+  existing: Skill[];
   mcpServers: McpServerConfig[];
   onClose: () => void;
-  onSave: (s: Snippet) => void;
+  onSave: (s: Skill) => void;
 }) {
-  const [draft, setDraft] = useState<Snippet | null>(snippet);
-  useEffect(() => setDraft(snippet), [snippet]);
+  const [draft, setDraft] = useState<Skill | null>(skill);
+  useEffect(() => setDraft(skill), [skill]);
   if (!draft) return null;
 
   const handleErr = !draft.handle
     ? "Required."
     : !isValidHandle(draft.handle)
       ? "Lowercase letters, digits, and dashes only."
-      : existing.some((s) => s.id !== draft.id && s.handle === draft.handle)
+      : existing.some((s) => s.name !== draft.name && s.handle === draft.handle)
         ? "Already in use."
         : null;
   const canSave =
     !handleErr &&
     draft.name.trim().length > 0 &&
-    draft.content.trim().length > 0;
+    draft.content.trim().length > 0 &&
+    draft.description.trim().length > 0;
 
   return (
-    <Dialog open={!!snippet} onOpenChange={(o) => !o && onClose()}>
+    <Dialog open={!!skill} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle className="text-[14px]">
-            {existing.some((s) => s.id === draft.id)
-              ? "Edit snippet"
-              : "New snippet"}
+            {existing.some((s) => s.name === draft.name)
+              ? "Edit skill"
+              : "New skill"}
           </DialogTitle>
         </DialogHeader>
         <div className="flex flex-col gap-3 max-h-[60vh] overflow-y-auto pr-1 scrollbar-thin">
@@ -227,12 +258,18 @@ function SnippetEditorDialog({
               ) : null}
             </div>
             <div className="flex flex-1 flex-col gap-1">
-              <Label>Name</Label>
+              <Label>Skill name</Label>
               <Input
                 value={draft.name}
-                onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                placeholder="e.g. Pre-merge review checklist"
-                className="h-8 text-[12px]"
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    // Folder name — keep it in the handle alphabet.
+                    name: normalizeHandle(e.target.value),
+                  })
+                }
+                placeholder="e.g. deploy-status"
+                className="h-8 font-mono text-[12px]"
               />
             </div>
           </div>
@@ -243,35 +280,55 @@ function SnippetEditorDialog({
               onChange={(e) =>
                 setDraft({ ...draft, description: e.target.value })
               }
-              placeholder="One line — shown in the # picker"
+              placeholder="One line — shown in the # picker and in list_skills"
               className="h-8 text-[12px]"
             />
           </div>
           <div className="flex flex-col gap-1">
-            <Label>Content</Label>
+            <Label>Instructions</Label>
             <Textarea
               value={draft.content}
               onChange={(e) => setDraft({ ...draft, content: e.target.value })}
-              placeholder="Inserted into the prompt as a <snippet> block when you use #handle."
+              placeholder="Inserted into the prompt as a <skill> block when you use #handle."
               className="min-h-40 max-h-64 resize-y overflow-y-auto break-words font-mono text-[11.5px] leading-relaxed"
             />
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex flex-col">
+              <Label>Agent discovery</Label>
+              <span className="text-[10px] text-muted-foreground">
+                Off = this skill is #handle-only (hidden from the agent's
+                list_skills).
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setDraft({ ...draft, agentHidden: !draft.agentHidden })}
+              className={cn(
+                "rounded-md border px-2 py-1 text-[11px] transition-colors",
+                draft.agentHidden
+                  ? "border-foreground/40 bg-accent font-medium"
+                  : "border-border/60 text-muted-foreground hover:bg-accent/40",
+              )}
+            >
+              {draft.agentHidden ? "Handle-only" : "Discoverable"}
+            </button>
           </div>
           {mcpServers.length > 0 && (
             <div className="flex flex-col gap-1">
               <Label>MCP Servers</Label>
               <div className="flex flex-wrap gap-1.5">
                 {mcpServers.map((s) => {
-                  const active = draft.mcpServerIds?.includes(s.id) ?? false;
+                  const active = draft.mcpServers.includes(s.id);
                   return (
                     <button
                       key={s.id}
                       type="button"
                       onClick={() => {
-                        const ids = draft.mcpServerIds ?? [];
                         const next = active
-                          ? ids.filter((id) => id !== s.id)
-                          : [...ids, s.id];
-                        setDraft({ ...draft, mcpServerIds: next });
+                          ? draft.mcpServers.filter((id) => id !== s.id)
+                          : [...draft.mcpServers, s.id];
+                        setDraft({ ...draft, mcpServers: next });
                       }}
                       className={cn(
                         "rounded-md border px-2 py-1 text-[11px] transition-colors",

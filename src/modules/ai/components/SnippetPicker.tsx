@@ -3,10 +3,10 @@ import { cn } from "@/lib/utils";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useRef } from "react";
 import type { SlashCommandMeta } from "../lib/slashCommands";
-import type { Snippet } from "../lib/snippets";
+import type { Skill } from "../lib/skills";
 
 export type PickerItem =
-  | { kind: "snippet"; snippet: Snippet }
+  | { kind: "snippet"; snippet: Skill }
   | { kind: "command"; command: SlashCommandMeta };
 
 type Props = {
@@ -47,7 +47,7 @@ export function SnippetPickerContent({
     >
       {items.length === 0 ? (
         <div className="px-3 py-2.5 text-[11px] text-muted-foreground">
-          No matches. Add snippets in Settings → Agents.
+          No matches. Add skills in Settings → Skills.
         </div>
       ) : (
         <div className="max-h-64 overflow-y-auto py-1">
@@ -99,7 +99,7 @@ export function SnippetPickerContent({
           )}
           {snippets.length > 0 && (
             <>
-              <SectionHeader label="Snippets" />
+              <SectionHeader label="Skills" />
               <ul>
                 {snippets.map((it) => {
                   cursor += 1;
@@ -107,7 +107,7 @@ export function SnippetPickerContent({
                   if (it.kind !== "snippet") return null;
                   const s = it.snippet;
                   return (
-                    <li key={`sn-${s.id}`}>
+                    <li key={`sn-${s.name}`}>
                       <button
                         ref={(el) => {
                           itemRefs.current[i] = el;

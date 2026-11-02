@@ -35,7 +35,7 @@ import { modelTextOnly } from "../extraction";
 import { useWorkspaceFiles } from "../hooks/useWorkspaceFiles";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { SLASH_COMMANDS } from "../lib/slashCommands";
-import type { Snippet } from "../lib/snippets";
+import type { Skill } from "../lib/skills";
 import {
   detectSnippetTrigger,
   detectFileTrigger,
@@ -43,7 +43,7 @@ import {
   type FileTrigger,
 } from "../lib/inputTriggers";
 import { useChatStore } from "../store/chatStore";
-import { useSnippetsStore } from "../store/snippetsStore";
+import { skillsForProject, useSkillsStore } from "../store/skillsStore";
 import {
   subscribeTtsPlaying,
   ttsPause,
@@ -60,8 +60,13 @@ import { SnippetPickerContent, type PickerItem } from "./SnippetPicker";
 export function AiInputBar() {
   const c = useComposer();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const snippets = useSnippetsStore((s) => s.snippets);
+  const snippets = useSkillsStore((s) => s.globalSkills);
   const workspaceRoot = useChatStore((s) => s.live.getWorkspaceRoot());
+  // Merged view (global + this project) — project skills shadow globals.
+  const mergedSkills = useMemo(
+    () => skillsForProject(workspaceRoot),
+    [snippets, workspaceRoot],
+  );
   const slashCommands = useMemo(() => Object.values(SLASH_COMMANDS), []);
 
   const [trigger, setTrigger] = useState<SnippetTrigger | null>(null);
@@ -122,12 +127,12 @@ export function AiInputBar() {
         (c) => !q || c.name.includes(q) || c.label.toLowerCase().includes(q),
       )
       .map((command) => ({ kind: "command", command }));
-    // `/` is the canonical command prefix — showing snippets there is noise.
-    // Snippets stay on `#` where they have always lived.
+    // `/` is the canonical command prefix — showing skills there is noise.
+    // Skills stay on `#` where the snippets always lived.
     const snipItems: PickerItem[] =
       trigger.char === "/"
         ? []
-        : snippets
+        : mergedSkills
             .filter(
               (s) =>
                 !q ||
@@ -137,7 +142,7 @@ export function AiInputBar() {
             )
             .map((snippet) => ({ kind: "snippet", snippet }));
     return [...cmdItems, ...snipItems];
-  }, [trigger, snippets, slashCommands]);
+  }, [trigger, mergedSkills, slashCommands]);
 
   const FILE_PICKER_CAP = 30;
   const filteredFiles = useMemo<string[]>(() => {
@@ -250,9 +255,9 @@ export function AiInputBar() {
           files={c.files}
           onRemoveFile={c.removeFile}
           snippets={c.pickedSnippets}
-          onRemoveSnippet={(id) => {
-            const snip = c.pickedSnippets.find((s) => s.id === id);
-            c.removeSnippet(id);
+          onRemoveSnippet={(name) => {
+            const snip = c.pickedSnippets.find((s) => s.name === name);
+            c.removeSnippet(name);
             if (!snip) return;
             const re = new RegExp(`(^|\\s)#${snip.handle}\\b ?`);
             c.setValue((v) => v.replace(re, (_m, lead: string) => lead));
@@ -550,7 +555,7 @@ export function AiInputBar() {
                       : "Transcribing…"
                     : c.isBusy
                       ? "Redirect agent…"
-                      : "Ask anything / for commands, # for snippets, @ for files"
+                      : "Ask anything / for commands, # for skills, @ for files"
                 }
                 rows={1}
                 disabled={false}
@@ -827,8 +832,8 @@ function ChipsRow({
 }: {
   files: FileAttachment[];
   onRemoveFile: (id: string) => void;
-  snippets: Snippet[];
-  onRemoveSnippet: (id: string) => void;
+  snippets: Skill[];
+  onRemoveSnippet: (name: string) => void;
   commands: { name: string; label: string; icon: typeof HashtagIcon }[];
   onRemoveCommand: (name: string) => void;
 }) {
@@ -867,7 +872,7 @@ function ChipsRow({
         ))}
         {snippets.map((s) => (
           <motion.div
-            key={`snip-${s.id}`}
+            key={`snip-${s.name}`}
             layout
             initial={{ opacity: 0, scale: 0.92 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -885,9 +890,9 @@ function ChipsRow({
             <span className="font-medium">{s.handle}</span>
             <button
               type="button"
-              onClick={() => onRemoveSnippet(s.id)}
+              onClick={() => onRemoveSnippet(s.name)}
               className="ml-0.5 opacity-0 transition-opacity group-hover:opacity-100"
-              aria-label="Remove snippet"
+              aria-label="Remove skill"
             >
               <HugeiconsIcon icon={Cancel01Icon} size={10} strokeWidth={2} />
             </button>

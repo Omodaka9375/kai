@@ -20,7 +20,10 @@ const GeneralSection = lazy(() => import("./sections/GeneralSection").then((m) =
 const ShortcutsSection = lazy(() => import("./sections/ShortcutsSection").then((m) => ({ default: m.ShortcutsSection })));
 const ModelsSection = lazy(() => import("./sections/ModelsSection").then((m) => ({ default: m.ModelsSection })));
 const AgentsSection = lazy(() => import("./sections/AgentsSection").then((m) => ({ default: m.AgentsSection })));
-const SnippetsSection = lazy(() => import("./sections/SnippetsSection").then((m) => ({ default: m.SnippetsSection })));
+const SkillsSection = lazy(() => import("./sections/SkillsSection").then((m) => ({ default: m.SkillsSection })));
+// 2026-11-02: Snippets → Skills rename. The tab ID stays "snippets"
+// (denylist/window-state keys churn otherwise — same approach as the
+// external → assistant id swap above).
 const McpSection = lazy(() => import("./sections/McpSection").then((m) => ({ default: m.McpSection })));
 const SandboxSection = lazy(() => import("./sections/SandboxSection").then((m) => ({ default: m.SandboxSection })));
 const SecuritySection = lazy(() => import("./sections/SecuritySection").then((m) => ({ default: m.SecuritySection })));
@@ -38,7 +41,7 @@ const TABS: TabDef[] =
     { id: "shortcuts", label: "Shortcuts", icon: KeyboardIcon, component: ShortcutsSection },
     { id: "models", label: "Models", icon: AiScanIcon, component: ModelsSection },
     { id: "agents", label: "Agents", icon: UserMultiple02Icon, component: AgentsSection },
-    { id: "snippets", label: "Snippets", icon: SparklesIcon, component: SnippetsSection },
+    { id: "snippets", label: "Skills", icon: SparklesIcon, component: SkillsSection },
     { id: "mcp", label: "MCP Servers", icon: PuzzleIcon, component: McpSection },
     { id: "sandbox", label: "Sandbox", icon: Shield01Icon, component: SandboxSection },
     { id: "security", label: "Security", icon: Shield01Icon, component: SecuritySection },

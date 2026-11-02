@@ -40,7 +40,7 @@ import { setSessionPreferences } from "@/modules/ai/store/sessionPreferences";
 import { native } from "@/modules/ai/lib/native";
 import { useAgentsStore } from "@/modules/ai/store/agentsStore";
 import { useMcpStore } from "@/modules/ai/store/mcpStore";
-import { useSnippetsStore } from "@/modules/ai/store/snippetsStore";
+import { refreshProjectSkills, useSkillsStore } from "@/modules/ai/store/skillsStore";
 import {
   AiDiffStack,
   EditorStack,
@@ -791,7 +791,9 @@ export const ProjectWorkspace = memo(function ProjectWorkspace({ isActive = true
     const root = explorerRoot ?? launchCwd ?? home ?? null;
       void hydrateSessions(root, projectRuntime);
     void useAgentsStore.getState().hydrate();
-    void useSnippetsStore.getState().hydrate();
+    void useSkillsStore.getState().hydrate(root);
+    // Project-scope skills re-scan on activation (global scans once).
+    void refreshProjectSkills(root);
     void useMcpStore.getState().hydrate();
     // Fire the env probe in the background — the first agent turn's <env>
     // block reads it from cache (verified shell + installed tool list,

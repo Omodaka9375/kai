@@ -19,7 +19,7 @@ import {
   spreadsheetToText,
 } from "../lib/documentParser";
 import type { SpreadsheetData } from "../lib/native";
-import { expandSnippetTokens, type Snippet } from "../lib/snippets";
+import { expandSkillTokens, type Skill } from "../lib/skills";
 import { tryRunSlashCommand, type SlashCommandMeta } from "../lib/slashCommands";
 import { buildQuoteBlock } from "../lib/chatText";
 import {
@@ -33,7 +33,7 @@ import {
   getSessionSteeringMessage,
   useChatStore,
 } from "../store/chatStore";
-import { useSnippetsStore } from "../store/snippetsStore";
+import { skillsForProject, useSkillsStore } from "../store/skillsStore";
 import {
   getSessionPreferences,
   hydrateSessionPreferences,
@@ -86,9 +86,9 @@ type ComposerCtx = {
    *  submit or dismiss. */
   pendingQuote: PendingQuote | null;
   setPendingQuote: (q: PendingQuote | null) => void;
-  pickedSnippets: Snippet[];
-  addSnippet: (s: Snippet) => void;
-  removeSnippet: (id: string) => void;
+  pickedSnippets: Skill[];
+  addSnippet: (s: Skill) => void;
+  removeSnippet: (name: string) => void;
   pickedCommands: SlashCommandMeta[];
   addCommand: (c: SlashCommandMeta) => void;
   removeCommand: (name: string) => void;
@@ -136,6 +136,9 @@ export function AiComposerProvider({ children }: ProviderProps) {
   const draftSessionRef = useRef(sessionId);
   useEffect(() => {
     void hydrateSessionPreferences();
+    // Skills hydrate: migrate legacy snippets once + scan the global scope.
+    // Project scopes refresh on activation (App.tsx calls refreshProjectSkills).
+    void useSkillsStore.getState().hydrate(runtime?.root);
   }, []);
   useEffect(() => {
     if (draftSessionRef.current !== sessionId) {
@@ -156,7 +159,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
     return () => clearTimeout(timer);
   }, [sessionId, value]);
   const [files, setFiles] = useState<FileAttachment[]>([]);
-  const [pickedSnippets, setPickedSnippets] = useState<Snippet[]>([]);
+  const [pickedSnippets, setPickedSnippets] = useState<Skill[]>([]);
   const [pickedCommands, setPickedCommands] = useState<SlashCommandMeta[]>([]);
   const [pendingQuote, setPendingQuote] = useState<PendingQuote | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -356,12 +359,12 @@ export function AiComposerProvider({ children }: ProviderProps) {
     ]);
   };
 
-  const addSnippet = (s: Snippet) =>
+  const addSnippet = (s: Skill) =>
     setPickedSnippets((prev) =>
-      prev.some((p) => p.id === s.id) ? prev : [...prev, s],
+      prev.some((p) => p.name === s.name) ? prev : [...prev, s],
     );
-  const removeSnippet = (id: string) =>
-    setPickedSnippets((prev) => prev.filter((s) => s.id !== id));
+  const removeSnippet = (name: string) =>
+    setPickedSnippets((prev) => prev.filter((s) => s.name !== name));
 
   const addCommand = (cmd: SlashCommandMeta) =>
     setPickedCommands((prev) =>
@@ -461,24 +464,51 @@ export function AiComposerProvider({ children }: ProviderProps) {
         (f) =>
           `<selection source="${f.source ?? "terminal"}">\n${f.text ?? ""}\n</selection>`,
       );
-    const { body: bodyAfterTokens, blocks: snippetBlocks } = expandSnippetTokens(
-      effectiveText,
-      useSnippetsStore.getState().snippets,
-    );
+    // SKILL EXPANSION (2026-11-02): `#handle` tokens expand into <skill>
+    // blocks — the same contract the legacy snippets had, now over the
+    // folder-based skills system (global + project scopes). Matched skills'
+    // MCP servers activate non-interactively on submit.
+    const { body: bodyAfterTokens, blocks: skillBlocks, mcpServers: skillMcpIds } =
+      expandSkillTokens(
+        effectiveText,
+        skillsForProject(runtime?.root),
+      );
     const seenHandles = new Set<string>();
     const allSnippetBlocks: string[] = [];
     for (const s of pickedSnippets) {
       if (seenHandles.has(s.handle)) continue;
       seenHandles.add(s.handle);
       allSnippetBlocks.push(
-        `<snippet name="${s.handle}">\n${s.content}\n</snippet>`,
+        `<skill name="${s.handle}">\n${s.content}\n</skill>`,
       );
+      for (const id of s.mcpServers) skillMcpIds.push(id);
     }
-    for (const block of snippetBlocks) {
-      const m = block.match(/^<snippet name="([^"]+)"/);
+    for (const block of skillBlocks) {
+      const m = block.match(/^<skill name="([^"]+)"/);
       if (m && seenHandles.has(m[1])) continue;
       if (m) seenHandles.add(m[1]);
       allSnippetBlocks.push(block);
+    }
+    // Activate any MCP servers a matched skill declares (non-interactive;
+    // the user's explicit #handle is the consent). Fire-and-forget.
+    if (skillMcpIds.length > 0) {
+      void (async () => {
+        const { useMcpStore } = await import("../store/mcpStore");
+        const { mcpManager } = await import("../lib/mcpManager");
+        const servers = useMcpStore.getState().servers;
+        for (const id of skillMcpIds) {
+          const cfg = servers.find((s) => s.id === id || s.name === id);
+          if (!cfg?.enabled) continue;
+          const status = useMcpStore.getState().statuses[cfg.id]?.status;
+          if (status !== "connected") {
+            try {
+              await mcpManager.connect(cfg, false);
+            } catch {
+              // best-effort: the run proceeds without that server's tools
+            }
+          }
+        }
+      })();
     }
     const quoteBlock = pendingQuote
       ? buildQuoteBlock(pendingQuote.author, pendingQuote.text)
