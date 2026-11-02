@@ -2,7 +2,11 @@ import { createContext, useContext } from "react";
 import type { ProjectSwitcherItem } from "@/modules/workspace";
 
 export type ProjectsMenu = {
-  items: ProjectSwitcherItem[];
+  /** Snapshot of the rail items, read at EVENT time — consumers of this
+   *  context never re-render when statuses change (2026-11-02
+   *  switch-freeze fix: items used to ride this context, so every agent
+   *  status bump re-rendered every workspace that consumed the menu). */
+  getItems: () => ProjectSwitcherItem[];
   addProject: (path?: string) => void | Promise<void>;
   /** Create a NEW project folder (save-style dialog), then open it in the
    *  rail via the same path as addProject. */
@@ -15,4 +19,12 @@ export type ProjectsMenu = {
 export const ProjectsMenuContext = createContext<ProjectsMenu | null>(null);
 export function useProjectsMenu(): ProjectsMenu | null {
   return useContext(ProjectsMenuContext);
+}
+
+/** Live rail items. Consumed ONLY by components that render item DATA
+ *  (ProjectRail, StatusBar): a status transition re-renders those, never
+ *  the memoized workspaces. */
+export const ProjectRailItemsContext = createContext<ProjectSwitcherItem[]>([]);
+export function useProjectRailItems(): ProjectSwitcherItem[] {
+  return useContext(ProjectRailItemsContext);
 }

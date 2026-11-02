@@ -9,7 +9,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useProjectsMenu } from "@/app/projectsMenu";
+import { useProjectRailItems } from "@/app/projectsMenu";
 import { IncognitoIcon, UserMultiple02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { CwdBreadcrumb } from "./CwdBreadcrumb";
@@ -44,8 +44,8 @@ export function StatusBar({
   const openMini = useChatStore((s) => s.openMini);
   const closeMini = useChatStore((s) => s.closeMini);
   // Cross-project group chats need at least two open projects to exist.
-  const projectsMenu = useProjectsMenu();
-  const canStartGroup = (projectsMenu?.items.length ?? 0) >= 2;
+  const railItems = useProjectRailItems();
+  const canStartGroup = railItems.length >= 2;
 
   const handleOpenAgent = useCallback(() => {
     if (panelOpen) {

@@ -109,7 +109,7 @@ import { listen } from "@tauri-apps/api/event";
 import { homeDir } from "@tauri-apps/api/path";
 import type { SearchAddon } from "@xterm/addon-search";
 import { AnimatePresence, motion } from "motion/react";
-import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PanelImperativeHandle } from "react-resizable-panels";
 
 function dirname(path: string | null): string | null {
@@ -125,10 +125,41 @@ function dirname(path: string | null): string | null {
 // Initialize agent bus event handlers once.
 initBusHandlers();
 
-export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
+/**
+ * Session-stamp child (2026-11-02 switch-freeze fix): the GLOBAL
+ * activeSessionId subscription lives here, so every session switch
+ * re-renders only this null-rendering component — not the whole (now
+ * memoized) workspace tree. Previously the subscription sat in
+ * ProjectWorkspace itself: any session switch anywhere re-rendered
+ * EVERY mounted workspace.
+ */
+function ProjectSessionStamp({
+  isActive,
+  projectRuntime,
+}: {
+  isActive: boolean;
+  projectRuntime: ReturnType<typeof createProjectRuntime>;
+}) {
+  const activeChatSessionId = useChatStore((s) => s.activeSessionId);
+  useEffect(() => {
+    if (!isActive || !activeChatSessionId) return;
+    // The global active id briefly still names the OUTGOING project's chat
+    // when the foreground changes. Never stamp that id onto this project.
+    if (projectIdForSession(activeChatSessionId) !== projectRuntime.id) return;
+    setSessionPreferences(activeChatSessionId, { projectId: projectRuntime.id });
+    setProjectActiveSession(projectRuntime.id, activeChatSessionId);
+  }, [isActive, projectRuntime.id, activeChatSessionId]);
+  return null;
+}
+
+/** Memoized (2026-11-02): AppShell re-renders on project-status transitions
+ *  and its own state; a memoized workspace only reconciles when ITS
+ *  isActive prop flips or its own state changes. A switch between two
+ *  projects no longer re-renders the third, and background agents' status
+ *  transitions no longer reconcile all workspaces at once. */
+export const ProjectWorkspace = memo(function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
   const runtime = useProjectRuntime();
   const projectsMenu = useProjectsMenu();
-  const activeChatSessionId = useChatStore((s) => s.activeSessionId);
   const {
     tabs,
     activeId,
@@ -626,7 +657,7 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
       // StartPage with zero tabs.
       if (projectsMenu) {
         const normalized = path.replace(/\\/g, "/").toLowerCase();
-        const existing = projectsMenu.items.find(
+        const existing = projectsMenu.getItems().find(
           (item) => item.root.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase() === normalized.replace(/\/+$/, ""),
         );
         if (existing) projectsMenu.switchProject(existing.id);
@@ -1895,15 +1926,6 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
     };
   }, [projectRuntime.root]);
 
-  useEffect(() => {
-    if (!isActive || !activeChatSessionId) return;
-    // The global active id briefly still names the OUTGOING project's chat
-    // when the foreground changes. Never stamp that id onto this project.
-    if (projectIdForSession(activeChatSessionId) !== projectRuntime.id) return;
-    setSessionPreferences(activeChatSessionId, { projectId: projectRuntime.id });
-    setProjectActiveSession(projectRuntime.id, activeChatSessionId);
-  }, [isActive, projectRuntime.id, activeChatSessionId]);
-
   const fileMenuTrigger = (
     <FileMenu
       activeTab={activeTab}
@@ -2061,9 +2083,9 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
       <TooltipProvider>
         <FileMenuTriggerProvider value={isActive ? fileMenuTrigger : null}>
         <div className="relative flex h-screen flex-col overflow-hidden bg-background text-foreground">
+          <ProjectSessionStamp isActive={isActive} projectRuntime={projectRuntime} />
           <div className="flex min-h-0 flex-1">
           <ProjectRail
-            projects={projectsMenu?.items ?? []}
             onSwitch={(id) => projectsMenu?.switchProject(id)}
             onAdd={() => void projectsMenu?.addProject()}
             onNewProject={() => void projectsMenu?.newProject()}
@@ -2481,4 +2503,4 @@ export function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
   );
 
   return <AiComposerProvider>{shell}</AiComposerProvider>;
-}
+});

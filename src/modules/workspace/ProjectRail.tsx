@@ -20,6 +20,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
 import { useFileMenuTrigger } from "@/app/fileMenu";
+import { useProjectRailItems } from "@/app/projectsMenu";
 import { SIDEBAR_RAIL_HEIGHT } from "@/modules/sidebar";
 import { useProjectRunningTerminals } from "@/modules/terminal/lib/terminalActivity";
 
@@ -104,19 +105,22 @@ function TerminalRunningText({ projectId }: { projectId: string }) {
  * each entry opens that project's last-active agent session. Session picking
  * deliberately lives in the AI window, not in this rail. */
 export function ProjectRail({
-  projects,
   onSwitch,
   onAdd,
   onNewProject,
   onClose,
 }: {
-  projects: ProjectSwitcherItem[];
   onSwitch: (id: string) => void;
   onAdd: () => void | Promise<void>;
   onNewProject: () => void | Promise<void>;
   onClose: (id: string) => void;
 }) {
   const fileMenuTrigger = useFileMenuTrigger();
+  // Live items (2026-11-02): the rail subscribes itself — status
+  // transitions re-render THIS component only, never the memoized
+  // workspaces (previously the items rode the menu context every
+  // workspace consumed, so every status bump re-rendered everything).
+  const projects = useProjectRailItems();
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   return (
     <TooltipProvider

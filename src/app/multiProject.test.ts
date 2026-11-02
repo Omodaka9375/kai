@@ -13,6 +13,9 @@ describe("multi-project workspace ownership", () => {
   it("keeps every project mounted and switches visibility, not resetWorkspace", () => {
     expect(shell).toContain("projects.map((project)");
     expect(shell).toContain("<ProjectWorkspace isActive={project.id === activeId}");
+    // 2026-11-02: memoized — a status-transition or foreign-project
+    // re-render of AppShell no longer reconciles every workspace.
+    expect(workspace).toMatch(/export const ProjectWorkspace = memo\(function ProjectWorkspace/);
     expect(workspace).toContain("projectVisible={isActive}");
     expect(shell).toContain("inert={project.id !== activeId ? true : undefined}");
     expect(shell).toContain("project.id !== activeId && \"invisible pointer-events-none\"");
@@ -49,6 +52,10 @@ describe("multi-project workspace ownership", () => {
     const header = readFileSync(new URL("../modules/header/Header.tsx", import.meta.url), "utf8");
     const rail = readFileSync(new URL("../modules/workspace/ProjectRail.tsx", import.meta.url), "utf8");
     expect(workspace).toContain("<ProjectRail");
+    // 2026-11-02: the rail pulls live items from its OWN context — the
+    // items no longer ride the menu context every workspace consumed.
+    expect(rail).toContain("useProjectRailItems()");
+    expect(workspace).not.toContain("projects={projectsMenu?.items ?? []}");
     expect(header).not.toContain("ProjectsSwitcher");
     expect(header).not.toContain("onSwitchProject");
     expect(rail).toContain('aria-label="Open projects"');
@@ -149,5 +156,60 @@ describe("multi-project workspace ownership", () => {
     expect(shell).toContain('<AlertDialogContent size="sm">');
     expect(shell).toContain('AlertDialogAction variant="destructive" onClick={performClose}');
     expect(shell).toContain("setCloseConfirm({");
+  });
+});
+
+describe("switch-cost contract: a switch re-renders one workspace (2026-11-02)", () => {
+  // User report: "running 3 parallel projects and switching between them
+  // is glitching and freezing hard." Root causes were RENDER CASCADES, not
+  // PTY work: (a) AppShell subscribed to subscribeSessionAgentMeta — a
+  // version bump per ~50ms throttle flush of EVERY streaming agent — and
+  // re-rendered AppShell → ALL mounted workspaces on each tick; (b) the
+  // menu context carried `items`, so every status bump also invalidated
+  // the context every workspace consumed; (c) each ProjectWorkspace itself
+  // subscribed to the GLOBAL activeSessionId, so every session switch
+  // re-rendered every workspace. All three are gone: status ticks
+  // subscribe nowhere above the rail, items live in a rail-only context,
+  // the global session id moved into a null-rendering stamp child, and
+  // ProjectWorkspace is memoized so AppShell re-renders don't reconcile
+  // unchanged workspaces.
+  const shell = readFileSync(new URL("./AppShell.tsx", import.meta.url), "utf8");
+  const workspace = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+  const menu = readFileSync(new URL("./projectsMenu.ts", import.meta.url), "utf8");
+  const statusBar = readFileSync(new URL("../modules/statusbar/StatusBar.tsx", import.meta.url), "utf8");
+
+  it("AppShell does not subscribe to per-tick agent-meta or session prefs", () => {
+    expect(shell).not.toContain("subscribeSessionAgentMeta");
+    expect(shell).not.toContain("subscribeSessionPreferences");
+    expect(shell).toContain("subscribeProjectAgentStatus");
+  });
+
+  it("the menu context carries actions + getItems only; items live in a rail-only context", () => {
+    expect(menu).toContain("getItems: () => ProjectSwitcherItem[];");
+    expect(menu).toContain("ProjectRailItemsContext");
+    expect(shell).toContain("<ProjectsMenuContext.Provider value={menuActions}>");
+    expect(shell).toContain("<ProjectRailItemsContext.Provider value={items}>");
+  });
+
+  it("the workspaces are memoized and free of the global session subscription", () => {
+    expect(workspace).toMatch(/export const ProjectWorkspace = memo\(function ProjectWorkspace/);
+    expect(workspace).toContain("function ProjectSessionStamp");
+    expect(workspace).toContain("<ProjectSessionStamp isActive={isActive} projectRuntime={projectRuntime} />");
+    const stampIdx = workspace.indexOf("function ProjectSessionStamp");
+    const bodyIdx = workspace.indexOf("export const ProjectWorkspace = memo(function ProjectWorkspace");
+    // The GLOBAL session-id selector must appear ONLY inside the stamp
+    // child, not in the memoized workspace body after it.
+    expect(stampIdx).toBeLessThan(bodyIdx);
+    expect(workspace.slice(bodyIdx)).not.toContain("useChatStore((s) => s.activeSessionId)");
+  });
+
+  it("open-project routing reads items at event time via getItems()", () => {
+    expect(workspace).toContain("projectsMenu.getItems().find(");
+    expect(workspace).not.toContain("projectsMenu.items.find(");
+  });
+
+  it("the status bar reads rail items from the rail context, not the menu", () => {
+    expect(statusBar).toContain("useProjectRailItems()");
+    expect(statusBar).not.toContain("useProjectsMenu");
   });
 });

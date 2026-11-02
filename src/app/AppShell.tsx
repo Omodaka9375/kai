@@ -1,11 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { homeDir } from "@tauri-apps/api/path";
-import { startTransition, useCallback, useEffect, useMemo, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getLaunchDir } from "@/lib/launchDir";
 import { cn } from "@/lib/utils";
-import { useChatStore } from "@/modules/ai";
-import { subscribeSessionAgentMeta } from "@/modules/ai/store/chatStore";
-import { hydrateSessionPreferences, subscribeSessionPreferences } from "@/modules/ai/store/sessionPreferences";
+import { hydrateSessionPreferences } from "@/modules/ai/store/sessionPreferences";
 import {
   getProjectAgentStatus,
   getProjectHasNews,
@@ -33,7 +31,7 @@ import {
   type WorkspaceEnv,
 } from "@/modules/workspace";
 import { ProjectWorkspace } from "./App";
-import { ProjectsMenuContext } from "./projectsMenu";
+import { ProjectRailItemsContext, ProjectsMenuContext } from "./projectsMenu";
 import { LazyStore } from "@tauri-apps/plugin-store";
 import { Spinner } from "@/components/ui/spinner";
 
@@ -90,14 +88,17 @@ export default function App() {
     root: string;
     running: boolean;
   } | null>(null);
-  const sessions = useChatStore((s) => s.sessions);
-  const activeSessionId = useChatStore((s) => s.activeSessionId);
-
+  // RAIL STATUS VERSION (2026-11-02 switch-freeze fix): ONE subscription
+  // bumps this version — projectStatus transitions (deduped by the store:
+  // identical statuses never fire) — so the rail dots/labels refresh. The
+  // old code ALSO bumped on every per-tick agent-meta listener fire (every
+  // ~50ms throttle flush of EVERY streaming agent) and every session-
+  // preference write: each bump re-rendered AppShell → ALL mounted
+  // workspaces → every editor pane + explorer + terminal wrapper, which
+  // with 3 parallel projects was the hard switch freeze.
   useEffect(() => subscribeProjectAgentStatus(() => setStatusVersion((v) => v + 1)), []);
   useEffect(() => { void hydrateSessionPreferences(); }, []);
   useEffect(() => { void hydrateGroups(); }, []);
-  useEffect(() => subscribeSessionAgentMeta(() => setStatusVersion((v) => v + 1)), []);
-  useEffect(() => subscribeSessionPreferences(() => setStatusVersion((v) => v + 1)), []);
 
   useEffect(() => {
     void (async () => {
@@ -244,7 +245,7 @@ export default function App() {
     // project was active). Amber pulse on the tile; cleared on switch.
     hasNews: project.id !== activeId && getProjectHasNews(project.id),
     active: project.id === activeId,
-  })), [projects, activeId, sessions, activeSessionId, statusVersion]);
+  })), [projects, activeId, statusVersion]);
 
   useEffect(() => {
     if (!ready) return;
@@ -253,6 +254,30 @@ export default function App() {
       activeId,
     });
   }, [projects, activeId, ready]);
+
+  // STABLE ACTIONS CONTEXT (2026-11-02): the menu value is memoized on the
+  // action callbacks ONLY. `items` live in their own context — a status
+  // transition (items identity change) must not invalidate THIS context,
+  // which every memoized ProjectWorkspace reads.
+  const switchProject = useCallback((id: string) => {
+    // startTransition: the visibility flip paints first; the heavy
+    // re-render cascade (global chatStore session switch, hydration,
+    // rail re-render) stays interruptible instead of blocking the frame.
+    startTransition(() => setActiveId(id));
+  }, []);
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  const menuActions = useMemo(
+    () => ({
+      getItems: () => itemsRef.current,
+      addProject,
+      newProject,
+      closeProject,
+      switchProject,
+      changeEnvironment,
+    }),
+    [addProject, newProject, closeProject, switchProject, changeEnvironment],
+  );
 
   // Entering a project consumes its unseen-news flag: whatever fired while
   // the user was elsewhere (watch firing, background agent reply) has now
@@ -274,19 +299,8 @@ export default function App() {
     );
   }
   return (
-    <ProjectsMenuContext.Provider value={{
-      items,
-    addProject,
-    newProject,
-    closeProject,
-      switchProject: (id) => {
-        // startTransition: the visibility flip paints first; the heavy
-        // re-render cascade (global chatStore session switch, hydration,
-        // rail re-render) stays interruptible instead of blocking the frame.
-        startTransition(() => setActiveId(id));
-      },
-      changeEnvironment,
-    }}>
+    <ProjectsMenuContext.Provider value={menuActions}>
+      <ProjectRailItemsContext.Provider value={items}>
       <div className="flex h-screen w-full">
         <div className="relative min-w-0 flex-1">
           <GroupChatPanel projects={items} activeProjectId={activeId} />
@@ -336,6 +350,7 @@ export default function App() {
           </AlertDialog>
         </div>
       </div>
+      </ProjectRailItemsContext.Provider>
     </ProjectsMenuContext.Provider>
   );
 }
