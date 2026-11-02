@@ -4,6 +4,13 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [2.1.4]
+
+- Rail: projects can be reordered by dragging their tiles — the manual order persists across restarts.
+- Group chats: the panel no longer gets stuck at the top-left of the screen when you create a group.
+
+---
+
 ## [2.1.3]
 
 - Group chats: voice input in the group chat composer, the same mic and STT engines as the main AI input bar (no TTS).
