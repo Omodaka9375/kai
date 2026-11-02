@@ -59,7 +59,7 @@ Kai is a fast, cross-platform terminal built on **Tauri 2 + Rust** and **React 1
 - **Cross-project group chats** — put agents from different projects in one conversation and have them coordinate: review each other's work, split a task, or discuss a design
 - One agent's reply lands in the shared transcript; the others see it on their next turn
 - Entry from the status bar, with clear per-agent status and a single merged activity dot
-- **Personas join too** — built-in and custom agents participate with the same tools as project agents, fenced to a per-group scratch workspace, with approvals surfaced as unified cards
+- **Personas join too** — built-in and custom agents join with the core working tools (files, edits, shell, search, web), fenced to a per-group scratch workspace; app-level surfaces (settings, screen capture, reminders, MCP registration) stay off, and approvals surface as unified cards
 
 ### AI Agent
 
@@ -74,6 +74,8 @@ Kai is a fast, cross-platform terminal built on **Tauri 2 + Rust** and **React 1
 - Interactive todo toggling with auto-closing completion lists
 - Per-model thinking control — a toggle on each reasoning model cycles effort off/low/medium/high
 - Resizable model picker — drag its left edge to set the width (persisted); descriptions hide automatically at narrower widths
+- **Click through from chat** — file paths in replies are live links: `docs/report.md` or `src/app.tsx:42` opens in the editor at that line; web links go to your browser
+- **Ask, and it configures KAI itself** — the agent can read and change app settings on request: theme, color palette, editor and terminal options, and more, through the same approval flow as its other work
 - Multi-step goals with automation, plan mode (queue edits for review as one diff), and sub-agents (explore / code-review / security / research)
 - Conversation forking and merging — branch any message into a parallel thread, then merge it back or into another thread
 - **Gmail + X (Twitter), read-only** — give the agent your Gmail app password and/or X developer token (Settings → General) and it can check your mail or scan X for what people are saying about a topic. Sending, posting, liking, and following are not implemented — it cannot do them. Credentials live in your OS keychain.
@@ -121,6 +123,7 @@ Kai is a fast, cross-platform terminal built on **Tauri 2 + Rust** and **React 1
 ### Tray & Notifications
 
 - **Closes to the tray** — closing the window keeps KAI alive: running agents, watches, and the Telegram assistant keep working in the background; tray "Show KAI" reopens, "Quit KAI" is the only true exit
+- **Launch at login, hidden** — turn it on in Settings → General and KAI starts quietly in the tray at sign-in, with agents and the assistant already reachable; a manual launch opens the window as usual
 - OS notifications arrive only while the window is hidden — approval needed, a run completely finished, or a settled error; bursts from parallel projects coalesce into one toast
 
 ## Agent Personas
