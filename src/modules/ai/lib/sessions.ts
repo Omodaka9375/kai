@@ -458,6 +458,7 @@ export async function saveMessages(
 ): Promise<void> {
   const toStore = prepareMessagesForStore(messages);
   if (!toStore) return;
+  if (await refuseEmptyOverwrite(store, id, toStore)) return;
   await writePreparedMessages(currentScopePath, id, toStore);
 }
 
@@ -477,7 +478,32 @@ export async function saveMessagesForRoot(
 ): Promise<void> {
   const toStore = prepareMessagesForStore(messages);
   if (!toStore) return;
+  const scoped = new LazyStore(scopedPath(root, env), { defaults: {}, autoSave: 200 });
+  if (await refuseEmptyOverwrite(scoped, id, toStore)) return;
   await writePreparedMessages(scopedPath(root, env), id, toStore);
+}
+
+/** EMPTY-OVERWRITE GUARD (2026-11-02 review, MUST): a persist of an EMPTY
+ *  message array must never replace an existing non-empty blob. The
+ *  clobber path it blocks: a Chat constructed without seeded history (e.g.
+ *  a background AgentRunBridge binding a never-visited session via
+ *  resolveBackgroundProjectSession) fires its mount persist with [] and
+ *  would wipe the session's real disk history. Deliberate wipes (reset /
+ *  delete paths) write through other helpers, not through saveMessages*.
+ *  Returns true when the write was refused. */
+async function refuseEmptyOverwrite(
+  target: LazyStore,
+  id: string,
+  toStore: unknown[],
+): Promise<boolean> {
+  if (toStore.length > 0) return false;
+  const existing = await target.get<unknown>(messagesKey(id)).catch(() => null);
+  const hadContent = Array.isArray(existing) && existing.length > 0;
+  if (!hadContent) return false; // nothing to protect
+  console.warn(
+    `[saveMessages] refusing to overwrite ${existing!.length} persisted messages for session ${id} with an empty array (unseeded-chat clobber guard)`,
+  );
+  return true;
 }
 
 /** JSON round-trip + image/tool-payload elision + size-trim + validity

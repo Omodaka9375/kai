@@ -787,6 +787,31 @@ export async function resolveBackgroundProjectSession(
         sessions: [...inMemory, ...snapshotOnly],
       });
     }
+    // SEED BEFORE BIND (2026-11-02 review, MUST): setProjectActiveSession
+    // re-binds the background project's AgentRunBridge (useSyncExternalStore
+    // fires), and the bridge constructs its Chat via getOrCreateChat ->
+    // makeChatSync, which seeds ONLY from the seedMessages map. Binding with
+    // an unseeded session instantiated an EMPTY Chat whose mount persist
+    // then overwrote the session's real disk history with [] - wiping
+    // exactly the never-visited sessions this resolver exists to serve
+    // (createGroupChat/addParticipants bind with no delivery to follow).
+    // Same contract as injectMessage's hydrate-before-create guard.
+    if (!chats.has(persistedActiveId) && !seedMessages.has(persistedActiveId)) {
+      try {
+        const m = await loadMessagesForRoot(
+          runtime.root,
+          persistedActiveId,
+          runtime.env,
+        );
+        if (m && m.length > 0 && !chats.has(persistedActiveId) && !seedMessages.has(persistedActiveId)) {
+          seedMessages.set(persistedActiveId, stripIncompleteToolMessages(m));
+        }
+      } catch {
+        // Unreadable blob: bind anyway - the empty-persist guard in
+        // saveMessages* keeps the on-disk copy from being clobbered, and a
+        // later visit hydrates properly.
+      }
+    }
     setProjectActiveSession(projectId, persistedActiveId);
     return persistedActiveId;
   })();

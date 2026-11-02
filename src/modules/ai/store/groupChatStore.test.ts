@@ -869,3 +869,42 @@ describe("persona participants", () => {
     expect(groupTool).toContain("isPersonaParticipantId");
   });
 });
+
+
+describe("history-wipe guards for the never-visited resolver (2026-11-02 review MUST)", () => {
+  // Review finding: resolveBackgroundProjectSession bound the background
+  // project's bridge with an UNSEEDED session; the bridge's mount persist
+  // then overwrote the session's real disk history with []. Two layers fix
+  // it, both pinned here (the real chatStore can't be imported in this
+  // harness - it drags Tauri - so these are source pins, like the rest of
+  // this file's trust-boundary guards).
+  const chatStore = readFileSync(
+    new URL("./chatStore.ts", import.meta.url),
+    "utf8",
+  );
+  const sessions = readFileSync(
+    new URL("../lib/sessions.ts", import.meta.url),
+    "utf8",
+  );
+
+  it("the resolver seeds the session's history BEFORE binding the bridge", () => {
+    // Seed-before-bind: loadMessagesForRoot -> seedMessages BEFORE the
+    // setProjectActiveSession call that re-binds AgentRunBridge.
+    const seedIdx = chatStore.indexOf("SEED BEFORE BIND");
+    const bindIdx = chatStore.indexOf("setProjectActiveSession(projectId, persistedActiveId);");
+    expect(seedIdx).toBeGreaterThan(-1);
+    expect(bindIdx).toBeGreaterThan(seedIdx);
+    expect(chatStore).toMatch(/!chats\.has\(persistedActiveId\) && !seedMessages\.has\(persistedActiveId\)/);
+    expect(chatStore).toContain("seedMessages.set(persistedActiveId, stripIncompleteToolMessages(m));");
+  });
+
+  it("saveMessages* refuse to overwrite a populated blob with an empty array", () => {
+    expect(sessions).toContain("refuseEmptyOverwrite");
+    // Both write paths route through the guard...
+    expect(sessions).toMatch(/saveMessages\([\s\S]*?refuseEmptyOverwrite\(store, id, toStore\)/);
+    expect(sessions).toMatch(/saveMessagesForRoot[\s\S]*?refuseEmptyOverwrite\(scoped, id, toStore\)/);
+    // ...and the guard only refuses when the EXISTING blob has content.
+    expect(sessions).toContain("const hadContent = Array.isArray(existing) && existing.length > 0;");
+    expect(sessions).toContain("if (!hadContent) return false;");
+  });
+});
