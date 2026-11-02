@@ -6,6 +6,7 @@ import "@xterm/xterm/css/xterm.css";
 import "./styles/globals.css";
 
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { invoke } from "@tauri-apps/api/core";
 import ReactDOM from "react-dom/client";
 import App from "./app/AppShell";
 import { RootErrorBoundary } from "./lib/RootErrorBoundary";
@@ -48,14 +49,32 @@ ReactDOM.createRoot(root).render(
 // Window starts hidden (per tauri.conf.json) so users never see a transparent
 // shadow-only frame before React paints. Use setTimeout — rAF is throttled
 // while the window is hidden and would never fire.
+//
+// START-HIDDEN AT LOGIN (2026-11-02): the autostart registration carries
+// `--hidden`, so a LOGIN launch keeps the window in the tray (it still runs
+// — agents, assistant, PTYs all alive; the tray's "Show KAI" restores it).
+// A manual launch never carries the flag and shows normally. An invoke
+// failure defaults to SHOWING — a wedged IPC must never strand the app
+// invisible with no window to recover.
 const showWindow = () => {
   getCurrentWindow()
     .show()
     .catch((e) => console.error("window.show failed:", e));
 };
-setTimeout(showWindow, 50);
-// Safety net: if the first show somehow fails to take effect, force again.
-setTimeout(showWindow, 500);
+void invoke<boolean>("launched_hidden")
+  .then((hidden) => {
+    if (!hidden) {
+      setTimeout(showWindow, 50);
+      // Safety net: if the first show somehow fails to take effect, force again.
+      setTimeout(showWindow, 500);
+    } else {
+      console.info("[kai] login launch: starting hidden in the tray");
+    }
+  })
+  .catch((e) => {
+    console.error("launched_hidden probe failed — showing window:", e);
+    setTimeout(showWindow, 50);
+  });
 
 // ── Close-to-tray (2026-10-31) ─────────────────────────────────────────
 // Closing the window must NOT kill the process: the assistant and any

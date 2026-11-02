@@ -218,6 +218,16 @@ fn parse_launch_dir() -> Option<String> {
     parse_launch_dir_from(std::env::args().skip(1))
 }
 
+/// True when THIS process was launched with the `--hidden` flag — the
+/// autostart registration (login item / LaunchAgent / XDG desktop entry)
+/// appends it, so a login launch starts minimized to the tray while a
+/// manual launch (dock, shortcut, CLI) never does. The frontend gates its
+/// first-paint window.show() on this.
+#[tauri::command]
+fn launched_hidden() -> bool {
+    std::env::args().any(|a| a == "--hidden")
+}
+
 /// Extract the first directory-looking argument (used both for this
 /// process's own argv and, via the single-instance callback, for the argv
 /// of a second instance that was forwarded here).
@@ -525,7 +535,19 @@ pub fn run() {
                 .with_filename(lib_state_filename(parse_launch_dir().as_deref()))
                 .build(),
         )
-        .plugin(tauri_plugin_autostart::Builder::new().build())
+        // `--hidden`: the login item launches KAI minimized to the tray —
+        // the OS-universal "start quietly" contract (Steam/Discord/Slack).
+        // A manual launch never carries the flag, so the window shows as
+        // usual. The flag rides the registration verbatim on every platform
+        // (Windows: `"…kai.exe" --hidden` in the HKCU Run value; macOS:
+        // ProgramArguments in the LaunchAgent plist; Linux: Exec in the
+        // XDG .desktop entry), and parse_launch_dir_from skips '-' args so
+        // it can never be mistaken for a launch directory.
+        .plugin(
+            tauri_plugin_autostart::Builder::new()
+                .arg("--hidden")
+                .build(),
+        )
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_os::init())
         .plugin(
@@ -763,6 +785,7 @@ app.manage(Mutex::new(None::<fs::env_probe::EnvInventory>));
         .manage(mcp::McpState::default())
         .manage(LaunchDir(Mutex::new(parse_launch_dir())))
         .invoke_handler(tauri::generate_handler![
+            launched_hidden,
             pty::pty_open,
             pty::pty_write,
             pty::pty_resize,
