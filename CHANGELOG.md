@@ -4,6 +4,14 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [2.1.3]
+
+- Group chats: voice input in the group chat composer, the same mic and STT engines as the main AI input bar (no TTS).
+- Notifications: no more phantom "needs your approval" notifications while an agent runs in auto mode; only approvals that actually need you (elevated, screen capture, signed commits) ping.
+- Performance: switching between parallel running projects no longer freezes; background agent streams, rail statuses, and session switches no longer re-render every mounted workspace.
+
+---
+
 ## [2.1.2]
 
 - Group chats: a slow participant no longer stalls the conversation.
