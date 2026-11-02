@@ -17,7 +17,11 @@ describe("restored conversation scrolling", () => {
 
   it("keeps the mini-window mounted when its workspace switches visibility", () => {
     const app = readFileSync(new URL("../../app/App.tsx", import.meta.url), "utf8");
-    expect(app).toContain('{isActive && miniOpen && hasComposer && stackSurface !== "group" ? (');
+    // 2026-11-02 round 2: the mini-window/pill mount condition lives in the
+    // ActiveSurfaces gate component (context-subscribed) instead of inline
+    // in the workspace body - a body-level isActive read re-rendered the
+    // whole tree on every project switch.
+    expect(app).toContain("function ActiveSurfaces");
     // No session key on the animated window: changing sessions reuses the
     // same conversation surface rather than restarting an enter animation.
     expect(miniWindow).not.toContain('<AiMiniWindow key={sessionId}');

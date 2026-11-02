@@ -668,8 +668,10 @@ describe("source pins — trust boundary & wiring", () => {
     expect(chatStore).toContain("closeGroupFromStack");
     // The AI window unmounts when the group owns the slot; the GroupPill
     // (collapsed AI) mounts in its place.
-    expect(app).toContain('stackSurface !== "group" ? (');
-    expect(app).toContain('stackSurface === "group" ? (');
+    // 2026-11-02 round 2: the surface ternaries moved into the
+    // ActiveSurfaces gate component (activation-context refactor).
+    expect(app).toContain('stackSurface !== "group"');
+    expect(app).toContain('stackSurface === "group"');
     expect(app).toContain("<GroupPill />");
     // The group panel expands ONLY when it owns the slot, and its ✕ both
     // closes the group AND hands the slot back to AI.

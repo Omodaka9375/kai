@@ -27,7 +27,6 @@ import {
   hasAnyKey,
   useChatStore,
 } from "@/modules/ai";
-import type { ModelId } from "@/modules/ai/config";
 import { CustomContextMenu } from "@/modules/ai/components/CustomContextMenu";
 import { ApiTesterPane } from "@/modules/api-tester/ApiTesterPane";
 import { AiComposerProvider } from "@/modules/ai/components/composer";
@@ -35,12 +34,10 @@ import { registerChatFileOpen } from "@/modules/ai/components/ChatFileLink";
 import { AiErrorBoundary } from "@/modules/ai/components/AiErrorBoundary";
 import { redactSensitive } from "@/modules/ai/lib/redact";
 import { setSandboxRoot } from "@/modules/ai/lib/sandbox";
-import { registerProjectRuntime, setActiveProjectRuntime, setProjectLive, setProjectModel, getProjectModel, setProjectActiveSession, getProjectActiveSession, projectIdForSession, stopSession } from "@/modules/ai/store/chatStore";
+import { registerProjectRuntime, setProjectLive, setProjectActiveSession, projectIdForSession, stopSession } from "@/modules/ai/store/chatStore";
 import { setSessionPreferences } from "@/modules/ai/store/sessionPreferences";
 import { native } from "@/modules/ai/lib/native";
-import { useAgentsStore } from "@/modules/ai/store/agentsStore";
-import { useMcpStore } from "@/modules/ai/store/mcpStore";
-import { refreshProjectSkills, useSkillsStore } from "@/modules/ai/store/skillsStore";
+import { WorkspaceActivationGate } from "./workspaceActivation";
 import {
   AiDiffStack,
   EditorStack,
@@ -55,7 +52,6 @@ import {
 } from "@/modules/editor/lib/formatter";
 import { GitHistoryStack } from "@/modules/git-history";
 import { normalizeWorkspacePath } from "@/modules/ai/lib/workspacePath";
-import { getLaunchDir } from "@/lib/launchDir";
 import { useZoom } from "@/lib/useZoom";
 import { FileExplorer, type FileExplorerHandle } from "@/modules/explorer";
 import {
@@ -67,7 +63,7 @@ import {
 import { PreviewStack, type PreviewPaneHandle } from "@/modules/preview";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import { onKeysChanged, setLastWorkspaceCwd, setRecentProjects, setSidebarView, setSidebarWidth, SIDEBAR_WIDTH_DEFAULT, SIDEBAR_WIDTH_MIN, SIDEBAR_WIDTH_MAX } from "@/modules/settings/store";
+import { onKeysChanged, setSidebarView, setSidebarWidth, SIDEBAR_WIDTH_DEFAULT, SIDEBAR_WIDTH_MIN, SIDEBAR_WIDTH_MAX } from "@/modules/settings/store";
 import { ShortcutsDialog } from "@/modules/shortcuts";
 import { useAppShortcuts } from "./useAppShortcuts";
 import { useProjectsMenu } from "./projectsMenu";
@@ -102,14 +98,14 @@ import {
   type WorkspaceEnv,
   createProjectRuntime,
   useProjectRuntime,
+  useWorkspaceActive,
   ProjectRail,
 } from "@/modules/workspace";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { homeDir } from "@tauri-apps/api/path";
 import type { SearchAddon } from "@xterm/addon-search";
 import { AnimatePresence, motion } from "motion/react";
-import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PanelImperativeHandle } from "react-resizable-panels";
 
 function dirname(path: string | null): string | null {
@@ -134,12 +130,13 @@ initBusHandlers();
  * EVERY mounted workspace.
  */
 function ProjectSessionStamp({
-  isActive,
   projectRuntime,
 }: {
-  isActive: boolean;
   projectRuntime: ReturnType<typeof createProjectRuntime>;
 }) {
+  // Context subscriber (tiny/null-rendering): a project switch re-renders
+  // this child, never the workspace body.
+  const isActive = useWorkspaceActive();
   const activeChatSessionId = useChatStore((s) => s.activeSessionId);
   useEffect(() => {
     if (!isActive || !activeChatSessionId) return;
@@ -152,14 +149,73 @@ function ProjectSessionStamp({
   return null;
 }
 
+/** ActiveRefSink - the ONE activation subscriber inside the workspace
+ *  subtree: keeps isActiveRef current so document-level listeners and lazy
+ *  tool callbacks can check foreground status without re-rendering the
+ *  body on every project switch. Renders null. */
+function ActiveRefSink({ isActiveRef }: { isActiveRef: React.MutableRefObject<boolean> }) {
+  const isActive = useWorkspaceActive();
+  useEffect(() => {
+    isActiveRef.current = isActive;
+  }, [isActive, isActiveRef]);
+  return null;
+}
+
+/** AgentRunBridgeGate - context-subscribed wrapper: the bridge's isActive
+ *  prop follows the activation context without the body re-rendering. The
+ *  diff-tab callbacks ride the bridge's own prop types (DiffOpenInput et
+ *  al) via ComponentProps inference. */
+function AgentRunBridgeGate(
+  props: Omit<React.ComponentProps<typeof AgentRunBridge>, "isActive">,
+) {
+  const isActive = useWorkspaceActive();
+  return <AgentRunBridge {...props} isActive={isActive} />;
+}
+
+/** ActiveSurfaces - the right-gutter AI surfaces (mini window / group
+ *  pill). Mounted per workspace; only the foreground one renders content.
+ *  Context-subscribed so a switch re-renders this tiny component, not the
+ *  workspace body. */
+function ActiveSurfaces(props: {
+  hasComposer: boolean;
+  miniOpen: boolean;
+  stackSurface: string;
+}) {
+  const isActive = useWorkspaceActive();
+  if (!isActive) return null;
+  const { hasComposer, miniOpen, stackSurface } = props;
+  if (miniOpen && hasComposer && stackSurface !== "group") {
+    return (
+      <AiErrorBoundary label="mini-window">
+        <AiMiniWindow key="ai-mini-window" />
+      </AiErrorBoundary>
+    );
+  }
+  if (hasComposer && stackSurface === "group") {
+    return <GroupPill />;
+  }
+  return null;
+}
+
 /** Memoized (2026-11-02): AppShell re-renders on project-status transitions
- *  and its own state; a memoized workspace only reconciles when ITS
- *  isActive prop flips or its own state changes. A switch between two
- *  projects no longer re-renders the third, and background agents' status
- *  transitions no longer reconcile all workspaces at once. */
-export const ProjectWorkspace = memo(function ProjectWorkspace({ isActive = true }: { isActive?: boolean }) {
+ *  and its own state; the workspace reconciles only on ITS OWN state
+ *  changes. ACTIVATION (round 2, same day - the residual switch lag with
+ *  actively-streaming agents): isActive was a PROP, so the two flipping
+ *  workspaces always fully reconciled on every switch; with live streams
+ *  those trees are large AND being pumped by token flushes that kept
+ *  interrupting the switch transition. Activation now rides
+ *  WorkspaceActiveContext: the workspace body NEVER subscribes - all
+ *  activation effects live in the null-rendering WorkspaceActivationGate
+ *  child, and every visual/behavioral gate is a tiny context subscriber. */
+export const ProjectWorkspace = memo(function ProjectWorkspace() {
   const runtime = useProjectRuntime();
   const projectsMenu = useProjectsMenu();
+  // ACTIVATION REFS (2026-11-02): document-level listeners and lazy tool
+  // callbacks check activation via this ref - it is kept current by the
+  // <ActiveRefSink> child (the ONLY place the body's subtree subscribes to
+  // the activation context). The body itself never re-renders on a switch.
+  const isActiveRef = useRef(false);
+  const setLiveRef = useRef<(() => void) | null>(null);
   const {
     tabs,
     activeId,
@@ -245,16 +301,19 @@ export const ProjectWorkspace = memo(function ProjectWorkspace({ isActive = true
       `${inPixels + handleW + 48}px`,
     );
   }, []);
-  useEffect(() => {
-    if (!isActive) return;
+  // The activation-dependent --kai-workspace-left write moved into
+  // <WorkspaceActivationGate>. Body callbacks (panel onResize) gate on
+  // isActiveRef; the gate re-syncs the var on every activation (a switch
+  // resizes nothing, so without the re-sync the incoming project's
+  // expanded window rendered at the outgoing project's offset).
+  const getSidebarPx = useCallback(() => {
     const panel = sidebarRef.current;
-    const px = panel
+    return panel
       ? panel.getSize().inPixels
       : sidebarCollapsed
         ? 0
         : sidebarWidthRef.current;
-    writeWorkspaceLeft(px);
-  }, [isActive, sidebarCollapsed, writeWorkspaceLeft]);
+  }, [sidebarCollapsed]);
 
   const toggleSidebar = useCallback(() => {
     const p = sidebarRef.current;
@@ -423,66 +482,6 @@ export const ProjectWorkspace = memo(function ProjectWorkspace({ isActive = true
   // A mount-time PTY raced the first paint / window-state restore / the
   // renderer font-gate (the renderer-bind race class); the StartPage now
   // fills the zero-tab state and terminals spawn on demand.
-  // We intentionally skip `workspaceCurrentDir()` as the Tauri process cwd
-  // is the app data directory on Windows, which is not a useful default.
-  useEffect(() => {
-    if (!isActive) return;
-    const resolveCwd = async (): Promise<string | null> => {
-      const launch = runtime?.root ?? getLaunchDir();
-      if (launch) return launch;
-      // A prefs-init failure (corrupt/locked store under a second concurrent
-      // instance) must not block root resolution — fall through to home.
-      try {
-        await usePreferencesStore.getState().init();
-      } catch (e) {
-        console.warn("[Kai] launch: preferences init failed:", e);
-      }
-      // LAN-only network policy hook: security.ts checkShellCommand reads
-      // this instead of importing the preferences store (avoids a settings
-      // circular import). Lazy getter - every call reads the live store, so
-      // a Settings flip applies to the very next shell command.
-      (globalThis as { __kaiLanOnlyPolicy?: () => boolean }).__kaiLanOnlyPolicy =
-        () => usePreferencesStore.getState().networkPolicy === "lan";
-      const saved = usePreferencesStore.getState().lastWorkspaceCwd;
-      if (saved) return saved;
-      try {
-        return (await homeDir()).replace(/\\/g, "/");
-      } catch {
-        return null;
-      }
-    };
-
-    // Watchdog: prefs hydration / the store plugin can wedge (seen in the
-    // wild). 5s is far beyond a healthy resolve; pin the root anyway so the
-    // explorer/sessions/AI have a workspace even though no tab spawns.
-    const watchdog = setTimeout(() => {
-      console.error(
-        "[Kai] launch: cwd resolution did not settle in 5s — pinning fallback workspace root",
-      );
-      setLaunchCwdResolved(true);
-      setRootRef.current(home ?? "");
-    }, 5000);
-
-    resolveCwd()
-      .then((cwd) => {
-        clearTimeout(watchdog);
-        setLaunchCwd(cwd);
-        setLaunchCwdResolved(true);
-        // Pin the workspace root to the launch directory so the explorer /
-        // AI sessions resolve against the right project. Every launch -
-        // plain, argv, or a shortcut carrying a path - stays on the
-        // StartPage: no mount-time PTY racing the renderer bind (the
-        // broken-first-terminal bug class). Terminals spawn on demand.
-        if (cwd) setRootRef.current(cwd);
-      })
-      .catch((e) => {
-        clearTimeout(watchdog);
-        console.error("[Kai] launch: cwd resolution failed:", e);
-        setLaunchCwdResolved(true);
-        setRootRef.current(home ?? "");
-      });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isActive, runtime]);
 
   // ── Workspace split ────────────────────────────────────────────────
   // When non-null, the workspace splits into two side-by-side panels.
@@ -695,7 +694,9 @@ export const ProjectWorkspace = memo(function ProjectWorkspace({ isActive = true
   const onOpenProjectRef = useRef(onOpenProject);
   onOpenProjectRef.current = onOpenProject;
   useEffect(() => {
-    if (!isActive) return;
+    // Ref-gated (passive listener): subscribing the body to activation is
+    // what this refactor removes. The gate owns foreground-only work.
+    if (!isActiveRef.current) return;
     const promise = listen<string>("Kai://open-project", (event) => {
       const path = event.payload;
       if (!path) return;
@@ -704,7 +705,8 @@ export const ProjectWorkspace = memo(function ProjectWorkspace({ isActive = true
     return () => {
       void promise.then((un) => un());
     };
-  }, [isActive]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Current project folder name — the last path segment. Used for the window
   // title (taskbar / Alt+Tab disambiguation) and the header's project label.
@@ -713,99 +715,9 @@ export const ProjectWorkspace = memo(function ProjectWorkspace({ isActive = true
     return explorerRoot.split(/[\\/]/).filter(Boolean).pop() ?? explorerRoot;
   }, [explorerRoot]);
 
-  // Reflect the current project folder in the window title so the user can
-  // distinguish multiple KAI instances in the taskbar / Alt+Tab. Show only
-  // the project name (no "KAI —" prefix).
-  useEffect(() => {
-    if (!isActive) return;
-    const w = getCurrentWindow();
-    const title = projectName ?? "KAI";
-    void w.setTitle(title);
-    document.title = title;
-  }, [projectName, isActive]);
 
-  // Persist the workspace root so it's restored on next launch.
-  // Guard behind prefsHydrated so we don't overwrite the persisted recent
-  // projects list with [current] before the store has loaded from disk.
-  useEffect(() => {
-    if (!isActive || !explorerRoot || !prefsHydrated) return;
-    void setLastWorkspaceCwd(explorerRoot);
-    try {
-      const normalized = explorerRoot.replace(/\\/g, "/").replace(/\/$/, "");
-      const list = usePreferencesStore.getState().recentProjects || [];
-      const next = [normalized, ...list.filter((p) => p !== normalized)].slice(0, 10);
-      void setRecentProjects(next);
-    } catch {
-      // ignore
-    }
-  }, [explorerRoot, prefsHydrated, isActive]);
 
-  // Restore per-project model when workspace changes, fall back to global default.
-  // Runs on every ACTIVATION flip, not just root changes: the applied-key
-  // ref records the last APPLIED state ("root" while active, "" while
-  // inactive) so re-activating a project always restores its model —
-  // the old root-only guard skipped the restore on A→B→A switches, leaving
-  // the outgoing project's selection in place.
-  const projectModelApplied = useRef<string | null>(null);
-  useEffect(() => {
-    if (!prefsHydrated) return;
-    const root = normalizeWorkspacePath(explorerRoot);
-    const key = isActive ? root : "";
-    if (key === projectModelApplied.current) return;
-    projectModelApplied.current = key;
-    if (!isActive) return;
-    const saved = root ? projectModelIds[root] : undefined;
-    const model = (saved ?? prefDefaultModel) as ModelId;
-    // This is a RESTORE, not a user selection: activate first so
-    // setProjectModel lands on the INCOMING project; the outgoing
-    // project's captured model must stay untouched.
-    setActiveProjectRuntime(projectRuntime);
-    setProjectModel(projectRuntime.id, model, useAgentsStore.getState().activeId);
-    // Session preference is stamped only when the current active session
-    // already belongs to the incoming project (a completed switch set it).
-    // Stamping unconditionally here hit the OUTGOING project's still-active
-    // session with the incoming project's model — the cross-project bleed.
-    if (
-      projectIdForSession(useChatStore.getState().activeSessionId ?? "") ===
-      projectRuntime.id
-    ) {
-      setSessionPreferences(useChatStore.getState().activeSessionId ?? "", {
-        modelId: model,
-      });
-    }
-    // Direct store write — NOT setSelectedModelId: that action mirrors into
-    // the active project AND persists to live.getWorkspaceRoot(), which
-    // during a switch still points at the OUTGOING project's live bridge
-    // (the incoming setLive runs later in the live-bridge effect).
-    // Persisting there overwrote the outgoing project's saved model with
-    // the incoming one — the exact bug this restore path must not
-    // reintroduce.
-    useChatStore.setState({ selectedModelId: model });
-    // Only the visible project changes the legacy global presentation
-    // selection; the captured project value remains independently stable.
-    useAgentsStore.getState().setRoot(root);
-  }, [isActive, prefsHydrated, projectRuntime, explorerRoot, projectModelIds, prefDefaultModel]);
 
-  useEffect(() => {
-    if (!isActive || !launchCwdResolved) return;
-    const root = explorerRoot ?? launchCwd ?? home ?? null;
-      void hydrateSessions(root, projectRuntime);
-    void useAgentsStore.getState().hydrate();
-    void useSkillsStore.getState().hydrate(root);
-    // Project-scope skills re-scan on activation (global scans once).
-    void refreshProjectSkills(root);
-    void useMcpStore.getState().hydrate();
-    // Fire the env probe in the background — the first agent turn's <env>
-    // block reads it from cache (verified shell + installed tool list,
-    // replacing hardcoded assumptions).
-    void import("@/modules/ai/lib/transport").then((m) => m.fetchEnvInventory());
-    // Seed the model catalog immediately (disk cache first, no key needed)
-    // so a restored per-project model resolves instead of hitting the
-    // synthetic "Unknown model" fallback before the picker ever mounts.
-    void import("@/modules/ai/store/openrouterModelsStore").then((m) =>
-      m.useOpenRouterModelsStore.getState().fetch(),
-    );
-  }, [isActive, hydrateSessions, launchCwdResolved, explorerRoot, launchCwd, home, projectRuntime]);
 
   // Personal assistant (Telegram bridge) — ONCE per app launch.
   //
@@ -819,42 +731,6 @@ export const ProjectWorkspace = memo(function ProjectWorkspace({ isActive = true
   // Settings panel hand delivery over after it enables the bot — otherwise
   // closing that transient window would strand the loop on a dead Channel and
   // the bot would silently ignore every message.
-  const assistantClaimUnlisten = useRef<(() => void) | null>(null);
-  useEffect(() => {
-    if (!isActive) return;
-    void import("@/modules/assistant")
-      .then(async ({ startAssistantBridge, reclaimAssistantEvents, onAssistantClaimRequested }) => {
-        assistantClaimUnlisten.current = await onAssistantClaimRequested(() => {
-          void reclaimAssistantEvents();
-        });
-        const r = await startAssistantBridge();
-        if (!r.ok && r.error && r.error !== "assistant disabled") {
-          console.warn("[kai:assistant] bridge not started:", r.error);
-        }
-        // Bridge may already be running (started from Settings) — take over
-        // delivery either way.
-        if (r.ok) await reclaimAssistantEvents();
-        // Project monitor: bound projects ping the owner on replies /
-        // approvals and mirror /tell replies. Installs with the delivery
-        // ownership, in the long-lived main window only.
-        if (r.ok) {
-          const { installTelegramProjectMonitor } = await import("@/modules/assistant/projectBridge");
-          installTelegramProjectMonitor();
-        }
-        // Long-term reminder scheduler (passive, restart-safe): boot
-        // catch-up + Rust-heartbeat tick. The main window is the
-        // long-lived surface and the process is shared — one scheduler.
-        {
-          const { startReminderScheduler } = await import("@/modules/ai/lib/reminders");
-          void startReminderScheduler();
-        }
-      })
-      .catch((e) => console.warn("[kai:assistant] bridge import failed:", e));
-    return () => {
-      assistantClaimUnlisten.current?.();
-      assistantClaimUnlisten.current = null;
-    };
-  }, [isActive]);
 
   useEffect(() => {
     setActiveSearchAddon(
@@ -1236,12 +1112,13 @@ export const ProjectWorkspace = memo(function ProjectWorkspace({ isActive = true
       });
     };
 
-    if (!isActive) return;
+    if (!isActiveRef.current) return;
     document.addEventListener("contextmenu", handleContextMenu);
     return () => {
       document.removeEventListener("contextmenu", handleContextMenu);
     };
-  }, [captureActiveSelection, isActive]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [captureActiveSelection]);
 
   const openNewTab = useCallback(() => {
     newTab(inheritedCwdForNewTab());
@@ -1593,7 +1470,7 @@ export const ProjectWorkspace = memo(function ProjectWorkspace({ isActive = true
         );
       }
     };
-    if (!isActive) return;
+    if (!isActiveRef.current) return;
     document.addEventListener("click", handler, true);
     const onCustom = (e: Event) => {
       const url = (e as CustomEvent<string>).detail;
@@ -1604,7 +1481,8 @@ export const ProjectWorkspace = memo(function ProjectWorkspace({ isActive = true
       document.removeEventListener("click", handler, true);
       window.removeEventListener("Kai:open-in-preview", onCustom);
     };
-  }, [isActive, openPreviewTab]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openPreviewTab]);
 
   const handleSplitPane = useCallback(
     (dir: "row" | "col") => {
@@ -1633,7 +1511,9 @@ export const ProjectWorkspace = memo(function ProjectWorkspace({ isActive = true
 
   const { shortcutsOpen, setShortcutsOpen, newEditorOpen, setNewEditorOpen } =
     useAppShortcuts({
-      isActive,
+      // Ref read at event time — the shortcuts hook must not subscribe the
+      // body to activation. (Lazy getters everywhere is the refactor rule.)
+      isActive: isActiveRef.current,
       tabsRef,
       activeId,
       openNewTab,
@@ -1774,38 +1654,18 @@ export const ProjectWorkspace = memo(function ProjectWorkspace({ isActive = true
   // preview tab. Updated inside the live-bridge effect below.
   const lastTerminalTabIdRef = useRef<number | null>(null);
 
+  // ACTIVATION MOVED (2026-11-02): the startTransition'd activate() block
+  // (setActiveProjectRuntime + session flip + model capture + sandbox root)
+  // lives in <WorkspaceActivationGate> now - the body must not subscribe to
+  // activation. onActivateLive (passed to the gate) routes back into this
+  // body's freshest closures via setLiveRef.
+  const onActivateLive = useCallback(() => {
+    setSandboxRoot(explorerRoot ?? launchCwd ?? home ?? null);
+    setLiveRef.current?.();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [explorerRoot, launchCwd, home]);
   useEffect(() => {
-    registerProjectRuntime(projectRuntime);
-    if (isActive) {
-      // startTransition: these GLOBAL chatStore writes re-render every
-      // useChatStore subscriber app-wide. Deferring them out of the
-      // visibility-flip paint keeps the project switch from blocking the
-      // frame (the switch itself is what the user sees).
-      const activate = () => {
-        setActiveProjectRuntime(projectRuntime);
-        setWorkspaceEnv(projectRuntime.env);
-        const savedSession = getProjectActiveSession(projectRuntime.id);
-        if (savedSession && savedSession !== useChatStore.getState().activeSessionId) {
-          useChatStore.getState().switchSession(savedSession);
-        }
-        // RESTORE the incoming project's captured model — never mirror the
-        // outgoing project's global selection into it (the old
-        // setProjectModel(selectedModelId) captured A's model on top of B's
-        // on every A→B switch, then re-restored it as if it were B's).
-        // The restore effect (projectModelApplied) owns the visible
-        // presentation selection; this owns the CAPTURE for correctness
-        // right after the session flip.
-        const restored = getProjectModel(projectRuntime.id);
-        setProjectModel(projectRuntime.id, restored, useAgentsStore.getState().activeId);
-        setSandboxRoot(explorerRoot ?? launchCwd ?? home ?? null);
-      };
-      // startTransition: these GLOBAL chatStore writes re-render every
-      // useChatStore subscriber app-wide. Deferring them out of the
-      // visibility-flip paint keeps the project switch from blocking the
-      // frame — the switch itself is what the user sees first.
-      startTransition(activate);
-    }
-    const findCwd = () => {
+    registerProjectRuntime(projectRuntime);    const findCwd = () => {
       const active = tabs.find((x) => x.id === activeId);
       if (active?.kind === "terminal") {
         return findLeafCwd(active.paneTree, active.activeLeafId) ?? active.cwd ?? null;
@@ -1822,7 +1682,7 @@ export const ProjectWorkspace = memo(function ProjectWorkspace({ isActive = true
     // Keep the project sandbox confinement root in sync with the same root
     // tools resolve against — checkSandbox (security.ts) reads it on every
     // fs tool call.
-    if (isActive) setSandboxRoot(explorerRoot ?? launchCwd ?? home ?? null);
+    if (isActiveRef.current) setSandboxRoot(explorerRoot ?? launchCwd ?? home ?? null);
 
     // Track the most recently active terminal tab for the fallback path in
     // injectIntoActivePty above.
@@ -1906,8 +1766,10 @@ export const ProjectWorkspace = memo(function ProjectWorkspace({ isActive = true
       },
     };
     setProjectLive(projectRuntime.id, live);
-    if (isActive) setLive(live);
-  }, [isActive, projectRuntime, setLive, activeId, tabs, explorerRoot, launchCwd, home, openPreviewTab]);
+    if (isActiveRef.current) setLive(live);
+    setLiveRef.current = () => setLive(live);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectRuntime, setLive, activeId, tabs, explorerRoot, launchCwd, home, openPreviewTab]);
 
   useEffect(() => {
     return () => {
@@ -1968,7 +1830,6 @@ export const ProjectWorkspace = memo(function ProjectWorkspace({ isActive = true
         <TerminalStack
           tabs={tabs}
           activeId={activeId}
-          projectVisible={isActive}
           registerHandle={registerTerminalHandle}
           onSearchReady={handleSearchReady}
           onCwd={handleTerminalCwd}
@@ -2005,7 +1866,6 @@ export const ProjectWorkspace = memo(function ProjectWorkspace({ isActive = true
         <PreviewStack
           tabs={tabs}
           activeId={activeId}
-          projectVisible={isActive}
           registerHandle={registerPreviewHandle}
           onUrlChange={handlePreviewUrl}
           onCloseTab={disposeTab}
@@ -2083,9 +1943,28 @@ export const ProjectWorkspace = memo(function ProjectWorkspace({ isActive = true
   const shell = (
     <ThemeProvider>
       <TooltipProvider>
-        <FileMenuTriggerProvider value={isActive ? fileMenuTrigger : null}>
+        <FileMenuTriggerProvider value={fileMenuTrigger}>
         <div className="relative flex h-screen flex-col overflow-hidden bg-background text-foreground">
-          <ProjectSessionStamp isActive={isActive} projectRuntime={projectRuntime} />
+          <ProjectSessionStamp projectRuntime={projectRuntime} />
+          <WorkspaceActivationGate
+            explorerRoot={explorerRoot}
+            launchCwd={launchCwd}
+            home={home}
+            prefsHydrated={prefsHydrated}
+            launchCwdResolved={launchCwdResolved}
+            projectName={projectName}
+            hydrateSessions={hydrateSessions}
+            openProject={(p) => onOpenProjectRef.current(p)}
+            getSidebarPx={getSidebarPx}
+            writeWorkspaceLeft={writeWorkspaceLeft}
+            onActivateLive={onActivateLive}
+            setLaunchCwd={setLaunchCwd}
+            setLaunchCwdResolved={setLaunchCwdResolved}
+            setRoot={(cwd) => setRootRef.current(cwd)}
+            projectModelIds={projectModelIds}
+            prefDefaultModel={prefDefaultModel}
+          />
+          <ActiveRefSink isActiveRef={isActiveRef} />
           <div className="flex min-h-0 flex-1">
           <ProjectRail
             onSwitch={(id) => projectsMenu?.switchProject(id)}
@@ -2137,7 +2016,7 @@ export const ProjectWorkspace = memo(function ProjectWorkspace({ isActive = true
                   // FOREGROUND ONLY: background project panels fire onResize
                   // on mount/resizes of their hidden subtree — an ungated
                   // write raced the var to whichever instance mounted last.
-                  if (isActive) writeWorkspaceLeft(size.inPixels);
+                  if (isActiveRef.current) writeWorkspaceLeft(size.inPixels);
                 }}
               >
                 <div className="flex h-full min-h-0 flex-col border-r border-border/60 bg-card">
@@ -2223,7 +2102,7 @@ export const ProjectWorkspace = memo(function ProjectWorkspace({ isActive = true
                                 <PreviewStack
                                   tabs={tabs}
                                   activeId={splitTab.id}
-                                  projectVisible={isActive}
+                                  projectVisible={true}
                                   registerHandle={registerPreviewHandle}
                                   onUrlChange={handlePreviewUrl}
                                   onCloseTab={disposeTab}
@@ -2308,22 +2187,18 @@ export const ProjectWorkspace = memo(function ProjectWorkspace({ isActive = true
           />
 
           {hasComposer ? (
-            <AgentRunBridge
+            <AgentRunBridgeGate
               openAiDiffTab={openAiDiffTab}
               closeAiDiffTab={closeAiDiffTab}
-              isActive={isActive}
             />
           ) : null}
 
           <AnimatePresence>
-            {isActive && miniOpen && hasComposer && stackSurface !== "group" ? (
-              <AiErrorBoundary label="mini-window">
-                <AiMiniWindow key="ai-mini-window" />
-              </AiErrorBoundary>
-            ) : null}
-            {isActive && hasComposer && stackSurface === "group" ? (
-              <GroupPill />
-            ) : null}
+            <ActiveSurfaces
+              hasComposer={hasComposer}
+              miniOpen={miniOpen}
+              stackSurface={stackSurface}
+            />
             {contextMenu ? (
               <CustomContextMenu
                 key="custom-context-menu"

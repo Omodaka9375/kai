@@ -12,18 +12,21 @@ describe("multi-project workspace ownership", () => {
 
   it("keeps every project mounted and switches visibility, not resetWorkspace", () => {
     expect(shell).toContain("projects.map((project)");
-    expect(shell).toContain("<ProjectWorkspace isActive={project.id === activeId}");
-    // 2026-11-02: memoized — a status-transition or foreign-project
-    // re-render of AppShell no longer reconciles every workspace.
-    expect(workspace).toMatch(/export const ProjectWorkspace = memo\(function ProjectWorkspace/);
-    expect(workspace).toContain("projectVisible={isActive}");
+    // 2026-11-02 round 2: activation rides WorkspaceActiveContext — the
+    // workspace takes NO isActive prop (a prop flip reconciled BOTH
+    // flipping workspaces on every switch; with live agent streams that
+    // was the residual switch lag).
+    expect(shell).toContain("<WorkspaceActiveProvider value={project.id === activeId}>");
+    expect(shell).toContain("<ProjectWorkspace />");
+    expect(shell).not.toContain("<ProjectWorkspace isActive=");
+    expect(workspace).toMatch(/export const ProjectWorkspace = memo\(function ProjectWorkspace\(\) \{/);
     expect(shell).toContain("inert={project.id !== activeId ? true : undefined}");
     expect(shell).toContain("project.id !== activeId && \"invisible pointer-events-none\"");
     // Visibility/inert must live on the absolute-positioned project WRAPPER.
     // A transparent, hit-testable wrapper otherwise covers the foreground
     // project, while inert inside an exiting workspace leaves AI clicks dead.
     expect(workspace).not.toContain("inert={!isActive");
-    expect(workspace).toContain("isActive && miniOpen && hasComposer");
+    expect(workspace).toContain("<ActiveSurfaces");
     expect(workspace).toContain("projectsMenu.addProject(path)");
   });
 
@@ -72,7 +75,10 @@ describe("multi-project workspace ownership", () => {
     // The hamburger occupies the rail's top-left slot, not a duplicate header
     // position. Only the active workspace may supply the File menu trigger.
     expect(rail).toContain("{fileMenuTrigger}");
-    expect(workspace).toContain("value={isActive ? fileMenuTrigger : null}");
+    // 2026-11-02 round 2: the provider value is unconditional in the body;
+    // foreground routing happens inside the trigger component (a body-level
+    // activation ternary here re-rendered the whole tree on every switch).
+    expect(workspace).toContain("<FileMenuTriggerProvider value={fileMenuTrigger}>");
     // Context reaches DESCENDANTS only: a rail above the provider always
     // receives null, leaving the hamburger blank in production.
     const provider = workspace.indexOf("<FileMenuTriggerProvider");
@@ -103,12 +109,14 @@ describe("multi-project workspace ownership", () => {
     // re-synced on every activation — otherwise the expanded window renders
     // at the outgoing/stale offset and covers the incoming project's tree.
     const miniWindow = readFileSync(new URL("../modules/ai/components/AiMiniWindow.tsx", import.meta.url), "utf8");
+    const gate = readFileSync(new URL("./workspaceActivation.tsx", import.meta.url), "utf8");
     expect(miniWindow).toContain("--kai-workspace-left");
-    // Foreground-only gate inside onResize…
-    expect(workspace).toContain("if (isActive) writeWorkspaceLeft(size.inPixels);");
-    // …and an activation re-sync (a project switch resizes nothing, so
-    // without this the var would keep the outgoing project's width).
-    expect(workspace).toMatch(/useEffect\(\(\) => \{\s*if \(!isActive\) return;[\s\S]*?writeWorkspaceLeft\(px\);/);
+    // Foreground-only gate inside onResize (ref read - no body subscription)…
+    expect(workspace).toContain("if (isActiveRef.current) writeWorkspaceLeft(size.inPixels);");
+    // …and the activation re-sync lives in the GATE now (a project switch
+    // resizes nothing, so without the re-sync the var would keep the
+    // outgoing project's width).
+    expect(gate).toMatch(/useEffect\(\(\) => \{\s*if \(!isActive\) return;[\s\S]*?writeWorkspaceLeft\(getSidebarPx\(\)\);/);
   });
 
   it("keeps session and archive controls in the AI window, not the project rail", () => {
@@ -135,7 +143,9 @@ describe("multi-project workspace ownership", () => {
 
   it("hydrates against an explicitly owned project runtime", () => {
     const store = readFileSync(new URL("../modules/ai/store/chatStore.ts", import.meta.url), "utf8");
-    expect(workspace).toContain("hydrateSessions(root, projectRuntime)");
+    const gate = readFileSync(new URL("./workspaceActivation.tsx", import.meta.url), "utf8");
+    // 2026-11-02 round 2: the hydrate bootstrap lives in the activation gate.
+    expect(gate).toContain("hydrateSessions(root, projectRuntime)");
     expect(store).toContain("const hydrationRuntime = runtime ?? activeProjectRuntime");
     expect(store).toContain("const liveActiveId = hydrationRuntime");
   });
@@ -191,16 +201,34 @@ describe("switch-cost contract: a switch re-renders one workspace (2026-11-02)",
     expect(shell).toContain("<ProjectRailItemsContext.Provider value={items}>");
   });
 
-  it("the workspaces are memoized and free of the global session subscription", () => {
-    expect(workspace).toMatch(/export const ProjectWorkspace = memo\(function ProjectWorkspace/);
+  it("the workspaces are memoized and never subscribe to activation or the global session id", () => {
+    expect(workspace).toMatch(/export const ProjectWorkspace = memo\(function ProjectWorkspace\(\) \{/);
     expect(workspace).toContain("function ProjectSessionStamp");
-    expect(workspace).toContain("<ProjectSessionStamp isActive={isActive} projectRuntime={projectRuntime} />");
-    const stampIdx = workspace.indexOf("function ProjectSessionStamp");
+    // The stamp subscribes the ACTIVATION CONTEXT itself (round 2).
+    expect(workspace).toMatch(/function ProjectSessionStamp\(\{[\s\S]*?useWorkspaceActive\(\)/);
     const bodyIdx = workspace.indexOf("export const ProjectWorkspace = memo(function ProjectWorkspace");
-    // The GLOBAL session-id selector must appear ONLY inside the stamp
-    // child, not in the memoized workspace body after it.
-    expect(stampIdx).toBeLessThan(bodyIdx);
+    // The GLOBAL session-id selector must appear ONLY inside tiny gate
+    // children, never in the memoized workspace body's own hooks.
     expect(workspace.slice(bodyIdx)).not.toContain("useChatStore((s) => s.activeSessionId)");
+  });
+
+  it("the workspace BODY never subscribes to activation (2026-11-02 round 2)", () => {
+    const bodyIdx = workspace.indexOf("export const ProjectWorkspace = memo(function ProjectWorkspace");
+    const body = workspace.slice(bodyIdx);
+    // useWorkspaceActive in the body would re-render the whole tree on every
+    // project switch — the exact cost this round removes. Only the gate
+    // components (defined BEFORE the body) and the stacks may subscribe.
+    const bodyHookIdx = body.indexOf("useWorkspaceActive()");
+    if (bodyHookIdx !== -1) {
+      // Allowed only inside the gate components appended AFTER the body
+      // (ActiveRefSink / AgentRunBridgeGate / ActiveSurfaces).
+      const afterBody = body.slice(bodyHookIdx);
+      expect(afterBody).toContain("function ActiveRefSink");
+    }
+    // The activation effects live in the null-rendering gate, not the body:
+    expect(workspace).toContain("<WorkspaceActivationGate");
+    expect(workspace).toContain("function ActiveRefSink");
+    expect(workspace).toContain("isActiveRef.current");
   });
 
   it("open-project routing reads items at event time via getItems()", () => {

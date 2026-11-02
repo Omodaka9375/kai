@@ -1,6 +1,7 @@
 import type { Tab } from "@/modules/tabs";
 import type { SearchAddon } from "@xterm/addon-search";
 import { useEffect, useMemo, useRef } from "react";
+import { useWorkspaceActive } from "@/modules/workspace";
 import { PaneTreeView } from "./PaneTreeView";
 import type { TerminalPaneHandle } from "./TerminalPane";
 import { leafIds } from "./lib/panes";
@@ -8,6 +9,9 @@ import { leafIds } from "./lib/panes";
 type Props = {
   tabs: Tab[];
   activeId: number;
+  /** DEPRECATED (2026-11-02): activation moved to WorkspaceActiveContext.
+   *  Kept for external callers; when true it forces visible (the split
+   *  pane passes it to keep the secondary terminal interactive). */
   projectVisible?: boolean;
   /** Register/unregister handle by leaf id (not tab id). */
   registerHandle: (leafId: number, handle: TerminalPaneHandle | null) => void;
@@ -36,6 +40,13 @@ export function TerminalStack({
   onFocusLeaf,
   onCloseLeaf,
 }: Props) {
+  // ACTIVATION SUBSCRIPTION (2026-11-02 switch-lag round 2): the stack
+  // itself is tiny (a map over tab wrappers) but its children hold every
+  // xterm pane — subscribing HERE keeps a project switch from reconciling
+  // the whole workspace while still flipping the visibility classes.
+  const workspaceActive = useWorkspaceActive();
+  const projectActive = projectVisible ?? workspaceActive;
+
   const terminals = useMemo(
     () => tabs.filter((t) => t.kind === "terminal"),
     [tabs],
@@ -84,7 +95,7 @@ export function TerminalStack({
   return (
     <div className="relative h-full w-full">
       {terminals.map((t) => {
-        const tabVisible = projectVisible && t.id === activeId;
+        const tabVisible = projectActive && t.id === activeId;
         return (
           <div
             key={t.id}

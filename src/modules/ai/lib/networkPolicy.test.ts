@@ -168,7 +168,11 @@ describe("shell egress classifier (behavioral)", () => {
 
 describe("hook wiring (source contract)", () => {
   it("App.tsx installs the globalThis hook from the preferences store", async () => {
-    const appSrc = readFileSync(new URL("../../../app/App.tsx", import.meta.url), "utf8");
+    // 2026-11-02 round 2: the LAN-only policy hook moved to the activation
+    // gate with the launch-cwd effect (workspaceActivation.tsx).
+    const appSrc = readFileSync(new URL("../../../app/workspaceActivation.tsx", import.meta.url), "utf8");
+    // 2026-11-02 round 2: the LAN-only policy hook moved to the
+    // activation gate (workspaceActivation.tsx) with the launch-cwd effect.
     expect(appSrc).toContain("__kaiLanOnlyPolicy");
     expect(appSrc).toContain('networkPolicy === "lan"');
   });

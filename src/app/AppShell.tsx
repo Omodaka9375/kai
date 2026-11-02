@@ -27,6 +27,7 @@ import {
   createProjectRuntime,
   LOCAL_WORKSPACE,
   ProjectRuntimeProvider,
+  WorkspaceActiveProvider,
   type ProjectRuntime,
   type WorkspaceEnv,
 } from "@/modules/workspace";
@@ -331,7 +332,15 @@ export default function App() {
               inert={project.id !== activeId ? true : undefined}
             >
               <ProjectRuntimeProvider value={project}>
-                <ProjectWorkspace isActive={project.id === activeId} />
+                {/* ACTIVATION CONTEXT (2026-11-02 switch-lag round 2):
+                    flipping THIS value re-renders only the small gate
+                    components that subscribe — ProjectWorkspace itself
+                    never re-renders on a switch (isActive-as-a-prop
+                    reconciled BOTH flipping workspaces fully; with active
+                    agent streams that was the residual lag). */}
+                <WorkspaceActiveProvider value={project.id === activeId}>
+                  <ProjectWorkspace />
+                </WorkspaceActiveProvider>
               </ProjectRuntimeProvider>
             </div>
           ))}

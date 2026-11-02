@@ -1,11 +1,14 @@
 import { cn } from "@/lib/utils";
 import type { PreviewTab, Tab } from "@/modules/tabs";
 import { useEffect, useRef } from "react";
+import { useWorkspaceActive } from "@/modules/workspace";
 import { PreviewPane, type PreviewPaneHandle } from "./PreviewPane";
 
 type Props = {
   tabs: Tab[];
   activeId: number;
+  /** DEPRECATED (2026-11-02): activation moved to WorkspaceActiveContext;
+   *  kept for the split-pane caller. */
   projectVisible?: boolean;
   onUrlChange: (id: number, url: string) => void;
   registerHandle: (id: number, handle: PreviewPaneHandle | null) => void;
@@ -20,6 +23,10 @@ export function PreviewStack({
   registerHandle,
   onCloseTab,
 }: Props) {
+  // ACTIVATION SUBSCRIPTION (2026-11-02): see TerminalStack's note.
+  const workspaceActive = useWorkspaceActive();
+  const projectActive = projectVisible ?? workspaceActive;
+
   const previews = tabs.filter((t): t is PreviewTab => t.kind === "preview");
 
   const registerRef = useRef(registerHandle);
@@ -67,7 +74,7 @@ export function PreviewStack({
   return (
     <div className="relative h-full w-full">
       {previews.map((t) => {
-        const visible = projectVisible && t.id === activeId;
+        const visible = projectActive && t.id === activeId;
         return (
           <div
             key={t.id}
