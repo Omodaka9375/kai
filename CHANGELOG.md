@@ -12,6 +12,8 @@ All notable changes to the KAI terminal emulator project are documented in this 
 - Skills: typing #skill no longer pastes the full skill text into your message.
 - Personas: the delete button on a persona card in Settings is now always visible. 
 - Menus: the main menu item that opened snippets is now labeled Skills, matching where things moved.
+- Groups: the group-chat button now shows on a brand-new install too. It used to stay hidden until you had two projects open, but agent personas can join a group on their own, so one project is enough.
+- Groups: fixed a small race from the switching work — a file-change review tab could fail to open if you switched projects at just the wrong moment.
 - Performance: switching between two projects is smoother when an agent is actively thinking or writing in the background.
 
 ---
