@@ -32,7 +32,14 @@ const here = dirname(fileURLToPath(import.meta.url));
 // src/modules/ai/lib → repo root is four up.
 const repoRoot = resolve(here, "..", "..", "..", "..");
 
-/** Walk a directory tree collecting relative paths (bounded, skips VCS). */
+/** Walk a directory tree collecting relative paths (bounded, skips VCS).
+ *
+ *  Dot-directories are skipped WHOLESALE (.kai/, .vscode/, .idea/…): they
+ *  hold gitignored local content — a path claim "resolving" against an
+ *  ignored local file passes on the dev machine and fails on clean CI (the
+ *  exact lie this gate exists to prevent; found by CI on 2026-11-03 when a
+ *  gitignored .kai/training clone's SKILL.md satisfied the `SKILL.md` token
+ *  locally). No KAI.md path claim legitimately points inside a dot-dir. */
 function walk(dir: string, acc: string[]): void {
   let entries: string[];
   try {
@@ -41,7 +48,7 @@ function walk(dir: string, acc: string[]): void {
     return;
   }
   for (const name of entries) {
-    if (name === ".git" || name === "node_modules" || name === "target" || name === "dist") continue;
+    if (name.startsWith(".") || name === "node_modules" || name === "target" || name === "dist") continue;
     const abs = join(dir, name);
     let st;
     try {
@@ -78,6 +85,10 @@ const RUNTIME_STORE_ALLOW = new Set([
   // Legacy snippets store — mentioned by the skills migration note; the file
   // exists at runtime in app-data (and on legacy installs), never in-repo.
   "kai-snippets.json",
+  // Skill manifest FORMAT name (2026-11-03 CI bite): SKILL.md files live at
+  // runtime under ~/.kai/skills/<name>/ and <project>/.kai/skills/<name>/ —
+  // never at the repo root. It is a format reference, not a repo path claim.
+  "SKILL.md",
 ]);
 
 const CODE_EXT = /\.(ts|tsx|js|jsx|rs|json|md|css|scss|html|bash|zsh|ps1|plist|toml|ya?ml|lock)$/;

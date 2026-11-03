@@ -1492,17 +1492,23 @@ mod tests {
             text: Some("hi".into()),
             voice_file_id: None,
             voice_duration_secs: None,
+            sender_name: "Tester".into(),
+            is_group: false,
             date: 0,
         };
         let j = serde_json::to_value(&e).unwrap();
         assert_eq!(j["kind"], "message");
         assert_eq!(j["chatId"], 42);
         assert_eq!(j["text"], "hi");
+        assert_eq!(j["senderName"], "Tester");
+        assert_eq!(j["isGroup"], false);
         let p = TelegramEvent::Photo {
             chat_id: 42,
             message_id: 7,
             photo_file_id: "f".into(),
             caption: None,
+            sender_name: "Tester".into(),
+            is_group: false,
             date: 0,
         };
         let j = serde_json::to_value(&p).unwrap();
