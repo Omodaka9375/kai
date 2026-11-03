@@ -1044,10 +1044,11 @@ function Bridge({
         // diff tab per file it touches.
         const dedupeKey = `${approvalId}:${path}`;
         if (state === "approval-requested") {
-          // Do NOT mark openedRef here: a hidden pass defers opens, and
-          // marking now would leave the key "opened" without a tab, so
+          // Do NOT claim in openedRef here: a hidden pass defers opens, and
+          // claiming now would leave the key "opened" without a tab, so
           // activation would never open it. Local dedupe (pendingSeen) keeps
-          // the list unique; openedRef is marked only on the real open.
+          // the list unique; openedRef is claimed just before the batch
+          // opens and RELEASED if an open never happens (see the cleanup).
           if (!openedRef.current.has(dedupeKey) && !pendingSeen.has(dedupeKey)) {
             pendingSeen.add(dedupeKey);
             pending.push({ approvalId, path, derive, dedupeKey });
@@ -1078,14 +1079,24 @@ function Bridge({
     // with a project switch for the main thread. The CLOSE pass above still
     // ran (cheap: tears down any tab left open when we switched away). On
     // activation, justActivated re-runs this effect and opens what is still
-    // pending. openedRef is marked only here, right before opening.
+    // pending. Keys are CLAIMED below before the batch opens and RELEASED
+    // in the cleanup if an open never happened (race fix, see below).
     if (!isActive) return;
 
     if (pending.length === 0) return;
 
+    // CLAIM NOW, RELEASE ON CANCEL (2026-11-03 review SHOULD): claim
+    // synchronously so a re-run's scan dedupes against this in-flight
+    // batch, and release in the cleanup the keys the IIFE never actually
+    // opened. Claim-without-release was the race: a project switch
+    // mid-flight set cancelled=true, the IIFE aborted before
+    // openAiDiffTab, and the claimed-but-never-opened key made the
+    // activation re-scan skip it forever - that approval's diff tab never
+    // opened.
     for (const p of pending) openedRef.current.add(p.dedupeKey);
 
     let cancelled = false;
+    const actuallyOpened = new Set<string>();
     void (async () => {
       const cwd = runtime?.root ?? useChatStore.getState().live.getCwd();
       for (const p of pending) {
@@ -1117,6 +1128,7 @@ function Bridge({
               p.derive.edits.map((e) => e.new_string).join("\n");
           }
         }
+        actuallyOpened.add(p.dedupeKey);
         openAiDiffTab({
           path: abs,
           originalContent: original.content,
@@ -1129,6 +1141,13 @@ function Bridge({
 
     return () => {
       cancelled = true;
+      // Release the claims this run never turned into tabs; keys that DID
+      // open keep their claims (the close pass tears their tabs down when
+      // the approval resolves). Without this, a cancelled in-flight open
+      // permanently hid the diff for a still-pending approval.
+      for (const p of pending) {
+        if (!actuallyOpened.has(p.dedupeKey)) openedRef.current.delete(p.dedupeKey);
+      }
     };
   }, [messages, fileMutationFingerprint, openAiDiffTab, closeAiDiffTab, isActive]);
 

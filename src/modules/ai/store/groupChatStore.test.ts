@@ -567,10 +567,16 @@ describe("source pins — trust boundary & wiring", () => {
     );
     // Opens deferred when hidden...
     expect(bridge).toContain("if (!isActive) return;");
-    // ...and openedRef marked at OPEN time (not scan time), else a hidden
-    // pass would mark the key opened without a tab and it never opens on
-    // activation.
+    // ...keys are CLAIMED before the batch opens (dedup across effect
+    // re-runs) and RELEASED on cancel (2026-11-03 review SHOULD): a
+    // claimed-but-never-opened key - a project switch cancelling the
+    // in-flight open mid-IIFE - must not hide the diff from the
+    // activation re-scan forever.
     expect(bridge).toContain("for (const p of pending) openedRef.current.add(p.dedupeKey);");
+    expect(bridge).toContain("const actuallyOpened = new Set<string>();");
+    expect(bridge).toContain(
+      "if (!actuallyOpened.has(p.dedupeKey)) openedRef.current.delete(p.dedupeKey);",
+    );
     // isActive is now a dep so the activation flip re-derives + opens.
     expect(bridge).toMatch(
       /\}, \[messages, fileMutationFingerprint, openAiDiffTab, closeAiDiffTab, isActive\]\);/,
