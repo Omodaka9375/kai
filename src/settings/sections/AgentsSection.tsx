@@ -188,7 +188,11 @@ function AgentCard({
             "Use agent"
           )}
         </Button>
-        <div className="flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+        {/* Always visible (2026-11-03): the hover-only reveal hid the
+            delete control entirely — the user couldn't find any way to
+            remove a persona from Settings. SkillsSection shows its actions
+            outright; match that. */}
+        <div className="flex gap-0.5">
           {onEdit ? (
             <Button
               size="icon"

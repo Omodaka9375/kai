@@ -111,6 +111,30 @@ describe("AgentsSection CustomInstructionsBlock (hydration + save UX)", () => {
   });
 });
 
+describe("AgentsSection persona card actions (2026-11-03)", () => {
+  const section = read("./sections/AgentsSection.tsx");
+
+  it("edit/delete are ALWAYS visible, not hover-revealed (Skills-section pattern)", () => {
+    // 2026-11-03: the hover-only reveal (opacity-0 + group-hover) made the
+    // delete control effectively undiscoverable — the user (and an agent
+    // surveying the code via failed greps) concluded Settings had NO way
+    // to remove a persona. SkillsSection shows its delete outright; the
+    // Agents cards now match.
+    expect(section).not.toContain("opacity-0 transition-opacity group-hover:opacity-100");
+  });
+
+  it("delete routes through agentsStore.remove with builtin/override semantics", () => {
+    // Custom personas: removeAgent(a.id). Overridden builtins: same call —
+    // deleting the OVERRIDE resets the card to the stock builtin (the
+    // button title says "Reset to default"). Pure builtins: no button.
+    expect(section).toContain('const removeAgent = useAgentsStore((s) => s.remove);');
+    expect(section).toContain(
+      'onDelete={a.builtIn ? (isOverridden ? () => removeAgent(a.id) : null) : () => removeAgent(a.id)}',
+    );
+    expect(section).toContain('title={isReset ? "Reset to default" : "Delete"}');
+  });
+});
+
 describe("per-agent instructions (AgentEditorDialog + agentsStore)", () => {
   const store = read("../modules/ai/store/agentsStore.ts");
   const lib = read("../modules/ai/lib/agents.ts");
