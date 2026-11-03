@@ -203,12 +203,15 @@ describe("deliverAgentMentions — routing engine", () => {
         (m) =>
           m.from === "system" && m.text.includes("@-mention routing paused"),
       );
-    // Burn the chain: agent-to-agent exchanges up to the cap.
+    // Burn the chain: agent-to-agent exchanges up to the cap. (2026-11-04
+    // pacing fix) the counter only burns when a mention actually ROUTES —
+    // use a real "@beta" mention, not a non-matching token, or the loop
+    // delivers nothing and never reaches the cap.
     for (let i = 0; i < MENTION_CHAIN_MAX; i++) {
       await deliverAgentMentions(
         g.id,
         i % 2 === 0 ? "proj-a" : "proj-b",
-        "@alpha/@beta ping",
+        i % 2 === 0 ? "@beta ping" : "@alpha pong",
       );
     }
     expect(systemNote()).toBe(false);

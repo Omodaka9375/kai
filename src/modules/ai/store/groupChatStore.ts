@@ -152,7 +152,12 @@ type PendingReply = {
   text: string;
   at: number;
 };
-type CoalesceBuffer = { expected: Set<string>; replies: PendingReply[] };
+type CoalesceBuffer = {
+  expected: Set<string>;
+  replies: PendingReply[];
+  /** One activity-aware extension of the timeout was consumed. */
+  graceUsed?: boolean;
+};
 const pendingReplies = new Map<string, CoalesceBuffer>();
 const coalesceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
@@ -353,6 +358,40 @@ export function flushCoalesced(coordinatorSessionId: string): void {
   if (!buf || (buf.replies.length === 0 && buf.expected.size === 0)) {
     pendingReplies.delete(coordinatorSessionId);
     return;
+  }
+  // ACTIVITY-AWARE GRACE (2026-11-04 review): the timer is fixed at 90s from
+  // the round's FIRST send_to_project and blind to what participants are
+  // doing — a participant actively inside a long build/test (or parked on a
+  // manual approval) was reported to the coordinator as "no reply", which
+  // the coordinator could act on (re-delegate / declare done) while the
+  // reply was still in flight. On timeout, participants that are STILL
+  // working (or awaiting approval) get ONE extension of the full budget —
+  // bounded once, so a wedged participant cannot extend forever.
+  const g = [...groups.values()].find(
+    (x) =>
+      x.endedAt === null &&
+      x.coordinator.kind === "agent" &&
+      x.coordinator.sessionId === coordinatorSessionId,
+  );
+  if (g) {
+    const stillActive = [...buf.expected].filter((e) => {
+      if (buf.replies.some((r) => r.projectId === e)) return false;
+      const p = g.participants.find((x) => x.projectId === e);
+      if (!p) return false;
+      const act = participantActivity(p.sessionId, g.id);
+      return act === "working" || act === "approval";
+    });
+    if (stillActive.length > 0 && !buf.graceUsed) {
+      buf.graceUsed = true;
+      coalesceTimers.set(
+        coordinatorSessionId,
+        setTimeout(
+          () => flushCoalesced(coordinatorSessionId),
+          GROUP_COALESCE_TIMEOUT_MS,
+        ),
+      );
+      return;
+    }
   }
   const merged = buf.replies
     .map((r) => `[group] ${r.name} replied:\n${r.text}`)
@@ -1518,43 +1557,53 @@ export async function deliverAgentMentions(
 ): Promise<{ deliveries: MentionDeliveryOutcome[]; skipped: string[] }> {
   const g = groups.get(groupId);
   if (!g || g.endedAt !== null) return { deliveries: [], skipped: [] };
-  // Cap: count ROUTED exchanges; a human message resets the chain.
-  const chain = (mentionChain.get(groupId) ?? 0) + 1;
-  mentionChain.set(groupId, chain);
-  if (chain > MENTION_CHAIN_MAX) {
-    await appendGroupMessage(groupId, {
-      from: "system",
-      projectId: "",
-      sessionId: "",
-      text: `@-mention routing paused after ${MENTION_CHAIN_MAX} agent-to-agent exchanges — send a message to the group to reset the chain.`,
-    });
-    return { deliveries: [], skipped: [] };
-  }
   const others = g.participants.filter(
     (p) => p.projectId !== fromParticipantId,
   );
   const tokens = [
     ...new Set([...replyText.matchAll(/@([^\s@]+)/g)].map((m) => m[1])),
   ];
-  const deliveries: MentionDeliveryOutcome[] = [];
-  const skipped: string[] = [];
+  // CAP COUNTS ROUTED MENTIONS (2026-11-04 review): the counter used to
+  // increment on every CALL, and both call sites invoke this on EVERY
+  // mirrored reply (mention or not) — so 8 plain replies with zero
+  // mentions exhausted MENTION_CHAIN_MAX and emitted a bogus "paused"
+  // note. Resolve the targets FIRST, then count (and cap) only when at
+  // least one token actually routes.
+  const resolvedTargets: GroupParticipant[] = [];
   for (const token of tokens) {
-    // ALIAS RESERVED (2026-11-02 audit NIT): with a USER coordinator there
-    // is no session behind the alias — route to NOBODY rather than fall
-    // through to the name matcher, where a participant whose name merely
-    // CONTAINS "coordinator" used to catch it.
     const normalized = token
       .toLowerCase()
       .replace(/\s+/g, "")
       .replace(/[\p{P}]+$/u, "");
     if (normalized === COORDINATOR_ALIAS && g.coordinator.kind !== "agent")
       continue;
-    // @coordinator resolves BEFORE the name matcher (alias priority —
-    // see coordinatorByAlias); every other token matches by display name.
     const target =
       coordinatorByAlias(g, fromParticipantId, token) ??
       matchParticipantByToken(others, token);
-    if (!target) continue;
+    if (target) resolvedTargets.push(target);
+  }
+  const deliveries: MentionDeliveryOutcome[] = [];
+  const skipped: string[] = [];
+  if (resolvedTargets.length > 0) {
+    // Cap: count ROUTED exchanges; a human message resets the chain.
+    const chain = (mentionChain.get(groupId) ?? 0) + 1;
+    mentionChain.set(groupId, chain);
+    if (chain > MENTION_CHAIN_MAX) {
+      await appendGroupMessage(groupId, {
+        from: "system",
+        projectId: "",
+        sessionId: "",
+        text: `@-mention routing paused after ${MENTION_CHAIN_MAX} agent-to-agent exchanges — send a message to the group to reset the chain.`,
+      });
+      return { deliveries: [], skipped: [] };
+    }
+  } else {
+    // No mention routed: a plain reply — nothing to deliver, nothing to cap.
+    return { deliveries: [], skipped: [] };
+  }
+  // Targets were resolved above (pre-cap); iterate them directly — no
+  // duplicate alias/match resolution here.
+  for (const target of resolvedTargets) {
     // Re-resolve the CURRENT active session like every other delivery path
     // (the record can be empty/stale — same frozen-record class the stop/
     // delivery/steering paths already fixed). Personas route via their own
@@ -1591,6 +1640,19 @@ export async function deliverAgentMentions(
       agentAuthored: true,
     });
     deliveries.push({ target, queued });
+  }
+  // SKIPPED MENTIONS ARE NOT SILENT (2026-11-04 review): both call sites
+  // fire-and-forget this function's return, so a mention aimed at a closed
+  // project (or a live session that could not be re-resolved) used to
+  // vanish with no note — the mentioner waited forever. Post the same
+  // class of system note the user-send path posts.
+  if (skipped.length > 0) {
+    await appendGroupMessage(groupId, {
+      from: "system",
+      projectId: "",
+      sessionId: "",
+      text: `@-mention not delivered (project not open in this window): ${skipped.join(", ")} — no message reached ${skipped.length === 1 ? "that participant" : "those participants"}.`,
+    });
   }
   return { deliveries, skipped };
 }

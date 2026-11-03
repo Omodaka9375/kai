@@ -622,6 +622,22 @@ describe("source pins — trust boundary & wiring", () => {
     expect(chatStoreSrc).toContain("export function hasPendingApprovals(");
   });
 
+  it("pacing: the mention cap counts ROUTED mentions only, skipped mentions are not silent, and the 90s timeout extends once for active participants (2026-11-04)", () => {
+    // Cap: the counter incremented on every CALL (both call sites invoke
+    // deliverAgentMentions on every mirrored reply, mention or not), so 8
+    // plain replies exhausted MENTION_CHAIN_MAX with zero mentions. The
+    // cap now applies only when a token actually routes.
+    expect(store).toContain("if (resolvedTargets.length > 0) {");
+    // Skipped mentions (closed project) used to vanish — callers discard
+    // the return. Same note class as the user-send path.
+    expect(store).toContain("not delivered (project not open in this window)");
+    // The coalesce timeout is blind to activity: a participant actively in
+    // a long build (or parked on an approval) was reported as "no reply".
+    // One bounded grace extension, then the honest "no reply yet" wake.
+    expect(store).toContain("ACTIVITY-AWARE GRACE");
+    expect(store).toContain("!buf.graceUsed");
+  });
+
   it("the create dialog lists existing groups with open + delete (deletion is human-only)", () => {
     expect(panel).toContain("Your groups");
     expect(panel).toContain("deleteGroupChat(g.id)");
