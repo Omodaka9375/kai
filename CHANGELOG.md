@@ -4,6 +4,18 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [2.1.6]
+
+- Polish pass on skills and personas, plus smoother project switching.
+- Personas: you can now ask the agent to remove a persona by name. 
+- Skills: a skill the agent creates now shows up under # right away.
+- Skills: typing #skill no longer pastes the full skill text into your message.
+- Personas: the delete button on a persona card in Settings is now always visible. 
+- Menus: the main menu item that opened snippets is now labeled Skills, matching where things moved.
+- Performance: switching between two projects is smoother when an agent is actively thinking or writing in the background.
+
+---
+
 ## [2.1.5]
 
 The agent-learnable skills release, plus a hardening pass
