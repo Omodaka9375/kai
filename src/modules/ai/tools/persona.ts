@@ -62,6 +62,10 @@ export function buildPersonaTools(ctx: ToolContext) {
   const roster = allPersonas()
     .map((a) => `${a.name} (id: ${a.id})`)
     .join("; ");
+  const rosterCustom = useAgentsStore
+    .getState()
+    .customAgents.map((a) => `${a.name} (id: ${a.id})`)
+    .join("; ");
 
   return {
     create_persona: tool({
@@ -101,6 +105,52 @@ export function buildPersonaTools(ctx: ToolContext) {
           id: agent.id,
           name: agent.name,
           note: `${agent.name} persona created and now active for this conversation. History and memory are kept — continue in the same chat.`,
+        };
+      },
+    }),
+
+    delete_persona: tool({
+      description:
+        `Delete an EXISTING CUSTOM persona permanently (removes it from the persona picker and Settings). ONLY call this when the user explicitly asks to delete/remove a persona — NEVER offer it on your own. Pass the persona's name or id. Personas that can be deleted: ${rosterCustom}. Builtin personas (Coder, Architect, Code Reviewer, Security, Designer, Researcher, Assistant) cannot be deleted. Deletion does NOT touch the conversation's history or memory.`,
+      inputSchema: z.object({
+        persona: z
+          .string()
+          .min(1)
+          .describe("The custom persona to delete: its name or id (from the list)."),
+      }),
+      needsApproval: true,
+      execute: async ({ persona }) => {
+        const raw = persona.trim();
+        // EXACT match only (id, or name) — this is a DESTRUCTIVE op; the
+        // relaxed prefix/substring tiers of set_persona must never guess
+        // here ("sec" must not delete Security).
+        const custom = useAgentsStore.getState().customAgents;
+        const target =
+          custom.find((a) => a.id === raw) ??
+          custom.find((a) => a.name.toLowerCase() === raw.toLowerCase());
+        if (!target) {
+          const builtin = BUILTIN_AGENTS.find(
+            (b) => b.id === raw || b.name.toLowerCase() === raw.toLowerCase(),
+          );
+          if (builtin) {
+            return {
+              ok: false,
+              error: `"${raw}" is a builtin persona and cannot be deleted. Personas that can be deleted: ${rosterCustom}.`,
+            };
+          }
+          return {
+            ok: false,
+            error: `No deletable persona "${raw}". Personas that can be deleted: ${rosterCustom}.`,
+          };
+        }
+        // Same store path Settings would use — resets the active persona,
+        // clears stale per-session pins, persists, and broadcasts.
+        useAgentsStore.getState().remove(target.id);
+        return {
+          ok: true,
+          id: target.id,
+          name: target.name,
+          note: `${target.name} persona deleted. This conversation (and any session pinned to it) runs with no persona from the next turn; history and memory are kept.`,
         };
       },
     }),

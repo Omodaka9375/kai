@@ -40,6 +40,8 @@ const shared = vi.hoisted(() => ({
   activeSessionId: "s-fg" as string | null,
   upsert: vi.fn(),
   setActiveId: vi.fn(),
+  remove: vi.fn(),
+  customAgents: [] as Array<{ id: string; name: string; builtIn: boolean }>,
 }));
 
 vi.mock("./chatStore", async (importOriginal) => {
@@ -58,8 +60,9 @@ vi.mock("./agentsStore", async (importOriginal) => {
     ...actual,
     useAgentsStore: {
       getState: () => ({
-        customAgents: [],
+        customAgents: shared.customAgents,
         upsert: shared.upsert,
+        remove: shared.remove,
         setActiveId: shared.setActiveId,
       }),
     },
@@ -72,6 +75,7 @@ import { getSessionPreferences, removeSessionPreferences } from "./sessionPrefer
 type PersonaTools = {
   create_persona: { needsApproval?: boolean; execute: (i: { name: string; instructions: string; description?: string; icon?: string }) => Promise<{ ok: boolean; id?: string; name?: string; note?: string }> };
   set_persona: { needsApproval?: boolean; execute: (i: { persona: string }) => Promise<{ ok: boolean; note?: string }> };
+  delete_persona: { needsApproval?: boolean; execute: (i: { persona: string }) => Promise<{ ok: boolean; name?: string; note?: string; error?: string }> };
 };
 
 const fgCtx = {
@@ -85,6 +89,11 @@ beforeEach(() => {
   shared.activeSessionId = "s-fg";
   shared.upsert.mockReset();
   shared.setActiveId.mockReset();
+  shared.remove.mockReset();
+  shared.customAgents = [
+    { id: "a-msjesn2h-j56b", name: "Senior Engineer", builtIn: false },
+    { id: "a-msthhm8j-n7hl", name: "Writer", builtIn: false },
+  ];
   removeSessionPreferences("s-fg");
   removeSessionPreferences("s-bg");
 });
@@ -164,6 +173,50 @@ describe("set_persona", () => {
   });
 });
 
+describe("delete_persona", () => {
+  it("deletes a custom persona by name or id through the store's remove path (approval-gated)", async () => {
+    const tools = buildPersonaTools(fgCtx) as unknown as PersonaTools;
+    // DESTRUCTIVE: unlike create/set, deletion must pause for approval.
+    expect(tools.delete_persona.needsApproval).toBe(true);
+    const res = await tools.delete_persona.execute({ persona: "Writer" });
+    expect(res.ok).toBe(true);
+    expect(res.name).toBe("Writer");
+    expect(shared.remove).toHaveBeenCalledWith("a-msthhm8j-n7hl");
+    // By id as well.
+    shared.remove.mockReset();
+    const res2 = await tools.delete_persona.execute({ persona: "a-msjesn2h-j56b" });
+    expect(res2.ok).toBe(true);
+    expect(shared.remove).toHaveBeenCalledWith("a-msjesn2h-j56b");
+  });
+
+  it("refuses builtin personas and never fuzzy-matches (exact name/id only)", async () => {
+    const tools = buildPersonaTools(fgCtx) as unknown as PersonaTools;
+    // Builtin: refused with the builtin-specific message.
+    const builtin = await tools.delete_persona.execute({ persona: "Security" });
+    expect(builtin.ok).toBe(false);
+    expect(builtin.error).toContain("builtin");
+    expect(shared.remove).not.toHaveBeenCalled();
+    // Prefix/substring that set_persona tolerates must NEVER delete:
+    // "sen" could look like "Senior Engineer" under the relaxed tiers.
+    const fuzzy = await tools.delete_persona.execute({ persona: "sen" });
+    expect(fuzzy.ok).toBe(false);
+    expect(fuzzy.error).toContain("No deletable persona");
+    expect(shared.remove).not.toHaveBeenCalled();
+    // Unknown name.
+    const unknown = await tools.delete_persona.execute({ persona: "ghost" });
+    expect(unknown.ok).toBe(false);
+    expect(unknown.error).toContain("No deletable persona");
+    expect(shared.remove).not.toHaveBeenCalled();
+  });
+
+  it("the description forbids proactive offers (no-spam contract, same as create_skill)", () => {
+    const persona = readFileSync(new URL("../tools/persona.ts", import.meta.url), "utf8");
+    expect(persona).toContain("NEVER offer it on your own");
+    // Exact-match comment is load-bearing: pin it.
+    expect(persona).toContain("EXACT match only");
+  });
+});
+
 describe("context/memory safety (the ask)", () => {
   const persona = readFileSync(new URL("../tools/persona.ts", import.meta.url), "utf8");
 
@@ -192,7 +245,18 @@ describe("context/memory safety (the ask)", () => {
     expect(persona).toContain("useAgentsStore.getState().setActiveId(personaId)");
   });
 
-  it("both tools are auto-run (no approval pause) — set_my_name class", () => {
-    expect(persona).not.toMatch(/needsApproval: true/);
+  it("create/set are auto-run (set_my_name class); delete is approval-gated (2026-11-03)", () => {
+    // create_persona + set_persona remain trivial reversible preferences.
+    // delete_persona is DESTRUCTIVE (a persona vanishes from the picker and
+    // every window) — it pauses on an approval card like create_skill does.
+    // The gate must be on delete ONLY: the source pins the boundary.
+    const deleteSite = persona.indexOf("delete_persona: tool({");
+    const setSite = persona.indexOf("set_persona: tool({");
+    const needsApprovalSite = persona.indexOf("needsApproval: true");
+    expect(needsApprovalSite).toBeGreaterThan(-1);
+    expect(needsApprovalSite).toBeGreaterThan(deleteSite);
+    expect(needsApprovalSite).toBeLessThan(setSite);
+    // And exactly one approval gate in the whole file (delete's).
+    expect(persona.match(/needsApproval: true/g)?.length).toBe(1);
   });
 });

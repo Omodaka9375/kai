@@ -384,6 +384,14 @@ const REGISTRY: Record<string, ToolPresentation> = {
     fence: false,
     remoteSurface: false,
   },
+  delete_persona: {
+    approvalLabel: "Delete persona",
+    status: (a) => `Deleting persona ${String(a.persona ?? "")}`,
+    summary: (a) => str(a, "persona"),
+    effect: "COMMITTED",
+    fence: false,
+    remoteSurface: false,
+  },
   project_status: {
     label: "Group status",
     status: (a) => `Checking ${String(a.project ?? "project")}`,
