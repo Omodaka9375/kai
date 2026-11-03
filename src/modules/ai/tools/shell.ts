@@ -145,6 +145,15 @@ function slowCommandTimeout(cmd: string): number | undefined {
   if (/\b(npm|pnpm|yarn|bun)\s+(run\s+)?(test|lint|typecheck|check)\b/.test(lower)) return 300;
   // Bare runner invocations too (vitest run, jest).
   if (/\b(vitest|jest)\b/.test(lower)) return 300;
+  // Network-heavy git operations — push/fetch/pull/clone can take minutes
+  // on large repos or slow remotes. The old 30s default (now 120s) killed
+  // these mid-transfer and the agent only ever saw partial output
+  // (2026-11-03 report: "when a command takes long the model seems to
+  // forget what it was doing").
+  if (/\bgit\s+(push|fetch|pull|clone)\b/.test(lower)) return 300;
+  // Downloads and pip installs — bounded by network speed, not work.
+  if (/\b(curl|wget)\b/.test(lower)) return 120;
+  if (/\b(pip|pip3)\s+(install|-m\s+pip\s+install)\b/.test(lower)) return 120;
   return undefined;
 }
 

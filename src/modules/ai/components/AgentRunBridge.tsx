@@ -714,9 +714,20 @@ function Bridge({
   const injectMessage = useChatStore((s) => s.injectMessage);
   useEffect(() => {
     if (status === "submitted" || status === "streaming") return;
+    // APPROVAL PAUSE IS NOT RUN END (2026-11-03 report: "when a command
+    // takes long the model's response is delayed after it and it seems to
+    // forget what it was doing"). Every bash_run ends the request on the
+    // approval card, so the SDK status settles to "ready" MID-RUN here —
+    // and this effect used to fire the verify (up to 240s of tsc/cargo)
+    // and inject a "[verify] Fix these failures" redirect while the run
+    // was merely paused on a click. Skip whenever ANY approval card is
+    // pending (raw count: auto-approvable cards resolve a macrotask later
+    // and re-enter streaming); the run's final, post-approval idle is the
+    // real run end and fires the verify there.
+    if (approvalsPending > 0) return;
     const root = runtime?.root ?? useChatStore.getState().live.getWorkspaceRoot();
     void verifyIfDirtyAtRunEnd(sessionId, root, injectMessage, runtime?.native);
-  }, [runtime, status, sessionId, injectMessage]);
+  }, [runtime, status, sessionId, injectMessage, approvalsPending]);
 
   // ---- Auto-speak finished replies (Voice settings) -----------------------
   // When a run settles to idle after streaming, read the reply THIS run

@@ -30,7 +30,7 @@ use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 use background::{BackgroundLogResponse, BackgroundProc, BackgroundProcInfo};
 use session::{SessionRunOutput, ShellSession};
 
-const DEFAULT_TIMEOUT_SECS: u64 = 30;
+const DEFAULT_TIMEOUT_SECS: u64 = 120;
 const MAX_TIMEOUT_SECS: u64 = 1000;
 const MAX_OUTPUT_BYTES: usize = 256 * 1024;
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
