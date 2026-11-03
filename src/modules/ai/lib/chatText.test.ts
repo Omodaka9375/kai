@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   stripLeakedTokens,
@@ -136,5 +137,45 @@ describe("quote blocks", () => {
     const long = "x".repeat(140);
     expect(quoteExcerpt(long)).toHaveLength(121); // 120 + ellipsis
     expect(quoteExcerpt(long).endsWith("…")).toBe(true);
+  });
+});
+
+
+describe("skill blocks render as chips, not pasted bodies (2026-11-03 report)", () => {
+  // The composer prepends the full SKILL body as a <skill name="…"> block so
+  // the model gets the instructions with zero round-trips. The transcript
+  // renderer must collapse it to a #handle chip — the 2026-11-02 skills
+  // refactor renamed the legacy <snippet> wire block to <skill> and this
+  // strip arm was missed, so the whole body pasted into the conversation.
+  it("collapses a <skill> block into a #handle chip and keeps the user text", () => {
+    const msg =
+      '<skill name="deploy-status">\nCheck the CI pipeline.\nStep 2...\n</skill>\n\nwhy did it fail?';
+    const { text, chips } = stripUserContextBlocks(msg);
+    expect(text).toBe("why did it fail?");
+    expect(chips).toHaveLength(1);
+    expect(chips[0]).toMatchObject({ kind: "snippet", name: "deploy-status" });
+  });
+
+  it("handles multiple <skill> blocks and mixed legacy <snippet> blocks", () => {
+    const msg =
+      '<skill name="a">body a</skill>\n\n<skill name="b">body b</skill>\n\n' +
+      '<snippet name="legacy">old form</snippet>\n\nrun them';
+    const { text, chips } = stripUserContextBlocks(msg);
+    expect(text).toBe("run them");
+    expect(chips).toHaveLength(3);
+    expect(chips.map((c) => ("name" in c ? c.name : "?"))).toEqual([
+      "legacy",
+      "a",
+      "b",
+    ]);
+  });
+
+  it("renders the skill chip through chipLabel as #handle (wiring pin)", () => {
+    const source = readFileSync(
+      new URL("./chatText.ts", import.meta.url),
+      "utf8",
+    );
+    expect(source).toContain('const SKILL_RE = /<skill\\s+name="([^"]+)">');
+    expect(source).toContain("out = out.replace(SKILL_RE, (_m, name: string) => {");
   });
 });

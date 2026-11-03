@@ -10,6 +10,9 @@ import { wrapAsciiArt } from "./wrapAsciiArt";
 export type ContextChip =
   | { kind: "selection"; source: "terminal" | "editor"; lines: number }
   | { kind: "file"; name: string; lines: number }
+  /** `#handle` invocation — renders as a `#name` pill. Covers BOTH the
+   *  legacy `<snippet>` blocks (pre-2026-11-02 persisted messages) and the
+   *  current `<skill>` blocks the composer emits. */
   | { kind: "snippet"; name: string }
   | { kind: "quote"; author: string; lines: number; excerpt: string };
 
@@ -18,6 +21,11 @@ const SELECTION_RE =
 const FILE_RE =
   /<file\s+name="([^"]+)"[^>]*>\n?([\s\S]*?)\n?<\/file>/g;
 const SNIPPET_RE = /<snippet\s+name="([^"]+)">\n?[\s\S]*?\n?<\/snippet>/g;
+// SKILL blocks (2026-11-02 skills system): the composer prepends the full
+// body ahead of the user's text — the MODEL must receive it (plug-and-play:
+// no agent round-trip), but the TRANSCRIPT must not dump it as raw text
+// (2026-11-03 report). Same chip as the legacy snippet form.
+const SKILL_RE = /<skill\s+name="([^"]+)">\n?[\s\S]*?\n?<\/skill>/g;
 const QUOTE_RE = /<quote\s+author="([^"]*)">\n?([\s\S]*?)\n?<\/quote>/g;
 
 /** Unescape the attribute-encoding used when the block was written. */
@@ -81,6 +89,10 @@ export function stripUserContextBlocks(text: string): {
     return "";
   });
   out = out.replace(SNIPPET_RE, (_m, name: string) => {
+    chips.push({ kind: "snippet", name });
+    return "";
+  });
+  out = out.replace(SKILL_RE, (_m, name: string) => {
     chips.push({ kind: "snippet", name });
     return "";
   });
