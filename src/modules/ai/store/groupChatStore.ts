@@ -4,6 +4,7 @@ import {
   getChat,
   getProjectActiveSession,
   getSessionAgentMeta,
+  hasPendingApprovals,
   isProjectOpen,
   resolveBackgroundProjectSession,
   setChatPinner,
@@ -920,10 +921,19 @@ function deliverToParticipant(
   // Busy check: a LIVE chat object is the source of truth — the mirrored
   // agentMeta can go stale (the stop path historically never patched it
   // back to idle), which queued deliveries forever with zero feedback.
+  // PENDING-APPROVAL AWARENESS (2026-11-04 review): the SDK sits at
+  // `ready` while parked on an approval card — but injectMessage treats a
+  // pending-approval chat as busy (passive ride-along, no run, no queue,
+  // no note), so a delivery injected here was armed and then silently
+  // parked inside the paused run. Treat a pending-approval chat as busy
+  // too: queue the delivery; the approval resolve (or deny) settles the
+  // run, the bridge fires noteSessionIdle, and the queue flushes armed.
   const live = getChat(p.sessionId);
   const meta = getSessionAgentMeta(p.sessionId);
   const busy = live
-    ? live.status === "streaming" || live.status === "submitted"
+    ? live.status === "streaming" ||
+      live.status === "submitted" ||
+      hasPendingApprovals(live)
     : meta.status === "streaming" ||
       meta.status === "awaiting-approval" ||
       meta.status === "thinking";

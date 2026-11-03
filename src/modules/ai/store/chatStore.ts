@@ -2122,7 +2122,12 @@ export function approvalContinuationPending(
   });
 }
 
-function hasPendingApprovals(chat: Chat<UIMessage>): boolean {
+// Exported (2026-11-04 group-chat review): the group delivery path
+// (deliverToParticipant) needs the SAME pending-approval awareness — a
+// session parked on an approval card is busy, not idle, or its delivery
+// gets armed + injected and then silently parked by injectMessage's own
+// (stricter) gate. One definition, two call sites.
+export function hasPendingApprovals(chat: Chat<UIMessage>): boolean {
   for (const m of chat.messages) {
     if (m.role !== "assistant") continue;
     for (const p of m.parts as unknown[]) {

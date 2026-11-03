@@ -606,6 +606,22 @@ describe("source pins — trust boundary & wiring", () => {
     expect(bridge).not.toContain("deliveryBoundaryIdRef.current = null;");
   });
 
+  it("a delivery to an approval-paused session queues instead of arming a parked provision (2026-11-04)", () => {
+    // The SDK sits at `ready` while parked on an approval card, but
+    // injectMessage treats pending-approval chats as busy (passive
+    // ride-along: no run, no queue, no note). The delivery busy check must
+    // agree, or the delivery is armed + injected and then silently parked
+    // inside the paused run — a second path to the stranded provision.
+    // hasPendingApprovals is exported from chatStore (one definition, two
+    // call sites).
+    expect(store).toContain("hasPendingApprovals(live)");
+    const chatStoreSrc = readFileSync(
+      new URL("chatStore.ts", import.meta.url),
+      "utf8",
+    );
+    expect(chatStoreSrc).toContain("export function hasPendingApprovals(");
+  });
+
   it("the create dialog lists existing groups with open + delete (deletion is human-only)", () => {
     expect(panel).toContain("Your groups");
     expect(panel).toContain("deleteGroupChat(g.id)");
