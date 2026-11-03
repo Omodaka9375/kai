@@ -1906,7 +1906,8 @@ function InvitePicker({
                     })
                   ) : (
                     <div className="px-3 py-6 text-center text-[12px] text-muted-foreground">
-                      Open another project to start a group chat.
+                      No other projects open — invite an agent persona below
+                      instead.
                     </div>
                   )}
                   <div className="px-2 pb-0.5 pt-1 text-[10.5px] text-muted-foreground/70">

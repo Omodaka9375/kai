@@ -236,8 +236,12 @@ describe("switch-cost contract: a switch re-renders one workspace (2026-11-02)",
     expect(workspace).not.toContain("projectsMenu.items.find(");
   });
 
-  it("the status bar reads rail items from the rail context, not the menu", () => {
-    expect(statusBar).toContain("useProjectRailItems()");
+  it("the status bar does not subscribe to project-list contexts at all (2026-11-03)", () => {
+    // The group-chat button lost its project-count gate (a 1-project
+    // install now shows it; personas alone form a valid group), which was
+    // the status bar's ONLY rail-context consumer. Zero subscriptions =
+    // one less component re-rendering on every project add/remove/switch.
+    expect(statusBar).not.toContain("useProjectRailItems");
     expect(statusBar).not.toContain("useProjectsMenu");
   });
 });

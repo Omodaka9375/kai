@@ -9,7 +9,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useProjectRailItems } from "@/app/projectsMenu";
 import { IncognitoIcon, UserMultiple02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { CwdBreadcrumb } from "./CwdBreadcrumb";
@@ -43,9 +42,6 @@ export function StatusBar({
   const togglePanel = useChatStore((s) => s.togglePanel);
   const openMini = useChatStore((s) => s.openMini);
   const closeMini = useChatStore((s) => s.closeMini);
-  // Cross-project group chats need at least two open projects to exist.
-  const railItems = useProjectRailItems();
-  const canStartGroup = railItems.length >= 2;
 
   const handleOpenAgent = useCallback(() => {
     if (panelOpen) {
@@ -60,17 +56,22 @@ export function StatusBar({
   // Group-chat toggle — visible ONLY while the AI panel is open, sitting
   // immediately LEFT of the Close AI panel button. Hidden when the panel
   // is closed (the "Open agent" pill stands alone).
-  const groupToggleButton = canStartGroup ? (
+  // 2026-11-03: NO project-count gate. A brand-new install has ONE project
+  // open, and the icon never rendered — the feature was undiscoverable.
+  // A single project + agent PERSONAS is a fully valid group (personas
+  // join without projects; the picker's Create enables on persona picks
+  // alone), so the button always shows while the panel is open.
+  const groupToggleButton = (
     <button
       type="button"
       onClick={() => window.dispatchEvent(new CustomEvent("Kai:new-group-chat"))}
-      title="Start a cross-project group chat"
-      aria-label="Start a cross-project group chat"
+      title="Start a group chat"
+      aria-label="Start a group chat"
       className="flex h-6 w-6 items-center justify-center rounded-md border border-border/60 bg-card text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-foreground"
     >
       <HugeiconsIcon icon={UserMultiple02Icon} size={13} strokeWidth={1.75} />
     </button>
-  ) : null;
+  );
 
   return (
     <footer className="grid h-9 shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 overflow-hidden border-t border-border/60 bg-card/60 px-3 pb-0.5 text-[11px]">
