@@ -536,9 +536,49 @@ function Bridge({
       // exists. An arm that consumed on stale messages burned the
       // provision against a reply it never saw — the reply then stayed in
       // the project chat forever.
+      //
+      // BOUNDARY LIFETIME (2026-11-04 review MUST 2): do NOT null the
+      // boundary on this pass. Nulling made it single-use: a later idle
+      // re-run (messages identity change — reaper, Stop cleanup,
+      // compaction — while the provision is still armed) resolved with
+      // boundaryId=null, so the causality check could not reject and a
+      // pre-delivery LOCAL reply could mirror into the group. The ref is
+      // overwritten by the next busy-arm snapshot (deliveryBoundaryIdRef
+      // assignment there); until then keeping the last boundary is both
+      // harmless (a consumed provision gates the whole resolve) and
+      // load-bearing for the re-runs.
       const boundary = deliveryBoundaryIdRef.current;
-      deliveryBoundaryIdRef.current = null;
       const coordGroup = coordinatorGroupForSession(sessionId);
+      // MIRROR GATE ON RUN PROVENANCE (2026-11-04 review MUST 1): only a
+      // run PROVOKED by a group delivery may mirror. busyWasGroupRef is
+      // armed at busy-arm from the triggering user message
+      // (isGroupDeliveryText) and was previously consulted by TTS muting
+      // only. Without this gate, a provision-armed run that settled with
+      // NO text (tool-only turn, denied tool, step cap) left the provision
+      // armed forever — and the next LOCAL reply in that project chat
+      // passed every id check and mirrored into the group transcript as
+      // the group answer (leaking local content, re-waking the
+      // coordinator, routing mentions out of local text). A non-provoked
+      // settle with a provision armed means the delivery went UNANSWERED:
+      // consume it and tell the group instead of leaving it armed.
+      const provisionedGroupId = peekReplyProvision(sessionId);
+      if (!busyWasGroupRef.current) {
+        if (provisionedGroupId) {
+          const g = getGroup(provisionedGroupId);
+          if (g && g.endedAt === null) {
+            takeReplyProvision(sessionId);
+            const who =
+              g.participants.find((p) => p.sessionId === sessionId)?.name ??
+              "A participant";
+            void appendGroupMessage(g.id, {
+              from: "system",
+              projectId: "",
+              sessionId: "",
+              text: `${who} did not reply to the last group delivery (its run produced no reply) — send again if you still need an answer.`,
+            });
+          }
+        }
+      } else {
       const mirror = resolveMirrorReply(
         sessionId,
         messagesRefForGroup.current,
@@ -593,6 +633,7 @@ function Bridge({
           mirror.projectId,
           mirror.text,
         ).catch(() => {});
+      }
       }
       // 2. COORDINATOR round bookkeeping: its own run settled — reset hop
       // depth for the next round.

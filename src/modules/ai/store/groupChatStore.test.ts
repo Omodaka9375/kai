@@ -583,6 +583,29 @@ describe("source pins — trust boundary & wiring", () => {
     );
   });
 
+  it("only a GROUP-PROVOKED run may mirror; a text-less settle consumes the provision with a note (2026-11-04 MUSTs)", () => {
+    // MUST 1: busyWasGroupRef (armed at busy-arm via isGroupDeliveryText,
+    // previously TTS-only) now gates the mirror. Without it, a
+    // provision-armed run that settled with NO text (tool-only, denied
+    // tool, step cap) left the provision armed forever, and the next
+    // LOCAL reply in that project chat mirrored into the group
+    // transcript as the group answer — leaking local content and
+    // burning the provision the real group reply needed (the literal
+    // "one stops and writes in project chat while thinking it's in the
+    // group" symptom family).
+    expect(bridge).toContain("if (!busyWasGroupRef.current) {");
+    expect(bridge).toContain(
+      "did not reply to the last group delivery",
+    );
+    // MUST 2: the boundary is NOT nulled on the idle pass — nulling made
+    // the causality gate single-use, so a later idle re-run (reaper /
+    // Stop cleanup / compaction changing messages identity while the
+    // provision was still armed) resolved with boundaryId=null and could
+    // mirror a pre-delivery local reply. The ref is overwritten by the
+    // next busy-arm snapshot instead.
+    expect(bridge).not.toContain("deliveryBoundaryIdRef.current = null;");
+  });
+
   it("the create dialog lists existing groups with open + delete (deletion is human-only)", () => {
     expect(panel).toContain("Your groups");
     expect(panel).toContain("deleteGroupChat(g.id)");
