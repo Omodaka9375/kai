@@ -4,6 +4,18 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [2.1.7]
+
+- Long commands and group chats under load - continuity and pacing fixes.
+- Chat: long-running commands no longer delay or derail the agent. Commands that used to be killed after 30 seconds (git push, downloads, scripts) now get up to 2 minutes, network-heavy git operations get 5, and the automatic project check no longer fires while the agent is waiting on your approval click - only when the run truly ends.
+- Chat: a message you accidentally send while a long command is running is no longer swallowed until you press Stop. It now stops the run and goes through right away.
+- Chat: the Stop button is now a small blinking amber square, so you can tell at a glance that the agent is running and the control is live.
+- Groups: fixed a leak where a participant's reply to its own project chat could appear in the group transcript as its group answer, leaving the real group reply stranded. Only runs provoked by the group now mirror back into it, and a delivery that goes unanswered is reported instead of lingering.
+- Groups: a message delivered to an agent that is paused on an approval card now waits for that approval instead of silently sitting inside the paused run.
+- Groups: pacing pass - agents' @-mentions to each other no longer burn the anti-ping-pong limit when no mention actually routes, a mention aimed at a closed project says so in the group instead of vanishing, and the coordinator now waits (once) for a participant that is actively working or paused on an approval before reporting it as silent.
+
+---
+
 ## [2.1.6]
 
 - Polish pass on skills and personas, plus smoother project switching.
