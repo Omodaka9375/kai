@@ -7,7 +7,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { ArrowDown01Icon, ArrowRight01Icon, CheckmarkSquare02Icon, SquareIcon, StopCircleIcon } from "@hugeicons/core-free-icons";
+import { ArrowDown01Icon, ArrowRight01Icon, CheckmarkSquare02Icon, SquareIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useState } from "react";
 import type { Todo } from "../lib/todos";
@@ -18,6 +18,26 @@ type Props = {
   isBusy?: boolean;
   onStop?: () => void;
 };
+
+/** The stop-agent control: a small BLINKING AMBER SQUARE (2026-11-04 user
+ *  report: "stop agent button is a circle and doesn't look like anything is
+ *  working"). The old muted StopCircleIcon glyph read as nothing at 4px; a
+ *  blinking amber square says "recording/running - press to stop" at a
+ *  glance, the same convention recorders use. */
+function StopSquare({ onClick, stopPropagation }: { onClick: () => void; stopPropagation?: boolean }) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        if (stopPropagation) e.stopPropagation();
+        onClick();
+      }}
+      className="size-2 shrink-0 cursor-pointer rounded-[2px] bg-amber-500 shadow-[0_0_0_2px] shadow-amber-500/20 animate-pulse transition-transform hover:scale-125 hover:animate-none"
+      title="Stop agent"
+      aria-label="Stop agent"
+    />
+  );
+}
 
 const EMPTY_TODOS: Todo[] = [];
 
@@ -58,14 +78,7 @@ export function TodoStrip({ sessionId, isBusy, onStop }: Props) {
           <Spinner className="size-3" />
           <span>Agent running…</span>
         </span>
-        <button
-          type="button"
-          onClick={onStop}
-          className="flex size-4 items-center justify-center rounded bg-muted hover:bg-muted-foreground/20 text-muted-foreground transition-colors hover:text-foreground cursor-pointer"
-          title="Stop agent"
-        >
-          <HugeiconsIcon icon={StopCircleIcon} size={9} strokeWidth={2} />
-        </button>
+        <StopSquare onClick={() => onStop?.()} />
       </div>
     );
   }
@@ -104,19 +117,7 @@ export function TodoStrip({ sessionId, isBusy, onStop }: Props) {
         <span className="text-[11px] tabular-nums font-mono text-muted-foreground">
           {completed}/{todos.length}
         </span>
-        {isBusy && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onStop?.();
-            }}
-            className="ml-1.5 flex size-4 shrink-0 items-center justify-center rounded bg-muted hover:bg-muted-foreground/20 text-muted-foreground transition-colors hover:text-foreground cursor-pointer"
-            title="Stop agent"
-          >
-            <HugeiconsIcon icon={StopCircleIcon} size={10} strokeWidth={1} />
-          </button>
-        )}
+        {isBusy && <StopSquare onClick={() => onStop?.()} stopPropagation />}
       </button>
       {expanded && (
         <ul className="flex flex-col gap-0.5">
