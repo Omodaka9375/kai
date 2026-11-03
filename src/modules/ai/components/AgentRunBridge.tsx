@@ -251,17 +251,6 @@ function Bridge({
     return () => flushPersist(sessionId);
   }, [sessionId]);
 
-  const approvalsPending = useMemo(() => {
-    let n = 0;
-    for (const m of messages) {
-      if (m.role !== "assistant") continue;
-      for (const p of m.parts) {
-        if ((p as { state?: string }).state === "approval-requested") n++;
-      }
-    }
-    return n;
-  }, [messages]);
-
   // ---- Auto-approve state --------------------------------------------------
   // Declared before the background-notification effect: that effect must
   // know which pending approvals auto-approve will NOT resolve on its own.
@@ -306,12 +295,23 @@ function Bridge({
   // autoApprovePrediction.test.ts). Ask mode ("off"):
   // predictAutoApproval is false for everything, so manual === raw and
   // behavior is unchanged.
-  const manualApprovalsPending = useMemo(() => {
-    let n = 0;
+  // ONE pass computes BOTH pending counts (2026-11-03 perf pass): these were
+  // two separate useMemos, each iterating EVERY message x part on EVERY 50ms
+  // token flush - pure wasted full scans (approvals are rare, and a HIDDEN
+  // background bridge streamed through them invisible to the user). The
+  // result values are identical to the old pair:
+  //   approvalsPending = raw approval-requested parts (feeds the stale
+  //     reaper, which intentionally scans ALL history, + the awaiting dot);
+  //   manualApprovalsPending = the subset auto-approve will NOT resolve
+  //     (predictAutoApproval, in lockstep via autoApprovePrediction.test.ts).
+  const { approvalsPending, manualApprovalsPending } = useMemo(() => {
+    let approvals = 0;
+    let manual = 0;
     for (const m of messages) {
       if (m.role !== "assistant") continue;
       for (const p of m.parts as AnyPart[]) {
         if ((p as { state?: string }).state !== "approval-requested") continue;
+        approvals++;
         const id = (p as { approval?: { id?: string } }).approval?.id;
         if (!id) continue;
         const type = (p as { type?: string }).type ?? "";
@@ -327,10 +327,10 @@ function Bridge({
           // Auto-approve WILL resolve this one on its own - not manual.
           continue;
         }
-        n++;
+        manual++;
       }
     }
-    return n;
+    return { approvalsPending: approvals, manualApprovalsPending: manual };
   }, [messages, autoApprove, signingApprovalRequired]);
 
   // ---- Background completion bookkeeping ---------------------------------
@@ -970,6 +970,7 @@ function Bridge({
   // open duplicates. Reset when the session changes.
   const openedRef = useRef<Set<string>>(new Set());
   const fileMutationFingerprintRef = useRef<string>("");
+  const wasActiveRef = useRef(isActive);
   useEffect(() => {
     openedRef.current = new Set();
     fileMutationFingerprintRef.current = "";
@@ -1005,6 +1006,8 @@ function Bridge({
     type Pending = {
       approvalId: string;
       path: string;
+      /** openedRef key (approval AND path) - marked only when we OPEN. */
+      dedupeKey: string;
       /**
        * Either a literal proposed content (write_file), or a function that
        * derives proposed content from the on-disk original (edit/multi_edit).
@@ -1013,13 +1016,23 @@ function Bridge({
         | { kind: "literal"; content: string }
         | { kind: "edits"; edits: EditOp[]; expectedOccurrences?: number };
     };
-    if (fileMutationFingerprint === fileMutationFingerprintRef.current) {
+    // Re-scan on activation change too: a hidden pass skips OPENS (below) but
+    // advances the fingerprint, so the moment we come forward we must
+    // re-derive the still-pending diffs and open them. `justActivated` forces
+    // that bypass without re-opening already-resolved mutations.
+    const justActivated = isActive && !wasActiveRef.current;
+    wasActiveRef.current = isActive;
+    if (
+      !justActivated &&
+      fileMutationFingerprint === fileMutationFingerprintRef.current
+    ) {
       return;
     }
     fileMutationFingerprintRef.current = fileMutationFingerprint;
 
     const pending: Pending[] = [];
     const toClose = new Set<string>();
+    const pendingSeen = new Set<string>();
 
     for (const m of messages) {
       if (m.role !== "assistant") continue;
@@ -1031,9 +1044,13 @@ function Bridge({
         // diff tab per file it touches.
         const dedupeKey = `${approvalId}:${path}`;
         if (state === "approval-requested") {
-          if (!openedRef.current.has(dedupeKey)) {
-            openedRef.current.add(dedupeKey);
-            pending.push({ approvalId, path, derive });
+          // Do NOT mark openedRef here: a hidden pass defers opens, and
+          // marking now would leave the key "opened" without a tab, so
+          // activation would never open it. Local dedupe (pendingSeen) keeps
+          // the list unique; openedRef is marked only on the real open.
+          if (!openedRef.current.has(dedupeKey) && !pendingSeen.has(dedupeKey)) {
+            pendingSeen.add(dedupeKey);
+            pending.push({ approvalId, path, derive, dedupeKey });
           }
         } else if (
           state === "approval-responded" ||
@@ -1054,7 +1071,19 @@ function Bridge({
       closeAiDiffTab(id);
     }
 
+    // Defer opens while HIDDEN (2026-11-03 perf pass): the diff-tab effect is
+    // the most expensive work on the streaming path, so a backgrounded
+    // project's file-edit approvals must NOT mount Monaco diff editors (and
+    // read originals from disk) into an invisible tree - that was competing
+    // with a project switch for the main thread. The CLOSE pass above still
+    // ran (cheap: tears down any tab left open when we switched away). On
+    // activation, justActivated re-runs this effect and opens what is still
+    // pending. openedRef is marked only here, right before opening.
+    if (!isActive) return;
+
     if (pending.length === 0) return;
+
+    for (const p of pending) openedRef.current.add(p.dedupeKey);
 
     let cancelled = false;
     void (async () => {
@@ -1101,7 +1130,7 @@ function Bridge({
     return () => {
       cancelled = true;
     };
-  }, [messages, fileMutationFingerprint, openAiDiffTab, closeAiDiffTab]);
+  }, [messages, fileMutationFingerprint, openAiDiffTab, closeAiDiffTab, isActive]);
 
   return null;
 }

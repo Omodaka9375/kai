@@ -527,7 +527,11 @@ describe("source pins — trust boundary & wiring", () => {
     expect(bridge).toContain(
       "import { predictAutoApproval } from \"../lib/autoApprovePrediction\";",
     );
-    expect(bridge).toContain("const manualApprovalsPending = useMemo");
+    // 2026-11-03 perf pass: the raw + manual counts derive from ONE memo
+    // (two full message scans per 50ms flush became one; identical values).
+    expect(bridge).toContain(
+      "const { approvalsPending, manualApprovalsPending } = useMemo(",
+    );
     expect(bridge).toMatch(
       /if \(manualApprovalsPending > 0\) runStatus = "awaiting-approval";/,
     );
@@ -550,6 +554,26 @@ describe("source pins — trust boundary & wiring", () => {
     expect(bridge).toContain("const justWentBusy =");
     expect(bridge).toMatch(
       /prevBusyRef\.current = \{ sid: sessionId, busy: true \};/,
+    );
+  });
+
+  it("diff tabs are NOT opened while the workspace is hidden (2026-11-03 switch-perf)", () => {
+    // A backgrounded agent's file-edit approvals must not mount Monaco diff
+    // editors + read originals from disk into an invisible tree (competing
+    // with a project switch on the main thread). The diff-tab effect gates
+    // opens on isActive and re-runs on activation to open what is pending.
+    expect(bridge).toContain(
+      "const justActivated = isActive && !wasActiveRef.current;",
+    );
+    // Opens deferred when hidden...
+    expect(bridge).toContain("if (!isActive) return;");
+    // ...and openedRef marked at OPEN time (not scan time), else a hidden
+    // pass would mark the key opened without a tab and it never opens on
+    // activation.
+    expect(bridge).toContain("for (const p of pending) openedRef.current.add(p.dedupeKey);");
+    // isActive is now a dep so the activation flip re-derives + opens.
+    expect(bridge).toMatch(
+      /\}, \[messages, fileMutationFingerprint, openAiDiffTab, closeAiDiffTab, isActive\]\);/,
     );
   });
 
