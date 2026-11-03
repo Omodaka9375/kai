@@ -40,6 +40,18 @@ describe("auto-verify does not fire during the approval pause", () => {
   });
 });
 
+describe("a queued steering message reaches a busy bridge immediately", () => {
+  it("the bridge subscribes to steeringMessage (queue writes re-render it)", () => {
+    // getSessionSteeringMessage is a plain Map read - NOT reactive. Without
+    // this subscription a message queued during a long bash_run (no token
+    // flushes, no re-renders) sat swallowed until the user clicked Stop
+    // (2026-11-04 report). The subscription makes the queue write re-render
+    // the bridge so the steering effect stops the run right away.
+    expect(bridge).toContain("useChatStore((s) => s.steeringMessage);");
+    expect(bridge).toContain("const steeringMessage = getSessionSteeringMessage(sessionId);");
+  });
+});
+
 describe("long commands are not killed mid-flight", () => {
   it("the Rust shell default timeout is 120s, not 30s", () => {
     expect(rustShell).toContain("const DEFAULT_TIMEOUT_SECS: u64 = 120;");

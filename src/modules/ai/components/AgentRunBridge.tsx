@@ -370,6 +370,19 @@ function Bridge({
   // stripIncompleteToolCalls in the transport), then inject the steering
   // message once the status settles to idle. The queued payload is full
   // message PARTS (text + image files) — attachments survive the redirect.
+  //
+  // REACTIVITY (2026-11-04 report: "when long command is running if I
+  // accidentally send a message it gets swallowed and I have to click stop
+  // for my message to appear"): getSessionSteeringMessage is a plain Map
+  // read, NOT a store subscription — the queue write only took effect on
+  // this bridge's NEXT render. During a long bash_run the SDK streams
+  // nothing (no token flushes, no re-renders), so a queued steering message
+  // sat unprocessed until the user clicked Stop (a status change finally
+  // re-rendered the bridge). Subscribe to the store's steeringMessage so
+  // the queue write re-renders this bridge immediately; the session-scoped
+  // read below then sees the fresh value and the effect stops the run and
+  // sends it right away.
+  useChatStore((s) => s.steeringMessage);
   const steeringMessage = getSessionSteeringMessage(sessionId);
   const setSteeringMessage = useChatStore((s) => s.setSteeringMessage);
   // Keep a ref so the send callback always sees the latest value without
