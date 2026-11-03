@@ -359,3 +359,34 @@ describe("write security (2026-11-02 review, FIX 6)", () => {
     expect(libSrc6).toContain("resolves outside the skill folder (symlink?)");
   });
 });
+
+
+describe("agent-authored skills refresh the live picker (2026-11-03 report)", () => {
+  // User report: an agent-created skill appeared in Settings (fresh hydrate
+  // on window open) but NOT in the composer's # picker (reads store state).
+  // Fix: the authoring tools emit the skills-changed event after a
+  // successful write; every window's store re-scans.
+  const toolsSrc = readFileSync(new URL("../tools/skills.ts", import.meta.url), "utf8");
+  const storeSrc = readFileSync(new URL("../store/skillsStore.ts", import.meta.url), "utf8");
+
+  it("create_skill and update_skill notify the store after a successful write", () => {
+    expect(toolsSrc).toContain('import { notifySkillsChanged } from "../store/skillsStore";');
+    const createSite = toolsSrc.indexOf("create_skill: tool({");
+    const updateSite = toolsSrc.indexOf("update_skill: tool({");
+    const createNotify = toolsSrc.indexOf("void notifySkillsChanged();", createSite);
+    const updateNotify = toolsSrc.indexOf("void notifySkillsChanged();", updateSite);
+    // Each tool notifies AFTER its write, before returning ok.
+    expect(createSite).toBeGreaterThan(-1);
+    expect(updateSite).toBeGreaterThan(createSite);
+    expect(createNotify).toBeGreaterThan(-1);
+    expect(updateNotify).toBeGreaterThan(updateSite);
+  });
+
+  it("the store exposes the notifier on the existing changed-event plumbing", () => {
+    expect(storeSrc).toContain("export function notifySkillsChanged(): void");
+    expect(storeSrc).toContain('void emit(CHANGED_EVENT);');
+    // The event is the SAME one the Settings window write path uses —
+    // one channel, every listener refreshes.
+    expect(storeSrc).toContain('const CHANGED_EVENT = "Kai://ai-skills-changed";');
+  });
+});

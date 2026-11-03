@@ -177,6 +177,17 @@ export const useSkillsStore = create<State>((set, get) => ({
   },
 }));
 
+/** Tell every window (composer # picker, Settings) that skills changed on
+ *  disk. Called by the agent-authoring tools (tools/skills.ts) after a
+ *  successful create/update — the tool writes via lib/skills.ts directly,
+ *  bypassing this store's upsert, so without this nudge the main window's
+ *  picker stays stale until the next hydrate/project activation (the
+ *  2026-11-03 report: agent-created skill visible in Settings but not
+ *  under #). Fire-and-forget; the listener re-scans global + cached roots. */
+export function notifySkillsChanged(): void {
+  void emit(CHANGED_EVENT);
+}
+
 /** Re-scan just one project root (called when a project becomes active).
  *  Cheap: one dir read + N SKILL.md reads; folders are typically few.
  *  Null root = no project (global-only view) — no-op. */

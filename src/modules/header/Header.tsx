@@ -155,7 +155,7 @@ export function FileMenu({
           <MenuTile icon={KeyboardIcon} label="Shortcuts" desc="Key bindings" onSelect={() => void openSettingsWindow("shortcuts")} />
           <MenuTile icon={AiScanIcon} label="Models" desc="Providers & API keys" onSelect={() => void openSettingsWindow("models")} />
           <MenuTile icon={UserMultiple02Icon} label="Agents" desc="Sub-agent registry" onSelect={() => void openSettingsWindow("agents")} />
-          <MenuTile icon={SparklesIcon} label="Snippets" desc="Prompts & skills" onSelect={() => void openSettingsWindow("snippets")} />
+          <MenuTile icon={SparklesIcon} label="Skills" desc="Reusable agent skills" onSelect={() => void openSettingsWindow("snippets")} />
           <MenuTile icon={PuzzleIcon} label="MCP Servers" desc="External tool servers" onSelect={() => void openSettingsWindow("mcp")} />
           <MenuTile icon={Shield01Icon} label="Sandbox" desc="Shadow mode" onSelect={() => void openSettingsWindow("sandbox")} />
           <MenuTile icon={LockKeyIcon} label="Security" desc="Approvals & audit" onSelect={() => void openSettingsWindow("security")} />

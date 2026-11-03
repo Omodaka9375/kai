@@ -49,6 +49,7 @@ import {
   type SkillDraft,
 } from "../lib/skills";
 import { currentWorkspaceEnv } from "@/modules/workspace/env";
+import { notifySkillsChanged } from "../store/skillsStore";
 
 /** Char cap for the instructions body — a SKILL.md is a procedure, not a book. */
 const CONTENT_MAX_CHARS = 24_000;
@@ -176,6 +177,11 @@ export function buildSkillTools(ctx: ToolContext) {
             workspace,
             scripts?.map((s) => ({ filename: s.filename, content: s.content })),
           );
+          // Refresh every window's skills store (the composer's # picker
+          // reads store state, not disk) — fire-and-forget, never blocks the
+          // tool result. 2026-11-03 report: without this the new skill only
+          // appeared in Settings (fresh hydrate) and not under #.
+          void notifySkillsChanged();
           return {
             ok: true,
             scope,
@@ -235,6 +241,8 @@ export function buildSkillTools(ctx: ToolContext) {
           }
           try {
             const skillMdPath = await secureSkillWrite(c.root, draft, c.workspace);
+            // Same as create_skill: the picker must see the change live.
+            void notifySkillsChanged();
             return { ok: true, scope: c.scope, skillMdPath };
           } catch (e) {
             return { error: e instanceof Error ? e.message : String(e) };
