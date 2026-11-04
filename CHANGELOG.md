@@ -6,8 +6,8 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ## [2.1.8]
 
-- Heavy agent commands no longer freeze the app: pnpm exec, vitest, cargo and similar now run at below-normal priority, so the UI and project switching stay smooth while they grind.
-- Assistant: re-sending a photo no longer gets a "no photo attached" reply - a text sent seconds before the photo now rides along with the photo turn instead of being answered alone.
+- Hardening: pnpm exec, vitest, cargo and similar now run at below-normal priority, so the UI and project switching stay smooth.
+- Assistant: re-sending a photo no longer gets a "no photo attached" reply - a text sent seconds before the photo now rides along with the photo.
 
 ---
 
