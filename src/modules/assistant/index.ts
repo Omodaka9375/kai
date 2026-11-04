@@ -1525,6 +1525,33 @@ function stopTypingIndicator(): void {
 }
 async function drainQueue(): Promise<void> {
   if (turnInFlight) return;
+  // PHOTO-TEXT COALESCE (2026-11-04, from user traces): a user who re-sends a
+  // photo often types a short text FIRST ("here?", "try again") and then the
+  // photo arrives seconds later (the download is async). Strict FIFO ran the
+  // text turn alone, which truthfully replied "no photo attached" while the
+  // photo sat queued - the user read it as the bot ignoring their photo.
+  // When the next item is PLAIN TEXT (no image, same chat) and the one
+  // after it carries an image, run the PHOTO turn and fold the text into
+  // its caption, so the model sees both together instead of answering the
+  // text in ignorance of the photo right behind it.
+  const peek = pendingQueue[0];
+  const peekAfter = pendingQueue[1];
+  if (
+    peek &&
+    peekAfter &&
+    !peek.imageBase64 &&
+    !peek.isVoice &&
+    !peek.isGroup &&
+    peek.chatId === peekAfter.chatId &&
+    peekAfter.imageBase64
+  ) {
+    pendingQueue.shift(); // the text item
+    const photo = pendingQueue.shift()!; // the photo item, runs NOW
+    photo.text = photo.text
+      ? `${peek.text} ${photo.text}`.trim()
+      : peek.text;
+    pendingQueue.unshift(photo);
+  }
   const next = pendingQueue.shift();
   if (!next) return;
   turnInFlight = true;

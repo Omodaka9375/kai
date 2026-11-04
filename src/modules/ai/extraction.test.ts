@@ -144,4 +144,23 @@ describe("swapImagePartsToText (shared OCR fallback)", () => {
     const out = await swapImagePartsToText([plain]);
     expect(out[0]).toBe(plain);
   });
+
+  it("sniffs the REAL mime from the base64 head, not hardcoded png (2026-11-04)", async () => {
+    // The assistant photo pipeline is JPEG end to end; the old hardcoded
+    // image/png mislabeled the extraction request's data-URL. JPEG magic
+    // FF D8 FF base64-encodes to "/9j/"; PNG's 0x89 50 4E 47 is "iVBOR".
+    const { sniffImageMime } = await import("./extraction");
+    expect(sniffImageMime("/9j/4AAQSkZJRgABAQ")).toBe("image/jpeg");
+    expect(sniffImageMime("iVBORw0KGgoAAA")).toBe("image/png");
+    // Unknown heads keep the (harmless) png default - extract.rs sniffs
+    // the real magic server-side for the temp-file extension regardless.
+    expect(sniffImageMime("AAAA")).toBe("image/png");
+    // The swap path USES the sniffer (source pin: no hardcoded data URL).
+    const src = (await import("node:fs")).readFileSync(
+      new URL("./extraction.ts", import.meta.url),
+      "utf8",
+    );
+    expect(src).toContain("const mime = sniffImageMime(base64);");
+    expect(src).toContain("`data:${mime};base64,${base64}`");
+  });
 });

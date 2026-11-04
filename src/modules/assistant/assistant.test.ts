@@ -423,4 +423,20 @@ describe("edit-follow-up: the media tools fall back to the newest photo in histo
     expect(idx).toContain("mediaTools.buildAssistantMediaTools(getTurnImage)");
     expect(idx).not.toContain("buildAssistantMediaTools(turnImage)");
   });
+
+  it("drainQueue coalesces a pending text into the photo turn right behind it (2026-11-04)", () => {
+    // USER TRACES: a photo re-send is usually preceded seconds earlier by a
+    // short text ("here?", "try again") - and the photo DOWNLOAD is async,
+    // so the text item lands in the queue first. Strict FIFO answered the
+    // text in ignorance of the photo ("still no photo attached") while the
+    // photo sat queued. The drain now reorders: next = plain text (same
+    // chat, not voice/group) + the item after it carries an image -> the
+    // photo turn runs first with the text folded into its caption.
+    expect(idx).toContain("PHOTO-TEXT COALESCE (2026-11-04, from user traces)");
+    expect(idx).toContain("!peek.imageBase64");
+    expect(idx).toContain("peek.chatId === peekAfter.chatId");
+    expect(idx).toContain("peekAfter.imageBase64");
+    // The fold: text merges into the photo turn's caption.
+    expect(idx).toContain("`${peek.text} ${photo.text}`.trim()");
+  });
 });

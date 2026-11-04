@@ -222,14 +222,29 @@ export async function swapImagePartsToText(
 }
 
 /** Cached extraction for one base64 image payload. */
+/** Real format from the base64 head instead of a hardcoded png (2026-11-04
+ *  assistant-trace review): the assistant photo pipeline is JPEG end to end
+ *  (Telegram downloads + downscalePhotoJpeg), and the extraction request's
+ *  data-URL should not mislabel it. Magic heads: PNG is 0x89 50 4E 47
+ *  ("iVBOR"), JPEG is FF D8 FF ("/9j/"); anything else keeps the png default -
+ *  extract.rs sniffs the real magic for the temp-file extension regardless,
+ *  so this is labeling, not parsing. */
+export function sniffImageMime(base64: string): string {
+  const head = base64.slice(0, 4);
+  if (head.startsWith("iVBOR")) return "image/png";
+  if (head.startsWith("/9j/")) return "image/jpeg";
+  return "image/png";
+}
+
 async function cachedImageText(base64: string): Promise<string> {
   if (imageTextCache.has(base64)) {
     return imageTextCache.get(base64) ?? attachmentFallbackText("image");
   }
-  const dataUrl = `data:image/png;base64,${base64}`;
+  const mime = sniffImageMime(base64);
+  const dataUrl = `data:${mime};base64,${base64}`;
   let text: string | null = null;
   try {
-    text = await extractAttachmentText({ url: dataUrl, mediaType: "image/png" });
+    text = await extractAttachmentText({ url: dataUrl, mediaType: mime });
   } catch (e) {
     console.warn("[kai] image extraction failed:", e);
   }
