@@ -6,10 +6,12 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ## [2.1.9]
 
-- AI input: right-clicking a misspelled word now shows up to 5 spelling suggestions plus Add-to-dictionary.
-- Voice: fixed a free transient error mid-recording delivered the transcript twice.
-- Performance: switching projects
-- Attachments: uploading an exotic image format (AVIF, HEIC, BMP, TIFF) no longer breaks the whole conversation
+- AI input: right-clicking a misspelled word now shows up to 5 spelling suggestions plus Add-to-dictionary (persisted per project; identifiers, paths and code tokens are never flagged).
+- Voice: hands-free dictation no longer repeats the same sentence many times - a transient error mid-recording delivered the transcript twice, and the local whisper route could hallucinate repeats over the auto-stop silence tail.
+- Settings: double-clicking a menu option on a lagging UI can no longer crash the settings window with an "already exists" error - the second click just focuses the window.
+- Performance: switching projects while an agent is thinking no longer freezes for a second - history saving stopped re-serializing the whole conversation on every streaming tick.
+- Attachments: uploading an exotic image format (AVIF, HEIC, BMP, TIFF) no longer breaks the whole conversation - such uploads are converted to PNG automatically, and already-broken sessions recover on their own.
+- Assistant: Telegram replies now render bold, headings, code and links properly instead of showing raw asterisks and hashes.
 
 ---
 
