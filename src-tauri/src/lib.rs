@@ -353,6 +353,12 @@ fn settings_panel_height(key: &str) -> f64 {
     }
 }
 
+/// Serializes settings-window opens - the TOCTOU guard's lock (see the
+/// comment inside open_settings_window). std Mutex: the command body has no
+/// await points, so holding it across the check-build-focus span fully
+/// serializes concurrent invokes without blocking the async runtime.
+static OPEN_SETTINGS_LOCK: Mutex<()> = Mutex::new(());
+
 #[tauri::command]
 async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Result<(), String> {
     let key = settings_panel_key(tab.as_deref());
@@ -360,6 +366,16 @@ async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Res
     let url_path = format!("settings.html?tab={key}");
     let title = settings_panel_title(&key);
     let height = settings_panel_height(&key);
+    // TOCTOU guard: the check-and-build must be atomic across concurrent
+    // invokes (2026-11-06 report: a lagging project made a double-click
+    // race the window open; both invokes saw get_webview_window() == None
+    // before either build() registered, so the loser hit "a webview with
+    // label `settings-models` already exists" -> unhandled JS rejection).
+    // The command body has NO await points, so a std Mutex held across it
+    // fully serializes concurrent invokes: the second click waits, finds
+    // the window, and simply focuses it. mutex_lock recovers from a
+    // poisoned lock - a panicking open must not brick future ones.
+    let _open_guard = mutex_lock(&OPEN_SETTINGS_LOCK);
     if let Some(window) = app.get_webview_window(&label) {
         // SELF-HEAL: if a previous settings-window creation failed partway
         // (e.g. the WebView2 environment mismatch bug this command once had),
@@ -413,7 +429,13 @@ async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Res
     #[cfg(target_os = "windows")]
     let builder = builder.additional_browser_args(WINDOWS_BROWSER_ARGS);
 
-    let window = builder.build().map_err(|e| e.to_string())?;
+    let window = builder.build().map_err(|e| {
+        // Rust-side log: the frontend wrapper catches command errors (they
+        // used to surface as unhandled promise rejections), so the log file
+        // is the only place a failed window creation is diagnosable.
+        log::warn!("settings window '{label}' build failed: {e}");
+        e.to_string()
+    })?;
 
     // Grant microphone/camera access on the settings webview too (WebView2
     // denies media by default — only clipboard is auto-approved by wry).
