@@ -29,6 +29,7 @@ import {
   EDIT_MAX_RETRIES,
   ensureReadCache,
   getEditFailures,
+  recoverEditTargetPath,
 } from "./edit";
 import { newQueuedEditId, usePlanStore } from "../store/planStore";
 
@@ -70,8 +71,21 @@ export function buildBatchEditTools(ctx: ToolContext) {
         // read-before-edit guard per file. Abs paths collected for locking.
         const absPaths: string[] = [];
         const override = await sandboxOverrideForContext(ctx);
+        // PATH RECOVERY (see recoverEditTargetPath in edit.ts): an edit
+        // entry whose path was stream-truncated targets the most recently
+        // read file instead of failing the whole batch.
+        const recoveredTarget = edits.some((e) => !e.path)
+          ? recoverEditTargetPath(ctx)
+          : null;
         for (const edit of edits) {
-          const reqPath = resolvePath(edit.path, ctx.getCwd());
+          const editPath = edit.path || recoveredTarget || "";
+          if (!editPath)
+            return {
+              ok: false,
+              error:
+                'an edit entry is missing its path field and no target could be inferred (the tool-arguments stream may have been truncated). Re-send with the path field FIRST in each edit entry, before old_string/new_string.',
+            };
+          const reqPath = resolvePath(editPath, ctx.getCwd());
           const safety = await checkWritableCanonical(reqPath, native.canonicalize, override);
           if (!safety.ok) return { ok: false, error: safety.reason, file: reqPath };
           const guard = await ensureReadCache(safety.canonical, ctx, native);

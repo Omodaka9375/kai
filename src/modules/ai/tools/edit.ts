@@ -12,6 +12,54 @@ export type EditResult =
   | { ok: true; replacements: number; bytesWritten: number; path: string }
   | { ok: false; error: string; path: string; editIndex?: number };
 
+/**
+ * PATH-RECOVERY (2026-11-06, from the GLM "edit keeps dropping the path
+ * field" report): some local servers (GLM 5.3 Flash over llama.cpp-class
+ * backends observed) emit tool-call arguments in ALPHABETICAL key order and
+ * silently truncate the tail of long streamed arguments. On the edit tools
+ * that lands exactly on `path` (it sorts after line_hint/new_string/old_
+ * string), producing a well-formed JSON object without the ONE field that
+ * identifies the file — the model retried the identical call forever.
+ *
+ * Recovery: the edit pipeline REQUIRES a fresh read of the target before any
+ * write (read-before-edit guard), so when `path` is missing we can often
+ * infer it: the file most recently read through this session's tool
+ * pipeline. That is a guarded, transparent guess, not a free action:
+ *
+ *  - Only files the model has actually READ (or freshly written) this
+ *    session are candidates — the readCache is the same source the
+ *    read-before-edit guard enforces, so the inferred target is always a
+ *    file the model has current knowledge of.
+ *  - UNAMBIGUOUS ONLY: if two or more candidates are within a 10-second
+ *    recency window (a paged multi-file read), we cannot tell which file
+ *    the call meant — refuse rather than edit the wrong file.
+ *  - The result tells the model WHICH file was targeted, so a wrong guess
+ *    is visible and correctable instead of silent.
+ *
+ * Returns null when there is no safe candidate; callers keep their explicit
+ * path-required error in that case.
+ */
+export function recoverEditTargetPath(ctx: ToolContext): string | null {
+  let best: { path: string; at: number } | null = null;
+  let secondBestAt = 0;
+  for (const [path, entry] of ctx.readCache) {
+    const at = entry.lastReadAt ?? 0;
+    if (!at) continue;
+    if (!best || at > best.at) {
+      secondBestAt = best?.at ?? 0;
+      best = { path, at };
+    } else if (at > secondBestAt) {
+      secondBestAt = at;
+    }
+  }
+  if (!best) return null;
+  // Ambiguity guard: a recent multi-file read burst (paging through several
+  // files back-to-back) leaves two candidates too close to call. A single
+  // recent read is a confident guess; near-ties are not.
+  if (secondBestAt > 0 && best.at - secondBestAt < 10_000) return null;
+  return best.path;
+}
+
 /** Compute a batch of edits against IN-MEMORY content without touching
  *  disk — the consolidated batch_edit applies edits per file through this
  *  core so it inherits the hardened matcher (EOL normalize/restore,
@@ -1026,11 +1074,22 @@ export function buildEditTools(ctx: ToolContext) {
       }),
       needsApproval: true,
       execute: async ({ path: pathArg, old_string, new_string, replace_all, line_hint }) => {
-        const path = pathArg ?? "";
+        // PATH RECOVERY: local servers that alphabetize arguments can stream-
+        // truncate the trailing `path` field (see recoverEditTargetPath).
+        // Infer the target from the most recent read instead of bouncing.
+        let path = pathArg ?? "";
+        let pathRecovered = false;
+        if (!path) {
+          const recovered = recoverEditTargetPath(ctx);
+          if (recovered) {
+            path = recovered;
+            pathRecovered = true;
+          }
+        }
         if (!path)
           return {
             error:
-              'path is required — set the top-level "path" field to the file you are editing (absolute, or relative to the terminal cwd). Example: {"path":"src/app.ts","old_string":"...","new_string":"..."}',
+              'path is required and could not be inferred - the tool-arguments stream may have been truncated. Re-send the call with the path field FIRST in the object (before old_string/new_string), or use batch_edit whose edits array carries {path, old_string, new_string} entries. If the file has not been read yet, read_file it first.',
           };
         const reqPath = resolvePath(path, ctx.getCwd());
         const safety = await checkWritableCanonical(reqPath, native.canonicalize, await sandboxOverrideForContext(ctx));
@@ -1066,7 +1125,9 @@ export function buildEditTools(ctx: ToolContext) {
             getEditFailures(ctx).delete(abs);
             ctx.fileTracker.markModified(abs);
             await commitCheckpointBatch(checkpoint);
-            return result;
+            return pathRecovered
+              ? { ...result, note: `path field was missing from the call - applied to the most recently read file (${abs}). If this is the wrong file, checkpoint_undo and resend with an explicit path.` }
+              : result;
           }
           // If old_string wasn't found, re-read the file (a prior concurrent
           // edit to the same file may have shifted content) and retry once.

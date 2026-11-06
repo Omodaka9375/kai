@@ -36,6 +36,11 @@ export function readCacheEntry(
 ): {
   size: number;
   hash: number;
+  /** When this file was last read/written through the tool pipeline. Used
+   *  to pick the most-recent file when a model drops the `path` field
+   *  (some local servers truncate long streamed tool arguments — see
+   *  recoverEditTargetPath in edit.ts). */
+  lastReadAt?: number;
   coverage?: {
     full: boolean;
     lines?: number;
@@ -45,6 +50,7 @@ export function readCacheEntry(
   return {
     size: content.length,
     hash: djb2(content),
+    lastReadAt: Date.now(),
     ...(coverage ? { coverage } : {}),
   };
 }

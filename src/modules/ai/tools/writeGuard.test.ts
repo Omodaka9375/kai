@@ -169,6 +169,12 @@ describe("write_file partial-view guard vs deleted files", () => {
 describe("hash exports one shared byte cap", () => {
   it("READ_BYTE_CAP is the 25KB read page size", () => {
     expect(READ_BYTE_CAP).toBe(25 * 1024);
-    expect(readCacheEntry("x")).toEqual({ size: 1, hash: expect.any(Number) });
+    expect(readCacheEntry("x")).toEqual({
+      size: 1,
+      hash: expect.any(Number),
+      // lastReadAt stamps every cache write - the recency signal the
+      // dropped-path recovery (edit.ts recoverEditTargetPath) reads.
+      lastReadAt: expect.any(Number),
+    });
   });
 });

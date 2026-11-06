@@ -64,6 +64,9 @@ export type ToolContext = {
   readCache: Map<string, {
     size: number;
     hash: number;
+    /** When this file last went through the tool pipeline (read or edited).
+     *  Set by readCacheEntry; used to recover a dropped `path` argument. */
+    lastReadAt?: number;
     coverage?: {
       full: boolean;
       lines?: number;
