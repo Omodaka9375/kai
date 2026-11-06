@@ -28,6 +28,7 @@ import {
   ArrowExpand01Icon,
   ArrowShrink01Icon,
   Delete02Icon,
+  MinusSignIcon,
   FilterIcon,
   GitMergeIcon,
   PencilEdit01Icon,
@@ -183,6 +184,16 @@ export function AiMiniWindow() {
     () => setMiniExpanded(!expanded),
     [setMiniExpanded, expanded],
   );
+  // MINIMIZE ( _ ), the twin of the group panel's minimize: hides the
+  // window (mini.open = false) but KEEPS the AI panel open, so the AI pill
+  // stays in the bottom strip as the re-entry surface - same
+  // collapse-to-pill pattern the group chat uses. A running agent keeps
+  // streaming (the bridge is independent of the window).
+  const closeMini = useChatStore((s) => s.closeMini);
+  const onMinimize = useCallback(() => {
+    setMiniExpanded(false);
+    closeMini();
+  }, [setMiniExpanded, closeMini]);
   const c = useComposer();
 
   useEffect(() => {
@@ -247,10 +258,11 @@ export function AiMiniWindow() {
         <Body
           sessionId={sessionId}
           onExpand={toggleExpand}
+          onMinimize={onMinimize}
           expanded={expanded}
         />
       ) : (
-        <EmptyShell onExpand={toggleExpand} expanded={expanded} />
+        <EmptyShell onExpand={toggleExpand} onMinimize={onMinimize} expanded={expanded} />
       )}
       <PlanDiffReview />
     </motion.div>
@@ -260,10 +272,12 @@ export function AiMiniWindow() {
 function Body({
   sessionId,
   onExpand,
+  onMinimize,
   expanded,
 }: {
   sessionId: string;
   onExpand: () => void;
+  onMinimize: () => void;
   expanded: boolean;
 }) {
   const focusInput = useChatStore((s) => s.focusInput);
@@ -281,6 +295,7 @@ function Body({
     <>
       <Header
         onExpand={onExpand}
+        onMinimize={onMinimize}
         expanded={expanded}
         messages={helpers.messages}
       />
@@ -347,9 +362,11 @@ function PlanModeStrip() {
 
 function EmptyShell({
   onExpand,
+  onMinimize,
   expanded,
 }: {
   onExpand: () => void;
+  onMinimize: () => void;
   expanded: boolean;
 }) {
   return (
@@ -358,6 +375,7 @@ function EmptyShell({
         step={null}
         isBusy={false}
         onExpand={onExpand}
+        onMinimize={onMinimize}
         expanded={expanded}
       />
       <div className="flex flex-1 items-center justify-center text-[11px] text-muted-foreground">
@@ -369,10 +387,12 @@ function EmptyShell({
 
 function Header({
   onExpand,
+  onMinimize,
   expanded,
   messages,
 }: {
   onExpand: () => void;
+  onMinimize?: () => void;
   expanded?: boolean;
   messages?: UIMessage[];
   step?: string | null;
@@ -391,6 +411,23 @@ function Header({
       </div>
       <div className="flex shrink-0 items-center gap-1">
         <SessionPicker />
+        {/* Minimize ( _ ) BEFORE the expand arrow - same order as the group
+            panel's header (minimize, then expand), 2026-11-06 ask.
+            Minimize collapses the window to the AI pill in the bottom
+            strip; the agent keeps running; the pill re-opens it. */}
+        {onMinimize ? (
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            onClick={onMinimize}
+            className="size-5"
+            aria-label="Minimize to pill"
+            title="Minimize — the agent keeps running, the pill re-opens this window"
+          >
+            <HugeiconsIcon icon={MinusSignIcon} size={11} strokeWidth={1.75} />
+          </Button>
+        ) : null}
         <Button
           type="button"
           size="icon"

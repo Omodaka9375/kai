@@ -180,10 +180,11 @@ function ActiveSurfaces(props: {
   hasComposer: boolean;
   miniOpen: boolean;
   stackSurface: string;
+  panelOpen: boolean;
 }) {
   const isActive = useWorkspaceActive();
   if (!isActive) return null;
-  const { hasComposer, miniOpen, stackSurface } = props;
+  const { hasComposer, miniOpen, stackSurface, panelOpen } = props;
   if (miniOpen && hasComposer && stackSurface !== "group") {
     return (
       <AiErrorBoundary label="mini-window">
@@ -192,6 +193,14 @@ function ActiveSurfaces(props: {
     );
   }
   if (hasComposer && stackSurface === "group") {
+    return <GroupPill />;
+  }
+  // MINIMIZED AI WINDOW (2026-11-06): the window's _ button hid it while
+  // the AI panel stayed open - the pill in the bottom strip is the re-entry
+  // surface, the same collapse-to-pill pattern the group chat uses.
+  // panelOpen is the gate: closing the panel via the status bar hides the
+  // pill too (mini.open and panelOpen both false = fully closed).
+  if (hasComposer && panelOpen && stackSurface !== "group") {
     return <GroupPill />;
   }
   return null;
@@ -2200,6 +2209,7 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
               hasComposer={hasComposer}
               miniOpen={miniOpen}
               stackSurface={stackSurface}
+              panelOpen={panelOpen}
             />
             {contextMenu ? (
               <CustomContextMenu

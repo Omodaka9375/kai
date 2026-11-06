@@ -59,6 +59,14 @@ export function GroupPill() {
   // strip — the pill's own strip. Hide instead of painting over/below it.
   if (groupPanelExpanded) return null;
 
+  // AI-PILL-MODE BADGE (2026-11-06): when this pill stands in for a
+  // MINIMIZED AI window (no group involved), the group badges below are
+  // noise - but the ACTIVE session's state is the signal that matters.
+  // Show a busy/streaming dot so a minimized agent's activity stays
+  // visible at a glance; approvals stay in the group badge (in this mode
+  // there are no group approvals - liveCount is 0).
+  const aiMode = !useMemo(() => getGroups().some((g) => g.endedAt === null), [version]);
+
   return (
     <button
       type="button"
@@ -77,6 +85,7 @@ export function GroupPill() {
       <HugeiconsIcon icon={AiBrain02Icon} size={12} strokeWidth={1.75} className="shrink-0 text-muted-foreground" />
       <span className="truncate font-medium">AI chat</span>
       <span className="flex-1" />
+      {aiMode ? <AiPillStatusBadge /> : null}
       {liveCount > 0 ? (
         <span className="shrink-0 rounded bg-primary/15 px-1.5 py-0.5 text-[10px] text-primary">
           {liveCount} live
@@ -91,5 +100,22 @@ export function GroupPill() {
         </span>
       ) : null}
     </button>
+  );
+}
+
+/** Busy-state badge for the minimized-AI-window pill: a small pulsing dot
+ *  plus tok/s while the agent runs, so a minimized agent is glanceable
+ *  exactly like the group pill makes a running group glanceable. */
+function AiPillStatusBadge() {
+  const status = useChatStore((s) => s.agentMeta.status);
+  const outputTps = useChatStore((s) => s.agentMeta.outputTps);
+  if (status !== "streaming") return null;
+  return (
+    <span className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
+      <span className="size-1.5 animate-pulse rounded-full bg-emerald-500" />
+      {status === "streaming" && outputTps > 0 ? (
+        <span className="tabular-nums">{outputTps} tok/s</span>
+      ) : null}
+    </span>
   );
 }
