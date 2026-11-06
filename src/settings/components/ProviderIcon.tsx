@@ -11,6 +11,7 @@ import {
   GlobeIcon,
   Hexagon01Icon,
   PlugIcon,
+  Search01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 
@@ -29,6 +30,8 @@ const ICON_BY_PROVIDER = {
   // Voice provider (STT/TTS) - a voice glyph distinguishes it from the
   // chat-model providers in the key grid.
   assemblyai: AiVoiceIcon,
+  // Search provider (web_search engine) - a search glyph, same rule.
+  brave: Search01Icon,
 } as const satisfies Record<ProviderId, typeof ChatGptIcon>;
 
 type Props = {

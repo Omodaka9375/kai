@@ -70,6 +70,8 @@ const PROVIDER_ICON = {
   // Voice provider - never appears in a model list, but the Record must be
   // exhaustive so a future ProviderId can't compile without an icon.
   assemblyai: AiVoiceIcon,
+  // Search provider (web_search engine) - same rule as assemblyai.
+  brave: AiBookIcon,
 } as const satisfies Record<ProviderId, typeof ChatGptIcon>;
 
 type Tab = "all" | "favorites" | "recent";

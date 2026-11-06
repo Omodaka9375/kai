@@ -3,6 +3,55 @@ import { tool } from "ai";
 import { z } from "zod";
 import type { ToolContext } from "./context";
 import { requireLanOnly } from "../lib/proxyFetch";
+import { useChatStore } from "../store/chatStore";
+
+/**
+ * BRAVE SEARCH ENGINE (2026-11-06): the top rung of web_search's engine
+ * ladder. When a Brave Search API key is configured (Settings > Models >
+ * Brave Search), queries go to Brave's official API — its OWN index, no
+ * Google/Bing dependency (Microsoft retired the Bing Search APIs; Google's
+ * Custom Search JSON API closes Jan 1, 2027), the best agent-quality
+ * scores in independent testing, and $5/mo of free credits on the prepaid
+ * plan (≈1,000 queries). Without a key the ladder falls through to the
+ * legacy Bing RSS + DDG scrapes unchanged.
+ */
+async function braveSearch(query: string): Promise<WebSearchResult[]> {
+  const key = useChatStore.getState().apiKeys.brave;
+  if (!key) return [];
+  const resp = await invoke<{ status: number; headers: Record<string, string>; body: number[] }>(
+    "ai_http_request",
+    {
+      url: "https://api.search.brave.com/res/v1/web/search?q=" +
+        encodeURIComponent(query) + "&count=10",
+      method: "GET",
+      headers: {
+        "Accept": "application/json",
+        "Accept-Encoding": "gzip",
+        "X-Subscription-Token": key,
+      },
+      allowPrivateNetwork: false,
+      requireLanOnly: requireLanOnly(),
+    },
+  );
+  if (resp.status !== 200) {
+    throw new Error(`Brave API HTTP ${resp.status}`);
+  }
+  const body = new TextDecoder().decode(new Uint8Array(resp.body));
+  const json = JSON.parse(body) as {
+    web?: { results?: Array<{ title?: string; url?: string; description?: string }> };
+  };
+  const out: WebSearchResult[] = [];
+  for (const r of json.web?.results ?? []) {
+    if (!r.url || !r.title) continue;
+    // description is HTML-ish text; strip tags so the snippet is clean.
+    out.push({
+      title: r.title,
+      url: r.url,
+      snippet: r.description ? r.description.replace(/<[^>]+>/g, "").trim() : undefined,
+    });
+  }
+  return out;
+}
 
 /**
  * Fetch a URL via the Rust HTTP proxy (bypasses CORS, no Python needed).
@@ -397,15 +446,25 @@ export function buildWebTools(_ctx: ToolContext) {
     web_search: tool({
       needsApproval: false,
       description:
-        "Search the web and return the top results with titles, URLs, and snippets (backed by Bing, with a DuckDuckGo fallback). Useful for finding documentation, answers, or current information. Auto-executes (read-only).",
+        "Search the web and return the top results with titles, URLs, and snippets (Brave Search API when a key is configured, else Bing with a DuckDuckGo fallback). Useful for finding documentation, answers, or current information. Auto-executes (read-only).",
       inputSchema: z.object({
         query: z.string().describe("The search query."),
       }),
       execute: async ({ query }) => {
         let bingError: unknown = null;
         try {
-          // Primary: Bing's RSS serializer (reliable, not bot-walled). Empty
-          // results AND request/parser failures both fall through to DDG.
+          // TOP RUNG: Brave's official API when a key is configured. A
+          // failure here (bad key, quota, outage) falls through to the
+          // legacy engines rather than erroring the tool.
+          try {
+            const brave = await braveSearch(query);
+            if (brave.length > 0) return { query, engine: "brave", results: brave };
+          } catch {
+            // fall through to Bing
+          }
+          // Primary legacy: Bing's RSS serializer (reliable, not
+          // bot-walled). Empty results AND request/parser failures both
+          // fall through to DDG.
           try {
             const bing = await bingSearch(query);
             if (bing.length > 0) return { query, engine: "bing", results: bing };

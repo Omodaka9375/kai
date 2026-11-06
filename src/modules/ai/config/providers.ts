@@ -12,7 +12,8 @@ export type ProviderId =
   | "openrouter"
   | "openai-compatible"
   | "zai"
-  | "assemblyai";
+  | "assemblyai"
+  | "brave";
 
 export type ProviderInfo = {
   id: ProviderId;
@@ -113,6 +114,22 @@ export const PROVIDERS: readonly ProviderInfo[] = [
     keyringAccount: "assemblyai-api-key",
     keyPrefix: null,
     consoleUrl: "https://www.assemblyai.com/dashboard/api-keys",
+  },
+  {
+    // SEARCH provider, not a chat-model provider: the key powers the Brave
+    // Search API in web_search (engine ladder's top rung). Listed here so it
+    // rides the same keychain storage + key card UI; there are NO chat
+    // models for this id and none must be added to models.ts - reaching
+    // buildLanguageModel with this id throws (same contract as assemblyai).
+    // Brave is the only major search API with its OWN index (no Google/Bing
+    // dependency - Microsoft retired the Bing Search APIs and Google's
+    // Custom Search JSON API closes to new customers and shuts down Jan 1,
+    // 2027, so the scrape-based fallbacks are on borrowed time).
+    id: "brave",
+    label: "Brave Search",
+    keyringAccount: "brave-search-api-key",
+    keyPrefix: null,
+    consoleUrl: "https://api-dashboard.search.brave.com/app/keys",
   },
 ] as const;
 

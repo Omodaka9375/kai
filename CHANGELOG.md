@@ -12,6 +12,7 @@ All notable changes to the KAI terminal emulator project are documented in this 
 - Performance: switching projects while an agent is thinking no longer freezes for a second - history saving stopped re-serializing the whole conversation on every streaming tick.
 - Attachments: uploading an exotic image format (AVIF, HEIC, BMP, TIFF) no longer breaks the whole conversation - such uploads are converted to PNG automatically, and already-broken sessions recover on their own.
 - Assistant: Telegram replies now render bold, headings, code and links properly instead of showing raw asterisks and hashes.
+- Search: web_search can now use the Brave Search API - add a Brave key in Settings → Models and results come from Brave's own index (no more bot-walled DuckDuckGo or junk-filled Bing scrapes). Without a key everything works exactly as before.
 
 ---
 

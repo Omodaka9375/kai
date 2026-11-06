@@ -223,6 +223,14 @@ export async function buildLanguageModel(
         "AssemblyAI is a voice provider (STT/TTS), not a chat model provider.",
       );
     }
+    case "brave": {
+      // Search provider (web_search's Brave engine) - same contract as
+      // assemblyai above: the id exists for key storage only, models.ts has
+      // no brave entries, and reaching the chat-model builder is a bug.
+      throw new Error(
+        "Brave is a search provider (web_search), not a chat model provider.",
+      );
+    }
     default: {
       const _exhaustive: never = provider;
       throw new Error(`Unsupported provider: ${_exhaustive as ProviderId}`);

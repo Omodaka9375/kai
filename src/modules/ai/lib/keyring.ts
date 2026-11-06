@@ -25,6 +25,7 @@ export const EMPTY_PROVIDER_KEYS: ProviderKeys = {
   "openai-compatible": null,
   zai: null,
   assemblyai: null,
+  brave: null,
 };
 
 export async function getKey(provider: ProviderId): Promise<string | null> {
@@ -88,5 +89,14 @@ export async function getAllKeys(): Promise<ProviderKeys> {
 }
 
 export function hasAnyKey(keys: ProviderKeys): boolean {
-  return PROVIDERS.some((p) => providerSupportsKey(p.id) && !!keys[p.id]);
+  // Non-chat providers (assemblyai = voice, brave = search) do NOT count:
+  // hasAnyKey gates the AI composer, and a user who configured only a
+  // search/voice key has no model to chat with.
+  return PROVIDERS.some(
+    (p) =>
+      p.id !== "assemblyai" &&
+      p.id !== "brave" &&
+      providerSupportsKey(p.id) &&
+      !!keys[p.id],
+  );
 }
