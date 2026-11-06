@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { compactModelMessagesDetailed, elideStaleWatchFires } from "./compact";
+import { readFileSync } from "node:fs";
+import {
+  compactModelMessagesDetailed,
+  elideStaleWatchFires,
+} from "./compact";
 import type { ModelMessage } from "ai";
 
 const b64 = (n: number) => "A".repeat(n);
@@ -284,5 +288,87 @@ describe("elideStaleWatchFires", () => {
     const lastFire = (r.messages[r.messages.length - 2].content as { type: string; text: string }[])[0].text;
     expect(lastFire).toContain("poll #4");
     expect(lastFire).not.toContain("elided to save context");
+  });
+});
+
+/**
+ * BYTE-SIZE MEMO (2026-11-06 "click, nothing happens, 2-3 seconds later
+ * it switches" freeze report): compactModelMessagesDetailed runs up to 6
+ * approxBytes passes per call, and prepareStep re-runs the compaction on
+ * EVERY step - approxBytes JSON.stringifies every tool output each pass,
+ * hundreds of ms of main-thread block per step on multi-MB sessions.
+ * The WeakMap memo keys on message identity; the .map phases never mutate
+ * in place, so cached sizes are exactly as valid as their objects.
+ */
+describe("approxBytes memoization", () => {
+  it("same message object is stringified once across repeated calls", () => {
+    const src = readFileSync(new URL("./compact.ts", import.meta.url), "utf8");
+    // Source pin: the memo exists and approxBytes routes through it.
+    expect(src).toContain("approxBytesCache = new WeakMap");
+    expect(src).toContain("messageApproxBytes(m)");
+    // Behavioral: repeated compact calls over the same (unchanged) heavy
+    // history must be dramatically cheaper than the first - the unchanged
+    // messages hit the cache.
+    const heavy: ModelMessage[] = [];
+    for (let i = 0; i < 40; i++) {
+      heavy.push({
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "c" + i,
+            output: { stdout: "x".repeat(50_000) },
+          },
+        ],
+      } as unknown as ModelMessage);
+    }
+    // Warm the cache (first call does the real work).
+    compactModelMessagesDetailed(heavy, 1_000_000);
+    const t0 = performance.now();
+    for (let i = 0; i < 10; i++) {
+      compactModelMessagesDetailed(heavy, 1_000_000);
+    }
+    const warmMs = performance.now() - t0;
+    // Ten WARM full-compaction passes over a 2MB history should be well
+    // under the equivalent COLD work (which stringify ~6x per call).
+    // Generous bound (warm pass < 15ms average) - CI machines vary.
+    expect(warmMs).toBeLessThan(150);
+  });
+
+  it("compaction results are unchanged by the memo (regression)", () => {
+    // The memo must not alter WHAT gets elided - same input, same output,
+    // regardless of whether the cache was warm from a previous call.
+    const history: ModelMessage[] = [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "c1",
+            toolName: "display_image",
+            input: { base64_data: "A".repeat(5000) },
+          },
+        ],
+      } as unknown as ModelMessage,
+      {
+        role: "tool",
+        content: [{ type: "tool-result", toolCallId: "c1", output: { ok: true } }],
+      } as unknown as ModelMessage,
+    ];
+    const cold = compactModelMessagesDetailed(history, 1_000_000);
+    const warm = compactModelMessagesDetailed(history, 1_000_000);
+    expect(cold.compacted).toBe(true);
+    expect(warm.compacted).toBe(true);
+    // Both calls elided the base64 input identically.
+    const coldInput = (
+      (cold.messages[0].content as { type: string; input?: { base64_data?: string } }[])
+        .find((p) => p.type === "tool-call")?.input?.base64_data ?? ""
+    );
+    const warmInput = (
+      (warm.messages[0].content as { type: string; input?: { base64_data?: string } }[])
+        .find((p) => p.type === "tool-call")?.input?.base64_data ?? ""
+    );
+    expect(warmInput).toBe(coldInput);
+    expect(coldInput).toContain("chars elided");
   });
 });

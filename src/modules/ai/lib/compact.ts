@@ -11,23 +11,54 @@ type ToolPart = {
   [k: string]: unknown;
 };
 
+/**
+ * Per-MESSAGE byte-size memo (2026-11-06 main-thread freeze report:
+ * "click, nothing happens, 2-3 seconds later it switches" while an agent
+ * runs on a heavy session).
+ *
+ * compactModelMessagesDetailed calls approxBytes up to 6 times per
+ * invocation (once up front + once after every phase that changes
+ * something), and prepareStep re-runs the whole compaction on EVERY step
+ * of a run - on a multi-MB history that was 5-6 full JSON.stringify passes
+ * over every tool output per STEP, hundreds of ms of pure main-thread
+ * block per step boundary. Clicks queue behind those blocks.
+ *
+ * The cache keys on the MESSAGE object identity. Every phase that changes
+ * content builds NEW message objects (the .map phases never mutate in
+ * place), so a cached size is exactly as valid as the object it keys -
+ * within one compaction call the unchanged messages keep their sizes and
+ * only the handful that a phase rewrote get re-stringified once. WeakMap
+ * so entries die with their messages; a compact finalMessages array is
+ * short-lived per run.
+ */
+const approxBytesCache = new WeakMap<object, number>();
+
+function messageApproxBytes(m: ModelMessage): number {
+  const cached = approxBytesCache.get(m);
+  if (cached !== undefined) return cached;
+  let n = 0;
+  if (typeof m.content === "string") n = m.content.length;
+  else if (Array.isArray(m.content)) {
+    for (const part of m.content as ToolPart[]) {
+      if (part.type === "text" && typeof part.text === "string")
+        n += (part.text as string).length;
+      else if (part.type === "tool-result")
+        n += JSON.stringify(part.output ?? "").length;
+      else if (part.type === "tool-call")
+        n += JSON.stringify(part.input ?? "").length;
+      else if (part.type === "file" && typeof part.data === "string")
+        n += (part.data as string).length;
+      else n += 64;
+    }
+  }
+  approxBytesCache.set(m, n);
+  return n;
+}
+
 function approxBytes(messages: ModelMessage[]): number {
   let n = 0;
   for (const m of messages) {
-    if (typeof m.content === "string") n += m.content.length;
-    else if (Array.isArray(m.content)) {
-      for (const part of m.content as ToolPart[]) {
-        if (part.type === "text" && typeof part.text === "string")
-          n += (part.text as string).length;
-        else if (part.type === "tool-result")
-          n += JSON.stringify(part.output ?? "").length;
-        else if (part.type === "tool-call")
-          n += JSON.stringify(part.input ?? "").length;
-        else if (part.type === "file" && typeof part.data === "string")
-          n += (part.data as string).length;
-        else n += 64;
-      }
-    }
+    n += messageApproxBytes(m);
   }
   return n;
 }
