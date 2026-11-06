@@ -134,7 +134,14 @@ describe("replace_exact recovery and byte-preserving native contract", () => {
       old_string: "old",
       new_string: "new",
     });
-    expect(ctx.readCache.get("/ws/a.ts")).toEqual(readCacheEntry(updated));
+    // Shape-based comparison: readCacheEntry stamps lastReadAt with
+    // Date.now() (the recency signal for dropped-path recovery), so a
+    // value-compare against a fresh entry fails on the timestamp. Match
+    // on the content-derived fields the cache exists to guard.
+    const entry = ctx.readCache.get("/ws/a.ts")!;
+    expect(entry.size).toBe(readCacheEntry(updated).size);
+    expect(entry.hash).toBe(readCacheEntry(updated).hash);
+    expect(entry.lastReadAt).toEqual(expect.any(Number));
   });
 
   it("returns the native ambiguity diagnostic without committing", async () => {

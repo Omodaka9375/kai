@@ -7,7 +7,11 @@ const LABELS: Record<AutoApproveMode, string> = {
 };
 
 const DOTS: Record<AutoApproveMode, string> = {
-  off: "bg-muted-foreground/50",
+  // 2026-11-06 ask: Ask is YELLOW (attention needed - the agent will stop
+  // and ask), Allow stays GREEN (free to run). The Stop square in the todo
+  // strip matches this color so the agent-control cluster speaks one
+  // language: green = auto-running, yellow = needs a human.
+  off: "bg-amber-500",
   all: "bg-emerald-500",
 };
 
