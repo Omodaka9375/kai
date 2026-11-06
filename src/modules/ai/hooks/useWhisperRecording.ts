@@ -3,7 +3,7 @@ import { experimental_transcribe as transcribe } from "ai";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useChatStore } from "../store/chatStore";
 import { encodeWav, transcribeLocal } from "../lib/voiceTts";
-import { frameRms, SilenceDetector } from "../lib/silence";
+import { frameRms, SilenceDetector, trimTrailingSilence } from "../lib/silence";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 
 const MIME_CANDIDATES = [
@@ -288,6 +288,13 @@ export function useWhisperRecording({
     speechRef.current = sr;
     let transcript = "";
     let settled = false;
+    // DELIVER-ONCE GUARD (2026-11-06 voice complaint: "repeated same
+    // sentence many times"): per the Web Speech spec onend fires after
+    // onerror, and BOTH handlers used to deliver the partial transcript -
+    // a transient mid-capture error (no-speech, network, audio-capture)
+    // delivered TWICE, and with hands-free auto-submit both copies landed
+    // in the chat. One capture, one delivery.
+    let delivered = false;
     const reset = () => {
       if (settled) return;
       settled = true;
@@ -296,8 +303,21 @@ export function useWhisperRecording({
       startingRef.current = false;
       setState("idle");
     };
+    // RESULT WATERMARK: some WebView2/OS recognizers resend results with a
+    // RESET resultIndex (e.g. after a network retry), re-flagging finals
+    // the loop below already consumed - appending the same sentences into
+    // `transcript` again (one message with the sentence repeated many
+    // times). Never consume a result index twice; a negative reset still
+    // appends (engines that never set the field) because indices are
+    // only trusted when they advance.
+    let lastResultIndex = -1;
     sr.onresult = (e: any) => {
-      for (let i = e.resultIndex; i < e.results.length; i++) {
+      const start = typeof e.resultIndex === "number" && e.resultIndex >= 0
+        ? e.resultIndex
+        : 0;
+      if (start <= lastResultIndex && lastResultIndex >= 0) return; // replay
+      if (start > lastResultIndex) lastResultIndex = start;
+      for (let i = start; i < e.results.length; i++) {
         if (e.results[i].isFinal) {
           transcript += e.results[i][0].transcript + " ";
         }
@@ -306,7 +326,10 @@ export function useWhisperRecording({
     sr.onend = () => {
       const text = transcript.trim();
       reset();
-      if (text) deliver(text);
+      if (text && !delivered) {
+        delivered = true;
+        deliver(text);
+      }
     };
     sr.onerror = (e: any) => {
       const code = String((e as any)?.error ?? "");
@@ -318,7 +341,10 @@ export function useWhisperRecording({
       }
       const text = transcript.trim();
       reset();
-      if (text) deliver(text);
+      if (text && !delivered) {
+        delivered = true;
+        deliver(text);
+      }
     };
     try {
       sr.start();
@@ -548,9 +574,14 @@ export function useWhisperRecording({
     }
   }, [teardownStream]);
 
-  /** Stop the local route: flush PCM → WAV → transcribe. */
+  /** Stop the local route: flush PCM → WAV → transcribe. FLUSH-ONCE: a
+   * second stop (silence-fire racing the manual toggle, or a stray window
+   * event) must not re-run the flush - teardownStream() already nulls the
+   * context, and a double deliver() would put the same transcript in the
+   * chat twice (2026-11-06 voice complaint class). */
   const stopLocalWhisper = useCallback(async () => {
     const ctx = audioCtxRef.current;
+    if (!ctx) return; // already flushed (or never started)
     const chunks = pcmRef.current;
     pcmRef.current = [];
     teardownStream();
@@ -566,7 +597,13 @@ export function useWhisperRecording({
       merged.set(c, off);
       off += c.length;
     }
-    const wav = encodeWav(merged, sampleRate);
+    // TRIM THE DETECTOR'S OWN TAIL: the silence detector fires only after
+    // ~1.6s of quiet frames have ALREADY been pushed into this buffer, so
+    // every auto-ended capture ends with that dead air - the textbook
+    // whisper.cpp repetition-loop trigger ("same sentence many times",
+    // intermittent: depends on the audio). Cut it before encoding.
+    const trimmed = trimTrailingSilence(merged, sampleRate);
+    const wav = encodeWav(trimmed, sampleRate);
     if (wav.size <= 44) {
       setState("idle");
       return;

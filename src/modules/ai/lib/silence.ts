@@ -99,3 +99,51 @@ export function frameRms(frame: Float32Array): number {
   }
   return Math.sqrt(sum / frame.length);
 }
+
+/** Window size for the trailing-silence scan, in samples (~16ms @16k). */
+const TRIM_WINDOW = 256;
+/** Silence pad kept after the last speech window (~250ms @16k). */
+const TRIM_PAD_MS = 250;
+
+/**
+ * Trim TRAILING silence from a finished PCM capture (2026-11-06 voice
+ * complaint). The silence auto-end detector fires only AFTER
+ * SILENCE_DEFAULTS.silenceMs of quiet have accumulated - and every one of
+ * those quiet frames was already pushed into the capture buffer - so every
+ * auto-ended recording ends with ~1.6s of near-silence. Feeding that tail
+ * to whisper.cpp is the textbook trigger for its repetition loop (the
+ * model re-emits the last phrase over silence - "same sentence many times"
+ * in the chat, intermittent because it depends on the audio).
+ *
+ * Walks windows from the END; keeps everything up to the last window whose
+ * RMS clears the speech threshold, plus a fixed pad so speech tails aren't
+ * clipped. Returns the input BY IDENTITY when no window clears the
+ * threshold (a very quiet mic / manual capture) - a silent trim there
+ * would DELETE the user's dictation instead of fixing hallucination.
+ */
+export function trimTrailingSilence(
+  samples: Float32Array,
+  sampleRate: number,
+  threshold = SILENCE_DEFAULTS.speechThreshold,
+  padMs = TRIM_PAD_MS,
+): Float32Array {
+  if (samples.length === 0) return samples;
+  const window = Math.max(1, Math.round((sampleRate / 1000) * 16)) || TRIM_WINDOW;
+  let lastSpeechEnd = -1;
+  for (let start = 0; start + window <= samples.length; start += window) {
+    let sum = 0;
+    for (let i = start; i < start + window; i++) {
+      const v = samples[i];
+      sum += v * v;
+    }
+    if (Math.sqrt(sum / window) >= threshold) {
+      lastSpeechEnd = start + window;
+    }
+  }
+  // No window cleared the threshold: quiet capture - keep every sample.
+  if (lastSpeechEnd === -1) return samples;
+  const pad = Math.round((sampleRate * padMs) / 1000);
+  const keep = Math.min(samples.length, lastSpeechEnd + pad);
+  if (keep >= samples.length) return samples;
+  return samples.subarray(0, keep);
+}
