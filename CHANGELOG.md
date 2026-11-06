@@ -6,15 +6,13 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ## [2.2.0]
 
-- Edit tool: no more "keeps dropping the path field" loops - local servers that alphabetize tool arguments can truncate the trailing path field on long edits; the edit tools now recover the intended file from your recent reads and tell the model what they targeted.
-- Media: videos and images shown by the agent now render as playable/viewable cards in the chat, not only in the terminal - and they work with no terminal open at all.
-- Approvals: flipping Allow to Ask mid-run actually stops auto-approval now - pending timers cancel and the approval card un-freezes into clickable buttons.
+- Edit tool: local servers that alphabetize tool arguments can truncate the trailing path field on long edits.
+- Media: videos and images shown by the agent now render as playable/viewable cards in the chat, not only in the terminal.
+- Approvals: flipping Allow to Ask mid-run stops auto-approval now - pending timers cancel and the approval card un-freezes into clickable buttons.
 - Mini window: a minimize button collapses the AI window to a small pill (like the group chat) - the agent keeps running behind it with a live busy indicator.
-- Permissions: one color language - Ask is yellow, Allow is green, and the Stop square always matches the current mode color.
-- Search: web_search can use the Brave Search API (add a key in Settings → Models) for results from Brave's own index, immune to bot-walls. (Also in 2.1.9.)
+- Search: web_search can use the Brave Search API (add a key in Settings → Models).
 - Themes: four new UI themes - Kanagawa, Gruvbox, Solarized, and One Dark (12 total).
-- Shell: agents can no longer launch un-stoppable 20-minute install+build+test one-liners - slow stages must run as separate commands, each with its own timeout, and timed-out commands are never blindly retried.
-- Performance: the last main-thread freeze under agent load is gone - the per-step context scan stopped re-serializing the whole conversation history on every agent step.
+- Shell: agents can no longer launch combined install+build+test one-liners - slow stages must run as separate commands.
 
 ---
 
