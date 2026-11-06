@@ -1066,16 +1066,21 @@ pub async fn telegram_send_message(
             post_json::<serde_json::Value>(&token, "sendMessage", &msg).await?;
             continue;
         }
-        // Markdown first (nicer rendering). Agent replies often contain raw
-        // backticks / half-written Markdown that Telegram's parser rejects
-        // with HTTP 400 "can't parse entities" — fall back to plain text so
-        // the reply is never lost to formatting.
-        let md = serde_json::json!({
+        // Telegram HTML, converted from the model's standard Markdown
+        // (2026-11-06: the legacy "Markdown" parse_mode only understands
+        // *single-star* emphasis, so the **bold** / ## headings / fenced
+        // code that models actually emit rendered as literal asterisks and
+        // hashes - user report: "looks like its markdown but either its
+        // broken or telegram doesnt render it"). md_to_telegram_html is
+        // conservative and escapes first, but anything Telegram's HTML
+        // parser still rejects with HTTP 400 "can't parse entities" falls
+        // back to plain text so the reply is never lost to formatting.
+        let html = serde_json::json!({
             "chat_id": chat_id,
-            "text": chunk,
-            "parse_mode": "Markdown",
+            "text": md_to_telegram_html(&chunk),
+            "parse_mode": "HTML",
         });
-        if let Err(e) = post_json::<serde_json::Value>(&token, "sendMessage", &md).await {
+        if let Err(e) = post_json::<serde_json::Value>(&token, "sendMessage", &html).await {
             if e.contains("can't parse entities") {
                 let plain = serde_json::json!({ "chat_id": chat_id, "text": chunk });
                 post_json::<serde_json::Value>(&token, "sendMessage", &plain).await?;
@@ -1443,6 +1448,208 @@ fn run_ffmpeg(input: &[u8], encode_args: &[&str]) -> Result<Vec<u8>, String> {
     Ok(result)
 }
 
+/// --- Markdown → Telegram HTML -------------------------------------------
+///
+/// Agent replies arrive as standard LLM Markdown (**bold**, ## headings,
+/// `code`, ``` fences, [links](url)). Telegram's legacy `parse_mode:
+/// "Markdown"` only understands *single-star* emphasis and chokes on the
+/// rest, so users saw raw asterisks and hashes. Telegram HTML renders all
+/// of it. Conversion rules, in order:
+///  1. The source text is HTML-escaped FIRST (`&`, `<`, `>`), so user or
+///     model content can never inject markup — the only tags in the output
+///     are the ones this function emits.
+///  2. Fenced ``` blocks become <pre> (contents untouched), ``` # headings
+///     become bold lines, "> quote" lines become <blockquote>.
+///  3. Inline: `code`, **bold**, *italic* (guarded), ~~strike~~, and
+///     [text](http…) links. `_italic_` is deliberately NOT converted —
+///     snake_case identifiers would be mangled into italics.
+///  4. Unpaired markers stay literal rather than guessing; the caller's
+///     plain-text fallback still catches anything Telegram's parser
+///     rejects (the "can't parse entities" path, unchanged).
+fn md_to_telegram_html(text: &str) -> String {
+    let escaped = text
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;");
+
+    let mut out = String::with_capacity(escaped.len() + 64);
+    let mut in_fence = false;
+    for line in escaped.split('\n') {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") {
+            out.push_str(if in_fence { "</pre>" } else { "<pre>" });
+            out.push('\n');
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence {
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+        // "# Heading" → bold line (Telegram has no heading concept). '#'
+        // is single-byte, so byte slicing after counting is safe.
+        let mut hashes = 0;
+        for ch in line.chars() {
+            if ch == '#' {
+                hashes += 1;
+            } else {
+                break;
+            }
+        }
+        if (1..=6).contains(&hashes) {
+            let rest = &line[hashes..];
+            if rest.starts_with(' ') || rest.starts_with('\t') {
+                out.push_str("<b>");
+                out.push_str(&md_inline(rest.trim()));
+                out.push_str("</b>\n");
+                continue;
+            }
+        }
+        // "> quote" → blockquote (a bare ">" line stays literal). The line
+        // is ALREADY HTML-escaped at this point, so the marker is "&gt; ".
+        if trimmed.len() > 5 && trimmed.starts_with("&gt; ") {
+            let q = trimmed[5..].trim();
+            if !q.is_empty() {
+                out.push_str("<blockquote>");
+                out.push_str(&md_inline(q));
+                out.push_str("</blockquote>\n");
+                continue;
+            }
+        }
+        out.push_str(&md_inline(line));
+        out.push('\n');
+    }
+    // The loop appends '\n' per line; drop the one added for a final line
+    // that had none in the source so the output ends exactly like the input.
+    if out.ends_with('\n') && !text.ends_with('\n') {
+        out.pop();
+    }
+    out
+}
+
+/// Inline conversion on ALREADY-ESCAPED text (see md_to_telegram_html).
+fn md_inline(s: &str) -> String {
+    md_inline_chars(&s.chars().collect::<Vec<char>>())
+}
+
+fn find_char(b: &[char], from: usize, c: char) -> Option<usize> {
+    (from..b.len()).find(|&i| b[i] == c)
+}
+
+fn md_inline_chars(b: &[char]) -> String {
+    let mut out = String::with_capacity(b.len() + 16);
+    let mut i = 0;
+    while i < b.len() {
+        let c = b[i];
+        // `code` — must come first so markers inside code spans are left
+        // alone and backticks in the wild don't half-convert.
+        if c == '`' {
+            if let Some(close) = find_char(b, i + 1, '`') {
+                out.push_str("<code>");
+                out.extend(&b[i + 1..close]);
+                out.push_str("</code>");
+                i = close + 1;
+                continue;
+            }
+        }
+        // **bold**
+        if c == '*' && b.get(i + 1) == Some(&'*') {
+            let mut j = i + 2;
+            let mut close = None;
+            while j + 1 < b.len() {
+                if b[j] == '*' && b[j + 1] == '*' {
+                    close = Some(j);
+                    break;
+                }
+                j += 1;
+            }
+            if let Some(j) = close {
+                out.push_str("<b>");
+                out.push_str(&md_inline_chars(&b[i + 2..j]));
+                out.push_str("</b>");
+                i = j + 2;
+                continue;
+            }
+        }
+        // *italic* — guarded: open only at start/after whitespace (never
+        // mid-word), close only before whitespace/end/sentence punctuation,
+        // so "a * b" and stray asterisks stay literal.
+        if c == '*'
+            && (i == 0 || b[i - 1].is_whitespace())
+            && i + 1 < b.len()
+            && !b[i + 1].is_whitespace()
+            && b[i + 1] != '*'
+        {
+            let mut j = i + 1;
+            let mut close = None;
+            while j < b.len() {
+                if b[j] == '*'
+                    && !b[j - 1].is_whitespace()
+                    && (j + 1 >= b.len()
+                        || b[j + 1].is_whitespace()
+                        || ".,;:!?)\"'".contains(b[j + 1]))
+                {
+                    close = Some(j);
+                    break;
+                }
+                j += 1;
+            }
+            if let Some(j) = close {
+                out.push_str("<i>");
+                out.push_str(&md_inline_chars(&b[i + 1..j]));
+                out.push_str("</i>");
+                i = j + 1;
+                continue;
+            }
+        }
+        // ~~strike~~
+        if c == '~' && b.get(i + 1) == Some(&'~') {
+            let mut j = i + 2;
+            let mut close = None;
+            while j + 1 < b.len() {
+                if b[j] == '~' && b[j + 1] == '~' {
+                    close = Some(j);
+                    break;
+                }
+                j += 1;
+            }
+            if let Some(j) = close {
+                out.push_str("<s>");
+                out.push_str(&md_inline_chars(&b[i + 2..j]));
+                out.push_str("</s>");
+                i = j + 2;
+                continue;
+            }
+        }
+        // [text](url) — http(s) only; anything else stays literal so
+        // bracketed prose can't become a bogus link. The URL is already
+        // HTML-escaped, which is exactly what an href attribute needs.
+        if c == '[' {
+            if let Some(close_br) = find_char(b, i + 1, ']') {
+                if b.get(close_br + 1) == Some(&'(') {
+                    if let Some(close_par) = find_char(b, close_br + 2, ')') {
+                        let url: String = b[close_br + 2..close_par].iter().collect();
+                        if url.starts_with("http://") || url.starts_with("https://") {
+                            let inner: String = b[i + 1..close_br].iter().collect();
+                            out.push_str("<a href=\"");
+                            out.push_str(&url);
+                            out.push_str("\">");
+                            out.push_str(&md_inline(&inner));
+                            out.push_str("</a>");
+                            i = close_par + 1;
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
 /// Split into ≤4096-char chunks at line boundaries (Telegram hard cap).
 fn split_message(text: &str) -> Vec<String> {
     const CAP: usize = 4000;
@@ -1574,6 +1781,54 @@ mod tests {
     #[test]
     fn split_message_keeps_short_text_whole() {
         assert_eq!(split_message("hello"), vec!["hello".to_string()]);
+    }
+
+    #[test]
+    fn md_to_html_renders_the_standard_llm_markdown() {
+        let h = md_to_telegram_html("## Title\nsome **bold** and `code` here");
+        assert!(h.contains("<b>Title</b>"), "got: {h}");
+        assert!(h.contains("<b>bold</b>"), "got: {h}");
+        assert!(h.contains("<code>code</code>"), "got: {h}");
+        assert!(!h.contains('*'));
+        assert!(!h.contains('#'));
+    }
+
+    #[test]
+    fn md_to_html_escapes_source_first_so_markup_cannot_be_injected() {
+        let h = md_to_telegram_html("<script>alert(1)</script>");
+        assert!(h.contains("&lt;script&gt;"), "got: {h}");
+        assert!(!h.contains("<script>"));
+    }
+
+    #[test]
+    fn md_to_html_leaves_snake_case_and_lone_markers_alone() {
+        let h = md_to_telegram_html("use file_name_here and a lone * star and 2 * 3 = 6");
+        assert_eq!(h, "use file_name_here and a lone * star and 2 * 3 = 6");
+    }
+
+    #[test]
+    fn md_to_html_links_fences_quotes_and_strike() {
+        let src = "[docs](https://example.com/a?b=1&c=2)\n```rust\nfn main() { let x = *p; }\n```\n> quoted *italics* text\n~~gone~~";
+        let h = md_to_telegram_html(src);
+        assert!(
+            h.contains("<a href=\"https://example.com/a?b=1&amp;c=2\">docs</a>"),
+            "got: {h}"
+        );
+        assert!(h.contains("<pre>"));
+        assert!(h.contains("fn main() { let x = *p; }"));
+        assert!(h.contains("</pre>"));
+        // The fence body must keep its raw asterisk (no inline conversion
+        // inside <pre>).
+        assert!(h.contains("x = *p"));
+        assert!(h.contains("<blockquote>quoted <i>italics</i> text</blockquote>"), "got: {h}");
+        assert!(h.contains("<s>gone</s>"));
+    }
+
+    #[test]
+    fn md_to_html_unpaired_markers_stay_literal() {
+        let h = md_to_telegram_html("a single ` backtick and an **unpaired bold");
+        assert!(h.contains('`'));
+        assert!(h.contains("**"));
     }
 
     #[test]
