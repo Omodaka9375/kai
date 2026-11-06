@@ -510,60 +510,107 @@ async function refuseEmptyOverwrite(
  *  check. Returns the prepared array, or null when the messages are not
  *  persistable (unserializable / invalid JSON). Shared by saveMessages and
  *  saveMessagesForRoot. */
-function prepareMessagesForStore(messages: UIMessage[]): unknown[] | null {
+/**
+ * Prepared-message cache: the original UIMessage object -> its store-ready
+ * clone + exact JSON string. Per-flush cost during a stream drops from
+ * 3-4 FULL-ARRAY serialization passes (the old JSON.parse(JSON.stringify)
+ * + size-guard stringify + verify parse - the main-thread freeze behind
+ * "switching projects lags while an agent is thinking", 2026-11-06) to
+ * cloning ONE message: history objects are stable, so each is prepared
+ * exactly once per object identity. The LAST message is always prepared
+ * fresh - a streaming run rebuilds it per flush, and a stale cached clone
+ * would freeze the persisted tail.
+ */
+type PreparedEntry = { stored: unknown; json: string };
+const preparedCache = new WeakMap<object, PreparedEntry>();
+
+function prepareOne(m: UIMessage, cacheable: boolean): PreparedEntry | null {
+  const key = m as unknown as object;
+  if (cacheable && m != null && typeof m === "object") {
+    const hit = preparedCache.get(key);
+    if (hit) return hit;
+  }
   // Deep-clone via JSON round-trip to strip any non-serializable values
   // (undefined, BigInt, Symbol, functions, circular refs) that would
   // produce corrupted or unreadable store data.
-  let toStore: unknown[];
+  let stored: unknown;
   try {
-    toStore = JSON.parse(JSON.stringify(messages));
+    stored = JSON.parse(JSON.stringify(m));
   } catch (err) {
     console.error(
-      "[saveMessages] Messages contain non-serializable data — skipping persist:",
+      "[saveMessages] Message contains non-serializable data - skipping persist:",
       err,
     );
     return null;
   }
+  // Strip image data-URLs and bulky tool payloads to keep the store file
+  // compact. All three walk per-message parts, so a 1-element array works.
+  const single = [stored];
+  stripInlineImagesInPlace(single);
+  elideBulkyToolInputsInPlace(single);
+  elideScreenCaptureOutputsInPlace(single);
+  let json: string;
+  try {
+    json = JSON.stringify(stored);
+  } catch (err) {
+    console.error(
+      "[saveMessages] Message failed to stringify - skipping persist:",
+      err,
+    );
+    return null;
+  }
+  const entry: PreparedEntry = { stored, json };
+  if (cacheable && m != null && typeof m === "object") preparedCache.set(key, entry);
+  return entry;
+}
 
-  // Strip image data-URLs and bulky tool payloads to keep the store file compact.
-  stripInlineImagesInPlace(toStore);
-  elideBulkyToolInputsInPlace(toStore);
-  elideScreenCaptureOutputsInPlace(toStore);
+/** TEST SEAM (behavioral coverage in sessions.test.ts): the per-message
+ *  prepare cache is the switch-lag fix - it must prepare identical output
+ *  to a full JSON round-trip while touching each historical message once. */
+export function __prepareMessagesForStore(
+  messages: UIMessage[],
+): unknown[] | null {
+  return prepareMessagesForStore(messages);
+}
 
-  // Guard against unbounded growth — if the serialized JSON exceeds
+function prepareMessagesForStore(messages: UIMessage[]): unknown[] | null {
+  const entries: PreparedEntry[] = [];
+  const last = messages.length - 1;
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i]!;
+    const entry = prepareOne(m, i !== last);
+    if (!entry) return null;
+    entries.push(entry);
+  }
+
+  // Guard against unbounded growth - if the serialized JSON exceeds
   // MAX_MESSAGES_JSON_BYTES, trim to the most recent messages. Without
   // this, a single session can balloon the store file to multiple MB
-  // and cause the same freeze on the next launch.
-  let json = JSON.stringify(toStore);
-  if (json.length > MAX_MESSAGES_JSON_BYTES) {
+  // and cause the same freeze on the next launch. The array JSON is
+  // assembled from cached per-message strings - exact, no re-stringify.
+  const jsonLen = (n: number) => {
+    let sum = n + 1; // '[' + ']' + (n-1) commas
+    for (let i = entries.length - n; i < entries.length; i++) {
+      sum += entries[i]!.json.length;
+    }
+    return sum;
+  };
+  let out: unknown[] = entries.map((e) => e.stored);
+  if (jsonLen(entries.length) > MAX_MESSAGES_JSON_BYTES) {
     // Keep the most recent messages that fit under the cap.
     let lo = 0;
-    let hi = toStore.length;
+    let hi = entries.length;
     while (lo < hi) {
       const mid = Math.ceil((lo + hi) / 2);
-      const slice = toStore.slice(-mid);
-      if (JSON.stringify(slice).length <= MAX_MESSAGES_JSON_BYTES) {
+      if (jsonLen(mid) <= MAX_MESSAGES_JSON_BYTES) {
         lo = mid;
       } else {
         hi = mid - 1;
       }
     }
-    toStore = toStore.slice(-lo || -1);
-    json = JSON.stringify(toStore);
+    out = out.slice(-lo || -1);
   }
-
-  // Verify the JSON round-trips before persisting. If it fails, the data
-  // is fundamentally unserializable — don't write it.
-  try {
-    JSON.parse(json);
-  } catch (err) {
-    console.error(
-      "[saveMessages] Produced invalid JSON — skipping persist:",
-      err,
-    );
-    return null;
-  }
-  return toStore;
+  return out;
 }
 
 /** Write a prepared message blob into the store file at `path`. Uses the
