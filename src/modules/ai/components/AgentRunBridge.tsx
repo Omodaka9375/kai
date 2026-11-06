@@ -1019,7 +1019,12 @@ function Bridge({
         // while auto-approve still completes within milliseconds.
         setTimeout(() => {
           // Latch-checked at fire time: a Deny that arrived after this was
-          // scheduled must win over session-level auto-approve.
+          // scheduled must win over session-level auto-approve. The MODE is
+          // re-checked too (2026-11-06 "toggle loses all power" report):
+          // switching Allow → Ask mid-step must also cancel every scheduled
+          // approval for calls not yet approved — the timer fires a
+          // macrotask after schedule, and a multi-tool step queued several.
+          if (getSessionAutoApprove(sessionId) !== "all") return;
           respond(id, true);
           // Mark the store only after the deferred response fired: marking
           // at schedule time grew autoApprovedIds with ids whose cards were

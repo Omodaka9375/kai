@@ -17,7 +17,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import type { ToolUIPart } from "ai";
 import { memo, useCallback, useState } from "react";
 import { useChatStore } from "../store/chatStore";
-import { abortSession, getSessionAutoApprove } from "../store/chatStore";
+import { abortSession, getSessionAutoApprove, getSessionAutoApproveVersion } from "../store/chatStore";
 import { setEditedToolInput } from "../lib/toolInputOverrides";
 import { predictAutoApproval } from "../lib/autoApprovePrediction";
 import { usePreferencesStore } from "@/modules/settings/preferences";
@@ -389,9 +389,21 @@ export const AiToolApproval = memo(AiToolApprovalImpl, (a, b) => {
   // onRespond: the closure captures the stable approval.id and streaming
   // re-renders cause rapid function-identity churn that makes earlier
   // approval cards unresponsive to clicks.
+  //
+  // AUTO-APPROVE MODE IS A COMPARATOR INPUT (2026-11-06 "toggle loses all
+  // power" report): a card that rendered as the flat auto-approved row
+  // under Allow used to stay memo-frozen when the user switched to Ask —
+  // the card kept showing "auto-approved" with no buttons, so the toggle
+  // looked dead and the pending call could never be answered manually.
+  // The mode is read from the version counter (bumped on every toggle),
+  // NOT the presentation-only store field — same source the bridge gates
+  // on, so card and behavior can't diverge.
+  const modeVersionA = getSessionAutoApproveVersion();
+  const modeVersionB = getSessionAutoApproveVersion();
   return (
     a.toolName === b.toolName &&
     a.part.approval.id === b.part.approval.id &&
+    modeVersionA === modeVersionB &&
     a.queue?.queued === b.queue?.queued &&
     a.queue?.position === b.queue?.position &&
     a.queue?.total === b.queue?.total
