@@ -1310,12 +1310,14 @@ const RenderedTool = memo(function RenderedTool({
   }
 
   // Render generated images/videos inline instead of as collapsed tool
-  // output. display_video carries the same media-output shape on success
-  // (2026-11-06: videos displayed in chat like images).
+  // output. display_video and display_image carry the same media-output
+  // shape on success (2026-11-06: media tools surface in chat like
+  // generated media, terminal decoration is the optional second surface).
   if (
     (toolName === "generate_image" ||
       toolName === "generate_video" ||
-      toolName === "display_video") &&
+      toolName === "display_video" ||
+      toolName === "display_image") &&
     "output" in part &&
     isMediaOutput(part.output)
   ) {

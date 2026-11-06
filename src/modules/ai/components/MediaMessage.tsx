@@ -131,8 +131,14 @@ export const MediaMessage = memo(function MediaMessage({ output }: Props) {
           <span className="flex-1 truncate text-[10.5px] text-muted-foreground">
             {providerLabel}
             {output.type === "image"
-              ? ` · ${output.width}×${output.height}`
-              : ` · ${output.durationSeconds}s`}
+              ? // display_image cards carry no known dimensions (0x0) -
+                // omit the suffix rather than showing a bogus "0x0".
+                output.width > 0 && output.height > 0
+                ? ` · ${output.width}×${output.height}`
+                : ""
+              : output.durationSeconds > 0
+                ? ` · ${output.durationSeconds}s`
+                : ""}
           </span>
           <button
             type="button"

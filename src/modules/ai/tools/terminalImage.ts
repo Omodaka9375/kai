@@ -14,6 +14,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 import type { ToolContext } from "./context";
+import { sniffImageMime } from "../extraction";
 
 /**
  * Parse an OSC 1337 inline image sequence.
@@ -47,7 +48,8 @@ export function buildTerminalImageTools(ctx: ToolContext) {
     display_image: tool({
       needsApproval: false,
       description:
-        "Display an image inline in the active terminal using the iTerm2 inline image protocol. Pass base64-encoded image data (without the data: URL prefix). The image renders at the current terminal cursor position. Use this to show plots, diagrams, screenshots, or AI-generated images directly in the terminal.",
+        "Display an image to the user: inline in the CHAT as an image card, and — when a terminal tab is active — also at the terminal cursor via the iTerm2 inline image protocol. " +
+        "Pass base64-encoded image data (without the data: URL prefix). Use this to show plots, diagrams, screenshots, or AI-generated images.",
       inputSchema: z.object({
         base64_data: z
           .string()
@@ -71,18 +73,42 @@ export function buildTerminalImageTools(ctx: ToolContext) {
           return { error: "base64_data must contain only base64 characters" };
         }
         const sizeBytes = Math.ceil((base64_data.length * 3) / 4);
+
+        // CHAT CARD (2026-11-06, same surface-independence fix as display_
+        // video): the base64 is already in hand, so the chat always gets
+        // the image — no terminal, no error. MediaMessage's image card
+        // accepts { type: "image", base64, mimeType, ... }; dimensions are
+        // unknown server-side, the card does not need them to render.
+        // Persisted copies elide the input base64 (elideBulkyToolInputs)
+        // and the compact stripper drops the output copy on later turns,
+        // so this adds no dead context weight.
+        const card = {
+          type: "image" as const,
+          base64: base64_data,
+          mimeType: sniffImageMime(base64_data),
+          url: "",
+          width: 0,
+          height: 0,
+          provider: "display",
+          prompt: imgName,
+        };
+
+        // Terminal decoration — best-effort second surface, never a gate.
+        let terminalDisplayed = false;
         const seq = buildOsc1337(base64_data, imgName, sizeBytes);
         // DISPLAY write, not shell stdin: the OSC 1337 sequence must reach the
         // xterm parser (which renders it as an inline decoration), never the
         // shell's input stream — typing megabytes of base64 into a live prompt
         // would execute garbage or wedge the shell.
-        const ok = ctx.writeToActiveTerminalDisplay
+        terminalDisplayed = ctx.writeToActiveTerminalDisplay
           ? ctx.writeToActiveTerminalDisplay(seq)
-          : ctx.injectIntoActivePty(seq); // legacy contexts (tests) fallback
-        if (!ok) return { error: "no active terminal tab to display into" };
+          : ctx.injectIntoActivePty?.(seq) ?? false; // legacy contexts (tests) fallback
         return {
           ok: true,
-          displayed_in: "active terminal",
+          ...card,
+          displayed_in: terminalDisplayed
+            ? "chat image card + active terminal"
+            : "chat image card",
           size_bytes: sizeBytes,
         };
       },
