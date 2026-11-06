@@ -41,8 +41,12 @@ describe("timeout result is actionable for the agent", () => {
     expect(src).toContain("if (r.timed_out) {");
     // The hint names both escape routes and the actual budget.
     expect(src).toMatch(/hint: `Command exceeded the \$\{effectiveTimeout\}s timeout/);
-    expect(src).toContain("re-spawn it via bash_background and poll bash_logs");
+    expect(src).toContain("bash_background");
     expect(src).toContain("larger timeout_secs (max 1000)");
+    // 2026-11-06: the hint also FORBIDS the identical-retry failure mode
+    // (agents re-running the same over-budget command until it times out
+    // again) and names the split option for chained one-liners.
+    expect(src).toContain("Do NOT re-run the same command unchanged");
     // Non-timeout path must stay a clean result WITHOUT the hint field.
     const nonTimeout = src.split("if (r.timed_out) {")[1] ?? "";
     expect(nonTimeout).toContain("timed_out: false");

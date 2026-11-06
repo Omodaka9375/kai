@@ -157,6 +157,43 @@ function slowCommandTimeout(cmd: string): number | undefined {
   return undefined;
 }
 
+/**
+ * MEGA-CHAIN DETECTION (2026-11-06 report): agents combine
+ * install + build + test into ONE command (`pnpm install; pnpm build;
+ * pnpm test`). One chain = the SUM of all stages' timeouts (120+600+300 =
+ * up to 20 minutes) of an un-stoppable foreground run; a timeout kills the
+ * whole thing with only partial output, and the agent's retry habit is to
+ * re-run the SAME combined command. Each stage belongs in its OWN
+ * bash_run call: separate timeouts, separate outputs, and a failure in
+ * stage 1 stops the chain before stages 2-3 burn time.
+ */
+export function megaChainHint(command: string): string | null {
+  const chain = /(?:;|&&|\|\||\|)\s*/;
+  // Split on shell separators (rough - good enough for detection; strings
+  // containing separators are the false-positive risk we accept).
+  const segments = command.split(chain).map((s) => s.trim().toLowerCase()).filter(Boolean);
+  if (segments.length < 2) return null;
+  const isInstall = (s: string) => /\b(npm|pnpm|yarn|bun)\s+(add|install|i|ci|update|upgrade)\b/.test(s) || /\b(pip|pip3)\s+install\b/.test(s);
+  const isBuild = (s: string) => /\b(npm|pnpm|yarn|bun)\s+(run\s+)?build\b/.test(s) || /\b(cargo\s+build|tsc)\b/.test(s);
+  const isTest = (s: string) => /\b(npm|pnpm|yarn|bun)\s+(run\s+)?(test|lint|typecheck|check)\b/.test(s) || /^(?:\s*)(?:npx\s+)?(vitest|jest|pytest)\b/.test(s) || /\bcargo\s+test\b/.test(s);
+  const kinds = new Set<string>();
+  for (const s of segments) {
+    // ONE kind per segment, first match wins: `pnpm add vitest` is an
+    // INSTALL (the vitest token is a package name, not a test invocation).
+    // isInstall is checked FIRST precisely because installs may name
+    // build/test packages in their args.
+    if (isInstall(s)) kinds.add("install");
+    else if (isBuild(s)) kinds.add("build");
+    else if (isTest(s)) kinds.add("test");
+  }
+  if (kinds.size < 2) return null;
+  return (
+    "This command chains multiple slow stages (" +
+    [...kinds].join(" + ") +
+    ") into ONE run. That multiplies the timeout (each stage gets the chain's FULL budget), a failure in a later stage loses everything before it, and the user cannot stop a 20-minute mega-run except by killing it. Split into SEPARATE bash_run calls - one stage per call (install first, then build, then test) - so each gets its own timeout and output, and a stage-1 failure stops the chain."
+  );
+}
+
 /** Detect commands that are long-running dev servers / watchers. */
 function isDevServerCommand(cmd: string): boolean {
   // Package manager foreground commands are not servers — never block them.
@@ -240,7 +277,7 @@ export function buildShellTools(ctx: ToolContext) {
   return {
     bash_run: tool({
       description:
-        "Run a short-lived foreground command (build, test, install, git) in this session's persistent agent shell; cwd persists across calls. For dev servers/watchers use `bash_background`; NEVER run interactive tools (vim, less, top) — they hang. Asks approval. On Windows the shell is PowerShell, NOT bash: do NOT reach for it to search or edit files — use the `grep`/`glob` tools instead of Select-String/findstr, and edit/batch_edit instead of Get-Content `-replace`/Set-Content pipelines. Keep each command to ONE responsibility (do not chain long `;`/`&&` pipelines that mix search+transform+write — split them, or better use the dedicated tools). PowerShell quoting, most reliable first: single-quoted strings keep everything literal (use them for paths and text with $ or quotes; a literal single quote is written as two single quotes); for text with many quotes or newlines (JSON, file content) use a single-quoted here-string (the closing '@ must start at the very beginning of its line) or write_file the payload and pass the path; inside double-quoted strings escape a quote with a backtick immediately before it, never backslash-quote. The approved command is parsed and executed verbatim, never silently rewritten. Set `elevated: true` only for genuine admin/root needs (OS privilege prompt + stronger confirmation).",
+        "Run a short-lived foreground command (build, test, install, git) in this session's persistent agent shell; cwd persists across calls. For dev servers/watchers use `bash_background`; NEVER run interactive tools (vim, less, top) — they hang. ONE COMMAND PER CALL: never chain install + build + test into a single `;`/`&&` one-liner - each stage is slow, the combined run eats the SUM of their timeouts (20+ min un-stoppable), and one timeout kills all progress. Run each stage as its own bash_run call so failures isolate and timeouts fit. Installs/builds/tests on a real codebase take minutes: pass an explicit timeout_secs when you know a stage is heavy (installs ~120s, builds ~600s, tests ~300s), or use bash_background for anything longer. If a command times out, do NOT re-run it unchanged - split it or raise the budget. Asks approval. On Windows the shell is PowerShell, NOT bash: do NOT reach for it to search or edit files - use the `grep`/`glob` tools instead of Select-String/findstr, and edit/batch_edit instead of Get-Content `-replace`/Set-Content pipelines. Keep each command to ONE responsibility (do not chain long `;`/`&&` pipelines that mix search+transform+write - split them, or better use the dedicated tools). PowerShell quoting, most reliable first: single-quoted strings keep everything literal (use them for paths and text with $ or quotes; a literal single quote is written as two single quotes); for text with many quotes or newlines (JSON, file content) use a single-quoted here-string (the closing '@ must start at the very beginning of its line) or write_file the payload and pass the path; inside double-quoted strings escape a quote with a backtick immediately before it, never backslash-quote. The approved command is parsed and executed verbatim, never silently rewritten. Set `elevated: true` only for genuine admin/root needs (OS privilege prompt + stronger confirmation).",
       inputSchema: z.object({
         command: z.string(),
         timeout_secs: z.number().min(1).max(1000).optional(),
@@ -268,6 +305,10 @@ export function buildShellTools(ctx: ToolContext) {
             error: `"${command}" is a long-running dev server. Use bash_background instead of bash_run for dev servers, watchers, and daemons. Then use bash_logs to read output and open_preview to show the page.`,
           };
         }
+        // MEGA-CHAIN GUARD (2026-11-06): install+build+test one-liners run
+        // 20+ minutes un-stoppable and timeout as a unit. Refuse and split.
+        const chainHint = megaChainHint(command);
+        if (chainHint) return { error: chainHint };
         // Block interactive scaffolding commands that prompt for input.
         const scaffoldHint = getInteractiveCommandHint(command);
         if (scaffoldHint) {
@@ -397,7 +438,7 @@ export function buildShellTools(ctx: ToolContext) {
               timed_out: true,
               truncated: outTruncated,
               cwd_after: r.cwd_after,
-              hint: `Command exceeded the ${effectiveTimeout}s timeout and was force-killed (partial output above). To finish the run: re-spawn it via bash_background and poll bash_logs — background processes are not subject to the foreground timeout. Or pass a larger timeout_secs (max 1000) when the command legitimately needs longer.`,
+              hint: `Command exceeded the ${effectiveTimeout}s timeout and was force-killed (partial output above). Do NOT re-run the same command unchanged - it will time out the same way. Instead: (1) if this is a chained one-liner, split it into separate bash_run calls, one stage each; (2) if the work legitimately needs longer, re-spawn it via bash_background (not subject to the foreground timeout) and poll bash_logs; (3) for a genuinely long foreground stage, pass a larger timeout_secs (max 1000) explicitly.`,
             };
           }
           return {
