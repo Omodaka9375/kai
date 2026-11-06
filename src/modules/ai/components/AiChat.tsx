@@ -1309,9 +1309,13 @@ const RenderedTool = memo(function RenderedTool({
     );
   }
 
-  // Render generated images/videos inline instead of as collapsed tool output.
+  // Render generated images/videos inline instead of as collapsed tool
+  // output. display_video carries the same media-output shape on success
+  // (2026-11-06: videos displayed in chat like images).
   if (
-    (toolName === "generate_image" || toolName === "generate_video") &&
+    (toolName === "generate_image" ||
+      toolName === "generate_video" ||
+      toolName === "display_video") &&
     "output" in part &&
     isMediaOutput(part.output)
   ) {

@@ -17,6 +17,23 @@ import { checkReadable, checkWritable } from "../lib/security";
  * the tool returns a readable notice instead of erroring the agent's turn.
  */
 
+/** Chat-playback cap. The bytes travel as number[] JSON over IPC
+ *  (fs_read_file_bytes) - the same transport cost the 8 MB remote-download
+ *  cap below is sized against. Above this the chat card is skipped and the
+ *  terminal poster frame remains the display. */
+const CHAT_VIDEO_CAP_BYTES = 8 * 1024 * 1024;
+
+/** Best-effort MIME from the extension - the <video> element only needs a
+ *  container hint to pick a decoder. */
+function videoMimeFor(path: string): string {
+  const lower = path.toLowerCase();
+  if (lower.endsWith(".webm")) return "video/webm";
+  if (lower.endsWith(".mov")) return "video/quicktime";
+  if (lower.endsWith(".mkv")) return "video/x-matroska";
+  if (lower.endsWith(".avi")) return "video/x-msvideo";
+  return "video/mp4";
+}
+
 /** Cached ffmpeg probe — spawning a process per call is not free. */
 let ffmpegAvailable: boolean | null = null;
 async function hasFfmpeg(): Promise<boolean> {
@@ -49,6 +66,8 @@ function shellQuote(s: string): string {
 
 /** Test seam — the gate itself, without building a command. */
 export const shellQuoteForTest = shellQuote;
+/** Test seam — the container→MIME hint used by the chat card. */
+export const videoMimeForTest = videoMimeFor;
 
 /**
  * Extract a poster frame (base64 PNG) from a local video file at `atSecs`.
@@ -103,10 +122,10 @@ export function buildTerminalVideoTools(ctx: ToolContext) {
   return {
     display_video: tool({
       description:
-        "Display a video in the active terminal as an inline poster frame (a single extracted frame, since terminals can't play video). " +
+        "Display a video to the user: an inline playable media card in the CHAT (like generate_video's), and — when a terminal tab is active — also an inline poster frame in the terminal (a single extracted frame, since terminals can't play video). " +
         "Pass `path` for a local file OR `url` for a remote video (HTTP(S) only — remote URLs are first downloaded to a temp file). " +
-        "Requires ffmpeg on PATH; without it the tool explains how to proceed instead of erroring. " +
-        "The full video remains viewable in the chat media card (generate_video) or at its path.",
+        "The chat card needs neither ffmpeg nor a terminal; the terminal poster frame additionally requires ffmpeg on PATH. " +
+        "The original file always remains at its path.",
       inputSchema: z.object({
         path: z
           .string()
@@ -136,13 +155,12 @@ export function buildTerminalVideoTools(ctx: ToolContext) {
         const display = ctx.writeToActiveTerminalDisplay ?? ctx.injectIntoActivePty;
         const write = (s: string) => display.call(ctx, s);
 
-        // 1. ffmpeg gate — fail-soft with an actionable notice.
-        if (!(await hasFfmpeg())) {
-          write("\x1b[33m[kai] display_video needs ffmpeg on PATH — install it to render video frames inline.\x1b[0m\r\n");
-          return {
-            ok: false,
-            note: "ffmpeg not found on PATH. Install ffmpeg, or read the video via read_file/ffprobe instead.",
-          };
+        // 1. ffmpeg gate — needed ONLY for the terminal poster frame. The
+        //    chat card (below) works without it; without ffmpeg we simply
+        //    skip the terminal decoration instead of failing the tool.
+        const ffmpeg = await hasFfmpeg();
+        if (!ffmpeg) {
+          write("\x1b[33m[kai] display_video: no ffmpeg on PATH — skipping the terminal poster frame; the video is in the chat card.\x1b[0m\r\n");
         }
 
         // The name/label is interpolated into an OSC 1337 sequence — same
@@ -205,28 +223,73 @@ export function buildTerminalVideoTools(ctx: ToolContext) {
           if (!name) label = url.split("/").pop()?.slice(0, 40) ?? "video";
         }
 
-        // 4. Extract the poster frame (base64 PNG via ffmpeg).
-        let b64: string;
-        try {
-          b64 = await extractPosterFrame(localPath, at_seconds ?? 0.5);
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
-          write(`\x1b[31m[kai] ffmpeg frame extraction failed: ${msg}\x1b[0m\r\n`);
-          return { error: `Frame extraction failed: ${msg}` };
+        // 4. Extract the poster frame (base64 PNG via ffmpeg). Terminal-only
+        //    decoration — a failure here must not kill the chat card below.
+        let terminalDisplayed = false;
+        if (ffmpeg) {
+          try {
+            const b64 = await extractPosterFrame(localPath, at_seconds ?? 0.5);
+            const seq = buildOsc1337(b64, label, Math.ceil((b64.length * 3) / 4));
+            const ok = write(seq);
+            if (ok) {
+              terminalDisplayed = true;
+              // Status line so it's clear this is a video poster, not a photo.
+              write(
+                `\x1b[2m[kai] ▶ ${label} — poster frame at ${at_seconds ?? 0.5}s; full video: ${url ?? path}\x1b[0m\r\n`,
+              );
+            }
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            write(`\x1b[31m[kai] ffmpeg frame extraction failed: ${msg}\x1b[0m\r\n`);
+          }
         }
 
-        // 5. Render through the same decoration pipeline as display_image.
-        const seq = buildOsc1337(b64, label, Math.ceil((b64.length * 3) / 4));
-        const ok = write(seq);
-        if (!ok) return { error: "no active terminal tab to display into" };
+        // 5. CHAT MEDIA CARD (2026-11-06: "Videos should be displayed in
+        //    chat as well as images" — the tool previously erroled with
+        //    "no active terminal tab to display into" when the user had no
+        //    terminal open, even though the chat already renders generate_
+        //    video output as a playable card). The bytes are read through
+        //    the fs module and wrapped in a blob URL — MediaMessage's
+        //    video card accepts { type: "video", base64, mimeType, ... }
+        //    shape; base64 rides the same IPC transport as every other
+        //    byte read. The CSP's media-src allows blob:.
+        let base64: string | undefined;
+        try {
+          const bytes = await native.readFileBytes(localPath);
+          if (bytes.length <= CHAT_VIDEO_CAP_BYTES) {
+            base64 = bytesToBase64(bytes);
+          }
+        } catch {
+          // Unreadable bytes: card is skipped; the terminal poster (if it
+          // rendered) plus the path note still tell the user where the
+          // video is.
+        }
 
-        // 6. Status line so it's clear this is a video poster, not a photo.
-        write(
-          `\x1b[2m[kai] ▶ ${label} — poster frame at ${at_seconds ?? 0.5}s; full video: ${url ?? path}\x1b[0m\r\n`,
-        );
+        if (!terminalDisplayed && !base64) {
+          return {
+            error:
+              "could not display the video in chat (no readable bytes under the 8MB card cap) and no terminal tab is active. Open a terminal tab and retry, or point the user at the file path directly.",
+          };
+        }
+
         return {
           ok: true,
-          displayed_in: "active terminal (poster frame)",
+          ...(base64
+            ? {
+                type: "video" as const,
+                provider: "file",
+                mimeType: videoMimeFor(localPath),
+                base64,
+                url: "",
+                durationSeconds: 0,
+                prompt: label,
+              }
+            : {}),
+          displayed_in: base64
+            ? terminalDisplayed
+              ? "chat media card + terminal poster frame"
+              : "chat media card"
+            : "active terminal (poster frame)",
           label,
           source: url ?? path,
         };
