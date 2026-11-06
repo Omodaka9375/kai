@@ -31,6 +31,16 @@ import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ACCEPTED_FILES, useComposer, type FileAttachment } from "./composer";
 import { quoteExcerpt } from "../lib/chatText";
+import {
+  addToUserDictionary,
+  replaceRange,
+  spellTargetAt,
+  type SpellTarget,
+} from "../lib/spellcheck";
+import {
+  getSpellUserWords,
+  setSpellUserWords,
+} from "@/modules/settings/store";
 import { modelTextOnly } from "../extraction";
 import { useWorkspaceFiles } from "../hooks/useWorkspaceFiles";
 import { usePreferencesStore } from "@/modules/settings/preferences";
@@ -653,6 +663,31 @@ export function AiInputBar() {
                 c.textareaRef.current.selectionEnd
               : false
           }
+          onSpellTarget={async () => {
+            const el = c.textareaRef.current;
+            if (!el) return null;
+            // Right-click moved the caret to the click point (Chromium
+            // textarea behavior - the same trick native spell menus rely
+            // on), so the word at selectionStart IS the word under the
+            // mouse. The dictionary chunk loads lazily on this first hit.
+            return spellTargetAt(el.value, el.selectionStart);
+          }}
+          onApplySpellFix={(replacement, start, end) => {
+            const el = c.textareaRef.current;
+            if (!el) return;
+            // Composer state is the source of truth: write through setValue
+            // so the textarea, chips, and submit all see the fixed text.
+            c.setValue(replaceRange(el.value, start, end, replacement));
+            el.focus();
+            // Restore the caret after the replacement (React re-renders
+            // with the new value; put it right after the fixed word).
+            requestAnimationFrame(() => {
+              el.setSelectionRange(start + replacement.length, start + replacement.length);
+            });
+          }}
+          onAddToDictionary={async (word) => {
+            await addToUserDictionary(word, setSpellUserWords, getSpellUserWords);
+          }}
           onDismiss={() => setCtxMenu(null)}
         />
       )}
@@ -740,15 +775,37 @@ function InputContextMenu({
   y,
   textareaRef,
   hasSelection: _hasSelection,
+  onSpellTarget,
+  onApplySpellFix,
+  onAddToDictionary,
   onDismiss,
 }: {
   x: number;
   y: number;
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   hasSelection: boolean;
+  /** Resolve the misspelled word at the right-clicked caret (async: the
+   *  bundled dictionary chunk loads lazily on first use). */
+  onSpellTarget: () => Promise<SpellTarget | null>;
+  onApplySpellFix: (replacement: string, start: number, end: number) => void;
+  onAddToDictionary: (word: string) => Promise<void>;
   onDismiss: () => void;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
+  // The spell target resolves ASYNC (lazy dictionary). The menu renders
+  // immediately; suggestions pop in when the chunk finishes loading.
+  const [spellTarget, setSpellTarget] = useState<SpellTarget | null | undefined>(undefined);
+
+  useEffect(() => {
+    let cancelled = false;
+    setSpellTarget(undefined);
+    void onSpellTarget().then((t) => {
+      if (!cancelled) setSpellTarget(t);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [onSpellTarget]);
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
@@ -766,10 +823,14 @@ function InputContextMenu({
     };
   }, [onDismiss]);
 
-  const w = 170;
-  const h = CTX_ITEMS.length * 28 + 12; // rough estimate for clamping
+  const w = 190;
+  const itemsH = CTX_ITEMS.length * 28 + 12; // rough estimate for clamping
+  const spellH =
+    spellTarget == null
+      ? 0
+      : (spellTarget.suggestions.length + 1) * 28 + 6; // + add-to-dict + separator
   const left = Math.max(4, Math.min(x, window.innerWidth - w - 4));
-  const top = Math.max(4, Math.min(y, window.innerHeight - h - 4));
+  const top = Math.max(4, Math.min(y, window.innerHeight - itemsH - spellH - 4));
 
   const el = textareaRef.current;
 
@@ -783,6 +844,60 @@ function InputContextMenu({
       style={{ top, left, width: w }}
       className="fixed z-50 flex flex-col gap-0.5 rounded-lg border border-border/70 bg-card/95 p-1 shadow-xl backdrop-blur-md"
     >
+      {/* Spell suggestions section (2026-11-06): the misspelled word at the
+          right-click, its top suggestions, and Add-to-dictionary. Code-like
+          tokens (paths, identifiers, #/@ triggers) never get here - the
+          guard lives in the spellcheck lib (isCodeLikeToken). */}
+      {spellTarget ? (
+        <div className="flex flex-col gap-0.5">
+          {spellTarget.suggestions.length === 0 ? (
+            <div className="px-2 py-1 text-[11px] text-muted-foreground">
+              No suggestions for <span className="font-semibold text-destructive">{spellTarget.word}</span>
+            </div>
+          ) : (
+            spellTarget.suggestions.map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onApplySpellFix(s, spellTarget.start, spellTarget.end);
+                  onDismiss();
+                }}
+                className="flex h-7 w-full cursor-pointer items-center rounded-md px-2 text-[11.5px] font-medium text-primary hover:bg-accent"
+              >
+                <HugeiconsIcon
+                  icon={TextSelectIcon}
+                  size={12}
+                  strokeWidth={1.8}
+                  className="mr-2 text-primary/70"
+                />
+                <span className="truncate">{s}</span>
+              </button>
+            ))
+          )}
+          <button
+            type="button"
+            onClick={async (e) => {
+              e.stopPropagation();
+              await onAddToDictionary(spellTarget.word);
+              onDismiss();
+            }}
+            className="flex h-7 w-full cursor-pointer items-center rounded-md px-2 text-[11.5px] text-muted-foreground hover:bg-accent"
+          >
+            <HugeiconsIcon
+              icon={Add01Icon}
+              size={12}
+              strokeWidth={1.8}
+              className="mr-2 text-muted-foreground"
+            />
+            <span className="truncate">
+              Add <span className="font-medium text-foreground">{spellTarget.word}</span> to dictionary
+            </span>
+          </button>
+          <div className="my-0.5 h-px bg-border/60" />
+        </div>
+      ) : null}
       {CTX_ITEMS.map((item) => {
         const disabled = el ? item.enabled?.(el) === false : true;
         return (

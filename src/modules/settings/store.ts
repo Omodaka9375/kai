@@ -171,6 +171,8 @@ const KEY_SIDEBAR_VIEW = "sidebarView";
 const KEY_UPDATER_LAST_CHECK = "updaterLastCheck";
 const KEY_RADIO_ENABLED = "radioEnabled";
 const KEY_RADIO_STATION = "radioStationId";
+/** User-accepted spell-check words (AI input "Add to dictionary"). */
+const KEY_SPELL_USER_WORDS = "spellUserWords";
 const KEY_VOICE_STT_MODE = "voiceSttMode";
 const KEY_VOICE_STT_MODEL = "voiceSttModel";
 const KEY_VOICE_STT_API_MODEL = "voiceSttApiModel";
@@ -457,6 +459,20 @@ export async function setRadioEnabled(value: boolean): Promise<void> {
 
 export async function setRadioStationId(value: string): Promise<void> {
   await writePref(KEY_RADIO_STATION, value ?? "");
+}
+
+/** Load the user's personal spell-check dictionary (accepted words). */
+export async function getSpellUserWords(): Promise<string[]> {
+  try {
+    return (await store.get<string[]>(KEY_SPELL_USER_WORDS)) ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/** Persist the user's personal spell-check dictionary. */
+export async function setSpellUserWords(words: string[]): Promise<void> {
+  await writePref(KEY_SPELL_USER_WORDS, words);
 }
 
 export async function setVoiceSttMode(value: Preferences["voiceSttMode"]): Promise<void> {
