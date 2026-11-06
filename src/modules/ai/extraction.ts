@@ -236,6 +236,75 @@ export function sniffImageMime(base64: string): string {
   return "image/png";
 }
 
+/**
+ * Media types every vision-capable provider accepts for base64 image parts
+ * (Anthropic: png/jpeg/webp/gif ONLY - anything else 400s the whole request;
+ * OpenAI/Google accept the same set). This is the allowlist gate for the
+ * model-bound path: an unsupported type (avif, heic, bmp, tiff, ...) must
+ * never reach a provider, because the part PERSISTS into the session
+ * history and one such attachment bricks every later request on replay
+ * (2026-11-06 report: an AVIF upload via the + button broke the whole
+ * conversation; re-uploading a good file did not help because the poison
+ * part kept replaying).
+ */
+export const PROVIDER_IMAGE_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+]);
+
+/** True when a media type is a provider-safe IMAGE payload. */
+export function isProviderImageType(mediaType: string | null | undefined): boolean {
+  if (!mediaType) return false;
+  return PROVIDER_IMAGE_TYPES.has(mediaType);
+}
+
+/**
+ * Decode ANY image the browser can read and re-encode as a provider-safe
+ * PNG/JPEG data-URL. This is the ATTACH-INTIME transcode for exotic image
+ * formats (avif/heic/bmp/tiff...): the browser's codec does the conversion,
+ * so a 1x1 AVIF never reaches a provider to 400 the request. Never throws:
+ * a transcode failure returns null and the caller falls back to the text
+ * ("could not be displayed as an image") path instead of attaching poison.
+ *
+ * Downscale cap: providers token-count the long edge (~1568px for Claude);
+ * a 12MP phone AVIF would become an enormous PNG. Cap at 1568 before the
+ * encode, mirroring the assistant's photo pipeline.
+ */
+export async function transcodeToProviderImage(
+  dataUrl: string,
+  maxLongEdge = 1568,
+): Promise<string | null> {
+  try {
+    if (typeof createImageBitmap !== "function") return null;
+    const res = await fetch(dataUrl);
+    const blob = await res.blob();
+    const bmp = await createImageBitmap(blob);
+    try {
+      const long = Math.max(bmp.width, bmp.height);
+      const scale = long > maxLongEdge ? maxLongEdge / long : 1;
+      const w = Math.max(1, Math.round(bmp.width * scale));
+      const h = Math.max(1, Math.round(bmp.height * scale));
+      const canvas = new OffscreenCanvas(w, h);
+      const g = canvas.getContext("2d");
+      if (!g) return null;
+      g.drawImage(bmp, 0, 0, w, h);
+      const out = await canvas.convertToBlob({ type: "image/png" });
+      const buf = new Uint8Array(await out.arrayBuffer());
+      let binary = "";
+      for (let i = 0; i < buf.length; i += 8192) {
+        binary += String.fromCharCode(...buf.subarray(i, i + 8192));
+      }
+      return `data:image/png;base64,${btoa(binary)}`;
+    } finally {
+      bmp.close?.();
+    }
+  } catch {
+    return null;
+  }
+}
+
 async function cachedImageText(base64: string): Promise<string> {
   if (imageTextCache.has(base64)) {
     return imageTextCache.get(base64) ?? attachmentFallbackText("image");

@@ -1,10 +1,31 @@
 import { describe, expect, it } from "vitest";
 import {
   hasInlineImageParts,
+  isProviderImageType,
   looksLikeVisionModel,
   modelTextOnly,
   swapImagePartsToText,
 } from "./extraction";
+
+describe("isProviderImageType (the poison-image gate)", () => {
+  it("accepts exactly the provider-supported image types", () => {
+    expect(isProviderImageType("image/png")).toBe(true);
+    expect(isProviderImageType("image/jpeg")).toBe(true);
+    expect(isProviderImageType("image/webp")).toBe(true);
+    expect(isProviderImageType("image/gif")).toBe(true);
+  });
+
+  it("rejects the exotic formats that brick sessions (the AVIF report)", () => {
+    expect(isProviderImageType("image/avif")).toBe(false);
+    expect(isProviderImageType("image/heic")).toBe(false);
+    expect(isProviderImageType("image/bmp")).toBe(false);
+    expect(isProviderImageType("image/tiff")).toBe(false);
+    expect(isProviderImageType("image/*")).toBe(false);
+    expect(isProviderImageType(null)).toBe(false);
+    expect(isProviderImageType("")).toBe(false);
+    expect(isProviderImageType("text/plain")).toBe(false);
+  });
+});
 
 describe("looksLikeVisionModel", () => {
   it.each([

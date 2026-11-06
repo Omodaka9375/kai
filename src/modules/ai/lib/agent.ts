@@ -32,6 +32,7 @@ import {
   modelCanSee,
   swapImagePartsToText,
   countInlineImageParts,
+  isProviderImageType,
 } from "../extraction";
 import type { ProviderKeys } from "./keyring";
 import { createProxyFetch } from "./proxyFetch";
@@ -512,6 +513,44 @@ function stripDataUrlPrefixes(messages: ModelMessage[]): ModelMessage[] {
 // renders the thumbnail.
 
 /**
+ * UNSUPPORTED-IMAGE SANITIZER (2026-11-06, from the AVIF report): strip
+ * image file parts whose media type no provider accepts (avif/heic/bmp/
+ * tiff...). Providers 400 the WHOLE request for such a part, and the part
+ * persists into the session - one exotic-format upload bricks every later
+ * request on replay (the re-upload of a good file could not recover the
+ * conversation). Runs on the MODEL-bound messages so already-poisoned
+ * persisted histories get scrubbed on every request; the UI transcript
+ * keeps its thumbnail. Runs regardless of vision capability: the text-only
+ * swap below would otherwise happily hand the part to the OCR extractor,
+ * which also cannot decode avif.
+ */
+function stripUnsupportedImageParts(messages: ModelMessage[]): ModelMessage[] {
+  let touched = false;
+  const out = messages.map((m) => {
+    if (!Array.isArray(m.content)) return m;
+    let msgTouched = false;
+    const content = (m.content as { type: string; mediaType?: unknown }[]).filter(
+      (part) => {
+        if (
+          part.type === "file" &&
+          typeof part.mediaType === "string" &&
+          part.mediaType.startsWith("image/") &&
+          !isProviderImageType(part.mediaType)
+        ) {
+          msgTouched = true;
+          return false;
+        }
+        return true;
+      },
+    );
+    if (!msgTouched) return m;
+    touched = true;
+    return { ...m, content } as ModelMessage;
+  });
+  return touched ? out : messages;
+}
+
+/**
  * Post-conversion sanitizer, three defenses:
  *  1. Fix non-object tool-call inputs (Anthropic rejects
  *     "Input should be an object" for null/undefined inputs).
@@ -631,11 +670,13 @@ export async function runAgentStream(opts: RunAgentOptions) {
     opts.stackInfo ?? null,
   ) + mcpBlock + fencePrompt + (canSee ? "" : `\n\n${NO_VISION_NOTICE}`);
 
-  const rawHistory = sanitizeModelMessages(
-    stripDataUrlPrefixes(
-      await convertToModelMessages(
-        stripModelInternalMeta(stripIncompleteToolCalls(opts.uiMessages)),
-        { ignoreIncompleteToolCalls: true },
+  const rawHistory = stripUnsupportedImageParts(
+    sanitizeModelMessages(
+      stripDataUrlPrefixes(
+        await convertToModelMessages(
+          stripModelInternalMeta(stripIncompleteToolCalls(opts.uiMessages)),
+          { ignoreIncompleteToolCalls: true },
+        ),
       ),
     ),
   );

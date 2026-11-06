@@ -23,6 +23,10 @@ import { expandSkillTokens, type Skill } from "../lib/skills";
 import { tryRunSlashCommand, type SlashCommandMeta } from "../lib/slashCommands";
 import { buildQuoteBlock } from "../lib/chatText";
 import {
+  isProviderImageType,
+  transcodeToProviderImage,
+} from "../extraction";
+import {
   mergeDraftTranscript,
   routeVoiceTranscript,
 } from "../lib/voiceTranscript";
@@ -633,13 +637,41 @@ export function AiComposerProvider({ children }: ProviderProps) {
 async function readAttachment(file: File): Promise<FileAttachment | null> {
   const id = `${file.name}-${file.size}-${file.lastModified}`;
   if (file.type.startsWith("image/")) {
-    const url = await readAsDataURL(file);
+    // PROVIDER GATE (2026-11-06, from the AVIF report): an image type the
+    // providers don't accept (avif/heic/bmp/tiff...) must NEVER ride into
+    // the session as an image part - the part PERSISTS and one such upload
+    // 400s every later request on replay, bricking the conversation (the
+    // re-upload of a good file could not recover it). Transcode to PNG via
+    // the browser codec; a failed transcode degrades to a text attachment
+    // instead of attaching poison.
+    const rawUrl = await readAsDataURL(file);
+    if (isProviderImageType(file.type)) {
+      return {
+        id,
+        name: file.name,
+        kind: "image",
+        mediaType: file.type,
+        url: rawUrl,
+        size: file.size,
+      };
+    }
+    const pngUrl = await transcodeToProviderImage(rawUrl);
+    if (pngUrl) {
+      return {
+        id,
+        name: file.name,
+        kind: "image",
+        mediaType: "image/png",
+        url: pngUrl,
+        size: file.size,
+      };
+    }
     return {
       id,
       name: file.name,
-      kind: "image",
-      mediaType: file.type || "image/png",
-      url,
+      kind: "text",
+      mediaType: "text/plain",
+      text: `[image attachment "${file.name}" (${file.type || "unknown type"}) could not be converted to a provider-supported format (png/jpeg/webp/gif) - the browser could not decode it. Ask the user to re-save it as png or jpg.]`,
       size: file.size,
     };
   }
