@@ -53,7 +53,7 @@ function StopSquare({
         onClick();
       }}
       className={cn(
-        "size-2 shrink-0 cursor-pointer rounded-[2px] animate-pulse transition-transform hover:scale-125 hover:animate-none",
+        "size-2 shrink-0 cursor-pointer rounded-full animate-pulse transition-transform hover:scale-125 hover:animate-none",
         allowMode
           ? "bg-emerald-500 shadow-[0_0_0_2px] shadow-emerald-500/20"
           : "bg-amber-500 shadow-[0_0_0_2px] shadow-amber-500/20",
