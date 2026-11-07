@@ -28,7 +28,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { IS_MAC } from "@/lib/platform";
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ACCEPTED_FILES, useComposer, type FileAttachment } from "./composer";
 import { quoteExcerpt } from "../lib/chatText";
 import {
@@ -824,13 +824,25 @@ function InputContextMenu({
   }, [onDismiss]);
 
   const w = 190;
-  const itemsH = CTX_ITEMS.length * 28 + 12; // rough estimate for clamping
-  const spellH =
-    spellTarget == null
-      ? 0
-      : (spellTarget.suggestions.length + 1) * 28 + 6; // + add-to-dict + separator
   const left = Math.max(4, Math.min(x, window.innerWidth - w - 4));
-  const top = Math.max(4, Math.min(y, window.innerHeight - itemsH - spellH - 4));
+  // UP-ONLY GROWTH (2026-11-07): the input bar lives at the window bottom,
+  // so anchoring the menu by its TOP edge at the click point made it grow
+  // DOWNWARD - with several suggestions it slid past the window edge behind
+  // the taskbar. Anchor by the BOTTOM edge instead: top = clickY - real
+  // menu height, so the menu opens upward from the click. The height is
+  // MEASURED from the DOM (the layout effect re-fires when the async
+  // suggestions pop in), not estimated - the old estimate clamp was exactly
+  // what let the menu overflow. setState inside useLayoutEffect re-renders
+  // synchronously BEFORE the first paint, so the corrected position never
+  // flashes on screen.
+  const [menuH, setMenuH] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const el = menuRef.current;
+    if (!el) return;
+    const h = el.offsetHeight;
+    setMenuH((prev) => (prev === h ? prev : h));
+  });
+  const top = menuH == null ? y : Math.max(4, y - menuH);
 
   const el = textareaRef.current;
 
