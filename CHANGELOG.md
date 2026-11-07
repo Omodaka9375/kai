@@ -4,6 +4,13 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [2.2.1]
+
+- Search tool: Enable Brave Search API if key is available as primary.
+- UI: Icon colors and cleanup.
+
+---
+
 ## [2.2.0]
 
 - Edit tool: local servers that alphabetize tool arguments can truncate the trailing path field on long edits.
