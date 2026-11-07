@@ -26,7 +26,16 @@ async function braveSearch(query: string): Promise<WebSearchResult[]> {
       method: "GET",
       headers: {
         "Accept": "application/json",
-        "Accept-Encoding": "gzip",
+        // NO Accept-Encoding here. The Rust proxy's reqwest is built WITHOUT
+        // the gzip/brotli/deflate features (see Cargo.toml), so it neither
+        // negotiates nor transparently decompresses anything. Advertising
+        // gzip manually made Brave respond with a gzip body that arrived as
+        // raw compressed bytes; JSON.parse then threw into the silent
+        // fall-through below and every search quietly used Bing instead
+        // (the 2026-11-07 live test: key valid, HTTP 200 via PowerShell
+        // without the header, engine still "bing" in KAI). Servers only
+        // compress when the client advertises support - omitting the
+        // header guarantees an identity-encoded (plain JSON) body.
         "X-Subscription-Token": key,
       },
       allowPrivateNetwork: false,
@@ -459,8 +468,13 @@ export function buildWebTools(_ctx: ToolContext) {
           try {
             const brave = await braveSearch(query);
             if (brave.length > 0) return { query, engine: "brave", results: brave };
-          } catch {
-            // fall through to Bing
+          } catch (e) {
+            // Fall through to Bing, but never SILENTLY: a Brave key that
+            // exists but fails (quota, bad header, proxy change) otherwise
+            // looks exactly like "no key configured" - the user thinks
+            // they have Brave when every query quietly used Bing (the
+            // 2026-11-07 gzip bug hid here for a full day).
+            console.warn("[web_search] Brave engine failed, falling back to Bing:", e);
           }
           // Primary legacy: Bing's RSS serializer (reliable, not
           // bot-walled). Empty results AND request/parser failures both

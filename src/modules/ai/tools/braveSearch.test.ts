@@ -44,9 +44,25 @@ describe("Brave search engine wiring (source pins)", () => {
     expect(braveCall).toBeLessThan(bingCall);
   });
 
-  it("a Brave failure falls through to the legacy engines, never errors the tool", () => {
-    // The Brave attempt is wrapped in its own try/catch that falls through.
-    expect(web).toContain("} catch {\n            // fall through to Bing\n          }");
+  it("a Brave failure falls through to the legacy engines - never silently", () => {
+    // The Brave attempt is wrapped in its own try/catch that falls through,
+    // BUT logs a warning: a key that exists yet fails (quota, bad header,
+    // proxy change) must not be indistinguishable from "no key" (the
+    // 2026-11-07 gzip bug hid in a bare catch for a full day).
+    expect(web).toContain("} catch (e) {");
+    expect(web).toContain("console.warn(\"[web_search] Brave engine failed, falling back to Bing:\"");
+  });
+
+  it("never sends Accept-Encoding to the proxy (reqwest has no gzip feature)", () => {
+    // 2026-11-07 bug pin: braveSearch used to send Accept-Encoding: gzip.
+    // The Rust proxy's reqwest is built WITHOUT gzip/brotli features, so
+    // the response arrived as raw compressed bytes, JSON.parse threw into
+    // the silent catch, and every search quietly fell to Bing while the
+    // user thought they had Brave. Servers only compress when the client
+    // advertises support - the header must stay absent.
+    expect(web).not.toContain('"Accept-Encoding": "gzip"');
+    // And the fix documents WHY in the source.
+    expect(web).toContain("NO Accept-Encoding here");
   });
 
   it("Brave requests ride the SSRF-hardened proxy with the LAN-only policy", () => {
