@@ -6,10 +6,10 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ## [2.2.2]
 
-- Shell: interrupting a hung command no longer leaves the run yellow forever with every later command stalling - the interrupt path now always returns even if a straggler process keeps the command's pipe open.
-- Models: switching projects no longer lets the first project's model override the target project's - the model catalog sync stopped stamping the outgoing selection onto the incoming project.
-- Mini window: renaming a session is no longer aborted by mouse movement and typing works properly mid-rename; the session picker now opens wider toward the left instead of clipping on the right.
-- Installer: Windows releases no longer ship an MSI (NSIS setup only), so no more admin prompts from a half-installed machine-wide MSI alongside the normal per-user install.
+- Shell: interrupting a hung command no longer leaves the command stalling.
+- Models: fix model override the target project's model.
+- Mini window: renaming a session is no longer aborted by mouse movement and typing works properly mid-rename.
+- Installer: Windows releases no longer ship an MSI (NSIS setup only).
 
 ---
 
