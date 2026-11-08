@@ -139,10 +139,15 @@ fn run_child_with_timeout(
         thread::sleep(Duration::from_millis(50));
     };
 
+    // `super::` paths, not imports: this function is #[cfg(unix)]-only, so a
+    // top-level `use super::{recv_drain_with_deadline, DRAIN_GRACE_AFTER_KILL}`
+    // would be an unused import on Windows (and name resolution inside cfg'd
+    // out code is never checked locally on a Windows dev box - the exact
+    // blind spot that broke the Linux CI build in v2.2.2's first attempt).
     let (stdout_bytes, stdout_truncated) =
-        recv_drain_with_deadline(stdout_rx, DRAIN_GRACE_AFTER_KILL);
+        super::recv_drain_with_deadline(stdout_rx, super::DRAIN_GRACE_AFTER_KILL);
     let (stderr_bytes, stderr_truncated) =
-        recv_drain_with_deadline(stderr_rx, DRAIN_GRACE_AFTER_KILL);
+        super::recv_drain_with_deadline(stderr_rx, super::DRAIN_GRACE_AFTER_KILL);
 
     Ok(CommandOutput {
         stdout: String::from_utf8_lossy(&stdout_bytes).into_owned(),
