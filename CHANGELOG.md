@@ -9,7 +9,6 @@ All notable changes to the KAI terminal emulator project are documented in this 
 - Shell: interrupting a hung command no longer leaves the command stalling.
 - Models: fix model override the target project's model.
 - Mini window: renaming a session is no longer aborted by mouse movement and typing works properly mid-rename.
-- Installer: Windows releases no longer ship an MSI (NSIS setup only).
 
 ---
 
