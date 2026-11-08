@@ -6,10 +6,10 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ## [2.2.3]
 
-- Agents: a watch firing while you are on another project no longer sends the agent to the wrong folder - background and wake turns now resolve their working directory from the session's own project, never the currently visible one.
-- Agents: workspace routing for background sessions (local vs WSL) is anchored to the session's own environment as well, so commands execute in the right place even when the session starts before its project finishes registering.
-- Release: the release pipeline now verifies the updater manifest shape - the Windows update artifact must be the NSIS setup, the manifest version must match the tag, and the MSI key must be present - so a manifest regression fails the build instead of reaching users.
-- Release: running the release workflow outside a version tag now fails fast with a clear error instead of creating a draft release named after the branch.
+- Agents: a watch firing wake turns now resolve their working directory from session project.
+- Agents: workspace routing is anchored to the session's own environment.
+- Release: the release pipeline now verifies the updater manifest shape.
+- Release: running the release workflow outside a version tag is now caught.
 
 ---
 
