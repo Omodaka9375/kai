@@ -663,7 +663,12 @@ function SessionPicker() {
           />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="max-h-[60vh] min-w-56 max-w-72 overflow-y-auto">
+      {/* align="end": the trigger sits at the header's RIGHT edge, so the
+          menu must grow LEFTWARD into the window - the old align="start"
+          anchored its left edge at the trigger and clipped against the
+          window's right side. Wider caps: long titles + timestamps need
+          more room than 288px. */}
+      <DropdownMenuContent align="end" className="max-h-[60vh] min-w-64 max-w-80 overflow-y-auto">
         <DropdownMenuItem
           onSelect={() => newSession()}
           className="gap-2 text-xs"
@@ -716,6 +721,8 @@ function SessionRow({
     }
     setEditing(false);
   };
+  const commitRef = useRef(commit);
+  commitRef.current = commit;
 
   useEffect(() => {
     if (editing) {
@@ -724,6 +731,29 @@ function SessionRow({
       inputRef.current?.select();
     }
   }, [editing, session.title]);
+
+  // COMMIT-ON-REAL-AWAY (2026-11-08 report: "rename a session, move the
+  // mouse, it ends instantly, can't type"): the input lives inside a Radix
+  // DropdownMenuItem, and Radix menu items GRAB DOM FOCUS ON POINTER MOVE
+  // (hover-highlight = focus in menus). That blur fired the old
+  // onBlur={commit} and instantly ended the rename; the menu's typeahead
+  // also swallowed letter keys. Two layers fix it: (1) a capture-phase
+  // pointerdown listener commits ONLY when the user actually presses down
+  // outside the input (the real "done editing" intent - clicking another
+  // row, outside the menu, etc.); (2) onBlur from anything else is treated
+  // as a focus steal - focus is reclaimed, never committed. The input's
+  // onKeyDown stopPropagation keeps keystrokes (and Escape) out of the
+  // menu's typeahead/dismiss handlers, so typing just types.
+  useEffect(() => {
+    if (!editing) return;
+    const onDown = (e: PointerEvent) => {
+      if (!inputRef.current?.contains(e.target as Node)) {
+        commitRef.current();
+      }
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  }, [editing]);
 
   return (
     <DropdownMenuItem
@@ -751,13 +781,32 @@ function SessionRow({
           ref={inputRef}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          onBlur={commit}
+          onBlur={(e) => {
+            // Never commit on blur: Radix steals focus to the hovered item
+            // on every pointer move (see the pointerdown effect above).
+            // Real commit paths: Enter, pointerdown elsewhere, or a blur
+            // to a target OUTSIDE the menu (rare - keyboard tab-out).
+            const to = e.relatedTarget as HTMLElement | null;
+            if (
+              to &&
+              !to.closest?.("[role='menu'], [data-radix-popper-content-wrapper]")
+            ) {
+              commitRef.current();
+              return;
+            }
+            inputRef.current?.focus();
+          }}
           onKeyDown={(e) => {
+            // Keep keys out of the menu: stopPropagation prevents Radix's
+            // typeahead from hijacking typed letters and Escape from
+            // closing the whole picker mid-edit.
+            e.stopPropagation();
             if (e.key === "Enter") {
               e.preventDefault();
               commit();
             }
             if (e.key === "Escape") {
+              e.preventDefault();
               setEditing(false);
             }
           }}
