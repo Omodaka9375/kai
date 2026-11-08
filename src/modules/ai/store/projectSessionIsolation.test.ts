@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
 import {
   getApprovalResponder,
   getSessionSteeringMessage,
@@ -28,5 +29,36 @@ describe("session-scoped approvals and steering", () => {
     expect(getSessionSteeringMessage("project-b-chat")).toBeNull();
     setSessionSteeringMessage("project-a-chat", null);
     expect(getSessionSteeringMessage("project-a-chat")).toBeNull();
+  });
+});
+
+// 2026-11-08 report: "agent from one project ended up in another folder
+// after a watch fired while I was on a different project and then switched."
+// makeChatSync resolved the owning project ONCE at chat construction and fell
+// back to the globally-active live handle when resolution failed - so a wake
+// turn (watch fire, LRU re-creation) for a backgrounded session resolved
+// ctx.getCwd() to whichever project the USER was viewing, and the agent
+// worked in the wrong folder. makeChatSync is not unit-constructible here
+// (it pulls the full agent runtime), so the contract is pinned at source
+// level like the other drift gates.
+describe("wake-turn cwd isolation (source pins)", () => {
+  const src = readFileSync(new URL("./chatStore.ts", import.meta.url), "utf8");
+
+  it("re-resolves the owning project per call instead of freezing it at chat creation", () => {
+    expect(src).toContain("const liveFor");
+    expect(src).toContain("projectLive.get(findProject()?.id ?? \"\")");
+  });
+
+  it("anchors unresolved sessions to their own root, never the visible project", () => {
+    expect(src).toContain("coarse but CORRECT folder");
+    expect(src).toContain("getCwd: () => sessionRoot");
+    // The old global-live fallback for a failed resolution must not return.
+    expect(src).not.toContain('projectLive.get(project?.id ?? "")');
+  });
+
+  it("anchors env/native routing for unresolved sessions to the session's own env", () => {
+    expect(src).toContain("createProjectRuntime(sessionRoot, session?.workspaceEnv)");
+    // deps.projectRuntime must be the anchored runtime, not the raw match.
+    expect(src).toContain("projectRuntime: runtime");
   });
 });

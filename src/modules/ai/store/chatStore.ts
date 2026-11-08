@@ -19,7 +19,7 @@ import { setProjectAgentStatus } from "./projectStatus";
 // before groupChatStore in the app's eval order — pulling the barrel here made
 // groupChatStore evaluate mid-chatStore, whose top-level setChatPinner(...)
 // then hit this module's `let chatPinner` TDZ and crashed the whole boot.
-import { projectIdFor } from "@/modules/workspace/projectRuntime";
+import { createProjectRuntime, projectIdFor } from "@/modules/workspace/projectRuntime";
 import { useTodosStore } from "./todoStore";
 import {
   getSessionPreferences,
@@ -948,28 +948,65 @@ function makeChatSync(sessionId: string): Chat<UIMessage> {
   const sessionRoot = session?.workspaceRoot;
   // A session belongs to its recorded project, not whichever workspace is
   // currently visible (watch/LRU recreation can happen in the background).
-  const project = sessionRoot
-    ? [...projectRuntimes.values()].find((candidate) =>
-      normalizeWorkspacePath(candidate.root) === normalizeWorkspacePath(sessionRoot) &&
-      (candidate.env.kind === (session?.workspaceEnv?.kind ?? "local")) &&
-      (candidate.env.kind !== "wsl" || session?.workspaceEnv?.kind === "wsl" && candidate.env.distro === session.workspaceEnv.distro))
-    : activeProjectRuntime;
-  const fallback = (projectLive.get(project?.id ?? "") ?? runtimeDeps.live) as unknown as Live;
+  // Resolution is re-run PER CALL (liveFor below), not frozen at creation:
+  // chats are constructed lazily (watch wakes, LRU re-creation) and can be
+  // built before the owning workspace registers its projectLive handle — a
+  // creation-time freeze then permanently pointed the agent at the GLOBALLY
+  // ACTIVE project's cwd, so a watch wake for project A while the user was
+  // viewing project B made the agent work in B's folder (2026-11-08 report:
+  // "agent from one project ended up in another folder after a watch fired").
+  const findProject = () =>
+    sessionRoot
+      ? [...projectRuntimes.values()].find((candidate) =>
+        normalizeWorkspacePath(candidate.root) === normalizeWorkspacePath(sessionRoot) &&
+        (candidate.env.kind === (session?.workspaceEnv?.kind ?? "local")) &&
+        (candidate.env.kind !== "wsl" || session?.workspaceEnv?.kind === "wsl" && candidate.env.distro === session.workspaceEnv.distro))
+      : undefined;
+  const project = sessionRoot ? findProject() : activeProjectRuntime;
+  // ENV HARDENING (residual from the same 2026-11-08 report): deps.projectRuntime
+  // also feeds toolContext.workspaceEnv / native / projectId, which are frozen
+  // at chat construction. An unresolved session used to run with an undefined
+  // env — local client routing even for WSL sessions, and an unscoped shell
+  // key. Anchor to the session's own recorded env instead: canonical id/root
+  // plus a native client bound to that env, so background turns route
+  // correctly even before the real runtime registers.
+  const runtime = project ?? (sessionRoot ? createProjectRuntime(sessionRoot, session?.workspaceEnv) : undefined);
+  // Last-resort anchor for a session whose project is not (yet) resolvable:
+  // the session's own recorded root — a coarse but CORRECT folder — instead
+  // of the visible project's live handle. Rootless sessions keep the old
+  // behavior (the active runtime at creation is the best available guess).
+  const sessionAnchor: Live | null = sessionRoot
+    ? ({
+        getCwd: () => sessionRoot,
+        getWorkspaceRoot: () => sessionRoot,
+        getTerminalContext: () => null,
+        isActiveTerminalPrivate: () => false,
+        injectIntoActivePty: () => false,
+        writeToActiveTerminalDisplay: () => false,
+        openPreview: () => false,
+        getActiveFile: () => null,
+      } as unknown as Live)
+    : null;
+  const liveFor = (): Live | undefined => {
+    if (!sessionRoot) return (project ? projectLive.get(project.id) : undefined) as unknown as Live | undefined;
+    return projectLive.get(findProject()?.id ?? "") as unknown as Live | undefined;
+  };
+  const fallback = (liveFor() ?? sessionAnchor ?? runtimeDeps.live) as unknown as Live;
   const live: Live = {
-    getCwd: () => (project ? projectLive.get(project.id) : undefined)?.getCwd() ?? fallback.getCwd(),
-    getTerminalContext: () => (project ? projectLive.get(project.id) : undefined)?.getTerminalContext() ?? fallback.getTerminalContext(),
-    getWorkspaceRoot: () => (project ? projectLive.get(project.id) : undefined)?.getWorkspaceRoot() ?? fallback.getWorkspaceRoot(),
-    getActiveFile: () => (project ? projectLive.get(project.id) as unknown as Live : undefined)?.getActiveFile() ?? fallback.getActiveFile(),
-    openPreview: (url: string) => (project ? projectLive.get(project.id) : undefined)?.openPreview(url) ?? fallback.openPreview(url),
-    isActiveTerminalPrivate: () => (project ? projectLive.get(project.id) : undefined)?.isActiveTerminalPrivate() ?? fallback.isActiveTerminalPrivate(),
-    injectIntoActivePty: (text: string) => (project ? projectLive.get(project.id) : undefined)?.injectIntoActivePty(text) ?? fallback.injectIntoActivePty(text),
-    writeToActiveTerminalDisplay: (data: string) => (project ? projectLive.get(project.id) : undefined)?.writeToActiveTerminalDisplay(data) ?? fallback.writeToActiveTerminalDisplay(data),
+    getCwd: () => liveFor()?.getCwd() ?? fallback.getCwd(),
+    getTerminalContext: () => liveFor()?.getTerminalContext() ?? fallback.getTerminalContext(),
+    getWorkspaceRoot: () => liveFor()?.getWorkspaceRoot() ?? fallback.getWorkspaceRoot(),
+    getActiveFile: () => liveFor()?.getActiveFile() ?? fallback.getActiveFile(),
+    openPreview: (url: string) => liveFor()?.openPreview(url) ?? fallback.openPreview(url),
+    isActiveTerminalPrivate: () => liveFor()?.isActiveTerminalPrivate() ?? fallback.isActiveTerminalPrivate(),
+    injectIntoActivePty: (text: string) => liveFor()?.injectIntoActivePty(text) ?? fallback.injectIntoActivePty(text),
+    writeToActiveTerminalDisplay: (data: string) => liveFor()?.writeToActiveTerminalDisplay(data) ?? fallback.writeToActiveTerminalDisplay(data),
   };
   return makeChatSyncRuntime(
     sessionId,
     {
       ...runtimeDeps,
-      projectRuntime: project,
+      projectRuntime: runtime,
       live: live ?? runtimeDeps.live,
       patchAgentMeta: (patch) => patchSessionAgentMeta(sessionId, patch),
       getSelectedModelId: () => getSessionPreferences(sessionId).modelId ?? (project
