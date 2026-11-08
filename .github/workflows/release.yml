@@ -189,6 +189,18 @@ jobs:
           releaseBody: ${{ needs.create-release.outputs.release-body }}
           releaseDraft: true
           prerelease: false
+          # UPDATER MUST USE THE NSIS SETUP, NOT THE MSI (2026-11-08 root
+          # cause of the boot-time admin prompt + double-install): with
+          # bundle targets "all" tauri-action points the generic
+          # windows-x86_64 key of latest.json at the PER-MACHINE MSI, and
+          # the Tauri updater executes that key - so every in-app update
+          # ran msiexec with a UAC prompt (silent per-user update became
+          # admin MSI install alongside the NSIS install; an interrupted
+          # one left a phantom HKLM registration retrying at every boot).
+          # updaterJsonPreferNsis flips the generic key to the NSIS
+          # setup while the MSI still ships in the release for direct
+          # downloads. Inert on macOS/Linux matrix arms.
+          updaterJsonPreferNsis: true
           args: ${{ matrix.args }}
 
       # The 7-minute builds occasionally die AFTER bundling on a transient
@@ -208,6 +220,9 @@ jobs:
           releaseBody: ${{ needs.create-release.outputs.release-body }}
           releaseDraft: true
           prerelease: false
+          # Retry arm must match the primary arm (see above) or the retry
+          # would reintroduce the MSI as the updater artifact.
+          updaterJsonPreferNsis: true
           args: ${{ matrix.args }}
 
   # ── 3. Patch latest.json's notes field on the draft release ──────────────
