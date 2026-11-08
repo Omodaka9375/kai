@@ -46,8 +46,23 @@ const exclusiveTails = new Map<string, Promise<void>>();
  * within one step: notably the per-session persistent agent shell — two
  * `bash_run` calls issued in one step would otherwise interleave on one PTY
  * (output corruption + cwd races).
+ *
+ * DEADLINE (2026-11-08 "run stays yellow forever, then every command
+ * stalls" report): the native promise CAN hang — a killed command with a
+ * surviving straggler kept the pipe open, the Rust join() never returned,
+ * and the lock's tail stayed held by a never-settling promise so EVERY
+ * later bash_run on the session queued forever and the run never settled.
+ * The seatbelt: the lock's tail advances on the deadline even if the
+ * wrapped promise is still pending; the caller gets a deadline timeout
+ * error. Rust now bounds the same hang at the source (bounded drain
+ * receive), but this guarantees the JS queue can never wedge again
+ * regardless of which native path regresses.
  */
-export function withExclusiveLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+export function withExclusiveLock<T>(
+  key: string,
+  fn: () => Promise<T>,
+  deadlineMs = 3_600_000,
+): Promise<T> {
   const prev = exclusiveTails.get(key) ?? Promise.resolve();
 
   let release!: () => void;
@@ -62,9 +77,24 @@ export function withExclusiveLock<T>(key: string, fn: () => Promise<T>): Promise
   });
 
   return prev.then(async () => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
     try {
-      return await fn();
+      // Race fn against the deadline. The loser settles the RESULT, but the
+      // lock is always released on the real completion OR the deadline —
+      // whichever comes first (release() below).
+      return await Promise.race([
+        fn().catch((err) => {
+          throw err;
+        }),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`shell lock holder exceeded ${Math.round(deadlineMs / 1000)}s (wedged native call - lock released by deadline seatbelt)`)),
+            deadlineMs,
+          );
+        }),
+      ]);
     } finally {
+      if (timer !== null) clearTimeout(timer);
       release();
     }
   });

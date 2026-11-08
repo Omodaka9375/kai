@@ -34,6 +34,24 @@ const DEFAULT_TIMEOUT_SECS: u64 = 120;
 const MAX_TIMEOUT_SECS: u64 = 1000;
 const MAX_OUTPUT_BYTES: usize = 256 * 1024;
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
+/// How long to wait for a pipe-drain thread after the child is gone.
+/// Normal EOF delivery is immediate; this budget only covers a straggler
+/// process keeping the pipe open past a kill (see the bounded-collection
+/// comment in `run_blocking_cancellable`).
+const DRAIN_GRACE_AFTER_KILL: Duration = Duration::from_millis(2_000);
+
+/// Receive a drain result with a hard deadline. `Ok` on EOF-sends; on
+/// timeout return what the pipe had as already-lost (empty) with the
+/// truncated flag set so output honesty is preserved.
+fn recv_drain_with_deadline(
+    rx: mpsc::Receiver<(Vec<u8>, bool)>,
+    grace: Duration,
+) -> (Vec<u8>, bool) {
+    match rx.recv_timeout(grace) {
+        Ok(pair) => pair,
+        Err(_) => (Vec::new(), true),
+    }
+}
 
 #[derive(Serialize)]
 pub struct CommandOutput {
@@ -203,9 +221,17 @@ fn run_blocking_cancellable(
     let mut stderr_pipe = child.stderr.take().ok_or("no stderr pipe")?;
 
     // Drain stdout/stderr on background threads so a full pipe buffer can't
-    // deadlock the child.
-    let stdout_handle = thread::spawn(move || drain(&mut stdout_pipe));
-    let stderr_handle = thread::spawn(move || drain(&mut stderr_pipe));
+    // deadlock the child. Each thread reports its result through a channel;
+    // the bounded receive below is what guarantees this function ALWAYS
+    // returns (see the join comment below).
+    let (stdout_tx, stdout_rx) = mpsc::channel::<(Vec<u8>, bool)>();
+    let (stderr_tx, stderr_rx) = mpsc::channel::<(Vec<u8>, bool)>();
+    thread::spawn(move || {
+        let _ = stdout_tx.send(drain(&mut stdout_pipe));
+    });
+    thread::spawn(move || {
+        let _ = stderr_tx.send(drain(&mut stderr_pipe));
+    });
 
     let started = Instant::now();
     let mut timed_out = false;
@@ -242,8 +268,23 @@ fn run_blocking_cancellable(
         thread::sleep(POLL_INTERVAL);
     };
 
-    let (stdout_bytes, stdout_truncated) = stdout_handle.join().unwrap_or((Vec::new(), false));
-    let (stderr_bytes, stderr_truncated) = stderr_handle.join().unwrap_or((Vec::new(), false));
+    // BOUNDED RESULT COLLECTION (2026-11-08 "run stays yellow after
+    // interrupting a hung command, then every command stalls" report):
+    // the old code did `stdout_handle.join()` / `stderr_handle.join()`
+    // directly. When a killed child leaves a straggler holding a pipe
+    // write-end open (Job-Object assignment failure, breakaway escape,
+    // a grandchild detached before the kill), the drain threads block
+    // in read() FOREVER and join() hangs this command forever — the
+    // shell_session_run never returned, which wedged the per-session
+    // shell lock in the JS tool, so EVERY later bash_run on that session
+    // queued behind it forever and the run never settled (stuck yellow).
+    // A bounded receive with a grace deadline guarantees return: the
+    // normal path is instantaneous (threads send on EOF); a straggler
+    // costs us the already-collected output, never the whole session.
+    let (stdout_bytes, stdout_truncated) =
+        recv_drain_with_deadline(stdout_rx, DRAIN_GRACE_AFTER_KILL);
+    let (stderr_bytes, stderr_truncated) =
+        recv_drain_with_deadline(stderr_rx, DRAIN_GRACE_AFTER_KILL);
 
     Ok(CommandOutput {
         stdout: String::from_utf8_lossy(&stdout_bytes).into_owned(),

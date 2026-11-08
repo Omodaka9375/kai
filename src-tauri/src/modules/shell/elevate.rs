@@ -108,9 +108,18 @@ fn run_child_with_timeout(
     let mut stderr_pipe = child.stderr.take().ok_or("no stderr pipe")?;
 
     // Drain both pipes on background threads so a full pipe buffer can't
-    // deadlock the elevated child.
-    let stdout_handle = thread::spawn(move || drain_limited(&mut stdout_pipe));
-    let stderr_handle = thread::spawn(move || drain_limited(&mut stderr_pipe));
+    // deadlock the elevated child. Results arrive through bounded-deadline
+    // channels (see run_blocking_cancellable in shell/mod.rs) so a
+    // straggler holding a pipe open past the kill can never wedge this
+    // function forever.
+    let (stdout_tx, stdout_rx) = std::sync::mpsc::channel();
+    let (stderr_tx, stderr_rx) = std::sync::mpsc::channel();
+    thread::spawn(move || {
+        let _ = stdout_tx.send(drain_limited(&mut stdout_pipe));
+    });
+    thread::spawn(move || {
+        let _ = stderr_tx.send(drain_limited(&mut stderr_pipe));
+    });
 
     let started = Instant::now();
     let mut timed_out = false;
@@ -130,8 +139,10 @@ fn run_child_with_timeout(
         thread::sleep(Duration::from_millis(50));
     };
 
-    let (stdout_bytes, stdout_truncated) = stdout_handle.join().unwrap_or((Vec::new(), false));
-    let (stderr_bytes, stderr_truncated) = stderr_handle.join().unwrap_or((Vec::new(), false));
+    let (stdout_bytes, stdout_truncated) =
+        recv_drain_with_deadline(stdout_rx, DRAIN_GRACE_AFTER_KILL);
+    let (stderr_bytes, stderr_truncated) =
+        recv_drain_with_deadline(stderr_rx, DRAIN_GRACE_AFTER_KILL);
 
     Ok(CommandOutput {
         stdout: String::from_utf8_lossy(&stdout_bytes).into_owned(),
