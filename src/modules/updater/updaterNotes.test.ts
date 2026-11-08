@@ -118,4 +118,23 @@ describe("the release workflow patches empty notes (root-cause fix)", () => {
       "core.setFailed('Release body is empty - CHANGELOG.md has no section for this tag.",
     );
   });
+
+  // 2026-11-08 audit: v2.2.1's manifest pointed the GENERIC windows-x86_64
+  // updater key at the per-machine MSI, so exes with an undetectable bundle
+  // type (old builds, portable) were silently converted to msiexec updates -
+  // the reported MSI+NSIS double install. The patch-notes job now asserts
+  // the artifact shape mechanically instead of trusting tauri-action inputs.
+  it("guards the updater artifact shape (version match, generic key -> NSIS setup, msi key present)", () => {
+    expect(workflow).toContain("json.version !== expectedVersion");
+    expect(workflow).toContain('winGenericUrl.endsWith("-setup.exe")');
+    expect(workflow).toContain('windows-x86_64-msi');
+  });
+
+  // workflow_dispatch from a branch created a draft release named after the
+  // branch and built an unversioned artifact set; only tag runs are valid.
+  it("refuses workflow_dispatch from a non-tag ref", () => {
+    expect(workflow).toMatch(
+      /Require a tag ref[\s\S]*?startsWith\(github\.ref, 'refs\/tags\/v'\)/,
+    );
+  });
 });

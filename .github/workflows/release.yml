@@ -18,6 +18,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # workflow_dispatch from a branch would create a draft release named
+      # after the BRANCH and build an unversioned artifact set; the release
+      # path is a pushed v* tag. Allow re-running a tag, refuse everything else.
+      - name: Require a tag ref
+        if: github.event_name == 'workflow_dispatch' && !startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          echo "::error::Release must run from a refs/tags/v* ref. Push a tag (git tag vX.Y.Z && git push origin vX.Y.Z) or re-run this workflow from the tag."
+          exit 1
+
       # Extract the CHANGELOG.md section for this tag so the GitHub release
       # body AND the updater latest.json `notes` field (which tauri-action
       # derives from `releaseBody`) carry real release notes.
@@ -269,6 +279,28 @@ jobs:
               headers: { Accept: 'application/octet-stream' },
             });
             const json = JSON.parse(new TextDecoder().decode(res.data));
+            // ARTIFACT GUARD (2026-11-08 audit): the 2.2.1 release shipped a
+            // generic windows-x86_64 updater key pointing at the per-machine
+            // MSI, so any exe with an undetectable bundle type followed the
+            // fallback and was silently converted to msiexec updates (the
+            // reported MSI+NSIS double install). The updater probes
+            // windows-x86_64-nsis / -msi FIRST (baked into the exe at build
+            // time) and falls back to the generic key - so assert the whole
+            // shape mechanically: a regression fails THIS job, not users.
+            const expectedVersion = context.ref.replace("refs/tags/", "").replace(/^v/, "");
+            if (json.version !== expectedVersion) {
+              core.setFailed(`latest.json version "${json.version}" does not match tag ${context.ref} (expected ${expectedVersion}).`);
+              return;
+            }
+            const winGenericUrl = json.platforms?.["windows-x86_64"]?.url || "";
+            if (!winGenericUrl.endsWith("-setup.exe")) {
+              core.setFailed(`latest.json windows-x86_64 must point at the NSIS setup (-setup.exe), got: ${winGenericUrl || "(missing)"}. Set updaterJsonPreferNsis: true on BOTH tauri-action arms.`);
+              return;
+            }
+            if (!json.platforms?.["windows-x86_64-msi"]?.url) {
+              core.setFailed("latest.json is missing the windows-x86_64-msi key - MSI-installed users probe it first and would be stranded on a dead key.");
+              return;
+            }
             const notes = (json.notes || '').trim();
             if (notes) {
               core.info(`latest.json notes already populated (${notes.length} chars) - nothing to do.`);
