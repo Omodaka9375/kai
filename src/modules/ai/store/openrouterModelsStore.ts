@@ -28,11 +28,24 @@ type OpenRouterResponse = {
  *  consumer that resolved `getModel(selectedModelId)` BEFORE the OpenRouter
  *  lookup existed (session restore is faster than the picker mount) cached
  *  the synthetic "Unknown model" fallback; a same-value set notifies every
- *  `selectedModelId` subscriber so they re-resolve with real data. */
+ *  `selectedModelId` subscriber so they re-resolve with real data.
+ *
+ *  MUST be a bare setState, NOT the setSelectedModelId action (2026-11-08
+ *  cross-project model bleed report): that action is a USER-SELECTION path
+ *  with stamping side effects - it writes the CURRENT GLOBAL model into the
+ *  active session's preferences, the active project's in-memory capture,
+ *  and the persisted per-root map. The catalog registers ASYNCHRONOUSLY, so
+ *  mid-project-switch it could land while the incoming project was already
+ *  active but the outgoing model was still the global - stamping A's model
+ *  onto B's session + project + disk, which then kept overriding B ("the
+ *  models from the first project stay and override the target project's").
+ *  A bare same-value setState re-runs the subscribers with zero side
+ *  effects; components re-render with real data via their models-list
+ *  subscription regardless. */
 function announceCatalogToModelConsumers(): void {
   try {
-    const { selectedModelId, setSelectedModelId } = useChatStore.getState();
-    setSelectedModelId(selectedModelId);
+    const { selectedModelId } = useChatStore.getState();
+    useChatStore.setState({ selectedModelId });
   } catch {
     // chatStore not ready yet (early hydration) — subscribers will resolve
     // correctly on their next render since the lookup is now registered.

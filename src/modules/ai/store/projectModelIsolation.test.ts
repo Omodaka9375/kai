@@ -1,4 +1,5 @@
 import { describe, expect, it, beforeEach } from "vitest";
+import { readFileSync } from "node:fs";
 import {
   getProjectModel,
   setActiveProjectRuntime,
@@ -95,5 +96,31 @@ describe("per-project model isolation across project switches", () => {
     useChatStore.setState({ selectedModelId: getProjectModel(a.id) });
     expect(useChatStore.getState().selectedModelId).toBe("gpt-5.5");
     expect(getProjectModel(b.id)).toBe("claude-sonnet-5");
+  });
+
+  /**
+   * CATALOG-ANNOUNCE BLEED (2026-11-08 report: "sometimes the models from
+   * the first project stay and override the target project's ones when I
+   * switch"): openrouterModelsStore.announceCatalogToModelConsumers used to
+   * re-emit the selection through the setSelectedModelId ACTION, whose
+   * stamping side effects (session-pref modelId, active-project capture,
+   * persistProjectModel to the live root) fired with whatever the GLOBAL
+   * model was at that async moment - mid-switch that was the OUTGOING
+   * project's model stamped onto the INCOMING project, and the poisoned
+   * session preference kept overriding it afterward. The announce must be
+   * a pure same-value notification: setState only, never the action.
+   */
+  it("catalog announce is a pure notify - never the stamping setSelectedModelId action", () => {
+    const src = readFileSync(
+      new URL("./openrouterModelsStore.ts", import.meta.url),
+      "utf8",
+    );
+    const announce = src.slice(
+      src.indexOf("/** Re-emit the current model selection"),
+      src.indexOf("const CACHE_TTL_MS"),
+    );
+    expect(announce).toContain("useChatStore.setState({ selectedModelId })");
+    expect(announce).not.toContain("setSelectedModelId(selectedModelId)");
+    expect(announce).toContain("MUST be a bare setState");
   });
 });
