@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  deriveTitle,
   partitionSessionsByWorkspace,
   type SessionMeta,
 } from "./sessions";
@@ -144,5 +145,42 @@ describe("__prepareMessagesForStore (switch-lag fix: per-message prepare cache)"
     circular.self = circular;
     const out = __prepareMessagesForStore([circular as unknown as UIMessage]);
     expect(out).toBeNull();
+  });
+});
+
+describe("deriveTitle (context-block stripping)", () => {
+  function userMsg(text: string): UIMessage {
+    return {
+      id: "m1",
+      role: "user",
+      parts: [{ type: "text", text }],
+    } as UIMessage;
+  }
+
+  it("does not derive the title from a prepended <skill> block (2026-11-09 bug)", () => {
+    // The composer expands #handle into `<skill name="…">` blocks prepended
+    // ahead of the user's text; the title must come from the user's own text,
+    // not the literal `<skill` opening tag.
+    const title = deriveTitle([
+      userMsg(
+        '<skill name="analyze">\nLong skill body...\n</skill>\nwhy did the build fail?',
+      ),
+    ]);
+    expect(title).toBe("why did the build fail?");
+  });
+
+  it("still derives from the skill text alone when there is no user text", () => {
+    // All text was context blocks: the fallback title applies.
+    expect(deriveTitle([userMsg('<skill name="analyze">\nbody\n</skill>')])).toBe(
+      "New chat",
+    );
+  });
+
+  it("keeps deriving from later user messages once blocks are stripped", () => {
+    const title = deriveTitle([
+      userMsg('<terminal-context>foo</terminal-context>'),
+      userMsg("the real question"),
+    ]);
+    expect(title).toBe("the real question");
   });
 });

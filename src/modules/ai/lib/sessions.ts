@@ -662,11 +662,16 @@ export function deriveTitle(messages: UIMessage[]): string {
     if (m.role !== "user") continue;
     for (const p of m.parts) {
       if (p.type !== "text") continue;
+      // Skills (2026-11-02): the composer prepends `<skill name="…">` blocks
+      // ahead of the user's text, so the first line would otherwise be the
+      // literal opening tag. Strip the whole block (same shape as
+      // chatText.ts SKILL_RE) before deriving the title.
       const text = (p as { text: string }).text
         .replace(/<terminal-context[\s\S]*?<\/terminal-context>\s*/g, "")
         .replace(/<selection[\s\S]*?<\/selection>\s*/g, "")
         .replace(/<file[\s\S]*?<\/file>\s*/g, "")
         .replace(/<snippet[\s\S]*?<\/snippet>\s*/g, "")
+        .replace(/<skill\s+name="[^"]+">[\s\S]*?<\/skill>\s*/g, "")
         .replace(/<Kai-command[^>]*\/>\s*/g, "")
         .trim();
       if (!text) continue;
