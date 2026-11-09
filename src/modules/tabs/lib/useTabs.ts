@@ -163,6 +163,18 @@ export function useTabs(initial?: Partial<TerminalTab> & { defer?: boolean }) {
     tabsRef.current = tabs;
   }, [tabs]);
 
+  const activeIdRef = useRef(activeId);
+  useEffect(() => {
+    activeIdRef.current = activeId;
+  }, [activeId]);
+
+  // The surface to hand focus back to when an AI diff tab that STOLE focus
+  // closes. 2026-11-09 report: while the agent runs edits, each diff
+  // open/close cycle threw the user from their file tab back to the terminal,
+  // because the close fallback picked the FIRST non-diff tab in the array.
+  // Null = nothing to restore.
+  const diffReturnTabRef = useRef<number | null>(null);
+
   const newTab = useCallback((cwd?: string) => {
     const tabId = allocateWorkspaceTabIds();
     const leafId = allocateWorkspaceTabIds();
@@ -333,7 +345,17 @@ export function useTabs(initial?: Partial<TerminalTab> & { defer?: boolean }) {
           },
         ];
       });
-      if (targetId !== null) setActiveId(targetId);
+      if (targetId !== null) {
+        // Remember where the user was BEFORE the diff steals focus, so the
+        // close can return them there. Skip when focus is already on a diff
+        // tab: batch_edit opens several tabs in a row and the FIRST capture
+        // (the user's real surface) must survive the later opens.
+        const currentTab = tabsRef.current.find((t) => t.id === activeIdRef.current);
+        if (!currentTab || currentTab.kind !== "ai-diff") {
+          diffReturnTabRef.current = activeIdRef.current;
+        }
+        setActiveId(targetId);
+      }
       return targetId as number | null;
     },
     [],
@@ -353,6 +375,13 @@ export function useTabs(initial?: Partial<TerminalTab> & { defer?: boolean }) {
   );
 
   const closeAiDiffTab = useCallback((approvalId: string) => {
+    // Only consume the pending restore if this approval actually has open
+    // tabs — a close for an already-answered approval must not drop it.
+    if (!tabsRef.current.some((t) => t.kind === "ai-diff" && t.approvalId === approvalId)) return;
+    // Read + clear BEFORE the updater (updaters must stay pure; React may
+    // call them twice in dev).
+    const returnCandidate = diffReturnTabRef.current;
+    diffReturnTabRef.current = null;
     setTabs((curr) => {
       // Closes EVERY ai-diff tab for that approval — batch_edit opens one
       // tab per file, and a single approve/reject ends the whole review.
@@ -365,11 +394,22 @@ export function useTabs(initial?: Partial<TerminalTab> & { defer?: boolean }) {
       // as closeTab). Approve/reject means the review is over: close them.
       const ids = new Set(targets.map((t) => t.id));
       const next = curr.filter((t) => !ids.has(t.id));
-      setActiveId((active) =>
-        ids.has(active)
-          ? (next.find((t) => t.kind !== "ai-diff")?.id ?? next[0]?.id ?? 0)
-          : active,
-      );
+      setActiveId((active) => {
+        if (!ids.has(active)) return active;
+        // Restore the surface the diff stole focus from (openAiDiffTab
+        // captured it) when it still exists. The old fallback — the first
+        // non-diff tab in the array — threw the user to the terminal every
+        // time (2026-11-09 report). The first-non-diff walk remains only as
+        // the last resort for a vanished return target.
+        if (
+          returnCandidate != null &&
+          returnCandidate !== active &&
+          next.some((t) => t.id === returnCandidate)
+        ) {
+          return returnCandidate;
+        }
+        return next.find((t) => t.kind !== "ai-diff")?.id ?? next[0]?.id ?? 0;
+      });
       return next;
     });
   }, []);

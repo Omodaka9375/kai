@@ -83,3 +83,32 @@ describe("tab bar drag contract (source pins)", () => {
     expect(move).toContain("next.splice(from, 1)");
   });
 });
+
+// 2026-11-09 report: "while the agent is running EDIT the whole UI flickers
+// and if I was on a file tab it would throw me back to terminal". Each edit
+// opens an ai-diff tab (stealing focus); closeAiDiffTab's fallback picked the
+// FIRST non-diff tab in the array - the terminal. The fix captures the
+// pre-diff active tab and restores it on close. useTabs is a hook over
+// workspace-local ids, so the contract is pinned at source level.
+describe("ai-diff focus restore (source pins)", () => {
+  it("openAiDiffTab captures the pre-diff surface, skipping diff-on-diff steals", () => {
+    expect(useTabs).toContain("diffReturnTabRef.current = activeIdRef.current");
+    expect(useTabs).toMatch(
+      /currentTab\.kind !== "ai-diff"[\s\S]{0,80}diffReturnTabRef/,
+    );
+  });
+
+  it("closeAiDiffTab restores the captured surface instead of the first non-diff tab", () => {
+    expect(useTabs).toContain("returnCandidate");
+    // The restore is gated on the return target still existing in `next`.
+    expect(useTabs).toContain("next.some((t) => t.id === returnCandidate)");
+    // The old blind fallback still exists, but only as the last resort.
+    expect(useTabs).toContain('next.find((t) => t.kind !== "ai-diff")?.id');
+  });
+
+  it("a close for an approval with no open tabs never consumes the pending restore", () => {
+    expect(useTabs).toMatch(
+      /if \(!tabsRef\.current\.some\(\(t\) => t\.kind === "ai-diff" && t\.approvalId === approvalId\)\) return;/,
+    );
+  });
+});
