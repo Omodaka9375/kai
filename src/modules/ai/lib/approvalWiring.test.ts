@@ -39,17 +39,27 @@ describe("approval responses flow through the denial latch", () => {
     expect(bridge).toMatch(/from "\.\.\/lib\/approvalLatch"/);
   });
 
-  it("every addToolApprovalResponse call lives inside the latch-guarded respond()", () => {
-    // There must be exactly ONE addToolApprovalResponse call site (inside
-    // `respond`); the deferred auto-approve and allowlist paths call
-    // respond(id, true) instead of the SDK API directly.
+  it("every approval response flows through the latch-guarded respond()", () => {
+    // The bridge must have NO direct SDK applier call: respond() goes through
+    // applyApprovalResponseToChat (which delegates to the SDK for the normal
+    // last-message case and handles stranded parts itself — ai@6.0.168's
+    // addToolApprovalResponse only rewrites the LAST message, so a part
+    // stranded under a ride-along message made every response a silent
+    // no-op). The deferred auto-approve and allowlist paths call
+    // respond(id, true) instead of applying responses directly.
     const sdkCalls = bridge.match(/addToolApprovalResponse\(/g) ?? [];
-    expect(sdkCalls.length).toBe(1);
+    expect(sdkCalls.length).toBe(0);
+    const helperCalls = bridge.match(/applyApprovalResponseToChat\(/g) ?? [];
+    expect(helperCalls.length).toBe(1);
     expect(bridge).toMatch(/respond\(id, true\);/);
     // No persistent per-command grants: compound shell commands cannot
     // create an invisible bypass around per-call review.
     expect(bridge).not.toContain("isCommandAllowed");
     expect(bridge).toContain('if (autoApprove !== "all") return;');
+    // The SDK applier lives in exactly ONE place: the helper's normal path.
+    const store = src("../store/chatStore.ts");
+    const sdkInStore = store.match(/addToolApprovalResponse\(/g) ?? [];
+    expect(sdkInStore.length).toBe(1);
   });
 
   it("respond() checks the latch at CALL time (both directions)", () => {

@@ -591,6 +591,88 @@ const projectPersonas = new Map<string, string>();
 const approvalResponders = new Map<string, ApprovalResponder>();
 /** Which session currently holds an approval id - the owner the decision
  *  must route to. Same scan shape describeApproval uses (part.approval.id). */
+/**
+ * Apply an approval decision to the chat that owns it.
+ *
+ * The AI SDK's `Chat.addToolApprovalResponse` only rewrites the approval part
+ * on the LAST message and only auto-continues when that last message is the
+ * assistant holding the responded approval. Both properties break the moment
+ * a ride-along message lands after the run parked on the card (a reminder or
+ * watch fire appended by injectMessage's passive ride-along, a steering
+ * message, or user text): the part gets STRANDED on an earlier assistant
+ * message and every later response — human click or auto-approve — becomes a
+ * silent no-op (the click "does nothing", the card pins forever, verified
+ * against ai@6.0.168 dist).
+ *
+ * So: when the part sits on the last message, delegate to the SDK (normal
+ * flow, jobExecutor-ordered). When it is stranded on an earlier message,
+ * flip the part state directly — the request builder converts ANY assistant
+ * tool part carrying `approval.approved` into a `tool-approval-response`
+ * regardless of position — and fire the continuation ourselves, carrying
+ * whatever rode along. Returns false when no matching pending part exists
+ * (stale id — callers already treat that as a no-op).
+ */
+export function applyApprovalResponseToChat(
+  chat: Chat<UIMessage>,
+  approvalId: string,
+  approved: boolean,
+): boolean {
+  const messages = chat.messages;
+  let holderIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const parts = (messages[i].parts ?? []) as Array<{
+      state?: string;
+      approval?: { id?: string };
+    }>;
+    if (
+      parts.some(
+        (p) => p.state === "approval-requested" && p.approval?.id === approvalId,
+      )
+    ) {
+      holderIdx = i;
+      break;
+    }
+  }
+  if (holderIdx === -1) return false;
+
+  if (holderIdx === messages.length - 1) {
+    void chat.addToolApprovalResponse({ id: approvalId, approved });
+    return true;
+  }
+
+  // Stranded part: rewrite it in place (same shape the SDK's applier writes:
+  // state approval-responded + approval {id, approved}) and continue the run.
+  chat.messages = messages.map((m, i) => {
+    if (i !== holderIdx) return m;
+    return {
+      ...m,
+      parts: (m.parts ?? []).map((p) => {
+        const part = p as { state?: string; approval?: { id?: string } };
+        if (
+          part.state === "approval-requested" &&
+          part.approval?.id === approvalId
+        ) {
+          return {
+            ...p,
+            state: "approval-responded",
+            approval: { id: approvalId, approved },
+          } as typeof p;
+        }
+        return p;
+      }),
+    } as UIMessage;
+  });
+  // Continue the run over the (rewritten) history. If another request is
+  // already in flight, skip: the next request builder pass picks the
+  // approval-response up from any position.
+  if (chat.status !== "streaming" && chat.status !== "submitted") {
+    void chat.sendMessage().catch((e) => {
+      console.warn("[kai] approval continuation failed:", e);
+    });
+  }
+  return true;
+}
+
 function findApprovalOwner(approvalId: string): string | null {
   for (const [sessionId, chat] of chats) {
     for (const m of chat.messages) {
@@ -1051,6 +1133,15 @@ export const useChatStore = create<StoreState>((set, get) => ({
     const fn = approvalResponders.get(owner);
     if (fn) {
       fn(approvalId, approved);
+      return;
+    }
+    // Owner chat resident but NO bridge responder registered for it (a
+    // reminder/wake run parked in a session no bridge watches): apply to
+    // the owner chat directly. Falling through would call the ACTIVE
+    // session's responder with a foreign approval id — a swallowed
+    // "Tool call not found" and a card that pins forever.
+    const ownerChat = chats.get(owner);
+    if (ownerChat && applyApprovalResponseToChat(ownerChat, approvalId, approved)) {
       return;
     }
   }
@@ -2319,6 +2410,12 @@ export function respondToApprovalStandalone(
     const fn = approvalResponders.get(owner);
     if (fn) {
       fn(approvalId, approved);
+      return;
+    }
+    // Same no-responder hole as respondToApproval: apply to the owner chat
+    // directly instead of dropping the decision on the wrong session.
+    const ownerChat = chats.get(owner);
+    if (ownerChat && applyApprovalResponseToChat(ownerChat, approvalId, approved)) {
       return;
     }
   }

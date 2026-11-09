@@ -28,6 +28,7 @@ import { offerToDigest } from "../lib/desktopDigest";
 import { predictAutoApproval } from "../lib/autoApprovePrediction";
 import { activeProjectId, projectIdForSession } from "../store/chatStore";
 import { isApprovalDenied, noteApprovalDenied } from "../lib/approvalLatch";
+import { applyApprovalResponseToChat } from "../store/chatStore";
 import { pickSpeakSegments, speakText } from "../lib/voiceTts";
 import { useProjectRuntime } from "@/modules/workspace";
 import {
@@ -178,7 +179,7 @@ function Bridge({
   // are long-lived and keyed by id, useChat simply reconnects to the existing
   // subscription — no state is lost.
   const chat = useMemo(() => getOrCreateChat(sessionId), [sessionId]);
-  const { status, messages, addToolApprovalResponse } = useChat<UIMessage>({
+  const { status, messages } = useChat<UIMessage>({
     chat,
     // Cap message-notification re-renders at ~20fps. During thinking bursts
     // the SDK fires replaceMessage (with a structuredClone of the whole
@@ -217,12 +218,19 @@ function Bridge({
       if (!approved) noteApprovalDenied(id);
       else if (isApprovalDenied(id)) return;
       try {
-        addToolApprovalResponse({ id, approved });
+        // applyApprovalResponseToChat (not the hook's addToolApprovalResponse):
+        // the SDK applier only rewrites the LAST message, so an approval part
+        // stranded under a ride-along message (reminder/watch fire, steering,
+        // user text appended while the run was parked on the card) made every
+        // later response a silent no-op — click did nothing, card pinned
+        // forever. The helper flips the part in place on ANY message and
+        // continues the run.
+        applyApprovalResponseToChat(chat, id, approved);
       } catch (e) {
         console.debug("[kai] stale approval ignored:", id, e);
       }
     },
-    [addToolApprovalResponse],
+    [chat],
   );
   useEffect(() => {
     setSessionResponder(sessionId, respond);
@@ -231,9 +239,9 @@ function Bridge({
       setSessionResponder(sessionId, null);
       if (isActive) setApprovalResponder(null);
     };
-    // respond is recreated each render but its deps (addToolApprovalResponse)
-    // are stable; keep the responder identity tied to that so the SDK call is
-    // always current.
+    // respond is recreated each render but its deps (chat) are stable; keep
+    // the responder identity tied to that so the applied response is always
+    // against the current Chat instance.
   }, [sessionId, isActive, setSessionResponder, setApprovalResponder, respond]);
 
   useEffect(() => {

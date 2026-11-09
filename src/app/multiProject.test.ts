@@ -47,7 +47,9 @@ describe("multi-project workspace ownership", () => {
   });
 
   it("keeps bridge status one-way from the SDK, without a status feedback loop", () => {
-    expect(bridge).toContain("const { status, messages, addToolApprovalResponse } = useChat");
+    // Approval responses ride applyApprovalResponseToChat (stranded-part
+    // fix) — the bridge no longer destructures the SDK's applier.
+    expect(bridge).toContain("const { status, messages } = useChat");
     expect(bridge).not.toContain("const status = sessionMeta.status");
   });
 
