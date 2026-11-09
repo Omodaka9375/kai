@@ -75,12 +75,12 @@ describe("stall budgets: local providers get LOCAL budgets", () => {
   // on engines that were still working.
   it("openai-compatible.chat (dotted, real SDK shape) gets LOCAL budgets", () => {
     const b = stallBudgetsForProvider("openai-compatible.chat");
-    expect(b.first).toBe(600_000);
-    expect(b.inter).toBe(240_000);
+    expect(b.first).toBe(900_000);
+    expect(b.inter).toBe(600_000);
   });
 
   it("bare legacy name still matches (defense in depth)", () => {
-    expect(stallBudgetsForProvider("openai-compatible").inter).toBe(240_000);
+    expect(stallBudgetsForProvider("openai-compatible").inter).toBe(600_000);
   });
 
   it("cloud providers keep cloud budgets — including dotted deepseek.chat", () => {
@@ -136,6 +136,24 @@ describe("stall message content", () => {
     expect(msg).toContain("2 min");
     expect(msg).not.toContain("Compact &");
     expect(msg).toContain("Automatic recovery");
+  });
+
+  it("is endpoint-aware: a LOCAL stall does not claim the provider is down", () => {
+    // 2026-11-09 report ("i keep getting this" with local models): the old
+    // single message told users their LOCAL engine was "down or
+    // rate-limiting" with a "status page" — nonsense for LM Studio. A local
+    // engine going silent is usually still working (buffered big tool call,
+    // loaded machine), so the message must point at the engine window/logs
+    // instead. The signature stays identical so isStallError keeps matching.
+    const local = stallMessageForBudgetMs(600_000, true);
+    expect(local).toContain("Model stream stalled");
+    expect(local).toContain("10 min");
+    expect(local).toContain("local engine");
+    expect(local).not.toContain("status page");
+    expect(local).not.toContain("rate-limiting");
+    // Cloud wording unchanged (regression guard).
+    const cloud = stallMessageForBudgetMs(120_000, false);
+    expect(cloud).toContain("status page");
   });
 });
 

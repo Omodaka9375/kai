@@ -35,19 +35,28 @@ import { generateId, type LanguageModelMiddleware } from "ai";
 // First chunk gets a longer budget: reasoning models with buffered thinking
 // can legitimately emit nothing for minutes before the first token.
 //
-// LOCAL endpoints get double budgets: engines like LM Studio / llama.cpp
+// LOCAL endpoints get much larger budgets: engines like LM Studio / llama.cpp
 // prefill the ENTIRE prompt before the first token — at high context on
-// consumer hardware that alone can take many minutes — and MoE layer
-// offloading can pause mid-decode too. A shared budget killed working
-// engines as "stalled".
+// consumer hardware that alone can take many minutes — and mid-stream the
+// engine can be alive but silent for a very long time in three normal ways:
+//   1. the server buffers a large TOOL CALL and sends it in one chunk at the
+//      end instead of streaming deltas (Ollama and several others do this),
+//      so writing a 3000-token edit is minutes of total silence;
+//   2. long reasoning blocks that the server does not stream;
+//   3. the machine is busy (builds, tests, another compile) and the model
+//      crawls to near-zero tokens per second.
+// Killing a WORKING engine costs the whole generation — recovery drops the
+// partial output and re-prefills the full context, which often stalls again.
+// A false negative (a genuinely dead engine lingers longer) only costs time
+// the user can cut short with Stop. So local budgets err generous.
 const STALL_FIRST_CHUNK_MS = 300_000; // 5 min before any data (cloud)
 const STALL_INTER_CHUNK_MS = 120_000; // 2 min between chunks once flowing (cloud)
-const STALL_FIRST_CHUNK_LOCAL_MS = 600_000; // 10 min — local prefill headroom
-const STALL_INTER_CHUNK_LOCAL_MS = 240_000; // 4 min — local offload pauses
+const STALL_FIRST_CHUNK_LOCAL_MS = 900_000; // 15 min — local prefill headroom
+const STALL_INTER_CHUNK_LOCAL_MS = 600_000; // 10 min — buffered tool calls / loaded machine
 
 const STALL_SIGNATURE = "Model stream stalled";
 
-type StallBudgets = { first: number; inter: number };
+type StallBudgets = { first: number; inter: number; local: boolean };
 
 function stallBudgetsFor(provider: string): StallBudgets {
   // `model.provider` from the SDK is DOTTED — createOpenAICompatible builds
@@ -60,8 +69,12 @@ function stallBudgetsFor(provider: string): StallBudgets {
   const head = (provider.split(".")[0] ?? "").trim();
   const local = head === "openai-compatible";
   return local
-    ? { first: STALL_FIRST_CHUNK_LOCAL_MS, inter: STALL_INTER_CHUNK_LOCAL_MS }
-    : { first: STALL_FIRST_CHUNK_MS, inter: STALL_INTER_CHUNK_MS };
+    ? {
+        first: STALL_FIRST_CHUNK_LOCAL_MS,
+        inter: STALL_INTER_CHUNK_LOCAL_MS,
+        local,
+      }
+    : { first: STALL_FIRST_CHUNK_MS, inter: STALL_INTER_CHUNK_MS, local };
 }
 
 /** Exported for tests: the budget table for a raw model.provider string. */
@@ -70,12 +83,24 @@ export function stallBudgetsForProvider(provider: string): StallBudgets {
 }
 
 /** Human-readable stall error. Reports the budget that actually fired so
- *  the text never claims "2 min" when a longer budget was in effect. */
-function stallMessage(timeoutMs: number): string {
+ *  the text never claims "2 min" when a longer budget was in effect, and is
+ *  endpoint-aware: a LOCAL engine going silent is usually still alive (big
+ *  buffered tool call, loaded machine), so "provider down / rate-limiting /
+ *  status page" wording is wrong and misleading for it. */
+function stallMessage(timeoutMs: number, local: boolean): string {
+  const minutes = Math.round(timeoutMs / 60_000);
+  if (local) {
+    return (
+      STALL_SIGNATURE +
+      ` — no data for ${minutes} min. ` +
+      "A local engine is often still alive while silent: it may be writing a large tool call or a long reasoning block that the server buffers instead of streaming, or crawling because the machine is busy (builds, tests, other jobs). " +
+      "Check the engine's own window or logs: if it is still generating, just wait or stop the run; if it is idle, the connection died and a retry will re-open it."
+    );
+  }
   return (
     STALL_SIGNATURE +
     " — no data for " +
-    `${Math.round(timeoutMs / 60_000)} min. ` +
+    `${minutes} min. ` +
     "The engine or connection likely died without closing the stream. " +
     "Automatic recovery (compact and/or fresh-connection retry) was attempted " +
     "and did not help — the provider is likely down or rate-limiting. " +
@@ -85,8 +110,11 @@ function stallMessage(timeoutMs: number): string {
 
 /** Test/export surface for stallMessage — the budget that fired is the
  *  only variable, so a budget-keyed wrapper keeps the test direct. */
-export function stallMessageForBudgetMs(timeoutMs: number): string {
-  return stallMessage(timeoutMs);
+export function stallMessageForBudgetMs(
+  timeoutMs: number,
+  local = false,
+): string {
+  return stallMessage(timeoutMs, local);
 }
 
 /** True when an error (possibly wrapped/re-displayed) is a watchdog stall. */
@@ -171,12 +199,12 @@ async function readWithStallWatchdog(
 ): Promise<ReadableStreamReadResult<Part>> {
   const timeoutMs = sawAnyChunk ? budgets.inter : budgets.first;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(
-      () => reject(new Error(stallMessage(timeoutMs))),
-      timeoutMs,
-    );
-  });
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(stallMessage(timeoutMs, budgets.local))),
+        timeoutMs,
+      );
+    });
   try {
     // Promise.race keeps a then-handler on `reader.read()`, so a late
     // rejection after the race settles is handled (no unhandledrejection).
