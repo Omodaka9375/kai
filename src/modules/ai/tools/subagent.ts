@@ -59,6 +59,7 @@ Asks for user approval unless auto-approve is enabled (subagents are read-only b
             summary: r.summary,
             stepCount: r.stepCount,
             durationMs: r.durationMs,
+            truncated: r.truncated,
           };
         } catch (e) {
           return { error: String(e), type };

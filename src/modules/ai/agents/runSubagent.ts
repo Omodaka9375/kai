@@ -11,6 +11,18 @@ import { SUBAGENTS, type SubagentType } from "./registry";
 
 const SUBAGENT_MAX_STEPS_DEFAULT = 24;
 
+/**
+ * Final-report directive for the WRAP-UP pass. A subagent that burns its whole
+ * working budget on tool calls used to return "(no output)" — the loop stops
+ * after the last tool step and `result.text` is empty, so 20 minutes of
+ * investigation were silently discarded ("subagents that go far deliver
+ * nothing"). When the run ends without a deliverable text, ONE extra model
+ * call with NO tools replays the gathered conversation and forces the model
+ * to write its report. Bounded by construction: no tools = no further forking.
+ */
+const WRAPUP_PROMPT =
+  "Your working budget is now exhausted. Write your final report immediately, based on everything you gathered so far: your findings, conclusions, and explicitly what you could NOT finish or verify. Plain text, no tool calls (none are available). Do not apologize for the budget - deliver what you have.";
+
 type Args = {
   type: SubagentType;
   prompt: string;
@@ -28,6 +40,10 @@ type RunResult = {
   summary: string;
   stepCount: number;
   durationMs: number;
+  /** True when the run ended WITHOUT a final text (budget exhausted on tool
+   *  calls, or the model narrated mid-work) and a wrap-up pass produced the
+   *  report. The parent can use this to decide a narrower re-spawn. */
+  truncated: boolean;
 };
 
 export async function runSubagent({
@@ -78,13 +94,14 @@ export async function runSubagent({
     { openaiCompatibleBaseURL },
   );
 
+  const effectiveMaxSteps = maxSteps ?? SUBAGENT_MAX_STEPS_DEFAULT;
   const start = Date.now();
   const result = await generateText({
     model,
     system: def.systemPrompt + "\n\n" + fenceSystemPrompt(fenceState),
     prompt,
     tools: guardedTools as Parameters<typeof generateText>[0]["tools"],
-    stopWhen: stepCountIs(maxSteps ?? SUBAGENT_MAX_STEPS_DEFAULT),
+    stopWhen: stepCountIs(effectiveMaxSteps),
     abortSignal,
     onStepFinish: (step) => {
       if (!onStep) return;
@@ -93,10 +110,38 @@ export async function runSubagent({
     },
   });
 
+  const stepCount = result.steps?.length ?? 0;
+  let text = (result.text ?? "").trim();
+  // Deliverable guarantee: text missing (the loop ended on a tool step) OR the
+  // budget was exhausted (the last narration is a mid-work fragment, not a
+  // report) both trigger the no-tools wrap-up. `response.messages` carries the
+  // full gathered conversation — tool calls and results included — so the
+  // wrap-up sees everything the subagent learned and cannot run more tools.
+  const exhausted = stepCount >= effectiveMaxSteps;
+  if ((!text || exhausted) && !abortSignal?.aborted) {
+    onStep?.(`${type}: final report`);
+    try {
+      const wrap = await generateText({
+        model,
+        system: def.systemPrompt + "\n\n" + fenceSystemPrompt(fenceState),
+        messages: [
+          ...(result.response?.messages ?? []),
+          { role: "user", content: WRAPUP_PROMPT },
+        ],
+        abortSignal,
+      });
+      const wrapText = (wrap.text ?? "").trim();
+      if (wrapText) text = wrapText;
+    } catch {
+      // Wrap-up is best-effort: deliver whatever the main run produced.
+    }
+  }
+
   return {
-    summary: fence("tool", fenceState.nonces.tool, result.text || "(no output)"),
-    stepCount: result.steps?.length ?? 0,
+    summary: fence("tool", fenceState.nonces.tool, text || "(no output)"),
+    stepCount,
     durationMs: Date.now() - start,
+    truncated: exhausted || !text,
   };
 }
 
