@@ -6,13 +6,13 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ## [2.2.4]
 
-- Approvals: clicking Allow now works even when a reminder or watch message landed after the approval card - the run continues instead of the card being stuck forever, and flipping the Ask toggle no longer silently does nothing.
-- Agents: subagents that use up their whole step budget now still write a final report instead of returning nothing - the parent also sees a truncated flag so it can re-spawn a narrower task instead of wasting another run.
-- Attachments: images larger than the provider limit are now downscaled automatically - a 4K screenshot no longer persists megabytes into the session and re-sends them on every request; already-small images keep their exact bytes.
-- Models: local models get much more patient stall detection - the engine is no longer killed while it is still working through a large tool call or a busy machine, and the stall message now explains local engines instead of claiming the provider is down.
-- Radio: the SomaFM pill now shows "playing" in every project - switching projects no longer makes it look stopped while the music keeps playing.
+
+- Agents: subagents that use up their step budget write a final report.
+- Attachments: images larger than the provider limit are now downscaled automatically.
+- Models: local models get more patient stall detection.
+- Radio: the radio pill now shows "playing" in every project.
 - Tabs: closing an AI diff tab returns you to the file or terminal you were working in, instead of throwing you to the first tab on every agent edit.
-- UI: the expanded AI window and group panel no longer let editor or terminal content leak through their rounded corner cracks.
+- UI: the expanded AI window and group panel backdrop.
 
 ---
 
