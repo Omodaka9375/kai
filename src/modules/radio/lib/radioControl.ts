@@ -41,6 +41,19 @@ function publish(next: RadioSnapshot) {
 
 export function subscribeRadio(cb: (s: RadioSnapshot) => void): () => void {
   listeners.add(cb);
+  // REPLAY the current snapshot to new subscribers. The player is GLOBAL
+  // (one <audio> for the whole app) but its subscribers are NOT: each
+  // project workspace renders its own status bar + RadioMarquee, and a
+  // workspace mounted AFTER playback started (new project, remounted bar,
+  // error-boundary recovery) missed the one publish() that announced
+  // "playing" — its UI then showed "not playing" forever while the music
+  // kept playing (2026-11-09 report). Standard store contract: subscribe
+  // delivers the current state, wrapped in the same fail-safe try/catch.
+  try {
+    cb(snapshot);
+  } catch {
+    // a broken subscriber must not break the listener set
+  }
   return () => {
     listeners.delete(cb);
   };

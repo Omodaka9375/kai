@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import type { RadioSnapshot } from "./radioControl";
 
 // The controller touches window.Audio lazily — stub it before import.
 class FakeAudio {
@@ -76,6 +78,23 @@ describe("radioControl — fail-safe contract", () => {
     expect(seen.filter((x) => x === "connecting").length).toBeGreaterThanOrEqual(1);
   });
 
+  it("a subscriber added AFTER playback started replays the current snapshot", () => {
+    // 2026-11-09 report: "when I switch projects it disappears ... shows as
+    // not playing on other project while playing". The player is GLOBAL but
+    // each project workspace mounts its own RadioMarquee; one mounted after
+    // playback began missed the only "playing" publish and showed stopped
+    // forever. subscribeRadio must deliver the CURRENT state on subscribe.
+    radioPlay("lush");
+    expect(getRadioSnapshot().status.state).toBe("connecting");
+    const seen: RadioSnapshot[] = [];
+    const unsub = subscribeRadio((s) => seen.push(s));
+    // Synchronous replay, before any new publish.
+    expect(seen).toHaveLength(1);
+    expect(seen[0].status.state).toBe("connecting");
+    unsub();
+    radioStop();
+  });
+
   it("a throwing subscriber does not break publication", () => {
     let broke = false;
     subscribeRadio(() => {
@@ -85,5 +104,19 @@ describe("radioControl — fail-safe contract", () => {
     expect(() => radioPlay("bagel")).not.toThrow();
     expect(broke).toBe(true);
     expect(getRadioSnapshot().status.state).toBe("connecting");
+  });
+});
+
+describe("useRadioPlayer — global-player, per-project-subscriber contract", () => {
+  // Source pin: the hook must seed from the controller's LIVE snapshot (and
+  // the controller must replay on subscribe — pinned above). A hardcoded
+  // stopped seed is exactly the "shows as not playing while playing" bug.
+  it("seeds its initial state from the live controller snapshot", () => {
+    const src = readFileSync(
+      new URL("./useRadioPlayer.ts", import.meta.url),
+      "utf8",
+    );
+    expect(src).toContain("getRadioSnapshot");
+    expect(src).not.toContain('state: "stopped"');
   });
 });

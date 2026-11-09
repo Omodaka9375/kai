@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
+  getRadioSnapshot,
   radioPlay,
   radioStop,
   radioShutdown,
@@ -24,10 +25,14 @@ export type UseRadioPlayer = {
 };
 
 export function useRadioPlayer(): UseRadioPlayer {
-  const [snap, setSnap] = useState<RadioSnapshot>(() => ({
-    status: { state: "stopped" },
-    stationId: null,
-  }));
+  // Seed from the controller's LIVE snapshot, not a hardcoded "stopped":
+  // this hook instance may mount long after playback started (each project
+  // workspace has its own status bar; the <audio> element is global). A
+  // hardcoded seed made the pill show "not playing" on any workspace that
+  // mounted mid-playback until the next radio event. subscribeRadio now
+  // also replays on subscribe — this seed keeps the very first paint
+  // correct too (no stopped flash before the effect runs).
+  const [snap, setSnap] = useState<RadioSnapshot>(() => getRadioSnapshot());
 
   useEffect(() => {
     const unsub = subscribeRadio(setSnap);
