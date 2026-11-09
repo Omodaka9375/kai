@@ -1,11 +1,36 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import {
+  downscaleOversizeImage,
   hasInlineImageParts,
   isProviderImageType,
   looksLikeVisionModel,
   modelTextOnly,
   swapImagePartsToText,
+  transcodeToProviderImage,
 } from "./extraction";
+
+describe("downscaleOversizeImage (the image-size gate)", () => {
+  it("degrades to null - never throws - when no image codec exists", async () => {
+    // Node/vitest has no createImageBitmap; the guard must return null so the
+    // caller keeps the ORIGINAL bytes instead of losing the attachment.
+    await expect(downscaleOversizeImage("data:image/png;base64,AAAA")).resolves.toBeNull();
+    await expect(transcodeToProviderImage("data:image/png;base64,AAAA")).resolves.toBeNull();
+  });
+
+  it("is wired into the composer's provider-safe attachment path", () => {
+    // 2026-11-09: provider-safe formats (png/jpeg/webp/gif) used to ride in
+    // RAW - a 4K screenshot persisted megabytes of base64 into history and
+    // re-sent it on every request, filling the context with image work.
+    const composer = readFileSync(
+      new URL("./components/composer.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(composer).toContain("downscaleOversizeImage(rawUrl)");
+    // The downgrade result replaces mediaType with the JPEG it produced.
+    expect(composer).toContain('mediaType: "image/jpeg"');
+  });
+});
 
 describe("isProviderImageType (the poison-image gate)", () => {
   it("accepts exactly the provider-supported image types", () => {

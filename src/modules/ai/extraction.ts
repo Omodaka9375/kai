@@ -275,6 +275,8 @@ export function isProviderImageType(mediaType: string | null | undefined): boole
 export async function transcodeToProviderImage(
   dataUrl: string,
   maxLongEdge = 1568,
+  encode: "image/png" | "image/jpeg" = "image/png",
+  quality = 0.92,
 ): Promise<string | null> {
   try {
     if (typeof createImageBitmap !== "function") return null;
@@ -289,17 +291,59 @@ export async function transcodeToProviderImage(
       const canvas = new OffscreenCanvas(w, h);
       const g = canvas.getContext("2d");
       if (!g) return null;
+      // JPEG has no alpha channel: flatten onto white so a transparent PNG
+      // re-encoded as JPEG doesn't come out with a black background.
+      if (encode === "image/jpeg") {
+        g.fillStyle = "#ffffff";
+        g.fillRect(0, 0, w, h);
+      }
       g.drawImage(bmp, 0, 0, w, h);
-      const out = await canvas.convertToBlob({ type: "image/png" });
+      const out = await canvas.convertToBlob({ type: encode, quality });
       const buf = new Uint8Array(await out.arrayBuffer());
       let binary = "";
       for (let i = 0; i < buf.length; i += 8192) {
         binary += String.fromCharCode(...buf.subarray(i, i + 8192));
       }
-      return `data:image/png;base64,${btoa(binary)}`;
+      return `data:${encode};base64,${btoa(binary)}`;
     } finally {
       bmp.close?.();
     }
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * SIZE GATE for already-provider-safe image attachments (2026-11-09 report:
+ * "when the agent works with images the context fills quickly"). Provider-safe
+ * formats (png/jpeg/webp/gif) used to ride in RAW - a 4K screenshot is 10+
+ * MB of base64 that PERSISTS in the session history and re-sends on EVERY
+ * request of the conversation. Providers token-count images by tiles over the
+ * long edge (~1568px for Claude), so pixels past that are pure payload with
+ * no fidelity the model could read anyway.
+ *
+ * Returns a downscaled JPEG data-URL when the long edge exceeds the cap, and
+ * null when the image is ALREADY small (caller keeps the exact original bytes
+ * - no re-encode, no quality loss) or cannot be measured (no codec, decode
+ * failure) - best-effort, never throws.
+ */
+export async function downscaleOversizeImage(
+  dataUrl: string,
+  maxLongEdge = 1568,
+): Promise<string | null> {
+  try {
+    if (typeof createImageBitmap !== "function") return null;
+    const res = await fetch(dataUrl);
+    const blob = await res.blob();
+    const bmp = await createImageBitmap(blob);
+    let long: number;
+    try {
+      long = Math.max(bmp.width, bmp.height);
+    } finally {
+      bmp.close?.();
+    }
+    if (long <= maxLongEdge) return null;
+    return transcodeToProviderImage(dataUrl, maxLongEdge, "image/jpeg", 0.92);
   } catch {
     return null;
   }

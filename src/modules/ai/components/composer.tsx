@@ -23,6 +23,7 @@ import { expandSkillTokens, type Skill } from "../lib/skills";
 import { tryRunSlashCommand, type SlashCommandMeta } from "../lib/slashCommands";
 import { buildQuoteBlock } from "../lib/chatText";
 import {
+  downscaleOversizeImage,
   isProviderImageType,
   transcodeToProviderImage,
 } from "../extraction";
@@ -646,6 +647,23 @@ async function readAttachment(file: File): Promise<FileAttachment | null> {
     // instead of attaching poison.
     const rawUrl = await readAsDataURL(file);
     if (isProviderImageType(file.type)) {
+      // SIZE GATE (2026-11-09, from the "images fill the context" report):
+      // provider-safe formats used to ride in RAW - a 4K screenshot is 10+
+      // MB of base64 that persists in history and re-sends on EVERY request.
+      // Anything over the provider's token-counting long edge (~1568px for
+      // Claude) is downscaled to JPEG; already-small images keep their exact
+      // original bytes.
+      const downscaled = await downscaleOversizeImage(rawUrl);
+      if (downscaled) {
+        return {
+          id,
+          name: file.name,
+          kind: "image",
+          mediaType: "image/jpeg",
+          url: downscaled,
+          size: Math.round((downscaled.length * 3) / 4),
+        };
+      }
       return {
         id,
         name: file.name,
