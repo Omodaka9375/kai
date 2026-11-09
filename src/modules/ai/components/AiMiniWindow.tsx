@@ -132,6 +132,8 @@ const SUGGESTIONS = [
   },
 ];
 
+import { AiWindowBackdrop, AI_EXPANDED_WINDOW_GEOMETRY } from "./AiWindowBackdrop";
+
 export function AiMiniWindow() {
   const sessionId = useChatStore((s) => s.activeSessionId);
   // Expanded state lives in the store (not local useState) so App can
@@ -229,7 +231,12 @@ export function AiMiniWindow() {
   }, [c.isBusy, c.stop]);
 
   return (
-    <motion.div
+    <>
+      {/* Corner-crack matte: the expanded window's rounded corners + translucent
+          border let editor/terminal content leak through; this covers the rect
+          behind it (see AiWindowBackdrop). */}
+      <AiWindowBackdrop active={expanded} />
+      <motion.div
       initial={{ opacity: 0, y: 12, scale: 0.98 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: 12, scale: 0.98 }}
@@ -242,7 +249,7 @@ export function AiMiniWindow() {
         "ring-1 ring-black/5 dark:ring-white/5",
         "transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
         expanded
-          ? "top-[2.85rem] right-2 bottom-[calc(var(--kai-input-bar-h,0px)+42px)] left-[calc(var(--kai-workspace-left,0px)+8px)] rounded-xl"
+          ? `${AI_EXPANDED_WINDOW_GEOMETRY} rounded-xl`
           : "right-2 bottom-[calc(var(--kai-input-bar-h,0px)+42px)] h-[min(42rem,calc(100vh-var(--kai-input-bar-h,0px)-92px))] w-[min(34rem,calc(100vw-2rem))]",
         // Shrink up by one pill height + gap when the group pill is stacked
         // below (84 = 42 base + 42 pill).
@@ -266,6 +273,7 @@ export function AiMiniWindow() {
       )}
       <PlanDiffReview />
     </motion.div>
+    </>
   );
 }
 

@@ -110,7 +110,12 @@ describe("multi-project workspace ownership", () => {
     // at the outgoing/stale offset and covers the incoming project's tree.
     const miniWindow = readFileSync(new URL("../modules/ai/components/AiMiniWindow.tsx", import.meta.url), "utf8");
     const gate = readFileSync(new URL("./workspaceActivation.tsx", import.meta.url), "utf8");
-    expect(miniWindow).toContain("--kai-workspace-left");
+    // The expanded geometry itself (including the --kai-workspace-left read)
+    // lives in the shared AiWindowBackdrop const so the corner-crack matte
+    // can never drift from the rect the window paints.
+    const backdrop = readFileSync(new URL("../modules/ai/components/AiWindowBackdrop.tsx", import.meta.url), "utf8");
+    expect(backdrop).toContain("--kai-workspace-left");
+    expect(miniWindow).toContain("AI_EXPANDED_WINDOW_GEOMETRY");
     // Foreground-only gate inside onResize (ref read - no body subscription)…
     expect(workspace).toContain("if (isActiveRef.current) writeWorkspaceLeft(size.inPixels);");
     // …and the activation re-sync lives in the GATE now (a project switch

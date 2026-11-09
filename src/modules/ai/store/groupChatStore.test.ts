@@ -779,7 +779,12 @@ describe("source pins — trust boundary & wiring", () => {
     // while the group panel covers its strip.
     expect(chatStore).toContain("groupPanelExpanded: false");
     expect(panel).toContain("groupPanelExpanded");
-    expect(panel).toContain("top-[2.85rem]");
+    // Expanded geometry is a shared const (AI_EXPANDED_WINDOW_GEOMETRY in
+    // AiWindowBackdrop.tsx) so the corner-crack matte behind the panel can
+    // never drift from the rect the panel paints. The panel must import and
+    // interpolate it, not carry its own copy.
+    expect(panel).toContain("AI_EXPANDED_WINDOW_GEOMETRY");
+    expect(panel).toContain("${AI_EXPANDED_WINDOW_GEOMETRY} rounded-xl");
     expect(panel).toContain("ArrowExpand01Icon");
     expect(pill).toContain("groupPanelExpanded");
   });

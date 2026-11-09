@@ -2,6 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { memo, useSyncExternalStore } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/lib/utils";
+import {
+  AiWindowBackdrop,
+  AI_EXPANDED_WINDOW_GEOMETRY,
+} from "./AiWindowBackdrop";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -327,6 +331,11 @@ export function GroupChatPanel({
 
   return (
     <>
+      {/* Corner-crack matte: same contract as the AI mini window's - the
+          expanded panel's rounded corners let editor content leak through.
+          Rendered OUTSIDE the AnimatePresence (a fragment inside it would
+          break the motion.div's exit animation). */}
+      <AiWindowBackdrop active={expanded && groupExpanded} />
       <InvitePicker
         open={pickerOpen}
         onOpenChange={setPickerOpen}
@@ -368,7 +377,7 @@ export function GroupChatPanel({
               // +42px strip — the AI pill hides); docked keeps the same
               // width, height formula, and the +84px anchor (AI pill below).
               groupExpanded
-                ? "top-[2.85rem] right-2 bottom-[calc(var(--kai-input-bar-h,0px)+42px)] left-[calc(var(--kai-workspace-left,0px)+8px)] rounded-xl"
+                ? `${AI_EXPANDED_WINDOW_GEOMETRY} rounded-xl`
                 : "right-2 w-[min(34rem,calc(100vw-2rem))] bottom-[calc(var(--kai-input-bar-h,0px)+84px)] h-[min(42rem,calc(100vh-var(--kai-input-bar-h,0px)-92px))]",
             )}
           >
