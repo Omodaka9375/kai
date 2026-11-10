@@ -547,6 +547,109 @@ const pendingPersist = new Map<
  *  noteSessionRoot below). */
 const sessionRoots = new Map<string, string | null>();
 
+/** Detached media results live outside the SDK stream. A streaming bridge
+ *  may still hold a transcript snapshot from before these completed, so keep
+ *  them for re-merging into any later persist (2026-11-10 two-image race). */
+type ResolvedMedia = {
+  sessionId: string;
+  toolCallId: string;
+  output: unknown;
+  messageId: string;
+  part: UIMessage["parts"][number];
+  partIndex: number;
+};
+const resolvedMedia = new Map<string, ResolvedMedia[]>();
+
+/** Re-apply media results to a snapshot, matching by toolCallId (message
+ *  indices and object identity are NOT stable across SDK clone flushes). */
+export const __mediaPersistenceForTest = {
+  merge: mergeResolvedMedia,
+  clear(sessionId: string) { resolvedMedia.delete(sessionId); },
+  register(sessionId: string, toolCallId: string, output: unknown, messages: UIMessage[]) {
+    registerResolvedMedia(sessionId, toolCallId, output, messages);
+  },
+};
+
+function mergeResolvedMedia(
+  sessionId: string,
+  messages: UIMessage[],
+): { messages: UIMessage[]; changed: boolean } {
+  const resolved = resolvedMedia.get(sessionId);
+  if (!resolved || resolved.length === 0) return { messages, changed: false };
+  const pending = new Set(resolved.map((r) => r.toolCallId));
+  let changed = false;
+  const next = messages.map((m) => {
+    if (m.role !== "assistant") return m;
+    let touched = false;
+    const parts = m.parts.map((p) => {
+      const id = (p as { toolCallId?: string }).toolCallId;
+      const result = resolved.find((r) => r.toolCallId === id);
+      if (!id || !result) return p;
+      pending.delete(id);
+      const output = (p as { output?: unknown }).output;
+      if (output === result.output) return p;
+      touched = true;
+      return { ...(p as object), output: result.output } as typeof p;
+    });
+    if (!touched) return m;
+    changed = true;
+    return { ...m, parts } as typeof m;
+  });
+  // If a later step replaced the old assistant message, attach ONLY the
+  // media tool part to the first assistant message - never resurrect its
+  // stale reasoning/text parts or remove any newer content.
+  if (pending.size > 0) {
+    const targetIndex = next.findIndex((m) => m.role === "assistant");
+    if (targetIndex >= 0) {
+      const target = next[targetIndex]!;
+      const parts = [...target.parts];
+      for (const id of pending) {
+        const result = resolved.find((r) => r.toolCallId === id);
+        if (!result) continue;
+        parts.splice(Math.min(result.partIndex, parts.length), 0, result.part);
+        changed = true;
+      }
+      next[targetIndex] = { ...target, parts };
+    }
+  }
+  return { messages: changed ? next : messages, changed };
+}
+
+/** Record a detached result against the real tool part, without sharing
+ *  the old assistant message's stale text/reasoning. */
+function registerResolvedMedia(
+  sessionId: string,
+  toolCallId: string,
+  output: unknown,
+  messages: UIMessage[],
+): void {
+  for (const m of messages) {
+    if (m.role !== "assistant") continue;
+    const partIndex = m.parts.findIndex((p) =>
+      (p as { toolCallId?: string }).toolCallId === toolCallId);
+    if (partIndex < 0) continue;
+    const part = m.parts[partIndex]!;
+    const state = (part as { state?: string }).state;
+    if (state !== "output-available" && state !== "output-error") continue;
+    const updatedPart = { ...(part as object), output } as typeof part;
+    const record = {
+      sessionId, toolCallId, output,
+      messageId: m.id, part: updatedPart, partIndex,
+    };
+    resolvedMedia.set(sessionId, [
+      ...(resolvedMedia.get(sessionId) ?? []).filter((r) => r.toolCallId !== toolCallId),
+      record,
+    ]);
+    return;
+  }
+}
+
+/** Persist a bridge snapshot WITHOUT reintroducing stale placeholders. */
+function persistSessionSnapshot(id: string, messages: UIMessage[]): void {
+  const merged = mergeResolvedMedia(id, messages).messages;
+  void saveMessagesRerouted(id, merged);
+}
+
 /** Record the workspace root a session belongs to (called from
  *  persistMessages' guard path and from hydrate). */
 function noteSessionRoot(id: string, root: string | null | undefined) {
@@ -598,7 +701,7 @@ function flushPersistEntry(id: string) {
   if (!entry) return;
   clearTimeout(entry.timer);
   pendingPersist.delete(id);
-  saveMessagesRerouted(id, entry.latest);
+  persistSessionSnapshot(id, entry.latest);
 }
 
 export function flushPersist(id?: string): void {
@@ -1154,27 +1257,28 @@ export const useChatStore = create<StoreState>((set, get) => ({
     const chat = chats.get(sessionId);
     if (!chat) return;
     const msgs = chat.messages;
-    let mutated = false;
+    const before = resolvedMedia.get(sessionId)?.length ?? 0;
+    registerResolvedMedia(sessionId, toolCallId, output, msgs);
+    const mutated = (resolvedMedia.get(sessionId)?.length ?? 0) > before ||
+      msgs.some((m) => m.role === "assistant" && m.parts.some((p) =>
+        (p as { toolCallId?: string }).toolCallId === toolCallId &&
+        (p as { output?: unknown }).output !== output));
+    if (!mutated) return;
     const next = msgs.map((m) => {
       if (m.role !== "assistant") return m;
-      let touched = false;
       const parts = m.parts.map((p) => {
         const tc = (p as { toolCallId?: string }).toolCallId;
         if (tc !== toolCallId) return p;
         const state = (p as { state?: string }).state;
-        // Only patch a part the SDK already finalized (has a result slot).
         if (state !== "output-available" && state !== "output-error") return p;
-        touched = true;
         return { ...(p as Record<string, unknown>), output } as unknown as typeof p;
       });
-      if (!touched) return m;
-      mutated = true;
       return { ...m, parts } as typeof m;
     });
     if (mutated) {
       chat.messages = next;
       set({ _tick: Date.now() });
-      void saveMessagesRerouted(sessionId, next);
+      persistSessionSnapshot(sessionId, next);
     }
   },
 
@@ -1617,6 +1721,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
   },
 
   deleteSession: (id) => {
+    resolvedMedia.delete(id);
     cancelMediaTasksForSession(id);
     removeSessionPreferences(id);
     sessionAutoApprove.delete(id);
@@ -1765,7 +1870,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
       const entry = pendingPersist.get(id);
       if (!entry) return;
       pendingPersist.delete(id);
-      saveMessagesRerouted(id, entry.latest);
+      persistSessionSnapshot(id, entry.latest);
     }, PERSIST_DEBOUNCE_MS);
     pendingPersist.set(id, { latest: messages, timer });
 
