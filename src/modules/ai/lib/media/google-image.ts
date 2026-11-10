@@ -1,5 +1,27 @@
 import { invoke } from "@tauri-apps/api/core";
+import { z } from "zod";
 import type { ImageGenerateOpts, ImageResult } from "./types";
+
+const imageDataSchema = z.object({
+  mimeType: z.string().optional(),
+  data: z.string().optional(),
+});
+const responseSchema = z.object({
+  candidates: z.array(z.object({
+    finishReason: z.string().optional(),
+    content: z.object({
+      parts: z.array(z.object({
+        inlineData: imageDataSchema.optional(),
+        inline_data: imageDataSchema.optional(),
+        text: z.string().optional(),
+      }).passthrough()).optional(),
+    }).passthrough().optional(),
+  }).passthrough()).optional(),
+  promptFeedback: z.object({
+    blockReason: z.string().optional(),
+    blockReasonMessage: z.string().optional(),
+  }).passthrough().optional(),
+}).passthrough();
 
 // Nano Banana 2 (Gemini 3.1 Flash Image). The 2024 `gemini-2.0-flash-exp`
 // id was long dead; this is the current image-gen workhorse.
@@ -75,23 +97,27 @@ export async function generateGoogleImage(
     throw new Error(`Google image generation failed (${resp.status}): ${text.slice(0, 300)}`);
   }
 
-  const json = JSON.parse(text) as {
-    candidates?: {
-      content?: {
-        parts?: { inlineData?: { mimeType: string; data: string } }[];
-      };
-    }[];
-  };
-
-  const parts = json.candidates?.[0]?.content?.parts;
-  const imagePart = parts?.find((p) => p.inlineData?.data);
-  if (!imagePart?.inlineData) {
-    throw new Error("Google returned no image data");
+  const parsed = responseSchema.safeParse(JSON.parse(text));
+  if (!parsed.success) {
+    throw new Error("Google returned an unexpected image response shape.");
+  }
+  const json = parsed.data;
+  const parts = json.candidates?.flatMap((c) => c.content?.parts ?? []) ?? [];
+  // The REST API uses camelCase, but some proxies return the protobuf's
+  // original snake_case. Accept both instead of losing a valid image.
+  const imagePart = parts.map((p) => p.inlineData ?? p.inline_data)
+    .find((data) => data?.data);
+  if (!imagePart?.data) {
+    const reason = json.promptFeedback?.blockReasonMessage ??
+      json.promptFeedback?.blockReason ??
+      json.candidates?.map((c) => c.finishReason).filter(Boolean).join(", ");
+    const textReply = parts.map((p) => p.text).filter(Boolean).join(" ");
+    throw new Error(`Google returned no image data${reason ? `: ${reason}` : ""}${textReply ? ` (${textReply.slice(0, 240)})` : ""}`);
   }
 
   return {
-    base64: imagePart.inlineData.data,
-    mimeType: imagePart.inlineData.mimeType || "image/png",
+    base64: imagePart.data,
+    mimeType: imagePart.mimeType || "image/png",
     width: 1024,
     height: 1024,
     provider: "google",

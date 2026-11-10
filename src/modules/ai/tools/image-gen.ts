@@ -107,6 +107,7 @@ Auto-executes — no approval needed.`,
             url: result.url,
             prompt,
           })),
+        3 * 60_000,
         );
 
         return {

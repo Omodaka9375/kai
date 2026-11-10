@@ -1324,6 +1324,21 @@ const RenderedTool = memo(function RenderedTool({
     return <MediaMessage output={part.output} />;
   }
 
+  // A background media failure is a terminal result too. Without this branch
+  // the error object fell into a collapsed generic tool card, so a provider
+  // rejection looked exactly like a job that never completed.
+  if (
+    (toolName === "generate_image" || toolName === "generate_video") &&
+    "output" in part &&
+    typeof (part.output as { error?: unknown } | undefined)?.error === "string"
+  ) {
+    return (
+      <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+        {toolName === "generate_image" ? "Image" : "Video"} generation failed: {String((part.output as { error: string }).error)}
+      </div>
+    );
+  }
+
   // Show a live "generating…" state for media jobs running in the background.
   if (
     (toolName === "generate_image" || toolName === "generate_video") &&

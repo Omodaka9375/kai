@@ -51,6 +51,7 @@ import {
 import { pushRecentModel, persistProjectModel } from "../lib/modelPrefs";
 import { normalizeWorkspacePath } from "../lib/workspacePath";
 import { cancelAllShellSessions } from "../tools/shell";
+import { cancelMediaTasksForSession } from "../lib/media/task";
 import { clearFenceState, summarizeMessagesNow } from "../lib/transport";
 import { reapSessionWatches, closeWatchSessionShell } from "../tools/watch";
 import { agentBus } from "../lib/eventBus";
@@ -1616,6 +1617,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
   },
 
   deleteSession: (id) => {
+    cancelMediaTasksForSession(id);
     removeSessionPreferences(id);
     sessionAutoApprove.delete(id);
     const remaining = get().sessions.filter((s) => s.id !== id);
