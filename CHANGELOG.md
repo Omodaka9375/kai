@@ -8,7 +8,10 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 
 - Agents: subagents that use up their step budget write a final report.
+- Agents: platform and web lookups validate the remote API's response shape, so a third-party change degrades cleanly instead of erroring.
 - Attachments: images larger than the provider limit are now downscaled automatically.
+- Chats: a session started with a #skill no longer gets titled after the skill tag.
+- Editing: line-ending corruption from PowerShell is now blocked up front, caught by the test suite, and safely repaired (pnpm eol:check / eol:fix).
 - Models: local models get more patient stall detection.
 - Radio: the radio pill now shows "playing" in every project.
 - Tabs: closing an AI diff tab returns you to the file or terminal you were working in, instead of throwing you to the first tab on every agent edit.
