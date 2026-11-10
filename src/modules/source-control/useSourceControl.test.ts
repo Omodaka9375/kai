@@ -118,7 +118,7 @@ describe("useSourceControl refresh triggers (no background blinking)", () => {
     // The context-change re-resolve is repo-null gated (one-shot per
     // context switch, local-only).
     expect(src).toMatch(/if \(stateRef\.current\.repo\) return;/);
-    expect(src).toMatch(/void refresh\(\{ remote: "never" \}\);\n\s*\/\/ eslint-disable/);
+    expect(src).toMatch(/void refresh\(\{ remote: "never" \}\);$/m);
   });
 
   it("no save/terminal-command file-change listeners in App", () => {

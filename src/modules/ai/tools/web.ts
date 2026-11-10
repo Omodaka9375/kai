@@ -46,11 +46,28 @@ async function braveSearch(query: string): Promise<WebSearchResult[]> {
     throw new Error(`Brave API HTTP ${resp.status}`);
   }
   const body = new TextDecoder().decode(new Uint8Array(resp.body));
-  const json = JSON.parse(body) as {
-    web?: { results?: Array<{ title?: string; url?: string; description?: string }> };
-  };
+  // Validate the remote shape (2026-11-10 review): a Brave API change must
+  // surface as "no results from Brave", letting the engine ladder fall
+  // through — not as a deep undefined error.
+  const braveResp = z.object({
+    web: z
+      .object({
+        results: z
+          .array(
+            z.object({
+              title: z.string().optional(),
+              url: z.string().optional(),
+              description: z.string().optional(),
+            }),
+          )
+          .optional(),
+      })
+      .optional(),
+  });
+  const parsed = braveResp.safeParse(JSON.parse(body));
+  if (!parsed.success) return [];
   const out: WebSearchResult[] = [];
-  for (const r of json.web?.results ?? []) {
+  for (const r of parsed.data.web?.results ?? []) {
     if (!r.url || !r.title) continue;
     // description is HTML-ish text; strip tags so the snippet is clean.
     out.push({

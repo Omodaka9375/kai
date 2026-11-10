@@ -9,6 +9,19 @@ use reqwest::Method;
 use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
 
+/// Hard cap on a buffered (non-streaming) proxy response body. web_browse
+/// and media downloads ride this path; without a cap a hostile server can
+/// make `ai_http_request` buffer an arbitrarily large body into memory.
+/// 128 MB comfortably fits base64 image/video payloads while bounding abuse.
+const MAX_RESPONSE_BYTES: usize = 128 * 1024 * 1024;
+
+/// Total deadline for the buffered proxy path (connect + response + body).
+/// The client only sets `connect_timeout`; without a request deadline a
+/// slow-loris server pins the call forever. Streaming (`ai_http_stream`)
+/// deliberately has NO deadline — long SSE generations are legitimate and
+/// the frontend stall watchdog covers silence there.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(600);
+
 const HEADER_BLOCKLIST: &[&str] = &[
     "host",
     "content-length",
@@ -295,39 +308,27 @@ pub async fn lm_list_models(base_url: String) -> Result<Vec<String>, String> {
         return Err(format!("server returned {}", resp.status()));
     }
     let body: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-    let mut models = Vec::new();
-
-    if let Some(arr) = body.as_array() {
-        for m in arr {
-            if let Some(s) = m.as_str() {
-                models.push(s.to_string());
-            } else if let Some(id) = m["id"].as_str() {
-                models.push(id.to_string());
-            } else if let Some(name) = m["name"].as_str() {
-                models.push(name.to_string());
-            }
-        }
-    } else if let Some(arr) = body["data"].as_array() {
-        for m in arr {
-            if let Some(s) = m.as_str() {
-                models.push(s.to_string());
-            } else if let Some(id) = m["id"].as_str() {
-                models.push(id.to_string());
-            } else if let Some(name) = m["name"].as_str() {
-                models.push(name.to_string());
-            }
-        }
-    } else if let Some(arr) = body["models"].as_array() {
-        for m in arr {
-            if let Some(s) = m.as_str() {
-                models.push(s.to_string());
-            } else if let Some(id) = m["id"].as_str() {
-                models.push(id.to_string());
-            } else if let Some(name) = m["name"].as_str() {
-                models.push(name.to_string());
-            }
-        }
-    }
+    // Local model servers disagree on the /models envelope: a bare array
+    // (llama.cpp), {data:[...]} (OpenAI-compatible), or {models:[...]}.
+    // One extractor handles all three shapes: plain strings, or objects
+    // with an `id`/`name` field.
+    let array = body
+        .as_array()
+        .cloned()
+        .or_else(|| body["data"].as_array().cloned())
+        .or_else(|| body["models"].as_array().cloned());
+    let models = array
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| {
+                    m.as_str()
+                        .map(str::to_string)
+                        .or_else(|| m["id"].as_str().map(str::to_string))
+                        .or_else(|| m["name"].as_str().map(str::to_string))
+                })
+                .collect::<Vec<String>>()
+        })
+        .unwrap_or_default();
 
     Ok(models)
 }
@@ -365,10 +366,19 @@ fn build_safe_client(
     pinned: &[(String, Vec<IpAddr>)],
 ) -> Result<reqwest::Client, String> {
     let mut builder = reqwest::Client::builder().connect_timeout(Duration::from_secs(10));
-    // SECURITY: accept self-signed TLS certs for private-network servers
-    // (DGX, lab machines, Ollama, vLLM). Public endpoints always require
-    // valid certs. See lm_ping comment for the trade-off rationale.
-    if allow_private {
+    // SECURITY: accept self-signed TLS certs ONLY when every pinned IP is
+    // private/loopback (DGX, lab machines, Ollama, vLLM behind nginx). The
+    // `allow_private` FLAG alone is not enough: the api-tester, remote MCP
+    // servers, and custom model base URLs pass allow_private=true while
+    // targeting PUBLIC hosts, and a public host must never skip cert
+    // validation (silent MITM). Mirrors the `is_local_only` gate used by
+    // `lm_ping` / `lm_list_models`.
+    let has_pinned_ips = pinned.iter().any(|(_, ips)| !ips.is_empty());
+    let all_pinned_local = pinned
+        .iter()
+        .flat_map(|(_, ips)| ips.iter())
+        .all(|ip| !matches!(ip_kind(*ip), IpKind::Public));
+    if allow_private && has_pinned_ips && all_pinned_local {
         builder = builder.danger_accept_invalid_certs(true);
     }
     // Pin reqwest's resolver to the IPs we just classified. Without this,
@@ -465,12 +475,33 @@ pub async fn ai_http_request(
     } else {
         decode_body_base64(body_base64)?
     };
-    let req = build_request(&client, &method, parsed, headers, effective_body)?;
+    let req = build_request(&client, &method, parsed, headers, effective_body)?
+        .timeout(REQUEST_TIMEOUT);
     let resp = req.send().await.map_err(|e| e.to_string())?;
 
     let status = resp.status().as_u16();
     let headers = header_map_to_strings(resp.headers());
-    let body = resp.bytes().await.map_err(|e| e.to_string())?.to_vec();
+    // Reject oversized bodies up front when the server declares a length,
+    // then enforce the cap while streaming (Content-Length is optional and
+    // attacker-controlled, so the streaming check is the real guard).
+    if let Some(len) = resp.content_length() {
+        if len > MAX_RESPONSE_BYTES as u64 {
+            return Err(format!(
+                "response body is {len} bytes; the proxy caps buffered responses at {MAX_RESPONSE_BYTES} bytes"
+            ));
+        }
+    }
+    let mut body: Vec<u8> = Vec::new();
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| e.to_string())?;
+        if body.len() + chunk.len() > MAX_RESPONSE_BYTES {
+            return Err(format!(
+                "response body exceeds the {MAX_RESPONSE_BYTES} byte proxy cap"
+            ));
+        }
+        body.extend_from_slice(&chunk);
+    }
     Ok(HttpResponse {
         status,
         headers,

@@ -40,6 +40,126 @@ export type ReachResult = {
 const MAX_ITEMS = 10;
 const MAX_TEXT = 4000;
 
+// Response-shape validation (2026-11-10 review): adapters inherited an
+// unchecked `JSON.parse(x) as T` from webGetJson, so a third-party shape
+// change surfaced as deep-undefined instead of a clean null. Every remote
+// body is now zod-validated. Fields stay optional so the defensive `?? ""`
+// access in the adapters is unchanged; a shape change returns null, which
+// the adapters turn into their honest failure note. z.unknown() is used
+// where the adapter only String()-coerces the value.
+const ghSearchResp = z.object({
+  items: z
+    .array(
+      z.object({
+        full_name: z.string().optional(),
+        html_url: z.string().optional(),
+        description: z.string().optional(),
+        stargazers_count: z.number().optional(),
+        language: z.string().optional(),
+        pushed_at: z.string().optional(),
+      }),
+    )
+    .optional(),
+});
+
+const ghIssueResp = z.object({
+  title: z.string().optional(),
+  state: z.string().optional(),
+  body: z.string().nullable().optional(),
+  created_at: z.string().optional(),
+  updated_at: z.string().optional(),
+  user: z.object({ login: z.string().optional() }).optional(),
+});
+
+const ghRepoResp = z.object({
+  full_name: z.string().optional(),
+  language: z.string().optional(),
+  description: z.string().optional(),
+  pushed_at: z.string().optional(),
+  stargazers_count: z.unknown().optional(),
+  open_issues_count: z.unknown().optional(),
+  license: z
+    .object({ spdx_id: z.string().nullable().optional() })
+    .nullable()
+    .optional(),
+});
+
+const ghReadmeResp = z.object({
+  content: z.string().optional(),
+  encoding: z.string().optional(),
+});
+
+const ghComment = z.object({
+  user: z.object({ login: z.string().optional() }).optional(),
+  body: z.unknown().optional(),
+  created_at: z.string().optional(),
+});
+
+const v2exTopic = z.object({
+  id: z.number().optional(),
+  title: z.string().optional(),
+  url: z.string().optional(),
+  member: z.object({ username: z.string().optional() }).optional(),
+  last_touched: z.number().optional(),
+  content: z.string().optional(),
+  created: z.number().optional(),
+});
+
+const redditListing = z.object({
+  data: z
+    .object({
+      children: z
+        .array(
+          z.object({
+            kind: z.string().optional(),
+            data: z.record(z.string(), z.unknown()).optional(),
+          }),
+        )
+        .optional(),
+    })
+    .optional(),
+});
+
+const hnSearchResp = z.object({
+  hits: z
+    .array(
+      z.object({
+        title: z.string().optional(),
+        url: z.string().optional(),
+        objectID: z.string().optional(),
+        author: z.string().optional(),
+        created_at: z.string().optional(),
+        points: z.number().optional(),
+        num_comments: z.number().optional(),
+        story_text: z.unknown().optional(),
+      }),
+    )
+    .optional(),
+});
+
+const stackSearchResp = z.object({
+  items: z
+    .array(
+      z.object({
+        title: z.string().optional(),
+        link: z.string().optional(),
+        owner: z.object({ display_name: z.string().optional() }).optional(),
+        creation_date: z.number().optional(),
+        score: z.number().optional(),
+        answer_count: z.number().optional(),
+        is_answered: z.boolean().optional(),
+        tags: z.array(z.string()).optional(),
+      }),
+    )
+    .optional(),
+});
+
+const youtubeOembedResp = z.object({
+  title: z.string().optional(),
+  author_name: z.string().optional(),
+  thumbnail_url: z.string().optional(),
+});
+
 // ── GitHub (public REST API — no key, no login) ─────────────────────────
 
 function ghRepoFromUrl(url: string): { owner: string; repo: string } | null {
@@ -63,20 +183,11 @@ function ghIssueRef(url: string): { kind: "issues" | "pull"; owner: string; repo
   };
 }
 
-type GhComment = { user?: { login?: string }; body?: string; created_at?: string };
-
 async function ghSearch(q: string): Promise<ReachResult> {
-  const data = await webGetJson<{
-    total_count?: number;
-    items?: Array<{
-      full_name?: string;
-      html_url?: string;
-      description?: string;
-      stargazers_count?: number;
-      language?: string;
-      pushed_at?: string;
-    }>;
-  }>(`https://api.github.com/search/repositories?q=${encodeURIComponent(q)}&sort=stars&per_page=${MAX_ITEMS}`);
+  const data = await webGetJson(
+    `https://api.github.com/search/repositories?q=${encodeURIComponent(q)}&sort=stars&per_page=${MAX_ITEMS}`,
+    { schema: ghSearchResp },
+  );
   const items: ReachItem[] = (data?.items ?? []).map((r) => ({
     title: r.full_name ?? "",
     url: r.html_url ?? "",
@@ -98,13 +209,13 @@ async function ghRead(url: string): Promise<ReachResult> {
   if (ref) {
     const apiBase = `https://api.github.com/repos/${ref.owner}/${ref.repo}`;
     const isPull = ref.kind === "pull";
-    const main = await webGetJson<Record<string, unknown>>(
-      `${apiBase}/${isPull ? "pulls" : "issues"}/${ref.num}`,
-    );
+    const main = await webGetJson(`${apiBase}/${isPull ? "pulls" : "issues"}/${ref.num}`, {
+      schema: ghIssueResp,
+    });
     if (!main) return { channel: "github", action: "read", items: [], note: "not found or rate-limited" };
-    const comments = await webGetJson<GhComment[]>(
-      `${apiBase}/issues/${ref.num}/comments?per_page=30`,
-    );
+    const comments = await webGetJson(`${apiBase}/issues/${ref.num}/comments?per_page=30`, {
+      schema: z.array(ghComment),
+    });
     const body = String(main.body ?? "");
     const parts: string[] = [
       `# ${String(main.title ?? "")} (${isPull ? "PR" : "issue"} #${ref.num}, state: ${String(main.state ?? "")})`,
@@ -121,7 +232,7 @@ async function ghRead(url: string): Promise<ReachResult> {
         {
           title: String(main.title ?? ""),
           url,
-          author: (main.user as { login?: string } | undefined)?.login,
+          author: main.user?.login,
           date: String(main.created_at ?? main.updated_at ?? ""),
           text: parts.join("\n\n").slice(0, 20000),
         },
@@ -132,11 +243,9 @@ async function ghRead(url: string): Promise<ReachResult> {
   const repo = ghRepoFromUrl(url);
   if (repo) {
     const apiBase = `https://api.github.com/repos/${repo.owner}/${repo.repo}`;
-    const meta = await webGetJson<Record<string, unknown>>(apiBase);
+    const meta = await webGetJson(apiBase, { schema: ghRepoResp });
     if (!meta) return { channel: "github", action: "read", items: [], note: "not found or rate-limited" };
-    const readme = await webGetJson<{ content?: string; encoding?: string }>(
-      `${apiBase}/readme`,
-    );
+    const readme = await webGetJson(`${apiBase}/readme`, { schema: ghReadmeResp });
     let readmeText = "";
     if (readme?.content) {
       try {
@@ -158,7 +267,7 @@ async function ghRead(url: string): Promise<ReachResult> {
           date: String(meta.pushed_at ?? ""),
           text: [
             String(meta.description ?? ""),
-            `★ ${String(meta.stargazers_count ?? "?")} · issues ${String(meta.open_issues_count ?? "?")} · license ${(meta.license as { spdx_id?: string } | null)?.spdx_id ?? "none"}`,
+            `★ ${String(meta.stargazers_count ?? "?")} · issues ${String(meta.open_issues_count ?? "?")} · license ${meta.license?.spdx_id ?? "none"}`,
             readmeText ? `\n## README\n${readmeText}` : "",
           ]
             .filter(Boolean)
@@ -174,9 +283,9 @@ async function ghRead(url: string): Promise<ReachResult> {
 // ── V2EX (public API) ───────────────────────────────────────────────────
 
 async function v2exHot(): Promise<ReachResult> {
-  const data = await webGetJson<
-    Array<{ id?: number; title?: string; url?: string; member?: { username?: string }; last_touched?: number }>
-  >("https://www.v2ex.com/api/topics/hot.json");
+  const data = await webGetJson("https://www.v2ex.com/api/topics/hot.json", {
+    schema: z.array(v2exTopic),
+  });
   const items: ReachItem[] = (data ?? []).slice(0, MAX_ITEMS).map((t) => ({
     title: t.title ?? "",
     url: t.url ?? (t.id != null ? `https://www.v2ex.com/t/${t.id}` : ""),
@@ -190,17 +299,13 @@ async function v2exHot(): Promise<ReachResult> {
 async function v2exRead(url: string): Promise<ReachResult> {
   const m = /v2ex\.com\/t\/(\d+)/i.exec(url);
   if (!m) return { channel: "v2ex", action: "read", items: [], note: "expected a /t/<id> topic URL" };
-  const topic = await webGetJson<
-    Array<{
-      title?: string;
-      content?: string;
-      member?: { username?: string };
-      created?: number;
-    }>
-  >(`https://www.v2ex.com/api/topics/show.json?id=${m[1]}`);
-  const replies = await webGetJson<
-    Array<{ content?: string; member?: { username?: string }; created?: number }>
-  >(`https://www.v2ex.com/api/replies/show.json?topic_id=${m[1]}&page_size=${MAX_ITEMS}`);
+  const topic = await webGetJson(`https://www.v2ex.com/api/topics/show.json?id=${m[1]}`, {
+    schema: z.array(v2exTopic),
+  });
+  const replies = await webGetJson(
+    `https://www.v2ex.com/api/replies/show.json?topic_id=${m[1]}&page_size=${MAX_ITEMS}`,
+    { schema: z.array(v2exTopic) },
+  );
   const t = topic?.[0];
   const parts = [
     `# ${t?.title ?? ""}`,
@@ -250,9 +355,12 @@ async function redditSearch(q: string): Promise<ReachResult> {
   if (r.status === 403 || !r.body.trim().startsWith("{")) {
     return redditBlockedNote("search");
   }
-  const data = JSON.parse(r.body) as {
-    data?: { children?: Array<{ data?: Record<string, unknown> }> };
-  };
+  const raw: unknown = JSON.parse(r.body);
+  const parsed = redditListing.safeParse(raw);
+  if (!parsed.success) {
+    return { channel: "reddit", action: "search", items: [], note: "unexpected response shape from Reddit" };
+  }
+  const data = parsed.data;
   const items: ReachItem[] = (data.data?.children ?? []).map((c) => {
     const d = c.data ?? {};
     return {
@@ -272,15 +380,21 @@ async function redditRead(url: string): Promise<ReachResult> {
   const r = await webGet(`${url.replace(/\/?$/, "")}.json?limit=30`, {
     headers: { Accept: "application/json" },
   });
-  if (r.status === 403 || !r.body.trim().startsWith("{")) {
+  // The post .json endpoint returns an ARRAY of two listings (post +
+  // comments), so the JSON guard checks "[", not "{" — the old "{" check
+  // made this path unreachable for every successful response.
+  if (r.status === 403 || !r.body.trim().startsWith("[")) {
     return redditBlockedNote("read");
   }
-  const pages = JSON.parse(r.body) as Array<{
-    data?: { children?: Array<{ data?: Record<string, unknown> }> };
-  }>;
-  const post = pages?.[0]?.data?.children?.[0]?.data;
+  const raw: unknown = JSON.parse(r.body);
+  const parsed = z.array(redditListing).safeParse(raw);
+  if (!parsed.success) {
+    return { channel: "reddit", action: "read", items: [], note: "unexpected response shape from Reddit" };
+  }
+  const pages = parsed.data;
+  const post = pages[0]?.data?.children?.[0]?.data;
   if (!post) return { channel: "reddit", action: "read", items: [], note: "not found" };
-  const comments = (pages?.[1]?.data?.children ?? []) as Array<{ data?: Record<string, unknown> }>;
+  const comments = pages[1]?.data?.children ?? [];
   const flat: string[] = [];
   const walk = (node: { data?: Record<string, unknown> }, depth: number) => {
     if (!node.data || depth > 3) return;
@@ -319,18 +433,10 @@ async function redditRead(url: string): Promise<ReachResult> {
 // ── Hacker News (Algolia public API — bonus channel, same pattern) ───────
 
 async function hnSearch(q: string): Promise<ReachResult> {
-  const data = await webGetJson<{
-    hits?: Array<{
-      title?: string;
-      url?: string;
-      objectID?: string;
-      author?: string;
-      created_at?: string;
-      points?: number;
-      num_comments?: number;
-      story_text?: string;
-    }>;
-  }>(`https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(q)}&hitsPerPage=${MAX_ITEMS}`);
+  const data = await webGetJson(
+    `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(q)}&hitsPerPage=${MAX_ITEMS}`,
+    { schema: hnSearchResp },
+  );
   const items: ReachItem[] = (data?.hits ?? []).map((h) => ({
     title: h.title ?? "",
     url: h.url ?? (h.objectID ? `https://news.ycombinator.com/item?id=${h.objectID}` : ""),
@@ -344,19 +450,9 @@ async function hnSearch(q: string): Promise<ReachResult> {
 // ── Stack Exchange (public API) ─────────────────────────────────────────
 
 async function stackSearch(q: string): Promise<ReachResult> {
-  const data = await webGetJson<{
-    items?: Array<{
-      title?: string;
-      link?: string;
-      owner?: { display_name?: string };
-      creation_date?: number;
-      score?: number;
-      answer_count?: number;
-      is_answered?: boolean;
-      tags?: string[];
-    }>;
-  }>(
+  const data = await webGetJson(
     `https://api.stackexchange.com/2.3/search/advanced?order=desc&sort=relevance&q=${encodeURIComponent(q)}&site=stackoverflow&pagesize=${MAX_ITEMS}`,
+    { schema: stackSearchResp },
   );
   const items: ReachItem[] = (data?.items ?? []).map((s) => ({
     title: String(s.title ?? "").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&"),
@@ -373,11 +469,10 @@ async function stackSearch(q: string): Promise<ReachResult> {
 async function youtubeInfo(url: string): Promise<ReachResult> {
   const id = /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/shorts\/)([\w-]{6,})/i.exec(url);
   if (!id) return { channel: "youtube", action: "read", items: [], note: "unrecognized YouTube URL" };
-  const data = await webGetJson<{
-    title?: string;
-    author_name?: string;
-    thumbnail_url?: string;
-  }>(`https://www.youtube.com/oembed?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${id[1]}`)}&format=json`);
+  const data = await webGetJson(
+    `https://www.youtube.com/oembed?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${id[1]}`)}&format=json`,
+    { schema: youtubeOembedResp },
+  );
   return {
     channel: "youtube",
     action: "read",

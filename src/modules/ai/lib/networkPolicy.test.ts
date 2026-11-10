@@ -39,6 +39,23 @@ describe("Rust proxy gate (source contract)", () => {
   });
 });
 
+describe("Rust proxy hardening (source contract, 2026-11-10)", () => {
+  it("cert validation skip is gated on local-only pinned IPs, never the allow_private flag alone", () => {
+    // build_safe_client must check the actual resolved IPs: api-tester,
+    // remote MCP servers, and custom model base URLs pass allow_private=true
+    // while targeting PUBLIC hosts — those must keep full cert validation.
+    expect(netRs).toContain("all_pinned_local");
+    expect(netRs).toContain("has_pinned_ips && all_pinned_local");
+  });
+
+  it("buffered proxy responses are size-capped and deadline-bounded", () => {
+    expect(netRs).toContain("MAX_RESPONSE_BYTES");
+    expect(netRs).toContain(".timeout(REQUEST_TIMEOUT)");
+    // The uncapped full-body read must not come back.
+    expect(netRs).not.toContain("resp.bytes().await");
+  });
+});
+
 describe("model-chosen surfaces are gated", () => {
   it("web.ts passes requireLanOnly()", () => {
     expect(webSrc).toContain("requireLanOnly: requireLanOnly()");

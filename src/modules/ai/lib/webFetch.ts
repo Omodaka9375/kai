@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { ZodType } from "zod";
 import { requireLanOnly } from "./proxyFetch";
 
 /**
@@ -67,15 +68,27 @@ export async function webPost(
   };
 }
 
-/** GET a URL expecting a JSON body. Returns `null` on non-2xx or bad JSON. */
+/**
+ * GET a URL expecting a JSON body. Returns `null` on non-2xx or bad JSON.
+ *
+ * Pass a zod `schema` to VALIDATE the parsed body (2026-11-10 review
+ * finding: every adapter inherited an unchecked `JSON.parse(x) as T` — a
+ * third-party shape change surfaced as deep-undefined instead of a clean
+ * null). With a schema, a shape mismatch returns `null` like any other
+ * failure; without one, the legacy unchecked parse is kept for callers
+ * that fully validate downstream.
+ */
 export async function webGetJson<T>(
   url: string,
-  opts: { headers?: Record<string, string> } = {},
+  opts: { headers?: Record<string, string>; schema?: ZodType<T> } = {},
 ): Promise<T | null> {
   const r = await webGet(url, opts);
   if (r.status < 200 || r.status >= 300) return null;
   try {
-    return JSON.parse(r.body) as T;
+    const parsed: unknown = JSON.parse(r.body);
+    if (!opts.schema) return parsed as T;
+    const res = opts.schema.safeParse(parsed);
+    return res.success ? res.data : null;
   } catch {
     return null;
   }

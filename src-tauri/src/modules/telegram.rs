@@ -368,16 +368,19 @@ fn api_url(token: &str, method: &str) -> String {
 /// pool: repeated sendMessage calls reuse the warm TLS session instead of
 /// handshaking from scratch every time (fresh-client-per-call made sends
 /// flaky whenever the handshake hit a transient DNS/TLS/VPN hiccup).
-fn http_client() -> &'static reqwest::Client {
-    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
-    CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .timeout(Duration::from_secs(60))
-            .connect_timeout(Duration::from_secs(15))
-            .pool_idle_timeout(Duration::from_secs(90))
-            .build()
-            .expect("reqwest client")
-    })
+fn http_client() -> Result<&'static reqwest::Client, String> {
+    static CLIENT: std::sync::OnceLock<Option<reqwest::Client>> = std::sync::OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(60))
+                .connect_timeout(Duration::from_secs(15))
+                .pool_idle_timeout(Duration::from_secs(90))
+                .build()
+                .ok()
+        })
+        .as_ref()
+        .ok_or_else(|| "HTTP client unavailable".to_string())
 }
 
 /// reqwest's Display ("error sending request for url …") hides the real
@@ -399,6 +402,7 @@ async fn post_json<T: serde::de::DeserializeOwned>(
     body: &serde_json::Value,
 ) -> Result<T, String> {
     let url = api_url(token, method);
+    let client = http_client()?;
     let mut last_err = String::new();
     // Transport-level failures (connect/TLS/DNS/reset/timeout) are transient
     // — retry up to 3 attempts with backoff before surfacing. HTTP-level
@@ -408,7 +412,7 @@ async fn post_json<T: serde::de::DeserializeOwned>(
         if attempt > 1 {
             tokio::time::sleep(Duration::from_millis(500 * u64::from(attempt - 1))).await;
         }
-        let resp = match http_client().post(&url).json(body).send().await {
+        let resp = match client.post(&url).json(body).send().await {
             Ok(r) => r,
             Err(e) => {
                 last_err = format!("{method}: {}", err_chain(&e));
@@ -840,10 +844,23 @@ pub async fn telegram_start(
             }
         };
         rt.block_on(async move {
-            let client = reqwest::Client::builder()
+            // Builder failures (e.g. TLS backend init) must degrade to an
+            // emitted error + stopped state, not panic the poll thread.
+            let client = match reqwest::Client::builder()
                 .timeout(Duration::from_secs(LONG_POLL_SECS + 15))
                 .build()
-                .expect("reqwest client");
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    if GENERATION.load(Ordering::SeqCst) == generation {
+                        RUNNING.store(false, Ordering::SeqCst);
+                    }
+                    emit_event(TelegramEvent::Error {
+                        message: format!("HTTP client: {e}"),
+                    });
+                    return;
+                }
+            };
             let mut last_error: Option<String> = None;
             let mut waiting_logged = false;
             // Held by THIS poll thread only, across successful polls. A
@@ -1166,7 +1183,7 @@ pub async fn telegram_send_voice(
     let form = reqwest::multipart::Form::new()
         .text("chat_id", chat_id.to_string())
         .part("voice", part);
-    let resp = http_client()
+    let resp = http_client()?
         .post(api_url(&token, "sendVoice"))
         .multipart(form)
         .send()
@@ -1217,7 +1234,7 @@ async fn download_file(token: &str, file_id: &str) -> Result<bytes::Bytes, Strin
     let fp: FilePath = post_json(token, "getFile", &serde_json::json!({ "file_id": file_id })).await?;
     let rel = fp.file_path.ok_or("no file_path in getFile result")?;
     let url = format!("{API}/file/bot{token}/{rel}");
-    let resp = http_client()
+    let resp = http_client()?
         .get(&url)
         .send()
         .await
@@ -1258,7 +1275,7 @@ async fn send_multipart(
         form = form.text("caption", c);
     }
     form = form.part(field.to_string(), part);
-    let resp = http_client()
+    let resp = http_client()?
         .post(api_url(token, method))
         .multipart(form)
         .send()
@@ -1346,7 +1363,7 @@ pub async fn telegram_send_media_url(
     caption: Option<String>,
 ) -> Result<(), String> {
     const MAX_BYTES: usize = 20 * 1024 * 1024;
-    let resp = http_client()
+    let resp = http_client()?
         .get(&url)
         .send()
         .await

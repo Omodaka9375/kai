@@ -211,7 +211,6 @@ export function Header({
   const shortcutLabel = useMemo(() => {
     const tokens = tokensFor("shortcuts.open");
     return tokens ? `Keyboard shortcuts (${tokens})` : "Keyboard shortcuts";
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userShortcuts]);
 
   useEffect(() => {

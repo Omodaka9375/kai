@@ -106,10 +106,8 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, Props>(
       setPhase({ kind: "waiting", url });
       void (async () => {
         for (let attempt = 0; attempt < WAIT_MAX_ATTEMPTS; attempt++) {
-          // eslint-disable-next-line no-await-in-loop
           await new Promise((r) => setTimeout(r, WAIT_POLL_MS));
           if (!alive) return;
-          // eslint-disable-next-line no-await-in-loop
           if (await serverReachable(url)) {
             if (alive) setPhase({ kind: "mount" });
             return;

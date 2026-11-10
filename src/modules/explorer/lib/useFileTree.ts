@@ -106,7 +106,6 @@ export function useFileTree(rootPath: string | null, options?: Options) {
     // Re-list loaded directories when the visibility preference changes.
     // `nodes` is intentionally omitted so ordinary tree edits don't refetch
     // every expanded directory.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showHidden, rootPath, fetchChildren]);
 
   const toggle = useCallback(

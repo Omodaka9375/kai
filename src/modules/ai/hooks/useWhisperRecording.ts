@@ -58,16 +58,57 @@ async function transcribeBlob(blob: Blob, apiKey: string): Promise<string> {
   return text;
 }
 
+/** Minimal shape of the (vendor-prefixed) Web Speech Recognition API as
+ *  exposed by WebView2/Chromium. TypeScript's DOM lib does not ship these
+ *  types, so only the members this hook uses are declared here. */
+interface SpeechResultItem {
+  readonly isFinal: boolean;
+  readonly length: number;
+  [index: number]: { transcript: string };
+}
+
+interface SpeechRecognitionEventLike {
+  readonly resultIndex: number;
+  readonly results: {
+    readonly length: number;
+    [index: number]: SpeechResultItem;
+  };
+}
+
+interface SpeechRecognitionErrorEventLike {
+  readonly error?: string;
+}
+
+type SpeechRecognitionLike = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((e: SpeechRecognitionEventLike) => void) | null;
+  onerror: ((e: SpeechRecognitionErrorEventLike) => void) | null;
+  onend: (() => void) | null;
+  start(): void;
+  stop(): void;
+  abort(): void;
+};
+
+type SpeechRecognitionCtor = new () => SpeechRecognitionLike;
+
+interface WindowWithSpeech {
+  SpeechRecognition?: SpeechRecognitionCtor;
+  webkitSpeechRecognition?: SpeechRecognitionCtor;
+}
+
 /** Check if the Browser Speech Recognition API is available (WebView2/Chromium). */
-const hasSpeechRecognition =
-  typeof window !== "undefined" &&
-  !!((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
+const hasSpeechRecognition = speechCtor() != null;
 
-type SpeechRec = any; // WebView2 SpeechRecognition — no TS lib types
+function speechCtor(): SpeechRecognitionCtor | undefined {
+  if (typeof window === "undefined") return undefined;
+  const w = window as WindowWithSpeech;
+  return w.SpeechRecognition ?? w.webkitSpeechRecognition;
+}
 
-function createSpeechRecognition(): SpeechRec | null {
-  const Ctor =
-    (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+function createSpeechRecognition(): SpeechRecognitionLike | null {
+  const Ctor = speechCtor();
   if (!Ctor) return null;
   const sr = new Ctor();
   sr.continuous = true;
@@ -112,7 +153,7 @@ export function useWhisperRecording({
   const recRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
-  const speechRef = useRef<SpeechRec | null>(null);
+  const speechRef = useRef<SpeechRecognitionLike | null>(null);
   // Local (whisper.cpp) route: raw PCM tap → WAV, encoded at stop.
   const audioCtxRef = useRef<AudioContext | null>(null);
   const procRef = useRef<ScriptProcessorNode | null>(null);
@@ -311,7 +352,7 @@ export function useWhisperRecording({
     // appends (engines that never set the field) because indices are
     // only trusted when they advance.
     let lastResultIndex = -1;
-    sr.onresult = (e: any) => {
+    sr.onresult = (e: SpeechRecognitionEventLike) => {
       const start = typeof e.resultIndex === "number" && e.resultIndex >= 0
         ? e.resultIndex
         : 0;
@@ -331,8 +372,8 @@ export function useWhisperRecording({
         deliver(text);
       }
     };
-    sr.onerror = (e: any) => {
-      const code = String((e as any)?.error ?? "");
+    sr.onerror = (e: SpeechRecognitionErrorEventLike) => {
+      const code = String(e?.error ?? "");
       console.error("SpeechRecognition error:", code);
       if (/not-allowed|notallowed|service-not-allowed|audio-capture/i.test(code)) {
         setError("Microphone permission denied. Enable mic access in your OS / WebView settings.");
@@ -672,7 +713,6 @@ export function useWhisperRecording({
       }
       streamRef.current?.getTracks().forEach((t) => t.stop());
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return {

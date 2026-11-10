@@ -871,7 +871,6 @@ function GroupApprovals({ group }: { group: GroupChat }) {
         })),
         foregroundSessionId,
       }).filter((a) => a.groupId === null || a.groupId === group.id),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [group, foregroundSessionId, version, metaVersion],
   );
   if (pending.length === 0) return null;

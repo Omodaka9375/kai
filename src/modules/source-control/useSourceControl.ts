@@ -663,7 +663,6 @@ export function useSourceControl(
     };
     // BOOT-ONCE: no contextPath/workspaceKey in the deps. The context-change
     // re-resolve lives in its own effect below (repo-null gated, local-only).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled]);
 
   // Context switch with no repo resolved for it: re-resolve locally (no
@@ -674,7 +673,6 @@ export function useSourceControl(
     if (!enabled || !settledContextPath) return;
     if (stateRef.current.repo) return;
     void refresh({ remote: "never" });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settledContextPath, enabled]);
 
   return useMemo<SourceControlSummary>(

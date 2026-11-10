@@ -210,7 +210,6 @@ function ModelDropdown() {
       (hasKeyFor(p.id) ? configured : unconfigured).push(p);
     }
     return { configured, unconfigured };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiKeys]);
 
   const filtered = useMemo(() => {

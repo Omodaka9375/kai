@@ -176,7 +176,6 @@ export const SearchInline = forwardRef<SearchInlineHandle, Props>(
     // Re-sync search config when toggles change.
     useEffect(() => {
       if (q && target?.kind === "editor") syncSearch(q);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [caseSensitive, useRegexp]);
 
     // Hide replace row when switching away from editor.

@@ -714,7 +714,6 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
     return () => {
       void promise.then((un) => un());
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Current project folder name — the last path segment. Used for the window
@@ -1126,7 +1125,6 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
     return () => {
       document.removeEventListener("contextmenu", handleContextMenu);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [captureActiveSelection]);
 
   const openNewTab = useCallback(() => {
@@ -1491,7 +1489,6 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
       document.removeEventListener("click", handler, true);
       window.removeEventListener("Kai:open-in-preview", onCustom);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openPreviewTab]);
 
   const handleSplitPane = useCallback(
@@ -1673,7 +1670,6 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
   const onActivateLive = useCallback(() => {
     setSandboxRoot(explorerRoot ?? launchCwd ?? home ?? null);
     setLiveRef.current?.();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [explorerRoot, launchCwd, home]);
   useEffect(() => {
     registerProjectRuntime(projectRuntime);    const findCwd = () => {
@@ -1779,7 +1775,6 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
     setProjectLive(projectRuntime.id, live);
     if (isActiveRef.current) setLive(live);
     setLiveRef.current = () => setLive(live);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectRuntime, setLive, activeId, tabs, explorerRoot, launchCwd, home, openPreviewTab]);
 
   useEffect(() => {

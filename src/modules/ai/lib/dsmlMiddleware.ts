@@ -216,7 +216,6 @@ async function readWithStallWatchdog(
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Part = any;
 
 type DsmlToolCall = {
@@ -424,11 +423,9 @@ export function createDsmlMiddleware(): LanguageModelMiddleware {
   return {
     specificationVersion: "v3",
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     wrapStream: (async ({ doStream, model }: any) => {
       const provider: string = (model as { provider?: string }).provider ?? "";
 
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       const result: { stream: ReadableStream<Part>; [k: string]: unknown } =
         await doStream();
       const original = result.stream;

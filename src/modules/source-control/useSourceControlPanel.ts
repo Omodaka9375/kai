@@ -476,7 +476,6 @@ export function useSourceControlPanel(
       setCommitMessage(msg);
     }
     // >1 files: leave the user's message alone.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stagedEntries, commitMessage]);
 
   // Push is allowed when tracking an upstream that we're not behind of, OR

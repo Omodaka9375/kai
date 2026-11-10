@@ -160,7 +160,6 @@ export function WorkspaceActivationGate(props: ActivationGateProps) {
         setLaunchCwdResolved(true);
         setRoot(home ?? "");
       });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive, projectRuntime]);
 
   // ── Open-project window events (foreground listener only) ────────────────
@@ -237,7 +236,6 @@ export function WorkspaceActivationGate(props: ActivationGateProps) {
     // Only the visible project changes the legacy global presentation
     // selection; the captured project value remains independently stable.
     useAgentsStore.getState().setRoot(root);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive, prefsHydrated, explorerRoot, projectModelIds, prefDefaultModel]);
 
   // ── Session flip + live-bridge activation (was the live effect's
@@ -264,7 +262,6 @@ export function WorkspaceActivationGate(props: ActivationGateProps) {
       onActivateLive();
     };
     startTransition(activate);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive]);
 
   // ── Session stamp: the global active id briefly names the OUTGOING
@@ -296,7 +293,6 @@ export function WorkspaceActivationGate(props: ActivationGateProps) {
     void import("@/modules/ai/store/openrouterModelsStore").then((m) =>
       m.useOpenRouterModelsStore.getState().fetch(),
     );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive, launchCwdResolved, explorerRoot, launchCwd, home]);
 
   // ── Assistant bridge / reminder scheduler (main-window surfaces) ────────
@@ -335,7 +331,6 @@ export function WorkspaceActivationGate(props: ActivationGateProps) {
       assistantClaimUnlisten.current?.();
       assistantClaimUnlisten.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive]);
 
   return null;

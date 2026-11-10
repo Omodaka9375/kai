@@ -19,7 +19,6 @@ import { noteWrite } from "./autoVerify";
 import { noteRemoteSurfaceTouched } from "./provenance";
 import { presentationFor } from "./toolPresentations";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ToolDef = any;
 
 // Effect status / fence / remote-surface classification all live in the
@@ -90,7 +89,6 @@ export function withToolGuard(
     ).toModelOutput;
 
     const wrapped = { ...toolDef };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (wrapped as any).execute = async (...args: any[]) => {
       const raw = await (execute as (...a: unknown[]) => unknown)(...args);
       // Provenance: a remote fetch happened — stamp the session so any memory
