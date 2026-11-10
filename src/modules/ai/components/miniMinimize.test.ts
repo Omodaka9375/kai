@@ -47,4 +47,16 @@ describe("AI mini window minimize-to-pill (source pins)", () => {
     expect(pill).toContain("AiPillStatusBadge");
     expect(pill).toContain("animate-pulse rounded-full bg-emerald-500");
   });
+
+  it("full-view hiding stays below all hooks (expand must not crash)", () => {
+    // ActiveSurfaces keeps the same pill mounted when the group expands.
+    // An early return before the final memo changes its hook count.
+    const earlyReturn = pill.indexOf("if (groupPanelExpanded) return null;");
+    const lastMemo = pill.indexOf("const aiMode = !useMemo(");
+    expect(earlyReturn).toBeGreaterThan(-1);
+    expect(lastMemo).toBeGreaterThan(-1);
+    expect(earlyReturn).toBeGreaterThan(lastMemo);
+    expect(pill).toContain("subscribeSessionAgentMeta");
+    expect(pill).toContain("[version, groups, sessionMetaVersion]");
+  });
 });

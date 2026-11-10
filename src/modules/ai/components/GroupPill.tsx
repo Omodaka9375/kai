@@ -9,7 +9,12 @@ import {
   getPersonaApprovals,
   subscribeGroupChats,
 } from "../store/groupChatStore";
-import { useChatStore, getSessionAgentMeta } from "../store/chatStore";
+import {
+  getSessionAgentMeta,
+  getSessionMetaVersion,
+  subscribeSessionAgentMeta,
+  useChatStore,
+} from "../store/chatStore";
 
 /**
  * The AI surface's collapsed pill. When a group chat owns the expanded slot
@@ -26,6 +31,13 @@ export function GroupPill() {
   );
   const openMiniToStack = useChatStore((s) => s.openMiniToStack);
   const groupPanelExpanded = useChatStore((s) => s.groupPanelExpanded);
+  // Approval state lives in session meta, not the group store. Subscribe
+  // here or a background participant's waiting badge appears/clears late.
+  const sessionMetaVersion = useSyncExternalStore(
+    subscribeSessionAgentMeta,
+    getSessionMetaVersion,
+    getSessionMetaVersion,
+  );
   // Count is cosmetic — shows how many groups are live while the group
   // panel is the expanded surface.
   const groups = useMemo(() => getGroups(), [version]);
@@ -53,11 +65,7 @@ export function GroupPill() {
           getSessionAgentMeta(p.sessionId).status === "awaiting-approval",
       ).length;
     return personas + sessions;
-  }, [version, groups]);
-
-  // Full view: the group panel overlays the workspace down to the +42px
-  // strip — the pill's own strip. Hide instead of painting over/below it.
-  if (groupPanelExpanded) return null;
+  }, [version, groups, sessionMetaVersion]);
 
   // AI-PILL-MODE BADGE (2026-11-06): when this pill stands in for a
   // MINIMIZED AI window (no group involved), the group badges below are
@@ -66,6 +74,12 @@ export function GroupPill() {
   // visible at a glance; approvals stay in the group badge (in this mode
   // there are no group approvals - liveCount is 0).
   const aiMode = !useMemo(() => getGroups().some((g) => g.endedAt === null), [version]);
+
+  // Full view: the group panel overlays the workspace down to the +42px
+  // strip — the pill's own strip. Hide instead of painting over/below it.
+  // This must stay AFTER every hook: expanding the group keeps this pill
+  // mounted, so an early return here changes the hook order and crashes.
+  if (groupPanelExpanded) return null;
 
   return (
     <button

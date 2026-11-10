@@ -149,6 +149,9 @@ export function AiComposerProvider({ children }: ProviderProps) {
     if (draftSessionRef.current !== sessionId) {
       draftSessionRef.current = sessionId;
       setValue(sessionId ? getSessionPreferences(sessionId).draft ?? "" : "");
+      // Only the text draft is session-scoped today. Do not let pending
+      // attachments from chat A become a message in chat B on the next send.
+      setFiles([]);
       return;
     }
     if (!sessionId) return;
@@ -337,7 +340,12 @@ export function AiComposerProvider({ children }: ProviderProps) {
       const att = await readAttachment(f);
       if (att) next.push(att);
     }
-    if (next.length) setFiles((prev) => [...prev, ...next]);
+    if (next.length) {
+      setFiles((prev) => {
+        const ids = new Set(prev.map((f) => f.id));
+        return [...prev, ...next.filter((f) => !ids.has(f.id))];
+      });
+    }
   };
 
   const removeFile = (id: string) =>

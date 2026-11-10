@@ -24,6 +24,7 @@ import { readFileSync } from "node:fs";
 
 const bar = readFileSync(new URL("./TabBar.tsx", import.meta.url), "utf8");
 const useTabs = readFileSync(new URL("./lib/useTabs.ts", import.meta.url), "utf8");
+const app = readFileSync(new URL("../../app/App.tsx", import.meta.url), "utf8");
 
 describe("tab bar drag contract (source pins)", () => {
   it("activation is manual - focus on pointerdown never activates a tab", () => {
@@ -110,5 +111,15 @@ describe("ai-diff focus restore (source pins)", () => {
     expect(useTabs).toMatch(
       /if \(!tabsRef\.current\.some\(\(t\) => t\.kind === "ai-diff" && t\.approvalId === approvalId\)\) return;/,
     );
+  });
+
+  it("split right renders the AI diff instead of a blank pane", () => {
+    const split = app.slice(
+      app.indexOf('{splitTab ? ('),
+      app.indexOf(') : (\n                      workspaceSurface', app.indexOf('{splitTab ? (')),
+    );
+    expect(split).toContain('splitTab.kind === "ai-diff"');
+    expect(split).toContain("activeId={splitTab.id}");
+    expect(split).toContain("<AiDiffStack");
   });
 });

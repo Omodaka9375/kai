@@ -347,7 +347,7 @@ export function GroupChatPanel({
               // width, height formula, and the +84px anchor (AI pill below).
               groupExpanded
                 ? `${AI_EXPANDED_WINDOW_GEOMETRY} rounded-xl`
-                : "right-2 w-[min(34rem,calc(100vw-2rem))] bottom-[calc(var(--kai-input-bar-h,0px)+84px)] h-[min(42rem,calc(100vh-var(--kai-input-bar-h,0px)-92px))]",
+                : "right-2 w-[min(34rem,calc(100vw-2rem))] bottom-[calc(var(--kai-input-bar-h,0px)+84px)] h-[min(42rem,calc(100vh-var(--kai-input-bar-h,0px)-134px))]",
             )}
           >
             <div

@@ -817,6 +817,12 @@ describe("source pins — trust boundary & wiring", () => {
     // interpolate it, not carry its own copy.
     expect(panel).toContain("AI_EXPANDED_WINDOW_GEOMETRY");
     expect(panel).toContain("${AI_EXPANDED_WINDOW_GEOMETRY} rounded-xl");
+    // Docked group + AI pill: the +84px bottom anchor also needs the extra
+    // 42px subtracted from height. Otherwise the panel grows upward past
+    // the equivalent AI window's top edge when the viewport is short.
+    expect(panel).toContain(
+      "bottom-[calc(var(--kai-input-bar-h,0px)+84px)] h-[min(42rem,calc(100vh-var(--kai-input-bar-h,0px)-134px))]",
+    );
     expect(panel).toContain("ArrowExpand01Icon");
     expect(pill).toContain("groupPanelExpanded");
   });

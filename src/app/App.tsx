@@ -1994,6 +1994,16 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
                                 />
                               </div>
                             )}
+                            {splitTab.kind === "ai-diff" && (
+                              <div className="absolute inset-0 px-3 pt-2 pb-2">
+                                <AiDiffStack
+                                  tabs={tabs}
+                                  activeId={splitTab.id}
+                                  onAccept={(id) => respondToApproval(id, true)}
+                                  onReject={(id) => respondToApproval(id, false)}
+                                />
+                              </div>
+                            )}
                             {splitTab.kind === "api-tester" && (
                               <div className="absolute inset-0 px-3 pt-2 pb-2">
                                 <ApiTesterPane visible />
