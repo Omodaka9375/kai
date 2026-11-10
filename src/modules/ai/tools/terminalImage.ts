@@ -72,6 +72,39 @@ export function buildTerminalImageTools(ctx: ToolContext) {
         if (!/^[A-Za-z0-9+/=]*$/.test(base64_data)) {
           return { error: "base64_data must contain only base64 characters" };
         }
+        // CONTENT VALIDATION (2026-11-10 broken-image report): a model that
+        // can't easily fetch the real bytes passes a PLACEHOLDER string
+        // (literal "PLACEHOLDER" = 12 chars = 9 bytes, seen in a real
+        // transcript) and the card renders a broken img. Base64 charset
+        // alone can't catch that — validate the decoded payload:
+        // (1) must not be a placeholder-ish literal, (2) must be long
+        // enough to hold real image bytes (a 1x1 PNG is ~68 bytes), (3) must
+        // start with a known image magic (png/jpeg/gif/webp). Reject with a
+        // corrective message so the model re-reads the actual file instead
+        // of the chat silently showing a broken image.
+        if (/^(PLACEHOLDER|TODO|image|base64|data)$/i.test(base64_data.trim())) {
+          return {
+            error:
+              "base64_data looks like a placeholder, not real image bytes. Read the image file and pass its actual base64 content (no placeholder, no truncation).",
+          };
+        }
+        if (base64_data.length < 64) {
+          return {
+            error: `base64_data is only ${base64_data.length} characters - far too small to be a real image (a 1x1 PNG is ~90 chars). Pass the complete base64 content of the image file.`,
+          };
+        }
+        const magic = sniffImageMime(base64_data);
+        const isKnownImage =
+          magic === "image/jpeg" ||
+          base64_data.startsWith("iVBORw0KGgo") ||
+          base64_data.startsWith("R0lGOD") ||
+          (base64_data.startsWith("UklGR") && base64_data.length >= 16);
+        if (!isKnownImage) {
+          return {
+            error:
+              "base64_data does not start with a recognized image header (PNG/JPEG/GIF/WEBP). Decode it to check: if it is plain text, you passed a description instead of the file's bytes - read the image file and pass its actual base64 content.",
+          };
+        }
         const sizeBytes = Math.ceil((base64_data.length * 3) / 4);
 
         // CHAT CARD (2026-11-06, same surface-independence fix as display_
