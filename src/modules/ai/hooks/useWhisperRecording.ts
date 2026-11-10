@@ -574,7 +574,15 @@ export function useWhisperRecording({
         "Timed out waiting for microphone access",
       );
       streamRef.current = stream;
-      const ctx = new AudioContext({ sampleRate: 16000 });
+      // DEFAULT device rate — NOT { sampleRate: 16000 }: forcing 16 kHz makes
+      // Chromium reconfigure the shared WASAPI capture stream off its native
+      // 44.1/48 kHz format and resample on the LIVE audio path for the whole
+      // recording. On Windows that resampler work stutters system-wide input
+      // (mouse visibly blocks during dictation, 2026-11-10 report). The 16 kHz
+      // WAV contract is already satisfied downstream: encodeWav() resamples
+      // from ANY input rate, and the detector math is rate-relative
+      // (frameMs = frame.length / ctx.sampleRate * 1000).
+      const ctx = new AudioContext();
       audioCtxRef.current = ctx;
       const src = ctx.createMediaStreamSource(stream);
       const proc = ctx.createScriptProcessor(4096, 1, 1);

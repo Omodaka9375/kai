@@ -352,7 +352,11 @@ export function useVoiceMicTest() {
       return;
     }
     streamRef.current = stream;
-    const ctx = new AudioContext({ sampleRate: 16000 });
+    // Default device rate — a forced 16 kHz context makes Windows resample
+    // the live WASAPI capture path (system-wide input stutter while the mic
+    // is open; see useWhisperRecording.ts for the full rationale). encodeWav
+    // resamples to 16 kHz at stop regardless of the context rate.
+    const ctx = new AudioContext();
     ctxRef.current = ctx;
     const src = ctx.createMediaStreamSource(stream);
     const proc = ctx.createScriptProcessor(4096, 1, 1);
