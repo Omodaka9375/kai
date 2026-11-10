@@ -14,11 +14,16 @@ import { describe, expect, it } from "vitest";
  * requires getSnapshot to return a CACHED value — a new reference per call
  * means "the store changed" after every render, so React re-renders,
  * re-runs the selector, and after ~50 nested updates throws #185. Both
- * offenders were in GroupChatPanelView.tsx (InvitePicker + ParticipantsMenu)
+ * offenders lived in the group panel (InvitePicker + ParticipantsMenu)
  * — exactly the components that mount when the group chat opens.
  *
  * The fix: select the store's STABLE array (`(s) => s.customAgents`), then
  * derive the mapped/filtered shape in useMemo.
+ *
+ * 2026-11-10: InvitePicker + ParticipantsMenu moved from
+ * GroupChatPanelView.tsx to GroupChatInvitePicker.tsx (god-file cleanup);
+ * both persona-list selector sites moved with them, so the pins read BOTH
+ * files — the union must stay clean.
  *
  * These pins keep every store selector in the group panel reference-stable.
  */
@@ -27,22 +32,30 @@ const read = (p: string) =>
 
 describe("group panel store selectors must return stable references", () => {
   const src = read("./GroupChatPanelView.tsx");
+  const picker = read("./GroupChatInvitePicker.tsx");
 
   it("no selector builds an array/object inline (the #185 footgun)", () => {
     // Any selector that spreads, maps, filters, or literals an array/object
     // returns a new reference per call → infinite re-render → #185.
-    expect(src).not.toMatch(
-      /use\w+Store\(\(s\) =>\s*\[\.\.\./,
-    );
-    expect(src).not.toMatch(/use\w+Store\(\(s\) =>[^)\n]*\.map\(/);
+    for (const file of [src, picker]) {
+      expect(file).not.toMatch(
+        /use\w+Store\(\(s\) =>\s*\[\.\.\./,
+      );
+      expect(file).not.toMatch(/use\w+Store\(\(s\) =>[^)\n]*\.map\(/);
+    }
   });
 
   it("persona lists derive in useMemo from the stable store array", () => {
-    expect(src).toContain("const customAgents = useAgentsStore((s) => s.customAgents)");
-    // Two fixed sites: InvitePicker's personas + ParticipantsMenu's invitablePersonas.
-    expect(src.match(/useAgentsStore\(\(s\) => s\.customAgents\)/g)?.length).toBe(2);
-    expect(src).toMatch(/const personas = useMemo\(/);
-    expect(src).toMatch(/const invitablePersonas = useMemo\(/);
+    // Two fixed sites, both in the picker file now: InvitePicker's personas
+    // + ParticipantsMenu's invitablePersonas.
+    expect(picker).toContain(
+      "const customAgents = useAgentsStore((s) => s.customAgents)",
+    );
+    expect(
+      picker.match(/useAgentsStore\(\(s\) => s\.customAgents\)/g)?.length,
+    ).toBe(2);
+    expect(picker).toMatch(/const personas = useMemo\(/);
+    expect(picker).toMatch(/const invitablePersonas = useMemo\(/);
   });
 });
 

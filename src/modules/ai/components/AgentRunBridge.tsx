@@ -20,6 +20,7 @@ import {
   type AgentRunStatus,
 } from "../store/chatStore";
 import { verifyIfDirtyAtRunEnd } from "../lib/autoVerify";
+import { useAgentSpeech } from "../hooks/useAgentSpeech";
 import {
   applyEditsLocally,
   extractFileMutations,
@@ -33,7 +34,6 @@ import { predictAutoApproval } from "../lib/autoApprovePrediction";
 import { activeProjectId, projectIdForSession } from "../store/chatStore";
 import { isApprovalDenied, noteApprovalDenied } from "../lib/approvalLatch";
 import { applyApprovalResponseToChat } from "../store/chatStore";
-import { pickSpeakSegments, speakText } from "../lib/voiceTts";
 import { useProjectRuntime } from "@/modules/workspace";
 import {
   appendGroupMessage,
@@ -49,7 +49,6 @@ import {
   resolveMirrorReply,
   peekReplyProvision,
   takeReplyProvision,
-  isGroupDeliveryText,
 } from "../store/groupChatStore";
 
 /**
@@ -788,180 +787,16 @@ function Bridge({
     void verifyIfDirtyAtRunEnd(sessionId, root, injectMessage, runtime?.native);
   }, [runtime, status, sessionId, injectMessage, approvalsPending]);
 
-  // ---- Auto-speak finished replies (Voice settings) -----------------------
-  // When a run settles to idle after streaming, read the reply THIS run
-  // produced aloud via the configured TTS mode (local Piper / OpenAI /
-  // AssemblyAI). Selecting any TTS mode other than "off" IS the opt-in —
-  // there is no separate checkbox.
-  //
-  // CAUSALITY BOUNDARY (2026-10-31 fix): the pre-run tail (array length +
-  // the last assistant message OBJECT) is snapshotted on every busy
-  // transition, and the extraction NEVER walks back past it. The old code
-  // searched the whole history for "the last assistant text" — a run whose
-  // final message had no speakable text (tool-only replies, a stopped run,
-  // a TTS toggle made through the voice_settings tool mid-run) fell through
-  // to the PREVIOUS turn's reply and spoke it: "I turned TTS on and it
-  // read the message from before my request." It also left the arm set on
-  // that path (!text return), so the NEXT unrelated messages-change effect
-  // re-fired extraction and spoke the old reply from nowhere, and its
-  // dedupe key (session-id + array LENGTH — forbidden by the ttsCausality
-  // pin) collided across compaction and steering strips, silently skipping
-  // later replies.
-  //
-  // Two-phase on purpose: useChat throttles MESSAGE notifications
-  // (experimental_throttle: 50) but NOT status notifications, so at end of
-  // run the status flips to idle up to 50ms before the final message commit
-  // lands. Phase 1 (the transition) only arms runEndedRef; phase 2 —
-  // re-entered when the final messages land — actually speaks. (The status
-  // flip render reads the LIVE array via getSnapshot, so the reply is
-  // normally already there; phase 2 only waits out the throttle's trailing
-  // edge when the settle and the last commit land in the same tick.)
-  // Hooks must be UNCONDITIONAL: `isActive` flips when this workspace moves
-  // between background and foreground (project switch) while the component
-  // stays mounted. A conditional hook shifts every later hook's position;
-  // React's production deps comparison then reads a non-effect hook's
-  // memoizedState (deps === undefined) → TypeError reading 'length' inside
-  // areHookInputsEqual → the whole tree unmounts (themed blank window).
-  const voiceTtsEnabled = usePreferencesStore((s) => s.voiceTtsMode !== "off");
-  const ttsActive = isActive && voiceTtsEnabled;
-  // Id of the last assistant message already spoken (dedupe by MESSAGE
-  // identity, not array length — compaction changes lengths).
-  const spokenForRef = useRef<string | null>(null);
-  const prevStatusRef = useRef(status);
-  const prevSessionRef = useRef(sessionId);
-  // True between a streaming→idle transition and the speak decision.
-  const runEndedRef = useRef(false);
-  // CAUSALITY BOUNDARY: what the tail looked like BEFORE the current run.
-  // busyTailRef = array length snapshot at busy-arm; busyLastAssistantRef =
-  // the last assistant message OBJECT at that moment (null when none).
-  // Object identity, not id: the SDK deep-clones on replaceMessage, so a
-  // regenerated reply is a NEW object with the same id and still counts as
-  // "this run produced it".
-  const busyTailRef = useRef<number | null>(null);
-  const busyLastAssistantRef = useRef<UIMessage | null>(null);
-  // TTS BOUNDARY: true when THIS run was provoked by a GROUP delivery:
-  // a cross-project participant delivery, an agent-coordinator wake, or
-  // the coordinator prompt. Group runs never speak: spoken replies are
-  // reserved for one-to-one user↔agent chats (the reply is mirrored into
-  // the group transcript instead, where it belongs). Snapshotted at
-  // busy-arm alongside the tail, BEFORE the ttsActive gate, so a mid-run
-  // TTS enable cannot resurrect a group run's voice either.
-  const busyWasGroupRef = useRef<boolean>(false);
-  // Latest render's state, read at speak time (after messages settle).
-  const statusRef = useRef(status);
-  statusRef.current = status;
-  const messagesRef = useRef(messages);
-  messagesRef.current = messages;
-  useEffect(() => {
-    const isBusy = status === "submitted" || status === "streaming";
-    // Session switch: refs carry over (Bridge is not remounted), so reset
-    // ALL transition tracking rather than speaking the new session's old
-    // tail. spokenFor too: the key embeds no session, and a stale id from
-    // the outgoing session must not skip the incoming one's first reply.
-    if (prevSessionRef.current !== sessionId) {
-      prevSessionRef.current = sessionId;
-      prevStatusRef.current = status;
-      runEndedRef.current = false;
-      busyTailRef.current = null;
-      busyLastAssistantRef.current = null;
-      busyWasGroupRef.current = false;
-      spokenForRef.current = null;
-      return;
-    }
-    const wasStreaming = prevStatusRef.current === "streaming";
-    const wasBusy =
-      prevStatusRef.current === "streaming" ||
-      prevStatusRef.current === "submitted";
-    prevStatusRef.current = status;
-    // Snapshot the pre-run tail on EVERY busy transition — including when
-    // ttsActive is false. TTS can be enabled MID-RUN (voice_settings tool),
-    // and a boundary snapshotted only-while-enabled would date from some
-    // earlier run and mis-gate the settle.
-    if (isBusy && !wasBusy) {
-      const msgs = messagesRef.current;
-      busyTailRef.current = msgs.length;
-      for (let i = msgs.length - 1; i >= 0; i--) {
-        if (msgs[i].role === "assistant") {
-          busyLastAssistantRef.current = msgs[i];
-          break;
-        }
-      }
-      // Group-provoked? The triggering user message is the LAST user text
-      // in the array at busy-arm (a queued group delivery may sit behind an
-      // even later user message only when the user typed while it was still
-      // queued — in that case the run answers the USER, not the group, and
-      // speaking is correct).
-      busyWasGroupRef.current = false;
-      for (let i = msgs.length - 1; i >= 0; i--) {
-        const m = msgs[i];
-        if (m.role !== "user") continue;
-        const text = m.parts
-          ?.map((p) => (p.type === "text" && typeof p.text === "string" ? p.text : ""))
-          .join("")
-          .trim();
-        busyWasGroupRef.current = !!text && isGroupDeliveryText(text);
-        break;
-      }
-    }
-    if (isBusy) {
-      // Mid-run: no settle to process. Any arm from a previous settle is
-      // void — a new run superseded it.
-      runEndedRef.current = false;
-      return;
-    }
-    if (!ttsActive) return;
-    if (wasStreaming && !isBusy) {
-      // A run just settled — arm the speak (fires once messages settle).
-      runEndedRef.current = true;
-    }
-    if (!runEndedRef.current) return;
-    // THE SPEAK DECISION is resolve-then-consume (the group-mirror throttle
-    // contract, 2026-11-01): useChat throttles message flushes, so status
-    // can settle BEFORE the final text lands. A pass that finds nothing
-    // keeps the arm AND the boundary — `messages` is a dep of this effect,
-    // so the late flush re-runs and speaks then. The arm is consumed only
-    // when a speak actually happens; the next busy transition voids it.
-    const msgs = messagesRef.current;
-    const from =
-      busyTailRef.current != null
-        ? Math.max(busyTailRef.current, 0)
-        : 0;
-    // Regenerate/stall-recovery replace the tail in place: the length may
-    // equal the boundary while the OBJECT differs. pickSpeakSegments treats
-    // any assistant message after `from` OR replacing the boundary object
-    // as this run's.
-    const boundaryObj = busyLastAssistantRef.current;
-    // FIRST + LAST (2026-11-01 report: "voice says one random sentence, and
-    // a fast agent never speaks at all"): multi-step runs accumulate every
-    // step's text parts, and speaking only the last said a random middle
-    // narration while the final answer was skipped — or nothing at all when
-    // the settle raced the throttled flush. The shared helper speaks the
-    // FIRST part (the immediate lead-in) joined with the LAST (the final
-    // answer); the step-by-step middle is skipped.
-    const seg = pickSpeakSegments(msgs, from, boundaryObj);
-    if (!seg) {
-      // Stale pass: keep the arm for the throttled late flush — UNLESS the
-      // array was rewritten under us (compaction removed the pre-run reply
-      // object), in which case `from` no longer means anything: void the
-      // arm rather than risk speaking a stale tail.
-      if (boundaryObj != null && from > 0 && !msgs.includes(boundaryObj)) {
-        runEndedRef.current = false;
-        busyTailRef.current = null;
-        busyLastAssistantRef.current = null;
-        busyWasGroupRef.current = false;
-      }
-      return;
-    }
-    runEndedRef.current = false;
-    const wasGroupRun = busyWasGroupRef.current;
-    busyTailRef.current = null;
-    busyLastAssistantRef.current = null;
-    busyWasGroupRef.current = false;
-    if (wasGroupRun) return; // group chats never speak — reserved for 1:1
-    if (spokenForRef.current === seg.lastMessageId) return;
-    spokenForRef.current = seg.lastMessageId;
-    void speakText(seg.text);
-  }, [status, ttsActive, messages, sessionId]);
+  // ---- Auto-speak finished replies ------------------------------------------
+  // Extracted to ../hooks/useAgentSpeech (2026-11-10). The TTS causality
+  // contracts (two-phase arm, object-identity boundary, group-mute) are
+  // pinned by lib/ttsCausality.test.ts against the hook file now.
+  const { busyWasGroupRef } = useAgentSpeech({
+    sessionId,
+    status,
+    messages,
+    isActive,
+  });
 
   // ---- Auto-approve effect --------------------------------------------------
   // (autoApprove / markAutoApproved / autoApprovedRef / signingApprovalRequired

@@ -104,6 +104,11 @@ describe("useSourceControl refresh triggers (no background blinking)", () => {
   // re-resolve on context switch. The old triggers are REMOVED:
   const src = read("./useSourceControl.ts");
   const app = read("../../app/App.tsx");
+  // 2026-11-10: the App.tsx source-control wiring (context paths, explicit
+  // refresh triggers, icon/git-graph handlers) moved to
+  // ../../app/useSourceControlWiring.ts — the pins follow the code; `app`
+  // stays for the wiring-call pin below.
+  const wiring = read("../../app/useSourceControlWiring.ts");
 
   it("no window-focus refresh listener", () => {
     expect(src).not.toContain('window.addEventListener("focus"');
@@ -121,12 +126,16 @@ describe("useSourceControl refresh triggers (no background blinking)", () => {
     expect(src).toMatch(/void refresh\(\{ remote: "never" \}\);$/m);
   });
 
-  it("no save/terminal-command file-change listeners in App", () => {
+  it("no save/terminal-command file-change listeners in the wiring hook", () => {
     // The old Kai:sc-file-change / Kai:term-command-end schedule hooks are
-    // gone; the events themselves remain (other consumers).
-    const sc = app.slice(app.indexOf("Explicit refresh triggers"));
+    // gone; the events themselves remain (other consumers). Pinned against
+    // BOTH files so a listener can't sneak back into either surface.
+    const sc = wiring.slice(wiring.indexOf("Explicit refresh triggers"));
+    expect(wiring.indexOf("Explicit refresh triggers")).toBeGreaterThan(-1);
     expect(sc).not.toContain('window.addEventListener("Kai:sc-file-change"');
     expect(sc).not.toContain('window.addEventListener("Kai:term-command-end"');
+    expect(app).not.toContain('window.addEventListener("Kai:sc-file-change"');
+    expect(app).not.toContain('window.addEventListener("Kai:term-command-end"');
   });
 
   it("explicit triggers exist: panel click-in, rail icon, refresh icon", () => {
@@ -134,9 +143,10 @@ describe("useSourceControl refresh triggers (no background blinking)", () => {
     const panel = read("./SourceControlPanel.tsx");
     expect(panel).toContain("data-source-control-panel");
     expect(panel).toContain("onRequestRefresh?.()");
-    // App: rail icon click refreshes (even when the panel is already open).
+    // The wiring hook: rail icon click refreshes (even when the panel is
+    // already open); App delegates to it.
     expect(app).toContain("handleSourceControlIconClick");
-    expect(app).toMatch(/if \(view === "source-control"\) \{\n\s*void manualScRefreshRef\.current/);
+    expect(wiring).toMatch(/if \(view === "source-control"\) \{\n\s*void manualScRefreshRef\.current/);
     // The panel's own Refresh icon path (handleRefresh -> scm.refresh) is
     // unchanged and remains one of the three triggers.
     expect(panel).toContain("onClick={handleRefresh}");

@@ -31,7 +31,7 @@ const read = (rel: string) =>
   readFileSync(new URL(rel, import.meta.url), "utf8") as string;
 
 describe("AgentRunBridge auto-speak: causality boundary (source pins)", () => {
-  const src = read("./AgentRunBridge.tsx");
+  const src = read("../hooks/useAgentSpeech.ts");
   const tts = read("../lib/voiceTts.ts");
 
   it("snapshots the pre-run tail (length + last assistant object) on busy transitions", () => {
@@ -123,11 +123,11 @@ describe("TTS is reserved for one-to-one chats — group runs never speak", () =
   // (isGroupDeliveryText), the bridge snapshots "group-provoked" at
   // busy-arm — BEFORE the ttsActive gate, so a mid-run enable can't
   // resurrect it — and the speak decision refuses group runs.
-  const src = read("./AgentRunBridge.tsx");
+  const src = read("../hooks/useAgentSpeech.ts");
   const store = read("../store/groupChatStore.ts");
 
-  it("the bridge imports the group-delivery marker check", () => {
-    expect(src).toContain("isGroupDeliveryText,");
+  it("the speech hook imports the group-delivery marker check", () => {
+    expect(src).toContain("isGroupDeliveryText");
   });
 
   it("group-provoked is snapshotted at busy-arm BEFORE the ttsActive gate", () => {
@@ -211,7 +211,7 @@ describe("speak the FINAL message in full, with length tiers (2026-11-01 redesig
   // the third: READ the reply — the run's FINAL assistant message, all
   // its text parts — and give the user pacing controls. First+last read
   // as an incoherent abridgment and is retired.
-  const src = read("./AgentRunBridge.tsx");
+  const src = read("../hooks/useAgentSpeech.ts");
   const tts = read("../lib/voiceTts.ts");
 
   it("the bridge picks the plan via the shared helper (old part loops gone)", () => {

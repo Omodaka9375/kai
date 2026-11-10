@@ -427,6 +427,12 @@ describe("source pins — trust boundary & wiring", () => {
     new URL("../components/GroupChatPanelView.tsx", import.meta.url),
     "utf8",
   );
+  // 2026-11-10: InvitePicker + ParticipantsMenu moved to their own file;
+  // their slice pins read the new home.
+  const invitePickerSrc = readFileSync(
+    new URL("../components/GroupChatInvitePicker.tsx", import.meta.url),
+    "utf8",
+  );
   const rail = readFileSync(
     new URL("../../workspace/ProjectRail.tsx", import.meta.url),
     "utf8",
@@ -639,8 +645,8 @@ describe("source pins — trust boundary & wiring", () => {
   });
 
   it("the create dialog lists existing groups with open + delete (deletion is human-only)", () => {
-    expect(panel).toContain("Your groups");
-    expect(panel).toContain("deleteGroupChat(g.id)");
+    expect(invitePickerSrc).toContain("Your groups");
+    expect(invitePickerSrc).toContain("deleteGroupChat(g.id)");
     // Trust boundary: the store's delete is human-triggered via the panel;
     // tool code must never gain a delete path.
     const groupTool = readFileSync(
@@ -655,9 +661,9 @@ describe("source pins — trust boundary & wiring", () => {
     // use dropdown lists to save on space." Each section is ONE trigger row
     // (Popover overlay carries the list); the selection shows as chips.
     // The old layout stacked three max-h-* scroll boxes inside the dialog.
-    const picker = panel.slice(
-      panel.indexOf("function InvitePicker("),
-      panel.indexOf("function ParticipantsMenu("),
+    const picker = invitePickerSrc.slice(
+      invitePickerSrc.indexOf("function InvitePicker("),
+      invitePickerSrc.indexOf("function ParticipantsMenu("),
     );
     // Dropdown triggers per section (with the collapse arrow icon).
     expect(picker).toMatch(/icon=\{ArrowDown01Icon\}/);
@@ -678,9 +684,9 @@ describe("source pins — trust boundary & wiring", () => {
     // a filter input over the list, a taller scroll region, and a count row
     // stating the full roster size ("N of M"), so a fold can never
     // masquerade as the whole roster again.
-    const picker = panel.slice(
-      panel.indexOf("function InvitePicker("),
-      panel.indexOf("function ParticipantsMenu("),
+    const picker = invitePickerSrc.slice(
+      invitePickerSrc.indexOf("function InvitePicker("),
+      invitePickerSrc.indexOf("function ParticipantsMenu("),
     );
     expect(picker).toContain("Filter personas…");
     expect(picker).toMatch(/const \[personaQuery, setPersonaQuery\]/);
@@ -702,7 +708,9 @@ describe("source pins — trust boundary & wiring", () => {
     // The OTHER persona invite surface — the live-group Members popover —
     // had NO scroll bound at all: a 17-persona roster overflowed the
     // screen with the tail unreachable. It must be scroll-bounded.
-    const menu = panel.slice(panel.indexOf("function ParticipantsMenu("));
+    const menu = invitePickerSrc.slice(
+      invitePickerSrc.indexOf("function ParticipantsMenu("),
+    );
     expect(menu).toMatch(/max-h-96 gap-0 overflow-y-auto/);
   });
 
@@ -928,13 +936,9 @@ describe("persona participants", () => {
     }
   });
 
-  it("source pins: persona support is wired through panel, store, and tool", () => {
+  it("source pins: persona support is wired through picker, store, and tool", () => {
     const store = readFileSync(
       new URL("./groupChatStore.ts", import.meta.url),
-      "utf8",
-    );
-    const panel = readFileSync(
-      new URL("../components/GroupChatPanelView.tsx", import.meta.url),
       "utf8",
     );
     const menu = readFileSync(
@@ -945,9 +949,14 @@ describe("persona participants", () => {
       new URL("../tools/group.ts", import.meta.url),
       "utf8",
     );
-    // Panel: picker lists personas + participants menu invites them.
-    expect(panel).toContain("addPersonaParticipants");
-    expect(panel).toContain("Invite personas");
+    // Picker (moved 2026-11-10): lists personas + participants menu invites
+    // them. Read the new file; the panel re-exports the components.
+    const invitePickerSrc = readFileSync(
+      new URL("../components/GroupChatInvitePicker.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(invitePickerSrc).toContain("addPersonaParticipants");
+    expect(invitePickerSrc).toContain("Invite personas");
     // Store: persona identity is synthetic and never a Chat session.
     expect(store).toContain('PERSONA_ID_PREFIX = "persona:"');
     expect(store).toContain("isPersonaParticipantId");

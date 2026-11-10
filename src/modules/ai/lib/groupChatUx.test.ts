@@ -23,6 +23,9 @@ const store = read("../store/groupChatStore.ts");
 // chatStore.ts source pins moved to ./projectRegistry (2026-11-10); read
 // locally in the one test that still needs them.
 const panel = read("../components/GroupChatPanelView.tsx");
+// 2026-11-10: InvitePicker + ParticipantsMenu moved out of the panel file;
+// their pins read the new home.
+const picker = read("../components/GroupChatInvitePicker.tsx");
 const mini = read("../components/AiMiniWindow.tsx");
 const lib = read("./groupApprovals.ts");
 
@@ -304,20 +307,20 @@ describe("single membership: conflicted rows disable at the picker (2026-11-01 M
   // invite surfaces (InvitePicker + ParticipantsMenu). The store backstop
   // is pinned in singleMembership.test.ts.
   it("InvitePicker rows disable with the owning group's name", () => {
-    expect(panel).toMatch(/const owners = useMemo\(\(\) => \{/);
-    expect(panel).toMatch(/const ownerName = owners\.get\(project\.id\);/);
-    expect(panel).toMatch(/disabled=\{!!ownerName\}/);
+    expect(picker).toMatch(/const owners = useMemo\(\(\) => \{/);
+    expect(picker).toMatch(/const ownerName = owners\.get\(project\.id\);/);
+    expect(picker).toMatch(/disabled=\{!!ownerName\}/);
     // Conflicted rows are still readable, never invisible: the badge names
     // the owning group, the row keeps the project name visible at 50%.
-    expect(panel).toMatch(/in \{ownerName\}/);
-    expect(panel).toMatch(
+    expect(picker).toMatch(/in \{ownerName\}/);
+    expect(picker).toMatch(
       /"cursor-not-allowed opacity-50 hover:bg-transparent"/,
     );
   });
 
   it("ParticipantsMenu lists conflicted projects as non-invitable", () => {
-    expect(panel).toMatch(/!liveGroupForProject\(c\.id\)/);
-    expect(panel).toMatch(/In another group/);
+    expect(picker).toMatch(/!liveGroupForProject\(c\.id\)/);
+    expect(picker).toMatch(/In another group/);
   });
 
   it("the store exposes the lookup the picker uses", () => {
@@ -388,20 +391,20 @@ describe("2026-11-02 user asks: compact InvitePicker dropdowns + custom-instruct
   it("both dropdowns gate their filters on roster size and cap their viewports", () => {
     // Filters only appear when the list warrants one (>6 rows) — a small
     // roster stays tight, a large one stays scannable.
-    expect(panel).toMatch(/showProjectFilter = candidates\.length > 6/);
-    expect(panel).toMatch(/showPersonaFilter = personas\.length > 6/);
+    expect(picker).toMatch(/showProjectFilter = candidates\.length > 6/);
+    expect(picker).toMatch(/showPersonaFilter = personas\.length > 6/);
     // Viewports are bounded short (max-h-56), not the old 64/80 walls.
-    expect(panel).not.toMatch(/max-h-64/);
-    expect(panel).not.toMatch(/max-h-80/);
-    expect(panel).toMatch(/max-h-56/);
-    expect(panel).toMatch(/Filter projects…/);
+    expect(picker).not.toMatch(/max-h-64/);
+    expect(picker).not.toMatch(/max-h-80/);
+    expect(picker).toMatch(/max-h-56/);
+    expect(picker).toMatch(/Filter projects…/);
   });
 
   it("selection chips cap at 4 with a +N overflow chip", () => {
-    expect(panel).toMatch(/invitees\.slice\(0, 4\)\.map/);
+    expect(picker).toMatch(/invitees\.slice\(0, 4\)\.map/);
     // JSX text: `+{invitees.length - 4} more` (no space before the brace).
-    expect(panel).toMatch(/\+\{invitees\.length - 4\} more/);
-    expect(panel).toMatch(/\+\{pickedPersonas\.length - 4\} more/);
+    expect(picker).toMatch(/\+\{invitees\.length - 4\} more/);
+    expect(picker).toMatch(/\+\{pickedPersonas\.length - 4\} more/);
   });
 
   it("the settings section explains where custom instructions apply", () => {

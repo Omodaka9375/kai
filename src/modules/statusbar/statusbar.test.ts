@@ -30,8 +30,10 @@ describe("group-chat entry button (2026-11-03 discoverability fix)", () => {
     // install; the old copy ("Open another project to start a group chat")
     // read as a hard blocker even though personas alone can create a
     // group. The hint now names the persona section below.
+    // 2026-11-10: the empty-projects hint lives in InvitePicker, which
+    // moved to GroupChatInvitePicker.tsx.
     const panel = readFileSync(
-      new URL("../ai/components/GroupChatPanelView.tsx", import.meta.url),
+      new URL("../ai/components/GroupChatInvitePicker.tsx", import.meta.url),
       "utf8",
     );
     expect(panel).toContain(
