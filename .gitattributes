@@ -5,6 +5,16 @@
 # edits keep working, which makes the failure look random). `eol=lf` forces LF
 # on checkout on every OS and overrides core.autocrlf on Windows; `text=auto`
 # normalizes to LF on add, so the repo can never regress to CRLF.
+#
+# Working-tree corruption STILL happens (PowerShell line surgery writes
+# CRLF: [IO.File]::WriteAllLines / Set-Content / Out-File), and git status
+# shows NOTHING for it — add normalizes, so only the byte-exact edit anchors
+# notice. Check with `pnpm eol:check`, repair with `pnpm eol:fix`
+# (scripts/eol.mjs — the SAFE stage-first recipe). NEVER repair by hand with
+# `git checkout -- <file>`: on unstaged work that restores the last COMMITTED
+# content and silently destroys your edits (it cost a full extraction session
+# once), and on EOL-only diffs it is a no-op anyway until the file is deleted.
+# The test suite's eolHygiene gate fails if the tree ever regresses.
 
 * text=auto eol=lf
 

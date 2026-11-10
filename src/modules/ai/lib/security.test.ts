@@ -253,6 +253,39 @@ describe("powerShellFileSurgeryHint — preserve the edit pipeline", () => {
     expect(powerShellFileSurgeryHint("Get-Content README.md | Select-Object -First 10")).toBeNull();
     expect(powerShellFileSurgeryHint("pnpm exec tsc --noEmit")).toBeNull();
   });
+
+  it("rejects ReadAllLines + WriteAllLines (the two-session CRLF culprit, 2026-11-10)", () => {
+    // The EXACT shape that CRLF'd the working tree twice: read lines, filter
+    // them, write them back. WriteAllLines emits Environment.NewLine (CRLF
+    // on Windows) for EVERY line even when the input was LF-only — git
+    // status then shows nothing (add normalizes) and byte-exact edit
+    // anchors fail on the file.
+    const command =
+      "$c = [IO.File]::ReadAllLines('src/app/App.tsx'); $out = $c | Where-Object { $_ -match 'keep' }; [IO.File]::WriteAllLines('src/app/App.tsx', $out)";
+    expect(powerShellFileSurgeryHint(command)).toContain("edit/batch_edit");
+  });
+
+  it("rejects WriteAllLines even with no paired read (split-then-write form)", () => {
+    // Agents split content earlier (or hold it from read_file) and use
+    // WriteAllLines purely as the writer - still a CRLF corruption.
+    const command =
+      "$lines = $content -split \"`n\"; [IO.File]::WriteAllLines('src/app.ts', $lines)";
+    expect(powerShellFileSurgeryHint(command)).toContain("edit/batch_edit");
+  });
+
+  it("rejects Out-File overwriting without a byte-safe encoding flag", () => {
+    expect(
+      powerShellFileSurgeryHint("Get-Content big.log | Select-String 'err' | Out-File errs.txt"),
+    ).toContain("edit/batch_edit");
+  });
+
+  it("still allows .NET reads for inspection with no write-back", () => {
+    // Reading a file's lines for ANALYSIS stays fine - only the write-back
+    // shapes are blocked.
+    expect(
+      powerShellFileSurgeryHint("$c = [IO.File]::ReadAllLines('a.ts'); $c.Length"),
+    ).toBeNull();
+  });
 });
 
 describe("checkWritable — shell-init / credential-file deny-list", () => {

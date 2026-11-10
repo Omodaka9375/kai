@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "eol:check": "node scripts/eol.mjs",
+    "eol:fix": "node scripts/eol.mjs --fix"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

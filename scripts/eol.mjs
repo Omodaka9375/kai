@@ -67,14 +67,19 @@ const SKIP_EXT = new Set([
 const violations = [];
 
 // ── 1. Tracked files: parse git's own --eol report ────────────────────────
-// Format: "i/<ieol>  w/<weol>  attr/<attrs>  <path>"
+// Format: "i/<ieol>  w/<weol>  attr/<attrs><TAB><path>" — the attrs column
+// contains SPACES ("text=auto eol=lf ") and the PATH is separated by a TAB,
+// so the path must be taken from after the tab, never by word-matching the
+// attr tail (that mis-captured "eol=lf \tfile" as the path — drill-found).
 const eolOut = run(["ls-files", "--eol"]);
 for (const line of eolOut.split("\n")) {
-  const m = /^i\/(\S+)\s+w\/(\S+)\s+attr\/\S+?\s+(.*)$/.exec(line);
+  const m = /^i\/(\S*)\s+w\/(\S+)\s+attr\/(.*)\t(.*)$/.exec(line);
   if (!m) continue;
-  const [, ieol, weol, path] = m;
+  const [, ieol, weol, , path] = m;
   if (weol !== "crlf" && weol !== "mixed") continue;
   // Binary files have ieol "-" (no text conversion) — not our contract.
+  // (Empty ieol = staged-new file: index holds the LF copy, working tree
+  // is corrupted — exactly a fixable violation, so it passes this check.)
   if (ieol === "-") continue;
   const ext = extname(path).toLowerCase();
   if (SKIP_EXT.has(ext)) continue;

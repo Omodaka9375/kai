@@ -444,10 +444,39 @@ export function powerShellFileSurgeryHint(command: string): string | null {
     /\b(?:Set-Content|Add-Content|Out-File)\b[\s\S]{0,200}?-Value\s*\$\w+/i.test(
       command,
     );
-  const dotNetRewrite =
-    /\[(?:IO|System\.IO)\.File\]::ReadAllText\b/i.test(command) &&
-    /\[(?:IO|System\.IO)\.File\]::WriteAllText\b/i.test(command);
-  if (!getContentRewrite && !varMediated && !dotNetRewrite) return null;
+  // The .NET File API pairs are the same trap in any combination:
+  // ReadAllText/ReadAllLines + WriteAllText/WriteAllLines/AppendAllLines/
+  // AppendAllText. The *Lines variants are the pair that CRLF'd two
+  // sessions' working trees (2026-11-10) — WriteAllLines writes
+  // Environment.NewLine (CRLF on Windows) even when every input line was LF.
+  const dotNetRead =
+    /\[(?:IO|System\.IO)\.File\]::ReadAllText\b/i.test(command) ||
+    /\[(?:IO|System\.IO)\.File\]::ReadAllLines\b/i.test(command);
+  const dotNetWrite =
+    /\[(?:IO|System\.IO)\.File\]::WriteAllText\b/i.test(command) ||
+    /\[(?:IO|System\.IO)\.File\]::WriteAllLines\b/i.test(command) ||
+    /\[(?:IO|System\.IO)\.File\]::AppendAllLines\b/i.test(command) ||
+    /\[(?:IO|System\.IO)\.File\]::AppendAllText\b/i.test(command);
+  const dotNetRewrite = dotNetRead && dotNetWrite;
+  // WriteAllLines/AppendAllLines ALONE are the trap even without a paired
+  // read: agents use them to "write out" an array of lines (split from
+  // earlier content), and they silently convert every break to CRLF.
+  const writeLinesAlone =
+    /\[(?:IO|System\.IO)\.File\]::WriteAllLines\b/i.test(command) ||
+    /\[(?:IO|System\.IO)\.File\]::AppendAllLines\b/i.test(command);
+  // Out-File on Windows writes CRLF (plus a trailing newline) by default.
+  // Overwriting an existing source file with it corrupts the tree's EOLs.
+  const outFileRewrite =
+    /\bOut-File\b/i.test(command) &&
+    !/--Encoding\s+(?:utf8NoBOM|asciiUnix|lf)/i.test(command);
+  if (
+    !getContentRewrite &&
+    !varMediated &&
+    !dotNetRewrite &&
+    !writeLinesAlone &&
+    !outFileRewrite
+  )
+    return null;
   return "Use edit/batch_edit for source-file changes. They preserve line endings, serialize same-file writes, and create an undo checkpoint. PowerShell remains appropriate for builds, tests, installs, git, and creating new artifacts.";
 }
 
