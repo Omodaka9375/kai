@@ -46,7 +46,10 @@ describe("wake-turn cwd isolation (source pins)", () => {
 
   it("re-resolves the owning project per call instead of freezing it at chat creation", () => {
     expect(src).toContain("const liveFor");
-    expect(src).toContain("projectLive.get(findProject()?.id ?? \"\")");
+    // 2026-11-10: projectLive moved to ./projectRegistry - the accessor
+    // must still re-run findProject() PER CALL (never project?.id frozen).
+    expect(src).toContain("getProjectLive(findProject()?.id ?? \"\")");
+    expect(src).not.toContain("getProjectLive(project?.id ?? \"\")");
   });
 
   it("anchors unresolved sessions to their own root, never the visible project", () => {

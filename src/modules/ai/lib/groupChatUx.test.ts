@@ -20,7 +20,8 @@ const read = (rel: string) =>
   readFileSync(new URL(rel, import.meta.url), "utf8") as string;
 
 const store = read("../store/groupChatStore.ts");
-const chat = read("../store/chatStore.ts");
+// chatStore.ts source pins moved to ./projectRegistry (2026-11-10); read
+// locally in the one test that still needs them.
 const panel = read("../components/GroupChatPanelView.tsx");
 const mini = read("../components/AiMiniWindow.tsx");
 const lib = read("./groupApprovals.ts");
@@ -515,13 +516,16 @@ describe("the pill survives a project round-trip (2026-11-01)", () => {
   // Fix: chatStore signals active-project changes; the window subscribes;
   // the pill derives from the panel's expanded boolean ("copy the regular
   // AI chat patterns" — one derived boolean drives window + pill).
-  it("chatStore notifies active-project switches (subscribe + version)", () => {
-    expect(chat).toContain("export function subscribeActiveProject");
-    expect(chat).toContain("export function getActiveProjectVersion");
-    expect(chat).toMatch(
+  it("the project registry notifies active-project switches (subscribe + version)", () => {
+    // Extracted 2026-11-10: the registries + reactive signal live in
+    // ./projectRegistry; chatStore re-exports them.
+    const registry = read("../store/projectRegistry.ts");
+    expect(registry).toContain("export function subscribeActiveProject");
+    expect(registry).toContain("export function getActiveProjectVersion");
+    expect(registry).toMatch(
       /const changed = activeProjectRuntime\?\.id !== runtime\.id;/,
     );
-    expect(chat).toMatch(/if \(changed\) \{\s*activeProjectVersion\+\+;/);
+    expect(registry).toMatch(/if \(changed\) \{\s*activeProjectVersion\+\+;/);
   });
 
   it("the pill gate uses the panel's expanded boolean (not the store surface)", () => {

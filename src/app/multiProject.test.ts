@@ -153,7 +153,9 @@ describe("multi-project workspace ownership", () => {
     const gate = readFileSync(new URL("./workspaceActivation.tsx", import.meta.url), "utf8");
     // 2026-11-02 round 2: the hydrate bootstrap lives in the activation gate.
     expect(gate).toContain("hydrateSessions(root, projectRuntime)");
-    expect(store).toContain("const hydrationRuntime = runtime ?? activeProjectRuntime");
+    // 2026-11-10: activeProjectRuntime moved to ./projectRegistry; the
+    // accessor preserves the capture-ONCE semantics this test guards.
+    expect(store).toContain("const hydrationRuntime = runtime ?? getActiveProjectRuntime()");
     expect(store).toContain("const liveActiveId = hydrationRuntime");
   });
 

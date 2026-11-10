@@ -67,10 +67,51 @@ import {
   type AgentRunStatus,
   type ChatRuntimeDeps,
 } from "../lib/chatRuntime";
+import {
+  applyApprovalResponseToChat,
+  COMPLETE_PART_STATES,
+  hasPendingApprovals,
+  type ApprovalResponder,
+} from "./approvalResponses";
+import {
+  getActiveProjectRuntime,
+  getAllProjectRuntimes,
+  getProjectActiveSession,
+  getProjectLive,
+  getProjectModel,
+  getProjectPersona,
+  getProjectRuntime,
+  setProjectActiveSession,
+  setProjectModel,
+} from "./projectRegistry";
 
 // Re-export for API compatibility — AgentStatusPill, eventBus, and the
 // module barrel import these types from chatStore (their original home).
 export type { AgentMeta, AgentRunStatus };
+// Re-exports: the extracted modules (approvalResponses, projectRegistry) are
+// the new homes; chatStore stays the import hub so no consumer changes.
+export {
+  applyApprovalResponseToChat,
+  approvalContinuationPending,
+  hasPendingApprovals,
+} from "./approvalResponses";
+export type { ApprovalResponder } from "./approvalResponses";
+export {
+  activeProjectId,
+  getActiveProjectRuntime,
+  getActiveProjectVersion,
+  getAllProjectRuntimes,
+  getProjectActiveSession,
+  getProjectModel,
+  isProjectOpen,
+  registerProjectRuntime,
+  setActiveProjectRuntime,
+  setProjectActiveSession,
+  setProjectLive,
+  setProjectModel,
+  subscribeActiveProject,
+  subscribeProjectActiveSessions,
+} from "./projectRegistry";
 
 type Live = {
   getCwd: () => string | null;
@@ -237,11 +278,6 @@ export type PendingSelection = {
   text: string;
   source: "terminal" | "editor";
 };
-
-export type ApprovalResponder = (
-  approvalId: string,
-  approved: boolean,
-) => void;
 
 /** Two-state approval mode: Ask reviews each approval-required call; Allow
  * auto-approves the session except for explicit consent carve-outs. */
@@ -537,8 +573,9 @@ function noteSessionRoot(id: string, root: string | null | undefined) {
  */
 function saveMessagesRerouted(id: string, messages: UIMessage[]): void {
     const session = useChatStore.getState().sessions.find((s) => s.id === id);
-    const root = sessionRoots.get(id) ?? session?.workspaceRoot ?? activeProjectRuntime?.root;
-    const env = session?.workspaceEnv ?? (session ? { kind: "local" as const } : activeProjectRuntime?.env);
+    const activeRt = getActiveProjectRuntime();
+    const root = sessionRoots.get(id) ?? session?.workspaceRoot ?? activeRt?.root;
+    const env = session?.workspaceEnv ?? (session ? { kind: "local" as const } : activeRt?.env);
   // Unknown session → current scope (cold-start fast path).
   if (root === undefined) {
     void saveMessages(id, messages);
@@ -581,98 +618,14 @@ export function flushPersist(id?: string): void {
  * callbacks is routed through these accessors, preserving the pre-
  * extraction behavior (including the active-session guard).
  */
-/** Active-window runtime for legacy/global callers. Each project installs
- * its own runtime while its chats are being created/hydrated. */
-let activeProjectRuntime: import("@/modules/workspace").ProjectRuntime | undefined;
-const projectRuntimes = new Map<string, import("@/modules/workspace").ProjectRuntime>();
-const projectLive = new Map<string, ChatRuntimeDeps["live"]>();
-const projectModels = new Map<string, ModelId>();
-const projectPersonas = new Map<string, string>();
+// The per-project registries (active runtime, runtimes, live handles, models,
+// personas) and the active-project reactive signal live in
+// ./projectRegistry. chatStore re-exports them for API compatibility and
+// reads them through the registry accessors below.
 const approvalResponders = new Map<string, ApprovalResponder>();
 /** Which session currently holds an approval id - the owner the decision
- *  must route to. Same scan shape describeApproval uses (part.approval.id). */
-/**
- * Apply an approval decision to the chat that owns it.
- *
- * The AI SDK's `Chat.addToolApprovalResponse` only rewrites the approval part
- * on the LAST message and only auto-continues when that last message is the
- * assistant holding the responded approval. Both properties break the moment
- * a ride-along message lands after the run parked on the card (a reminder or
- * watch fire appended by injectMessage's passive ride-along, a steering
- * message, or user text): the part gets STRANDED on an earlier assistant
- * message and every later response — human click or auto-approve — becomes a
- * silent no-op (the click "does nothing", the card pins forever, verified
- * against ai@6.0.168 dist).
- *
- * So: when the part sits on the last message, delegate to the SDK (normal
- * flow, jobExecutor-ordered). When it is stranded on an earlier message,
- * flip the part state directly — the request builder converts ANY assistant
- * tool part carrying `approval.approved` into a `tool-approval-response`
- * regardless of position — and fire the continuation ourselves, carrying
- * whatever rode along. Returns false when no matching pending part exists
- * (stale id — callers already treat that as a no-op).
- */
-export function applyApprovalResponseToChat(
-  chat: Chat<UIMessage>,
-  approvalId: string,
-  approved: boolean,
-): boolean {
-  const messages = chat.messages;
-  let holderIdx = -1;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const parts = (messages[i].parts ?? []) as Array<{
-      state?: string;
-      approval?: { id?: string };
-    }>;
-    if (
-      parts.some(
-        (p) => p.state === "approval-requested" && p.approval?.id === approvalId,
-      )
-    ) {
-      holderIdx = i;
-      break;
-    }
-  }
-  if (holderIdx === -1) return false;
-
-  if (holderIdx === messages.length - 1) {
-    void chat.addToolApprovalResponse({ id: approvalId, approved });
-    return true;
-  }
-
-  // Stranded part: rewrite it in place (same shape the SDK's applier writes:
-  // state approval-responded + approval {id, approved}) and continue the run.
-  chat.messages = messages.map((m, i) => {
-    if (i !== holderIdx) return m;
-    return {
-      ...m,
-      parts: (m.parts ?? []).map((p) => {
-        const part = p as { state?: string; approval?: { id?: string } };
-        if (
-          part.state === "approval-requested" &&
-          part.approval?.id === approvalId
-        ) {
-          return {
-            ...p,
-            state: "approval-responded",
-            approval: { id: approvalId, approved },
-          } as typeof p;
-        }
-        return p;
-      }),
-    } as UIMessage;
-  });
-  // Continue the run over the (rewritten) history. If another request is
-  // already in flight, skip: the next request builder pass picks the
-  // approval-response up from any position.
-  if (chat.status !== "streaming" && chat.status !== "submitted") {
-    void chat.sendMessage().catch((e) => {
-      console.warn("[kai] approval continuation failed:", e);
-    });
-  }
-  return true;
-}
-
+ *  must route to. Same scan shape describeApproval uses (part.approval.id).
+ *  (The APPLY half lives in ./approvalResponses; chatStore keeps ROUTING.) */
 function findApprovalOwner(approvalId: string): string | null {
   for (const [sessionId, chat] of chats) {
     for (const m of chat.messages) {
@@ -744,12 +697,9 @@ export function getApprovalResponder(sessionId: string): ApprovalResponder | nul
   return approvalResponders.get(sessionId) ?? null;
 }
 
-const projectActiveSessions = new Map<string, string | null>();
-const projectActiveSessionListeners = new Set<() => void>();
-export function subscribeProjectActiveSessions(listener: () => void): () => void {
-  projectActiveSessionListeners.add(listener);
-  return () => projectActiveSessionListeners.delete(listener);
-}
+// projectActiveSessions + its subscribe/persist helpers live in
+// ./projectRegistry (the extracted per-project registries). chatStore keeps
+// the session-side plumbing below.
 
 /**
  * True for a session that has never had content: untitled, no recorded
@@ -772,8 +722,9 @@ function persistActiveSessionsList(sessions: SessionMeta[]): void {
   // (Older builds persisted a fresh "New chat" on every boot per project —
   // that litter is what the session picker was drowning in.)
   const real = sessions.filter((s) => !isGhostSession(s));
-  void (activeProjectRuntime
-    ? saveSessionsListForRoot(activeProjectRuntime.root, real, activeProjectRuntime.env)
+  const rt = getActiveProjectRuntime();
+  void (rt
+    ? saveSessionsListForRoot(rt.root, real, rt.env)
     : saveSessionsList(real));
 }
 function persistActiveSessionId(id: string | null): void {
@@ -783,23 +734,10 @@ function persistActiveSessionId(id: string | null): void {
     const meta = useChatStore.getState().sessions.find((s) => s.id === id);
     if (meta && isGhostSession(meta)) return;
   }
-  void (activeProjectRuntime
-    ? saveActiveIdForRoot(activeProjectRuntime.root, id, activeProjectRuntime.env)
+  const rt = getActiveProjectRuntime();
+  void (rt
+    ? saveActiveIdForRoot(rt.root, id, rt.env)
     : saveActiveId(id));
-}
-
-export function getProjectActiveSession(projectId: string): string | null {
-  return projectActiveSessions.get(projectId) ?? null;
-}
-/** True when the project workspace is currently OPEN (runtime registered).
- *  Group deliveries use this to distinguish "open but no active session
- *  YET" (safe to deliver into the persisted session id — the project's
- *  bridge is mounting) from "project CLOSED since the record was written"
- *  (the persisted id is stale — delivering into it fabricates a chat no
- *  bridge watches: the run fires, the reply never mirrors, and the panel
- *  still reports "delivered"). 2026-11-02 group-chat audit SHOULD. */
-export function isProjectOpen(projectId: string): boolean {
-  return projectRuntimes.has(projectId);
 }
 
 /** In-flight lazy resolutions (resolveBackgroundProjectSession) so two
@@ -845,7 +783,7 @@ export async function resolveBackgroundProjectSession(
 ): Promise<string | null> {
   const known = getProjectActiveSession(projectId);
   if (known) return known;
-  const runtime = projectRuntimes.get(projectId);
+  const runtime = getProjectRuntime(projectId);
   if (!runtime) return null; // closed (or never-open) project: no lazy path
   const inFlight = backgroundSessionResolutions.get(projectId);
   if (inFlight) return inFlight;
@@ -869,6 +807,7 @@ export async function resolveBackgroundProjectSession(
         sessions: [...inMemory, ...snapshotOnly],
       });
     }
+    // NOTE: setProjectActiveSession is the registry's own setter.
     // SEED BEFORE BIND (2026-11-02 review, MUST): setProjectActiveSession
     // re-binds the background project's AgentRunBridge (useSyncExternalStore
     // fires), and the bridge constructs its Chat via getOrCreateChat ->
@@ -905,13 +844,8 @@ export async function resolveBackgroundProjectSession(
   }
 }
 
-/** The currently ACTIVE project id (null when no project is open).
- *  Used by cross-project surfaces (watch firings) to decide whether an
- *  event lands in the project the user is looking at. */
-export function activeProjectId(): string | null {
-  return activeProjectRuntime?.id ?? null;
-}
-
+/** Session's owning project id (root+env canonical, falls back to the
+ *  session preference stamp). Uses the registry's canonical projectIdFor. */
 export function projectIdForSession(sessionId: string): string | null {
   const session = useChatStore.getState().sessions.find((s) => s.id === sessionId);
   const root = normalizeWorkspacePath(session?.workspaceRoot);
@@ -922,59 +856,10 @@ export function projectIdForSession(sessionId: string): string | null {
   return getSessionPreferences(sessionId).projectId ?? null;
 }
 
-export function setProjectActiveSession(projectId: string, sessionId: string | null): void {
-  if (projectActiveSessions.get(projectId) === sessionId) return;
-  projectActiveSessions.set(projectId, sessionId);
-  for (const listener of projectActiveSessionListeners) listener();
-}
-
-// Reactive signal for the ACTIVE PROJECT. activeProjectRuntime is module
-// state — a project switch bumps no zustand field, so cross-project
-// surfaces that read activeProjectId() imperatively (AiMiniWindow's
-// group-pill strip reservation) had no way to notice a switch: their memos
-// froze at the last-computed project (2026-11-01: the frozen lift = the
-// empty-strip gap, or the window squatting on the pill's strip hiding it).
-const activeProjectListeners = new Set<() => void>();
-let activeProjectVersion = 0;
-export function subscribeActiveProject(listener: () => void): () => void {
-  activeProjectListeners.add(listener);
-  return () => activeProjectListeners.delete(listener);
-}
-export function getActiveProjectVersion(): number {
-  return activeProjectVersion;
-}
-export function setActiveProjectRuntime(runtime: import("@/modules/workspace").ProjectRuntime): void {
-  const changed = activeProjectRuntime?.id !== runtime.id;
-  activeProjectRuntime = runtime;
-  projectRuntimes.set(runtime.id, runtime);
-  if (changed) {
-    activeProjectVersion++;
-    for (const listener of activeProjectListeners) listener();
-  }
-}
-export function getActiveProjectRuntime(): import("@/modules/workspace").ProjectRuntime | undefined {
-  return activeProjectRuntime;
-}
-export function registerProjectRuntime(runtime: import("@/modules/workspace").ProjectRuntime): void {
-  projectRuntimes.set(runtime.id, runtime);
-}
-/** All registered project runtimes (open workspaces). Used by the group
- *  invite tool to describe which PROJECTS can be invited into a group. */
-export function getAllProjectRuntimes(): Array<import("@/modules/workspace").ProjectRuntime> {
-  return [...projectRuntimes.values()];
-}
-
-/** Bind live UI handles to their owning project, not the foreground window. */
-export function setProjectLive(projectId: string, live: ChatRuntimeDeps["live"]): void {
-  projectLive.set(projectId, live);
-}
-export function setProjectModel(projectId: string, model: ModelId, personaId: string): void {
-  projectModels.set(projectId, model);
-  projectPersonas.set(projectId, personaId);
-}
-export function getProjectModel(projectId: string, fallback: ModelId = DEFAULT_MODEL_ID): ModelId {
-  return projectModels.get(projectId) ?? fallback;
-}
+// setActiveProjectRuntime / getActiveProjectRuntime / registerProjectRuntime
+// / getAllProjectRuntimes / setProjectLive / setProjectModel / getProjectModel
+// / activeProjectId / subscribeActiveProject / getActiveProjectVersion — all
+// live in ./projectRegistry now (re-exported above for API compatibility).
 const runtimeDeps: ChatRuntimeDeps = {
   projectRuntime: undefined,
   getAgentPersonaId: () => undefined,
@@ -999,7 +884,8 @@ const runtimeDeps: ChatRuntimeDeps = {
     const root = normalizeWorkspacePath(meta?.workspaceRoot);
     // Background projects run independently: their stream callbacks must
     // update their own status/persistence even when another project is visible.
-    if (activeProjectRuntime && root && root !== normalizeWorkspacePath(activeProjectRuntime.root)) {
+    const active = getActiveProjectRuntime();
+    if (active && root && root !== normalizeWorkspacePath(active.root)) {
       return true;
     }
     return useChatStore.getState().activeSessionId === sessionId;
@@ -1039,12 +925,12 @@ function makeChatSync(sessionId: string): Chat<UIMessage> {
   // "agent from one project ended up in another folder after a watch fired").
   const findProject = () =>
     sessionRoot
-      ? [...projectRuntimes.values()].find((candidate) =>
+      ? getAllProjectRuntimes().find((candidate) =>
         normalizeWorkspacePath(candidate.root) === normalizeWorkspacePath(sessionRoot) &&
         (candidate.env.kind === (session?.workspaceEnv?.kind ?? "local")) &&
         (candidate.env.kind !== "wsl" || session?.workspaceEnv?.kind === "wsl" && candidate.env.distro === session.workspaceEnv.distro))
       : undefined;
-  const project = sessionRoot ? findProject() : activeProjectRuntime;
+  const project = sessionRoot ? findProject() : getActiveProjectRuntime();
   // ENV HARDENING (residual from the same 2026-11-08 report): deps.projectRuntime
   // also feeds toolContext.workspaceEnv / native / projectId, which are frozen
   // at chat construction. An unresolved session used to run with an undefined
@@ -1070,8 +956,8 @@ function makeChatSync(sessionId: string): Chat<UIMessage> {
       } as unknown as Live)
     : null;
   const liveFor = (): Live | undefined => {
-    if (!sessionRoot) return (project ? projectLive.get(project.id) : undefined) as unknown as Live | undefined;
-    return projectLive.get(findProject()?.id ?? "") as unknown as Live | undefined;
+    if (!sessionRoot) return (project ? getProjectLive(project.id) : undefined) as unknown as Live | undefined;
+    return getProjectLive(findProject()?.id ?? "") as unknown as Live | undefined;
   };
   const fallback = (liveFor() ?? sessionAnchor ?? runtimeDeps.live) as unknown as Live;
   const live: Live = {
@@ -1092,12 +978,12 @@ function makeChatSync(sessionId: string): Chat<UIMessage> {
       live: live ?? runtimeDeps.live,
       patchAgentMeta: (patch) => patchSessionAgentMeta(sessionId, patch),
       getSelectedModelId: () => getSessionPreferences(sessionId).modelId ?? (project
-        ? (projectModels.get(project.id) ?? useChatStore.getState().selectedModelId)
+        ? getProjectModel(project.id, useChatStore.getState().selectedModelId)
         : runtimeDeps.getSelectedModelId()),
       getAgentPersonaId: () => getSessionPreferences(sessionId).personaId ??
         (project
           ? projectIdForSession(sessionId) === project.id
-            ? projectPersonas.get(project.id)
+            ? getProjectPersona(project.id)
             : undefined
           : undefined),
     },
@@ -1166,8 +1052,9 @@ export const useChatStore = create<StoreState>((set, get) => ({
     const sessionId = get().activeSessionId;
     if (sessionId) setSessionPreferences(sessionId, { modelId: id });
     set({ selectedModelId: id });
-    if (activeProjectRuntime) {
-      setProjectModel(activeProjectRuntime.id, id, useAgentsStore.getState().activeId);
+    const rt = getActiveProjectRuntime();
+    if (rt) {
+      setProjectModel(rt.id, id, useAgentsStore.getState().activeId);
     }
     void pushRecentModel(id);
     // live.getWorkspaceRoot() may be null during startup before setLive()
@@ -1344,7 +1231,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
     // Capture the owning project ONCE. The foreground runtime can change
     // while this hydration awaits storage (A → B → A); reading the mutable
     // global below would restore B's active session into A's workspace.
-    const hydrationRuntime = runtime ?? activeProjectRuntime;
+    const hydrationRuntime = runtime ?? getActiveProjectRuntime();
     const norm = normalizeWorkspacePath;
     const normalizedRoot = norm(root);
 
@@ -1650,9 +1537,10 @@ export const useChatStore = create<StoreState>((set, get) => ({
       createdAt: Date.now(),
       updatedAt: Date.now(),
       workspaceRoot: get().live?.getWorkspaceRoot?.(),
-      workspaceEnv: activeProjectRuntime?.env,
+      workspaceEnv: getActiveProjectRuntime()?.env,
     };
-    if (activeProjectRuntime) setSessionPreferences(id, { projectId: activeProjectRuntime.id });
+    const rt = getActiveProjectRuntime();
+    if (rt) setSessionPreferences(id, { projectId: rt.id });
     const next = [meta, ...get().sessions];
     set({
       sessions: next,
@@ -1689,7 +1577,8 @@ export const useChatStore = create<StoreState>((set, get) => ({
         autoApprove: getSessionAutoApprove(id),
         selectedModelId: prefs.modelId ?? get().selectedModelId,
       });
-      if (activeProjectRuntime) setProjectActiveSession(activeProjectRuntime.id, id);
+      const rt = getActiveProjectRuntime();
+    if (rt) setProjectActiveSession(rt.id, id);
       persistActiveSessionId(id);
     };
     if (chats.has(id) || seedMessages.has(id)) {
@@ -1754,7 +1643,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
         createdAt: Date.now(),
         updatedAt: Date.now(),
         workspaceRoot: get().live?.getWorkspaceRoot?.(),
-      workspaceEnv: activeProjectRuntime?.env,
+      workspaceEnv: getActiveProjectRuntime()?.env,
       };
       set({ sessions: [fresh], activeSessionId: fresh.id });
       // Record the DELETION on disk, but keep the replacement placeholder
@@ -2014,7 +1903,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
         parentId: activeId,
         forkMessageIndex: atMessageIndex,
         workspaceRoot: get().live?.getWorkspaceRoot?.(),
-      workspaceEnv: activeProjectRuntime?.env,
+      workspaceEnv: getActiveProjectRuntime()?.env,
       };
       const next = [meta, ...get().sessions];
       set({ sessions: next, activeSessionId: newId, agentMeta: IDLE_META });
@@ -2057,7 +1946,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
         parentId: activeId,
         forkMessageIndex: Math.max(0, messages.length - 1),
         workspaceRoot: root,
-        workspaceEnv: activeProjectRuntime?.env,
+        workspaceEnv: getActiveProjectRuntime()?.env,
       };
       const next = [meta, ...get().sessions];
       set({ sessions: next, activeSessionId: newId, agentMeta: IDLE_META });
@@ -2221,12 +2110,7 @@ export async function sendMessage(text: string): Promise<boolean> {
   return true;
 }
 
-/** Tool-part states that count as fully resolved (safe to keep). */
-const COMPLETE_PART_STATES = new Set([
-  "output-available",
-  "output-error",
-  "approval-responded",
-]);
+// COMPLETE_PART_STATES lives in ./approvalResponses now.
 
 /**
  * True when a message's parts hold an approval that is pending OR just
@@ -2241,32 +2125,8 @@ const COMPLETE_PART_STATES = new Set([
  * model sees the denial), so ANY responded approval counts as pending
  * continuation, not just approved ones.
  */
-export function approvalContinuationPending(
-  parts: ReadonlyArray<unknown>,
-): boolean {
-  return parts.some((p) => {
-    const st = (p as { state?: string }).state ?? "";
-    return st === "approval-requested" || st === "approval-responded";
-  });
-}
-
-// Exported (2026-11-04 group-chat review): the group delivery path
-// (deliverToParticipant) needs the SAME pending-approval awareness — a
-// session parked on an approval card is busy, not idle, or its delivery
-// gets armed + injected and then silently parked by injectMessage's own
-// (stricter) gate. One definition, two call sites.
-export function hasPendingApprovals(chat: Chat<UIMessage>): boolean {
-  for (const m of chat.messages) {
-    if (m.role !== "assistant") continue;
-    for (const p of m.parts as unknown[]) {
-      if ((p as { state?: string }).state === "approval-requested") return true;
-    }
-  }
-  return false;
-}
-
 /**
- * Strip only STALE pending approvals — never a live approval card.
+ * Strip only STALE pending approvals - never a live approval card.
  *
  * A pending (`approval-requested`) part is stale when:
  *  - it sits on an assistant message that is NOT the last assistant message

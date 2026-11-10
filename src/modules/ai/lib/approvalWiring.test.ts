@@ -56,10 +56,15 @@ describe("approval responses flow through the denial latch", () => {
     // create an invisible bypass around per-call review.
     expect(bridge).not.toContain("isCommandAllowed");
     expect(bridge).toContain('if (autoApprove !== "all") return;');
-    // The SDK applier lives in exactly ONE place: the helper's normal path.
+    // The SDK applier lives in exactly ONE place: the helper's normal path
+    // (./approvalResponses, extracted 2026-11-10; chatStore re-exports it).
+    const helper = src("../store/approvalResponses.ts");
+    const sdkInHelper = helper.match(/addToolApprovalResponse\(/g) ?? [];
+    expect(sdkInHelper.length).toBe(1);
+    // And no second applier appeared anywhere in the store layer.
     const store = src("../store/chatStore.ts");
     const sdkInStore = store.match(/addToolApprovalResponse\(/g) ?? [];
-    expect(sdkInStore.length).toBe(1);
+    expect(sdkInStore.length).toBe(0);
   });
 
   it("respond() checks the latch at CALL time (both directions)", () => {

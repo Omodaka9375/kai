@@ -612,14 +612,14 @@ describe("source pins — trust boundary & wiring", () => {
     // ride-along: no run, no queue, no note). The delivery busy check must
     // agree, or the delivery is armed + injected and then silently parked
     // inside the paused run — a second path to the stranded provision.
-    // hasPendingApprovals is exported from chatStore (one definition, two
-    // call sites).
+    // hasPendingApprovals lives in ./approvalResponses (extracted
+    // 2026-11-10; chatStore re-exports it) - one definition, two call sites.
     expect(store).toContain("hasPendingApprovals(live)");
-    const chatStoreSrc = readFileSync(
-      new URL("chatStore.ts", import.meta.url),
+    const approvalSrc = readFileSync(
+      new URL("approvalResponses.ts", import.meta.url),
       "utf8",
     );
-    expect(chatStoreSrc).toContain("export function hasPendingApprovals(");
+    expect(approvalSrc).toContain("export function hasPendingApprovals(");
   });
 
   it("pacing: the mention cap counts ROUTED mentions only, skipped mentions are not silent, and the 90s timeout extends once for active participants (2026-11-04)", () => {

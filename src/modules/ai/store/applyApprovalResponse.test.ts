@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Chat } from "@ai-sdk/react";
 import type { UIMessage } from "ai";
-import { applyApprovalResponseToChat } from "./chatStore";
+import { applyApprovalResponseToChat } from "./approvalResponses";
 
 /**
  * The stranded-approval contract (2026-11-09 report: reminder wake parked on
