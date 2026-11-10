@@ -880,6 +880,9 @@ function Bridge({
   // open duplicates. Reset when the session changes.
   const openedRef = useRef<Set<string>>(new Set());
   const fileMutationFingerprintRef = useRef<string>("");
+  /** Last-seen approval gate inputs (autoApprove + signing) - a flip must
+   *  re-scan pending mutations even when no part state changed. */
+  const diffGateRef = useRef("");
   const wasActiveRef = useRef(isActive);
   useEffect(() => {
     openedRef.current = new Set();
@@ -932,8 +935,17 @@ function Bridge({
     // that bypass without re-opening already-resolved mutations.
     const justActivated = isActive && !wasActiveRef.current;
     wasActiveRef.current = isActive;
+    // Gate inputs decide which approval-requested parts get skipped below:
+    // flipping Auto -> Ask mid-flight cancels the auto-approve timers (the
+    // latch re-checks the mode at fire time), leaving parts parked in
+    // approval-requested that a previous pass skipped. The flip must
+    // re-scan them so their diff tabs finally open.
+    const diffGateKey = `${autoApprove}:${signingApprovalRequired}`;
+    const gateChanged = diffGateKey !== diffGateRef.current;
+    diffGateRef.current = diffGateKey;
     if (
       !justActivated &&
+      !gateChanged &&
       fileMutationFingerprint === fileMutationFingerprintRef.current
     ) {
       return;
@@ -954,6 +966,28 @@ function Bridge({
         // diff tab per file it touches.
         const dedupeKey = `${approvalId}:${path}`;
         if (state === "approval-requested") {
+          // AUTO-RESOLVED APPROVALS NEVER OPEN A DIFF TAB (2026-11-10
+          // report: "keeps opening AI diff tabs while on Auto"): under
+          // autoApprove "all" every edit still transits approval-requested
+          // for one macrotask - the auto-approve effect answers it on a
+          // setTimeout(0) - and this effect used to flash a diff tab
+          // open->closed per edit, stealing focus twice per mutation.
+          // predictAutoApproval is the SAME gate the auto-approve effect
+          // and the manual-attention count use (lockstep via
+          // autoApprovePrediction.test.ts): false in Ask mode, and false
+          // for the manual carve-outs (elevated / privacy / signed
+          // commit) even under Auto - those still get their review tab.
+          if (
+            predictAutoApproval({
+              autoApprove,
+              toolName:
+                (part as { type?: string }).type?.replace(/^tool-/, "") ?? "",
+              input: (part as { input?: Record<string, unknown> }).input,
+              signingApprovalRequired,
+            })
+          ) {
+            continue;
+          }
           // Do NOT claim in openedRef here: a hidden pass defers opens, and
           // claiming now would leave the key "opened" without a tab, so
           // activation would never open it. Local dedupe (pendingSeen) keeps
@@ -1059,7 +1093,7 @@ function Bridge({
         if (!actuallyOpened.has(p.dedupeKey)) openedRef.current.delete(p.dedupeKey);
       }
     };
-  }, [messages, fileMutationFingerprint, openAiDiffTab, closeAiDiffTab, isActive]);
+  }, [messages, fileMutationFingerprint, openAiDiffTab, closeAiDiffTab, isActive, autoApprove, signingApprovalRequired]);
 
   return null;
 }

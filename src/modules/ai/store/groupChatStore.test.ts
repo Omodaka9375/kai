@@ -584,9 +584,24 @@ describe("source pins — trust boundary & wiring", () => {
       "if (!actuallyOpened.has(p.dedupeKey)) openedRef.current.delete(p.dedupeKey);",
     );
     // isActive is now a dep so the activation flip re-derives + opens.
+    // autoApprove + signingApprovalRequired are deps for the SAME reason
+    // (2026-11-10): a mode flip re-scans pending mutations the predictor
+    // previously skipped.
     expect(bridge).toMatch(
-      /\}, \[messages, fileMutationFingerprint, openAiDiffTab, closeAiDiffTab, isActive\]\);/,
+      /\}, \[messages, fileMutationFingerprint, openAiDiffTab, closeAiDiffTab, isActive, autoApprove, signingApprovalRequired\]\);/,
     );
+    // Auto-resolved approvals must never open a diff tab (the 2026-11-10
+    // "tabs keep opening on Auto" report): the diff effect consults the
+    // SAME predictor the auto-approve gate uses, inside the pending scan.
+    // Anchor on the diff-scan's unique inline part cast (the bridge has a
+    // second predictAutoApproval call site in the manual-attention memo).
+    const predIdx = bridge.indexOf(
+      '(part as { type?: string }).type?.replace(/^tool-/, "") ?? "",',
+    );
+    const pendingIdx = bridge.indexOf('if (state === "approval-requested") {');
+    expect(predIdx).toBeGreaterThan(-1);
+    expect(pendingIdx).toBeGreaterThan(-1);
+    expect(predIdx).toBeGreaterThan(pendingIdx);
   });
 
   it("only a GROUP-PROVOKED run may mirror; a text-less settle consumes the provision with a note (2026-11-04 MUSTs)", () => {
