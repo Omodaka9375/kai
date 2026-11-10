@@ -4,6 +4,16 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [2.2.5]
+
+- Approvals: Auto mode no longer opens AI diff tabs for edits it resolves itself.
+- Media: generated images survive long streaming responses, Google failures are visible, and invalid image payloads are rejected.
+- Groups: ended chats no longer leave a phantom pill gap; expanding the group panel no longer crashes the AI pill.
+- UI: AI diff tabs can be split right, and pending attachments no longer leak between chats or duplicate.
+- MCP: disabling a server no longer crashes the app with an undefined Channel handler.
+
+---
+
 ## [2.2.4]
 
 
