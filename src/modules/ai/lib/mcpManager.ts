@@ -99,7 +99,26 @@ class TauriStdioTransport {
     });
   }
 
+  /** True once close() has begun — guards against a second close racing the
+   *  first (MCPClient.close can invoke transport.close more than once). */
+  private closed = false;
+
   async close(): Promise<void> {
+    if (this.closed) return;
+    this.closed = true;
+    // Swap to a NOOP FIRST, before the Rust teardown. mcp_stdio_close kills
+    // the child, and its reader threads emit a final burst of stderr/exit
+    // events through this very channel. Tauri's Channel invokes the stored
+    // handler with `handler.call(this, msg)` and NO null check — if the
+    // handler were undefined at that instant, `undefined.call` throws, and
+    // the constructor's catch rethrows it via queueMicrotask as an UNCAUGHT
+    // error that WebView2 surfaces as a pane-wide crash overlay:
+    // "Cannot read properties of undefined (reading 'call')"
+    // (focusModality chunk, reported when toggling an MCP server off).
+    // A noop keeps the channel safe for those trailing events forever.
+    if (this.channel !== null) {
+      this.channel.onmessage = () => {};
+    }
     if (this.sessionId !== null) {
       await invoke("mcp_stdio_close", { id: this.sessionId }).catch(
         () => {},
@@ -107,7 +126,8 @@ class TauriStdioTransport {
       this.sessionId = null;
     }
     if (this.channel !== null) {
-      this.channel.onmessage = undefined as unknown as (e: McpStdioEvent) => void;
+      // Keep the noop: the Rust side may still hold buffered trailing
+      // events; dropping the handler entirely re-arms the crash.
       this.channel = null;
     }
   }
