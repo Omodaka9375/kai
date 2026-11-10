@@ -174,13 +174,16 @@ describe("composer mirrors the AI input bar", () => {
     // The tray gate is the full JSX condition (prettier wraps it across
     // lines — match with \s*, not the one-line literal).
     const gate = panel.match(
-      /\{activeProjectInGroup &&\s*activeProjectGroups\.length > 0 &&\s*!expanded \? \(/,
+      /\{activeProjectGroups\.length > 0 &&\s*!expanded \? \(/,
     );
     // 2026-11-01: the pill derives from the panel's OWN expanded boolean —
     // the cross-store surface term is gone (see the round-trip describe).
     expect(panel).not.toMatch(/stackSurface !== "group" \? \(/);
     expect(gate).not.toBeNull();
     expect(panel).toContain("const activeProjectGroups = useMemo(");
+    expect(panel).toContain(
+      "activeProjectId === null ? [] : groupsForProject(activeProjectId)",
+    );
     expect(panel).toMatch(/groups=\{activeProjectGroups\}/);
     // The OLD unscoped gate (any group anywhere shows the pill) must not return.
     expect(panel).not.toMatch(

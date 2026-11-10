@@ -51,6 +51,7 @@ import {
   getGroupStoreVersion,
   getGroup,
   getGroups,
+  groupsForProject,
   getPersonaApprovals,
   isPersonaParticipantId,
   lastGroupRefusal,
@@ -142,21 +143,11 @@ export function GroupChatPanel({
   // itself lists only the ACTIVE project's groups (same filter the pill
   // names from); creation is unaffected - it enters via the status-bar
   // button's window event, not the pill.
-  const activeProjectInGroup = useMemo(
-    () =>
-      activeProjectId !== null &&
-      groups.some((g) =>
-        g.participants.some((p) => p.projectId === activeProjectId),
-      ),
-    [groups, activeProjectId],
-  );
+  // LIVE-only, active-project groups: the exact predicate AiMiniWindow uses
+  // to reserve its extra 42px pill strip. Ended groups stay in the store for
+  // the picker's Resume action, but must not reserve a collapsed-pill gap.
   const activeProjectGroups = useMemo(
-    () =>
-      activeProjectId === null
-        ? []
-        : groups.filter((g) =>
-            g.participants.some((p) => p.projectId === activeProjectId),
-          ),
+    () => (activeProjectId === null ? [] : groupsForProject(activeProjectId)),
     [groups, activeProjectId],
   );
   const active = useMemo(
@@ -415,7 +406,7 @@ export function GroupChatPanel({
           self-heals: it paints whenever no group is actually open, and
           opening one re-syncs the surface. Same rule as the AI window: one
           derived boolean drives the window and its pill. */}
-      {activeProjectInGroup && activeProjectGroups.length > 0 && !expanded ? (
+      {activeProjectGroups.length > 0 && !expanded ? (
         <GroupListTray
           groups={activeProjectGroups}
           activeId={active?.id ?? null}

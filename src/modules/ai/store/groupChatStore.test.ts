@@ -124,6 +124,11 @@ describe("group chat store — lifecycle", () => {
     expect(getGroups()).toHaveLength(1);
     expect(groupsForProject("a")).toHaveLength(1);
     expect(groupsForProject("c")).toHaveLength(0);
+    await endGroupChat(g!.id);
+    // Ending preserves the transcript for Resume, but must clear the
+    // collapsed pill AND the AI window's reserved 42px gap immediately.
+    expect(getGroup(g!.id)?.endedAt).not.toBeNull();
+    expect(groupsForProject("a")).toHaveLength(0);
   });
 
   it("refuses to create a group with no invitees", async () => {
@@ -793,6 +798,10 @@ describe("source pins — trust boundary & wiring", () => {
     expect(panel).toMatch(
       /activeProjectGroups\.length > 0 &&\s*!expanded \? \(/,
     );
+    // An ended group is resumable from the picker, but does NOT reserve a
+    // phantom pill gap in the AI window. Panel and window share the same
+    // live-only, active-project lookup (2026-11-10).
+    expect(panel).toContain("groupsForProject(activeProjectId)");
     // The mini window shrinks up by one pill height when the group pill is
     // stacked below it.
     expect(mini).toContain("+84px");
