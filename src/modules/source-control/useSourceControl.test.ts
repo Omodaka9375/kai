@@ -97,6 +97,22 @@ describe("useSourceControl identity-preserving refresh (focus blink)", () => {
   });
 });
 
+describe("source-control diff visibility", () => {
+  const app = read("../../app/App.tsx");
+
+  it("opening a diff shrinks an expanded AI window like the file tree does", () => {
+    const handler = app
+      .split("const handleSourceControlOpenDiff = useCallback(")[1]
+      ?.split("const openPreviewTab = useCallback(")[0] ?? "";
+    expect(handler).toContain("if (s.mini.expanded) s.collapseMini();");
+    expect(handler).toContain(
+      "if (s.groupPanelExpanded) s.setGroupPanelExpanded(false);",
+    );
+    expect(handler).toContain("openGitDiffTab(input);");
+    expect(app).toContain("onOpenDiff={handleSourceControlOpenDiff}");
+  });
+});
+
 describe("useSourceControl refresh triggers (no background blinking)", () => {
   // User request: the panel "blinked a lot trying to refresh and check
   // state". Refreshes must fire ONLY on explicit user action (panel click,

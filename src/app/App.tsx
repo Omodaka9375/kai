@@ -1277,6 +1277,18 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
     openCommitHistoryTab,
   });
 
+  const handleSourceControlOpenDiff = useCallback(
+    (input: Parameters<typeof openGitDiffTab>[0]) => {
+      // Match opening a file from the explorer: the selected diff must not
+      // remain hidden behind an expanded AI window or group panel.
+      const s = useChatStore.getState();
+      if (s.mini.expanded) s.collapseMini();
+      if (s.groupPanelExpanded) s.setGroupPanelExpanded(false);
+      openGitDiffTab(input);
+    },
+    [openGitDiffTab],
+  );
+
   const openPreviewTab = useCallback(
     (url: string) => {
       const id = newPreviewTab(url);
@@ -1895,7 +1907,7 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
                       <SourceControlPanel
                         open
                         sourceControl={sourceControl}
-                        onOpenDiff={openGitDiffTab}
+                        onOpenDiff={handleSourceControlOpenDiff}
                         onRequestRefresh={scheduleScRefreshRef.current}
                       />
                     ) : (
