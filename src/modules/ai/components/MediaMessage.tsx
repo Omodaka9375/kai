@@ -1,9 +1,7 @@
 import { memo, useMemo, useState } from "react";
 import { MediaLightbox } from "./MediaLightbox";
-import {
-  Image02Icon,
-  Download04Icon,
-} from "@hugeicons/core-free-icons";
+import Image02Icon from "@hugeicons/core-free-icons/Image02Icon";
+import Download04Icon from "@hugeicons/core-free-icons/Download04Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 
 type ImageOutput = {

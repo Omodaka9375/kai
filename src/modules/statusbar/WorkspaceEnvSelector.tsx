@@ -11,7 +11,8 @@ import {
   useWorkspaceEnvStore,
   type WorkspaceEnv,
 } from "@/modules/workspace";
-import { Refresh01Icon, ServerStack03Icon } from "@hugeicons/core-free-icons";
+import Refresh01Icon from "@hugeicons/core-free-icons/Refresh01Icon";
+import ServerStack03Icon from "@hugeicons/core-free-icons/ServerStack03Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 
 type Props = {

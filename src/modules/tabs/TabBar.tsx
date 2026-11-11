@@ -16,21 +16,19 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { fmtShortcut, MOD_KEY } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { fileIconUrl } from "@/modules/explorer/lib/iconResolver";
-import {
-  ApiIcon,
-  Cancel01Icon,
-  Clock01Icon,
-  ComputerTerminal02Icon,
-  Delete02Icon,
-  GitCompareIcon,
-  Globe02Icon,
-  IncognitoIcon,
-  PencilEdit02Icon,
-  PlusSignIcon,
-  SplitIcon,
-  TableColumnsSplitIcon,
-  TableRowsSplitIcon,
-} from "@hugeicons/core-free-icons";
+import ApiIcon from "@hugeicons/core-free-icons/ApiIcon";
+import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
+import Clock01Icon from "@hugeicons/core-free-icons/Clock01Icon";
+import ComputerTerminal02Icon from "@hugeicons/core-free-icons/ComputerTerminal02Icon";
+import Delete02Icon from "@hugeicons/core-free-icons/Delete02Icon";
+import GitCompareIcon from "@hugeicons/core-free-icons/GitCompareIcon";
+import Globe02Icon from "@hugeicons/core-free-icons/Globe02Icon";
+import IncognitoIcon from "@hugeicons/core-free-icons/IncognitoIcon";
+import PencilEdit02Icon from "@hugeicons/core-free-icons/PencilEdit02Icon";
+import PlusSignIcon from "@hugeicons/core-free-icons/PlusSignIcon";
+import SplitIcon from "@hugeicons/core-free-icons/SplitIcon";
+import TableColumnsSplitIcon from "@hugeicons/core-free-icons/TableColumnsSplitIcon";
+import TableRowsSplitIcon from "@hugeicons/core-free-icons/TableRowsSplitIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { EditorTab, Tab } from "./lib/useTabs";

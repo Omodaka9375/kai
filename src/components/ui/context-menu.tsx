@@ -3,7 +3,8 @@ import { ContextMenu as ContextMenuPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 import { HugeiconsIcon } from "@hugeicons/react"
-import { ArrowRight01Icon, Tick02Icon } from "@hugeicons/core-free-icons"
+import ArrowRight01Icon from "@hugeicons/core-free-icons/ArrowRight01Icon";
+import Tick02Icon from "@hugeicons/core-free-icons/Tick02Icon";
 
 function ContextMenu({
   ...props

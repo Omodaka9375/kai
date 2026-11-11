@@ -7,19 +7,17 @@ import {
   AI_EXPANDED_WINDOW_GEOMETRY,
 } from "./AiWindowBackdrop";
 import { Button } from "@/components/ui/button";
-import {
-  ArrowExpand01Icon,
-  ArrowShrink01Icon,
-  Cancel01Icon,
-  LeftToRightBlockQuoteIcon,
-  Link01Icon,
-  Mic01Icon,
-  MinusSignIcon,
-  PencilEdit01Icon,
-  SentIcon,
-  StopIcon,
-  UserWarning01Icon,
-} from "@hugeicons/core-free-icons";
+import ArrowExpand01Icon from "@hugeicons/core-free-icons/ArrowExpand01Icon";
+import ArrowShrink01Icon from "@hugeicons/core-free-icons/ArrowShrink01Icon";
+import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
+import LeftToRightBlockQuoteIcon from "@hugeicons/core-free-icons/LeftToRightBlockQuoteIcon";
+import Link01Icon from "@hugeicons/core-free-icons/Link01Icon";
+import Mic01Icon from "@hugeicons/core-free-icons/Mic01Icon";
+import MinusSignIcon from "@hugeicons/core-free-icons/MinusSignIcon";
+import PencilEdit01Icon from "@hugeicons/core-free-icons/PencilEdit01Icon";
+import SentIcon from "@hugeicons/core-free-icons/SentIcon";
+import StopIcon from "@hugeicons/core-free-icons/StopIcon";
+import UserWarning01Icon from "@hugeicons/core-free-icons/UserWarning01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Spinner } from "@/components/ui/spinner";

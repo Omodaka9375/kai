@@ -9,14 +9,12 @@ import {
 } from "@/modules/ai/lib/mcpRegistry";
 import { useMcpStore } from "@/modules/ai/store/mcpStore";
 import { McpInstallDialog } from "./McpInstallDialog";
-import {
-  ArrowDown01Icon,
-  CheckmarkCircle02Icon,
-  Download01Icon,
-  PuzzleIcon,
-  Search01Icon,
-  WifiConnected01Icon,
-} from "@hugeicons/core-free-icons";
+import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
+import CheckmarkCircle02Icon from "@hugeicons/core-free-icons/CheckmarkCircle02Icon";
+import Download01Icon from "@hugeicons/core-free-icons/Download01Icon";
+import PuzzleIcon from "@hugeicons/core-free-icons/PuzzleIcon";
+import Search01Icon from "@hugeicons/core-free-icons/Search01Icon";
+import WifiConnected01Icon from "@hugeicons/core-free-icons/WifiConnected01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 

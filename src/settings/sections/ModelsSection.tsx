@@ -29,12 +29,10 @@ import {
   setOpenaiCompatibleVision,
 } from "@/modules/settings/store";
 import { invoke } from "@tauri-apps/api/core";
-import {
-  ArrowDown01Icon,
-  CheckmarkCircle02Icon,
-  Cancel01Icon,
-  TestTubeIcon,
-} from "@hugeicons/core-free-icons";
+import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
+import CheckmarkCircle02Icon from "@hugeicons/core-free-icons/CheckmarkCircle02Icon";
+import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
+import TestTubeIcon from "@hugeicons/core-free-icons/TestTubeIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useState } from "react";
 import { ProviderIcon } from "../components/ProviderIcon";

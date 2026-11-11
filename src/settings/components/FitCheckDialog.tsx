@@ -17,12 +17,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { HugeiconsIcon } from "@hugeicons/react";
-import {
-  CheckmarkCircle02Icon,
-  Cancel01Icon,
-  TestTubeIcon,
-  Loading01Icon,
-} from "@hugeicons/core-free-icons";
+import CheckmarkCircle02Icon from "@hugeicons/core-free-icons/CheckmarkCircle02Icon";
+import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
+import TestTubeIcon from "@hugeicons/core-free-icons/TestTubeIcon";
+import Loading01Icon from "@hugeicons/core-free-icons/Loading01Icon";
 import { getModel } from "@/modules/ai/config";
 import { buildConfiguredLanguageModel } from "@/modules/ai/lib/agent";
 import type { ProviderKeys } from "@/modules/ai/lib/keyring";

@@ -7,11 +7,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { native } from "@/modules/ai/lib/native";
-import {
-  ArrowReloadHorizontalIcon,
-  Globe02Icon,
-  LinkSquare02Icon,
-} from "@hugeicons/core-free-icons";
+import ArrowReloadHorizontalIcon from "@hugeicons/core-free-icons/ArrowReloadHorizontalIcon";
+import Globe02Icon from "@hugeicons/core-free-icons/Globe02Icon";
+import LinkSquare02Icon from "@hugeicons/core-free-icons/LinkSquare02Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {

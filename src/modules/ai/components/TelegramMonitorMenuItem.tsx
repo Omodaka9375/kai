@@ -1,6 +1,6 @@
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { SentIcon } from "@hugeicons/core-free-icons";
+import SentIcon from "@hugeicons/core-free-icons/SentIcon";
 import { useEffect, useState } from "react";
 import { useChatStore, projectIdForSession } from "../store/chatStore";
 import { useProjectRuntime } from "@/modules/workspace";

@@ -35,12 +35,10 @@ import {
 } from "@/modules/settings/store";
 import { useTheme } from "@/modules/theme";
 import { UI_THEMES } from "@/modules/theme/palettes";
-import {
-  ArrowDown01Icon,
-  ComputerIcon,
-  Moon02Icon,
-  Sun03Icon,
-} from "@hugeicons/core-free-icons";
+import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
+import ComputerIcon from "@hugeicons/core-free-icons/ComputerIcon";
+import Moon02Icon from "@hugeicons/core-free-icons/Moon02Icon";
+import Sun03Icon from "@hugeicons/core-free-icons/Sun03Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { openUrl } from "@tauri-apps/plugin-opener";

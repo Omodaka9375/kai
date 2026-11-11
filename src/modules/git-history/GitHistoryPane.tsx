@@ -19,16 +19,14 @@ import {
   type GitLogEntry,
 } from "@/modules/ai/lib/native";
 import { fileIconUrl } from "@/modules/explorer/lib/iconResolver";
-import {
-  Cancel01Icon,
-  Copy01Icon,
-  File02Icon,
-  GitBranchIcon,
-  GitCommitHorizontalIcon,
-  LinkSquare02Icon,
-  Refresh01Icon,
-  Search01Icon,
-} from "@hugeicons/core-free-icons";
+import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
+import Copy01Icon from "@hugeicons/core-free-icons/Copy01Icon";
+import File02Icon from "@hugeicons/core-free-icons/File02Icon";
+import GitBranchIcon from "@hugeicons/core-free-icons/GitBranchIcon";
+import GitCommitHorizontalIcon from "@hugeicons/core-free-icons/GitCommitHorizontalIcon";
+import LinkSquare02Icon from "@hugeicons/core-free-icons/LinkSquare02Icon";
+import Refresh01Icon from "@hugeicons/core-free-icons/Refresh01Icon";
+import Search01Icon from "@hugeicons/core-free-icons/Search01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { openUrl } from "@tauri-apps/plugin-opener";

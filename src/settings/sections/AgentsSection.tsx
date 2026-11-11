@@ -18,13 +18,11 @@ import {
 import { newAgentId, useAgentsStore } from "@/modules/ai/store/agentsStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { setCustomInstructions, setSubagentMaxSteps } from "@/modules/settings/store";
-import {
-  Add01Icon,
-  CheckmarkCircle02Icon,
-  Delete02Icon,
-  Edit02Icon,
-  SparklesIcon,
-} from "@hugeicons/core-free-icons";
+import Add01Icon from "@hugeicons/core-free-icons/Add01Icon";
+import CheckmarkCircle02Icon from "@hugeicons/core-free-icons/CheckmarkCircle02Icon";
+import Delete02Icon from "@hugeicons/core-free-icons/Delete02Icon";
+import Edit02Icon from "@hugeicons/core-free-icons/Edit02Icon";
+import SparklesIcon from "@hugeicons/core-free-icons/SparklesIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SectionHeader } from "../components/SectionHeader";

@@ -1,7 +1,5 @@
-import {
-  Cancel01Icon,
-  Download04Icon,
-} from "@hugeicons/core-free-icons";
+import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
+import Download04Icon from "@hugeicons/core-free-icons/Download04Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect } from "react";
 

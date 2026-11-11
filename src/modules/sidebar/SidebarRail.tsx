@@ -4,12 +4,10 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import {
-  FolderGitTwoIcon,
-  FolderTreeIcon,
-  GitForkIcon,
-  PuzzleIcon,
-} from "@hugeicons/core-free-icons";
+import FolderGitTwoIcon from "@hugeicons/core-free-icons/FolderGitTwoIcon";
+import FolderTreeIcon from "@hugeicons/core-free-icons/FolderTreeIcon";
+import GitForkIcon from "@hugeicons/core-free-icons/GitForkIcon";
+import PuzzleIcon from "@hugeicons/core-free-icons/PuzzleIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { SidebarViewId } from "./types";
 

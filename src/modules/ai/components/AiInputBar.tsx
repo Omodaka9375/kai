@@ -2,28 +2,26 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverAnchor } from "@/components/ui/popover";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
-import {
-  Add01Icon,
-  Cancel01Icon,
-  ClipboardIcon,
-  NextIcon,
-  PauseIcon,
-  PlayCircleIcon,
-  Timer01Icon,
-  CodeIcon,
-  Copy01Icon,
-  HashtagIcon,
-  Key01Icon,
-  LeftToRightBlockQuoteIcon,
-  Mic01Icon,
-  RedoIcon,
-  Scissor01Icon,
-  TerminalIcon,
-  VolumeHighIcon,
-  TextSelectIcon,
-  UndoIcon,
-  UserWarning01Icon,
-} from "@hugeicons/core-free-icons";
+import Add01Icon from "@hugeicons/core-free-icons/Add01Icon";
+import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
+import ClipboardIcon from "@hugeicons/core-free-icons/ClipboardIcon";
+import NextIcon from "@hugeicons/core-free-icons/NextIcon";
+import PauseIcon from "@hugeicons/core-free-icons/PauseIcon";
+import PlayCircleIcon from "@hugeicons/core-free-icons/PlayCircleIcon";
+import Timer01Icon from "@hugeicons/core-free-icons/Timer01Icon";
+import CodeIcon from "@hugeicons/core-free-icons/CodeIcon";
+import Copy01Icon from "@hugeicons/core-free-icons/Copy01Icon";
+import HashtagIcon from "@hugeicons/core-free-icons/HashtagIcon";
+import Key01Icon from "@hugeicons/core-free-icons/Key01Icon";
+import LeftToRightBlockQuoteIcon from "@hugeicons/core-free-icons/LeftToRightBlockQuoteIcon";
+import Mic01Icon from "@hugeicons/core-free-icons/Mic01Icon";
+import RedoIcon from "@hugeicons/core-free-icons/RedoIcon";
+import Scissor01Icon from "@hugeicons/core-free-icons/Scissor01Icon";
+import TerminalIcon from "@hugeicons/core-free-icons/TerminalIcon";
+import VolumeHighIcon from "@hugeicons/core-free-icons/VolumeHighIcon";
+import TextSelectIcon from "@hugeicons/core-free-icons/TextSelectIcon";
+import UndoIcon from "@hugeicons/core-free-icons/UndoIcon";
+import UserWarning01Icon from "@hugeicons/core-free-icons/UserWarning01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { IS_MAC } from "@/lib/platform";

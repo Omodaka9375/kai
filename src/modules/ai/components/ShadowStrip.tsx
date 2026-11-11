@@ -1,9 +1,7 @@
-import {
-  AlertCircleIcon,
-  Copy02Icon,
-  Delete02Icon,
-  Shield01Icon,
-} from "@hugeicons/core-free-icons";
+import AlertCircleIcon from "@hugeicons/core-free-icons/AlertCircleIcon";
+import Copy02Icon from "@hugeicons/core-free-icons/Copy02Icon";
+import Delete02Icon from "@hugeicons/core-free-icons/Delete02Icon";
+import Shield01Icon from "@hugeicons/core-free-icons/Shield01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { cn } from "@/lib/utils";
 import { useEffect, useState } from "react";

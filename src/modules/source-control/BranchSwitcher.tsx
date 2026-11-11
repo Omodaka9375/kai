@@ -7,12 +7,10 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { native, type GitBranch } from "@/modules/ai/lib/native";
-import {
-  CheckmarkCircle01Icon,
-  Delete01Icon,
-  GitBranchIcon,
-  PlusSignIcon,
-} from "@hugeicons/core-free-icons";
+import CheckmarkCircle01Icon from "@hugeicons/core-free-icons/CheckmarkCircle01Icon";
+import Delete01Icon from "@hugeicons/core-free-icons/Delete01Icon";
+import GitBranchIcon from "@hugeicons/core-free-icons/GitBranchIcon";
+import PlusSignIcon from "@hugeicons/core-free-icons/PlusSignIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   useCallback,

@@ -1,12 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import {
-  MusicNote01Icon,
-  PlayIcon,
-  StopIcon,
-  VolumeHighIcon,
-  VolumeOffIcon,
-} from "@hugeicons/core-free-icons";
+import MusicNote01Icon from "@hugeicons/core-free-icons/MusicNote01Icon";
+import PlayIcon from "@hugeicons/core-free-icons/PlayIcon";
+import StopIcon from "@hugeicons/core-free-icons/StopIcon";
+import VolumeHighIcon from "@hugeicons/core-free-icons/VolumeHighIcon";
+import VolumeOffIcon from "@hugeicons/core-free-icons/VolumeOffIcon";
 import {
   DropdownMenu,
   DropdownMenuContent,

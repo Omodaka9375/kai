@@ -11,11 +11,9 @@ import {
   type Shortcut,
   type ShortcutId,
 } from "@/modules/shortcuts/shortcuts";
-import {
-  ArrowTurnBackwardIcon,
-  Search01Icon,
-  Delete02Icon,
-} from "@hugeicons/core-free-icons";
+import ArrowTurnBackwardIcon from "@hugeicons/core-free-icons/ArrowTurnBackwardIcon";
+import Search01Icon from "@hugeicons/core-free-icons/Search01Icon";
+import Delete02Icon from "@hugeicons/core-free-icons/Delete02Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useState, useMemo } from "react";
 import { SectionHeader } from "../components/SectionHeader";

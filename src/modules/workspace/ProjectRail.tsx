@@ -10,15 +10,13 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import {
-  Add01Icon,
-  Cancel01Icon,
-  Folder01Icon,
-  FolderAddIcon,
-  PencilEdit01Icon,
-  RefreshIcon,
-  Upload04Icon,
-} from "@hugeicons/core-free-icons";
+import Add01Icon from "@hugeicons/core-free-icons/Add01Icon";
+import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
+import Folder01Icon from "@hugeicons/core-free-icons/Folder01Icon";
+import FolderAddIcon from "@hugeicons/core-free-icons/FolderAddIcon";
+import PencilEdit01Icon from "@hugeicons/core-free-icons/PencilEdit01Icon";
+import RefreshIcon from "@hugeicons/core-free-icons/RefreshIcon";
+import Upload04Icon from "@hugeicons/core-free-icons/Upload04Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
 import { useFileMenuTrigger } from "@/app/fileMenu";

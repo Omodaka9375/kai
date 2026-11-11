@@ -15,17 +15,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Add01Icon,
-  ArrowDown01Icon,
-  Cancel01Icon,
-  Delete02Icon,
-  Folder01Icon,
-  Link01Icon,
-  StopIcon,
-  Tick02Icon,
-  UserMultiple02Icon,
-} from "@hugeicons/core-free-icons";
+import Add01Icon from "@hugeicons/core-free-icons/Add01Icon";
+import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
+import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
+import Delete02Icon from "@hugeicons/core-free-icons/Delete02Icon";
+import Folder01Icon from "@hugeicons/core-free-icons/Folder01Icon";
+import Link01Icon from "@hugeicons/core-free-icons/Link01Icon";
+import StopIcon from "@hugeicons/core-free-icons/StopIcon";
+import Tick02Icon from "@hugeicons/core-free-icons/Tick02Icon";
+import UserMultiple02Icon from "@hugeicons/core-free-icons/UserMultiple02Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useAgentsStore } from "../store/agentsStore";
 import { BUILTIN_AGENTS } from "../lib/agents";

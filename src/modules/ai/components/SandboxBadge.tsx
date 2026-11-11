@@ -1,4 +1,4 @@
-import { Shield01Icon } from "@hugeicons/core-free-icons";
+import Shield01Icon from "@hugeicons/core-free-icons/Shield01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useState } from "react";
 import { useChatStore } from "../store/chatStore";

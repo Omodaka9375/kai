@@ -3,12 +3,10 @@
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useChatStore } from "@/modules/ai/store/chatStore";
-import {
-  ArrowRight01Icon,
-  CheckmarkCircle01Icon,
-  CopyIcon,
-  TerminalIcon,
-} from "@hugeicons/core-free-icons";
+import ArrowRight01Icon from "@hugeicons/core-free-icons/ArrowRight01Icon";
+import CheckmarkCircle01Icon from "@hugeicons/core-free-icons/CheckmarkCircle01Icon";
+import CopyIcon from "@hugeicons/core-free-icons/CopyIcon";
+import TerminalIcon from "@hugeicons/core-free-icons/TerminalIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { createContext, memo, useContext, useEffect, useRef, useState } from "react";
 

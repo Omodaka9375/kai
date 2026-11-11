@@ -1,5 +1,9 @@
 import { Button } from "@/components/ui/button";
-import { Alert02Icon, Clock01Icon, GithubIcon, Globe02Icon, RefreshIcon } from "@hugeicons/core-free-icons";
+import Alert02Icon from "@hugeicons/core-free-icons/Alert02Icon";
+import Clock01Icon from "@hugeicons/core-free-icons/Clock01Icon";
+import GithubIcon from "@hugeicons/core-free-icons/GithubIcon";
+import Globe02Icon from "@hugeicons/core-free-icons/Globe02Icon";
+import RefreshIcon from "@hugeicons/core-free-icons/RefreshIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useUpdater } from "@/modules/updater/useUpdater";
 import { getName, getVersion } from "@tauri-apps/api/app";

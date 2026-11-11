@@ -6,13 +6,11 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import {
-  FileAddIcon,
-  Folder01Icon,
-  FolderAddIcon,
-  Refresh01Icon,
-  Search01Icon,
-} from "@hugeicons/core-free-icons";
+import FileAddIcon from "@hugeicons/core-free-icons/FileAddIcon";
+import Folder01Icon from "@hugeicons/core-free-icons/Folder01Icon";
+import FolderAddIcon from "@hugeicons/core-free-icons/FolderAddIcon";
+import Refresh01Icon from "@hugeicons/core-free-icons/Refresh01Icon";
+import Search01Icon from "@hugeicons/core-free-icons/Search01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {

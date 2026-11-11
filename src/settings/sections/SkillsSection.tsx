@@ -17,11 +17,9 @@ import {
 } from "@/modules/ai/lib/skills";
 import { useMcpStore } from "@/modules/ai/store/mcpStore";
 import { useSkillsStore } from "@/modules/ai/store/skillsStore";
-import {
-  Add01Icon,
-  Delete02Icon,
-  Edit02Icon,
-} from "@hugeicons/core-free-icons";
+import Add01Icon from "@hugeicons/core-free-icons/Add01Icon";
+import Delete02Icon from "@hugeicons/core-free-icons/Delete02Icon";
+import Edit02Icon from "@hugeicons/core-free-icons/Edit02Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useState } from "react";
 import { SectionHeader } from "../components/SectionHeader";

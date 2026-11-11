@@ -25,24 +25,22 @@ import {
 import { IS_MAC } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { fileIconUrl } from "@/modules/explorer/lib/iconResolver";
-import {
-  AddSquareIcon,
-  AiContentGenerator02Icon,
-  Archive01Icon,
-  ArchiveArrowDownIcon,
-  ArrowDown01Icon,
-  ArrowRight01Icon,
-  ArrowUp01Icon,
-  CheckmarkCircle01Icon,
-  Delete01Icon,
-  Download01Icon,
-  FolderGitTwoIcon,
-  GitMergeIcon,
-  MinusSignIcon,
-  MinusSignSquareIcon,
-  Refresh01Icon,
-  RemoveSquareIcon,
-} from "@hugeicons/core-free-icons";
+import AddSquareIcon from "@hugeicons/core-free-icons/AddSquareIcon";
+import AiContentGenerator02Icon from "@hugeicons/core-free-icons/AiContentGenerator02Icon";
+import Archive01Icon from "@hugeicons/core-free-icons/Archive01Icon";
+import ArchiveArrowDownIcon from "@hugeicons/core-free-icons/ArchiveArrowDownIcon";
+import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
+import ArrowRight01Icon from "@hugeicons/core-free-icons/ArrowRight01Icon";
+import ArrowUp01Icon from "@hugeicons/core-free-icons/ArrowUp01Icon";
+import CheckmarkCircle01Icon from "@hugeicons/core-free-icons/CheckmarkCircle01Icon";
+import Delete01Icon from "@hugeicons/core-free-icons/Delete01Icon";
+import Download01Icon from "@hugeicons/core-free-icons/Download01Icon";
+import FolderGitTwoIcon from "@hugeicons/core-free-icons/FolderGitTwoIcon";
+import GitMergeIcon from "@hugeicons/core-free-icons/GitMergeIcon";
+import MinusSignIcon from "@hugeicons/core-free-icons/MinusSignIcon";
+import MinusSignSquareIcon from "@hugeicons/core-free-icons/MinusSignSquareIcon";
+import Refresh01Icon from "@hugeicons/core-free-icons/Refresh01Icon";
+import RemoveSquareIcon from "@hugeicons/core-free-icons/RemoveSquareIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {

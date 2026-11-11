@@ -24,16 +24,14 @@ import { cn } from "@/lib/utils";
 import { absoluteTime } from "../lib/relativeTime";
 import { motion } from "motion/react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import {
-  ArrowRight01Icon,
-  CodeIcon,
-  File01Icon,
-  GitForkIcon,
-  HashtagIcon,
-  Image01Icon,
-  LeftToRightBlockQuoteIcon,
-  TerminalIcon,
-} from "@hugeicons/core-free-icons";
+import ArrowRight01Icon from "@hugeicons/core-free-icons/ArrowRight01Icon";
+import CodeIcon from "@hugeicons/core-free-icons/CodeIcon";
+import File01Icon from "@hugeicons/core-free-icons/File01Icon";
+import GitForkIcon from "@hugeicons/core-free-icons/GitForkIcon";
+import HashtagIcon from "@hugeicons/core-free-icons/HashtagIcon";
+import Image01Icon from "@hugeicons/core-free-icons/Image01Icon";
+import LeftToRightBlockQuoteIcon from "@hugeicons/core-free-icons/LeftToRightBlockQuoteIcon";
+import TerminalIcon from "@hugeicons/core-free-icons/TerminalIcon";
 import { SLASH_COMMANDS, Kai_CMD_RE } from "../lib/slashCommands";
 import { Spinner } from "@/components/ui/spinner";
 import { useChatStore, sendMessage, respondToApprovalStandalone, resolveErrorDisplay, approvalContinuationPending } from "../store/chatStore";

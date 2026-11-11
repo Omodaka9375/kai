@@ -1,18 +1,16 @@
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import {
-  AiBrain03Icon,
-  Cancel01Icon,
-  FileEditIcon,
-  FilePlusIcon,
-  FolderAddIcon,
-  PencilEdit01Icon,
-  TerminalIcon,
-  Tick02Icon,
-  ToolsIcon,
-  UserWarning01Icon,
-} from "@hugeicons/core-free-icons";
+import AiBrain03Icon from "@hugeicons/core-free-icons/AiBrain03Icon";
+import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
+import FileEditIcon from "@hugeicons/core-free-icons/FileEditIcon";
+import FilePlusIcon from "@hugeicons/core-free-icons/FilePlusIcon";
+import FolderAddIcon from "@hugeicons/core-free-icons/FolderAddIcon";
+import PencilEdit01Icon from "@hugeicons/core-free-icons/PencilEdit01Icon";
+import TerminalIcon from "@hugeicons/core-free-icons/TerminalIcon";
+import Tick02Icon from "@hugeicons/core-free-icons/Tick02Icon";
+import ToolsIcon from "@hugeicons/core-free-icons/ToolsIcon";
+import UserWarning01Icon from "@hugeicons/core-free-icons/UserWarning01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ToolUIPart } from "ai";
 import { memo, useCallback, useState } from "react";

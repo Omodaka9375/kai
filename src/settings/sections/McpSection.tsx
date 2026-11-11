@@ -10,13 +10,11 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { newMcpServerId, type McpServerConfig, type McpTransport } from "@/modules/ai/lib/mcp";
 import { useMcpStore } from "@/modules/ai/store/mcpStore";
-import {
-  Add01Icon,
-  Delete02Icon,
-  Edit02Icon,
-  RefreshIcon,
-  WifiConnected01Icon,
-} from "@hugeicons/core-free-icons";
+import Add01Icon from "@hugeicons/core-free-icons/Add01Icon";
+import Delete02Icon from "@hugeicons/core-free-icons/Delete02Icon";
+import Edit02Icon from "@hugeicons/core-free-icons/Edit02Icon";
+import RefreshIcon from "@hugeicons/core-free-icons/RefreshIcon";
+import WifiConnected01Icon from "@hugeicons/core-free-icons/WifiConnected01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useState } from "react";
 import { SectionHeader } from "../components/SectionHeader";

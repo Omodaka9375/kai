@@ -4,13 +4,11 @@ import { usePreferencesStore } from "@/modules/settings/preferences";
 import { useChatStore } from "@/modules/ai/store/chatStore";
 import { SHORTCUTS, getBindingTokens, type ShortcutId } from "@/modules/shortcuts/shortcuts";
 import { HugeiconsIcon } from "@hugeicons/react";
-import {
-  AiChat01Icon,
-  ApiIcon,
-  IncognitoIcon,
-  InformationCircleIcon,
-  TerminalIcon,
-} from "@hugeicons/core-free-icons";
+import AiChat01Icon from "@hugeicons/core-free-icons/AiChat01Icon";
+import ApiIcon from "@hugeicons/core-free-icons/ApiIcon";
+import IncognitoIcon from "@hugeicons/core-free-icons/IncognitoIcon";
+import InformationCircleIcon from "@hugeicons/core-free-icons/InformationCircleIcon";
+import TerminalIcon from "@hugeicons/core-free-icons/TerminalIcon";
 import { useCallback, useMemo } from "react";
 
 type Props = {

@@ -18,21 +18,19 @@ import {
 } from "@/modules/shortcuts/shortcuts";
 import type { Tab } from "@/modules/tabs";
 import { TabBar } from "@/modules/tabs";
-import {
-  AiScanIcon,
-  FloppyDiskIcon,
-  GlobeIcon,
-  InformationCircleIcon,
-  KeyboardIcon,
-  LockKeyIcon,
-  Mic01Icon,
-  PuzzleIcon,
-  Settings01Icon,
-  Shield01Icon,
-  SidebarLeftIcon,
-  SparklesIcon,
-  UserMultiple02Icon,
-} from "@hugeicons/core-free-icons";
+import AiScanIcon from "@hugeicons/core-free-icons/AiScanIcon";
+import FloppyDiskIcon from "@hugeicons/core-free-icons/FloppyDiskIcon";
+import GlobeIcon from "@hugeicons/core-free-icons/GlobeIcon";
+import InformationCircleIcon from "@hugeicons/core-free-icons/InformationCircleIcon";
+import KeyboardIcon from "@hugeicons/core-free-icons/KeyboardIcon";
+import LockKeyIcon from "@hugeicons/core-free-icons/LockKeyIcon";
+import Mic01Icon from "@hugeicons/core-free-icons/Mic01Icon";
+import PuzzleIcon from "@hugeicons/core-free-icons/PuzzleIcon";
+import Settings01Icon from "@hugeicons/core-free-icons/Settings01Icon";
+import Shield01Icon from "@hugeicons/core-free-icons/Shield01Icon";
+import SidebarLeftIcon from "@hugeicons/core-free-icons/SidebarLeftIcon";
+import SparklesIcon from "@hugeicons/core-free-icons/SparklesIcon";
+import UserMultiple02Icon from "@hugeicons/core-free-icons/UserMultiple02Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import {

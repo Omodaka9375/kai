@@ -2,18 +2,16 @@ import { WindowControls } from "@/components/WindowControls";
 import { IS_MAC, USE_CUSTOM_WINDOW_CONTROLS } from "@/lib/platform";
 import type { SettingsTab } from "@/modules/settings/openSettingsWindow";
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import {
-  AiScanIcon,
-  InformationCircleIcon,
-  PuzzleIcon,
-  Settings01Icon,
-  SparklesIcon,
-  UserMultiple02Icon,
-  KeyboardIcon,
-  Shield01Icon,
-  Mic01Icon,
-  GlobeIcon,
-} from "@hugeicons/core-free-icons";
+import AiScanIcon from "@hugeicons/core-free-icons/AiScanIcon";
+import InformationCircleIcon from "@hugeicons/core-free-icons/InformationCircleIcon";
+import PuzzleIcon from "@hugeicons/core-free-icons/PuzzleIcon";
+import Settings01Icon from "@hugeicons/core-free-icons/Settings01Icon";
+import SparklesIcon from "@hugeicons/core-free-icons/SparklesIcon";
+import UserMultiple02Icon from "@hugeicons/core-free-icons/UserMultiple02Icon";
+import KeyboardIcon from "@hugeicons/core-free-icons/KeyboardIcon";
+import Shield01Icon from "@hugeicons/core-free-icons/Shield01Icon";
+import Mic01Icon from "@hugeicons/core-free-icons/Mic01Icon";
+import GlobeIcon from "@hugeicons/core-free-icons/GlobeIcon";
 import { lazy, Suspense, useEffect } from "react";
 
 const GeneralSection = lazy(() => import("./sections/GeneralSection").then((m) => ({ default: m.GeneralSection })));

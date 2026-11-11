@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import * as fullPack from "@hugeicons/core-free-icons";
 import {
@@ -61,6 +62,30 @@ describe("project icon customization (2026-11-11)", () => {
     expect(picker).toContain("SEARCH_RESULT_CAP");
     // Glyph click applies and closes (quickpick); color click stays open.
     expect(picker).toMatch(/onSelect=\{\(\) => \{\s*\/\/ Quickpick/);
+  });
+
+  it("no src file statically imports the hugeicons INDEX (only deep imports)", () => {
+    // The index module must stay referenced ONLY by the dynamic
+    // loadFullPack() import. Any static named import from
+    // "@hugeicons/core-free-icons" pulls the index into the eager chunk
+    // graph, and the whole ~5MB pack then welds itself into the initial
+    // load (verified on real dist output, 2026-11-11). If a new import is
+    // needed, use the per-icon deep import form:
+    //   import RocketIcon from "@hugeicons/core-free-icons/RocketIcon";
+    const offenders: string[] = [];
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir)) {
+        const p = join(dir, entry);
+        if (statSync(p).isDirectory()) walk(p);
+        else if (/\.(ts|tsx)$/.test(entry) && entry !== "projectIcons.test.ts") {
+          if (readFileSync(p, "utf8").includes('from "@hugeicons/core-free-icons"')) {
+            offenders.push(p);
+          }
+        }
+      }
+    };
+    walk(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
+    expect(offenders).toEqual([]);
   });
 
   it("AppShell persists overrides under a dedicated key keyed by canonical root", () => {

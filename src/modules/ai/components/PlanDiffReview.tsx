@@ -1,13 +1,11 @@
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import {
-  ArrowDown01Icon,
-  Cancel01Icon,
-  FileEditIcon,
-  FilePlusIcon,
-  FolderAddIcon,
-  Tick02Icon,
-} from "@hugeicons/core-free-icons";
+import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
+import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
+import FileEditIcon from "@hugeicons/core-free-icons/FileEditIcon";
+import FilePlusIcon from "@hugeicons/core-free-icons/FilePlusIcon";
+import FolderAddIcon from "@hugeicons/core-free-icons/FolderAddIcon";
+import Tick02Icon from "@hugeicons/core-free-icons/Tick02Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
 import { usePlanStore, type QueuedEdit } from "../store/planStore";

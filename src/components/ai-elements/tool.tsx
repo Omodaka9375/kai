@@ -6,24 +6,22 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
-import {
-  ArrowRight01Icon,
-  CheckListIcon,
-  EyeIcon,
-  File01Icon,
-  FileEditIcon,
-  FilePlusIcon,
-  Folder01Icon,
-  FolderAddIcon,
-  FolderOpenIcon,
-  GlobalSearchIcon,
-  RobotIcon,
-  SparklesIcon,
-  TerminalIcon,
-  StopIcon,
-  ToolsIcon,
-  VideoIcon,
-} from "@hugeicons/core-free-icons";
+import ArrowRight01Icon from "@hugeicons/core-free-icons/ArrowRight01Icon";
+import CheckListIcon from "@hugeicons/core-free-icons/CheckListIcon";
+import EyeIcon from "@hugeicons/core-free-icons/EyeIcon";
+import File01Icon from "@hugeicons/core-free-icons/File01Icon";
+import FileEditIcon from "@hugeicons/core-free-icons/FileEditIcon";
+import FilePlusIcon from "@hugeicons/core-free-icons/FilePlusIcon";
+import Folder01Icon from "@hugeicons/core-free-icons/Folder01Icon";
+import FolderAddIcon from "@hugeicons/core-free-icons/FolderAddIcon";
+import FolderOpenIcon from "@hugeicons/core-free-icons/FolderOpenIcon";
+import GlobalSearchIcon from "@hugeicons/core-free-icons/GlobalSearchIcon";
+import RobotIcon from "@hugeicons/core-free-icons/Robot01Icon";
+import SparklesIcon from "@hugeicons/core-free-icons/SparklesIcon";
+import TerminalIcon from "@hugeicons/core-free-icons/TerminalIcon";
+import StopIcon from "@hugeicons/core-free-icons/StopIcon";
+import ToolsIcon from "@hugeicons/core-free-icons/ToolsIcon";
+import VideoIcon from "@hugeicons/core-free-icons/Video01Icon";
 import { useChatStore } from "@/modules/ai/store/chatStore";
 import { stopCommand } from "@/modules/ai/tools/shell";
 import { extractRedactionNotices, unfenceDeep } from "@/modules/ai/lib/fence";

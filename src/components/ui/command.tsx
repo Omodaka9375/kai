@@ -14,7 +14,8 @@ import {
   InputGroupAddon,
 } from "@/components/ui/input-group"
 import { HugeiconsIcon } from "@hugeicons/react"
-import { SearchIcon, Tick02Icon } from "@hugeicons/core-free-icons"
+import SearchIcon from "@hugeicons/core-free-icons/Search01Icon";
+import Tick02Icon from "@hugeicons/core-free-icons/Tick02Icon";
 
 function Command({
   className,

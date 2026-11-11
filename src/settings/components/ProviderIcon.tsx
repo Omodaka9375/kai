@@ -1,18 +1,16 @@
 import type { ProviderId } from "@/modules/ai/config";
-import {
-  AiVoiceIcon,
-  ChatGptIcon,
-  ClaudeIcon,
-  FlashIcon,
-  GoogleGeminiIcon,
-  Grok02Icon,
-  CpuIcon,
-  DeepseekIcon,
-  GlobeIcon,
-  Hexagon01Icon,
-  PlugIcon,
-  Search01Icon,
-} from "@hugeicons/core-free-icons";
+import AiVoiceIcon from "@hugeicons/core-free-icons/AiVoiceIcon";
+import ChatGptIcon from "@hugeicons/core-free-icons/ChatGptIcon";
+import ClaudeIcon from "@hugeicons/core-free-icons/ClaudeIcon";
+import FlashIcon from "@hugeicons/core-free-icons/FlashIcon";
+import GoogleGeminiIcon from "@hugeicons/core-free-icons/GoogleGeminiIcon";
+import Grok02Icon from "@hugeicons/core-free-icons/Grok02Icon";
+import CpuIcon from "@hugeicons/core-free-icons/CpuIcon";
+import DeepseekIcon from "@hugeicons/core-free-icons/DeepseekIcon";
+import GlobeIcon from "@hugeicons/core-free-icons/GlobeIcon";
+import Hexagon01Icon from "@hugeicons/core-free-icons/Hexagon01Icon";
+import PlugIcon from "@hugeicons/core-free-icons/Plug01Icon";
+import Search01Icon from "@hugeicons/core-free-icons/Search01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 
 const ICON_BY_PROVIDER = {

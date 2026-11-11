@@ -21,19 +21,17 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { useChat, type Chat, type UIMessage } from "@ai-sdk/react";
-import {
-  Add01Icon,
-  AlertCircleIcon,
-  ArrowDown01Icon,
-  ArrowExpand01Icon,
-  ArrowShrink01Icon,
-  Delete02Icon,
-  MinusSignIcon,
-  FilterIcon,
-  GitMergeIcon,
-  PencilEdit01Icon,
-  TerminalIcon,
-} from "@hugeicons/core-free-icons";
+import Add01Icon from "@hugeicons/core-free-icons/Add01Icon";
+import AlertCircleIcon from "@hugeicons/core-free-icons/AlertCircleIcon";
+import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
+import ArrowExpand01Icon from "@hugeicons/core-free-icons/ArrowExpand01Icon";
+import ArrowShrink01Icon from "@hugeicons/core-free-icons/ArrowShrink01Icon";
+import Delete02Icon from "@hugeicons/core-free-icons/Delete02Icon";
+import MinusSignIcon from "@hugeicons/core-free-icons/MinusSignIcon";
+import FilterIcon from "@hugeicons/core-free-icons/FilterIcon";
+import GitMergeIcon from "@hugeicons/core-free-icons/GitMergeIcon";
+import PencilEdit01Icon from "@hugeicons/core-free-icons/PencilEdit01Icon";
+import TerminalIcon from "@hugeicons/core-free-icons/TerminalIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { motion } from "motion/react";
 import {

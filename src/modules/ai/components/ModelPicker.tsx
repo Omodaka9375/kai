@@ -7,29 +7,27 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
-import {
-  AiBookIcon,
-  AiVoiceIcon,
-  ArrowDown01Icon,
-  BrainIcon,
-  ChatGptIcon,
-  ClaudeIcon,
-  Clock01Icon,
-  CoinsDollarIcon,
-  CpuIcon,
-  DeepseekIcon,
-  FavouriteIcon,
-  FlashIcon,
-  GlobeIcon,
-  GoogleGeminiIcon,
-  Grok02Icon,
-  Hexagon01Icon,
-  PlugIcon,
-  Search01Icon,
-  Settings01Icon,
-  StarIcon,
-  Tick01Icon,
-} from "@hugeicons/core-free-icons";
+import AiBookIcon from "@hugeicons/core-free-icons/AiBookIcon";
+import AiVoiceIcon from "@hugeicons/core-free-icons/AiVoiceIcon";
+import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
+import BrainIcon from "@hugeicons/core-free-icons/BrainIcon";
+import ChatGptIcon from "@hugeicons/core-free-icons/ChatGptIcon";
+import ClaudeIcon from "@hugeicons/core-free-icons/ClaudeIcon";
+import Clock01Icon from "@hugeicons/core-free-icons/Clock01Icon";
+import CoinsDollarIcon from "@hugeicons/core-free-icons/CoinsDollarIcon";
+import CpuIcon from "@hugeicons/core-free-icons/CpuIcon";
+import DeepseekIcon from "@hugeicons/core-free-icons/DeepseekIcon";
+import FavouriteIcon from "@hugeicons/core-free-icons/FavouriteIcon";
+import FlashIcon from "@hugeicons/core-free-icons/FlashIcon";
+import GlobeIcon from "@hugeicons/core-free-icons/GlobeIcon";
+import GoogleGeminiIcon from "@hugeicons/core-free-icons/GoogleGeminiIcon";
+import Grok02Icon from "@hugeicons/core-free-icons/Grok02Icon";
+import Hexagon01Icon from "@hugeicons/core-free-icons/Hexagon01Icon";
+import PlugIcon from "@hugeicons/core-free-icons/Plug01Icon";
+import Search01Icon from "@hugeicons/core-free-icons/Search01Icon";
+import Settings01Icon from "@hugeicons/core-free-icons/Settings01Icon";
+import StarIcon from "@hugeicons/core-free-icons/StarIcon";
+import Tick01Icon from "@hugeicons/core-free-icons/Tick01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {

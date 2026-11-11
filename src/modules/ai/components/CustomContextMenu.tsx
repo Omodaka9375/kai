@@ -3,18 +3,16 @@ import { fmtShortcut, MOD_KEY, IS_MAC } from "@/lib/platform";
 import { motion } from "motion/react";
 import { useEffect, useRef } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import {
-  AiContentGenerator02Icon,
-  Copy01Icon,
-  ClipboardIcon,
-  Delete02Icon,
-  GridIcon,
-  ArrowRight01Icon,
-  ArrowDown01Icon,
-  LeftToRightBlockQuoteIcon,
-  MagicWand01Icon,
-  UserWarning01Icon
-} from "@hugeicons/core-free-icons";
+import AiContentGenerator02Icon from "@hugeicons/core-free-icons/AiContentGenerator02Icon";
+import Copy01Icon from "@hugeicons/core-free-icons/Copy01Icon";
+import ClipboardIcon from "@hugeicons/core-free-icons/ClipboardIcon";
+import Delete02Icon from "@hugeicons/core-free-icons/Delete02Icon";
+import GridIcon from "@hugeicons/core-free-icons/GridIcon";
+import ArrowRight01Icon from "@hugeicons/core-free-icons/ArrowRight01Icon";
+import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
+import LeftToRightBlockQuoteIcon from "@hugeicons/core-free-icons/LeftToRightBlockQuoteIcon";
+import MagicWand01Icon from "@hugeicons/core-free-icons/MagicWand01Icon";
+import UserWarning01Icon from "@hugeicons/core-free-icons/UserWarning01Icon";
 
 export type CustomContextMenuProps = {
   x: number;

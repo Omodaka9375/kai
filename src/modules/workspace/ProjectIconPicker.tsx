@@ -1,4 +1,4 @@
-import { Folder01Icon } from "@hugeicons/core-free-icons";
+import Folder01Icon from "@hugeicons/core-free-icons/Folder01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { IconSvgElement } from "@hugeicons/react";
 import { useEffect, useMemo, useState } from "react";
