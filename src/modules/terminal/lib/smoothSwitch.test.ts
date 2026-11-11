@@ -79,6 +79,7 @@ describe("DormantRing.drainChunked (budget tail-trim)", () => {
 
 describe("paced replay wiring (rendererPool source pins)", () => {
   const pool = read("./rendererPool.ts");
+  const session = read("./useTerminalSession.ts");
 
   it("bindSlot paces the backlog across frames, not one write burst", () => {
     expect(pool).toContain("function replayBacklog");
@@ -96,6 +97,65 @@ describe("paced replay wiring (rendererPool source pins)", () => {
 
   it("AcquireParams.drainRing is the chunked iterator", () => {
     expect(pool).toContain("drainRing: () => Generator<{ bytes: Uint8Array; remaining: number }>;");
+  });
+
+  it("live output flushes the backlog before writing (ordering)", () => {
+    // Live bytes appended into the MIDDLE of a paced replay put pre-bind
+    // history on top of what the user is watching: the line jumps back and
+    // the caret blinks above the newest line. writeLiveToSlot flushes first.
+    const fn = pool.slice(pool.indexOf("export function writeLiveToSlot"));
+    expect(fn).toContain("if (slot.finishReplay) slot.finishReplay();");
+    // ...and the term.write must come AFTER that flush.
+    expect(fn.indexOf("slot.finishReplay()")).toBeLessThan(
+      fn.indexOf("slot.term.write(bytes)"),
+    );
+    // The session layer must route through the helper, never write directly.
+    expect(session).toContain("writeLiveToSlot(slot, bytes)");
+    expect(session).not.toMatch(/if \(slot\) slot\.term\.write\(/);
+  });
+
+  it("the cursor-show lands AFTER the last backlog byte, not mid-replay", () => {
+    // Pre-fix order: replayBacklog(...) then term.write("\x1b[?25h") — the
+    // show-cursor was queued behind the FIRST slice only, so the caret was
+    // painted on an intermediate history line for the rest of the drain.
+    const epilogue = pool.slice(pool.indexOf("replayBacklog(slot, p, () =>"));
+    expect(epilogue).toContain('slot.term.write("\\x1b[?25h")');
+    expect(pool).toMatch(/function replayBacklog\(\s*slot: Slot,\s*p: AcquireParams,\s*onDone: \(\) => void,?\s*\)/);
+    // replayBacklog must call onDone exactly on completion paths.
+    const body = pool.slice(
+      pool.indexOf("function replayBacklog("),
+      pool.indexOf("export function writeLiveToSlot"),
+    );
+    expect(body).toMatch(/if \(next\.done\) \{\s*if \(slot\.finishReplay === finish\) slot\.finishReplay = null;\s*onDone\(\);/);
+    expect(body).toContain("    onDone();\n  };");
+  });
+
+  it("an in-flight replay handle is dropped on unbind and rebind", () => {
+    // A straggler live write must not flush a replay that belongs to the
+    // previous leaf.
+    const detach = pool.slice(
+      pool.indexOf("function detachSlotFromLeaf"),
+      pool.indexOf("function destroySlot"),
+    );
+    expect(detach).toContain("slot.finishReplay = null;");
+    // bindSlot clears the handle right where it cancels the replay timer
+    // (replayBacklog is defined ABOVE bindSlot, so slice forwards from bind).
+    const bindStart = pool.indexOf("function bindSlot(slot: Slot");
+    expect(bindStart).toBeGreaterThan(-1);
+    const bind = pool.slice(bindStart, bindStart + 600);
+    expect(bind).toContain("slot.finishReplay = null;");
+    expect(bind).toMatch(
+      /clearTimeout\(slot\.replayTimer\);\s*slot\.replayTimer = null;\s*slot\.finishReplay = null;/,
+    );
+  });
+
+  it("the forced cursor-show is skipped in the alternate buffer", () => {
+    // Full-screen apps (vim/less/htop) hide the cursor deliberately.
+    const epilogue = pool.slice(pool.indexOf("replayBacklog(slot, p, () =>"));
+    expect(epilogue).toContain("if (isAltScreen(slot)) return;");
+    expect(epilogue.indexOf("isAltScreen")).toBeLessThan(
+      epilogue.indexOf('slot.term.write("\\x1b[?25h")'),
+    );
   });
 });
 

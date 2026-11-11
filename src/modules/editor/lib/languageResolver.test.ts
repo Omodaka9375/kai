@@ -107,4 +107,70 @@ describe("resolveLanguage", () => {
     const ext = resolveLanguageSync("file.never_loaded_ext_abc");
     expect(ext).toBeNull();
   });
+
+  it("resolveLanguageSync returns the cached extension after a load", async () => {
+    await resolveLanguage("deep/ly/nested/app.rs");
+    expect(resolveLanguageSync("C:\\other\\place\\lib.rs")).not.toBeNull();
+  });
+});
+
+describe("resolveLanguage coverage", () => {
+  // Batch has no legacy mode; it is a local StreamParser (lib/batchMode.ts).
+  it.each(["run.bat", "build.cmd", "setup.BAT", "autorun"])(
+    "resolves Windows Batch for %s",
+    async (file) => {
+      expect(await resolveLanguage(file)).not.toBeNull();
+    },
+  );
+
+  it.each([
+    "config.ini",
+    "gradle.properties",
+    ".env",
+    "paper.tex",
+    "refs.bib",
+    "build.tcl",
+    "Module1.vb",
+    "run.vbs",
+    "api.http",
+    "view.pug",
+    "page.jinja2",
+    "main.cr",
+    "App.elm",
+    "Main.hs",
+    "init.lisp",
+    "script.scm",
+    "installer.nsi",
+    "boot.s",
+    "main.d",
+    "theme.styl",
+    "login.feature",
+    "model.idl",
+    "proof.mathematica",
+    "Types.ml",
+    "App.fs",
+    "data.ttl",
+    "query.rq",
+    "legacy.cob",
+    "index.tiddlywiki",
+    "mod.wat",
+  ])("resolves %s", async (file) => {
+    expect(await resolveLanguage(file)).not.toBeNull();
+  });
+
+  it("resolves CMakeLists.txt by filename", async () => {
+    expect(await resolveLanguage("CMakeLists.txt")).not.toBeNull();
+    expect(await resolveLanguage("project/CMakeLists.txt")).not.toBeNull();
+  });
+
+  it("resolves Dockerfile by filename on a backslashed path", async () => {
+    // Windows paths reach the editor in both separator styles; a `split("/")`
+    // basename would never match the override for `C:\\repo\\Dockerfile`.
+    expect(await resolveLanguage("C:\\repo\\Dockerfile")).not.toBeNull();
+  });
+
+  it("keeps unknown extensions null", async () => {
+    expect(await resolveLanguage("notes.unknownext")).toBeNull();
+    expect(await resolveLanguage("LICENSE")).toBeNull();
+  });
 });

@@ -42,6 +42,10 @@ export function useDocument({ path, onDirtyChange }: Options) {
    *  The user must pick: reload (discard their edits) or overwrite. */
   const [conflict, setConflict] = useState(false);
   const [reloadCounter, setReloadCounter] = useState(0);
+  /** Path whose FIRST load already happened. Lets a same-path reload keep the
+   *  current document mounted instead of flashing the loading placeholder
+   *  (which unmounts the CodeMirror view, see the load effect). */
+  const loadedPathRef = useRef<string | null>(null);
 
   // Track the saved buffer so we can detect changes cheaply.
   const savedRef = useRef<string>("");
@@ -67,13 +71,20 @@ export function useDocument({ path, onDirtyChange }: Options) {
   // Load on path change or explicit reload.
   useEffect(() => {
     let cancelled = false;
-    setDoc({ status: "loading" });
+    // Only the FIRST load of a path shows the loading placeholder. Every
+    // reload (external `fs-changed` while clean, conflict "take disk",
+    // explicit reload) keeps the current document: flipping to "loading"
+    // unmounts <CodeMirror>, which destroys undo history, scroll position,
+    // fold state and the language/vim/wrap compartments — and flashes the
+    // placeholder every time the agent writes to an open file.
+    if (loadedPathRef.current !== path) setDoc({ status: "loading" });
     setDirty(false);
     setConflict(false);
 
     invoke<ReadResult>("fs_read_file", { path, workspace: workspaceEnv() })
       .then((res) => {
         if (cancelled) return;
+        loadedPathRef.current = path;
         if (res.kind === "text") {
           savedRef.current = res.content;
           bufferRef.current = res.content;
@@ -93,7 +104,13 @@ export function useDocument({ path, onDirtyChange }: Options) {
         }
       })
       .catch((e) => {
-        if (!cancelled) setDoc({ status: "error", message: String(e) });
+        if (cancelled) return;
+        // A failed RE-load keeps the last good content on screen; only the
+        // first load for a path turns the pane into an error state.
+        if (loadedPathRef.current !== path) {
+          setDoc({ status: "error", message: String(e) });
+        }
+        loadedPathRef.current = path;
       });
 
     return () => {

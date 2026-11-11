@@ -42,6 +42,13 @@ import {
   formatSelection,
 } from "./lib/formatter";
 
+/** Built ONCE per module. `buildSharedExtensions()` returns a fresh
+ *  EditorView.theme() value each call, and CM6 keys its injected stylesheet
+ *  on the theme object — building it per editor means every open editor tab
+ *  injects its own near-identical style block, re-scanning the DOM on each
+ *  mount. AiDiffPane/GitDiffPane already share theirs this way. */
+const SHARED_EXT = buildSharedExtensions();
+
 const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico", "avif"]);
 const VIDEO_EXTS = new Set(["mp4", "webm", "mov", "mkv", "avi"]);
 const PDF_EXT = "pdf";
@@ -147,6 +154,40 @@ function applyFormattedDoc(view: EditorView, formatted: string) {
   });
 }
 
+/**
+ * Narrow a full-document replacement to the range that actually differs.
+ *
+ * A whole-document change maps EVERY cursor position to the end of the new
+ * document, so an external reload (the agent writing to an open file) yanks
+ * the caret to the last line and scrolls the viewport there. Trimming the
+ * common prefix and suffix keeps the caret where the user left it whenever
+ * the reload only touched other parts of the file.
+ */
+function minimalDocChange(
+  current: string,
+  next: string,
+): { from: number; to: number; insert: string } {
+  const shorter = Math.min(current.length, next.length);
+  let start = 0;
+  while (
+    start < shorter &&
+    current.charCodeAt(start) === next.charCodeAt(start)
+  ) {
+    start++;
+  }
+  let curEnd = current.length;
+  let nextEnd = next.length;
+  while (
+    curEnd > start &&
+    nextEnd > start &&
+    current.charCodeAt(curEnd - 1) === next.charCodeAt(nextEnd - 1)
+  ) {
+    curEnd--;
+    nextEnd--;
+  }
+  return { from: start, to: curEnd, insert: next.slice(start, nextEnd) };
+}
+
 export const EditorPane = forwardRef<EditorPaneHandle, Props>(
   function EditorPane({ path, onDirtyChange, onSaved, onClose }, ref) {
     const { doc, dirty, conflict, onChange, save, overwriteDisk, reload, takeDiskVersion } =
@@ -156,6 +197,22 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
     const takeDiskRef = useRef(takeDiskVersion);
     takeDiskRef.current = takeDiskVersion;
     const cmRef = useRef<ReactCodeMirrorRef>(null);
+    /**
+     * The `value` prop is only the SEED for the CodeMirror document, captured
+     * when a file first loads. It deliberately does not track `doc.content`:
+     * @uiw/react-codemirror reacts to a changed `value` by replacing the
+     * ENTIRE document, and a whole-document change maps every cursor position
+     * to the new end of the doc — so a background reload (the agent writing to
+     * an open file) teleported the caret to the last line and scrolled the
+     * viewport there. Later content (reload / take-disk) is applied by the
+     * effect below as a minimal-diff change instead.
+     *
+     * Keyed by path: the seed must never outlive the file it belongs to.
+     */
+    const seedRef = useRef<{ path: string; content: string } | null>(null);
+    if (doc.status === "ready" && seedRef.current?.path !== path) {
+      seedRef.current = { path, content: doc.content };
+    }
     const editorThemeId = usePreferencesStore((s) => s.editorTheme);
     const vimMode = usePreferencesStore((s) => s.vimMode);
     const wordWrap = usePreferencesStore((s) => s.editorWordWrap);
@@ -276,7 +333,7 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
           },
           close: () => onCloseRef.current?.(),
         })),
-        ...buildSharedExtensions(),
+        ...SHARED_EXT,
         languageCompartment.of([]),
         wrapCompartment.of(
           usePreferencesStore.getState().editorWordWrap
@@ -318,6 +375,19 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
         ),
       });
     }, [wordWrap]);
+
+    // Apply externally-driven content changes (reload after an external
+    // `fs-changed`, or "take disk version" from the conflict banner) as the
+    // SMALLEST possible change so the caret, selection and scroll position
+    // survive when the edit landed elsewhere in the file.
+    useEffect(() => {
+      if (doc.status !== "ready") return;
+      const view = cmRef.current?.view;
+      if (!view) return;
+      const current = view.state.doc.toString();
+      if (current === doc.content) return;
+      view.dispatch({ changes: minimalDocChange(current, doc.content) });
+    }, [doc]);
 
     useEffect(() => {
       let cancelled = false;
@@ -513,7 +583,7 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
         )}
         <CodeMirror
           ref={cmRef}
-          value={doc.content}
+          value={seedRef.current?.content ?? ""}
           onChange={onChange}
           theme={themeExt}
           extensions={extensions}

@@ -14,36 +14,94 @@
 import type { Plugin } from "prettier";
 import { native } from "@/modules/ai/lib/native";
 
-/** Prettier parser → plugin loaders. Kept as dynamic imports so only the
- *  formatters actually used enter the editor chunk. */
+/**
+ * Load every plugin the parser needs, in TWO layers:
+ *
+ *  1. the parser's own plugin (the thing that can parse this file at all), and
+ *  2. the plugins for any languages EMBEDDED in it — prettier delegates
+ *     `<script>` / `<style>` / fenced code blocks to those parsers, and a
+ *     missing one is not an error, it silently leaves the block untouched.
+ *
+ * Layer 1 is load-bearing: `prettier/standalone` resolves parsers ONLY from
+ * the plugins passed here, so `parser: "json"` without the babel plugin
+ * throws "Couldn't resolve parser" and the format command does nothing.
+ *
+ * All imports are dynamic so unused formatters stay out of the editor chunk.
+ */
 async function loadPrettierPlugins(parsers: string[]): Promise<Plugin[]> {
   const plugins: Plugin[] = [];
   const need = new Set(parsers);
-  if (need.has("babel") || need.has("typescript") || need.has("espree") || need.has("flow")) {
-    const m = await import("prettier/plugins/babel");
-    plugins.push(m as unknown as Plugin);
-    const estree = await import("prettier/plugins/estree");
-    plugins.push(estree as unknown as Plugin);
+
+  /** Script/style blocks inside these are delegated to other parsers. */
+  const embedsCode =
+    need.has("html") ||
+    need.has("vue") ||
+    need.has("angular") ||
+    need.has("lwc") ||
+    need.has("mjml") ||
+    need.has("markdown") ||
+    need.has("mdx");
+
+  // JS family, plus the ``json`` parsers (they live in the babel plugin and
+  // print through the estree printer), plus every embedded-code host.
+  if (
+    embedsCode ||
+    need.has("babel") ||
+    need.has("babel-ts") ||
+    need.has("typescript") ||
+    need.has("flow") ||
+    need.has("espree") ||
+    need.has("acorn") ||
+    need.has("meriyah") ||
+    need.has("json") ||
+    need.has("jsonc") ||
+    need.has("json5")
+  ) {
+    plugins.push((await import("prettier/plugins/babel")) as unknown as Plugin);
+    plugins.push((await import("prettier/plugins/estree")) as unknown as Plugin);
   }
-  if (need.has("html") || need.has("angular") || need.has("vue") || need.has("lwc")) {
-    const m = await import("prettier/plugins/html");
-    plugins.push(m as unknown as Plugin);
+  // TypeScript parser is separate from babel's ``babel-ts``. Embedded hosts
+  // load it too: a ``<script lang="ts">`` block (or a ```ts fence) is only
+  // formatted when its parser is present, otherwise it is left verbatim.
+  if (need.has("typescript") || embedsCode) {
+    plugins.push((await import("prettier/plugins/typescript")) as unknown as Plugin);
   }
-  if (need.has("css") || need.has("scss") || need.has("less") || need.has("postcss")) {
-    const m = await import("prettier/plugins/postcss");
-    plugins.push(m as unknown as Plugin);
+  if (need.has("flow")) {
+    plugins.push((await import("prettier/plugins/flow")) as unknown as Plugin);
+  }
+  if (need.has("acorn") || need.has("espree")) {
+    plugins.push((await import("prettier/plugins/acorn")) as unknown as Plugin);
+  }
+  if (need.has("meriyah")) {
+    plugins.push((await import("prettier/plugins/meriyah")) as unknown as Plugin);
+  }
+  if (
+    need.has("html") ||
+    need.has("vue") ||
+    need.has("angular") ||
+    need.has("lwc") ||
+    need.has("mjml")
+  ) {
+    plugins.push((await import("prettier/plugins/html")) as unknown as Plugin);
+  }
+  // style= blocks in html/vue need postcss, so embedsCode pulls it too.
+  if (
+    embedsCode ||
+    need.has("css") ||
+    need.has("scss") ||
+    need.has("less") ||
+    need.has("postcss")
+  ) {
+    plugins.push((await import("prettier/plugins/postcss")) as unknown as Plugin);
   }
   if (need.has("markdown") || need.has("mdx")) {
-    const m = await import("prettier/plugins/markdown");
-    plugins.push(m as unknown as Plugin);
+    plugins.push((await import("prettier/plugins/markdown")) as unknown as Plugin);
   }
   if (need.has("yaml")) {
-    const m = await import("prettier/plugins/yaml");
-    plugins.push(m as unknown as Plugin);
+    plugins.push((await import("prettier/plugins/yaml")) as unknown as Plugin);
   }
   if (need.has("graphql")) {
-    const m = await import("prettier/plugins/graphql");
-    plugins.push(m as unknown as Plugin);
+    plugins.push((await import("prettier/plugins/graphql")) as unknown as Plugin);
   }
   return plugins;
 }
@@ -52,9 +110,14 @@ export type FormattableLanguage =
   | "javascript"
   | "typescript"
   | "json"
+  | "json5"
   | "html"
+  | "vue"
   | "css"
+  | "scss"
+  | "less"
   | "markdown"
+  | "mdx"
   | "yaml"
   | "graphql"
   | "python";
@@ -87,12 +150,13 @@ const EXTENSION_MAP: Record<string, FormatSpec> = {
   tsx: prettier(["typescript", "estree"]),
   // JSON family
   json: prettier(["json"]),
-  jsonc: prettier(["json"]),
+  jsonc: prettier(["jsonc"]),
   json5: prettier(["json5"]),
-  // Web
+  // Web — vue gets its own parser: parsed as plain HTML the <script> body is
+  // left untouched (no JS formatting at all).
   html: prettier(["html"]),
   htm: prettier(["html"]),
-  vue: prettier(["html"]),
+  vue: prettier(["vue"]),
   css: prettier(["css"]),
   scss: prettier(["scss"]),
   less: prettier(["less"]),

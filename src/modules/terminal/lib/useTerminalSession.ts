@@ -26,6 +26,7 @@ import {
   getSlotForLeaf,
   releaseSlot,
   setSlotFocused,
+  writeLiveToSlot,
 } from "./rendererPool";
 
 /** Display budget for a dormant-ring backlog replay (smooth-switch 2026-10-31):
@@ -241,7 +242,12 @@ function deliverPtyBytes(leafId: number, bytes: Uint8Array): void {
     }
   }
   s.lastOutputAt = performance.now();
-  if (slot) slot.term.write(bytes);
+  // Through writeLiveToSlot, never slot.term.write directly: a paced backlog
+  // replay may still be draining PRE-BIND output into this slot, and live
+  // bytes interleaved into it land out of order - the screen jumps back to
+  // old history and the cursor is left blinking above the newest line. The
+  // helper flushes the replay first so live output is always last.
+  if (slot) writeLiveToSlot(slot, bytes);
   else s.dormantRing.push(bytes);
   // Feed to error detector (skip private terminals).
   if (!s.disposed) feedErrorDetector(textDecoder.decode(bytes, { stream: true }));
@@ -390,8 +396,11 @@ function openPtySession(
         // Show error in the terminal — no more silent dead panes.
         const slot = getSlotForLeaf(leafId);
         if (slot) {
-          slot.term.write(
-            `\r\n\x1b[31mShell failed to start:\x1b[0m ${String(e)}\r\n`,
+          writeLiveToSlot(
+            slot,
+            new TextEncoder().encode(
+              `\r\n\x1b[31mShell failed to start:\x1b[0m ${String(e)}\r\n`,
+            ),
           );
         }
       }
@@ -702,8 +711,11 @@ export async function respawnSession(
     logLeaf(leafId, `respawn: openPty FAILED: ${String(e)}`);
     console.error("[Kai] respawn openPty failed:", e);
     if (slot) {
-      slot.term.write(
-        `\r\n\x1b[31mShell failed to start:\x1b[0m ${String(e)}\r\n`,
+      writeLiveToSlot(
+        slot,
+        new TextEncoder().encode(
+          `\r\n\x1b[31mShell failed to start:\x1b[0m ${String(e)}\r\n`,
+        ),
       );
     }
     return;

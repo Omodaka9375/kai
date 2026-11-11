@@ -72,6 +72,10 @@ export type Slot = {
   unhideTimer: ReturnType<typeof setTimeout> | null;
   /** Pending paced-backlog replay slice (see replayBacklog). */
   replayTimer: ReturnType<typeof setTimeout> | null;
+  /** Drains the REST of an in-flight paced replay synchronously. Non-null
+   *  only while a replay is running; set by replayBacklog (see
+   *  writeLiveToSlot for why live output forces it). */
+  finishReplay: (() => void) | null;
   webglRecoveryTimer: ReturnType<typeof setTimeout> | null;
   /** Once-per-bind: the first keystroke forwarded to the PTY is file-logged
    *  (input-path proof — see term.onData in createSlot). */
@@ -159,6 +163,7 @@ function createSlot(): Slot {
     unhideRaf: null,
     unhideTimer: null,
     replayTimer: null,
+    finishReplay: null,
     webglRecoveryTimer: null,
     sawKeystroke: false,
     lastCols: term.cols,
@@ -300,15 +305,52 @@ const REPLAY_CHUNK_BYTES = 32 * 1024;
 const REPLAY_FUSE_MS = 2_000;
 
 /** Stream the dormant ring's backlog into a freshly bound slot in
- *  per-frame slices. See bindSlot's replay comment for the why. */
-function replayBacklog(slot: Slot, p: AcquireParams): void {
+ *  per-frame slices. See bindSlot's replay comment for the why.
+ *
+ *  `onDone` fires exactly once, AFTER the last backlog byte reached xterm —
+ *  and never at all when the slot was re-bound mid-replay (the new bind owns
+ *  the pane and writes its own epilogue). The cursor-show lives there: it
+ *  must not land in the middle of the drain, or the caret is painted on an
+ *  intermediate history line for the rest of the replay. */
+function replayBacklog(
+  slot: Slot,
+  p: AcquireParams,
+  onDone: () => void,
+): void {
   const iter = p.drainRing();
   const startedAt = performance.now();
+
+  /** Finish the backlog NOW, synchronously, then close the replay. */
+  const finish = (): void => {
+    if (slot.finishReplay !== finish) return; // already done / cancelled
+    // A rebound slot belongs to a different leaf's buffer: never pour this
+    // leaf's remaining history into it, and never run its epilogue.
+    if (slot.currentLeafId !== p.leafId) {
+      slot.finishReplay = null;
+      return;
+    }
+    slot.finishReplay = null;
+    if (slot.replayTimer) clearTimeout(slot.replayTimer);
+    slot.replayTimer = null;
+    try {
+      let next = iter.next();
+      while (!next.done) {
+        slot.term.write(next.value.bytes);
+        next = iter.next();
+      }
+    } catch (e) {
+      console.warn("[Kai-pool] backlog replay failed:", e);
+    }
+    onDone();
+  };
+  slot.finishReplay = finish;
+
   const writeSlice = (): void => {
     if (slot.currentLeafId !== p.leafId) {
       // Slot re-bound to another leaf mid-replay: abandon the iterator (the
       // ring's finally resets it; the rest of THIS backlog is spent - a
       // re-bind replays from the snapshot, not a half-drained ring).
+      if (slot.finishReplay === finish) slot.finishReplay = null;
       iter.return?.(undefined as never);
       return;
     }
@@ -316,26 +358,24 @@ function replayBacklog(slot: Slot, p: AcquireParams): void {
     try {
       while (written < REPLAY_CHUNK_BYTES) {
         const next = iter.next();
-        if (next.done) return;
+        if (next.done) {
+          if (slot.finishReplay === finish) slot.finishReplay = null;
+          onDone();
+          return;
+        }
         slot.term.write(next.value.bytes);
         written += next.value.bytes.length;
       }
     } catch (e) {
       console.warn("[Kai-pool] backlog replay failed:", e);
+      if (slot.finishReplay === finish) slot.finishReplay = null;
+      onDone();
       return;
     }
     if (performance.now() - startedAt > REPLAY_FUSE_MS) {
       // Fuse: stop pacing, finish synchronously so the backlog can never
       // dribble forever.
-      try {
-        let next = iter.next();
-        while (!next.done) {
-          slot.term.write(next.value.bytes);
-          next = iter.next();
-        }
-      } catch {
-        /* already warned above */
-      }
+      finish();
       return;
     }
     // Continue next frame. setTimeout, not rAF: rAF is throttled while the
@@ -348,6 +388,21 @@ function replayBacklog(slot: Slot, p: AcquireParams): void {
   writeSlice();
 }
 
+/**
+ * Write LIVE PTY output into a bound slot.
+ *
+ * Live bytes must never interleave with an in-flight paced replay. The
+ * replay appends PRE-BIND HISTORY (`npm run dev` spam from while the tab was
+ * dormant) on top of output the user is already watching, so the visible
+ * line jumps backwards and the cursor is left blinking ABOVE the last
+ * printed line until the backlog finishes. Flushing the replay first keeps
+ * live bytes strictly last.
+ */
+export function writeLiveToSlot(slot: Slot, bytes: Uint8Array): void {
+  if (slot.finishReplay) slot.finishReplay();
+  slot.term.write(bytes);
+}
+
 function bindSlot(slot: Slot, p: AcquireParams): void {
   slot.currentLeafId = p.leafId;
   slot.lastUsedAt = performance.now();
@@ -356,6 +411,7 @@ function bindSlot(slot: Slot, p: AcquireParams): void {
   cancelPendingUnhide(slot);
   if (slot.replayTimer) clearTimeout(slot.replayTimer);
   slot.replayTimer = null;
+  slot.finishReplay = null;
   slot.host.style.visibility = "hidden";
 
   try {
@@ -390,15 +446,26 @@ function bindSlot(slot: Slot, p: AcquireParams): void {
     // beat" jank. The snapshot above already restored the visible state;
     // the backlog is history, so it streams in CHUNK_BYTES-per-frame slices
     // with a hard completion fuse. The pane is live and interactive from
-    // the first frame; new PTY output keeps flowing normally (the session
-    // layer writes live bytes directly to the bound slot, ahead of this
-    // backlog tail - late-history ordering is acceptable for a replay).
-    replayBacklog(slot, p);
-    try {
-      slot.term.write("\x1b[?25h");
-    } catch (e) {
-      console.debug("[Kai-pool] cursor-show write failed:", e);
-    }
+    // the first frame; new PTY output goes through writeLiveToSlot, which
+    // flushes the rest of this replay first so live bytes are never
+    // interleaved into the middle of old history.
+    replayBacklog(slot, p, () => {
+      // Backlog fully drained: only now is the cursor at the true end of
+      // the buffer. Writing the show-cursor EARLIER (the pre-fix order)
+      // left the caret painted on an intermediate history line until the
+      // drain finished - the "cursor blinks before the last printed line"
+      // symptom on a busy hidden project.
+      //
+      // Skip it in the ALTERNATE buffer: a full-screen app (vim, less, htop,
+      // fzf) owns the cursor and deliberately hides it (`\x1b[?25l`). Forcing
+      // it visible there made the caret blink over the app's own layout.
+      if (isAltScreen(slot)) return;
+      try {
+        slot.term.write("\x1b[?25h");
+      } catch (e) {
+        console.debug("[Kai-pool] cursor-show write failed:", e);
+      }
+    });
 
     for (const d of slot.oscDisposers) {
       try {
@@ -665,6 +732,9 @@ function detachSlotFromLeaf(slot: Slot): void {
   // slice from firing at all after the slot moves on.
   if (slot.replayTimer) clearTimeout(slot.replayTimer);
   slot.replayTimer = null;
+  // Drop the drain handle too: a live write arriving after the unbind must
+  // not flush a replay that belongs to the previous leaf's buffer.
+  slot.finishReplay = null;
 
   cancelPendingUnhide(slot);
   slot.host.style.visibility = "";

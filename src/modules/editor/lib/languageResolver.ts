@@ -72,6 +72,9 @@ const loaders: Record<string, LanguageLoader> = {
     import("@codemirror/legacy-modes/mode/shell").then((m) => m.shell),
   zsh: () => import("@codemirror/legacy-modes/mode/shell").then((m) => m.shell),
   fish: () => import("@codemirror/legacy-modes/mode/shell").then((m) => m.shell),
+  // Windows Batch — no legacy mode exists, so local/batchMode.ts supplies one.
+  bat: () => import("./batchMode").then((m) => m.batch),
+  cmd: () => import("./batchMode").then((m) => m.batch),
   toml: () => import("@codemirror/legacy-modes/mode/toml").then((m) => m.toml),
   yaml: () => import("@codemirror/legacy-modes/mode/yaml").then((m) => m.yaml),
   yml: () => import("@codemirror/legacy-modes/mode/yaml").then((m) => m.yaml),
@@ -167,18 +170,105 @@ const loaders: Record<string, LanguageLoader> = {
 
   // Pascal
   pas: () => import("@codemirror/legacy-modes/mode/pascal").then((m) => m.pascal),
+
+  // INI / properties / env / git config — all key=value, same mode.
+  ini: () =>
+    import("@codemirror/legacy-modes/mode/properties").then((m) => m.properties),
+  properties: () =>
+    import("@codemirror/legacy-modes/mode/properties").then((m) => m.properties),
+  env: () =>
+    import("@codemirror/legacy-modes/mode/properties").then((m) => m.properties),
+  editorconfig: () =>
+    import("@codemirror/legacy-modes/mode/properties").then((m) => m.properties),
+  gitconfig: () =>
+    import("@codemirror/legacy-modes/mode/properties").then((m) => m.properties),
+
+  // LaTeX family
+  tex: () => import("@codemirror/legacy-modes/mode/stex").then((m) => m.stex),
+  latex: () => import("@codemirror/legacy-modes/mode/stex").then((m) => m.stex),
+  sty: () => import("@codemirror/legacy-modes/mode/stex").then((m) => m.stex),
+  cls: () => import("@codemirror/legacy-modes/mode/stex").then((m) => m.stex),
+  bib: () => import("@codemirror/legacy-modes/mode/stex").then((m) => m.stex),
+
+  // Tcl
+  tcl: () => import("@codemirror/legacy-modes/mode/tcl").then((m) => m.tcl),
+
+  // Visual Basic / VBScript
+  vb: () => import("@codemirror/legacy-modes/mode/vb").then((m) => m.vb),
+  vbs: () => import("@codemirror/legacy-modes/mode/vbscript").then((m) => m.vbScript),
+
+  // HTTP request files (.http / .rest)
+  http: () => import("@codemirror/legacy-modes/mode/http").then((m) => m.http),
+
+  // Template languages
+  pug: () => import("@codemirror/legacy-modes/mode/pug").then((m) => m.pug),
+  jade: () => import("@codemirror/legacy-modes/mode/pug").then((m) => m.pug),
+  jinja: () => import("@codemirror/legacy-modes/mode/jinja2").then((m) => m.jinja2),
+  jinja2: () => import("@codemirror/legacy-modes/mode/jinja2").then((m) => m.jinja2),
+  j2: () => import("@codemirror/legacy-modes/mode/jinja2").then((m) => m.jinja2),
+
+  // More languages legacy-modes already ships
+  crystal: () => import("@codemirror/legacy-modes/mode/crystal").then((m) => m.crystal),
+  cr: () => import("@codemirror/legacy-modes/mode/crystal").then((m) => m.crystal),
+  elm: () => import("@codemirror/legacy-modes/mode/elm").then((m) => m.elm),
+  haxe: () => import("@codemirror/legacy-modes/mode/haxe").then((m) => m.haxe),
+  lisp: () => import("@codemirror/legacy-modes/mode/commonlisp").then((m) => m.commonLisp),
+  cl: () => import("@codemirror/legacy-modes/mode/commonlisp").then((m) => m.commonLisp),
+  el: () => import("@codemirror/legacy-modes/mode/commonlisp").then((m) => m.commonLisp),
+  scm: () => import("@codemirror/legacy-modes/mode/scheme").then((m) => m.scheme),
+  ss: () => import("@codemirror/legacy-modes/mode/scheme").then((m) => m.scheme),
+  nsi: () => import("@codemirror/legacy-modes/mode/nsis").then((m) => m.nsis),
+  nsh: () => import("@codemirror/legacy-modes/mode/nsis").then((m) => m.nsis),
+  s: () => import("@codemirror/legacy-modes/mode/gas").then((m) => m.gas),
+  asm: () => import("@codemirror/legacy-modes/mode/gas").then((m) => m.gas),
+  d: () => import("@codemirror/legacy-modes/mode/d").then((m) => m.d),
+  styl: () => import("@codemirror/legacy-modes/mode/stylus").then((m) => m.stylus),
+  stylus: () => import("@codemirror/legacy-modes/mode/stylus").then((m) => m.stylus),
+  feature: () => import("@codemirror/legacy-modes/mode/gherkin").then((m) => m.gherkin),
+  idl: () => import("@codemirror/legacy-modes/mode/idl").then((m) => m.idl),
+  mathematica: () => import("@codemirror/legacy-modes/mode/mathematica").then((m) => m.mathematica),
+  mll: () => import("@codemirror/legacy-modes/mode/mllike").then((m) => m.oCaml),
+  ml: () => import("@codemirror/legacy-modes/mode/mllike").then((m) => m.oCaml),
+  mli: () => import("@codemirror/legacy-modes/mode/mllike").then((m) => m.oCaml),
+  fs: () => import("@codemirror/legacy-modes/mode/mllike").then((m) => m.fSharp),
+  fsx: () => import("@codemirror/legacy-modes/mode/mllike").then((m) => m.fSharp),
+  sml: () => import("@codemirror/legacy-modes/mode/mllike").then((m) => m.sml),
+  ttl: () => import("@codemirror/legacy-modes/mode/turtle").then((m) => m.turtle),
+  rq: () => import("@codemirror/legacy-modes/mode/sparql").then((m) => m.sparql),
+  sparql: () => import("@codemirror/legacy-modes/mode/sparql").then((m) => m.sparql),
+  cob: () => import("@codemirror/legacy-modes/mode/cobol").then((m) => m.cobol),
+  tiddlywiki: () => import("@codemirror/legacy-modes/mode/tiddlywiki").then((m) => m.tiddlyWiki),
+  wat: () => import("@codemirror/legacy-modes/mode/wast").then((m) => m.wast),
+  wast: () => import("@codemirror/legacy-modes/mode/wast").then((m) => m.wast),
 };
 
+/** Files whose language is decided by NAME, not extension. Keys are the
+ *  lowercase basename; `cacheKey` uses them before falling back to `extOf`. */
 const filenameOverrides: Record<string, LanguageLoader> = {
   dockerfile: loaders.dockerfile!,
   "dockerfile.dev": loaders.dockerfile!,
+  "dockerfile.prod": loaders.dockerfile!,
+  containerfile: loaders.dockerfile!,
+  // Batch entry point that usually has no extension.
+  autorun: loaders.bat!,
+  // CMake's canonical filename is .txt, which would resolve to no language.
+  "cmakelists.txt": loaders.cmake!,
 };
 
-function extOf(name: string): string | null {
+/** Lowercased final path segment. Splits on BOTH separators: editor paths
+ *  are canonical forward-slash, but git/AI/OS callers can hand us a
+ *  backslashed Windows path, and a Dockerfile under `C:\\repo\\` would
+ *  otherwise never match its filename override. */
+function basenameOf(name: string): string {
   const lower = name.toLowerCase();
-  const dot = lower.lastIndexOf(".");
-  if (dot === -1 || dot === lower.length - 1) return null;
-  return lower.slice(dot + 1);
+  return lower.split(/[\\/]/).pop() ?? lower;
+}
+
+function extOf(name: string): string | null {
+  const base = basenameOf(name);
+  const dot = base.lastIndexOf(".");
+  if (dot === -1 || dot === base.length - 1) return null;
+  return base.slice(dot + 1);
 }
 
 function isStreamParser(v: unknown): boolean {
@@ -192,8 +282,7 @@ function isStreamParser(v: unknown): boolean {
 const cache = new Map<string, Extension | null>();
 
 function cacheKey(filename: string): string | null {
-  const lower = filename.toLowerCase();
-  const base = lower.split("/").pop() ?? lower;
+  const base = basenameOf(filename);
   if (filenameOverrides[base]) return `name:${base}`;
   const ext = extOf(base);
   return ext ? `ext:${ext}` : null;
@@ -212,8 +301,7 @@ export async function resolveLanguage(
   const cached = cache.get(key);
   if (cached !== undefined) return cached;
 
-  const lower = filename.toLowerCase();
-  const base = lower.split("/").pop() ?? lower;
+  const base = basenameOf(filename);
   const loader = filenameOverrides[base] ?? loaders[extOf(base) ?? ""];
   if (!loader) {
     cache.set(key, null);
