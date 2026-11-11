@@ -24,11 +24,14 @@ pub struct ShellSession {
     pub pristine: AtomicBool,
     /// Set to true to abort the currently running command.
     pub cancel: Arc<AtomicBool>,
+    /// Close is permanent. Unlike `cancel`, this is never reset by a worker
+    /// starting a command, so a stop cannot be lost during dispatch.
+    closed: AtomicBool,
     /// Per-session sentinel string used to extract cwd from command output.
     sentinel: String,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct SessionRunOutput {
     pub stdout: String,
     pub stderr: String,
@@ -65,12 +68,18 @@ impl ShellSession {
             workspace,
             pristine: AtomicBool::new(true),
             cancel: Arc::new(AtomicBool::new(false)),
+            closed: AtomicBool::new(false),
             sentinel: new_sentinel(),
         }
     }
 
     pub fn current_cwd(&self) -> String {
         mutex_lock(&self.cwd).clone()
+    }
+
+    pub fn close(&self) {
+        self.closed.store(true, Ordering::Release);
+        self.cancel.store(true, Ordering::Release);
     }
 
     pub fn run(
@@ -102,16 +111,29 @@ impl ShellSession {
         // Windows-local path normally emits.
         let sandboxed = sandbox_root.is_some_and(|r| !r.is_empty());
         let wrapped = if sandboxed {
+            // The native fallback receives a separate host-dialect wrapper,
+            // so Windows never tries to parse this POSIX text as PowerShell.
             wrap_posix_with_sentinel(&trimmed, &self.sentinel)
         } else {
             wrap_with_sentinel(&trimmed, &effective_workspace, &self.sentinel)
         };
 
-        self.cancel.store(false, Ordering::Release);
         let cancel = self.cancel.clone();
         let (tx, rx) = mpsc::channel::<Result<super::CommandOutput, String>>();
+        if self.closed.load(Ordering::Acquire) {
+            return Err("shell session closed".to_string());
+        }
+        // Cancellation applies to the current run, not to the next. `closed`
+        // is sticky, so a close during this reset still prevents dispatch.
+        self.cancel.store(false, Ordering::Release);
+        if self.closed.load(Ordering::Acquire) {
+            return Err("shell session closed".to_string());
+        }
         let cwd_for_thread = cwd.clone();
         let sandbox_root = sandbox_root.map(|s| s.to_string());
+        let fallback = sandboxed.then(||
+            wrap_with_sentinel(&trimmed, &effective_workspace, &self.sentinel)
+        );
         thread::spawn(move || {
             let _ = tx.send(super::run_blocking_cancellable_pub(
                 wrapped,
@@ -120,6 +142,7 @@ impl ShellSession {
                 timeout,
                 Some(&cancel),
                 sandbox_root.as_deref(),
+                fallback.as_deref(),
             ));
         });
         let raw = rx.recv().map_err(|e| e.to_string())??;
@@ -368,6 +391,38 @@ mod tests {
 #[cfg(test)]
 mod cancellation_tests {
     use super::*;
+    use std::sync::atomic::Ordering;
+
+    #[cfg(windows)]
+    #[test]
+    fn missing_sandbox_runner_falls_back_to_powershell_not_posix() {
+        let cwd = std::env::current_dir().unwrap().to_string_lossy().into_owned();
+        let session = ShellSession::new(cwd, WorkspaceEnv::Local);
+        let output = session.run(
+            "Write-Output 'fallback-ok'".to_string(),
+            None,
+            None,
+            Duration::from_secs(15),
+            Some("C:/definitely-missing-kai-sandbox"),
+        ).expect("fallback must execute through the host PowerShell");
+        assert!(output.stdout.contains("fallback-ok"), "{output:?}");
+        assert!(!output.stderr.contains("__KAI_rc"), "{output:?}");
+    }
+
+    #[test]
+    fn close_before_dispatch_is_sticky() {
+        let cwd = std::env::current_dir().unwrap().to_string_lossy().into_owned();
+        let session = ShellSession::new(cwd, WorkspaceEnv::Local);
+        session.close();
+        let error = session.run(
+            "Write-Output 'must-not-run'".to_string(),
+            None,
+            None,
+            Duration::from_secs(1),
+            None,
+        ).expect_err("a closed session must not dispatch its command");
+        assert_eq!(error, "shell session closed");
+    }
 
     #[test]
     fn cancel_kills_running_command_and_returns_cancelled() {

@@ -395,7 +395,7 @@ type StoreState = {
    *  for the toast. */
   compactActiveSession: () => string;
   /** Inject a system-originated user message (e.g. watch result) without triggering a new agent run. */
-  injectMessage: (id: string, text: string) => Promise<void>;
+  injectMessage: (id: string, text: string, shouldDeliver?: () => boolean) => Promise<void>;
   /** Fork the current session at a message index, creating a new branch. */
   forkSession: (atMessageIndex: number) => Promise<string | null>;
   /**
@@ -1906,7 +1906,8 @@ export const useChatStore = create<StoreState>((set, get) => ({
     // never persisted, so THIS is what makes it survive a restart.
     if (wasGhost && count > 0) persistActiveSessionId(id);
   },
-  injectMessage: async (id, text) => {
+  injectMessage: async (id, text, shouldDeliver) => {
+    if (shouldDeliver && !shouldDeliver()) return;
     // Hydrate persisted history BEFORE constructing a chat, so evicting a
     // session from the LRU and receiving a watch/steering message while it's
     // inactive can't instantiate an empty Chat and clobber the real history.
@@ -1919,6 +1920,9 @@ export const useChatStore = create<StoreState>((set, get) => ({
         seedMessages.set(id, stripIncompleteToolMessages(m));
       }
     }
+    // Deletion/reaping may have completed while history was loading. Never
+    // recreate an orphaned Chat after its owning watch was stopped.
+    if (shouldDeliver && !shouldDeliver()) return;
     const chat = getOrCreateChat(id);
     // Push a system-originated user message into the chat's message array.
     chat.messages = [
@@ -1961,7 +1965,9 @@ export const useChatStore = create<StoreState>((set, get) => ({
       // Passive ride-along: no wake, no queue. The message is already in
       // chat.messages (appended above) and will be in the next request's
       // history snapshot.
-    } else {
+    } else if (!shouldDeliver || shouldDeliver()) {
+      // Starting a run must not suspend polling until the model finishes.
+      // The appended event remains in history if the provider request fails.
       void chat.sendMessage().catch((e) => {
         console.error("[kai] watch wake-up failed:", e);
       });

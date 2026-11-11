@@ -9,8 +9,9 @@ vi.mock("../lib/native", () => ({
   native: {
     shellSessionRun: vi.fn(),
     shellSessionOpen: vi.fn(),
-    shellSessionClose: vi.fn(),
-    watchHeartbeat: vi.fn(),
+    shellSessionClose: vi.fn(async () => undefined),
+    shellSessionCancel: vi.fn(async () => undefined),
+    watchHeartbeat: vi.fn(async () => undefined),
   },
 }));
 const { injectMessageMock } = vi.hoisted(() => ({ injectMessageMock: vi.fn() }));
@@ -31,6 +32,66 @@ vi.mock("../lib/sandbox", () => ({
 }));
 
 const watchModule = await import("./watch");
+const { native } = await import("../lib/native");
+
+type TestContext = import("./context").ToolContext;
+function testContext(nativeOverride?: TestContext["native"]): TestContext {
+  return {
+    getSessionId: () => "watch-create-session",
+    getCwd: () => "D:/watch-root",
+    native: nativeOverride,
+  } as TestContext;
+}
+
+type CreateTool = {
+  execute: (input: {
+    command: string;
+    interval_secs: number;
+    condition?: string;
+    mode: "fire_on_match" | "fire_on_change";
+  }) => Promise<{ error?: string; watch_id?: string }>;
+};
+
+describe("watch creation", () => {
+  beforeEach(() => {
+    for (const w of watchModule.listWatches()) watchModule.stopWatchById(w.id);
+    vi.mocked(native.shellSessionOpen).mockReset();
+  });
+
+  it("rejects an invalid condition before opening a shell", async () => {
+    const tools = watchModule.buildWatchTools(testContext());
+    const result = await (tools.watch_create as unknown as CreateTool).execute({
+      command: "status",
+      interval_secs: 60,
+      mode: "fire_on_match",
+      condition: "stdout.trim() === \"ready\"",
+    });
+    expect(result.error).toContain("Invalid watch condition");
+    expect(native.shellSessionOpen).not.toHaveBeenCalled();
+  });
+
+  it("opens a separate shell for each watch with its captured cwd", async () => {
+    vi.mocked(native.shellSessionOpen).mockResolvedValueOnce(11).mockResolvedValueOnce(12);
+    const create = watchModule.buildWatchTools(testContext()).watch_create as unknown as CreateTool;
+    const first = await create.execute({ command: "Get-Location", interval_secs: 60, mode: "fire_on_change" });
+    const second = await create.execute({ command: "Get-Location", interval_secs: 60, mode: "fire_on_change" });
+    expect(native.shellSessionOpen).toHaveBeenCalledTimes(2);
+    expect(native.shellSessionOpen).toHaveBeenNthCalledWith(1, "D:/watch-root");
+    expect(native.shellSessionOpen).toHaveBeenNthCalledWith(2, "D:/watch-root");
+    expect(first.watch_id).not.toBe(second.watch_id);
+  });
+
+  it("keeps the five-watch cap when creation calls run concurrently", async () => {
+    vi.mocked(native.shellSessionOpen).mockImplementation(async () => 20);
+    const create = watchModule.buildWatchTools(testContext()).watch_create as unknown as CreateTool;
+    const results = await Promise.all(Array.from({ length: 6 }, (_, i) =>
+      create.execute({ command: `status-${i}`, interval_secs: 60, mode: "fire_on_change" }),
+    ));
+    expect(results.filter((r) => r.watch_id)).toHaveLength(5);
+    expect(results.filter((r) => r.error)).toHaveLength(1);
+    expect(native.shellSessionOpen).toHaveBeenCalledTimes(5);
+  });
+});
 
 describe("pollTimeoutSecsFor", () => {
   it("scales the per-poll timeout to the interval", () => {
@@ -74,6 +135,18 @@ describe("evaluateCondition", () => {
     expect(
       watchModule.evaluateCondition("timed_out", { ...result, timed_out: true }),
     ).toBe(true);
+  });
+
+  it("treats a missing exit code as a failed command, not a broken condition", () => {
+    const killed = { ...result, exit_code: null };
+    expect(watchModule.evaluateConditionChecked("exit_code !== 0", killed)).toEqual({
+      ok: true,
+      value: true,
+    });
+    expect(watchModule.evaluateConditionChecked("exit_code === 0", killed)).toEqual({
+      ok: true,
+      value: false,
+    });
   });
 
   it("returns false on a throwing condition, never crashes", () => {
@@ -191,11 +264,119 @@ describe("watch registry lifecycle", () => {
     for (const w of watchModule.listWatches()) {
       watchModule.stopWatchById(w.id);
     }
+    vi.mocked(native.shellSessionRun).mockReset();
+    vi.mocked(native.shellSessionOpen).mockReset();
+    vi.mocked(native.shellSessionCancel).mockClear();
+    vi.mocked(native.shellSessionClose).mockClear();
+    injectMessageMock.mockReset();
   });
 
-  it("reaps only the owning session's watches", () => {
+  it("reaps only the owning session's watches", async () => {
+    await watchModule.startWatch({
+      id: "watch-reap-a",
+      command: "status",
+      intervalSecs: 60,
+      mode: "fire_on_match",
+      shellId: 1,
+      cwd: null,
+      sessionId: "session-a",
+    });
+    await watchModule.startWatch({
+      id: "watch-reap-b",
+      command: "status",
+      intervalSecs: 60,
+      mode: "fire_on_match",
+      shellId: 2,
+      cwd: null,
+      sessionId: "session-b",
+    });
     watchModule.reapSessionWatches("session-a");
-    expect(watchModule.listWatches().every((w) => w.sessionId !== "session-a")).toBe(true);
+    expect(watchModule.listWatches().map((w) => w.id)).toEqual(["watch-reap-b"]);
+  });
+
+  it("does not inject or retry after a watch is killed during its poll", async () => {
+    const run = vi.mocked(native.shellSessionRun);
+    let finish: ((value: Awaited<ReturnType<typeof native.shellSessionRun>>) => void) | undefined;
+    run.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const w = await watchModule.startWatch({
+      id: "watch-kill-in-flight",
+      command: "status",
+      intervalSecs: 60,
+      mode: "fire_on_match",
+      shellId: 7,
+      cwd: null,
+      sessionId: "session-kill",
+    });
+    const polling = watchModule.pollWatchForTest(w);
+    await vi.waitFor(() => expect(run).toHaveBeenCalledOnce());
+    expect(watchModule.stopWatchById(w.id)).toBe(true);
+    finish?.({
+      exit_code: 0,
+      stdout: "late",
+      stderr: "",
+      timed_out: false,
+      cancelled: false,
+      truncated: false,
+      cwd_after: "D:/",
+    });
+    await polling;
+    expect(injectMessageMock).not.toHaveBeenCalled();
+    expect(native.shellSessionCancel).toHaveBeenCalledWith(7);
+    expect(native.shellSessionClose).toHaveBeenCalledWith(7);
+  });
+
+  it("does not execute a command when stopped while reopening its shell", async () => {
+    const run = vi.mocked(native.shellSessionRun);
+    const open = vi.mocked(native.shellSessionOpen);
+    run.mockResolvedValueOnce({
+      exit_code: null,
+      stdout: "",
+      stderr: "no shell session",
+      timed_out: false,
+      cancelled: false,
+      truncated: false,
+      cwd_after: "D:/one",
+    });
+    let finish: ((id: number) => void) | undefined;
+    open.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const w = await watchModule.startWatch({
+      id: "watch-kill-reopen",
+      command: "status",
+      intervalSecs: 60,
+      mode: "fire_on_match",
+      shellId: 9,
+      cwd: "D:/one",
+      sessionId: "session-reopen",
+    });
+    const polling = watchModule.pollWatchForTest(w);
+    await vi.waitFor(() => expect(open).toHaveBeenCalledWith("D:/one"));
+    watchModule.stopWatchById(w.id);
+    finish?.(10);
+    await polling;
+    expect(run).toHaveBeenCalledOnce();
+    expect(native.shellSessionClose).toHaveBeenCalledWith(10);
+    expect(injectMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("retries identical output when its delivery fails", async () => {
+    injectMessageMock.mockRejectedValueOnce(new Error("hydration failed"));
+    const w = await watchModule.startWatch({
+      id: "watch-delivery-retry",
+      command: "status",
+      intervalSecs: 60,
+      mode: "fire_on_match",
+      shellId: 1,
+      cwd: null,
+      sessionId: "session-delivery",
+    });
+    const result = { exit_code: 0, stdout: "ready", stderr: "", timed_out: false };
+    await watchModule.handlePollResult(w, result);
+    expect(watchModule.listWatches().find((item) => item.id === w.id)?.deliveryError)
+      .toBe("hydration failed");
+    await watchModule.handlePollResult(w, result);
+    expect(injectMessageMock).toHaveBeenCalledTimes(2);
+    expect(watchModule.listWatches().find((item) => item.id === w.id)?.deliveryError)
+      .toBeNull();
   });
 });
 
@@ -309,16 +490,16 @@ describe("match-mode replay dedup (chat scrolling duplicates / context fill)", (
   it("fires ONCE for a persistent condition on identical output", async () => {
     const w = await mkWatch();
     const same = { exit_code: 0, stdout: "STATUS: OK", stderr: "", timed_out: false };
-    watchModule.handlePollResult(w, same);
-    watchModule.handlePollResult(w, same);
-    watchModule.handlePollResult(w, same);
+    await watchModule.handlePollResult(w,same);
+    await watchModule.handlePollResult(w,same);
+    await watchModule.handlePollResult(w,same);
     expect(injectMessageMock).toHaveBeenCalledTimes(1);
   });
 
   it("re-fires when the output changes (log growth, new status lines)", async () => {
     const w = await mkWatch();
-    watchModule.handlePollResult(w, { exit_code: 0, stdout: "STATUS: OK", stderr: "", timed_out: false });
-    watchModule.handlePollResult(w, { exit_code: 0, stdout: "STATUS: OK\nNEW LINE", stderr: "", timed_out: false });
+    await watchModule.handlePollResult(w,{ exit_code: 0, stdout: "STATUS: OK", stderr: "", timed_out: false });
+    await watchModule.handlePollResult(w,{ exit_code: 0, stdout: "STATUS: OK\nNEW LINE", stderr: "", timed_out: false });
     expect(injectMessageMock).toHaveBeenCalledTimes(2);
   });
 
@@ -328,9 +509,9 @@ describe("match-mode replay dedup (chat scrolling duplicates / context fill)", (
     const down = { exit_code: 1, stdout: "STATUS: DOWN", stderr: "", timed_out: false };
     const ok = { exit_code: 0, stdout: "STATUS: OK", stderr: "", timed_out: false };
     // down → fires; recovers → no match, dedup cleared; down again → re-fires.
-    watchModule.handlePollResult(w, down);
-    watchModule.handlePollResult(w, ok);
-    watchModule.handlePollResult(w, down);
+    await watchModule.handlePollResult(w,down);
+    await watchModule.handlePollResult(w,ok);
+    await watchModule.handlePollResult(w,down);
     expect(injectMessageMock).toHaveBeenCalledTimes(2);
   });
 
@@ -338,8 +519,8 @@ describe("match-mode replay dedup (chat scrolling duplicates / context fill)", (
     const w = await mkWatch();
     w.condition = undefined; // no condition = always true
     const same = { exit_code: 0, stdout: "tick", stderr: "", timed_out: false };
-    watchModule.handlePollResult(w, same);
-    watchModule.handlePollResult(w, same);
+    await watchModule.handlePollResult(w,same);
+    await watchModule.handlePollResult(w,same);
     expect(injectMessageMock).toHaveBeenCalledTimes(1);
   });
 
@@ -350,8 +531,8 @@ describe("match-mode replay dedup (chat scrolling duplicates / context fill)", (
     const w = await mkWatch();
     w.condition = '((stdout || "")).includes("ALL_EVALS_DONE")';
     const res = { exit_code: 0, stdout: "… ALL_EVALS_DONE …", stderr: "", timed_out: false };
-    watchModule.handlePollResult(w, res);
-    watchModule.handlePollResult(w, res);
+    await watchModule.handlePollResult(w,res);
+    await watchModule.handlePollResult(w,res);
     expect(injectMessageMock).toHaveBeenCalledTimes(1);
   });
 });

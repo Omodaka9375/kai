@@ -25,7 +25,8 @@ import { usePlanStore } from "../store/planStore";
 import type { AgentUsage } from "../lib/agent";
 import type { StackInfo } from "../lib/stackDetector";
 import { detectStack } from "../lib/stackDetector";
-import { createContextAwareTransport } from "../lib/transport";
+import { createContextAwareTransport, getSessionFenceState } from "../lib/transport";
+import { fence } from "../lib/fence";
 import { isContextOverflowError, isStallError } from "../lib/dsmlMiddleware";
 import { appendSessionEvent } from "../lib/sessionEvents";
 import { loadShadow, withShadowRedirect } from "../lib/shadow";
@@ -249,6 +250,10 @@ export function makeChatSync(
       openPreview: (url: string) => deps.live.openPreview(url),
       readCache,
       getSessionId: () => sessionId,
+      formatWatchOutput: (text: string) => {
+        const state = getSessionFenceState(sessionId);
+        return fence("watch", state.nonces.watch, text, { source: "watch command output" });
+      },
       fileTracker: new FileTracker(),
       getRemainingContextTokens: () => {
         const tokens = deps.getTokens();

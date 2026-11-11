@@ -138,16 +138,16 @@ const fenceStateCache = new Map<string, import("./fence").FenceState>();
  * the trust zone per fence.ts's boundary model).
  */
 export function fenceGroupText(sessionId: string, content: string): string {
-  return fence("tool", getFenceState(sessionId).nonces.tool, content, {
+  return fence("tool", getSessionFenceState(sessionId).nonces.tool, content, {
     source: "cross-project group chat",
   });
 }
 
 export function getFenceStateForTest(sessionId: string): FenceState {
-  return getFenceState(sessionId);
+  return getSessionFenceState(sessionId);
 }
 
-function getFenceState(sessionId: string): import("./fence").FenceState {
+export function getSessionFenceState(sessionId: string): import("./fence").FenceState {
   let state = fenceStateCache.get(sessionId);
   if (!state) {
     state = createFenceState(sessionId);
@@ -298,7 +298,7 @@ export function createContextAwareTransport(deps: Deps) {
       autoApprove,
       mcpTools: Object.keys(mcpTools).length > 0 ? mcpTools : undefined,
       mcpSummary: mcpSummary.length > 0 ? mcpSummary : undefined,
-      fenceState: getFenceState(sessionId),
+      fenceState: getSessionFenceState(sessionId),
     });
     // When summarization trimmed the history, pass the trimmed set as
     // originalMessages so the Chat instance adopts it. Otherwise the Chat

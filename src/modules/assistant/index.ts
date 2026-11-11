@@ -46,10 +46,11 @@ import {
 } from "@/modules/ai/extraction";
 import { withToolRedaction, withToolGuard } from "@/modules/ai/lib/toolFencing";
 import { withCentralToolGuards } from "@/modules/ai/lib/toolGuards";
-import { createFenceState, fenceSystemPrompt } from "@/modules/ai/lib/fence";
+import { fence, fenceSystemPrompt } from "@/modules/ai/lib/fence";
 import { auditAppend, AUDIT_KINDS } from "@/modules/ai/lib/audit";
 import { buildTools } from "@/modules/ai/tools/tools";
 import type { ToolContext } from "@/modules/ai/tools/context";
+import { getSessionFenceState } from "@/modules/ai/lib/transport";
 import { GROUP_ALLOWED_TOOLS, isToolAllowed } from "./toolCatalog";
 import { BUILTIN_AGENTS, loadAgents } from "@/modules/ai/lib/agents";
 import { toSpeechText, splitForSpeech, transcribeLocal } from "@/modules/ai/lib/voiceTts";
@@ -170,6 +171,9 @@ export async function switchSession(id: string): Promise<AssistantSession | null
 }
 
 export async function deleteSession(id: string): Promise<void> {
+  const { reapSessionWatches } = await import("@/modules/ai/tools/watch");
+  reapSessionWatches(id);
+  cancelAssistantWatch(id);
   const list = await listSessions();
   sessionsCache = list.filter((s) => s.id !== id);
   await prefsStore.set(KEY_SESSIONS, sessionsCache);
@@ -244,6 +248,9 @@ async function persistHistory(messages: UIMessage[], sessionId?: string): Promis
 /** Reset the ACTIVE session's history (title kept). /new with no args. */
 export async function resetAssistantHistory(): Promise<void> {
   const id = await getActiveSessionId();
+  const { reapSessionWatches } = await import("@/modules/ai/tools/watch");
+  reapSessionWatches(id);
+  cancelAssistantWatch(id);
   historyCache.set(id, []);
   await prefsStore.set(messagesKey(id), []);
 }
@@ -275,13 +282,19 @@ export async function migrateV1HistoryIfNeeded(): Promise<void> {
  * inside it. WithToolRedaction scrubs tool RESULTS before they reach the
  * provider (same guarantee as the project path).
  */
-async function makeAssistantToolContext(): Promise<ToolContext> {
+async function makeAssistantToolContext(sessionId: string): Promise<ToolContext> {
   const root = await assistantRoot();
   return {
     getCwd: () => root,
     getWorkspaceRoot: () => root,
     getRealWorkspaceRoot: () => root,
-    getSessionId: () => "telegram-assistant",
+    getSessionId: () => sessionId,
+    deliverWatchMessage: (text: string, shouldDeliver: () => boolean) =>
+      deliverAssistantWatch(text, shouldDeliver, sessionId),
+    formatWatchOutput: (text: string) => {
+      const state = getSessionFenceState(sessionId);
+      return fence("watch", state.nonces.watch, text, { source: "watch command output" });
+    },
     readCache: new Map(),
     fileTracker: {
       markRead: () => {},
@@ -482,6 +495,8 @@ export function resolveAssistantEndpoint(
 export async function runAssistantTurn(
   userText: string,
   opts?: {
+    /** Internal scheduled event: never re-resolves the user's active session. */
+    sessionId?: string;
     onNotice?: (msg: string) => void;
     /** Vision input: base64 image attached to this turn. */
     imageBase64?: string;
@@ -504,9 +519,9 @@ export async function runAssistantTurn(
   // GROUP SESSION: one shared assistant session per allow-listed group —
   // the whole group shares one conversation (user decision 2026-11-02).
   // Private chats keep the owner's active session as before.
-  const sessionId = opts?.groupChatId != null
+  const sessionId = opts?.sessionId ?? (opts?.groupChatId != null
     ? await getOrCreateGroupSession(opts.groupChatId)
-    : await getActiveSessionId();
+    : await getActiveSessionId());
   // null = follow the app's DEFAULT MODEL (Settings → Models), NOT the
   // hardcoded registry constant — the picker's "Follow default" entry
   // promises exactly this. getState() is kept current cross-window by
@@ -515,7 +530,7 @@ export async function runAssistantTurn(
   const modelId = (prefs.modelId as ModelId | null) ??
     usePreferencesStore.getState().defaultModelId;
   const keys = await getAllKeys();
-  const toolContext = await makeAssistantToolContext();
+  const toolContext = await makeAssistantToolContext(sessionId);
   const persona = await resolveAssistantPersona();
   const custom = usePreferencesStore.getState().customInstructions;
 
@@ -645,7 +660,7 @@ export async function runAssistantTurn(
   // provider — same guarantee as the project agent path. Then fence them:
   // the assistant reads web pages and arbitrary user files, so its tool
   // output gets the same nonce trust-boundary the desktop agent has.
-  const fenceState = createFenceState();
+  const fenceState = getSessionFenceState(sessionId);
   const redactedTools = withToolRedaction(tools);
   // The assistant auto-executes without approval cards, so the same central
   // deny-only floor as the desktop path is mandatory here — especially for
@@ -954,6 +969,56 @@ let bridgeStarted = false;
 /** Set when the assistant is mid-turn; new messages queue (one at a time is
  *  the conversational contract — a personal chat doesn't parallel-reply). */
 let turnInFlight = false;
+
+/** A watch targets its ORIGINATING assistant session, even after the user
+ *  switches conversations. Queueing serializes history writes and Telegram
+ *  sends with ordinary turns; `shouldDeliver` is checked at the last safe
+ *  boundary so killing/deleting a watch cannot queue a late event. */
+export async function deliverAssistantWatch(
+  text: string,
+  shouldDeliver: () => boolean,
+  sessionId?: string,
+): Promise<void> {
+  if (!shouldDeliver()) return;
+  const id = sessionId ?? (await getActiveSessionId());
+  const prefs = await loadAssistantPrefs();
+  const chatId = prefs.ownerChatId;
+  if (!chatId) throw new Error("Telegram owner is not bound; watch result was not delivered.");
+  if (!shouldDeliver()) return;
+  await new Promise<void>((resolve, reject) => {
+    let started = false;
+    const item: QueueItem = {
+      chatId,
+      text,
+      isVoice: false,
+      sessionId: id,
+      shouldDeliver,
+    };
+    item.acknowledge = (error) => {
+      if (started) return;
+      started = true;
+      pendingWatchCancels.delete(item);
+      if (error) reject(error);
+      else resolve();
+    };
+    const cancelled = () => {
+      if (started || shouldDeliver()) return;
+      const index = pendingQueue.indexOf(item);
+      if (index >= 0) pendingQueue.splice(index, 1);
+      item.acknowledge?.();
+    };
+    cancelled();
+    if (started) return;
+    pendingWatchCancels.set(item, cancelled);
+    cancelled();
+    if (started) return;
+    pendingQueue.push(item);
+    cancelled();
+    if (started) return;
+    void drainQueue();
+  });
+}
+
 type QueueItem = {
   chatId: number;
   text: string;
@@ -969,8 +1034,20 @@ type QueueItem = {
   groupChatId?: number;
   groupSenderName?: string;
   isGroup?: boolean;
+  /** Scheduled assistant event routing/acknowledgement. */
+  sessionId?: string;
+  shouldDeliver?: () => boolean;
+  acknowledge?: (error?: unknown) => void;
 };
 const pendingQueue: QueueItem[] = [];
+const pendingWatchCancels = new Map<QueueItem, () => void>();
+
+/** Resolve a queued watch when its owner is reaped before its turn starts. */
+function cancelAssistantWatch(sessionId: string): void {
+  for (const item of [...pendingWatchCancels.keys()]) {
+    if (item.sessionId === sessionId) pendingWatchCancels.get(item)?.();
+  }
+}
 
 export async function startAssistantBridge(): Promise<{ ok: boolean; error?: string }> {
   if (bridgeStarted) {
@@ -1542,6 +1619,7 @@ async function drainQueue(): Promise<void> {
     !peek.imageBase64 &&
     !peek.isVoice &&
     !peek.isGroup &&
+    !peek.shouldDeliver &&
     peek.chatId === peekAfter.chatId &&
     peekAfter.imageBase64
   ) {
@@ -1554,11 +1632,18 @@ async function drainQueue(): Promise<void> {
   }
   const next = pendingQueue.shift();
   if (!next) return;
+  pendingWatchCancels.delete(next);
+  if (next.shouldDeliver && !next.shouldDeliver()) {
+    next.acknowledge?.();
+    if (pendingQueue.length > 0) void drainQueue();
+    return;
+  }
   turnInFlight = true;
   const token = await getTelegramToken();
   if (!token) {
     // Never fail silently: a missing key must tell the owner what to fix.
     console.warn("[kai:assistant] no bot token — dropping queued message");
+    next.acknowledge?.(new Error("Telegram bot token is not configured."));
     turnInFlight = false;
     if (pendingQueue.length > 0) void drainQueue();
     return;
@@ -1580,6 +1665,7 @@ async function drainQueue(): Promise<void> {
       groupChatId: next.groupChatId,
       groupSenderName: next.groupSenderName,
       isGroup: next.isGroup,
+      sessionId: next.sessionId,
     });
     const prefs = await loadAssistantPrefs();
     if (next.isVoice && prefs.voiceReplies) {
@@ -1588,12 +1674,14 @@ async function drainQueue(): Promise<void> {
     } else {
       await telegramNative.sendMessage(token, next.chatId, reply);
     }
+    next.acknowledge?.();
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[kai:assistant] turn failed:", err);
     await telegramNative
       .sendMessage(token, next.chatId, `⚠️ ${msg.slice(0, 300)}`)
       .catch(() => {});
+    next.acknowledge?.(err);
   } finally {
     stopTypingIndicator();
     turnInFlight = false;

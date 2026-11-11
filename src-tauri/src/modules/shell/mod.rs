@@ -141,8 +141,17 @@ pub(crate) fn run_blocking_cancellable_pub(
     dur: Duration,
     cancel: Option<&std::sync::atomic::AtomicBool>,
     sandbox_root: Option<&str>,
+    sandbox_fallback_command: Option<&str>,
 ) -> Result<CommandOutput, String> {
-    run_blocking_cancellable(command, cwd, workspace, dur, cancel, sandbox_root)
+    run_blocking_cancellable(
+        command,
+        cwd,
+        workspace,
+        dur,
+        cancel,
+        sandbox_root,
+        sandbox_fallback_command,
+    )
 }
 
 /// `run_blocking` with an OS-confinement root (workspaceOnly sandbox mode).
@@ -153,7 +162,7 @@ fn run_blocking_sandbox(
     dur: Duration,
     sandbox_root: Option<String>,
 ) -> Result<CommandOutput, String> {
-    run_blocking_cancellable(command, cwd, workspace, dur, None, sandbox_root.as_deref())
+    run_blocking_cancellable(command, cwd, workspace, dur, None, sandbox_root.as_deref(), None)
 }
 
 /// Kill the process group led by `child` on Unix. The one-shot command is
@@ -175,6 +184,7 @@ fn run_blocking_cancellable(
     dur: Duration,
     cancel: Option<&std::sync::atomic::AtomicBool>,
     sandbox_root: Option<&str>,
+    sandbox_fallback_command: Option<&str>,
 ) -> Result<CommandOutput, String> {
     let mut cmd = match sandbox_root.filter(|r| !r.is_empty()) {
         Some(root) => {
@@ -196,7 +206,13 @@ fn run_blocking_cancellable(
                 None,
             )? {
                 Some(wrapped) => wrapped,
-                None => build_oneshot_command(&command, &workspace, cwd.as_deref())?,
+                // Persistent sessions supply their host-dialect wrapper;
+                // one-shot commands use the original raw command.
+                None => build_oneshot_command(
+                    sandbox_fallback_command.unwrap_or(&command),
+                    &workspace,
+                    cwd.as_deref(),
+                )?,
             }
         }
         None => build_oneshot_command(&command, &workspace, cwd.as_deref())?,
@@ -419,6 +435,11 @@ pub async fn shell_session_run(
 
 #[tauri::command]
 pub fn shell_session_close(state: tauri::State<ShellState>, id: u32) -> Result<(), String> {
+    // Mark cancellation while the session is still registered. Removing the
+    // map entry first makes a paired cancel request a silent no-op.
+    if let Some(session) = rwlock_read(&state.sessions).get(&id) {
+        session.close();
+    }
     rwlock_write(&state.sessions).remove(&id);
     Ok(())
 }

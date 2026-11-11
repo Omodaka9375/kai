@@ -73,8 +73,16 @@ export type ToolContext = {
       seenThrough?: number;
     };
   }>;
-  /** Active chat session id — used by tools that persist per-session state (todos). */
+  /** Active chat session id — used by tools that persist per-session state. */
   getSessionId: () => string | null;
+  /** Headless channels deliver watch events through their own conversation
+   *  queue, not the desktop chat store. */
+  deliverWatchMessage?: (
+    text: string,
+    shouldDeliver: () => boolean,
+  ) => Promise<void>;
+  /** Uses the session's persistent watch nonce from the agent's fence state. */
+  formatWatchOutput?: (text: string) => string;
   /** Tracks files read/modified during this session for smarter compaction. */
   fileTracker: FileTracker;
   /**

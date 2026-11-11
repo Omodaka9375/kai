@@ -37,6 +37,7 @@ import {
   projectIdForSession,
 } from "../store/chatStore";
 import { setProjectHasNews } from "../store/projectStatus";
+import { redactToolOutput } from "../lib/redact";
 
 // ── Heartbeat (Rust-driven scheduler tick) ─────────────────────────────────
 //
@@ -127,17 +128,25 @@ export interface WatchConfig {
   sessionId: string;
   /** Project-bound execution client, captured with the watch. */
   native?: ReturnType<typeof nativeForContext>;
-  /** Sandbox confinement captured at CREATE time from the invoking context
-   *  (see SandboxOverride in lib/sandbox.ts). pollWatch's `sandboxExecRoot`
-   *  calls live outside buildWatchTools so ctx is not in scope there — the
-   *  override rides on the watch. Undefined = use the global sandbox (desktop
-   *  behavior). The Telegram assistant stamps its scratch-dir workspaceOnly
-   *  override here so recurring polls stay inside ~/.kai/assistant even if
-   *  the user's desktop sandbox changes between polls. */
+  /** Sandbox confinement captured at CREATE time from the invoking context. */
   sandboxOverride?: SandboxOverride | null;
+  /** Owning conversation's delivery path. Tests/headless channels override
+   *  the desktop chatStore default. `shouldDeliver` is checked again after
+   *  asynchronous hydration/queueing so a stopped watch cannot wake a chat. */
+  deliver?: (
+    text: string,
+    shouldDeliver: () => boolean,
+  ) => Promise<void>;
+  /** Apply the owning conversation's persistent trust-boundary fencing. */
+  formatOutput?: (text: string) => string;
+  /** Last delivery failure, exposed by watch_list until the next success. */
+  deliveryError?: string | null;
 }
 
 interface WatchState extends WatchConfig {
+  deliver: NonNullable<WatchConfig["deliver"]>;
+  formatOutput?: WatchConfig["formatOutput"];
+  deliveryError: string | null;
   /** Next timestamp (ms) at which the scheduler may poll. */
   nextDue: number;
   /** A poll is currently executing — skip ticks until it settles. */
@@ -170,10 +179,19 @@ const watches = new Map<string, WatchState>();
 export async function startWatch(config: WatchConfig): Promise<WatchState> {
   const state: WatchState = {
     ...config,
+    deliver: config.deliver ?? (async (text, shouldDeliver) => {
+      if (!shouldDeliver()) return;
+      await useChatStore.getState().injectMessage(
+        config.sessionId,
+        text,
+        shouldDeliver,
+      );
+    }),
     nextDue: Date.now(),
     inFlight: false,
     consecutiveFailures: 0,
     lastError: null,
+    deliveryError: null,
     lastResult: null,
     lastFired: null,
     polls: 0,
@@ -185,13 +203,26 @@ export async function startWatch(config: WatchConfig): Promise<WatchState> {
   return state;
 }
 
-/** Stop and remove a watch. */
+/** Stop and remove a watch. Cancellation is best-effort; the active check
+ *  after every asynchronous continuation is what prevents a late firing. */
 function stopWatch(id: string): boolean {
   const w = watches.get(id);
   if (!w) return false;
   w.active = false;
   watches.delete(id);
+  releaseWatchShell(w);
   return true;
+}
+
+function releaseWatchShell(w: WatchState): void {
+  if (w.shellId === 0) return;
+  const id = w.shellId;
+  w.shellId = 0;
+  const client = w.native ?? native;
+  void (async () => {
+    await client.shellSessionCancel(id).catch(() => {});
+    await client.shellSessionClose(id).catch(() => {});
+  })();
 }
 
 /** Stop and remove a watch by id. Exported for tests + watch_kill. */
@@ -201,17 +232,8 @@ export function stopWatchById(id: string): boolean {
 
 /** Reap all watches owned by a session. */
 export function reapSessionWatches(sessionId: string): void {
-  const client = [...watches.values()].find((w) => w.sessionId === sessionId)?.native ?? native;
   for (const [id, w] of watches) {
-    if (w.sessionId === sessionId) {
-      w.active = false;
-      watches.delete(id);
-    }
-  }
-  const shellId = sessionShellIds.get(sessionId);
-  if (shellId != null) {
-    sessionShellIds.delete(sessionId);
-    void client.shellSessionClose(shellId).catch(() => {});
+    if (w.sessionId === sessionId) stopWatch(id);
   }
 }
 
@@ -219,7 +241,7 @@ export function reapSessionWatches(sessionId: string): void {
 export function listWatches(): WatchConfig[] {
   return Array.from(watches.values())
     .filter((w) => w.active)
-    .map(({ nextDue: _nd, inFlight: _if, consecutiveFailures: _cf, lastError: _le, ...cfg }) => cfg);
+    .map(({ nextDue: _nd, inFlight: _if, consecutiveFailures: _cf, lastError: _le, deliver: _d, formatOutput: _f, ...cfg }) => cfg);
 }
 
 /** Number of live watch timers (diagnostics). */
@@ -240,8 +262,7 @@ function countPollFailure(w: WatchState, msg: string): void {
   // chat so the model (and user) see why it stopped, then stop the watch —
   // previously this looped silently forever.
   if (w.consecutiveFailures >= WATCH_MAX_CONSECUTIVE_FAILURES) {
-    injectWatchFailure(w);
-    stopWatch(w.id);
+    void injectWatchFailure(w).then(() => stopWatch(w.id), () => stopWatch(w.id));
   } else {
     console.warn(
       `[kai] watch ${w.id} poll failed (${w.consecutiveFailures}/${WATCH_MAX_CONSECUTIVE_FAILURES}, command: ${w.command}):`,
@@ -255,10 +276,11 @@ function countPollFailure(w: WatchState, msg: string): void {
  *  counters on any successful run (shell-level success, regardless of exit
  *  code — the condition decides firing, not the exit code). */
 /** Exported for tests: the poll-result classifier/state machine. */
-export function handlePollResult(
+export async function handlePollResult(
   w: WatchState,
   result: { exit_code: number | null; stdout: string; stderr: string; timed_out: boolean },
-): void {
+): Promise<void> {
+  if (!w.active) return;
   const fingerprint = `${result.exit_code}:${result.stdout}:${result.stderr}`;
 
   if (w.mode === "fire_on_match") {
@@ -270,8 +292,7 @@ export function handlePollResult(
       w.lastError = `Condition expression failed to evaluate: ${w.condition}${check.reason ? ` (${check.reason})` : ""}`;
       w.consecutiveFailures++;
       if (w.consecutiveFailures >= WATCH_MAX_CONSECUTIVE_FAILURES) {
-        injectWatchFailure(w);
-        stopWatch(w.id);
+        void injectWatchFailure(w).then(() => stopWatch(w.id), () => stopWatch(w.id));
       } else {
         console.warn(
           `[kai] watch ${w.id} condition failed to evaluate (${w.consecutiveFailures}/${WATCH_MAX_CONSECUTIVE_FAILURES}, condition: ${w.condition}${check.reason ? `, reason: ${check.reason}` : ""})`,
@@ -291,8 +312,16 @@ export function handlePollResult(
       // (down → up → down with the same text) re-fires on re-entry.
       const firedKey = firedResultKey(result);
       if (w.lastFired !== firedKey) {
-        w.lastFired = firedKey;
-        injectWatchResult(w, result);
+        try {
+          await injectWatchResult(w, result);
+          if (w.active) {
+            w.lastFired = firedKey;
+            w.deliveryError = null;
+          }
+        } catch (e) {
+          w.deliveryError = e instanceof Error ? e.message : String(e);
+          console.warn(`[kai] watch ${w.id} result delivery failed:`, e);
+        }
       }
       // Don't stop — the watch keeps running for subsequent (new) matches.
     } else {
@@ -309,8 +338,16 @@ export function handlePollResult(
       return;
     }
     if (fingerprint !== w.lastResult) {
-      w.lastResult = fingerprint;
-      injectWatchResult(w, result);
+      try {
+        await injectWatchResult(w, result);
+        if (w.active) {
+          w.lastResult = fingerprint;
+          w.deliveryError = null;
+        }
+      } catch (e) {
+        w.deliveryError = e instanceof Error ? e.message : String(e);
+        console.warn(`[kai] watch ${w.id} result delivery failed:`, e);
+      }
     }
   }
 }
@@ -319,81 +356,50 @@ async function poll(w: WatchState): Promise<void> {
   if (!w.active || w.inFlight) return;
   w.inFlight = true;
   w.polls++;
+  let retried = false;
   try {
-    const client = w.native ?? native;
-    let result = await client.shellSessionRun(
-      w.shellId,
-      w.command,
-      w.cwd,
-      pollTimeoutSecsFor(w.intervalSecs),
-      await sandboxExecRoot(w.sandboxOverride),
-    );
-
-    // Self-heal: the cached shell session can die while the chat session
-    // stays alive (shell subsystem restart, PTY reap). One failure then
-    // re-opens a fresh shell and retries the SAME poll once before any
-    // breaker counting — instead of failing for 10 intervals and tripping
-    // the breaker on something a fresh shell fixes.
-    if (result.exit_code === null && !result.timed_out && isDeadShellError(result.stderr)) {
-      const fresh = await reopenShell(w.sessionId);
-      if (fresh != null) {
-        w.shellId = fresh;
-        try {
-          result = await client.shellSessionRun(
-            w.shellId,
-            w.command,
-            w.cwd,
-            pollTimeoutSecsFor(w.intervalSecs),
-            await sandboxExecRoot(w.sandboxOverride),
-          );
-        } catch (retryErr) {
-          // Retry also failed — count it like any other poll failure (do NOT
-          // run handlePollResult on the dead result: a condition like
-          // `exit_code !== 0` would match null and report a bogus firing).
-          countPollFailure(
-            w,
-            retryErr instanceof Error ? retryErr.message : String(retryErr),
-          );
+    while (w.active) {
+      try {
+        const sandboxRoot = await sandboxExecRoot(w.sandboxOverride);
+        if (!w.active) return;
+        const result = await (w.native ?? native).shellSessionRun(
+          w.shellId,
+          w.command,
+          w.cwd,
+          pollTimeoutSecsFor(w.intervalSecs),
+          sandboxRoot,
+        );
+        if (!w.active) return;
+        const dead = result.exit_code === null &&
+          !result.timed_out &&
+          isDeadShellError(result.stderr);
+        if (!dead) {
+          await handlePollResult(w, result);
           return;
         }
+        if (retried) return;
+        if (!(await reopenShell(w))) {
+          countPollFailure(w, result.stderr || "shell reopen failed");
+          return;
+        }
+        retried = true;
+      } catch (e) {
+        if (!w.active) return;
+        const msg = e instanceof Error ? e.message : String(e);
+        if (!retried && isDeadShellError(msg) && await reopenShell(w)) {
+          retried = true;
+          continue;
+        }
+        countPollFailure(w, msg);
+        return;
       }
     }
-    handlePollResult(w, result);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    // Self-heal FIRST: a thrown "session not found / closed / exited" error
-    // usually means the cached shell id went stale, not that the watch is
-    // beyond saving. Re-open once and retry the same poll; only count a
-    // breaker failure when the retry also fails.
-    if (isDeadShellError(msg)) {
-      const fresh = await reopenShell(w.sessionId);
-      if (fresh != null) {
-        w.shellId = fresh;
-        try {
-          const result = await (w.native ?? native).shellSessionRun(
-            w.shellId,
-            w.command,
-            w.cwd,
-            pollTimeoutSecsFor(w.intervalSecs),
-            await sandboxExecRoot(w.sandboxOverride),
-          );
-          // Retry succeeded — treat this poll as clean (reset counters,
-          // run the normal match/change logic once, no breaker count).
-          w.consecutiveFailures = 0;
-          w.lastError = null;
-          handlePollResult(w, result);
-          return;
-        } catch (retryErr) {
-          // Retry also failed — count it like any other poll failure.
-          countPollFailure(
-            w,
-            retryErr instanceof Error ? retryErr.message : String(retryErr),
-          );
-          return;
-        }
-      }
+    // Delivery/hydration failures are not shell failures: keep polling and
+    // leave dedup unchanged so the same result is retried next time.
+    if (w.active) {
+      console.warn(`[kai] watch ${w.id} result delivery failed:`, e);
     }
-    countPollFailure(w, msg);
   } finally {
     w.inFlight = false;
   }
@@ -612,8 +618,9 @@ class ConditionParser {
  * Value-preserving evaluation (JS semantics): `a && b` / `a || b` return the
  * VALUE of an operand, not just a boolean — `(stdout || "")` coalesces to the
  * stdout string (or "" when stdout is falsy), which `.includes` then uses.
- * Null (exit_code of a killed process) propagates only into explicit
- * comparisons, where it throws — same as `new Function` would have.
+ * Null (exit_code of a killed process) uses ordinary strict equality;
+ * `exit_code !== 0` therefore reports the failed execution instead of
+ * turning the condition itself into an evaluation error.
  */
 function valueOf(
   node: ConditionNode,
@@ -656,7 +663,6 @@ function valueOf(
     case "cmp": {
       const l = valueOf(node.left, result);
       const r = valueOf(node.right, result);
-      if (l === null || r === null) throw new Error("cannot compare null (killed process has no exit_code)");
       switch (node.op) {
         case "==":
         case "===":
@@ -731,14 +737,20 @@ function stripClixml(text: string): string {
   return parts.join("\n");
 }
 
-function injectWatchResult(
+async function injectWatchResult(
   w: WatchState,
   result: { exit_code: number | null; stdout: string; stderr: string; timed_out: boolean; cwd_after?: string },
-): void {
+): Promise<void> {
   const label = w.label ?? w.command;
   const exitCode = result.exit_code ?? "?";
-  const stdoutTrimmed = stripClixml(result.stdout ?? "").slice(0, 2000);
-  const stderrTrimmed = stripClixml(result.stderr ?? "").slice(0, 500);
+  const stdoutTrimmed = redactToolOutput(
+    "bash_run",
+    stripClixml(result.stdout ?? "").slice(0, 2000),
+  );
+  const stderrTrimmed = redactToolOutput(
+    "bash_run",
+    stripClixml(result.stderr ?? "").slice(0, 500),
+  );
 
   let text = `**Watch fired**: \`${label}\` (exit: ${exitCode}, poll #${w.polls})\n\n`;
   if (stdoutTrimmed) {
@@ -762,7 +774,11 @@ function injectWatchResult(
   // rides the next request's history — no queued self-initiated wake to
   // hijack the user's conversation. Idle fires wake inline (injectMessage).
   const sessionId = w.sessionId;
-  void useChatStore.getState().injectMessage(sessionId, text);
+  await w.deliver(
+    w.formatOutput ? w.formatOutput(text) : text,
+    () => w.active,
+  );
+  if (!w.active) return;
 
   // CROSS-PROJECT SURFACING: the owning session's model is woken above, but
   // the USER may be in a different project watching a different terminal —
@@ -780,11 +796,12 @@ function injectWatchResult(
   // when the watch opted in. Fail-soft — no assistant → silent no-op.
   if (w.notifyTelegram) {
     void import("@/modules/assistant")
-      .then(({ telegramPing }) =>
-        telegramPing(
-          `🔔 Watch fired: ${w.label ?? w.command}\n\n${stripClixml(result.stdout ?? "").slice(0, 3000)}`,
-        ),
-      )
+      .then(({ telegramPing }) => {
+        if (!w.active) return;
+        return telegramPing(
+          `Watch fired: ${w.label ?? w.command}\n\n${stdoutTrimmed.slice(0, 3000)}`,
+        );
+      })
       .catch(() => {
         /* assistant module not loadable — ignore */
       });
@@ -793,16 +810,25 @@ function injectWatchResult(
 
 /** Terminal self-report for a dead watch (circuit breaker). Tells the model
  *  the watch is gone and why, so it can re-create it or tell the user. */
-function injectWatchFailure(w: WatchState): void {
+async function injectWatchFailure(w: WatchState): Promise<void> {
   const label = w.label ?? w.command;
+  const lastError = redactToolOutput("bash_run", (w.lastError ?? "unknown").slice(0, 500));
   const text =
     `**Watch stopped**: \`${label}\` (id: ${w.id}) — its command failed ${w.consecutiveFailures} polls in a row ` +
-    `and the watch was auto-stopped. Last error:\n\`\`\`\n${(w.lastError ?? "unknown").slice(0, 500)}\n\`\`\`\n` +
+    `and the watch was auto-stopped. Last error:\n\`\`\`\n${lastError}\n\`\`\`\n` +
     `If this task still needs monitoring, create a new watch with watch_create.`;
-  void useChatStore.getState().injectMessage(w.sessionId, text);
+  try {
+    await w.deliver(w.formatOutput ? w.formatOutput(text) : text, () => w.active);
+  } catch (e) {
+    console.warn(`[kai] watch ${w.id} failure notice delivery failed:`, e);
+  }
 }
 
 // ── Tool implementations ──────────────────────────────────────────────────
+
+// Creation is asynchronous, so the five-watch cap needs a reservation. The
+// map also prevents concurrent calls from opening orphaned shells.
+const sessionCreations = new Map<string, Promise<void>>();
 
 export function buildWatchTools(ctx: ToolContext) {
   return {
@@ -813,7 +839,7 @@ export function buildWatchTools(ctx: ToolContext) {
         command: z.string().describe("Shell command to run periodically."),
         interval_secs: z.number().min(5).max(300).describe("Polling interval in seconds (5-300)."),
         condition: z.string().optional().describe(
-          "JavaScript expression evaluated against { exit_code, stdout, stderr, timed_out }. Must be boolean. E.g. 'exit_code !== 0', 'stdout.includes(\"MERGED\")'. If omitted, fires whenever the result differs from the last firing.",
+          "Boolean expression over { exit_code, stdout, stderr, timed_out }. Supports comparisons, &&, ||, !, parentheses, stdout/stderr .includes(\"text\") and .length. E.g. 'exit_code !== 0', 'stdout.includes(\"MERGED\")'. If omitted, fires once per distinct result.",
         ),
         mode: z.enum(["fire_on_match", "fire_on_change"]).optional().default("fire_on_match").describe(
           "fire_on_match: fire when condition is true; a match on output identical to the last firing is suppressed (fires once per distinct result, not once per poll). fire_on_change: fire when command output differs from the previous poll.",
@@ -833,6 +859,17 @@ export function buildWatchTools(ctx: ToolContext) {
           ? powerShellFileSurgeryHint(command)
           : null;
         if (surgeryHint) return { error: surgeryHint };
+        if (mode === "fire_on_match") {
+          const check = evaluateConditionChecked(condition, {
+            exit_code: 0,
+            stdout: "",
+            stderr: "",
+            timed_out: false,
+          });
+          if (!check.ok) {
+            return { error: `Invalid watch condition: ${check.reason ?? "evaluation failed"}` };
+          }
+        }
         const sandbox = await checkShellSandbox(command, await sandboxOverrideForContext(ctx));
         if (!sandbox.ok) return { error: sandbox.reason };
         if (options?.abortSignal?.aborted) return { error: "Cancelled." };
@@ -840,39 +877,62 @@ export function buildWatchTools(ctx: ToolContext) {
         const sessionId = ctx.getSessionId();
         if (!sessionId) return { error: "No active chat session." };
 
-        const existing = listWatches().filter((w) => w.sessionId === sessionId);
-        if (existing.length >= 5) {
-          return { error: "Maximum 5 active watches per session." };
+        const previous = sessionCreations.get(sessionId) ?? Promise.resolve();
+        const gate = previous.then(async () => {
+          if (options?.abortSignal?.aborted) return { error: "Cancelled." };
+          const existing = listWatches().filter((w) => w.sessionId === sessionId);
+          if (existing.length >= 5) {
+            return { error: "Maximum 5 active watches per session." };
+          }
+          const client = nativeForContext(ctx);
+          const cwd = ctx.getCwd();
+          const sandboxOverride = await sandboxOverrideForContext(ctx);
+          const shellId = await client.shellSessionOpen(cwd);
+          const id = `watch_${generateId().slice(0, 6)}`;
+          try {
+            if (options?.abortSignal?.aborted) {
+              await client.shellSessionCancel(shellId).catch(() => {});
+              await client.shellSessionClose(shellId).catch(() => {});
+              return { error: "Cancelled." };
+            }
+            await startWatch({
+              id,
+              command,
+              intervalSecs: Math.max(5, Math.min(300, interval_secs)),
+              condition,
+              mode,
+              label,
+              notifyTelegram: notify_telegram === true,
+              shellId,
+              cwd,
+              sessionId,
+              sandboxOverride,
+              native: client,
+              deliver: ctx.deliverWatchMessage,
+              formatOutput: ctx.formatWatchOutput,
+            });
+          } catch (e) {
+            stopWatch(id);
+            throw e;
+          }
+          return {
+            ok: true,
+            watch_id: id,
+            command,
+            interval_secs: Math.max(5, Math.min(300, interval_secs)),
+            mode,
+            condition: condition ?? "(always fire)",
+          };
+        });
+        const pending = gate.then(() => {}, () => {});
+        sessionCreations.set(sessionId, pending);
+        try {
+          return await gate;
+        } finally {
+          if (sessionCreations.get(sessionId) === pending) {
+            sessionCreations.delete(sessionId);
+          }
         }
-
-        const shellId = await getOrCreateShell(ctx, sessionId);
-        const id = `watch_${generateId().slice(0, 6)}`;
-
-        const config: WatchConfig = {
-          id,
-          command,
-          intervalSecs: Math.max(5, Math.min(300, interval_secs)),
-          condition,
-          mode,
-          label,
-          notifyTelegram: notify_telegram === true,
-          shellId,
-          cwd: ctx.getCwd(),
-          sessionId,
-          sandboxOverride: await sandboxOverrideForContext(ctx),
-          native: nativeForContext(ctx),
-        };
-
-        await startWatch(config);
-
-        return {
-          ok: true,
-          watch_id: id,
-          command,
-          interval_secs: config.intervalSecs,
-          mode,
-          condition: condition ?? "(always fire)",
-        };
       },
     }),
 
@@ -890,6 +950,7 @@ export function buildWatchTools(ctx: ToolContext) {
             interval_secs: w.intervalSecs,
             mode: w.mode,
             label: w.label,
+            delivery_error: w.deliveryError,
           })),
         };
       },
@@ -912,41 +973,34 @@ export function buildWatchTools(ctx: ToolContext) {
   } as const;
 }
 
-// ── Shell session reuse + self-healing ────────────────────────────────────
+// ── Per-watch shells + self-healing ───────────────────────────────────────
+// A session shell tracks cwd and has one cancellation flag. Watches cannot
+// share it: parallel polls would change each other's working directory and
+// killing one watch would cancel another watch's command.
 
-const sessionShellIds = new Map<string, number>();
-
-async function getOrCreateShell(ctx: ToolContext, sessionId: string): Promise<number> {
-  const existing = sessionShellIds.get(sessionId);
-  if (existing) return existing;
-  const id = await nativeForContext(ctx).shellSessionOpen(ctx.getCwd());
-  sessionShellIds.set(sessionId, id);
-  return id;
+/** Exported for focused lifecycle tests; the scheduler itself stays private. */
+export async function pollWatchForTest(w: WatchState): Promise<void> {
+  await poll(w);
 }
 
-/**
- * Open a replacement shell after the cached one died. A shell session can
- * vanish out from under a watch while the session itself stays open (shell
- * subsystem restart, PTY/SendTo reap, crash recovery). The watch would then
- * fail every poll for up to 10 intervals before the breaker declared it
- * dead — even though a fresh shell makes it work again. Self-heal instead:
- * on the first failure we drop the cache and re-open on the next poll.
- */
-async function reopenShell(sessionId: string): Promise<number | null> {
-  const old = sessionShellIds.get(sessionId);
-  const client = [...watches.values()].find((w) => w.sessionId === sessionId)?.native ?? native;
-  if (old != null) {
-    // Best-effort close of the husk; ignore errors (it may already be gone).
-    void client.shellSessionClose(old).catch(() => {});
-    sessionShellIds.delete(sessionId);
-  }
+async function reopenShell(w: WatchState): Promise<boolean> {
+  releaseWatchShell(w);
+  if (!w.active) return false;
   try {
-    const id = await client.shellSessionOpen(null);
-    sessionShellIds.set(sessionId, id);
-    return id;
-  } catch (e) {
-    console.warn(`[kai] watch shell reopen failed for session ${sessionId}:`, e);
-    return null;
+    const id = await (w.native ?? native).shellSessionOpen(w.cwd);
+    if (!w.active) {
+      const client = w.native ?? native;
+      void client.shellSessionCancel(id)
+        .catch(() => {})
+        .then(() => client.shellSessionClose(id))
+        .catch(() => {});
+      return false;
+    }
+    w.shellId = id;
+    return true;
+    } catch (e) {
+    console.warn(`[kai] watch shell reopen failed for session ${w.sessionId}:`, e);
+    return false;
   }
 }
 
@@ -971,11 +1025,7 @@ function isDeadShellError(msg: string): boolean {
   );
 }
 
-/** Close and release session shell (called on session close). */
+/** Backward-compatible session cleanup; watch shells are owned per watch. */
 export function closeWatchSessionShell(sessionId: string): void {
-  const id = sessionShellIds.get(sessionId);
-  if (id != null) {
-    void native.shellSessionClose(id).catch(() => {});
-    sessionShellIds.delete(sessionId);
-  }
+  reapSessionWatches(sessionId);
 }
