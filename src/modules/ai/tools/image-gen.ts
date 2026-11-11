@@ -4,12 +4,21 @@ import { useChatStore } from "../store/chatStore";
 import { generateOpenAIImage } from "../lib/media/openai-image";
 import { generateGoogleImage } from "../lib/media/google-image";
 import { generateXAIImage } from "../lib/media/xai-image";
+import {
+  IMAGE_PROVIDERS,
+  pickImageProvider,
+  type ImageProvider,
+} from "../lib/media/providerChoice";
 import { spawnMediaTask } from "../lib/media/task";
 import type { ImageResult } from "../lib/media/types";
 import { resolvePath } from "./context";
 import { nativeForContext, type ToolContext } from "./context";
 
-const PROVIDER_ENUM = ["openai", "google", "xai"] as const;
+const PROVIDER_LABEL: Record<ImageProvider, string> = {
+  openai: "OpenAI GPT Image 2",
+  google: "Google Nano Banana 2",
+  xai: "xAI Grok Imagine",
+};
 
 export function buildImageGenTools(ctx: ToolContext) {
   const native = nativeForContext(ctx);
@@ -19,13 +28,14 @@ export function buildImageGenTools(ctx: ToolContext) {
       description: `Generate an image from a text prompt using AI. Returns the image inline in the conversation.
 
 Providers:
-- openai: GPT Image 2 (best quality)
 - google: Nano Banana 2 (Gemini, fast, good quality, native image EDITING
   via imagePath — change style, add/remove objects, combine images)
+- openai: GPT Image 2 (best raw quality, no reference-image editing)
 - xai: Grok Imagine (good quality)
 
-You MUST specify a provider. Ask the user which one to use if unclear.
-Auto-executes — no approval needed.`,
+The provider is OPTIONAL. Omit it and KAI uses whichever engine the user
+has a key for (Google first, then OpenAI, then xAI). Only pass a provider
+when the user explicitly names one — never ask, and never assume OpenAI.`,
       inputSchema: z.object({
         prompt: z
           .string()
@@ -33,8 +43,11 @@ Auto-executes — no approval needed.`,
             "Detailed description of the image to generate. Be specific about style, composition, lighting, and subject.",
           ),
         provider: z
-          .enum(PROVIDER_ENUM)
-          .describe("Which image provider to use. Ask the user if not specified."),
+          .enum(IMAGE_PROVIDERS)
+          .optional()
+          .describe(
+            "Provider to force. Omit this unless the user explicitly named an engine; KAI picks from the configured API keys otherwise.",
+          ),
         size: z
           .string()
           .optional()
@@ -49,24 +62,17 @@ Auto-executes — no approval needed.`,
           .string()
           .optional()
           .describe(
-            "Path to an existing image to EDIT (google provider only, Nano Banana 2). The image is sent to the model alongside the prompt: restyle, add/remove objects, composites. Optional - omit for pure text-to-image.",
+            "Path to an existing image to EDIT (Google provider only, Nano Banana 2). The image is sent to the model alongside the prompt: restyle, add/remove objects, composites. Optional - omit for pure text-to-image.",
           ),
       }),
       execute: async ({ prompt, provider, size, quality, imagePath }, options) => {
         const keys = useChatStore.getState().apiKeys;
-        const signal = options?.abortSignal;
 
-        const key = keys[provider as keyof typeof keys];
         // Editing: read the reference image and thread it to the provider.
         // Google (Nano Banana 2) consumes it natively; other providers get
         // an explicit refusal rather than silently ignoring the input.
         let referenceImage: string | undefined;
         if (imagePath) {
-          if (provider !== "google") {
-            return {
-              error: `imagePath editing is google-only (Nano Banana 2). Use provider: "google" to edit an existing image.`,
-            };
-          }
           try {
             const cwd = ctx.getCwd();
             const abs = resolvePath(imagePath, cwd);
@@ -84,19 +90,27 @@ Auto-executes — no approval needed.`,
           }
         }
 
+        // Decide the ENGINE from the keys, not from what the model guessed.
+        // A model naming "openai" with only a Google key configured used to
+        // fail outright ("No API key configured for openai").
+        const picked = pickImageProvider(keys, provider, {
+          needsEditing: referenceImage !== undefined,
+        });
+        if (!picked.ok) return { error: picked.error };
+        const engine = picked.provider;
+        const key = keys[engine];
         if (!key) {
-          return {
-            error: `No API key configured for ${provider}. Tell the user: add a ${provider === "google" ? "Google" : provider} key in Settings → Models, or use that engine's official MCP server (Settings → MCP). Keep it short.`,
-          };
+          // Unreachable (pickImageProvider only returns providers with a
+          // key) — kept as a type narrowing guard.
+          return { error: `No API key configured for ${engine}.` };
         }
 
-        spawnMediaTask(ctx.getSessionId(), options.toolCallId, signal, () =>
-          callProvider(provider as "openai" | "google" | "xai", key, {
+        spawnMediaTask(ctx.getSessionId(), options.toolCallId, () =>
+          callProvider(engine, key, {
             prompt,
             size,
             quality,
             referenceImage,
-            signal,
           }).then((result) => ({
             type: "image" as const,
             provider: result.provider,
@@ -113,7 +127,13 @@ Auto-executes — no approval needed.`,
         return {
           status: "generating",
           kind: "image",
-          provider: provider as "openai" | "google" | "xai",
+          provider: engine,
+          providerLabel: PROVIDER_LABEL[engine],
+          // Tell the model (and the user) when its request was redirected, so
+          // it can narrate "using Google" instead of claiming OpenAI.
+          ...(picked.substituted && provider
+            ? { note: `${provider} has no API key, so ${engine} was used instead.` }
+            : {}),
           prompt,
         };
       },
@@ -122,9 +142,14 @@ Auto-executes — no approval needed.`,
 }
 
 async function callProvider(
-  provider: "openai" | "google" | "xai",
+  provider: ImageProvider,
   key: string,
-  opts: { prompt: string; size?: string; quality?: string; referenceImage?: string; signal?: AbortSignal },
+  opts: {
+    prompt: string;
+    size?: string;
+    quality?: string;
+    referenceImage?: string;
+  },
 ): Promise<ImageResult> {
   switch (provider) {
     case "openai":

@@ -1348,7 +1348,7 @@ const RenderedTool = memo(function RenderedTool({
       <div className="flex items-center gap-2 rounded-lg border border-border/40 bg-card/60 px-3 py-2.5 text-xs text-muted-foreground">
         <Spinner />
         <span className="truncate">
-          Generating {g.kind} via {g.provider}…
+          Generating {g.kind} via {g.providerLabel ?? g.provider}…
         </span>
       </div>
     );

@@ -31,6 +31,12 @@ const tgIndexSrc = readFileSync(
   new URL("../../../assistant/index.ts", import.meta.url),
   "utf8",
 );
+// Provider SELECTION moved out of the tool when the engine became
+// key-driven (2026-11-12): the google-only rule for imagePath lives here now.
+const providerChoiceSrc = readFileSync(
+  new URL("./providerChoice.ts", import.meta.url),
+  "utf8",
+);
 
 describe("Veo 3.1 image-to-video wiring", () => {
   it("sends the reference image as instances[0].image", () => {
@@ -112,7 +118,14 @@ describe("Nano Banana 2 image editing wiring", () => {
   });
 
   it("non-google providers refuse imagePath explicitly", () => {
-    expect(toolSrc).toContain("imagePath editing is google-only");
+    // The refusal is a key-availability decision now (documented in
+    // providerChoice.ts): editing needs a Google key, so a request with
+    // imagePath either uses Google or fails with an actionable message
+    // instead of silently dropping the reference image.
+    expect(providerChoiceSrc).toContain("imagePath editing needs a Google API key");
+    expect(providerChoiceSrc).toMatch(/needsEditing[\s\S]*available\.includes\("google"\)/);
+    // The tool must pass needsEditing whenever a reference image was read.
+    expect(toolSrc).toContain("needsEditing: referenceImage !== undefined");
   });
 
   it("the tool reads the image bytes via the native fs bridge", () => {

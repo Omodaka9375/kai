@@ -46,6 +46,9 @@ export type MediaGeneratingOutput = {
   status: "generating";
   kind: "image" | "video";
   provider: string;
+  /** Human label for the engine that was ACTUALLY picked — set when the
+   *  requested provider had no key and KAI substituted another one. */
+  providerLabel?: string;
   prompt: string;
 };
 

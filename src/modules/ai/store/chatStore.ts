@@ -2526,6 +2526,10 @@ function releaseStoppedSessionTools(sessionId: string): void {
 
 export function stopSession(sessionId: string): void {
   cancelAllShellSessions(sessionId);
+  // Detached media jobs are NOT run-scoped (see media/task.ts), so Stop has
+  // to end them explicitly — otherwise the card spins until its own 3-10
+  // minute timeout. Passing a reason makes the cancellation VISIBLE.
+  cancelMediaTasksForSession(sessionId, "Generation cancelled before completion.");
   // Abort our own controller unconditionally — the Stop button must work even
   // when the model is stuck in a reasoning/tool loop where `Chat.stop()` is a
   // silent no-op (SDK status is neither streaming nor submitted).

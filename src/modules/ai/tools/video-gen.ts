@@ -47,7 +47,6 @@ If the user asks for a different video engine (Kling, Seedance, …), tell them 
       }),
       execute: async ({ prompt, duration, aspect_ratio, imagePath }, options) => {
         const effectiveDuration = duration ?? DEFAULT_DURATION;
-        const signal = options?.abortSignal;
 
         const key = await getKey("google");
         if (!key) {
@@ -77,13 +76,17 @@ If the user asks for a different video engine (Kling, Seedance, …), tell them 
           }
         }
 
-        spawnMediaTask(ctx.getSessionId(), options.toolCallId, signal, () =>
+        // NOTE: no run AbortSignal is threaded into the detached job. The
+        // agent run's signal is aborted the moment a new run supersedes it
+        // (registerRunController), which would kill a 1-5 minute Veo render
+        // seconds after it started. The job dies only on its own timeout or
+        // an explicit session-level cancel.
+        spawnMediaTask(ctx.getSessionId(), options.toolCallId, () =>
           generateGoogleVideo(key, {
             prompt,
             duration: effectiveDuration,
             aspectRatio: aspect_ratio,
             referenceImage,
-            signal,
           }).then((result) => ({
             type: "video" as const,
             provider: result.provider,
