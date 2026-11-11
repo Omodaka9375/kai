@@ -4,6 +4,15 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [2.2.6]
+
+- Quoting: quote controls stay visible as the input bar grows.
+- Watches: stopping a watch cancels its shell without late notifications.
+- Assistant: Telegram project handoff now follows the current session correctly.
+- Assistant: the session action is now "Send to Assistant", visible only when the assistant is enabled.
+
+---
+
 ## [2.2.5]
 
 - Approvals: Auto mode no longer opens AI diff tabs for edits it resolves itself.
