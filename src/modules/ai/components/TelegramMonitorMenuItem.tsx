@@ -6,8 +6,8 @@ import { useChatStore, projectIdForSession } from "../store/chatStore";
 import { useProjectRuntime } from "@/modules/workspace";
 
 /**
- * "Monitor via Telegram" - the desktop-side half of "send project to
- * assistant". Binding a project:
+ * "Send to Assistant" - the desktop-side half of Telegram project control.
+ * Binding a project:
  *   - pings the owner's Telegram when the project's agent finishes a reply
  *     or needs an approval, and
  *   - lets the owner prompt the project from the phone (/tell, or plain
@@ -93,7 +93,7 @@ export function TelegramMonitorMenuItem() {
         title="Ping your Telegram when this project's agent replies or needs approval, and prompt it from your phone via /tell"
       >
         <HugeiconsIcon icon={SentIcon} size={12} strokeWidth={1.75} />
-        {busy ? "Working." : bound ? "Stop Telegram monitoring" : "Monitor via Telegram"}
+        {busy ? "Working." : bound ? "Remove from Assistant" : "Send to Assistant"}
       </DropdownMenuItem>
       {error ? (
         <div className="px-2 py-1 text-[10.5px] leading-snug text-red-500">{error}</div>

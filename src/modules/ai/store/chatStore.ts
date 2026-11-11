@@ -2200,6 +2200,25 @@ export function getOrCreateChat(sessionId: string): Chat<UIMessage> {
   return c;
 }
 
+/** Load persisted history BEFORE a background subsystem constructs its Chat.
+ *  Awaiting this prevents a Telegram prompt or watcher wake from replacing
+ *  an evicted conversation with an empty in-memory one. */
+export async function ensureChatHydrated(sessionId: string): Promise<Chat<UIMessage>> {
+  if (!chats.has(sessionId) && !seedMessages.has(sessionId)) {
+    const meta = useChatStore.getState().sessions.find((s) => s.id === sessionId);
+    const loaded = meta?.workspaceRoot
+      ? await loadMessagesForRoot(meta.workspaceRoot, sessionId, meta.workspaceEnv ?? { kind: "local" })
+      : await loadMessages(sessionId);
+    if (loaded && loaded.length > 0 && !chats.has(sessionId) && !seedMessages.has(sessionId)) {
+      seedMessages.set(sessionId, stripIncompleteToolMessages(loaded));
+    }
+  }
+  if (!useChatStore.getState().sessions.some((s) => s.id === sessionId)) {
+    throw new Error("Session was deleted before its history could be loaded.");
+  }
+  return getOrCreateChat(sessionId);
+}
+
 export function getChat(sessionId?: string): Chat<UIMessage> | undefined {
   if (sessionId) return chats.get(sessionId);
   const id = useChatStore.getState().activeSessionId;

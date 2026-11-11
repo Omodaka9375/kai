@@ -110,6 +110,26 @@ export async function saveAssistantPrefs(prefs: AssistantPrefs): Promise<void> {
   await prefsStore.set("prefs", prefs);
 }
 
+// Serialize mutations across Settings and the main window. Every mutation
+// loads inside its queue slot, so a stale React snapshot cannot restore old
+// project bindings or unrelated preferences.
+let prefsMutationQueue: Promise<void> = Promise.resolve();
+
+export async function updateAssistantPrefs(next: Partial<AssistantPrefs>): Promise<void> {
+  await mutateAssistantPrefs((current) => ({ ...current, ...next }));
+}
+
+export async function mutateAssistantPrefs(
+  mutate: (current: AssistantPrefs) => AssistantPrefs,
+): Promise<void> {
+  const run = prefsMutationQueue.then(async () => {
+    const current = await loadAssistantPrefs();
+    await saveAssistantPrefs(mutate(current));
+  });
+  prefsMutationQueue = run.catch(() => {});
+  await run;
+}
+
 /** Set (or clear, with null) the assistant's custom name. Merged onto the
  *  CURRENT persisted prefs — load-then-save, never a stale in-memory copy —
  *  so a name set mid-conversation can't clobber a concurrent pref write. */

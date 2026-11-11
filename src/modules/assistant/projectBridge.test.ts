@@ -51,6 +51,7 @@ vi.mock("@/modules/ai/lib/keyring", () => ({
   getKey: async () => null,
 }));
 
+import { loadAssistantPrefs, updateAssistantPrefs } from "./prefs";
 import {
   bindProjectForTelegramWith,
   clearMirrorProvision,
@@ -68,15 +69,28 @@ const menuItem = read("../ai/components/TelegramMonitorMenuItem.tsx");
 
 // chatStore mock: sessions + injectMessage spy.
 const injectMessageMock = vi.fn(async () => undefined);
+const testRouting = vi.hoisted(() => ({
+  currentSession: "s-1",
+  open: true,
+  busy: false,
+}));
+const ensureChatHydratedMock = vi.hoisted(() => vi.fn(async () => ({ messages: [] })));
+const steeringMock = vi.hoisted(() => vi.fn());
 const activeSessions = [{ id: "s-1", workspaceRoot: "D:/Code/demo", title: "demo" }];
 vi.mock("@/modules/ai/store/chatStore", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/modules/ai/store/chatStore")>();
   return {
     ...actual,
+    ensureChatHydrated: ensureChatHydratedMock,
+    isProjectOpen: () => testRouting.open,
+    resolveBackgroundProjectSession: async () => testRouting.open ? testRouting.currentSession : null,
+    setSessionSteeringMessage: steeringMock,
+    getSessionSteeringMessage: () => [],
+    getSessionAgentMeta: () => ({ status: testRouting.busy ? "streaming" : "idle" }),
     useChatStore: {
       getState: () => ({
         sessions: activeSessions,
-        activeSessionId: "s-1",
+        activeSessionId: testRouting.currentSession,
         live: { getWorkspaceRoot: () => "D:/Code/demo" },
         injectMessage: injectMessageMock,
       }),
@@ -87,7 +101,13 @@ vi.mock("@/modules/ai/store/chatStore", async (importOriginal) => {
 
 beforeEach(() => {
   __resetProjectMonitorForTest();
+  testRouting.currentSession = "s-1";
+  testRouting.open = true;
+  testRouting.busy = false;
+  activeSessions.splice(0, activeSessions.length, { id: "s-1", workspaceRoot: "D:/Code/demo", title: "demo" });
   injectMessageMock.mockReset();
+  ensureChatHydratedMock.mockClear();
+  steeringMock.mockClear();
 });
 
 describe("bindings", () => {
@@ -99,6 +119,14 @@ describe("bindings", () => {
     await unbindProjectFromTelegram("demo-id");
     bound = await listBoundProjects();
     expect(bound["demo-id"]).toBeUndefined();
+  });
+
+  it("preference updates preserve bindings made by another window", async () => {
+    await bindProjectForTelegramWith("demo-id", "D:/Code/demo", "demo", "s-1");
+    await updateAssistantPrefs({ voiceReplies: false });
+    const prefs = await loadAssistantPrefs();
+    expect(prefs.voiceReplies).toBe(false);
+    expect(prefs.boundProjects["demo-id"]).toBeDefined();
   });
 
   it("re-binding the same project replaces, not duplicates", async () => {
@@ -115,13 +143,13 @@ describe("/tell routing", () => {
     await bindProjectForTelegramWith("demo-id", "D:/Code/demo", "demo", "s-1");
     const outcome = await tellProject("demo", "run the tests", 42);
     expect(outcome).toContain("Sent to demo");
-    expect(injectMessageMock).toHaveBeenCalledWith("s-1", "[via Telegram] run the tests");
+    expect(injectMessageMock).toHaveBeenCalledWith("s-1", "[via Telegram] run the tests", expect.any(Function));
   });
 
   it("finds the target by name (case-insensitive) and id", async () => {
     await bindProjectForTelegramWith("demo-id", "D:/Code/demo", "demo", "s-1");
     await tellProject("DEMO", "a", 42);
-    expect(injectMessageMock).toHaveBeenCalledWith("s-1", expect.stringContaining("a"));
+    expect(injectMessageMock).toHaveBeenCalledWith("s-1", expect.stringContaining("a"), expect.any(Function));
   });
 
   it("unknown target produces an actionable reply, not silence", async () => {
@@ -131,17 +159,42 @@ describe("/tell routing", () => {
     expect(injectMessageMock).not.toHaveBeenCalled();
   });
 
-  it("re-resolves a dead bound session to the project's current one", async () => {
-    // Bound session s-old no longer exists; s-1 is the project's session.
-    await bindProjectForTelegramWith("demo-id", "D:/Code/demo", "demo", "s-old");
-    await tellProject("demo", "status?", 42);
-    expect(injectMessageMock).toHaveBeenCalledWith(
-      "s-1",
-      expect.stringContaining("[via Telegram] status?"),
+  it("follows the project's current session after a desktop session switch", async () => {
+    activeSessions.push({ id: "s-2", workspaceRoot: "D:/Code/demo", title: "second" });
+    await bindProjectForTelegramWith("demo-id", "D:/Code/demo", "demo", "s-1");
+    testRouting.currentSession = "s-2";
+    await tellProject("demo", "continue here", 42);
+    expect(ensureChatHydratedMock).toHaveBeenCalledWith("s-2");
+    expect(injectMessageMock).toHaveBeenCalledWith("s-2", "[via Telegram] continue here", expect.any(Function));
+    expect((await listBoundProjects())["demo-id"]!.sessionId).toBe("s-2");
+  });
+
+  it("steering also releases an approval-paused run before sending", async () => {
+    const source = readFileSync(new URL("../ai/components/AgentRunBridge.tsx", import.meta.url), "utf8");
+    const effect = source.slice(
+      source.indexOf("useEffect(() => {", source.indexOf("const steeringMessage")),
+      source.indexOf("// ── Group chat: delegation preamble"),
     );
-    // The re-resolution persists back into prefs.
-    const bound = await listBoundProjects();
-    expect(bound["demo-id"]!.sessionId).toBe("s-1");
+    expect(effect).toContain("status === \"submitted\" || status === \"streaming\" || approvalsPending > 0");
+    expect(effect).toContain("stopSession(sessionId);");
+    expect(effect).toContain("[steeringMessage, status, approvalsPending, chat, setSteeringMessage]");
+  });
+
+  it("reuses composer steering when the target agent is busy", async () => {
+    testRouting.busy = true;
+    await bindProjectForTelegramWith("demo-id", "D:/Code/demo", "demo", "s-1");
+    const outcome = await tellProject("demo", "steer this", 42);
+    expect(outcome).toContain("will steer the run");
+    expect(steeringMock).toHaveBeenCalledWith("s-1", [{ type: "text", text: "[via Telegram] steer this" }]);
+    expect(injectMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses to fabricate a chat for a closed project", async () => {
+    await bindProjectForTelegramWith("demo-id", "D:/Code/demo", "demo", "s-1");
+    testRouting.open = false;
+    const outcome = await tellProject("demo", "hello", 42);
+    expect(outcome).toContain("no chat session");
+    expect(injectMessageMock).not.toHaveBeenCalled();
   });
 
   it("/projects status names bindings and their agent state", async () => {
@@ -153,16 +206,14 @@ describe("/tell routing", () => {
 });
 
 describe("causality + audit (source pins)", () => {
-  it("a /tell arms a one-shot mirror provision with a reply boundary", () => {
-    // tellProject snapshots the last assistant id BEFORE injecting and
-    // stores { chatId, boundaryId } - mirror sends only a reply that
-    // post-dates it, once.
-    expect(bridge).toContain("mirrorProvisions.set(sessionId, { chatId, boundaryId: lastAssistant?.id ?? null });");
-    expect(bridge).toMatch(/const lastAssistant = \[\.\.\.chat\.messages\]\.reverse\(\)\.find\(\(m\) => m\.role === \"assistant\"\)/);
+  it("a /tell arms a one-shot mirror provision with a prompt boundary", () => {
+    // The mirror accepts only the assistant response AFTER the Telegram
+    // prompt, not a response from an older interrupted run.
+    expect(bridge).toContain("mirrorProvisions.set(sessionId, { chatId, promptText: text });");
+    expect(bridge).toContain("replyIndex > promptIndex");
   });
 
   it("the monitor mirrors only provoked replies and pings only new ones", () => {
-    expect(bridge).toContain("lastAssistant.id !== provision.boundaryId");
     expect(bridge).toContain("monitorLastReplyId.get(sessionId) !== lastAssistant.id");
     // Provision is consumed either way (one-shot).
     expect(bridge).toContain("mirrorProvisions.delete(sessionId)");
@@ -226,8 +277,8 @@ describe("telegram command surface (source pins)", () => {
 
 describe("desktop bind toggle (source pins)", () => {
   it("the session menu exposes the monitor toggle, hidden when the bot is off", () => {
-    expect(menuItem).toContain("Monitor via Telegram");
-    expect(menuItem).toContain("Stop Telegram monitoring");
+    expect(menuItem).toContain("Send to Assistant");
+    expect(menuItem).toContain("Remove from Assistant");
     expect(menuItem).toContain("if (!prefs.enabled)");
   });
 

@@ -326,7 +326,11 @@ export function WorkspaceActivationGate(props: ActivationGateProps) {
     void import("@/modules/assistant")
       .then(async ({ startAssistantBridge, reclaimAssistantEvents, onAssistantClaimRequested }) => {
         assistantClaimUnlisten.current = await onAssistantClaimRequested(() => {
-          void reclaimAssistantEvents();
+          void (async () => {
+            await reclaimAssistantEvents();
+            const { installTelegramProjectMonitor } = await import("@/modules/assistant/projectBridge");
+            installTelegramProjectMonitor();
+          })();
         });
         const r = await startAssistantBridge();
         if (!r.ok && r.error && r.error !== "assistant disabled") {

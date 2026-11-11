@@ -25,17 +25,21 @@
  *    mirrored only when it was PROVOKED by a /tell delivery (delivery
  *    boundary snapshot + one-shot provision), never background chatter.
  *
- * BUSY SEMANTICS: injectMessage already gives us the whole contract for
- * free - an idle session wakes immediately; a busy run lets the injected
- * message ride the in-flight history (passive), so mid-run /tells steer
- * rather than clobber, exactly like steering from the composer.
+ * BUSY SEMANTICS: an idle session wakes through injectMessage. A busy run
+ * uses the composer's steering queue, which stops the current run and starts
+ * the Telegram prompt as the next request instead of silently parking it in
+ * history. Mirror provisions apply only to that next reply.
  */
 
-import { getTelegramToken, loadAssistantPrefs, saveAssistantPrefs, telegramNative } from "./prefs";
+import { getTelegramToken, loadAssistantPrefs, mutateAssistantPrefs, telegramNative } from "./prefs";
 import { auditAppend, AUDIT_KINDS } from "@/modules/ai/lib/audit";
 import {
+  ensureChatHydrated,
   getSessionAgentMeta,
-  getOrCreateChat,
+  getSessionSteeringMessage,
+  isProjectOpen,
+  resolveBackgroundProjectSession,
+  setSessionSteeringMessage,
   subscribeSessionAgentMeta,
   useChatStore,
 } from "@/modules/ai/store/chatStore";
@@ -55,14 +59,12 @@ export async function bindProjectForTelegram(projectId: string): Promise<boolean
   // DESKTOP caller passes identity in. This variant is for tests/internal.
   const root = useChatStore.getState().live.getWorkspaceRoot();
   if (!root) return false;
-  const prefs = await loadAssistantPrefs();
   const name = root.split(/[\\/]/).filter(Boolean).pop() ?? root;
   const sessionId = useChatStore.getState().activeSessionId;
-  prefs.boundProjects = {
-    ...prefs.boundProjects,
-    [projectId]: { root, name, sessionId },
-  };
-  await saveAssistantPrefs(prefs);
+  await mutateAssistantPrefs((prefs) => ({
+    ...prefs,
+    boundProjects: { ...prefs.boundProjects, [projectId]: { root, name, sessionId } },
+  }));
   auditAppend(AUDIT_KINDS.sandboxChange, "telegram-bind", `bound ${name} (${projectId})`, root);
   return true;
 }
@@ -75,19 +77,25 @@ export async function bindProjectForTelegramWith(
   name: string,
   sessionId: string | null,
 ): Promise<void> {
-  const prefs = await loadAssistantPrefs();
-  prefs.boundProjects = { ...prefs.boundProjects, [projectId]: { root, name, sessionId } };
-  await saveAssistantPrefs(prefs);
+  await mutateAssistantPrefs((prefs) => ({
+    ...prefs,
+    boundProjects: { ...prefs.boundProjects, [projectId]: { root, name, sessionId } },
+  }));
   auditAppend(AUDIT_KINDS.sandboxChange, "telegram-bind", `bound ${name} (${projectId})`, root);
 }
 
 export async function unbindProjectFromTelegram(projectId: string): Promise<void> {
-  const prefs = await loadAssistantPrefs();
-  if (!prefs.boundProjects[projectId]) return;
-  const { [projectId]: removed, ...rest } = prefs.boundProjects;
-  void removed;
-  prefs.boundProjects = rest;
-  await saveAssistantPrefs(prefs);
+  const removed = (await loadAssistantPrefs()).boundProjects[projectId];
+  if (!removed) return;
+  if (removed.sessionId) {
+    clearMirrorProvision(removed.sessionId);
+    monitorPrevStatus.delete(removed.sessionId);
+    monitorLastReplyId.delete(removed.sessionId);
+  }
+  await mutateAssistantPrefs((prefs) => {
+    const { [projectId]: _, ...rest } = prefs.boundProjects;
+    return { ...prefs, boundProjects: rest };
+  });
   auditAppend(AUDIT_KINDS.sandboxChange, "telegram-unbind", `unbound ${projectId}`, "");
 }
 
@@ -97,38 +105,33 @@ export function isProjectBound(projectId: string, prefs: { boundProjects: Record
 
 // ── Session resolution (group-store pattern) ─────────────────────────────
 
-/** Resolve the session a /tell should land in: the bound session if it still
- *  exists, else the project's current active session, else the bound id as
- *  a last resort (injectMessage rehydrates persisted history into a fresh
- *  Chat). Re-binds the resolved id so the binding follows the live project. */
+/** Resolve the session a /tell should land in: the project's CURRENT active
+ *  session. Binding a project does not fork a second, frozen conversation
+ *  when the user later switches sessions on the desktop. */
 async function resolveBoundSession(
   projectId: string,
   binding: BoundProject,
 ): Promise<string | null> {
+  if (!isProjectOpen(projectId)) return null;
+  const candidate = await resolveBackgroundProjectSession(projectId);
+  if (!candidate) return null;
   const state = useChatStore.getState();
-  const sessions = state.sessions;
-  const bound = binding.sessionId;
-  if (bound && sessions.some((s) => s.id === bound)) return bound;
-  // Re-resolve: find the session meta whose workspaceRoot matches the bound
-  // project root (forward-slash normalized compare, same identity rule as
-  // projectIdFor).
-  const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
-  const candidate = sessions.find(
-    (s) => s.workspaceRoot && norm(s.workspaceRoot) === norm(binding.root),
-  );
-  if (candidate) {
-    // Persist the re-resolution.
-    const prefs = await loadAssistantPrefs();
-    if (prefs.boundProjects[projectId]?.sessionId !== candidate.id) {
-      prefs.boundProjects = {
-        ...prefs.boundProjects,
-        [projectId]: { ...binding, sessionId: candidate.id },
+  if (!state.sessions.some((s) => s.id === candidate)) return null;
+  if (binding.sessionId !== candidate) {
+    await mutateAssistantPrefs((prefs) => {
+      // A concurrent unbind wins: never resurrect a removed project just to
+      // update the session it used to point at.
+      if (!prefs.boundProjects[projectId]) return prefs;
+      return {
+        ...prefs,
+        boundProjects: {
+          ...prefs.boundProjects,
+          [projectId]: { ...binding, sessionId: candidate },
+        },
       };
-      await saveAssistantPrefs(prefs);
-    }
-    return candidate.id;
+    });
   }
-  return bound;
+  return candidate;
 }
 
 // ── /projects status listing ────────────────────────────────────────────
@@ -139,13 +142,14 @@ export async function formatProjectsStatus(): Promise<string> {
   if (entries.length === 0) {
     return [
       "No projects monitored.",
-      "Bind one from its session menu on the desktop (Monitor via Telegram).",
+      "Bind one from its session menu on the desktop (Send to Assistant).",
     ].join("\n");
   }
-  const lines = entries.map(([id, b]) => {
+  const lines = [];
+  for (const [id, b] of entries) {
     let status = "idle";
     let step = "";
-    const sid = b.sessionId;
+    const sid = await resolveBoundSession(id, b);
     if (sid) {
       const meta = getSessionAgentMeta(sid);
       status =
@@ -158,8 +162,8 @@ export async function formatProjectsStatus(): Promise<string> {
               : "idle";
       step = meta.step ? ` - ${meta.step}` : "";
     }
-    return `- ${b.name} (${id}): ${status}${step}`;
-  });
+    lines.push(`- ${b.name} (${id}): ${status}${step}`);
+  }
   return [
     `Monitored projects (${entries.length}):`,
     ...lines,
@@ -170,12 +174,13 @@ export async function formatProjectsStatus(): Promise<string> {
 
 // ── /tell routing + reply mirroring ──────────────────────────────────────
 
-/** Mirrored-reply provision: projectId -> { boundaryId, provision } for the
- *  NEXT assistant reply of that session. One delivery = one mirrored reply
- *  (the group-chat contract); a second /tell overwrites the pending wake. */
+/** One Telegram prompt -> its next assistant reply. A second /tell replaces
+ *  the pending provision; no unrelated desktop reply is eligible. */
 type MirrorProvision = {
   chatId: number;
-  boundaryId: string | null;
+  /** Actual Telegram user message text, used to locate the prompt after
+   *  composer steering creates its message. */
+  promptText: string;
 };
 const mirrorProvisions = new Map<string, MirrorProvision>();
 
@@ -231,27 +236,37 @@ export async function tellProject(
   if (!sessionId) {
     return `${binding.name} has no chat session to prompt - open its AI panel on the desktop first.`;
   }
-  const chat = getOrCreateChat(sessionId);
-  // CAUSALITY: snapshot the last assistant message id NOW; the mirror hook
-  // sends only a reply that appears AFTER this boundary (group-chat
-  // contract - never background chatter).
-  const lastAssistant = [...chat.messages].reverse().find((m) => m.role === "assistant");
-  mirrorProvisions.set(sessionId, { chatId, boundaryId: lastAssistant?.id ?? null });
-
+  await ensureChatHydrated(sessionId);
+  // CAUSALITY: only an assistant message AFTER this exact Telegram prompt
+  // is eligible for mirroring (never an older interrupted/background run).
   const text = `[via Telegram] ${message}`;
+  mirrorProvisions.set(sessionId, { chatId, promptText: text });
+
   const state = useChatStore.getState();
-  await state.injectMessage(sessionId, text);
+  const meta = getSessionAgentMeta(sessionId);
+  const busy =
+    meta.status === "streaming" ||
+    meta.status === "thinking" ||
+    meta.status === "awaiting-approval";
+  try {
+    if (busy) {
+      const pending = getSessionSteeringMessage(sessionId) ?? [];
+      setSessionSteeringMessage(sessionId, [...pending, { type: "text", text }]);
+    } else {
+      await state.injectMessage(sessionId, text, () =>
+        useChatStore.getState().sessions.some((s) => s.id === sessionId),
+      );
+    }
+  } catch (e) {
+    clearMirrorProvision(sessionId);
+    throw e;
+  }
   auditAppend(
     AUDIT_KINDS.assistantExec,
     "telegram-tell",
     `${binding.name} <- "${message.slice(0, 120)}"`,
     binding.root,
   );
-  const meta = getSessionAgentMeta(sessionId);
-  const busy =
-    meta.status === "streaming" ||
-    meta.status === "thinking" ||
-    meta.status === "awaiting-approval";
   return busy
     ? `Sent to ${binding.name} (agent busy - your message will steer the run).`
     : `Sent to ${binding.name} - reply follows here.`;
@@ -313,7 +328,7 @@ export function hasMirrorProvision(sessionId: string): boolean {
  *
  *  - busy -> idle with a FRESH assistant reply:
  *      - a pending /tell mirror provision exists -> mirror the reply text
- *        to Telegram (one-shot; causality = reply id != provision boundary)
+ *        to Telegram (one-shot; reply must follow the Telegram prompt)
  *      - else -> "reply ready" ping (the AFK monitoring contract: you left
  *        a run going; here's when it lands). Ping-side causality: only when
  *        the last assistant id CHANGED since the previous ping, so a
@@ -335,8 +350,8 @@ async function monitorBoundSessions(): Promise<void> {
   const prefs = await loadAssistantPrefs();
   if (!prefs.enabled) return;
   const entries = Object.entries(prefs.boundProjects);
-  for (const [, binding] of entries) {
-    const sessionId = binding.sessionId;
+  for (const [projectId, binding] of entries) {
+    const sessionId = await resolveBoundSession(projectId, binding);
     if (!sessionId) continue;
     const meta = getSessionAgentMeta(sessionId);
     const prev = monitorPrevStatus.get(sessionId) ?? "idle";
@@ -369,13 +384,28 @@ async function monitorBoundSessions(): Promise<void> {
       continue;
     }
 
+    const provision = mirrorProvisions.get(sessionId);
+    if (provision && meta.status === "error") {
+      clearMirrorProvision(sessionId);
+      const token = await getTelegramToken();
+      if (token) {
+        await telegramNative
+          .sendMessage(
+            token,
+            provision.chatId,
+            `${binding.name}: agent run failed - see the desktop session.`,
+          )
+          .catch(() => {});
+      }
+      continue;
+    }
     if (!settled) continue;
 
-    // The live chat is the source of truth for the reply text. getOrCreate
-    // would resurrect a deleted session - guard on the session list first.
+    // The live chat is the source of truth for the reply text. The session
+    // existence guard prevents recreating a deleted conversation.
     const state = useChatStore.getState();
     if (!state.sessions.some((s) => s.id === sessionId)) continue;
-    const chat = getOrCreateChat(sessionId);
+    const chat = await ensureChatHydrated(sessionId);
     const lastAssistant = [...chat.messages].reverse().find((m) => m.role === "assistant");
     const replyText = lastAssistant
       ? (lastAssistant.parts ?? [])
@@ -385,11 +415,27 @@ async function monitorBoundSessions(): Promise<void> {
         .trim()
       : "";
 
-    const provision = mirrorProvisions.get(sessionId);
-    if (provision && lastAssistant && lastAssistant.id !== provision.boundaryId) {
+    const promptIndex = provision
+      ? chat.messages.findIndex((m) =>
+          m.role === "user" && (m.parts ?? []).some((p) =>
+            (p as { type?: string }).type === "text" &&
+            (p as { text?: string }).text === provision.promptText,
+          )
+        )
+      : -1;
+    const replyIndex = lastAssistant
+      ? chat.messages.findIndex((m) => m.id === lastAssistant.id)
+      : -1;
+    if (provision && lastAssistant && promptIndex >= 0 && replyIndex > promptIndex) {
       // The /tell round-trip completes: mirror the provoked reply.
       await mirrorProjectReply(sessionId, replyText);
       monitorLastReplyId.set(sessionId, lastAssistant.id);
+      continue;
+    }
+    // A settled run without a Telegram reply consumes the provision. It
+    // must never capture a later desktop-originated response.
+    if (provision) {
+      clearMirrorProvision(sessionId);
       continue;
     }
     // Plain monitor ping: only when a genuinely new reply landed (not the

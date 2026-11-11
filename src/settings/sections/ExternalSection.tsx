@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import {
   loadAssistantPrefs,
-  saveAssistantPrefs,
+  updateAssistantPrefs,
   telegramNative,
   getTelegramToken,
   setTelegramToken,
@@ -51,13 +51,11 @@ export function ExternalSection() {
   const refreshOwner = useCallback(async () => {
     try {
       const s = await telegramNative.status();
-      setPrefs((p) => {
-        if (!p || s.ownerChatId == null) return p;
-        if (p.ownerChatId === s.ownerChatId) return p;
-        const merged = { ...p, ownerChatId: s.ownerChatId };
-        void saveAssistantPrefs(merged);
-        return merged;
-      });
+      if (s.ownerChatId == null) return;
+      const current = await loadAssistantPrefs();
+      if (current.ownerChatId === s.ownerChatId) return;
+      await updateAssistantPrefs({ ownerChatId: s.ownerChatId });
+      setPrefs((p) => p ? { ...p, ownerChatId: s.ownerChatId } : p);
     } catch {
       // status polling is best-effort
     }
@@ -74,15 +72,10 @@ export function ExternalSection() {
     return () => clearInterval(iv);
   }, [refreshOwner]);
 
-  const patch = useCallback(
-    async (next: Partial<AssistantPrefs>) => {
-      if (!prefs) return;
-      const merged = { ...prefs, ...next };
-      setPrefs(merged);
-      await saveAssistantPrefs(merged);
-    },
-    [prefs],
-  );
+  const patch = useCallback(async (next: Partial<AssistantPrefs>) => {
+    setPrefs((current) => current ? { ...current, ...next } : current);
+    await updateAssistantPrefs(next);
+  }, []);
 
   const onEnable = async (enabled: boolean) => {
     setBusy(true);

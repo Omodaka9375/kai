@@ -396,7 +396,7 @@ function Bridge({
 
   useEffect(() => {
     if (!steeringMessage) return;
-    if (status === "submitted" || status === "streaming") {
+    if (status === "submitted" || status === "streaming" || approvalsPending > 0) {
       // Agent is still running — stop it; the effect will re-fire once
       // status settles to "ready" and send the queued message then.
       // stopSession (NOT bare chat.stop()): Chat.stop() is a documented
@@ -418,7 +418,7 @@ function Bridge({
       role: "user",
       parts,
     });
-  }, [steeringMessage, status, chat, setSteeringMessage]);
+  }, [steeringMessage, status, approvalsPending, chat, setSteeringMessage]);
 
   // ── Group chat: delegation preamble (Phase 2) ─────────────────────────
   // When this session becomes the group's AGENT coordinator (user action in
