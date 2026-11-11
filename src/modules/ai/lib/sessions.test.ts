@@ -183,4 +183,21 @@ describe("deriveTitle (context-block stripping)", () => {
     ]);
     expect(title).toBe("the real question");
   });
+
+  it("derives the title from the message after a quote, not the quote tag", () => {
+    const title = deriveTitle([
+      userMsg(
+        '<quote author="Kai">\nReview the parser tests.\n</quote>\n\nCan you fix this?',
+      ),
+    ]);
+    expect(title).toBe("Can you fix this?");
+  });
+
+  it("uses the quoted text when a quote is the entire first message", () => {
+    expect(
+      deriveTitle([
+        userMsg('<quote author="Kai">\nReview the parser tests.\n</quote>'),
+      ]),
+    ).toBe("Review the parser tests.");
+  });
 });

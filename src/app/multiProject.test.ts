@@ -126,6 +126,21 @@ describe("multi-project workspace ownership", () => {
     expect(gate).toMatch(/useEffect\(\(\) => \{\s*if \(!isActive\) return;[\s\S]*?writeWorkspaceLeft\(getSidebarPx\(\)\);/);
   });
 
+  it("offsets the AI window from the foreground composer's full live height", () => {
+    // A quote adds a row to the input bar. The shared height var must update
+    // for that DOM resize, and must re-sync on activation even if no resize
+    // occurs during the switch. Background workspaces cannot own the var.
+    const gate = readFileSync(new URL("./workspaceActivation.tsx", import.meta.url), "utf8");
+    expect(gate).toContain("const ro = new ResizeObserver(syncInputBarHeight);");
+    expect(gate).toContain("ro.observe(el);");
+    expect(gate).toContain("el.getBoundingClientRect().height");
+    expect(gate).toContain("[isActive, inputBarReady, inputBarRef]");
+    const observer = gate.indexOf("new ResizeObserver(syncInputBarHeight)");
+    const effect = gate.lastIndexOf("useEffect(() => {", observer);
+    expect(gate.slice(effect, observer)).toContain("if (!isActive) return;");
+    expect(gate.slice(effect, observer)).toContain("syncInputBarHeight();");
+  });
+
   it("keeps session and archive controls in the AI window, not the project rail", () => {
     const menu = readFileSync(new URL("./projectsMenu.ts", import.meta.url), "utf8");
     const rail = readFileSync(new URL("../modules/workspace/ProjectRail.tsx", import.meta.url), "utf8");

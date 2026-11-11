@@ -31,7 +31,7 @@
  * The heavy workspace tree simply never re-renders on a project switch.
  */
 
-import { useEffect, useRef, startTransition } from "react";
+import { useEffect, useRef, startTransition, type RefObject } from "react";
 import { homeDir } from "@tauri-apps/api/path";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -75,6 +75,9 @@ export type ActivationGateProps = {
   /** Sidebar px snapshot for the --kai-workspace-left CSS var write. */
   getSidebarPx: () => number;
   writeWorkspaceLeft: (px: number) => void;
+  /** Composer wrapper whose measured height offsets the floating AI window. */
+  inputBarRef: RefObject<HTMLDivElement | null>;
+  inputBarReady: boolean;
   /** setLive + setSandboxRoot with the body's freshest refs. */
   onActivateLive: () => void;
   /** Launch-cwd resolution state (body-owned). */
@@ -94,8 +97,9 @@ export function WorkspaceActivationGate(props: ActivationGateProps) {
   const {
     explorerRoot, launchCwd, home, prefsHydrated, launchCwdResolved,
     projectName, hydrateSessions, openProject, getSidebarPx,
-    writeWorkspaceLeft, onActivateLive, setLaunchCwd, setLaunchCwdResolved,
-    setRoot, projectModelIds, prefDefaultModel,
+    writeWorkspaceLeft, inputBarRef, inputBarReady, onActivateLive,
+    setLaunchCwd, setLaunchCwdResolved, setRoot, projectModelIds,
+    prefDefaultModel,
   } = props;
 
   // ── Expanded-AI-window left offset (moved from the body 2026-11-02) ──────
@@ -107,6 +111,26 @@ export function WorkspaceActivationGate(props: ActivationGateProps) {
     if (!isActive) return;
     writeWorkspaceLeft(getSidebarPx());
   }, [isActive, getSidebarPx, writeWorkspaceLeft]);
+
+  // Keep the floating window above the COMPLETE composer, including quote
+  // and attachment rows. Measure immediately as well as on resize: lazy
+  // loading and project switches do not guarantee a later resize callback.
+  // Background workspaces must never overwrite the foreground geometry.
+  useEffect(() => {
+    if (!isActive) return;
+    const el = inputBarRef.current;
+    if (!el) return;
+    const syncInputBarHeight = () => {
+      document.documentElement.style.setProperty(
+        "--kai-input-bar-h",
+        `${el.getBoundingClientRect().height}px`,
+      );
+    };
+    syncInputBarHeight();
+    const ro = new ResizeObserver(syncInputBarHeight);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [isActive, inputBarReady, inputBarRef]);
 
   // ── Launch-cwd resolution (first activation per workspace) ───────────────
   useEffect(() => {

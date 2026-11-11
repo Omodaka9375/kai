@@ -623,25 +623,10 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
     [runtime, explorerRoot, launchCwd, home, workspaceEnv],
   );
 
-  // Single ResizeObserver for the AI input bar height CSS var. This was
-  // previously an inline ref callback — React re-attaches inline refs on every
-  // commit, so each App re-render created one MORE observer on the same
-  // element and nothing ever disconnected them. After hours of tab switches
-  // and agent runs that was thousands of live observers (heap growth + GC
-  // pauses), one of the causes of the app slowly crawling to a halt.
+  // The foreground-only height observer lives in WorkspaceActivationGate.
+  // The ref itself stays stable: an inline callback would install a new
+  // observer on every commit and leak the previous one.
   const inputBarRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    const el = inputBarRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => {
-      document.documentElement.style.setProperty(
-        "--kai-input-bar-h",
-        `${el.offsetHeight}px`,
-      );
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [keysLoaded]);
 
   const onOpenProject = useCallback(
     (path: string) => {
@@ -1828,6 +1813,8 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
             openProject={(p) => onOpenProjectRef.current(p)}
             getSidebarPx={getSidebarPx}
             writeWorkspaceLeft={writeWorkspaceLeft}
+            inputBarRef={inputBarRef}
+            inputBarReady={keysLoaded}
             onActivateLive={onActivateLive}
             setLaunchCwd={setLaunchCwd}
             setLaunchCwdResolved={setLaunchCwdResolved}

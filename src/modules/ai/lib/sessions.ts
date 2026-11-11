@@ -2,6 +2,7 @@ import type { UIMessage } from "@ai-sdk/react";
 import { LazyStore } from "@tauri-apps/plugin-store";
 import { normalizeWorkspacePath } from "./workspacePath";
 import { workspaceScopeKey, type WorkspaceEnv } from "@/modules/workspace/env";
+import { splitQuoteBlock } from "./chatText";
 
 export type SessionMeta = {
   id: string;
@@ -658,26 +659,38 @@ export async function forkSession(
 }
 
 export function deriveTitle(messages: UIMessage[]): string {
+  let quoteFallback: string | null = null;
   for (const m of messages) {
     if (m.role !== "user") continue;
     for (const p of m.parts) {
       if (p.type !== "text") continue;
+      const raw = (p as { text: string }).text;
+      const quoted = splitQuoteBlock(raw);
+      if (!quoteFallback && quoted?.quoteText.trim()) {
+        quoteFallback = quoted.quoteText.trim().split("\n")[0];
+      }
       // Skills (2026-11-02): the composer prepends `<skill name="…">` blocks
       // ahead of the user's text, so the first line would otherwise be the
       // literal opening tag. Strip the whole block (same shape as
       // chatText.ts SKILL_RE) before deriving the title.
-      const text = (p as { text: string }).text
+      const text = raw
         .replace(/<terminal-context[\s\S]*?<\/terminal-context>\s*/g, "")
         .replace(/<selection[\s\S]*?<\/selection>\s*/g, "")
         .replace(/<file[\s\S]*?<\/file>\s*/g, "")
         .replace(/<snippet[\s\S]*?<\/snippet>\s*/g, "")
         .replace(/<skill\s+name="[^"]+">[\s\S]*?<\/skill>\s*/g, "")
+        .replace(/<quote[\s\S]*?<\/quote>\s*/g, "")
         .replace(/<Kai-command[^>]*\/>\s*/g, "")
         .trim();
       if (!text) continue;
       const first = text.split("\n")[0].trim();
       return first.length > 40 ? `${first.slice(0, 40)}…` : first;
     }
+  }
+  if (quoteFallback) {
+    return quoteFallback.length > 40
+      ? `${quoteFallback.slice(0, 40)}…`
+      : quoteFallback;
   }
   return "New chat";
 }
