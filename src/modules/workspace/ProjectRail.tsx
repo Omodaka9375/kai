@@ -15,14 +15,19 @@ import {
   Cancel01Icon,
   Folder01Icon,
   FolderAddIcon,
+  PencilEdit01Icon,
+  RefreshIcon,
   Upload04Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
 import { useFileMenuTrigger } from "@/app/fileMenu";
 import { useProjectsMenu, useProjectRailItems } from "@/app/projectsMenu";
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { SIDEBAR_RAIL_HEIGHT } from "@/modules/sidebar";
 import { useProjectRunningTerminals } from "@/modules/terminal/lib/terminalActivity";
+import { ProjectIconPicker } from "./ProjectIconPicker";
+import { projectIconCss, useProjectIcon } from "./projectIcons";
 
 export type ProjectSwitcherItem = {
   id: string;
@@ -33,6 +38,10 @@ export type ProjectSwitcherItem = {
    *  while another project was active). Cleared on switch. */
   hasNews?: boolean;
   active: boolean;
+  /** Custom tile glyph (hugeicons export name) and/or color preset key.
+   * Both optional: absent = folder glyph / deterministic auto hue. */
+  icon?: string;
+  color?: string;
 };
 
 const STATUS_LABEL: Record<ProjectSwitcherItem["status"], string> = {
@@ -101,6 +110,22 @@ function TerminalRunningText({ projectId }: { projectId: string }) {
   );
 }
 
+/** The tile's glyph: a custom hugeicons glyph when the project has one
+ * (resolved lazily - non-curated names arrive with the code-split pack and
+ * render the folder until then), else the folder. Custom colors ride the
+ * same muted hsl(45% 52%) family as the original auto hash. */
+function TileGlyph({ project, active }: { project: ProjectSwitcherItem; active: boolean }) {
+  const icon = useProjectIcon(project.icon);
+  return (
+    <HugeiconsIcon
+      icon={icon ?? Folder01Icon}
+      size={17}
+      strokeWidth={active ? 2 : 1.75}
+      style={{ color: projectIconCss(project.color, project.id) }}
+    />
+  );
+}
+
 /** Always-visible project switcher. Workspaces stay mounted when switched;
  * each entry opens that project's last-active agent session. Session picking
  * deliberately lives in the AI window, not in this rail. */
@@ -128,6 +153,8 @@ export function ProjectRail({
   const [dragId, setDragId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
+  // Project whose tile has the icon picker dialog open (null = closed).
+  const [iconPickerFor, setIconPickerFor] = useState<string | null>(null);
   return (
     <TooltipProvider
       delayDuration={250}
@@ -145,9 +172,10 @@ export function ProjectRail({
         </div>
         <div className="relative flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto p-1.5 [scrollbar-width:thin] [-ms-overflow-style:none] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border/60">
           {projects.map((project) => (
-            <div
-              key={project.id}
-              className="group relative w-full"
+            <ContextMenu key={project.id}>
+              <ContextMenuTrigger asChild>
+              <div
+                className="group relative w-full"
               draggable
               onDragStart={(e) => {
                 setDragId(project.id);
@@ -201,14 +229,7 @@ export function ProjectRail({
                     {project.active ? (
                       <span className="absolute -left-1.5 h-4 w-0.5 rounded-r bg-foreground/70" />
                     ) : null}
-                    <HugeiconsIcon
-                      icon={Folder01Icon}
-                      size={17}
-                      strokeWidth={project.active ? 2 : 1.75}
-                      // Subtle per-project hue so tiles stay recognizable at a
-                      // glance. Low saturation/lightness keeps it on-theme.
-                      style={{ color: projectIconColor(project.id) }}
-                    />
+                    <TileGlyph project={project} active={project.active} />
                     <TileStatusDot status={project.status} projectId={project.id} hasNews={project.hasNews} />
                   </button>
                 </TooltipTrigger>
@@ -241,7 +262,21 @@ export function ProjectRail({
                   <HugeiconsIcon icon={Cancel01Icon} size={9} strokeWidth={2} />
                 </button>
               ) : null}
-            </div>
+              </div>
+              </ContextMenuTrigger>
+              <ContextMenuContent className="w-48 text-xs">
+                <ContextMenuItem onSelect={() => setIconPickerFor(project.id)}>
+                  <HugeiconsIcon icon={PencilEdit01Icon} size={14} strokeWidth={1.75} className="shrink-0 text-muted-foreground" />
+                  Change icon...
+                </ContextMenuItem>
+                {project.icon || project.color ? (
+                  <ContextMenuItem onSelect={() => menu?.changeProjectIcon(project.id, null, null)}>
+                    <HugeiconsIcon icon={RefreshIcon} size={14} strokeWidth={1.75} className="shrink-0 text-muted-foreground" />
+                    Reset to default
+                  </ContextMenuItem>
+                ) : null}
+              </ContextMenuContent>
+            </ContextMenu>
           ))}
         </div>
         <div
@@ -306,18 +341,18 @@ export function ProjectRail({
           </Popover>
         </div>
       </aside>
+      {/* Icon picker dialog lives OUTSIDE the aside layout (Radix portals it
+          anyway) - keyed to whichever tile was right-clicked. */}
+      <ProjectIconPicker
+        project={projects.find((p) => p.id === iconPickerFor) ?? null}
+        onOpenChange={(open) => {
+          if (!open) setIconPickerFor(null);
+        }}
+        onChange={(icon, color) => {
+          if (iconPickerFor) menu?.changeProjectIcon(iconPickerFor, icon, color);
+        }}
+      />
     </TooltipProvider>
   );
 }
 
-/** Deterministic, subtle per-project icon hue: hash -> hsl(h, 45%, 55%).
- *  Same hash scheme as the group arcs used but muted — enough to tell
- *  projects apart at a glance without fighting the theme. Dark mode
- *  lightens a touch. */
-function projectIconColor(projectId: string): string {
-  let h = 0;
-  for (let i = 0; i < projectId.length; i++) {
-    h = (h * 31 + projectId.charCodeAt(i)) >>> 0;
-  }
-  return `hsl(${h % 360} 45% 52%)`;
-}

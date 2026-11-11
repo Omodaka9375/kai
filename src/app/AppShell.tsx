@@ -38,6 +38,12 @@ import { Spinner } from "@/components/ui/spinner";
 
 const openProjectsStore = new LazyStore("kai-open-projects.json", { defaults: {}, autoSave: 200 });
 
+/** Canonical key for project icon overrides: forward slashes, no trailing
+ * slashes - the same normalization createProjectRuntime applies to roots. */
+function projectIconOverrideKey(root: string): string {
+  return root.replace(/\\/g, "/").replace(/\/+$/, "");
+}
+
 /** Race a boot-critical promise with a timeout + rejection guard so a wedged
  * IPC call can never wedge the WHOLE boot: on failure or timeout, log loudly
  * (the console bridge forwards into kai-<pid>.log) and continue with the
@@ -77,6 +83,13 @@ async function bootAwait<T>(
 export default function App() {
   const [projects, setProjects] = useState<ProjectRuntime[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
+  // Project icon/color customizations (2026-11-11), keyed by canonical root
+  // so they survive env switches and close/reopen. Persisted under the
+  // "projectIcons" key of kai-open-projects.json, independent of the roots
+  // list so closing a project never loses its customization.
+  const [projectIconOverrides, setProjectIconOverrides] = useState<
+    Record<string, { icon?: string; color?: string }>
+  >({});
   const [ready, setReady] = useState(false);
   const [statusVersion, setStatusVersion] = useState(0);
   /** Human-readable boot phase - rendered by the pre-ready placeholder so a
@@ -129,6 +142,14 @@ export default function App() {
       const savedProjects = (saved?.roots ?? []).map((entry) =>
         typeof entry === "string" ? { root: entry, env: LOCAL_WORKSPACE } : entry,
       );
+      // Icon overrides are non-critical but boot-coupled (tiles would flash
+      // the default glyph otherwise); same guarded race as the roots.
+      const savedIconOverrides = await bootAwait(
+        openProjectsStore.get<Record<string, { icon?: string; color?: string }>>("projectIcons"),
+        () => ({}) as Record<string, { icon?: string; color?: string }>,
+        "openProjectsStore.get(projectIcons)",
+      );
+      setProjectIconOverrides(savedIconOverrides ?? {});
       const roots = [
         launch ? { root: launch, env: LOCAL_WORKSPACE } : null,
         ...savedProjects,
@@ -241,22 +262,27 @@ export default function App() {
     });
   }, [closeConfirm, projects]);
 
-  const items = useMemo(() => projects.map((project) => ({
-    id: project.id,
-    root: project.root,
-    name: project.root.split(/[\\/]/).filter(Boolean).pop() ?? project.root,
-    status: (() => {
-      const status = getProjectAgentStatus(project.id);
-      return status === "awaiting-approval" ? "awaiting" as const
-        : status === "error" ? "error" as const
-        : status === "idle" ? "idle" as const
-        : "running" as const;
-    })(),
-    // Unseen cross-project news (watch fired / agent replied while another
-    // project was active). Amber pulse on the tile; cleared on switch.
-    hasNews: project.id !== activeId && getProjectHasNews(project.id),
-    active: project.id === activeId,
-  })), [projects, activeId, statusVersion]);
+  const items = useMemo(() => projects.map((project) => {
+    const iconOverride = projectIconOverrides[projectIconOverrideKey(project.root)];
+    return {
+      id: project.id,
+      root: project.root,
+      name: project.root.split(/[\\/]/).filter(Boolean).pop() ?? project.root,
+      status: (() => {
+        const status = getProjectAgentStatus(project.id);
+        return status === "awaiting-approval" ? "awaiting" as const
+          : status === "error" ? "error" as const
+          : status === "idle" ? "idle" as const
+          : "running" as const;
+      })(),
+      // Unseen cross-project news (watch fired / agent replied while another
+      // project was active). Amber pulse on the tile; cleared on switch.
+      hasNews: project.id !== activeId && getProjectHasNews(project.id),
+      active: project.id === activeId,
+      icon: iconOverride?.icon,
+      color: iconOverride?.color,
+    };
+  }), [projects, activeId, statusVersion, projectIconOverrides]);
 
   useEffect(() => {
     if (!ready) return;
@@ -265,6 +291,13 @@ export default function App() {
       activeId,
     });
   }, [projects, activeId, ready]);
+
+  // Icon/color customizations persist per canonical root, independent of the
+  // open-roots list: close a project, reopen it later, the glyph is back.
+  useEffect(() => {
+    if (!ready) return;
+    void openProjectsStore.set("projectIcons", projectIconOverrides);
+  }, [projectIconOverrides, ready]);
 
   // STABLE ACTIONS CONTEXT (2026-11-02): the menu value is memoized on the
   // action callbacks ONLY. `items` live in their own context — a status
@@ -291,6 +324,23 @@ export default function App() {
       return next;
     });
   }, []);
+  const changeProjectIcon = useCallback((id: string, icon: string | null, color: string | null) => {
+    const project = projectsRef.current.find((p) => p.id === id);
+    if (!project) return;
+    const key = projectIconOverrideKey(project.root);
+    setProjectIconOverrides((current) => {
+      const merged = { ...current[key] };
+      if (icon === null) delete merged.icon;
+      else merged.icon = icon;
+      if (color === null) delete merged.color;
+      else merged.color = color;
+      const next = { ...current };
+      if (!merged.icon && !merged.color) delete next[key];
+      else next[key] = merged;
+      return next;
+    });
+  }, []);
+
   const itemsRef = useRef(items);
   itemsRef.current = items;
   const menuActions = useMemo(
@@ -302,8 +352,9 @@ export default function App() {
       switchProject,
       changeEnvironment,
       moveProject,
+      changeProjectIcon,
     }),
-    [addProject, newProject, closeProject, switchProject, changeEnvironment, moveProject],
+    [addProject, newProject, closeProject, switchProject, changeEnvironment, moveProject, changeProjectIcon],
   );
 
   // Entering a project consumes its unseen-news flag: whatever fired while

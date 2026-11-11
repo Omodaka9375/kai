@@ -19,6 +19,10 @@ export type ProjectsMenu = {
    *  so a reorder survives restarts with no extra storage. */
   moveProject: (dragId: string, overId: string) => void;
   changeEnvironment: (id: string, env: import("@/modules/workspace").WorkspaceEnv, home: string | null) => void;
+  /** Project icon customization (2026-11-11): set/clear a tile glyph and/or
+   *  color. Passing null for a field resets it (glyph -> folder, color ->
+   *  the project's auto hash hue); both null clears the customization. */
+  changeProjectIcon: (id: string, icon: string | null, color: string | null) => void;
 };
 
 export const ProjectsMenuContext = createContext<ProjectsMenu | null>(null);
