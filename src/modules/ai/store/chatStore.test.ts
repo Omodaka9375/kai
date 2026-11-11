@@ -359,6 +359,88 @@ describe("chatStore exports", () => {
       expect(store.getState().activeSessionId).toBe(sessionA);
     });
 
+    it("loads a restored session from its own project's file before the store scope changes", async () => {
+      const store = mod.useChatStore;
+      const { loadMessages, saveMessagesForRoot, setSessionsScope } =
+        await import("../lib/sessions");
+      const outgoingRoot = "D:/restore-current-scope";
+      const restoredRoot = "D:/restore-selected-project";
+      const sessionId = "restore-project-history";
+      const meta = {
+        id: sessionId,
+        title: "Preserved title",
+        createdAt: 1,
+        updatedAt: 1,
+        lastMessageCount: 1,
+        workspaceRoot: restoredRoot,
+        workspaceEnv: { kind: "local" as const },
+      };
+      await saveMessagesForRoot(restoredRoot, sessionId, [
+        { id: "saved-message", role: "user", parts: [{ type: "text", text: "restore me" }] },
+      ] as never);
+      store.setState({
+        sessions: [],
+        activeSessionId: null,
+        sessionsHydrated: false,
+        lastHydratedWorkspace: null,
+      });
+      await store.getState().hydrateSessions(outgoingRoot);
+      store.setState({ sessions: [...store.getState().sessions, meta] });
+
+      store.getState().switchSession(sessionId);
+      await vi.waitFor(() => expect(store.getState().activeSessionId).toBe(sessionId));
+
+      expect(mod.getOrCreateChat(sessionId).messages[0]?.id).toBe("saved-message");
+      // This assertion proves the current file is still the OUTGOING one.
+      expect(await loadMessages(sessionId)).toBeNull();
+      await setSessionsScope(restoredRoot);
+    });
+
+    it("restores history when activation selects the saved id before hydration", async () => {
+      const store = mod.useChatStore;
+      const { createProjectRuntime } = await import("@/modules/workspace/projectRuntime");
+      const { saveActiveIdForRoot, saveMessagesForRoot, saveSessionsListForRoot, setSessionsScope } =
+        await import("../lib/sessions");
+      const root = "D:/activation-restored-history";
+      const sessionId = "activation-restored-history-session";
+      await saveMessagesForRoot(root, sessionId, [
+        { id: "activation-message", role: "user", parts: [{ type: "text", text: "saved" }] },
+      ] as never);
+      await saveSessionsListForRoot(root, [{
+        id: sessionId,
+        title: "Saved conversation",
+        createdAt: 1,
+        updatedAt: 1,
+        lastMessageCount: 1,
+        workspaceRoot: root,
+        workspaceEnv: { kind: "local" as const },
+      }]);
+      await saveActiveIdForRoot(root, sessionId);
+      await setSessionsScope(null);
+      store.setState({
+        sessions: [],
+        activeSessionId: null,
+        sessionsHydrated: false,
+        lastHydratedWorkspace: null,
+      });
+      const runtime = createProjectRuntime(root);
+      mod.setActiveProjectRuntime(runtime);
+      mod.setProjectActiveSession(runtime.id, sessionId);
+      await store.getState().hydrateSessions(root, runtime);
+
+      expect(mod.getOrCreateChat(sessionId).messages[0]?.id).toBe("activation-message");
+      // Reset: the in-memory session list is global across tests, and a
+      // leftover active id would leak into the next hydration's restore.
+      mod.setProjectActiveSession(runtime.id, null);
+      mod.setActiveProjectRuntime(createProjectRuntime("D:/no-project"));
+      store.setState({
+        sessions: [],
+        activeSessionId: null,
+        sessionsHydrated: false,
+        lastHydratedWorkspace: null,
+      });
+    });
+
     it("a fast A→B switch while A's hydration is still in flight shows B (latest wins)", async () => {
       // REGRESSION ("AI window shows the stale project's chat after a
       // switch"): hydrateSessions is async and swaps the module-level
@@ -369,6 +451,7 @@ describe("chatStore exports", () => {
       // The fix: starts serialize (each run awaits the prior chain tail)
       // and every stale run's commit is dropped.
       const store = mod.useChatStore;
+      store.setState({ sessionsHydrated: false, lastHydratedWorkspace: null });
 
       // Fire both hydrations WITHOUT awaiting the first — the interleaved
       // shape the App effect produces on a fast project switch.

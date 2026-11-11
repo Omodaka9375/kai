@@ -1019,12 +1019,19 @@ describe("history-wipe guards for the never-visited resolver (2026-11-02 review 
   it("the resolver seeds the session's history BEFORE binding the bridge", () => {
     // Seed-before-bind: loadMessagesForRoot -> seedMessages BEFORE the
     // setProjectActiveSession call that re-binds AgentRunBridge.
+    // 2026-11-11: the seeding itself moved into loadSessionHistory (the
+    // single-flight loader shared with hydration/switchSession); the pin
+    // follows the call, not the inlined body.
     const seedIdx = chatStore.indexOf("SEED BEFORE BIND");
     const bindIdx = chatStore.indexOf("setProjectActiveSession(projectId, persistedActiveId);");
     expect(seedIdx).toBeGreaterThan(-1);
     expect(bindIdx).toBeGreaterThan(seedIdx);
     expect(chatStore).toMatch(/!chats\.has\(persistedActiveId\) && !seedMessages\.has\(persistedActiveId\)/);
-    expect(chatStore).toContain("seedMessages.set(persistedActiveId, stripIncompleteToolMessages(m));");
+    const bind = chatStore.slice(seedIdx, bindIdx);
+    expect(bind).toContain("await loadSessionHistory(persistedActiveId");
+    expect(bind).toContain("loadMessagesForRoot(runtime.root, persistedActiveId, runtime.env)");
+    // The shared loader is the only place history seeding happens now.
+    expect(chatStore).toContain("seedMessages.set(id, stripIncompleteToolMessages(messages));");
   });
 
   it("saveMessages* refuse to overwrite a populated blob with an empty array", () => {

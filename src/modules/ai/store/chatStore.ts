@@ -536,6 +536,36 @@ export function setChatPinner(fn: ((id: string) => boolean) | null): void {
 // when the matching Chat is constructed.
 const seedMessages = new Map<string, UIMessage[]>();
 
+/** Single-flight history loading shared by hydration, session switching and
+ *  the background-project resolver. Every caller used to fire its own
+ *  loadMessages race for the same id; two concurrent reads could resolve out
+ *  of order and the loser's empty result would win. One read per id until
+ *  the Chat is constructed. */
+const sessionHistoryReads = new Map<string, Promise<void>>();
+function loadSessionHistory(
+  id: string,
+  load: () => Promise<UIMessage[] | null>,
+): Promise<void> {
+  if (chats.has(id) || seedMessages.has(id)) return Promise.resolve();
+  const existing = sessionHistoryReads.get(id);
+  if (existing) return existing;
+  const read = Promise.resolve()
+    .then(load)
+    .then((messages) => {
+      if (messages && messages.length > 0 && !chats.has(id)) {
+        seedMessages.set(id, stripIncompleteToolMessages(messages));
+      }
+    })
+    .catch((error: unknown) => {
+      console.error(`[chatStore] failed to load messages for ${id}:`, error);
+    })
+    .finally(() => {
+      sessionHistoryReads.delete(id);
+    });
+  sessionHistoryReads.set(id, read);
+  return read;
+}
+
 // Trailing debounce for per-token message persistence. Streaming fires
 // `persistMessages` on every token; without this we'd JSON-serialize the
 // full message array and round-trip to the store plugin per token, which
@@ -932,20 +962,9 @@ export async function resolveBackgroundProjectSession(
     // (createGroupChat/addParticipants bind with no delivery to follow).
     // Same contract as injectMessage's hydrate-before-create guard.
     if (!chats.has(persistedActiveId) && !seedMessages.has(persistedActiveId)) {
-      try {
-        const m = await loadMessagesForRoot(
-          runtime.root,
-          persistedActiveId,
-          runtime.env,
-        );
-        if (m && m.length > 0 && !chats.has(persistedActiveId) && !seedMessages.has(persistedActiveId)) {
-          seedMessages.set(persistedActiveId, stripIncompleteToolMessages(m));
-        }
-      } catch {
-        // Unreadable blob: bind anyway - the empty-persist guard in
-        // saveMessages* keeps the on-disk copy from being clobbered, and a
-        // later visit hydrates properly.
-      }
+      await loadSessionHistory(persistedActiveId, () =>
+        loadMessagesForRoot(runtime.root, persistedActiveId, runtime.env),
+      );
     }
     setProjectActiveSession(projectId, persistedActiveId);
     return persistedActiveId;
@@ -1598,18 +1617,12 @@ export const useChatStore = create<StoreState>((set, get) => ({
     if (nextActiveId) {
       if (!chats.has(nextActiveId) && !seedMessages.has(nextActiveId)) {
         try {
-          const m = hydrationRuntime
-            ? await loadMessagesForRoot(hydrationRuntime.root, nextActiveId, hydrationRuntime.env)
-            : await loadMessages(nextActiveId);
+          await loadSessionHistory(nextActiveId, () =>
+            hydrationRuntime
+              ? loadMessagesForRoot(hydrationRuntime.root, nextActiveId, hydrationRuntime.env)
+              : loadMessages(nextActiveId),
+          );
           if (isStale()) return;
-          if (
-            m &&
-            m.length > 0 &&
-            !chats.has(nextActiveId) &&
-            !seedMessages.has(nextActiveId)
-          ) {
-            seedMessages.set(nextActiveId, stripIncompleteToolMessages(m));
-          }
         } catch (err) {
           console.error(
             "[hydrateSessions] Failed to seed active session:",
@@ -1702,15 +1715,16 @@ export const useChatStore = create<StoreState>((set, get) => ({
       flip();
       return;
     }
-    void loadMessages(id).then((m) => {
-      // Only seed if this session hasn't already been opened (its own chat
-      // instantiated) while the load was in flight — using seedMessages now
-      // would be discarded or, worse, clobber a live chat's history.
-      if (m && m.length > 0 && !chats.has(id)) {
-        seedMessages.set(id, stripIncompleteToolMessages(m));
-      }
-      flip();
-    });
+    const session = get().sessions.find((s) => s.id === id);
+    // Activation selects the incoming project BEFORE its hydration changes
+    // the module-level store scope. Reading the unscoped/current file here
+    // loads the OUTGOING project's blob, finds nothing, and creates an empty
+    // Chat that later hydration then mistakes for an already-restored one.
+    void loadSessionHistory(id, () =>
+      session?.workspaceRoot
+        ? loadMessagesForRoot(session.workspaceRoot, id, session.workspaceEnv ?? { kind: "local" })
+        : loadMessages(id),
+    ).then(flip);
   },
 
   archiveSession: (id) => {
@@ -1786,14 +1800,12 @@ export const useChatStore = create<StoreState>((set, get) => ({
       // as a normal switch, so the newly active session's persisted history
       // is hydrated instead of being overwritten with an empty chat.
       if (!chats.has(next) && !seedMessages.has(next)) {
-        void loadMessages(next).then((m) => {
-          // The user may have switched away while loading — only honor if
-          // this session is still active and its chat wasn't built meanwhile.
-          if (get().activeSessionId !== next) return;
-          if (m && m.length > 0 && !chats.has(next)) {
-            seedMessages.set(next, stripIncompleteToolMessages(m));
-          }
-        });
+        const target = remaining.find((s) => s.id === next);
+        void loadSessionHistory(next, () =>
+          target?.workspaceRoot
+            ? loadMessagesForRoot(target.workspaceRoot, next, target.workspaceEnv ?? { kind: "local" })
+            : loadMessages(next),
+        );
       }
     }
   },
