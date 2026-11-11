@@ -100,12 +100,74 @@ describe("presentationFor — safe defaults for unknown tools", () => {
     expect(p.remoteSurface).toBe(false);
     expect(p.label).toBeUndefined();
     expect(p.status).toBeUndefined();
-    expect(p.summary).toBeUndefined();
+    expect(p.summary?.({})).toBeNull();
   });
 
   it("an MCP tool (server__name) defaults to a remote surface", () => {
     expect(presentationFor("ugnas__files_find").remoteSurface).toBe(true);
     expect(presentationFor("netexpert__net_ping").remoteSurface).toBe(true);
+  });
+});
+
+describe("inline argument summaries", () => {
+  it("shows Browserr targets without opening the tool card", () => {
+    expect(
+      presentationFor("browserr__browser_navigate").summary?.({
+        url: "https://example.com",
+      }),
+    ).toBe("https://example.com");
+    expect(
+      presentationFor("browserr__browser_click_element").summary?.({
+        selector: "#go",
+        timeout: 1000,
+      }),
+    ).toBe("#go timeout=1000");
+    expect(presentationFor("browserr__browser_read_structure").summary?.({})).toBeNull();
+  });
+
+  it("fills missing built-in summaries and keeps custom summaries unchanged", () => {
+    expect(presentationFor("web_search").summary?.({ query: "KAI terminal" })).toBe(
+      "KAI terminal",
+    );
+    expect(presentationFor("web_browse").summary?.({ url: "https://example.com" })).toBe(
+      "https://example.com",
+    );
+    expect(presentationFor("read_file").summary?.({ path: "src/a.ts" })).toBe(
+      "src/a.ts",
+    );
+  });
+
+  it("formats scalar options and short arrays", () => {
+    const summary = presentationFor("mcp__example").summary;
+    expect(summary?.({ x: 10, y: 20, focus: true })).toBe(
+      "x=10 y=20 focus=true",
+    );
+    expect(summary?.({ domains: ["a.com", "b.com"] })).toBe(
+      "domains=a.com, b.com",
+    );
+  });
+
+  it("bounds long values and hides secrets and base64 payloads", () => {
+    const summary = presentationFor("mcp__example").summary;
+    expect(summary?.({ token: "do-not-show", path: "safe.txt" })).toBe(
+      "safe.txt token=[hidden]",
+    );
+    expect(summary?.({ base64_data: "A".repeat(4096) })).toBe(
+      "base64_data=[3 KB base64]",
+    );
+    const long = summary?.({ query: `start ${"x".repeat(500)}` });
+    expect(long).toHaveLength(80);
+    expect(long).toMatch(/…$/);
+    expect(long).not.toContain("x".repeat(80));
+  });
+
+  it("does not stringify nested objects or throw on invalid values", () => {
+    const summary = presentationFor("mcp__example").summary;
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    expect(summary?.(cyclic)).toBeNull();
+    expect(summary?.({ value: Number.NaN })).toBeNull();
+    expect(summary?.({ nested: { authorization: "hidden" } })).toBeNull();
   });
 });
 

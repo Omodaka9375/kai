@@ -30,7 +30,8 @@ export type ToolPresentation = {
   /** Live status-bar text, built from the call args (agent.ts onStepFinish).
    *  undefined → `Calling <name>` fallback. */
   status?: (args: Record<string, unknown>) => string;
-  /** One-line arg summary under the card header. undefined → no summary. */
+  /** One-line arg summary in the card header. Tools without a custom summary
+   *  use the compact generic formatter below, including MCP tools. */
   summary?: (args: Record<string, unknown>) => string | null;
   /** Default effect status before result inspection (toolFencing). */
   effect: EffectStatus;
@@ -54,6 +55,88 @@ function ellipsize(s: string, max: number): string {
 /** Shared string field reader for summaries. */
 const str = (i: Record<string, unknown>, k: string): string | null =>
   typeof i[k] === "string" ? (i[k] as string) : null;
+
+// Generic tools still need a useful collapsed row. Prefer the argument that
+// identifies the target (an MCP URL or CSS selector, for example), then add
+// a few scalar options. Never stringify nested input: it can be huge and can
+// contain credentials or base64 payloads.
+const PRIMARY_ARGUMENT_KEYS = [
+  "url",
+  "path",
+  "selector",
+  "query",
+  "pattern",
+  "command",
+  "host",
+  "name",
+  "sourcePath",
+  "remotePath",
+  "localPath",
+  "directory",
+  "source",
+  "destination",
+  "station",
+  "persona",
+  "project",
+] as const;
+const SENSITIVE_ARGUMENT =
+  /(?:api.?key|token|secret|password|passphrase|credential|authorization|cookie)/i;
+
+function compactArgument(value: unknown): string | null {
+  if (typeof value === "string") {
+    const text = value.replace(/\s+/g, " ").trim();
+    return text ? ellipsize(text, 80) : null;
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? String(value) : null;
+  }
+  if (typeof value === "boolean" || typeof value === "bigint") {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    const items = value
+      .slice(0, 3)
+      .map((item) =>
+        typeof item === "string" ||
+        typeof item === "number" ||
+        typeof item === "boolean"
+          ? compactArgument(item)
+          : null,
+      )
+      .filter((item): item is string => item !== null);
+    if (items.length === 0) return value.length === 0 ? "[]" : null;
+    return `${items.join(", ")}${value.length > items.length ? ` +${value.length - items.length} more` : ""}`;
+  }
+  return null;
+}
+
+function summarizeToolArguments(
+  args: Record<string, unknown>,
+): string | null {
+  const entries = Object.entries(args).filter(([key]) => !key.startsWith("_"));
+  if (entries.length === 0) return null;
+  const primary = PRIMARY_ARGUMENT_KEYS.find(
+    (key) => compactArgument(args[key]) !== null,
+  );
+  const ordered = primary
+    ? [
+        [primary, args[primary]] as const,
+        ...entries.filter(([key]) => key !== primary),
+      ]
+    : entries;
+  const parts: string[] = [];
+  for (const [key, value] of ordered) {
+    if (parts.length >= 3) break;
+    const text = SENSITIVE_ARGUMENT.test(key)
+      ? "[hidden]"
+      : key === "base64_data" && typeof value === "string"
+        ? `[${Math.ceil((value.length * 3) / 4 / 1024)} KB base64]`
+        : compactArgument(value);
+    if (text === null) continue;
+    parts.push(parts.length === 0 && key === primary ? text : `${key}=${text}`);
+  }
+  return parts.length > 0 ? ellipsize(parts.join(" "), 160) : null;
+}
 
 const REGISTRY: Record<string, ToolPresentation> = {
   // ── Filesystem ────────────────────────────────────────────────────────
@@ -593,10 +676,16 @@ export function registeredToolPresentations(): readonly string[] {
 /** Resolve the presentation for a tool name, applying safe defaults. */
 export function presentationFor(toolName: string): ToolPresentation {
   const row = REGISTRY[toolName];
-  if (row) return row;
+  if (row) {
+    return row.summary
+      ? row
+      : { ...row, summary: summarizeToolArguments };
+  }
   // Unknown tool (MCP `server__name`, future additions): conservative —
   // fence everything, assume remote if namespaced, no side effects claimed.
+  // The collapsed row still shows its safe, scalar arguments inline.
   return {
+    summary: summarizeToolArguments,
     effect: "NONE",
     fence: true,
     remoteSurface: toolName.includes("__"),
