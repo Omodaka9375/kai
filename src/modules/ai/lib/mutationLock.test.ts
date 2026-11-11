@@ -58,6 +58,34 @@ describe("withExclusiveLock", () => {
     expect(await withExclusiveLock("v", async () => 42)).toBe(42);
   });
 
+  it("rejects an aborted waiter without executing its command", async () => {
+    const controller = new AbortController();
+    let release!: () => void;
+    const holding = withExclusiveLock("abort-waiter", () =>
+      new Promise<void>((resolve) => { release = resolve; }),
+    );
+    let ran = false;
+    const waiting = withExclusiveLock("abort-waiter", async () => {
+      ran = true;
+    }, 3_600_000, controller.signal);
+    controller.abort();
+    await expect(waiting).rejects.toThrow("cancelled");
+    release();
+    await holding;
+    expect(ran).toBe(false);
+    // The aborted waiter's gate must be released too. This assertion used to
+    // hang forever because release() lived only on the success path.
+    await expect(withExclusiveLock("abort-waiter", async () => "reused")).resolves.toBe("reused");
+  });
+
+  it("releases an active wait on abort and allows the next command", async () => {
+    const controller = new AbortController();
+    const active = withExclusiveLock("abort-active", () => new Promise(() => {}), 3_600_000, controller.signal);
+    controller.abort();
+    await expect(active).rejects.toThrow("cancelled by stop");
+    await expect(withExclusiveLock("abort-active", async () => "next")).resolves.toBe("next");
+  });
+
   it("does not collide with the file-lock map (separate tails)", async () => {
     // The same string used as both an exclusive key and a file path must not
     // serialize against each other (independent maps by design).
@@ -102,14 +130,14 @@ describe("bash_run serializes on the shared agent shell", () => {
     const { readFileSync } = await import("node:fs");
     const src = readFileSync(new URL("../tools/shell.ts", import.meta.url), "utf8");
     expect(src).toMatch(
-      /const r = await withExclusiveLock\(shellKey, \(\) =>[\s\S]*?native\.shellSessionRun\(/,
+      /const r = await withExclusiveLock\(\s*`\$\{shellKey\}:\$\{openedShellId\}`,\s*\(\) => native\.shellSessionRun\(/,
     );
     // The elevated one-shot path must NOT be inside the lock (separate
     // process). runElevatedCommand appears, and that branch RETURNS, before
     // the shared-shell lock is reached — assert the elevated return precedes
     // the withExclusiveLock call site.
     const elevatedIdx = src.indexOf("runElevatedCommand(command, cwd, effectiveTimeout)");
-    const lockIdx = src.indexOf("const r = await withExclusiveLock(shellKey");
+    const lockIdx = src.indexOf("const r = await withExclusiveLock(");
     expect(elevatedIdx).toBeGreaterThan(-1);
     expect(lockIdx).toBeGreaterThan(elevatedIdx);
   });

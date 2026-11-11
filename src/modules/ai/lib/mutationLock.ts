@@ -62,7 +62,11 @@ export function withExclusiveLock<T>(
   key: string,
   fn: () => Promise<T>,
   deadlineMs = 3_600_000,
+  abortSignal?: AbortSignal,
 ): Promise<T> {
+  if (abortSignal?.aborted) {
+    return Promise.reject(new Error("Command cancelled before shell dispatch."));
+  }
   const prev = exclusiveTails.get(key) ?? Promise.resolve();
 
   let release!: () => void;
@@ -76,27 +80,29 @@ export function withExclusiveLock<T>(
     if (exclusiveTails.get(key) === tail) exclusiveTails.delete(key);
   });
 
-  return prev.then(async () => {
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    try {
-      // Race fn against the deadline. The loser settles the RESULT, but the
-      // lock is always released on the real completion OR the deadline —
-      // whichever comes first (release() below).
-      return await Promise.race([
-        fn().catch((err) => {
-          throw err;
-        }),
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(
-            () => reject(new Error(`shell lock holder exceeded ${Math.round(deadlineMs / 1000)}s (wedged native call - lock released by deadline seatbelt)`)),
-            deadlineMs,
-          );
-        }),
-      ]);
-    } finally {
-      if (timer !== null) clearTimeout(timer);
-      release();
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let onAbort: (() => void) | null = null;
+  const interrupted = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`shell lock holder exceeded ${Math.round(deadlineMs / 1000)}s (wedged native call - lock released by deadline seatbelt)`)),
+      deadlineMs,
+    );
+    if (abortSignal) {
+      onAbort = () => reject(new Error("Command cancelled by stop."));
+      abortSignal.addEventListener("abort", onAbort, { once: true });
     }
+  });
+  const work = prev.then(() => {
+    if (abortSignal?.aborted) throw new Error("Command cancelled before shell dispatch.");
+    return fn();
+  });
+  // Abort releases the JS tool wait and its queue slot even if a native pipe
+  // never settles. Rust's per-shell run_lock still serializes the real child
+  // process; a retired native shell cannot share state with its replacement.
+  return Promise.race([work, interrupted]).finally(() => {
+    if (timer !== null) clearTimeout(timer);
+    if (onAbort) abortSignal?.removeEventListener("abort", onAbort);
+    release();
   });
 }
 

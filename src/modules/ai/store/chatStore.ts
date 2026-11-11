@@ -72,6 +72,10 @@ import {
   applyApprovalResponseToChat,
   COMPLETE_PART_STATES,
   hasPendingApprovals,
+  clearSessionStopped,
+  markSessionStopped,
+  settleInterruptedToolMessages,
+  wasSessionStopped,
   type ApprovalResponder,
 } from "./approvalResponses";
 import {
@@ -778,6 +782,12 @@ export function getSessionAutoApprove(sessionId: string): "off" | "all" {
   return sessionAutoApprove.get(sessionId) ?? "off";
 }
 export function patchSessionAgentMeta(sessionId: string, patch: Partial<AgentMeta>): void {
+  // A late token flush during stop must not make the session look active
+  // again or trigger its steering path a second time.
+  if (wasSessionStopped(sessionId) && (patch.status === "thinking" || patch.status === "streaming")) {
+    const { status: _ignored, ...rest } = patch;
+    patch = rest;
+  }
   const next = { ...getSessionAgentMeta(sessionId), ...patch };
   sessionAgentMeta.set(sessionId, next);
   sessionMetaVersion++;
@@ -1078,6 +1088,8 @@ function makeChatSync(sessionId: string): Chat<UIMessage> {
     sessionId,
     {
       ...runtimeDeps,
+      onAbortFinish: releaseStoppedSessionTools,
+      isSessionStopped: wasSessionStopped,
       projectRuntime: runtime,
       live: live ?? runtimeDeps.live,
       patchAgentMeta: (patch) => patchSessionAgentMeta(sessionId, patch),
@@ -1727,6 +1739,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
     sessionAutoApprove.delete(id);
     const remaining = get().sessions.filter((s) => s.id !== id);
     abortRunController(id);
+    clearSessionStopped(id);
     chats.get(id)?.stop();
     chats.delete(id);
     seedMessages.delete(id);
@@ -2344,6 +2357,11 @@ function stripIncompleteToolMessages(messages: UIMessage[]): UIMessage[] {
 }
 
 function releasePendingApprovals(chat: Chat<UIMessage>): void {
+  // Chat.stop() aborts the request but does not synthesize tool results.
+  // Settle executing parts locally so the transcript cannot retain amber
+  // "running" cards after the user interrupted the command.
+  chat.messages = settleInterruptedToolMessages(chat.messages);
+
   if (!hasPendingApprovals(chat)) return;
   // Absence of permission is denial: latch every still-pending approval id
   // before stripping, so a deferred auto-approve callback already in flight
@@ -2482,24 +2500,38 @@ function describeApproval(
  * blocked. So on stop we also strip those stale parts, which drops
  * `approvalsPending` back to 0 and frees the session.
  */
+function releaseStoppedSessionTools(sessionId: string): void {
+  if (!wasSessionStopped(sessionId)) return;
+  clearSessionStopped(sessionId);
+  const chat = chats.get(sessionId);
+  if (chat) releasePendingApprovals(chat);
+  patchSessionAgentMeta(sessionId, {
+    status: "idle",
+    approvalsPending: 0,
+    step: null,
+  });
+}
+
 export function stopSession(sessionId: string): void {
   cancelAllShellSessions(sessionId);
   // Abort our own controller unconditionally — the Stop button must work even
   // when the model is stuck in a reasoning/tool loop where `Chat.stop()` is a
   // silent no-op (SDK status is neither streaming nor submitted).
   abortRunController(sessionId);
+  markSessionStopped(sessionId);
   const chat = chats.get(sessionId);
-  if (!chat) return;
-  void chat.stop().finally(() => {
+  if (!chat) {
+    clearSessionStopped(sessionId);
+    patchSessionAgentMeta(sessionId, { status: "idle", approvalsPending: 0, step: null });
+    return;
+  }
+  if (chat.status !== "submitted" && chat.status !== "streaming") {
+    clearSessionStopped(sessionId);
     releasePendingApprovals(chat);
-    // Meta MUST settle to idle here, not keep its last busy value. Group
-    // delivery gates on this mirrored status; a stale "streaming" after a
-    // stop pinned every later cross-project message in the send queue
-    // forever (flush only fires on an idle transition that never came).
-    patchSessionAgentMeta(sessionId, {
-      status: "idle",
-      approvalsPending: 0,
-      step: null,
-    });
-  });
+    patchSessionAgentMeta(sessionId, { status: "idle", approvalsPending: 0, step: null });
+    return;
+  }
+  // Stay busy until Chat.onFinish: the next request must not start while
+  // the interrupted request can still commit its active message.
+  void chat.stop();
 }

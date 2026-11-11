@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Chat } from "@ai-sdk/react";
 import type { UIMessage } from "ai";
-import { applyApprovalResponseToChat } from "./approvalResponses";
+import { applyApprovalResponseToChat, clearSessionStopped, markSessionStopped, settleInterruptedToolMessages, wasSessionStopped } from "./approvalResponses";
 
 /**
  * The stranded-approval contract (2026-11-09 report: reminder wake parked on
@@ -107,5 +107,43 @@ describe("applyApprovalResponseToChat", () => {
     const ok = applyApprovalResponseToChat(chat, "ap-gone", true);
     expect(ok).toBe(false);
     expect(chat.sendMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe("session stop marker", () => {
+  it("marks and clears only the interrupted session", () => {
+    markSessionStopped("interrupted");
+    expect(wasSessionStopped("interrupted")).toBe(true);
+    expect(wasSessionStopped("next")).toBe(false);
+    clearSessionStopped("interrupted");
+    expect(wasSessionStopped("interrupted")).toBe(false);
+  });
+});
+
+describe("settleInterruptedToolMessages", () => {
+  it("settles executing tool calls without deleting assistant text", () => {
+    const text = { type: "text", text: "Before interruption" };
+    const running = { type: "tool-bash_run", state: "input-available" };
+    const preparing = { type: "tool-bash_run", state: "input-streaming" };
+    const done = { type: "tool-bash_run", state: "output-available" };
+    const messages = [{ id: "a1", role: "assistant", parts: [text, running, preparing, done] }] as UIMessage[];
+    const settled = settleInterruptedToolMessages(messages);
+    expect(settled[0]!.parts[0]).toBe(text);
+    expect(settled[0]!.parts[1]).toMatchObject({
+      state: "output-error",
+      errorText: "Command stopped by the user.",
+    });
+    expect(settled[0]!.parts[2]).toMatchObject({ state: "output-error" });
+    expect(settled[0]!.parts[3]).toBe(done);
+  });
+
+  it("leaves pending approval cards for the approval release path", () => {
+    const messages = [assistantWithCard, rideAlongUser];
+    expect(settleInterruptedToolMessages(messages)).toBe(messages);
+  });
+
+  it("returns the same array when nothing is executing", () => {
+    const messages = [rideAlongUser];
+    expect(settleInterruptedToolMessages(messages)).toBe(messages);
   });
 });

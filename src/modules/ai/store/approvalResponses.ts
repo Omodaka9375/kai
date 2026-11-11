@@ -27,12 +27,56 @@ export type ApprovalResponder = (
   approved: boolean,
 ) => void;
 
+const stoppedSessions = new Set<string>();
+
+export function markSessionStopped(sessionId: string): void {
+  stoppedSessions.add(sessionId);
+}
+
+export function wasSessionStopped(sessionId: string): boolean {
+  return stoppedSessions.has(sessionId);
+}
+
+export function clearSessionStopped(sessionId: string): void {
+  stoppedSessions.delete(sessionId);
+}
+
 /** Tool-part states that count as fully resolved (safe to keep). */
 export const COMPLETE_PART_STATES = new Set([
   "output-available",
   "output-error",
   "approval-responded",
 ]);
+
+/** The SDK stops the request but does not synthesize results for executing
+ *  tools. Give interrupted calls a terminal UI/persistence state instead of
+ *  leaving them "running" forever. Pending approval cards are handled by
+ *  releasePendingApprovals below, not mislabeled as command failures. */
+export function settleInterruptedToolMessages(messages: UIMessage[]): UIMessage[] {
+  let changed = false;
+  const settled = messages.map((m) => {
+    if (m.role !== "assistant") return m;
+    let messageChanged = false;
+    const parts = m.parts.map((p) => {
+      const part = p as Record<string, unknown>;
+      const type = String(part.type ?? "");
+      const state = String(part.state ?? "");
+      if ((!type.startsWith("tool-") && type !== "dynamic-tool") ||
+          !["input-available", "input-streaming", "approval-responded"].includes(state)) {
+        return p;
+      }
+      changed = true;
+      messageChanged = true;
+      return {
+        ...part,
+        state: "output-error",
+        errorText: "Command stopped by the user.",
+      };
+    });
+    return messageChanged ? { ...m, parts } as UIMessage : m;
+  });
+  return changed ? settled : messages;
+}
 
 /**
  * True when a message's parts hold an approval that is pending OR just

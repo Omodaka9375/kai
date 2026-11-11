@@ -27,6 +27,9 @@ pub struct ShellSession {
     /// Close is permanent. Unlike `cancel`, this is never reset by a worker
     /// starting a command, so a stop cannot be lost during dispatch.
     closed: AtomicBool,
+    /// One native child per shell. JS releases its queue on abort, but the
+    /// next command must not clear cancellation while the old child runs.
+    run_lock: Mutex<()>,
     /// Per-session sentinel string used to extract cwd from command output.
     sentinel: String,
 }
@@ -69,6 +72,7 @@ impl ShellSession {
             pristine: AtomicBool::new(true),
             cancel: Arc::new(AtomicBool::new(false)),
             closed: AtomicBool::new(false),
+            run_lock: Mutex::new(()),
             sentinel: new_sentinel(),
         }
     }
@@ -90,6 +94,7 @@ impl ShellSession {
         timeout: Duration,
         sandbox_root: Option<&str>,
     ) -> Result<SessionRunOutput, String> {
+        let _run_guard = mutex_lock(&self.run_lock);
         let trimmed = command.trim().to_string();
         if trimmed.is_empty() {
             return Err("empty command".into());

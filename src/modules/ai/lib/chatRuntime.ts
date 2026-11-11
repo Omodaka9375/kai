@@ -66,6 +66,9 @@ export type ChatRuntimeDeps = {
   patchAgentMeta: (patch: Partial<AgentMeta>) => void;
   /** Abort the app-owned run controller for a session (loop detection). */
   abortRunController: (sessionId: string) => void;
+  /** Finalize a stopped request after the SDK commits its active message. */
+  onAbortFinish?: (sessionId: string) => void;
+  isSessionStopped?: (sessionId: string) => boolean;
   /** Compact the ACTIVE session's history in place. Returns a human
    *  outcome string; "Context compacted…" prefix means it succeeded.
    *  Injected (not imported) so the runtime stays store-cycle-free. */
@@ -416,7 +419,8 @@ export function makeChatSync(
         },
       });
     },
-    onFinishMeta: (info: { hitStepCap: boolean; finishReason: string }) => {
+
+      onFinishMeta: (info: { hitStepCap: boolean; finishReason: string }) => {
       if (!isActive()) return;
       // A completed run proves the stream is healthy again — any stall
       // retry budget this run consumed is forgiven.
@@ -476,7 +480,12 @@ export function makeChatSync(
     id: sessionId,
     transport,
     messages: initialMessages,
-    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
+    sendAutomaticallyWhen: ({ messages }) =>
+      !deps.isSessionStopped?.(sessionId) &&
+      lastAssistantMessageIsCompleteWithApprovalResponses({ messages }),
+    onFinish: () => {
+      if (deps.isSessionStopped?.(sessionId)) deps.onAbortFinish?.(sessionId);
+    },
     onError: (e) => {
       const msg = e instanceof Error ? e.message : String(e);
       // Suppress stale approval errors — these fire when a tool call was

@@ -31,21 +31,20 @@ let shellGeneration = 0;
 export function cancelAllShellSessions(sessionId?: string): void {
   for (const [key, entry] of sessionShells) {
     if (sessionId && key !== sessionId && !key.startsWith(`${sessionId}:`)) continue;
-    const gen = entry.generation;
     void entry.promise.then((id) => {
-      void entry.native.shellSessionCancel(id);
-      // If the cancel flag didn't take effect (e.g. the child process is
-      // unkillable or stuck in a blocking syscall), close the entire session
-      // after a grace period so the next run gets a fresh shell.
+      void entry.native.shellSessionCancel(id).catch((e) => {
+        console.debug("shellSessionCancel failed during cancelAllShellSessions:", e);
+      });
+      // The registry entry is cleared below immediately. Close this RETIRED
+      // native session after a grace period even when a replacement exists;
+      // checking for the same map entry made this fallback unreachable and
+      // leaked every interrupted native shell.
       setTimeout(() => {
-        // Only close if this generation is still current — a new
-        // getSessionShell call may have replaced the entry by now.
-        const cur = sessionShells.get(key);
-        if (cur && cur.generation === gen) {
-          void entry.native.shellSessionClose(id);
-        }
+        void entry.native.shellSessionClose(id).catch((e) => {
+          console.debug("shellSessionClose after cancel failed:", e);
+        });
       }, 3000);
-    }).catch((e) => { console.debug("shellSessionCancel failed during cancelAllShellSessions:", e); });
+    }).catch((e) => { console.debug("shell session open failed during cancellation:", e); });
   }
   // Also clear the session map so the next agent run creates a fresh shell
   // instead of reusing the stuck one.
@@ -316,20 +315,34 @@ export function buildShellTools(ctx: ToolContext) {
         }
         const sid = ctx.getSessionId();
         if (!sid) return { error: "no active chat session" };
+        const cwd = ctx.getCwd();
+        const shellKey = workspaceSessionKey(sid, ctx.workspaceEnv);
+        const effectiveTimeout = timeout_secs ?? slowCommandTimeout(command);
+        const abortSignal = options?.abortSignal;
+        let shellId: number | null = null;
+        let cancelled = false;
+        const onAbort = () => {
+          cancelled = true;
+          if (shellId === null) return;
+          void native.shellSessionCancel(shellId).catch((e) => {
+            console.debug("shellSessionCancel on abort failed:", e);
+          });
+        };
+        abortSignal?.addEventListener("abort", onAbort, { once: true });
         try {
-          const cwd = ctx.getCwd();
-          const shellKey = workspaceSessionKey(sid, ctx.workspaceEnv);
-          const shellId = await getSessionShell(shellKey, cwd, native);
-          const effectiveTimeout =
-            timeout_secs ?? slowCommandTimeout(command);
-
-          // Wire abort signal — cancels the Rust child process immediately.
-          let aborted = false;
-          const onAbort = () => {
-            aborted = true;
-            void native.shellSessionCancel(shellId).catch((e) => { console.debug("shellSessionCancel on abort failed:", e); });
-          };
-          options?.abortSignal?.addEventListener("abort", onAbort, { once: true });
+          // A shell that finishes opening after cancellation is retired, not
+          // allowed to receive the stale queued command.
+          const openedShellId = await getSessionShell(shellKey, cwd, native);
+          shellId = openedShellId;
+          if (cancelled) {
+            // An earlier tool cancelled during this shared open may already
+            // have queued work here. Retire it instead of dispatching after
+            // its cancellation was consumed by that earlier command.
+            sessionShells.delete(shellKey);
+            void native.shellSessionCancel(openedShellId).catch(() => {});
+            void native.shellSessionClose(openedShellId).catch(() => {});
+            return { error: "Command cancelled by stop.", cancelled: true };
+          }
 
           // `npx` without `--yes`/`-y` prompts interactively on a first run, which
           // hangs the non-interactive agent shell. Previously we silently appended
@@ -356,11 +369,8 @@ export function buildShellTools(ctx: ToolContext) {
             };
           }
 
-          // Clean up abort listener to avoid leaks.
-          options?.abortSignal?.removeEventListener("abort", onAbort);
-
-          if (aborted) {
-            return { error: "Command cancelled by stop.", timed_out: true };
+          if (cancelled) {
+            return { error: "Command cancelled by stop.", cancelled: true };
           }
 
           // Elevated runs are one-shot (no persistent shell session) so there
@@ -384,6 +394,9 @@ export function buildShellTools(ctx: ToolContext) {
           const sandboxRoot = await sandboxExecRoot(
             await sandboxOverrideForContext(ctx),
           );
+          if (cancelled) {
+            return { error: "Command cancelled by stop.", cancelled: true };
+          }
           // Serialize on the shared per-session shell. The AI SDK runs
           // sibling tool calls from one step CONCURRENTLY, and two bash_run
           // commands would otherwise interleave on the SAME PTY — garbled
@@ -393,14 +406,19 @@ export function buildShellTools(ctx: ToolContext) {
           // the native call is locked. Elevated runs spawn a separate
           // one-shot process and take no lock; watch tools own a DIFFERENT
           // shell session, so they never contend for this key.
-          const r = await withExclusiveLock(shellKey, () =>
-            native.shellSessionRun(
-              shellId,
+          // Key the lock by the native shell, not only the chat. A retired
+          // native call cannot block the replacement shell after Stop.
+          const r = await withExclusiveLock(
+            `${shellKey}:${openedShellId}`,
+            () => native.shellSessionRun(
+              openedShellId,
               command,
               cwd,
               effectiveTimeout,
               sandboxRoot,
             ),
+            3_600_000,
+            abortSignal,
           );
           // Bound each stream before it reaches the model's context; flip the
           // truncated flag if we elided anything so the result says so.
@@ -453,6 +471,8 @@ export function buildShellTools(ctx: ToolContext) {
           };
         } catch (e) {
           return { error: String(e) };
+        } finally {
+          abortSignal?.removeEventListener("abort", onAbort);
         }
       },
     }),
