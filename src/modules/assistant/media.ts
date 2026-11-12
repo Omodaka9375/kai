@@ -36,8 +36,9 @@ async function pickImageProvider(): Promise<{ provider: "google" | "openai" | "x
 }
 
 async function pickVideoProvider(): Promise<{ provider: "google"; key: string } | null> {
-  // Video is Google Veo only — Kling/Seedance are served by their official
-  // MCP servers (install in Settings → MCP), not native integrations.
+  // Video is Google Gemini Omni Flash only — Kling/Seedance are served by
+  // their official MCP servers (install in Settings → MCP), not native
+  // integrations.
   const google = await getKey("google");
   if (google) return { provider: "google", key: google };
   return null;
@@ -161,11 +162,12 @@ export function buildAssistantMediaTools(
 
   const generateVideo = tool({
     description:
-      "Generate a short video from a text prompt (4-8s) with Google Veo 3.1 - or ANIMATE the most recent photo in the conversation (animate_attached_image: true; the photo attached to this message if there is one, else the newest photo the user sent earlier). Veo uses it as the opening frame and the prompt describes the motion. Uses the configured Google key; the video is delivered to the chat when ready; generation takes 1-5 minutes. If the user wants a different engine (Kling, Seedance…), tell them to install that vendor's MCP server in the desktop app's Settings → MCP.",
+      "Generate a short video from a text prompt (3-15s) with Google Gemini Omni Flash - or ANIMATE the most recent photo in the conversation (animate_attached_image: true; the photo attached to this message if there is one, else the newest photo the user sent earlier). Omni uses it as the opening frame and the prompt describes the motion. Uses the configured Google key; the video is delivered to the chat when ready; generation takes 1-5 minutes. If the user wants a different engine (Kling, Seedance…), tell them to install that vendor's MCP server in the desktop app's Settings → MCP.",
     inputSchema: z.object({
       prompt: z.string().describe("Scene description: subject, motion, camera work, mood. When animate_attached_image is true, describe the MOTION, not the scene."),
-        duration: z.number().min(4).max(8).optional().describe("Duration in seconds (4-8 only — the provider rejects anything else). Default 8."),     aspect_ratio: z.string().optional().describe("Aspect ratio like '16:9' or '9:16'. Default 16:9."),
-      animate_attached_image: z.boolean().optional().describe("Animate the photo attached to this message - Veo uses it as the opening frame. Only meaningful when the user attached an image."),
+        duration: z.number().min(3).max(15).optional().describe("Duration in seconds (3-15). Default 8."),
+      aspect_ratio: z.string().optional().describe("Aspect ratio: '16:9' (default) or '9:16'. Other values are coerced to 16:9."),
+      animate_attached_image: z.boolean().optional().describe("Animate the photo attached to this message - Omni uses it as the opening frame. Only meaningful when the user attached an image."),
     }),
     execute: async ({ prompt, duration, aspect_ratio, animate_attached_image }) => {
       const p = await pickVideoProvider();

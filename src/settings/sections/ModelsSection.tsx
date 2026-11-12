@@ -698,9 +698,9 @@ function Label({ children }: { children: React.ReactNode }) {
 }
 
 // Media keyring ("kai-media" service) intentionally has no providers:
-// video generation is Google Veo (native, uses the Google key above);
-// other engines (Kling, Seedance, …) are served by their official MCP
-// servers — install them in Settings → MCP.
+// video generation is Google Gemini Omni Flash (native, uses the Google
+// key above); other engines (Kling, Seedance, …) are served by their
+// official MCP servers — install them in Settings → MCP.
 
 
 

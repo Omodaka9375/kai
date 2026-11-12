@@ -16,7 +16,7 @@ export type ImageResult = {
 export type VideoResult = {
   /** Remote URL (temporary — download promptly). */
   url: string;
-  /** Base64-encoded video bytes (Veo's URI needs an auth header to fetch,
+  /** Base64-encoded video bytes (Omni's URI needs an auth header to fetch,
    * so we download in-process and hand bytes downstream instead). */
   base64?: string;
   mimeType: string;

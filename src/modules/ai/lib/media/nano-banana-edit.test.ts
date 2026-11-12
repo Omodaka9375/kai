@@ -38,14 +38,39 @@ const providerChoiceSrc = readFileSync(
   "utf8",
 );
 
-describe("Veo 3.1 image-to-video wiring", () => {
-  it("sends the reference image as instances[0].image", () => {
-    expect(videoSrc).toContain("sniffImageMime(opts.referenceImage)");
-    expect(videoSrc).toContain("bytesBase64Encoded: opts.referenceImage");
-    // Binary: image present → image-to-video; absent → text-to-video.
-    expect(videoSrc).toMatch(
-      /opts\.referenceImage[\s\S]*\? \{ prompt: opts\.prompt, image:[\s\S]*: \{ prompt: opts\.prompt \}/,
+describe("Gemini Omni Flash image-to-video wiring", () => {
+  it("sends the reference image as an image input part with task image_to_video", () => {
+    expect(videoSrc).toContain("sniffImageMime(image)");
+    // Interactions API shape: image part (opening frame) + text part.
+    expect(videoSrc).toContain(
+      '{ type: "image", data: image, mime_type: sniffImageMime(image) }',
     );
+    expect(videoSrc).toContain('{ type: "text", text: opts.prompt }');
+    // With an image the task is pinned so it is treated as the OPENING
+    // FRAME; text-only leaves the task unset (model infers text_to_video).
+    expect(videoSrc).toMatch(
+      /image\s*\?\s*\{ video_config: \{ task: "image_to_video" \} \}/,
+    );
+  });
+
+  it("uses the live Omni model and the Interactions API, not the dead Veo LRO", () => {
+    // veo-3.1-generate-preview was shut down 2026-10-22; every call 404s
+    // with NOT_FOUND. This pin is the drift gate: if the constant ever
+    // references a veo-* or *-preview id again, the suite fails and the
+    // model id must be re-verified against the Gemini API docs.
+    expect(videoSrc).toContain('const MODEL = "gemini-omni-1.2-flash";');
+    expect(videoSrc).not.toMatch(/veo-3\.1-generate-preview/);
+    expect(videoSrc).not.toMatch(/predictLongRunning/);
+    // The Interactions endpoint, synchronous unary POST.
+    expect(videoSrc).toContain("`${BASE}/interactions`");
+    // URI delivery (>4MB clips overflow inline base64) + auth'd download.
+    expect(videoSrc).toContain('delivery: "uri"');
+    expect(videoSrc).toContain("x-goog-api-key");
+  });
+
+  it("clamps duration to Omni's 3-15s range and aspect to 16:9/9:16", () => {
+    expect(videoSrc).toMatch(/Math\.min\(15, Math\.max\(3, Math\.round\(d as number\)\)\)/);
+    expect(videoSrc).toMatch(/function normalizeAspect\(a: string \| undefined\): "16:9" \| "9:16"/);
   });
 
   it("tool schema exposes imagePath and threads it through", () => {
@@ -55,6 +80,14 @@ describe("Veo 3.1 image-to-video wiring", () => {
     );
     expect(videoToolSrc).toContain("referenceImage,");
     expect(videoToolSrc).toContain("native.readFileBytes(abs)");
+  });
+
+  it("scales the detached-job timeout with the requested count", () => {
+    // The old code passed `undefined` (fixed 10-min default) while rendering
+    // up to three videos SEQUENTIALLY — count>1 always hit a bogus timeout
+    // while later renders were still running.
+    expect(videoToolSrc).toContain("wanted * PER_VIDEO_BUDGET_MS");
+    expect(videoToolSrc).not.toMatch(/spawnMediaTask\(\s*\n?\s*ctx\.getSessionId\(\),\s*\n?\s*options\.toolCallId,[\s\S]*?\n\s*undefined,/);
   });
 });
 

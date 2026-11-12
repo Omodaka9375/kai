@@ -85,7 +85,7 @@ Kai is a fast, cross-platform terminal built on **Tauri 2 + Rust** and **React 1
 
 - Generate directly from chat, with inline rendering, lightbox, and download
 - **Image:** OpenAI GPT Image 2 · Google Nano Banana 2 · xAI Grok Imagine
-- **Video:** Google Veo 3.1 (Kling, Seedance & others available via their official MCP servers)
+- **Video:** Google Gemini Omni Flash (Kling, Seedance & others available via their official MCP servers)
 
 ### Git
 

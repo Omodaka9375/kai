@@ -38,7 +38,7 @@ type VideoEntry = {
 type VideoOutput = {
   type: "video";
   url: string;
-  /** Inline bytes — Veo's URI needs an auth header, so bytes are the only
+  /** Inline bytes — Omni's URI needs an auth header, so bytes are the only
    * thing a bare <video src> can play. */
   base64?: string;
   mimeType: string;
@@ -109,7 +109,7 @@ export const MediaMessage = memo(function MediaMessage({ output }: Props) {
     return all.filter((e) => entrySrc(e) !== "");
   }, [output]);
 
-  // Video: prefer inline bytes — Veo's URI needs an auth header to fetch,
+  // Video: prefer inline bytes — Omni's URI needs an auth header to fetch,
   // which a bare <video src> cannot send.
   const videoEntries = useMemo<VideoEntry[]>(() => {
     if (output.type !== "video") return [];
@@ -129,11 +129,14 @@ export const MediaMessage = memo(function MediaMessage({ output }: Props) {
     : videoEntries.length > 1;
   const count = output.type === "image" ? imageEntries.length : videoEntries.length;
 
+  // The provider id is engine-level ("google"), but images and videos use
+  // DIFFERENT Google engines — Nano Banana 2 vs Gemini Omni Flash. Label by
+  // media kind so a video card stops claiming it came from the image model.
   const providerLabel = {
     openai: "GPT Image 2",
-    google: "Nano Banana 2",
+    google: output.type === "video" ? "Gemini Omni Flash" : "Nano Banana 2",
     xai: "Grok Imagine",
-    veo: "Veo 3.1",
+    veo: "Gemini Omni Flash",
   }[output.provider] ?? output.provider;
 
   // Native save dialog -> fs_write_file_bytes. The old <a download> click

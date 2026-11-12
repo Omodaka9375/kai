@@ -9,6 +9,14 @@ import { nativeForContext, type ToolContext } from "./context";
 
 const DEFAULT_DURATION = 8;
 
+/** Per-video budget in ms for the detached job's timeout: the synchronous
+ *  render POST may legally take up to 600s (the Rust proxy's cap) and the
+ *  Files-API activation poll another 5 min. The OLD code used one fixed
+ *  10-minute timeout for up to THREE sequential renders — count>1 always
+ *  outlived it and the card reported a bogus timeout while videos 2-3 were
+ *  still rendering. */
+const PER_VIDEO_BUDGET_MS = 15 * 60_000;
+
 /** Run `gen` `n` times in sequence, stopping at the first failure (a partial
  *  set with no error reads as "the rest are still rendering"). */
 async function generateVideos(
@@ -21,7 +29,7 @@ async function generateVideos(
 }
 
 /**
- * Video generation — Google Veo only, by design. Other generators (Kling,
+ * Video generation — Google Gemini Omni Flash only, by design. Other generators (Kling,
  * Seedance, …) live behind their official MCP servers: users who need them
  * install the MCP in Settings → MCP and the tools appear automatically.
  * Native integrations were removed because both required bespoke auth
@@ -32,7 +40,7 @@ export function buildVideoGenTools(ctx: ToolContext) {
   return {
     generate_video: tool({
       needsApproval: false,
-      description: `Generate a video from a text prompt using Google Veo 3.1 (audio-native) — or ANIMATE an existing image (imagePath: Veo animates it as the opening frame; the prompt then describes motion). Uses the configured Google API key — no provider choice needed. Returns the video inline in the conversation.
+      description: `Generate a video from a text prompt using Google Gemini Omni Flash (audio-native video) — or ANIMATE an existing image (imagePath: Omni animates it as the opening frame; the prompt then describes motion). Uses the configured Google API key — no provider choice needed. Returns the video inline in the conversation.
 
 Video generation takes 1-5 minutes. Auto-executes — no approval needed.
 If the user asks for a different video engine (Kling, Seedance, …), tell them to install that vendor's MCP server in Settings → MCP.
@@ -49,17 +57,19 @@ Only call it again if the user asks for a NEW, different video.`,
           ),
         duration: z
           .number()
+          .min(3)
+          .max(15)
           .optional()
-          .describe("Video duration in seconds (4-8). Defaults to 8."),
+          .describe("Video duration in seconds (3-15). Defaults to 8."),
         aspect_ratio: z
           .string()
           .optional()
-          .describe("Aspect ratio (e.g. '16:9', '9:16', '1:1'). Defaults to 16:9."),
+          .describe("Aspect ratio: '16:9' (default) or '9:16' (portrait). Other values are coerced to 16:9."),
         imagePath: z
           .string()
           .optional()
           .describe(
-            "Path to an existing image to ANIMATE - Veo uses it as the opening frame and the prompt describes the motion. Optional - omit for pure text-to-video.",
+            "Path to an existing image to ANIMATE - Omni uses it as the opening frame and the prompt describes the motion. Optional - omit for pure text-to-video.",
           ),
         count: z
           .number()
@@ -85,7 +95,7 @@ Only call it again if the user asks for a NEW, different video.`,
           };
         }
 
-        // Image-to-video: read the image and thread it to Veo (see
+        // Image-to-video: read the image and thread it to Omni (see
         // google-video.ts for the wire format).
         let referenceImage: string | undefined;
         if (imagePath) {
@@ -107,24 +117,26 @@ Only call it again if the user asks for a NEW, different video.`,
 
         // NOTE: no run AbortSignal is threaded into the detached job. The
         // agent run's signal is aborted the moment a new run supersedes it
-        // (registerRunController), which would kill a 1-5 minute Veo render
+        // (registerRunController), which would kill a 1-5 minute Omni render
         // seconds after it started. The job dies only on its own timeout or
         // an explicit session-level cancel.
         // Same prompt/options = same video: a retry attaches to the in-flight
         // job rather than paying for a second multi-minute render.
         const dedupeKey = `video:${wanted}:${effectiveDuration}:${aspect_ratio ?? ""}:${referenceImage ? "animate" : "new"}:${prompt}`;
 
-        spawnMediaTask(ctx.getSessionId(), options.toolCallId, () =>
-          // Sequential: each render already takes minutes, and the Veo
-          // long-running-operation quota is small.
-          generateVideos(wanted, () =>
-            generateGoogleVideo(key, {
-              prompt,
-              duration: effectiveDuration,
-              aspectRatio: aspect_ratio,
-              referenceImage,
-            }),
-          ).then((results) => {
+        spawnMediaTask(
+          ctx.getSessionId(),
+          options.toolCallId,
+          () =>
+            // Sequential: each render already takes minutes.
+            generateVideos(wanted, () =>
+              generateGoogleVideo(key, {
+                prompt,
+                duration: effectiveDuration,
+                aspectRatio: aspect_ratio,
+                referenceImage,
+              }),
+            ).then((results) => {
             const first = results[0]!;
             return {
               type: "video" as const,
@@ -143,7 +155,9 @@ Only call it again if the user asks for a NEW, different video.`,
               prompt,
             };
           }),
-          undefined,
+          // count videos render SEQUENTIALLY inside one job — the budget
+          // must scale with the count or the timer kills renders 2+ midway.
+          wanted * PER_VIDEO_BUDGET_MS,
           dedupeKey,
         );
 
@@ -151,6 +165,9 @@ Only call it again if the user asks for a NEW, different video.`,
           status: "generating",
           kind: "video",
           provider: "google",
+          // The live placeholder reads this label — pin the engine name so
+          // the card says "Gemini Omni Flash", not a bare "google".
+          providerLabel: "Gemini Omni Flash",
           count: wanted,
           // Video renders take minutes. Models read the bare placeholder as
           // a failure and retry, which stacked duplicate renders.
