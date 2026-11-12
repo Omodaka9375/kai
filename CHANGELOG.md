@@ -4,6 +4,23 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [2.2.7]
+
+- Projects: right-click a project tile to change its icon and color.
+- Chats: long sessions keep their history after a restart or update.
+- Media: one request generates exactly one image, with counts up to 4 images or 3 videos when you ask for several.
+- Media: generations now outlive the agent turn instead of being cancelled mid-render.
+- Media: OpenAI and xAI requests no longer fail with 400/404, and saving a generation uses a clean filename instead of the whole prompt.
+- Editing: reloading a file no longer throws the caret to the last line.
+- Editing: Format Document works for json/ts/tsx again, and vue/html/markdown now format their embedded script.
+- Editing: Windows Batch plus around 30 more languages are highlighted, and Dockerfile-style names are detected on Windows paths.
+- Assistant: Telegram replies render bullet, numbered and task lists as real lists instead of raw dashes and asterisks.
+- UI: opening a source-control diff shrinks the expanded AI window out of the way.
+- UI: collapsed tool rows show their arguments inline, so calls can be told apart without expanding them.
+- Chat: code blocks in replies highlight again on builds where two copies of the syntax-tree library could be installed.
+
+---
+
 ## [2.2.6]
 
 - Quoting: quote controls stay visible as the input bar grows.
