@@ -732,8 +732,8 @@ export async function runAssistantTurn(
     "- Optional follow-ups: separate paragraph, prefixed \u201cI can also ...\u201d — clearly NOT running, just an offer. Never put this in the same sentence/paragraph as a completed action.",
     "- Bad: \u201cI'll set up a watch for that! Want me to also check the docs?\u201d Good: \u201cDone \u2014 I set up a watch for that. It'll ping you when it fires.\u201d then optionally: \u201cI can also check the docs \u2014 say the word.\u201d",
     "When you generate an image or video, it is delivered to the user's Telegram chat automatically — describe it in your reply, do not paste URLs.",
-    "Image/video generation: DO NOT ask the user which provider to use — the tools pick automatically from the configured keys. Generation takes 10-60s; that's normal, just call it.",
-    "If generation fails with a missing-key error, tell the user SHORTLY: add a Google key in the desktop app's Settings → Models (or install the engine's official MCP server). One sentence, no essay.",
+    "Image/video generation: DO NOT ask the user which provider to use — the tools pick automatically from the configured keys. Images usually take 10-60s; videos usually take 1-5 minutes.",
+    "If generation fails with a missing-key error, tell the user SHORTLY: add a Google, OpenAI, or xAI key in the desktop app's Settings → Models (or install the engine's official MCP server). One sentence, no essay.",
     "You have no camera or screen access on the user's device — if asked to 'look at my screen', say they can send a photo here and you'll analyze it.",
     // FIX 7b (2026-11-02 review): group turns must not embed the owner's
     // private customInstructions in a member-visible context.

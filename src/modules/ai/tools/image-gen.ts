@@ -1,5 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
+import { fingerprintBase64 } from "../lib/media/bytes";
 import { useChatStore } from "../store/chatStore";
 import { generateOpenAIImage } from "../lib/media/openai-image";
 import { generateGoogleImage } from "../lib/media/google-image";
@@ -16,8 +17,8 @@ import { resolvePath } from "./context";
 import { nativeForContext, type ToolContext } from "./context";
 
 const PROVIDER_LABEL: Record<ImageProvider, string> = {
-  openai: "OpenAI GPT Image 2",
-  google: "Google Nano Banana 2",
+  openai: "OpenAI GPT Image 2.6 Flare",
+  google: "Google Nano Banana 2.1",
   xai: "xAI Grok Imagine",
 };
 
@@ -29,10 +30,12 @@ export function buildImageGenTools(ctx: ToolContext) {
       description: `Generate an image from a text prompt using AI. Returns the image inline in the conversation.
 
 Providers:
-- google: Nano Banana 2 (Gemini, fast, good quality, native image EDITING
-  via imagePath — change style, add/remove objects, combine images)
-- openai: GPT Image 2 (best raw quality, no reference-image editing)
-- xai: Grok Imagine (good quality)
+- google: Nano Banana 2.1 (Gemini, fast, native image editing via imagePath)
+- openai: GPT Image 2.6 Flare (fast generation and native image editing)
+- xai: Grok Imagine Image 2.0 (generation and native image editing)
+
+imagePath lets each provider change style or add/remove objects in the supplied
+reference image. The provider is optional and key selection is automatic.
 
 The provider is OPTIONAL. Omit it and KAI uses whichever engine the user
 has a key for (Google first, then OpenAI, then xAI). Only pass a provider
@@ -63,7 +66,7 @@ Only call it again if the user asks for a NEW, different picture.`,
         quality: z
           .string()
           .optional()
-          .describe("Quality level: 'low', 'medium', 'high', or 'auto'. Defaults to auto."),
+          .describe("Quality: 'low', 'medium', 'high', or 'auto'. Defaults to auto. Google uses 1K (auto/low/medium) or 2K (high); xAI maps high to its supported medium tier."),
         count: z
           .number()
           .int()
@@ -77,7 +80,7 @@ Only call it again if the user asks for a NEW, different picture.`,
           .string()
           .optional()
           .describe(
-            "Path to an existing image to EDIT (Google provider only, Nano Banana 2). The image is sent to the model alongside the prompt: restyle, add/remove objects, composites. Optional - omit for pure text-to-image.",
+            "Path to an existing image to EDIT. Google Nano Banana 2.1, OpenAI GPT Image 2.6 Flare, and xAI Grok Imagine Image 2.0 accept it alongside the prompt. Optional - omit for pure text-to-image.",
           ),
       }),
       execute: async ({ prompt, provider, size, quality, count, imagePath }, options) => {
@@ -86,9 +89,8 @@ Only call it again if the user asks for a NEW, different picture.`,
         // hallucinating count: 20 cannot run up a bill.
         const wanted = Math.min(4, Math.max(1, Math.round(count ?? 1)));
 
-        // Editing: read the reference image and thread it to the provider.
-        // Google (Nano Banana 2) consumes it natively; other providers get
-        // an explicit refusal rather than silently ignoring the input.
+        // Read the reference image once. Every current provider supports
+        // editing; its own module selects the documented edit endpoint.
         let referenceImage: string | undefined;
         if (imagePath) {
           try {
@@ -127,7 +129,7 @@ Only call it again if the user asks for a NEW, different picture.`,
         // retry (the model re-calling because it read "generating" as a
         // failure) attaches to the in-flight job instead of paying for and
         // displaying a second generation.
-        const dedupeKey = `image:${engine}:${wanted}:${size ?? ""}:${quality ?? ""}:${referenceImage ? "edit" : "new"}:${prompt}`;
+        const dedupeKey = `image:${engine}:${wanted}:${size ?? ""}:${quality ?? ""}:${referenceImage ? fingerprintBase64(referenceImage) : "new"}:${prompt}`;
 
         spawnMediaTask(
           ctx.getSessionId(),
@@ -173,7 +175,7 @@ Only call it again if the user asks for a NEW, different picture.`,
                 prompt,
               };
             }),
-          3 * 60_000,
+          wanted * 3 * 60_000,
           dedupeKey,
         );
 

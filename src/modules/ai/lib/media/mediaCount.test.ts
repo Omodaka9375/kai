@@ -49,7 +49,7 @@ describe("video count contract", () => {
   });
 
   it("threads count through the dedupe key and the result", () => {
-    expect(videoToolSrc).toMatch(/dedupeKey = `video:\$\{wanted\}/);
+    expect(videoToolSrc).toMatch(/dedupeKey = `video:\$\{engine\}:\$\{wanted\}/);
     expect(videoToolSrc).toContain("videos: results.map(");
     expect(videoToolSrc).toMatch(/async function generateVideos[\s\S]*await gen\(\)/);
   });

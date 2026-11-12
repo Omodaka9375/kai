@@ -51,9 +51,9 @@ describe("OpenAI image request", () => {
       quality: "ultra",
     });
     const body = sentBody();
-    expect(body.model).toBe("gpt-image-2");
+    expect(body.model).toBe("gpt-image-2.6-flare");
     // Invalid inputs are normalized, never forwarded (an unknown enum 400s).
-    expect(body.size).toBe("1024x1024");
+    expect(body).not.toHaveProperty("size");
     expect(body.quality).toBe("auto");
     expect(body.n).toBe(1);
   });
@@ -67,6 +67,15 @@ describe("OpenAI image request", () => {
     expect(r.mimeType).toBe("image/jpeg");
     expect(r.width).toBe(1536);
     expect(r.height).toBe(1024);
+  });
+
+  it("edits a reference image through the JSON images API", async () => {
+    mockedInvoke.mockResolvedValue(ok({ data: [{ b64_json: "AAA" }] }));
+    await generateOpenAIImage("key", { prompt: "restyle", referenceImage: "aW1hZ2U=" });
+    expect(mockedInvoke.mock.calls[0]![1]).toMatchObject({
+      url: "https://api.openai.com/v1/images/edits",
+    });
+    expect(sentBody().images).toEqual([{ image_url: "data:image/png;base64,aW1hZ2U=" }]);
   });
 
   it("surfaces the provider's error message, not just the status", async () => {
@@ -106,13 +115,29 @@ describe("xAI image request", () => {
     expect(body).not.toHaveProperty("size");
   });
 
-  it("drops a quality value xAI does not accept", async () => {
+  it("maps the common high quality to xAI's supported medium tier", async () => {
     mockedInvoke.mockResolvedValue(ok({ data: [{ url: "https://x/1.jpg" }] }));
     await generateXAIImage("key", { prompt: "x", quality: "high" });
-    expect(sentBody()).not.toHaveProperty("quality");
+    expect(sentBody().quality).toBe("medium");
   });
 
-  it("returns a URL-only payload (the default response shape)", async () => {
+  it("requests base64 so temporary URLs cannot break later editing", async () => {
+    mockedInvoke.mockResolvedValue(ok({ data: [{ b64_json: "AAA" }] }));
+    await generateXAIImage("key", { prompt: "x" });
+    expect(sentBody().response_format).toBe("b64_json");
+  });
+
+  it("edits a reference image through xAI's native JSON endpoint", async () => {
+    mockedInvoke.mockResolvedValue(ok({ data: [{ b64_json: "AAA" }] }));
+    await generateXAIImage("key", { prompt: "restyle", referenceImage: "aW1hZ2U=" });
+    expect(mockedInvoke.mock.calls[0]![1]).toMatchObject({ url: "https://api.x.ai/v1/images/edits" });
+    expect(sentBody().image).toEqual({
+      type: "image_url",
+      url: "data:image/png;base64,aW1hZ2U=",
+    });
+  });
+
+  it("returns a URL-only payload (a compatible response shape)", async () => {
     mockedInvoke.mockResolvedValue(
       ok({ data: [{ url: "https://x/1.jpg", mime_type: "image/webp" }] }),
     );

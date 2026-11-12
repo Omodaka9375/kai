@@ -1,46 +1,63 @@
 import { invoke } from "@tauri-apps/api/core";
+import { sniffImageMime } from "./google-image";
 import type { ImageGenerateOpts, ImageResult } from "./types";
 
-const ENDPOINT = "https://api.openai.com/v1/images/generations";
-const MODEL = "gpt-image-2";
+const GENERATE_ENDPOINT = "https://api.openai.com/v1/images/generations";
+const EDIT_ENDPOINT = "https://api.openai.com/v1/images/edits";
+// gpt-image-2 is deprecated. Flare is the latest model intended for fast
+// generation and editing; Sunburst remains the detail-first alternative.
+const MODEL = "gpt-image-2.6-flare";
 
-/** Quality values the GPT image models accept. Anything else is dropped
- *  rather than sent (an unknown enum value 400s the whole request). */
 const QUALITY = new Set(["low", "medium", "high", "auto"]);
 
-/** `WIDTHxHEIGHT` with both sides a positive integer. */
-const SIZE_RE = /^\d{2,5}x\d{2,5}$/;
+/** GPT Image accepts arbitrary resolutions only within these API limits. */
+function validSize(size: string | undefined): size is string {
+  const match = /^(\d{1,5})x(\d{1,5})$/.exec(size ?? "");
+  if (!match) return false;
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  return width > 0 && height > 0 && width % 16 === 0 && height % 16 === 0 &&
+    width <= 3840 && height <= 2160 && width / height >= 1 / 3 && width / height <= 3;
+}
 
-/** Generate an image via OpenAI GPT Image 2. */
+/** Generate or edit an image via OpenAI GPT Image 2.6 Flare. */
 export async function generateOpenAIImage(
   apiKey: string,
   opts: ImageGenerateOpts,
 ): Promise<ImageResult> {
-  const size = SIZE_RE.test(opts.size ?? "") ? opts.size! : "1024x1024";
+  // Only send size when the user requested one; auto lets the model choose.
+  const size = opts.size && validSize(opts.size) ? opts.size : undefined;
   const quality = QUALITY.has(opts.quality ?? "") ? opts.quality! : "auto";
 
   if (opts.signal?.aborted) throw new Error("Generation cancelled.");
 
-  // GPT image models ALWAYS return base64 and REJECT `response_format` with
-  // a 400 ("Unknown parameter: 'response_format'") — that parameter is
-  // deprecated and only valid for the retired DALL-E models. Never send it.
-  //
-  // `size`/`quality` are forwarded because they are supported, but the
-  // caller's free-text values are validated above first.
-  const body = JSON.stringify({
-    model: MODEL,
-    prompt: opts.prompt,
-    n: 1,
-    size,
-    quality,
-  });
+  // GPT image models always return base64. Never send response_format: it is
+  // a deprecated DALL-E parameter and GPT image endpoints reject it.
+  const body = opts.referenceImage
+    ? JSON.stringify({
+        model: MODEL,
+        prompt: opts.prompt,
+        images: [{
+          image_url: `data:${sniffImageMime(opts.referenceImage)};base64,${opts.referenceImage}`,
+        }],
+        n: 1,
+        ...(size ? { size } : {}),
+        quality,
+      })
+    : JSON.stringify({
+        model: MODEL,
+        prompt: opts.prompt,
+        n: 1,
+        ...(size ? { size } : {}),
+        quality,
+      });
 
   const resp = await invoke<{
     status: number;
     headers: Record<string, string>;
     body: number[];
   }>("ai_http_request", {
-    url: ENDPOINT,
+    url: opts.referenceImage ? EDIT_ENDPOINT : GENERATE_ENDPOINT,
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -67,9 +84,7 @@ export async function generateOpenAIImage(
     throw new Error("OpenAI returned an image entry with no data");
   }
 
-  // The response reports the format/dimensions it actually produced; prefer
-  // those over what we asked for (the API may adjust an unsupported size).
-  const [rw, rh] = (json.size ?? size).split("x").map(Number);
+  const [rw, rh] = (json.size ?? size ?? "0x0").split("x").map(Number);
   const mimeType =
     json.output_format === "jpeg"
       ? "image/jpeg"
@@ -81,8 +96,8 @@ export async function generateOpenAIImage(
     base64: item.b64_json,
     url: item.url,
     mimeType,
-    width: rw ?? 1024,
-    height: rh ?? 1024,
+    width: Number.isFinite(rw) ? rw! : 0,
+    height: Number.isFinite(rh) ? rh! : 0,
     provider: "openai",
   };
 }

@@ -697,10 +697,10 @@ function Label({ children }: { children: React.ReactNode }) {
   );
 }
 
-// Media keyring ("kai-media" service) intentionally has no providers:
-// video generation is Google Gemini Omni Flash (native, uses the Google
-// key above); other engines (Kling, Seedance, …) are served by their
-// official MCP servers — install them in Settings → MCP.
+// Native media generation uses the same provider keys configured above:
+// image generation/editing on Google, OpenAI, and xAI; video on Google
+// Gemini Omni Flash and xAI Grok Imagine. Other engines are available via
+// their official MCP servers in Settings → MCP.
 
 
 

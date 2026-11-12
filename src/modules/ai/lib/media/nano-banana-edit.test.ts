@@ -2,17 +2,15 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 /**
- * Source-contract pins: Nano Banana 2 (Gemini image) EDITING.
+ * Source-contract pins: Nano Banana 2.1 (Gemini image) EDITING.
  *
- * The model is natively multimodal INPUT — image editing is the same
- * generateContent call with an inlineData part ahead of the text
- * instruction. No separate /edits endpoint. Pinned here so the wiring
- * (which existed in the type as `referenceImage` but was never sent)
- * can't silently regress to text-only requests:
- *   1. google-image.ts sends the reference image as an inlineData part.
+ * All current image providers accept one reference image. Google's current
+ * Nano Banana 2.1 path uses the Interactions API; the request body itself is
+ * behavior-tested in google-image.test.ts. These source pins cover the tool,
+ * video, and Telegram wiring that must not silently drop the reference.
+ *   1. google-image.ts sends an image content part before the text.
  *   2. The tool schema exposes imagePath and threads it to referenceImage.
- *   3. Non-google providers refuse imagePath explicitly (never silently
- *      drop the edit input).
+ *   3. Selection preserves a configured provider for editing.
  *   4. The request mime comes from magic bytes, not a hardcoded constant.
  */
 
@@ -31,8 +29,7 @@ const tgIndexSrc = readFileSync(
   new URL("../../../assistant/index.ts", import.meta.url),
   "utf8",
 );
-// Provider SELECTION moved out of the tool when the engine became
-// key-driven (2026-11-12): the google-only rule for imagePath lives here now.
+// Provider selection lives outside the tool and is key-driven.
 const providerChoiceSrc = readFileSync(
   new URL("./providerChoice.ts", import.meta.url),
   "utf8",
@@ -76,7 +73,7 @@ describe("Gemini Omni Flash image-to-video wiring", () => {
   it("tool schema exposes imagePath and threads it through", () => {
     expect(videoToolSrc).toContain("imagePath: z");
     expect(videoToolSrc).toMatch(
-      /execute: async \(\{ prompt, duration, aspect_ratio, imagePath, count \}, options\)/,
+      /execute: async \(\{ provider, prompt, duration, aspect_ratio, imagePath, count \}, options\)/,
     );
     expect(videoToolSrc).toContain("referenceImage,");
     expect(videoToolSrc).toContain("native.readFileBytes(abs)");
@@ -106,7 +103,7 @@ describe("Telegram assistant edit/animate wiring", () => {
     expect(tgMediaSrc).toMatch(/referenceImage = edit_attached_image \? turnImage\?\.base64/);
     expect(tgMediaSrc).toMatch(/referenceImage = animate_attached_image \? turnImage\?\.base64/);
     // Both thread through to the underlying gens.
-    expect(tgMediaSrc).toContain("gen(p.key, { prompt, size, referenceImage })");
+    expect(tgMediaSrc).toContain("gen(p.key, { prompt, size, quality, referenceImage })");
     expect(tgMediaSrc).toContain("referenceImage,");
   });
 
@@ -126,14 +123,12 @@ describe("Telegram assistant edit/animate wiring", () => {
   });
 });
 
-describe("Nano Banana 2 image editing wiring", () => {
-  it("sends the reference image as an inlineData part", () => {
-    expect(googleSrc).toContain("inlineData: { mimeType: sniffImageMime");
-    expect(googleSrc).toMatch(/inlineData[\s\S]*data: opts\.referenceImage/);
-    // The text instruction rides alongside, not instead.
-    expect(googleSrc).toContain("reqParts.push({ text: opts.prompt })");
-    // parts: reqParts is what actually goes into contents[0].
-    expect(googleSrc).toContain("parts: reqParts,");
+describe("Nano Banana 2.1 image editing wiring", () => {
+  it("sends the reference image as an Interactions image content part", () => {
+    expect(googleSrc).toContain('const MODEL = "gemini-nano-banana-2.1";');
+    expect(googleSrc).toContain("data: opts.referenceImage, mime_type: sniffImageMime(opts.referenceImage)");
+    expect(googleSrc).toContain('{ type: "text", text: opts.prompt }');
+    expect(googleSrc).toContain("response_format: responseFormat");
   });
 
   it("sniffs the mime from magic bytes (Gemini rejects wrong mimeType)", () => {
@@ -152,14 +147,8 @@ describe("Nano Banana 2 image editing wiring", () => {
     expect(toolSrc).toMatch(/callProvider\(engine, key, \{[\s\S]*?referenceImage[\s\S]*?\}\)/);
   });
 
-  it("non-google providers refuse imagePath explicitly", () => {
-    // The refusal is a key-availability decision now (documented in
-    // providerChoice.ts): editing needs a Google key, so a request with
-    // imagePath either uses Google or fails with an actionable message
-    // instead of silently dropping the reference image.
-    expect(providerChoiceSrc).toContain("imagePath editing needs a Google API key");
-    expect(providerChoiceSrc).toMatch(/needsEditing[\s\S]*available\.includes\("google"\)/);
-    // The tool must pass needsEditing whenever a reference image was read.
+  it("preserves a configured provider for editing instead of forcing Google", () => {
+    expect(providerChoiceSrc).toMatch(/needsEditing && requested && keys\[requested\]/);
     expect(toolSrc).toContain("needsEditing: referenceImage !== undefined");
   });
 

@@ -1,7 +1,9 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { getKey } from "../lib/keyring";
+import { fingerprintBase64 } from "../lib/media/bytes";
 import { generateGoogleVideo } from "../lib/media/google-video";
+import { generateXAIVideo } from "../lib/media/xai-video";
 import { persistGeneratedMedia } from "../lib/media/persist";
 import type { VideoResult } from "../lib/media/types";
 import { resolvePath } from "./context";
@@ -30,18 +32,18 @@ async function generateVideos(
 }
 
 /**
- * Video generation — Google Gemini Omni Flash only, by design. Other generators (Kling,
- * Seedance, …) live behind their official MCP servers: users who need them
- * install the MCP in Settings → MCP and the tools appear automatically.
- * Native integrations were removed because both required bespoke auth
- * (Kling's JWT ak/sk, Volcengine Ark onboarding) we couldn't maintain.
+ * Video generation — Google Gemini Omni Flash and xAI Grok Imagine Video.
+ * Other generators (Kling, Seedance, …) live behind their official MCP
+ * servers, installed in Settings → MCP.
  */
 export function buildVideoGenTools(ctx: ToolContext) {
   const native = nativeForContext(ctx);
   return {
     generate_video: tool({
       needsApproval: false,
-      description: `Generate a video from a text prompt using Google Gemini Omni Flash (audio-native video) — or ANIMATE an existing image (imagePath: Omni animates it as the opening frame; the prompt then describes motion). Uses the configured Google API key — no provider choice needed. Returns the video inline in the conversation.
+      description: `Generate a video from a text prompt using Google Gemini Omni Flash or xAI Grok Imagine Video (audio-native video) — or ANIMATE an existing image (imagePath becomes the opening frame; the prompt describes motion). Uses the configured Google or xAI key. Returns the video inline in the conversation.
+
+Providers: google = Gemini Omni 1.2 Flash; xai = Grok Imagine Video 1.5 Lite. Optional: Google is preferred, then xAI. Only name one when the user explicitly asks for it.
 
 Video generation takes 1-5 minutes. Auto-executes — no approval needed.
 If the user asks for a different video engine (Kling, Seedance, …), tell them to install that vendor's MCP server in Settings → MCP.
@@ -51,6 +53,7 @@ single call. Do NOT call this tool again for the same prompt to "retry", and
 do NOT call it repeatedly to produce several videos: set count instead.
 Only call it again if the user asks for a NEW, different video.`,
       inputSchema: z.object({
+        provider: z.enum(["google", "xai"]).optional().describe("Engine only when the user explicitly names it. Google preferred, xAI fallback."),
         prompt: z
           .string()
           .describe(
@@ -70,7 +73,7 @@ Only call it again if the user asks for a NEW, different video.`,
           .string()
           .optional()
           .describe(
-            "Path to an existing image to ANIMATE - Omni uses it as the opening frame and the prompt describes the motion. Optional - omit for pure text-to-video.",
+            "Path to an existing image to ANIMATE - the selected provider uses it as the opening frame and the prompt describes the motion. Optional - omit for pure text-to-video.",
           ),
         count: z
           .number()
@@ -82,22 +85,34 @@ Only call it again if the user asks for a NEW, different video.`,
             "How many videos to produce. Default 1. Only set above 1 when the USER explicitly asked for several variations. Each video is a separate multi-minute render.",
           ),
       }),
-      execute: async ({ prompt, duration, aspect_ratio, imagePath, count }, options) => {
+      execute: async ({ provider, prompt, duration, aspect_ratio, imagePath, count }, options) => {
         const effectiveDuration = duration ?? DEFAULT_DURATION;
         // Exactly one unless the user asked for more (clamped: every extra
         // render is minutes of GPU time and real money).
         const wanted = Math.min(3, Math.max(1, Math.round(count ?? 1)));
 
-        const key = await getKey("google");
-        if (!key) {
+        const [googleKey, xaiKey] = await Promise.all([getKey("google"), getKey("xai")]);
+        const engine = provider === "xai" && xaiKey
+          ? "xai" as const
+          : provider === "google" && googleKey
+            ? "google" as const
+            : googleKey
+              ? "google" as const
+              : xaiKey
+                ? "xai" as const
+                : undefined;
+        const key = engine === "google" ? googleKey : xaiKey;
+        if (!engine || !key) {
           return {
-            error:
-              "No Google API key configured. Tell the user: add a Google key in Settings → Models, or use another engine's official MCP server (Settings → MCP). Keep it short.",
+            error: provider === "google" || provider === "xai"
+              ? `No ${provider === "google" ? "Google" : "xAI"} API key configured for the requested video engine. Add it in Settings → Models, or omit provider to use a configured key.`
+              : "No usable video API key configured. Tell the user: add a Google or xAI key in Settings → Models, or use another engine's official MCP server (Settings → MCP). Keep it short.",
           };
         }
+        const substituted = provider !== undefined && provider !== engine;
 
-        // Image-to-video: read the image and thread it to Omni (see
-        // google-video.ts for the wire format).
+        // Image-to-video: read the image and thread it to the selected
+        // provider (Google Interactions or xAI Imagine).
         let referenceImage: string | undefined;
         if (imagePath) {
           try {
@@ -123,7 +138,7 @@ Only call it again if the user asks for a NEW, different video.`,
         // an explicit session-level cancel.
         // Same prompt/options = same video: a retry attaches to the in-flight
         // job rather than paying for a second multi-minute render.
-        const dedupeKey = `video:${wanted}:${effectiveDuration}:${aspect_ratio ?? ""}:${referenceImage ? "animate" : "new"}:${prompt}`;
+        const dedupeKey = `video:${engine}:${wanted}:${effectiveDuration}:${aspect_ratio ?? ""}:${referenceImage ? fingerprintBase64(referenceImage) : "new"}:${prompt}`;
 
         spawnMediaTask(
           ctx.getSessionId(),
@@ -131,7 +146,7 @@ Only call it again if the user asks for a NEW, different video.`,
           () =>
             // Sequential: each render already takes minutes.
             generateVideos(wanted, () =>
-              generateGoogleVideo(key, {
+              (engine === "xai" ? generateXAIVideo : generateGoogleVideo)(key, {
                 prompt,
                 duration: effectiveDuration,
                 aspectRatio: aspect_ratio,
@@ -180,10 +195,9 @@ Only call it again if the user asks for a NEW, different video.`,
         return {
           status: "generating",
           kind: "video",
-          provider: "google",
-          // The live placeholder reads this label — pin the engine name so
-          // the card says "Gemini Omni Flash", not a bare "google".
-          providerLabel: "Gemini Omni Flash",
+          provider: engine,
+          providerLabel: engine === "xai" ? "Grok Imagine Video 1.5 Lite" : "Gemini Omni Flash",
+          ...(substituted ? { note: `${provider} has no usable video key, so ${engine} was used instead.` } : {}),
           count: wanted,
           // Video renders take minutes. Models read the bare placeholder as
           // a failure and retry, which stacked duplicate renders.

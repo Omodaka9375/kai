@@ -95,6 +95,38 @@ describe("Gemini Omni video requests", () => {
     expect(body.response_format).toMatchObject({ delivery: "uri", aspect_ratio: "9:16" });
   });
 
+  it("polls a URI-delivered file to ACTIVE and downloads it with the API key", async () => {
+    invokeMock
+      .mockResolvedValueOnce(response(200, {
+        id: "v1_uri",
+        status: "completed",
+        steps: [{
+          type: "model_output",
+          content: [{
+            type: "video",
+            uri: "https://generativelanguage.googleapis.com/v1beta/files/file-1:download?alt=media",
+            mime_type: "video/mp4",
+          }],
+        }],
+      }))
+      .mockResolvedValueOnce(response(200, { state: "PROCESSING" }))
+      .mockResolvedValueOnce(response(200, { state: "ACTIVE" }))
+      .mockResolvedValueOnce(response(200, "video"));
+
+    const resultPromise = generateGoogleVideo("test-key", { prompt: "URI delivery" });
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+    expect(result.base64).toBe(btoa("video"));
+    expect(invokeMock.mock.calls[1]![1]).toMatchObject({
+      url: "https://generativelanguage.googleapis.com/v1beta/files/file-1",
+      headers: { "x-goog-api-key": "test-key" },
+    });
+    expect(invokeMock.mock.calls[3]![1]).toMatchObject({
+      url: "https://generativelanguage.googleapis.com/v1beta/files/file-1:download?alt=media",
+      headers: { "x-goog-api-key": "test-key" },
+    });
+  });
+
   it("accepts inline data from an early-submit interaction poll", async () => {
     // A GET of an interaction created with URI delivery returns INLINE bytes,
     // not the uri. The old `data || uri` wait therefore ignored a completed

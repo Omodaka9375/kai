@@ -81,7 +81,7 @@ describe("a retry cannot buy a second generation", () => {
     // be treated as a retry of a 1-image job.
     expect(imageToolSrc).toMatch(/const dedupeKey = `image:\$\{engine\}:\$\{wanted\}/);
     expect(imageToolSrc).toMatch(/\n\s*dedupeKey,\n\s*\);/);
-    expect(videoToolSrc).toMatch(/const dedupeKey = `video:\$\{wanted\}/);
+    expect(videoToolSrc).toMatch(/const dedupeKey = `video:\$\{engine\}:\$\{wanted\}/);
     expect(videoToolSrc).toMatch(/\n\s*dedupeKey,\n\s*\);/);
   });
 

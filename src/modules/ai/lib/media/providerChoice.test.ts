@@ -16,8 +16,7 @@ describe("pickImageProvider", () => {
   });
 
   it("defaults to Google when no provider is named", () => {
-    // Google first: it is the only engine that also does imagePath editing,
-    // so one default keeps both the generate and edit paths working.
+    // Google is the fast default; every current provider supports editing.
     expect(pickImageProvider(allKeys, undefined)).toEqual({
       ok: true,
       provider: "google",
@@ -61,15 +60,16 @@ describe("pickImageProvider", () => {
     }
   });
 
-  it("pins imagePath editing to Google", () => {
+  it("honors any configured provider for imagePath editing", () => {
     expect(
       pickImageProvider(allKeys, "openai", { needsEditing: true }),
-    ).toEqual({ ok: true, provider: "google", substituted: true });
-    const noGoogle = pickImageProvider({ openai: "o" }, "openai", {
-      needsEditing: true,
-    });
-    expect(noGoogle.ok).toBe(false);
-    if (!noGoogle.ok) expect(noGoogle.error).toContain("needs a Google API key");
+    ).toEqual({ ok: true, provider: "openai", substituted: false });
+    expect(
+      pickImageProvider({ openai: "o" }, "openai", { needsEditing: true }),
+    ).toEqual({ ok: true, provider: "openai", substituted: false });
+    expect(
+      pickImageProvider({ xai: "x" }, "google", { needsEditing: true }),
+    ).toEqual({ ok: true, provider: "xai", substituted: true });
   });
 
   it("treats an empty-string key as absent", () => {

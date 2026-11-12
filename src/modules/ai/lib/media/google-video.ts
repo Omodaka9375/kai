@@ -12,7 +12,7 @@ import type { VideoResult } from "./types";
 //          store:true, background:false, stream:false }
 //   → SYNCHRONOUS unary: the POST blocks until the render finishes (the
 //     Rust proxy allows 600s) and returns
-//     steps[].model_output.content[] = { type:"video", uri, mime_type }.
+//     steps[] (type:"model_output").content[] = { type:"video", uri, mime_type }.
 //     `delivery:"uri"` is mandatory for >4MB videos — inline base64
 //     (`data`) hits a payload cap and Omni clips exceed it.
 //   GET  /v1beta/files/{id}  → poll `state` until ACTIVE

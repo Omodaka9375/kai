@@ -1,66 +1,45 @@
 import { invoke } from "@tauri-apps/api/core";
+import { imageDimensionsFromBase64 } from "./bytes";
+import { sniffImageMime } from "./google-image";
+import { aspectRatioForSize } from "./options";
 import type { ImageGenerateOpts, ImageResult } from "./types";
 
-const ENDPOINT = "https://api.x.ai/v1/images/generations";
-// Grok Imagine image 2.0 — the current generation model. The retired
-// `grok-imagine-image-quality` id 404s on the endpoint.
+const GENERATE_ENDPOINT = "https://api.x.ai/v1/images/generations";
+const EDIT_ENDPOINT = "https://api.x.ai/v1/images/edits";
+// Current Grok Imagine model; grok-imagine-image-quality retired 2026-11-02.
 const MODEL = "grok-imagine-image-2.0";
+const ASPECT_RATIOS = [
+  "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "2:1", "1:2",
+  "19.5:9", "9:19.5", "20:9", "9:20", "21:9", "5:2",
+] as const;
 
-/** xAI's documented quality values. `high` is NOT one of them (the API
- *  accepts low/medium/auto and rejects anything else). */
-const QUALITY = new Set(["low", "medium", "auto"]);
-
-/** Map a `WIDTHxHEIGHT` request onto xAI's aspect_ratio enum. It sizes the
- *  output itself (1k/2k), so a pixel pair cannot be passed through. */
-function aspectRatioFor(size: string | undefined): string | undefined {
-  if (!size) return undefined;
-  const m = /^(\d{2,5})x(\d{2,5})$/.exec(size);
-  if (!m) return undefined;
-  const w = Number(m[1]);
-  const h = Number(m[2]);
-  if (!w || !h) return undefined;
-  const ratio = w / h;
-  const table: [number, string][] = [
-    [1, "1:1"],
-    [16 / 9, "16:9"],
-    [9 / 16, "9:16"],
-    [4 / 3, "4:3"],
-    [3 / 4, "3:4"],
-    [3 / 2, "3:2"],
-    [2 / 3, "2:3"],
-    [21 / 9, "21:9"],
-  ];
-  let best: string | undefined;
-  let bestDelta = Number.POSITIVE_INFINITY;
-  for (const [value, label] of table) {
-    const delta = Math.abs(value - ratio);
-    if (delta < bestDelta) {
-      bestDelta = delta;
-      best = label;
-    }
-  }
-  // Anything further than ~15% off is not a representable ratio.
-  return bestDelta / ratio < 0.15 ? best : undefined;
-}
-
-/** Generate an image via xAI Grok Imagine. */
+/** Generate an image via xAI Grok Imagine Image 2.0. */
 export async function generateXAIImage(
   apiKey: string,
   opts: ImageGenerateOpts,
 ): Promise<ImageResult> {
   if (opts.signal?.aborted) throw new Error("Generation cancelled.");
 
-  const quality = QUALITY.has(opts.quality ?? "") ? opts.quality : undefined;
-  const aspectRatio = aspectRatioFor(opts.size);
-
+  const quality = opts.quality === "high" ? "medium" : opts.quality;
+  const aspectRatio = aspectRatioForSize(opts.size, ASPECT_RATIOS);
   const body = JSON.stringify({
     model: MODEL,
     prompt: opts.prompt,
     n: 1,
-    // No response_format: URLs are the default and b64_json is an opt-in
-    // that some deployments reject. We accept either in the response.
-    ...(quality ? { quality } : {}),
+    // Supported by current Grok Imagine. Inline bytes let KAI persist the
+    // image before its temporary hosted URL expires, so edit/animate
+    // follow-ups have a local path instead of an unusable link.
+    response_format: "b64_json",
+    ...(quality === "low" || quality === "medium" || quality === "auto" ? { quality } : {}),
     ...(aspectRatio ? { aspect_ratio: aspectRatio } : {}),
+    ...(opts.referenceImage
+      ? {
+          image: {
+            type: "image_url",
+            url: `data:${sniffImageMime(opts.referenceImage)};base64,${opts.referenceImage}`,
+          },
+        }
+      : {}),
   });
 
   const resp = await invoke<{
@@ -68,7 +47,7 @@ export async function generateXAIImage(
     headers: Record<string, string>;
     body: number[];
   }>("ai_http_request", {
-    url: ENDPOINT,
+    url: opts.referenceImage ? EDIT_ENDPOINT : GENERATE_ENDPOINT,
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -97,8 +76,7 @@ export async function generateXAIImage(
     base64: item.b64_json,
     url: item.url,
     mimeType: item.mime_type ?? "image/jpeg",
-    width: 1024,
-    height: 1024,
+    ...imageDimensionsFromBase64(item.b64_json),
     provider: "xai",
   };
 }

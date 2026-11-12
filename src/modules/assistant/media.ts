@@ -35,12 +35,10 @@ async function pickImageProvider(): Promise<{ provider: "google" | "openai" | "x
   return null;
 }
 
-async function pickVideoProvider(): Promise<{ provider: "google"; key: string } | null> {
-  // Video is Google Gemini Omni Flash only — Kling/Seedance are served by
-  // their official MCP servers (install in Settings → MCP), not native
-  // integrations.
-  const google = await getKey("google");
+async function pickVideoProvider(): Promise<{ provider: "google" | "xai"; key: string } | null> {
+  const [google, xai] = await Promise.all([getKey("google"), getKey("xai")]);
   if (google) return { provider: "google", key: google };
+  if (xai) return { provider: "xai", key: xai };
   return null;
 }
 
@@ -53,7 +51,7 @@ async function deliver(
   const token = await getTelegramToken();
   const prefs = await loadAssistantPrefs();
   const chatId = prefs.ownerChatId;
-  if (!token || chatId == null) return;
+  if (!token || chatId == null) throw new Error("Telegram is not bound to an owner chat.");
   const caption = prompt ? prompt.slice(0, 900) : null;
   // URL path (server-side fetch) when the provider gave one and no inline bytes.
   if (!media.base64 && media.url) {
@@ -63,11 +61,11 @@ async function deliver(
       url: media.url,
       kind,
       caption,
-    }).catch(() => {});
+    });
     return;
   }
   const b64 = media.base64;
-  if (!b64) return;
+  if (!b64) throw new Error("No generated media bytes or URL to deliver.");
   if (kind === "image") {
     const photoOk = /^image\/(png|jpeg|webp)/.test(media.mimeType);
     const send = photoOk ? "telegram_send_photo" : "telegram_send_document";
@@ -79,14 +77,14 @@ async function deliver(
       caption,
       fileName: "image",
       mimeType: media.mimeType,
-    }).catch(() => {});
+    });
   } else {
     await invoke("telegram_send_video", {
       token,
       chatId,
       videoBase64: b64,
       caption,
-    }).catch(() => {});
+    });
   }
 }
 
@@ -107,13 +105,14 @@ export function buildAssistantMediaTools(
 ): Record<string, unknown> {
   const generateImage = tool({
     description:
-      "Generate an image from a text prompt - or EDIT the most recent photo in the conversation (edit_attached_image: true): the photo attached to this message if there is one, else the newest photo the user sent earlier (e.g. a \"try again now\" follow-up after an error). The provider is picked automatically from configured keys (google preferred, then openai, then xai); editing requires google (Nano Banana 2). The result is delivered to the user's Telegram chat immediately; describe it briefly in your reply. Size/quality are optional.",
+      "Generate an image from a text prompt - or EDIT the most recent photo in the conversation (edit_attached_image: true): the photo attached to this message if there is one, else the newest photo the user sent earlier (e.g. a \"try again now\" follow-up after an error). The provider is picked automatically from configured keys (google preferred, then openai, then xai); editing uses the selected provider's native edit endpoint. The result is delivered to the user's Telegram chat immediately; describe it briefly in your reply. Size/quality are optional.",
     inputSchema: z.object({
       prompt: z.string().describe("Detailed description of the image: subject, style, composition, lighting. When edit_attached_image is true, describe the EDITS (restyle, add/remove objects), not the scene."),
-      size: z.string().optional().describe("Dimensions like '1024x1024' or '1536x1024'. Default 1024x1024."),
-      edit_attached_image: z.boolean().optional().describe("Edit the photo attached to this message instead of generating from scratch. Requires google. Only meaningful when the user attached an image."),
+      size: z.string().optional().describe("Dimensions like '1024x1024' or '1536x1024'."),
+      quality: z.string().optional().describe("Quality: low, medium, high, or auto."),
+      edit_attached_image: z.boolean().optional().describe("Edit the photo attached to this message instead of generating from scratch. Only meaningful when the user attached an image."),
     }),
-    execute: async ({ prompt, size, edit_attached_image }) => {
+    execute: async ({ prompt, size, quality, edit_attached_image }) => {
       const p = await pickImageProvider();
       if (!p) {
         return {
@@ -121,19 +120,13 @@ export function buildAssistantMediaTools(
             "No image key configured. Tell the user: add a Google/OpenAI/xAI key in the desktop app's Settings → Models, or use an engine's official MCP server. Keep it short.",
         };
       }
-      // EDIT path: the attached photo rides as the reference image — with a
-      // fallback to the most recent photo in history (getTurnImage resolves
-      // both; see the TurnImage doc above). Google only (Nano Banana 2 is
-      // natively multimodal INPUT); refuse explicitly rather than silently
-      // dropping the edit intent.
+      // Resolve the attached/current or latest historical photo lazily.
+      // All three current native providers implement image editing.
       const turnImage = edit_attached_image ? await getTurnImage?.() : undefined;
       const referenceImage = edit_attached_image ? turnImage?.base64 : undefined;
       if (edit_attached_image) {
         if (!turnImage) {
           return { error: "No photo available - neither on this message nor earlier in the conversation. Ask the user to attach the image to edit, then call again." };
-        }
-        if (p.provider !== "google") {
-          return { error: "Image editing is google-only (Nano Banana 2). Ask the user to add a Google key in the desktop app's Settings → Models." };
         }
       }
       try {
@@ -145,7 +138,7 @@ export function buildAssistantMediaTools(
         } else {
           gen = (await import("@/modules/ai/lib/media/xai-image")).generateXAIImage;
         }
-        const result = await gen(p.key, { prompt, size, referenceImage });
+        const result = await gen(p.key, { prompt, size, quality, referenceImage });
         await deliver("image", result, prompt);
         return {
           ok: true,
@@ -162,7 +155,7 @@ export function buildAssistantMediaTools(
 
   const generateVideo = tool({
     description:
-      "Generate a short video from a text prompt (3-15s) with Google Gemini Omni Flash - or ANIMATE the most recent photo in the conversation (animate_attached_image: true; the photo attached to this message if there is one, else the newest photo the user sent earlier). Omni uses it as the opening frame and the prompt describes the motion. Uses the configured Google key; the video is delivered to the chat when ready; generation takes 1-5 minutes. If the user wants a different engine (Kling, Seedance…), tell them to install that vendor's MCP server in the desktop app's Settings → MCP.",
+      "Generate a short video (3-15s) with Google Gemini Omni Flash or xAI Grok Imagine Video 1.5 Lite - or ANIMATE the most recent photo (the image becomes the opening frame and the prompt describes motion). Uses the configured Google key first, then xAI. The video is delivered to the chat when ready; generation takes 1-5 minutes. Other engines require their official MCP server.",
     inputSchema: z.object({
       prompt: z.string().describe("Scene description: subject, motion, camera work, mood. When animate_attached_image is true, describe the MOTION, not the scene."),
         duration: z.number().min(3).max(15).optional().describe("Duration in seconds (3-15). Default 8."),
@@ -173,18 +166,19 @@ export function buildAssistantMediaTools(
       const p = await pickVideoProvider();
         if (!p) {
           return {
-            error: "No Google API key configured. Tell the user: add a Google key in the desktop app's Settings → Models, or use another engine's official MCP server. Keep it short.",
+            error: "No Google or xAI API key configured. Tell the user: add a Google or xAI key in the desktop app's Settings → Models, or use another engine's official MCP server. Keep it short.",
           };
         }
-        // ANIMATE path: the attached photo rides as instances[0].image —
-        // with the same history fallback as the image-edit path.
+        // Animate the attached/current or latest historical photo.
         const turnImage = animate_attached_image ? await getTurnImage?.() : undefined;
         const referenceImage = animate_attached_image ? turnImage?.base64 : undefined;
         if (animate_attached_image && !turnImage) {
           return { error: "No photo available - neither on this message nor earlier in the conversation. Ask the user to attach the image to animate, then call again." };
         }
         try {
-          const gen = (await import("@/modules/ai/lib/media/google-video")).generateGoogleVideo;
+          const gen = p.provider === "xai"
+            ? (await import("@/modules/ai/lib/media/xai-video")).generateXAIVideo
+            : (await import("@/modules/ai/lib/media/google-video")).generateGoogleVideo;
         const result = await gen(p.key, {
           prompt,
           duration,

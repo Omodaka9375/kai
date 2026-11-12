@@ -14,9 +14,9 @@ export const IMAGE_PROVIDERS = ["openai", "google", "xai"] as const;
 export type ImageProvider = (typeof IMAGE_PROVIDERS)[number];
 
 /**
- * Fallback order when the caller named no provider, or named one whose key is
- * missing. Google is first because it is the only engine that ALSO performs
- * image editing (`imagePath`), so one default keeps both paths working.
+ * Fallback order when the caller named no provider, or named one whose key
+ * is missing. Google remains the fast default; all three current engines
+ * support single-reference image editing.
  */
 const PREFERENCE: readonly ImageProvider[] = ["google", "openai", "xai"];
 
@@ -29,8 +29,7 @@ const NO_KEY_HINT =
 
 /** Resolve the image provider to call.
  *
- *  `needsEditing` pins the choice to Google: Nano Banana 2 is the only engine
- *  that consumes a reference image here. */
+ *  All current engines accept the one reference image KAI exposes. */
 export function pickImageProvider(
   keys: Record<string, string | null | undefined>,
   requested: ImageProvider | undefined,
@@ -42,15 +41,8 @@ export function pickImageProvider(
     return { ok: false, error: `No image-generation API key is configured. ${NO_KEY_HINT}` };
   }
 
-  if (opts?.needsEditing) {
-    if (available.includes("google")) {
-      return { ok: true, provider: "google", substituted: requested !== "google" };
-    }
-    return {
-      ok: false,
-      error:
-        "imagePath editing needs a Google API key (Nano Banana 2). Tell the user: add a Google key in Settings → Models, or retry without imagePath. Keep it short.",
-    };
+  if (opts?.needsEditing && requested && keys[requested]) {
+    return { ok: true, provider: requested, substituted: false };
   }
 
   if (requested && keys[requested]) {

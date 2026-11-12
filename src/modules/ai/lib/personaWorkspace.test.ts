@@ -88,6 +88,11 @@ describe("excluded tools - desktop-UI-bound + global user-surface", () => {
       "open_preview",
       "display_image",
       "display_video",
+      // Media jobs complete through the project chat's MediaMessage, which
+      // a headless persona does not own. Keep paid generation out of this
+      // surface rather than returning an invisible result.
+      "generate_image",
+      "generate_video",
       "watch_create",
       "watch_list",
       "watch_kill",
@@ -114,9 +119,15 @@ describe("excluded tools - desktop-UI-bound + global user-surface", () => {
     ]);
   });
 
+  it("excludes paid media generation because group results have no media renderer", () => {
+    expect(PERSONA_EXCLUDED_TOOLS).toEqual(
+      expect.arrayContaining(["generate_image", "generate_video"]),
+    );
+  });
+
   it("does NOT exclude the productive agent tools", () => {
     const excluded = new Set(PERSONA_EXCLUDED_TOOLS);
-    // File/edit/shell/search/web/subagent/memory/todo/media tools must remain.
+    // File/edit/shell/search/web/subagent/memory/todo tools must remain.
     for (const kept of [
       "read_file",
       "write_file",
@@ -136,8 +147,6 @@ describe("excluded tools - desktop-UI-bound + global user-surface", () => {
       "run_subagent",
       "save_memory",
       "todo_write",
-      "generate_image",
-      "generate_video",
       "gmail_read",
       "social_read",
       "mcp_list_servers",

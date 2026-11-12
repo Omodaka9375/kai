@@ -1,9 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
+import { imageDimensionsFromBase64 } from "./bytes";
+import { aspectRatioForSize } from "./options";
 import type { ImageGenerateOpts, ImageResult } from "./types";
 
 const imageDataSchema = z.object({
   mimeType: z.string().optional(),
+  mime_type: z.string().optional(),
   data: z.string().optional(),
 });
 const responseSchema = z.object({
@@ -22,14 +25,30 @@ const responseSchema = z.object({
     blockReasonMessage: z.string().optional(),
   }).passthrough().optional(),
 }).passthrough();
+const interactionResponseSchema = z.object({
+  steps: z.array(z.object({
+    type: z.string().optional(),
+    content: z.array(z.object({
+      type: z.string().optional(),
+      mimeType: z.string().optional(),
+      mime_type: z.string().optional(),
+      data: z.string().optional(),
+      text: z.string().optional(),
+    }).passthrough()).optional(),
+  }).passthrough()).optional(),
+}).passthrough();
 
-// Nano Banana 2 (Gemini 3.1 Flash Image). The 2024 `gemini-2.0-flash-exp`
-// id was long dead; this is the current image-gen workhorse.
-const MODEL = "gemini-3.1-flash-image";
+// Google's current high-efficiency image generation and editing model.
+// gemini-3.1-flash-image is the previous generation; Google's image guide
+// recommends this Nano Banana 2.1 successor for all new projects.
+const MODEL = "gemini-nano-banana-2.1";
+const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/interactions";
+const ASPECT_RATIOS = [
+  "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9", "5:2",
+] as const;
 
 /** Sniff image/jpeg|png|webp|gif from magic bytes (base64-decoded head).
- *  Gemini needs the true mimeType in inlineData; text/unknown gets the
- *  request rejected. PNG/JPEG/WebP/GIF are the formats it accepts. */
+ *  Gemini needs the true mime_type; text/unknown gets rejected. */
 export function sniffImageMime(b64: string): string {
   let head: Uint8Array;
   try {
@@ -46,39 +65,37 @@ export function sniffImageMime(b64: string): string {
   return "image/png";
 }
 
-/** Generate an image via Google Gemini (Nano Banana 2). */
+/** Generate or edit an image through Google's current Interactions API. */
 export async function generateGoogleImage(
   apiKey: string,
   opts: ImageGenerateOpts,
 ): Promise<ImageResult> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey}`;
-
   if (opts.signal?.aborted) throw new Error("Generation cancelled.");
 
-  // EDITING: Nano Banana 2 (Gemini image) is natively multimodal INPUT —
-  // a reference image rides as an inlineData part ahead of the text
-  // instruction ("put a red hat on this", multi-image composites, style
-  // transfer). No separate /edits endpoint; same generateContent call.
-  const reqParts: Record<string, unknown>[] = [];
-  if (opts.referenceImage) {
-    reqParts.push({
-      inlineData: { mimeType: sniffImageMime(opts.referenceImage), data: opts.referenceImage },
-    });
-  }
-  reqParts.push({ text: opts.prompt });
-
+  const aspectRatio = aspectRatioForSize(opts.size, ASPECT_RATIOS);
+  // Quality maps to the supported resolution enum. Do not silently discard
+  // it, but do not invent an unsupported "high" tier either.
+  const imageSize = opts.quality === "high" ? "2K" : "1K";
+  const responseFormat = {
+    type: "image",
+    mime_type: "image/png",
+    image_size: imageSize,
+    ...(aspectRatio ? { aspect_ratio: aspectRatio } : {}),
+  };
   const body = JSON.stringify({
-    contents: [
-      {
-        parts: reqParts,
-      },
+    model: MODEL,
+    input: [
+      ...(opts.referenceImage
+        ? [{ type: "image", data: opts.referenceImage, mime_type: sniffImageMime(opts.referenceImage) }]
+        : []),
+      { type: "text", text: opts.prompt },
     ],
-    // Gemini image generation: ONLY responseModalities. responseMimeType
-    // accepts text/JSON types (never image/*) — sending it 400s the request
-    // ("allowed mimetypes are text/plain, application/json, ...").
-    generationConfig: {
-      responseModalities: ["IMAGE", "TEXT"],
-    },
+    response_format: responseFormat,
+    // One-shot image generation/editing needs no server-side conversation
+    // history. Unlike video URI delivery, image data needs no stored result.
+    store: false,
+    background: false,
+    stream: false,
   });
 
   const resp = await invoke<{
@@ -86,9 +103,13 @@ export async function generateGoogleImage(
     headers: Record<string, string>;
     body: number[];
   }>("ai_http_request", {
-    url,
+    url: ENDPOINT,
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": apiKey,
+      "Api-Revision": "2026-05-20",
+    },
     body: Array.from(new TextEncoder().encode(body)),
   });
 
@@ -96,30 +117,40 @@ export async function generateGoogleImage(
   if (resp.status !== 200) {
     throw new Error(`Google image generation failed (${resp.status}): ${text.slice(0, 300)}`);
   }
-
-  const parsed = responseSchema.safeParse(JSON.parse(text));
-  if (!parsed.success) {
-    throw new Error("Google returned an unexpected image response shape.");
+  const raw = JSON.parse(text) as unknown;
+  const parsed = interactionResponseSchema.safeParse(raw);
+  if (parsed.success) {
+    const parts = (parsed.data.steps ?? []).flatMap((step) => step.content ?? []);
+    const imagePart = parts.find((part) => part.type === "image" && part.data);
+    if (imagePart?.data) {
+      return imageResult(imagePart.data, imagePart.mimeType ?? imagePart.mime_type);
+    }
   }
-  const json = parsed.data;
-  const parts = json.candidates?.flatMap((c) => c.content?.parts ?? []) ?? [];
-  // The REST API uses camelCase, but some proxies return the protobuf's
-  // original snake_case. Accept both instead of losing a valid image.
-  const imagePart = parts.map((p) => p.inlineData ?? p.inline_data)
+
+  // Compatibility with the previous generateContent response shape. This
+  // also preserves useful parsing if a proxy returns the older resource.
+  const legacy = responseSchema.safeParse(raw);
+  if (!legacy.success) throw new Error("Google returned an unexpected image response shape.");
+  const json = legacy.data;
+  const parts = json.candidates?.flatMap((candidate) => candidate.content?.parts ?? []) ?? [];
+  const imagePart = parts.map((part) => part.inlineData ?? part.inline_data)
     .find((data) => data?.data);
   if (!imagePart?.data) {
     const reason = json.promptFeedback?.blockReasonMessage ??
       json.promptFeedback?.blockReason ??
-      json.candidates?.map((c) => c.finishReason).filter(Boolean).join(", ");
-    const textReply = parts.map((p) => p.text).filter(Boolean).join(" ");
+      json.candidates?.map((candidate) => candidate.finishReason).filter(Boolean).join(", ");
+    const textReply = parts.map((part) => part.text).filter(Boolean).join(" ");
     throw new Error(`Google returned no image data${reason ? `: ${reason}` : ""}${textReply ? ` (${textReply.slice(0, 240)})` : ""}`);
   }
+  return imageResult(imagePart.data, imagePart.mimeType ?? imagePart.mime_type);
+}
 
+function imageResult(base64: string, mimeType?: string): ImageResult {
+  const dimensions = imageDimensionsFromBase64(base64);
   return {
-    base64: imagePart.data,
-    mimeType: imagePart.mimeType || "image/png",
-    width: 1024,
-    height: 1024,
+    base64,
+    mimeType: mimeType || "image/png",
+    ...dimensions,
     provider: "google",
   };
 }

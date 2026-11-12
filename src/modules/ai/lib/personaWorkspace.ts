@@ -146,6 +146,11 @@ export const PERSONA_EXCLUDED_TOOLS: readonly string[] = [
   // terminalImage.ts / terminalVideo.ts - render INTO the active terminal
   "display_image",
   "display_video",
+  // Media jobs patch a project chat via chatStore.resolveMedia; a persona
+  // has no such chat or media-rendering surface. Do not charge for an
+  // invisible result (the group transcript stores only message text).
+  "generate_image",
+  "generate_video",
   // watch.ts - watch results inject into the owning session's Chat
   "watch_create",
   "watch_list",

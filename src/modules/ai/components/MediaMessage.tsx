@@ -130,12 +130,12 @@ export const MediaMessage = memo(function MediaMessage({ output }: Props) {
   const count = output.type === "image" ? imageEntries.length : videoEntries.length;
 
   // The provider id is engine-level ("google"), but images and videos use
-  // DIFFERENT Google engines — Nano Banana 2 vs Gemini Omni Flash. Label by
+  // DIFFERENT Google engines — Nano Banana 2.1 vs Gemini Omni Flash. Label by
   // media kind so a video card stops claiming it came from the image model.
   const providerLabel = {
-    openai: "GPT Image 2",
-    google: output.type === "video" ? "Gemini Omni Flash" : "Nano Banana 2",
-    xai: "Grok Imagine",
+    openai: "GPT Image 2.6 Flare",
+    google: output.type === "video" ? "Gemini Omni Flash" : "Nano Banana 2.1",
+    xai: output.type === "video" ? "Grok Imagine Video 1.5 Lite" : "Grok Imagine Image 2.0",
     veo: "Gemini Omni Flash",
   }[output.provider] ?? output.provider;
 
