@@ -91,4 +91,22 @@ describe("download filenames are normalized", () => {
     // `alt` stays the accessible description only.
     expect(lightboxSrc).toMatch(/alt=\{alt \?\? "Generated image"\}/);
   });
+
+  it("the lightbox is portaled to document.body, not rendered inline", () => {
+    const lightboxSrc = readFileSync(
+      new URL("../../components/MediaLightbox.tsx", import.meta.url),
+      "utf8",
+    );
+    // Every chat message part sits inside a framer-motion wrapper
+    // (PartAppear) with willChange: transform, which is BOTH a containing
+    // block for `fixed` descendants and its own stacking context. An inline
+    // lightbox was therefore clamped to that part's rect and could not paint
+    // above sibling tool output (text over the image, close button
+    // unclickable). The portal is what makes inset-0 mean the viewport.
+    expect(lightboxSrc).toContain('from "react-dom"');
+    expect(lightboxSrc).toContain("createPortal(");
+    expect(lightboxSrc).toMatch(/^\s*document\.body,$/m);
+    // Guards against a partial revert: no bare `return (` of the overlay.
+    expect(lightboxSrc).not.toMatch(/return\s*\(\s*<div\s+className="fixed inset-0/);
+  });
 });

@@ -2,6 +2,7 @@ import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 import Download04Icon from "@hugeicons/core-free-icons/Download04Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { safeMediaFilename } from "../lib/media/filename";
 
 /** `data:image/png;base64,...` -> `image/png`. Undefined for blob/http URLs,
@@ -45,8 +46,17 @@ export function MediaLightbox({ src, alt, kind, onClose }: Props) {
     a.click();
   };
 
-  return (
+  // Portaled to document.body: the chat wraps every message part in a
+  // framer-motion div (PartAppear) with willChange: transform, which makes
+  // that wrapper a containing block AND a stacking context. Rendered inline,
+  // the lightbox's `fixed inset-0` was clamped to that message part and its
+  // z-[9998] could not rise above sibling parts - tool output painted on top
+  // of the image and clicks landed on the text instead of the close button.
+  return createPortal(
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={alt ?? "Media preview"}
       className="fixed inset-0 z-[9998] flex items-center justify-center bg-black/80 backdrop-blur-sm"
       onClick={onClose}
     >
@@ -88,6 +98,7 @@ export function MediaLightbox({ src, alt, kind, onClose }: Props) {
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
