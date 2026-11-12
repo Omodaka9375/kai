@@ -509,8 +509,8 @@ const REGISTRY: Record<string, ToolPresentation> = {
   },
   display_image: {
     label: "Display img",
-    status: () => `Displaying image in terminal`,
-    summary: (a) => str(a, "name"),
+    status: () => `Displaying image in chat`,
+    summary: (a) => str(a, "path") ?? str(a, "name"),
     effect: "NONE",
     fence: true,
     remoteSurface: false,

@@ -9,6 +9,41 @@ import type { ToolContext } from "./context";
  * to display into") — with no terminal open the tool failed even though the
  * base64 was already in hand and the chat can render an image card from it.
  */
+describe("display_image loads local files without base64 in model context", () => {
+  it("reads a Browserr screenshot and projects only a short text result", async () => {
+    const { vi } = await import("vitest");
+    const realPng = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+    const readFileBytes = vi.fn(async () => realPng);
+    const ctx = {
+      getCwd: () => null,
+      native: {
+        readFileBytes,
+        canonicalize: async (path: string) => path,
+      },
+      writeToActiveTerminalDisplay: () => false,
+    } as unknown as ToolContext;
+    const display = buildTerminalImageTools(ctx).display_image;
+    if (typeof display.execute !== "function") throw new Error("display_image.execute missing");
+    const output = await display.execute(
+      { path: "C:/Users/Valsinarb/AppData/Local/browserr/mcp-shots/shot-1794497024.png" },
+      { toolCallId: "local-shot", messages: [], abortSignal: new AbortController().signal },
+    );
+    if (Symbol.asyncIterator in output) throw new Error("expected one shot, not a stream");
+    if ("error" in output) throw new Error(output.error);
+    expect(output.type).toBe("image");
+    expect(String(output.base64).startsWith("iVBORw0KGgo")).toBe(true);
+    expect(output.sourcePath).toContain("shot-1794497024.png");
+    if (!display.toModelOutput) throw new Error("missing display_image model serializer");
+    const projected = await display.toModelOutput({
+      toolCallId: "local-shot", input: { path: "shot.png" }, output,
+    });
+    const serialized = JSON.stringify(projected);
+    expect(serialized).not.toContain(output.base64);
+    expect(serialized).toContain("shot-1794497024.png");
+    expect(serialized.length).toBeLessThan(512);
+  });
+});
+
 describe("OSC 1337 build/parse", () => {
   it("round-trips name and data", () => {
     const seq = buildOsc1337("QUJD", "pic.png", 3);
