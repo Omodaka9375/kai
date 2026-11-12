@@ -78,7 +78,9 @@ export async function generateGoogleImage(
   const imageSize = opts.quality === "high" ? "2K" : "1K";
   const responseFormat = {
     type: "image",
-    mime_type: "image/png",
+    // The Interactions API only accepts image/jpeg here (400 invalid_request
+    // for anything else); PNG output is not an option on this endpoint.
+    mime_type: "image/jpeg",
     image_size: imageSize,
     ...(aspectRatio ? { aspect_ratio: aspectRatio } : {}),
   };

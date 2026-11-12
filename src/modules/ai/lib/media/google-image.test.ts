@@ -42,7 +42,7 @@ describe("generateGoogleImage current Interactions contract", () => {
     ]);
     expect(body.response_format).toEqual({
       type: "image",
-      mime_type: "image/png",
+      mime_type: "image/jpeg",
       image_size: "2K",
       aspect_ratio: "16:9",
     });
