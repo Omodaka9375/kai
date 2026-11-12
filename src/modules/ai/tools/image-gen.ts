@@ -35,7 +35,12 @@ Providers:
 
 The provider is OPTIONAL. Omit it and KAI uses whichever engine the user
 has a key for (Google first, then OpenAI, then xAI). Only pass a provider
-when the user explicitly names one — never ask, and never assume OpenAI.`,
+when the user explicitly names one — never ask, and never assume OpenAI.
+
+ONE GENERATION PER REQUEST. Generate exactly count images (default 1) in a
+single call. Do NOT call this tool again for the same prompt to "retry", and
+do NOT call it repeatedly to produce several images: set count instead.
+Only call it again if the user asks for a NEW, different picture.`,
       inputSchema: z.object({
         prompt: z
           .string()
@@ -58,6 +63,15 @@ when the user explicitly names one — never ask, and never assume OpenAI.`,
           .string()
           .optional()
           .describe("Quality level: 'low', 'medium', 'high', or 'auto'. Defaults to auto."),
+        count: z
+          .number()
+          .int()
+          .min(1)
+          .max(4)
+          .optional()
+          .describe(
+            "How many images to produce. Default 1 — the overwhelmingly common case. Only set above 1 when the USER explicitly asked for several variations ('two versions', '4 options').",
+          ),
         imagePath: z
           .string()
           .optional()
@@ -65,8 +79,11 @@ when the user explicitly names one — never ask, and never assume OpenAI.`,
             "Path to an existing image to EDIT (Google provider only, Nano Banana 2). The image is sent to the model alongside the prompt: restyle, add/remove objects, composites. Optional - omit for pure text-to-image.",
           ),
       }),
-      execute: async ({ prompt, provider, size, quality, imagePath }, options) => {
+      execute: async ({ prompt, provider, size, quality, count, imagePath }, options) => {
         const keys = useChatStore.getState().apiKeys;
+        // Exactly one unless the user asked for more. Clamped so a model
+        // hallucinating count: 20 cannot run up a bill.
+        const wanted = Math.min(4, Math.max(1, Math.round(count ?? 1)));
 
         // Editing: read the reference image and thread it to the provider.
         // Google (Nano Banana 2) consumes it natively; other providers get
@@ -105,23 +122,41 @@ when the user explicitly names one — never ask, and never assume OpenAI.`,
           return { error: `No API key configured for ${engine}.` };
         }
 
-        spawnMediaTask(ctx.getSessionId(), options.toolCallId, () =>
-          callProvider(engine, key, {
-            prompt,
-            size,
-            quality,
-            referenceImage,
-          }).then((result) => ({
-            type: "image" as const,
-            provider: result.provider,
-            mimeType: result.mimeType,
-            width: result.width,
-            height: result.height,
-            base64: result.base64,
-            url: result.url,
-            prompt,
-          })),
-        3 * 60_000,
+        // Same engine + same prompt + same options = the same picture. A
+        // retry (the model re-calling because it read "generating" as a
+        // failure) attaches to the in-flight job instead of paying for and
+        // displaying a second generation.
+        const dedupeKey = `image:${engine}:${wanted}:${size ?? ""}:${quality ?? ""}:${referenceImage ? "edit" : "new"}:${prompt}`;
+
+        spawnMediaTask(
+          ctx.getSessionId(),
+          options.toolCallId,
+          () =>
+            // Sequential, not parallel: image endpoints rate-limit hard and a
+            // burst of 4 concurrent requests is what produces spurious 429s.
+            generateMany(wanted, () =>
+              callProvider(engine, key, { prompt, size, quality, referenceImage }),
+            ).then((results) => ({
+              type: "image" as const,
+              provider: results[0]!.provider,
+              mimeType: results[0]!.mimeType,
+              width: results[0]!.width,
+              height: results[0]!.height,
+              base64: results[0]!.base64,
+              url: results[0]!.url,
+              // Only present for multi-image requests; MediaMessage renders
+              // every entry and falls back to the single fields above.
+              images: results.map((r) => ({
+                base64: r.base64,
+                url: r.url,
+                mimeType: r.mimeType,
+                width: r.width,
+                height: r.height,
+              })),
+              prompt,
+            })),
+          3 * 60_000,
+          dedupeKey,
         );
 
         return {
@@ -129,16 +164,33 @@ when the user explicitly names one — never ask, and never assume OpenAI.`,
           kind: "image",
           provider: engine,
           providerLabel: PROVIDER_LABEL[engine],
+          count: wanted,
           // Tell the model (and the user) when its request was redirected, so
           // it can narrate "using Google" instead of claiming OpenAI.
           ...(picked.substituted && provider
             ? { note: `${provider} has no API key, so ${engine} was used instead.` }
             : {}),
+          // The image lands in this card when the job finishes. Models read
+          // the bare placeholder as a failure and call the tool again, which
+          // produced duplicate/looping generations.
+          next: `The ${wanted === 1 ? "image" : `${wanted} images`} will appear in this card when ready, usually 10-60 seconds. Do NOT call generate_image again for this prompt: wait for the card to update. Only retry if the card reports an error.`,
           prompt,
         };
       },
     }),
   } as const;
+}
+
+/** Run `gen` `n` times in sequence, stopping at the first failure. Partial
+ *  success is deliberately NOT returned: a half-populated grid with no error
+ *  reads as "the missing ones are still coming". */
+async function generateMany(
+  n: number,
+  gen: () => Promise<ImageResult>,
+): Promise<ImageResult[]> {
+  const out: ImageResult[] = [];
+  for (let i = 0; i < n; i++) out.push(await gen());
+  return out;
 }
 
 async function callProvider(

@@ -2,6 +2,14 @@ import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 import Download04Icon from "@hugeicons/core-free-icons/Download04Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect } from "react";
+import { safeMediaFilename } from "../lib/media/filename";
+
+/** `data:image/png;base64,...` -> `image/png`. Undefined for blob/http URLs,
+ *  where the caller's `kind` supplies the fallback extension. */
+function mimeTypeFromDataUri(src: string): string | undefined {
+  const m = /^data:([^;,]+)[;,]/.exec(src);
+  return m?.[1];
+}
 
 type Props = {
   /** Base64 data URI or blob URL. */
@@ -28,7 +36,12 @@ export function MediaLightbox({ src, alt, kind, onClose }: Props) {
   const download = () => {
     const a = document.createElement("a");
     a.href = src;
-    a.download = alt ?? (kind === "image" ? "kai-image.png" : "kai-video.mp4");
+    // `alt` is the full prompt - never a filename. It flooded the save
+    // dialog's name field and broke extension parsing.
+    a.download = safeMediaFilename(alt, {
+      mimeType: mimeTypeFromDataUri(src),
+      kind,
+    });
     a.click();
   };
 

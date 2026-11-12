@@ -51,7 +51,7 @@ describe("Veo 3.1 image-to-video wiring", () => {
   it("tool schema exposes imagePath and threads it through", () => {
     expect(videoToolSrc).toContain("imagePath: z");
     expect(videoToolSrc).toMatch(
-      /execute: async \(\{ prompt, duration, aspect_ratio, imagePath \}, options\)/,
+      /execute: async \(\{ prompt, duration, aspect_ratio, imagePath, count \}, options\)/,
     );
     expect(videoToolSrc).toContain("referenceImage,");
     expect(videoToolSrc).toContain("native.readFileBytes(abs)");
@@ -112,9 +112,11 @@ describe("Nano Banana 2 image editing wiring", () => {
   it("tool schema exposes imagePath and threads it through", () => {
     expect(toolSrc).toContain("imagePath: z");
     expect(toolSrc).toMatch(
-      /execute: async \(\{ prompt, provider, size, quality, imagePath \}, options\)/,
+      /execute: async \(\{ prompt, provider, size, quality, count, imagePath \}, options\)/,
     );
-    expect(toolSrc).toContain("referenceImage,");
+    // The reference image must reach the provider call (the call object is
+    // inline now that the tool also threads count/engine).
+    expect(toolSrc).toMatch(/callProvider\(engine, key, \{[\s\S]*?referenceImage[\s\S]*?\}\)/);
   });
 
   it("non-google providers refuse imagePath explicitly", () => {

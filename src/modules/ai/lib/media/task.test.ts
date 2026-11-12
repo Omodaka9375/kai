@@ -73,6 +73,54 @@ describe("background media task lifecycle", () => {
     expect(resolveMedia).toHaveBeenCalledWith("s", "call", { type: "image", base64: "ok" });
   });
 
+  it("shares one provider request between retries of the same prompt", async () => {
+    // "you are generating images in loop and I only wanted one": a model that
+    // reads the placeholder as a failure re-calls with the same prompt.
+    const run = vi.fn(
+      () =>
+        new Promise((resolve) =>
+          setTimeout(() => resolve({ type: "image", base64: "one" }), 1000),
+        ),
+    );
+    spawnMediaTask("s", "call-a", run, 10_000, "google:prompt");
+    spawnMediaTask("s", "call-b", run, 10_000, "google:prompt");
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(run).toHaveBeenCalledTimes(1);
+    // BOTH cards receive the result, so neither is left spinning.
+    expect(resolveMedia).toHaveBeenCalledWith("s", "call-a", { type: "image", base64: "one" });
+    expect(resolveMedia).toHaveBeenCalledWith("s", "call-b", { type: "image", base64: "one" });
+  });
+
+  it("reuses a completed result instead of generating the same image twice", async () => {
+    const first = vi.fn(async () => ({ type: "image", base64: "cached" }));
+    spawnMediaTask("s", "call-a", first, 10_000, "google:prompt");
+    await vi.advanceTimersByTimeAsync(0);
+    // The model retries AFTER the first card resolved.
+    spawnMediaTask("s", "call-b", first, 10_000, "google:prompt");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(resolveMedia).toHaveBeenCalledWith("s", "call-b", { type: "image", base64: "cached" });
+  });
+
+  it("does not cache a failure: the retry really retries", async () => {
+    const run = vi.fn(async () => {
+      throw new Error("blocked");
+    });
+    spawnMediaTask("s", "call-a", run, 10_000, "google:prompt");
+    await vi.advanceTimersByTimeAsync(0);
+    spawnMediaTask("s", "call-b", run, 10_000, "google:prompt");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps jobs with different prompts independent", async () => {
+    const run = vi.fn(async () => ({ type: "image", base64: "x" }));
+    spawnMediaTask("s", "call-a", run, 10_000, "google:one");
+    spawnMediaTask("s", "call-b", run, 10_000, "google:two");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+
   it("does not accept the run's abort signal at all (signature pin)", async () => {
     // No parameter position for a run signal: the job's lifetime is its own
     // timeout, never the agent turn's.

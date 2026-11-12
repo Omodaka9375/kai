@@ -2,11 +2,23 @@ import { tool } from "ai";
 import { z } from "zod";
 import { getKey } from "../lib/keyring";
 import { generateGoogleVideo } from "../lib/media/google-video";
+import type { VideoResult } from "../lib/media/types";
 import { resolvePath } from "./context";
 import { spawnMediaTask } from "../lib/media/task";
 import { nativeForContext, type ToolContext } from "./context";
 
 const DEFAULT_DURATION = 8;
+
+/** Run `gen` `n` times in sequence, stopping at the first failure (a partial
+ *  set with no error reads as "the rest are still rendering"). */
+async function generateVideos(
+  n: number,
+  gen: () => Promise<VideoResult>,
+): Promise<VideoResult[]> {
+  const out: VideoResult[] = [];
+  for (let i = 0; i < n; i++) out.push(await gen());
+  return out;
+}
 
 /**
  * Video generation — Google Veo only, by design. Other generators (Kling,
@@ -23,7 +35,12 @@ export function buildVideoGenTools(ctx: ToolContext) {
       description: `Generate a video from a text prompt using Google Veo 3.1 (audio-native) — or ANIMATE an existing image (imagePath: Veo animates it as the opening frame; the prompt then describes motion). Uses the configured Google API key — no provider choice needed. Returns the video inline in the conversation.
 
 Video generation takes 1-5 minutes. Auto-executes — no approval needed.
-If the user asks for a different video engine (Kling, Seedance, …), tell them to install that vendor's MCP server in Settings → MCP.`,
+If the user asks for a different video engine (Kling, Seedance, …), tell them to install that vendor's MCP server in Settings → MCP.
+
+ONE GENERATION PER REQUEST. Produce exactly count videos (default 1) in a
+single call. Do NOT call this tool again for the same prompt to "retry", and
+do NOT call it repeatedly to produce several videos: set count instead.
+Only call it again if the user asks for a NEW, different video.`,
       inputSchema: z.object({
         prompt: z
           .string()
@@ -44,9 +61,21 @@ If the user asks for a different video engine (Kling, Seedance, …), tell them 
           .describe(
             "Path to an existing image to ANIMATE - Veo uses it as the opening frame and the prompt describes the motion. Optional - omit for pure text-to-video.",
           ),
+        count: z
+          .number()
+          .int()
+          .min(1)
+          .max(3)
+          .optional()
+          .describe(
+            "How many videos to produce. Default 1. Only set above 1 when the USER explicitly asked for several variations. Each video is a separate multi-minute render.",
+          ),
       }),
-      execute: async ({ prompt, duration, aspect_ratio, imagePath }, options) => {
+      execute: async ({ prompt, duration, aspect_ratio, imagePath, count }, options) => {
         const effectiveDuration = duration ?? DEFAULT_DURATION;
+        // Exactly one unless the user asked for more (clamped: every extra
+        // render is minutes of GPU time and real money).
+        const wanted = Math.min(3, Math.max(1, Math.round(count ?? 1)));
 
         const key = await getKey("google");
         if (!key) {
@@ -81,27 +110,51 @@ If the user asks for a different video engine (Kling, Seedance, …), tell them 
         // (registerRunController), which would kill a 1-5 minute Veo render
         // seconds after it started. The job dies only on its own timeout or
         // an explicit session-level cancel.
+        // Same prompt/options = same video: a retry attaches to the in-flight
+        // job rather than paying for a second multi-minute render.
+        const dedupeKey = `video:${wanted}:${effectiveDuration}:${aspect_ratio ?? ""}:${referenceImage ? "animate" : "new"}:${prompt}`;
+
         spawnMediaTask(ctx.getSessionId(), options.toolCallId, () =>
-          generateGoogleVideo(key, {
-            prompt,
-            duration: effectiveDuration,
-            aspectRatio: aspect_ratio,
-            referenceImage,
-          }).then((result) => ({
-            type: "video" as const,
-            provider: result.provider,
-            mimeType: result.mimeType,
-            durationSeconds: result.durationSeconds,
-            url: result.url,
-            base64: result.base64,
-            prompt,
-          })),
+          // Sequential: each render already takes minutes, and the Veo
+          // long-running-operation quota is small.
+          generateVideos(wanted, () =>
+            generateGoogleVideo(key, {
+              prompt,
+              duration: effectiveDuration,
+              aspectRatio: aspect_ratio,
+              referenceImage,
+            }),
+          ).then((results) => {
+            const first = results[0]!;
+            return {
+              type: "video" as const,
+              provider: first.provider,
+              mimeType: first.mimeType,
+              durationSeconds: first.durationSeconds,
+              url: first.url,
+              base64: first.base64,
+              videos: results.map((r) => ({
+                url: r.url,
+                base64: r.base64,
+                mimeType: r.mimeType,
+                durationSeconds: r.durationSeconds,
+                thumbnailBase64: r.thumbnailBase64,
+              })),
+              prompt,
+            };
+          }),
+          undefined,
+          dedupeKey,
         );
 
         return {
           status: "generating",
           kind: "video",
           provider: "google",
+          count: wanted,
+          // Video renders take minutes. Models read the bare placeholder as
+          // a failure and retry, which stacked duplicate renders.
+          next: `The ${wanted === 1 ? "video" : `${wanted} videos`} will appear in this card when ready, usually 1-5 minutes. Do NOT call generate_video again for this prompt: wait for the card to update. Only retry if the card reports an error.`,
           prompt,
         };
       },

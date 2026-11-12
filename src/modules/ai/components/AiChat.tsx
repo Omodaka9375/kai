@@ -34,7 +34,7 @@ import LeftToRightBlockQuoteIcon from "@hugeicons/core-free-icons/LeftToRightBlo
 import TerminalIcon from "@hugeicons/core-free-icons/TerminalIcon";
 import { SLASH_COMMANDS, Kai_CMD_RE } from "../lib/slashCommands";
 import { Spinner } from "@/components/ui/spinner";
-import { useChatStore, sendMessage, respondToApprovalStandalone, resolveErrorDisplay, approvalContinuationPending } from "../store/chatStore";
+import { useChatStore, sendMessage, respondToApprovalStandalone, resolveErrorDisplay, approvalContinuationPending, getMediaOverride } from "../store/chatStore";
 import type {
   ChatStatus,
   DynamicToolUIPart,
@@ -1296,6 +1296,18 @@ const RenderedTool = memo(function RenderedTool({
       ? part.toolName
       : part.type.replace(/^tool-/, "");
 
+  // A finished background media job OWNS this card. The SDK rewrites the
+  // in-flight assistant message from its own response state on every stream
+  // write, so a resolved image was clobbered back to the "generating"
+  // placeholder (it appeared, then vanished and regenerated). The store's
+  // overlay is the authoritative result; prefer it over part.output.
+  const resolvedMediaOutput =
+    "toolCallId" in part && typeof part.toolCallId === "string"
+      ? getMediaOverride(part.toolCallId)
+      : undefined;
+  const mediaOutput =
+    resolvedMediaOutput ?? ("output" in part ? part.output : undefined);
+
   if (part.state === "approval-requested") {
     return (
       <AiToolApproval
@@ -1316,10 +1328,9 @@ const RenderedTool = memo(function RenderedTool({
       toolName === "generate_video" ||
       toolName === "display_video" ||
       toolName === "display_image") &&
-    "output" in part &&
-    isMediaOutput(part.output)
+    isMediaOutput(mediaOutput)
   ) {
-    return <MediaMessage output={part.output} />;
+    return <MediaMessage output={mediaOutput} />;
   }
 
   // A background media failure is a terminal result too. Without this branch
@@ -1327,12 +1338,11 @@ const RenderedTool = memo(function RenderedTool({
   // rejection looked exactly like a job that never completed.
   if (
     (toolName === "generate_image" || toolName === "generate_video") &&
-    "output" in part &&
-    typeof (part.output as { error?: unknown } | undefined)?.error === "string"
+    typeof (mediaOutput as { error?: unknown } | undefined)?.error === "string"
   ) {
     return (
       <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-        {toolName === "generate_image" ? "Image" : "Video"} generation failed: {String((part.output as { error: string }).error)}
+        {toolName === "generate_image" ? "Image" : "Video"} generation failed: {String((mediaOutput as { error: string }).error)}
       </div>
     );
   }
@@ -1340,10 +1350,9 @@ const RenderedTool = memo(function RenderedTool({
   // Show a live "generating…" state for media jobs running in the background.
   if (
     (toolName === "generate_image" || toolName === "generate_video") &&
-    "output" in part &&
-    isGeneratingMedia(part.output)
+    isGeneratingMedia(mediaOutput)
   ) {
-    const g = part.output;
+    const g = mediaOutput;
     return (
       <div className="flex items-center gap-2 rounded-lg border border-border/40 bg-card/60 px-3 py-2.5 text-xs text-muted-foreground">
         <Spinner />

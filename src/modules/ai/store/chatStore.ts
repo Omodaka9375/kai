@@ -594,6 +594,34 @@ type ResolvedMedia = {
 };
 const resolvedMedia = new Map<string, ResolvedMedia[]>();
 
+/**
+ * RENDER overlay: toolCallId -> resolved media output.
+ *
+ * Why this exists on top of `resolvedMedia` (2026-11-12 "the image got
+ * hidden and regenerated"): `resolveMedia` rewrites `chat.messages`, but the
+ * AI SDK owns that array. `replaceMessage` re-writes the in-flight assistant
+ * message from ITS OWN response state on the next stream write, which knows
+ * nothing about a detached media patch — so the image appeared and was then
+ * clobbered back to the `{status:"generating"}` placeholder, and the model
+ * (whose next-step tool result was the stale placeholder) called
+ * generate_image again. Reading the result through this overlay at RENDER
+ * time makes the card immune to SDK state churn.
+ */
+const mediaOverrides = new Map<string, unknown>();
+
+/** The resolved media output for a tool call, if its job has finished. */
+export function getMediaOverride(toolCallId: string): unknown {
+  return mediaOverrides.get(toolCallId);
+}
+
+/** Drop a deleted session's overlay entries (the map is toolCallId-keyed, so
+ *  it needs the session's own records to know which ids to retire). */
+function clearMediaOverridesForSession(sessionId: string): void {
+  for (const r of resolvedMedia.get(sessionId) ?? []) {
+    mediaOverrides.delete(r.toolCallId);
+  }
+}
+
 /** Re-apply media results to a snapshot, matching by toolCallId (message
  *  indices and object identity are NOT stable across SDK clone flushes). */
 export const __mediaPersistenceForTest = {
@@ -657,6 +685,10 @@ function registerResolvedMedia(
   output: unknown,
   messages: UIMessage[],
 ): void {
+  // Register the render overlay FIRST: the part lookup below can miss (SDK
+  // state churn, message not yet materialized) while the card must still
+  // show the result.
+  mediaOverrides.set(toolCallId, output);
   for (const m of messages) {
     if (m.role !== "assistant") continue;
     const partIndex = m.parts.findIndex((p) =>
@@ -1286,6 +1318,10 @@ export const useChatStore = create<StoreState>((set, get) => ({
 
   resolveMedia: (sessionId, toolCallId, output) => {
     const chat = chats.get(sessionId);
+    // ALWAYS record the render overlay, even with no live chat: it is keyed by
+    // toolCallId alone, so a card that mounts later (switch back, rehydrate)
+    // can still show the finished image instead of a stale placeholder.
+    mediaOverrides.set(toolCallId, output);
     if (!chat) return;
     const msgs = chat.messages;
     const before = resolvedMedia.get(sessionId)?.length ?? 0;
@@ -1294,7 +1330,13 @@ export const useChatStore = create<StoreState>((set, get) => ({
       msgs.some((m) => m.role === "assistant" && m.parts.some((p) =>
         (p as { toolCallId?: string }).toolCallId === toolCallId &&
         (p as { output?: unknown }).output !== output));
-    if (!mutated) return;
+    // The overlay changed regardless of whether the transcript snapshot could
+    // be patched, so the card MUST re-render (the lookup misses while the SDK
+    // is mid-stream rewriting the assistant message).
+    if (!mutated) {
+      set({ _tick: Date.now() });
+      return;
+    }
     const next = msgs.map((m) => {
       if (m.role !== "assistant") return m;
       const parts = m.parts.map((p) => {
@@ -1306,11 +1348,9 @@ export const useChatStore = create<StoreState>((set, get) => ({
       });
       return { ...m, parts } as typeof m;
     });
-    if (mutated) {
-      chat.messages = next;
-      set({ _tick: Date.now() });
-      persistSessionSnapshot(sessionId, next);
-    }
+    chat.messages = next;
+    set({ _tick: Date.now() });
+    persistSessionSnapshot(sessionId, next);
   },
 
   autoApprove: "off" as AutoApproveMode,
@@ -1748,6 +1788,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
 
   deleteSession: (id) => {
     resolvedMedia.delete(id);
+    clearMediaOverridesForSession(id);
     cancelMediaTasksForSession(id);
     removeSessionPreferences(id);
     sessionAutoApprove.delete(id);
