@@ -39,6 +39,12 @@ jobs:
 
       - name: Build frontend
         run: pnpm build
+        env:
+          # Same heap headroom as the release workflow: ubuntu runners
+          # default to a 4 GB cap only because they have 16 GB RAM; make
+          # it explicit so a runner RAM change cannot break CI the same
+          # way it broke the 2.2.8 macOS release build.
+          NODE_OPTIONS: --max-old-space-size=4096
 
   rust:
     runs-on: ubuntu-22.04

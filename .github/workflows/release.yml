@@ -93,6 +93,18 @@ jobs:
     needs: create-release
     permissions:
       contents: write
+    env:
+      # macOS runners have 7 GB RAM, so Node 24 defaults its old-space cap
+      # to ~2 GB — the 2.2.8 vite build OOM'd exactly there (2017 MB
+      # last-resort GC, exit 134, BOTH macOS arms) while the identical tree
+      # passed CI's build on 16 GB ubuntu/windows runners whose default cap
+      # is 4 GB. The bundle's multi-MB lazy chunks (full hugeicons pack,
+      # spell dictionary) grew the peak heap past the cap. Explicit 4 GB
+      # matches what the 16 GB runners give for free; vite build runs alone
+      # (beforeBuildCommand finishes before rustc starts), so it is safe on
+      # 7 GB physical. Covers both tauri-action arms AND the pnpm build
+      # children they spawn.
+      NODE_OPTIONS: --max-old-space-size=4096
     strategy:
       fail-fast: false
       matrix:
