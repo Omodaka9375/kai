@@ -1092,9 +1092,21 @@ pub async fn telegram_send_message(
         // conservative and escapes first, but anything Telegram's HTML
         // parser still rejects with HTTP 400 "can't parse entities" falls
         // back to plain text so the reply is never lost to formatting.
+        // A chunk cut after a ``` opener (split_message trims at 4000 chars
+        // without knowing about fences) leaves <pre> unclosed, Telegram 400s
+        // with "can't parse entities", and the fallback below sends that
+        // chunk as PLAIN TEXT - silently dropping every bullet and heading in
+        // it. Close an open fence at the chunk boundary; the next chunk
+        // re-opens its own because the boundary sits between lines.
+        let body = md_to_telegram_html(&chunk);
+        let body = if has_unclosed_fence(&body) {
+            format!("{body}</pre>")
+        } else {
+            body
+        };
         let html = serde_json::json!({
             "chat_id": chat_id,
-            "text": md_to_telegram_html(&chunk),
+            "text": body,
             "parse_mode": "HTML",
         });
         if let Err(e) = post_json::<serde_json::Value>(&token, "sendMessage", &html).await {
@@ -1477,10 +1489,18 @@ fn run_ffmpeg(input: &[u8], encode_args: &[&str]) -> Result<Vec<u8>, String> {
 ///     are the ones this function emits.
 ///  2. Fenced ``` blocks become <pre> (contents untouched), ``` # headings
 ///     become bold lines, "> quote" lines become <blockquote>.
-///  3. Inline: `code`, **bold**, *italic* (guarded), ~~strike~~, and
+///  3. LISTS ARE NORMALIZED, not marked up: Telegram's HTML parse mode does
+///     NOT support <ul>/<ol>/<li> ("Only the tags mentioned above are
+///     currently supported" — core.telegram.org/bots/api), so raw `- item`
+///     passed through as literal text and the user read a paragraph of
+///     dashes. Bullets become a dot, task boxes become boxes, and ordered
+///     items are RENUMBERED per block (models emit "1." for every item).
+///     Nesting is indented with non-breaking spaces, which Telegram keeps.
+///     A standalone `---` rule becomes a separator line (no <hr> either).
+///  4. Inline: `code`, **bold**, *italic* (guarded), ~~strike~~, and
 ///     [text](http…) links. `_italic_` is deliberately NOT converted —
 ///     snake_case identifiers would be mangled into italics.
-///  4. Unpaired markers stay literal rather than guessing; the caller's
+///  5. Unpaired markers stay literal rather than guessing; the caller's
 ///     plain-text fallback still catches anything Telegram's parser
 ///     rejects (the "can't parse entities" path, unchanged).
 fn md_to_telegram_html(text: &str) -> String {
@@ -1491,6 +1511,10 @@ fn md_to_telegram_html(text: &str) -> String {
 
     let mut out = String::with_capacity(escaped.len() + 64);
     let mut in_fence = false;
+    // (indent level, next number) per open ordered list. Reset by any
+    // non-list content so a new list starts at 1, but PRESERVED across the
+    // blank lines models put between items (a loose list is still one list).
+    let mut ordered: Vec<(usize, u32)> = Vec::new();
     for line in escaped.split('\n') {
         let trimmed = line.trim_start();
         if trimmed.starts_with("```") {
@@ -1502,6 +1526,13 @@ fn md_to_telegram_html(text: &str) -> String {
         if in_fence {
             out.push_str(line);
             out.push('\n');
+            continue;
+        }
+        // "---" / "***" / "___" alone on a line → a visible rule. Telegram
+        // has no <hr>, so a run of box-drawing chars stands in.
+        if is_thematic_break(trimmed) {
+            ordered.clear();
+            out.push_str("──────────\n");
             continue;
         }
         // "# Heading" → bold line (Telegram has no heading concept). '#'
@@ -1517,6 +1548,7 @@ fn md_to_telegram_html(text: &str) -> String {
         if (1..=6).contains(&hashes) {
             let rest = &line[hashes..];
             if rest.starts_with(' ') || rest.starts_with('\t') {
+                ordered.clear();
                 out.push_str("<b>");
                 out.push_str(&md_inline(rest.trim()));
                 out.push_str("</b>\n");
@@ -1528,12 +1560,55 @@ fn md_to_telegram_html(text: &str) -> String {
         if trimmed.len() > 5 && trimmed.starts_with("&gt; ") {
             let q = trimmed[5..].trim();
             if !q.is_empty() {
+                ordered.clear();
                 out.push_str("<blockquote>");
                 out.push_str(&md_inline(q));
                 out.push_str("</blockquote>\n");
                 continue;
             }
         }
+        // List item at any depth. Detected BEFORE inline conversion so a
+        // leading "* " is a bullet, never an italic opener.
+        if let Some((marker, body)) = parse_list_marker(trimmed) {
+            let level = list_indent_level(&line[..line.len() - trimmed.len()]);
+            let bullet = match marker {
+                ListMarker::Bullet => "• ".to_string(),
+                ListMarker::Task(done) => if done { "☑ " } else { "☐ " }.to_string(),
+                ListMarker::Ordered => {
+                    while ordered.last().is_some_and(|(l, _)| *l > level) {
+                        ordered.pop();
+                    }
+                    let n = match ordered.last_mut() {
+                        Some((l, next)) if *l == level => {
+                            let n = *next;
+                            *next += 1;
+                            n
+                        }
+                        _ => {
+                            ordered.push((level, 2));
+                            1
+                        }
+                    };
+                    format!("{n}. ")
+                }
+            };
+            // Two non-breaking spaces per level: Telegram preserves those,
+            // while a plain-space indent can be collapsed by the client.
+            for _ in 0..level {
+                out.push('\u{00A0}');
+                out.push('\u{00A0}');
+            }
+            out.push_str(&bullet);
+            out.push_str(&md_inline(body));
+            out.push('\n');
+            continue;
+        }
+        // Blank line: keep it, and keep any open ordered list alive.
+        if trimmed.is_empty() {
+            out.push('\n');
+            continue;
+        }
+        ordered.clear();
         out.push_str(&md_inline(line));
         out.push('\n');
     }
@@ -1543,6 +1618,99 @@ fn md_to_telegram_html(text: &str) -> String {
         out.pop();
     }
     out
+}
+
+/// `---`, `***`, `___`, optionally spaced out, and nothing else on the line.
+fn is_thematic_break(trimmed: &str) -> bool {
+    let mut count = 0usize;
+    let mut kind: Option<char> = None;
+    for ch in trimmed.chars() {
+        if ch == ' ' || ch == '\t' {
+            continue;
+        }
+        match kind {
+            None => {
+                if !matches!(ch, '-' | '*' | '_') {
+                    return false;
+                }
+                kind = Some(ch);
+                count = 1;
+            }
+            Some(k) if k == ch => count += 1,
+            Some(_) => return false,
+        }
+    }
+    count >= 3
+}
+
+enum ListMarker {
+    Bullet,
+    Task(bool),
+    Ordered,
+}
+
+/// Indent level of a list item. Tabs count as four columns; two columns is
+/// one level (the most common LLM nesting step). Capped so a pathological
+/// line cannot push the body off-screen.
+fn list_indent_level(leading: &str) -> usize {
+    let mut cols = 0usize;
+    for ch in leading.chars() {
+        match ch {
+            ' ' => cols += 1,
+            '\t' => cols += 4,
+            _ => break,
+        }
+    }
+    (cols / 2).min(6)
+}
+
+/// Parse a Markdown list marker at the start of `rest` (already trimmed and
+/// HTML-escaped). Returns the marker and the item body.
+fn parse_list_marker(rest: &str) -> Option<(ListMarker, &str)> {
+    let first = rest.chars().next()?;
+    if matches!(first, '-' | '*' | '+') {
+        let after = &rest[1..];
+        // A marker must be followed by whitespace; "-5 degrees" is prose.
+        if !after.starts_with(' ') && !after.starts_with('\t') {
+            return None;
+        }
+        let body = after.trim_start();
+        if body.is_empty() {
+            return None;
+        }
+        // Task list: "- [ ] " / "- [x]" (checked before the bare bullet).
+        let bytes = body.as_bytes();
+        if bytes.len() >= 3
+            && bytes[0] == b'['
+            && bytes[2] == b']'
+            && (bytes.len() == 3 || bytes[3] == b' ')
+        {
+            let mk = bytes[1];
+            let tail = body[3..].trim_start();
+            if mk == b' ' {
+                return Some((ListMarker::Task(false), tail));
+            }
+            if mk == b'x' || mk == b'X' {
+                return Some((ListMarker::Task(true), tail));
+            }
+        }
+        return Some((ListMarker::Bullet, body));
+    }
+    // Ordered: "1. " or "1) ". ASCII digits, so byte slicing is safe.
+    let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+    if digits == 0 || digits > 9 {
+        return None;
+    }
+    let after = &rest[digits..];
+    for sep in [". ", ") "] {
+        if let Some(body) = after.strip_prefix(sep) {
+            return Some((ListMarker::Ordered, body.trim_start()));
+        }
+    }
+    if after == "." || after == ")" {
+        return Some((ListMarker::Ordered, ""));
+    }
+    None
 }
 
 /// Inline conversion on ALREADY-ESCAPED text (see md_to_telegram_html).
@@ -1665,6 +1833,12 @@ fn md_inline_chars(b: &[char]) -> String {
         i += 1;
     }
     out
+}
+
+/// True when the converted HTML has an odd number of <pre> openers/closers,
+/// i.e. a fence was cut at a chunk boundary and must be closed by hand.
+fn has_unclosed_fence(html: &str) -> bool {
+    html.matches("<pre>").count() > html.matches("</pre>").count()
 }
 
 /// Split into ≤4096-char chunks at line boundaries (Telegram hard cap).
@@ -1839,6 +2013,101 @@ mod tests {
         assert!(h.contains("x = *p"));
         assert!(h.contains("<blockquote>quoted <i>italics</i> text</blockquote>"), "got: {h}");
         assert!(h.contains("<s>gone</s>"));
+    }
+
+    #[test]
+    fn md_to_html_renders_bullet_lists_instead_of_literal_dashes() {
+        // User report: "when telegram assistant writes a list it comes out as
+        // plain text not rendered in html properly from markdown". Telegram's
+        // HTML mode has NO <ul>/<ol>/<li>, so raw "- item" used to survive
+        // verbatim. Bullets are normalized to a real bullet glyph.
+        let h = md_to_telegram_html("- one\n- two\n- **three**");
+        assert_eq!(h, "• one\n• two\n• <b>three</b>");
+        assert!(!h.contains("- "), "marker left literal: {h}");
+    }
+
+    #[test]
+    fn md_to_html_nests_bullets_with_nonbreaking_indent() {
+        let h = md_to_telegram_html("- outer\n  - inner\n    - deeper");
+        assert!(h.starts_with("• outer\n"), "got: {h}");
+        // Two NBSPs per level: clients cannot collapse them the way they
+        // collapse a leading run of plain spaces.
+        assert!(h.contains("\n\u{00A0}\u{00A0}• inner"), "got: {h}");
+        assert!(h.contains("\n\u{00A0}\u{00A0}\u{00A0}\u{00A0}• deeper"), "got: {h}");
+    }
+
+    #[test]
+    fn md_to_html_renumbers_ordered_lists() {
+        // Models emit "1." for every item. Renumber sequentially.
+        let h = md_to_telegram_html("1. first\n1. second\n1. third");
+        assert_eq!(h, "1. first\n2. second\n3. third");
+        // ") " is accepted too.
+        assert_eq!(md_to_telegram_html("1) a\n2) b"), "1. a\n2. b");
+    }
+
+    #[test]
+    fn md_to_html_keeps_one_ordered_list_across_blank_lines() {
+        // A loose list (blank line between items) is still ONE list - the
+        // counter must not reset at each gap.
+        let h = md_to_telegram_html("1. a\n\n2. b\n\n3. c");
+        assert_eq!(h, "1. a\n\n2. b\n\n3. c");
+    }
+
+    #[test]
+    fn md_to_html_restarts_ordered_lists_after_prose() {
+        let h = md_to_telegram_html("1. a\n2. b\n\nSome prose.\n\n1. c");
+        assert_eq!(h, "1. a\n2. b\n\nSome prose.\n\n1. c", "got: {h}");
+    }
+
+    #[test]
+    fn md_to_html_renders_task_lists_as_boxes() {
+        let h = md_to_telegram_html("- [x] done\n- [ ] pending");
+        assert_eq!(h, "☑ done\n☐ pending");
+    }
+
+    #[test]
+    fn md_to_html_leaves_prose_that_only_looks_like_a_list() {
+        // A marker needs trailing whitespace, so a negative number and a
+        // multiplication expression must not become bullets.
+        let src = "Temperature dropped -5 degrees, and 2 * 3 = 6.";
+        assert_eq!(md_to_telegram_html(src), src);
+        // A single dash is not a thematic break either.
+        assert_eq!(md_to_telegram_html("A line with a single - dash"), "A line with a single - dash");
+        // A "*" bullet right after text is NOT a bullet (no line start).
+        assert_eq!(md_to_telegram_html("a * b"), "a * b");
+    }
+
+    #[test]
+    fn md_to_html_converts_standalone_rules() {
+        // Telegram has no <hr>; --- used to render as literal dashes.
+        let h = md_to_telegram_html("above\n\n---\n\nbelow");
+        assert!(h.contains("──────────"), "got: {h}");
+        assert!(!h.contains("---"));
+        // Inside a fence, dashes are content and must survive.
+        let fenced = md_to_telegram_html("```\n---\n```");
+        assert!(fenced.contains("---"), "got: {fenced}");
+    }
+
+    #[test]
+    fn unclosed_fence_is_detected_at_a_chunk_boundary() {
+        // A code fence split across chunks leaves <pre> unbalanced; sending
+        // that would 400 and cost the whole chunk its formatting.
+        let open = md_to_telegram_html("text\n```rust\nfn main() {}");
+        assert!(has_unclosed_fence(&open), "got: {open}");
+        let balanced = md_to_telegram_html("text\n```rust\nfn main() {}\n```\nmore");
+        assert!(!has_unclosed_fence(&balanced), "got: {balanced}");
+        // Closing it by hand yields a parseable chunk.
+        let repaired = format!("{open}</pre>");
+        assert!(!has_unclosed_fence(&repaired));
+    }
+
+    #[test]
+    fn md_to_html_list_items_still_get_inline_formatting() {
+        let h = md_to_telegram_html("- use `code` and **bold** and [x](https://e.com)");
+        assert!(h.starts_with("• "), "got: {h}");
+        assert!(h.contains("<code>code</code>"));
+        assert!(h.contains("<b>bold</b>"));
+        assert!(h.contains("<a href=\"https://e.com\">x</a>"));
     }
 
     #[test]
