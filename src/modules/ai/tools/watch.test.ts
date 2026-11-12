@@ -31,6 +31,11 @@ vi.mock("../lib/sandbox", () => ({
   sandboxExecRoot: vi.fn(async () => null),
 }));
 
+vi.mock("@/modules/assistant/projectBridge", () => ({
+  watchTelegramProjectAllowed: vi.fn(async () => false),
+  watchTelegramPing: vi.fn(async () => undefined),
+}));
+
 const watchModule = await import("./watch");
 const { native } = await import("../lib/native");
 
@@ -68,6 +73,19 @@ describe("watch creation", () => {
     });
     expect(result.error).toContain("Invalid watch condition");
     expect(native.shellSessionOpen).not.toHaveBeenCalled();
+  });
+
+  it("rejects Telegram notifications for an unbound project before opening a shell", async () => {
+    const tools = watchModule.buildWatchTools(testContext());
+    const result = await (tools.watch_create as unknown as CreateTool).execute({
+      command: "status", interval_secs: 60, mode: "fire_on_match",
+      // @ts-expect-error snake-case notification is part of the real tool input
+      notify_telegram: true,
+    });
+    expect(result.error).toContain("explicitly sent to Telegram");
+    expect(result.error).toContain("NOT created");
+    expect(native.shellSessionOpen).not.toHaveBeenCalled();
+    expect(watchModule.listWatches()).toHaveLength(0);
   });
 
   it("opens a separate shell for each watch with its captured cwd", async () => {
@@ -258,6 +276,30 @@ describe("circuit breaker threshold", () => {
   });
 });
 
+describe("watch startup timing", () => {
+  beforeEach(() => {
+    for (const w of watchModule.listWatches()) watchModule.stopWatchById(w.id);
+    vi.useRealTimers();
+      vi.mocked(native.shellSessionRun).mockReset();
+    vi.mocked(native.shellSessionRun).mockResolvedValue({ exit_code: 0, stdout: "ready", stderr: "", timed_out: false, cancelled: false, truncated: false, cwd_after: "D:/project" });
+  });
+
+  it("does not start its shell command until the requested interval elapses", async () => {
+    vi.useFakeTimers({ now: new Date("2026-11-12T17:00:00Z") });
+    await watchModule.startWatch({
+      id: "first-poll-delay", command: "status", intervalSecs: 60,
+      mode: "fire_on_match", shellId: 44, cwd: null, sessionId: "first-poll-delay",
+    });
+    vi.advanceTimersByTime(59_000);
+    watchModule.onWatchSchedulerTick();
+    expect(native.shellSessionRun).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1_000);
+    watchModule.onWatchSchedulerTick();
+    await vi.waitFor(() => expect(native.shellSessionRun).toHaveBeenCalledOnce());
+    vi.useRealTimers();
+  });
+});
+
 describe("watch registry lifecycle", () => {
   beforeEach(() => {
     // Clear any watches left by other tests.
@@ -359,7 +401,7 @@ describe("watch registry lifecycle", () => {
   });
 
   it("retries identical output when its delivery fails", async () => {
-    injectMessageMock.mockRejectedValueOnce(new Error("hydration failed"));
+    const unrelatedForBaseline = { exit_code: 0, stdout: "initial", stderr: "", timed_out: false };
     const w = await watchModule.startWatch({
       id: "watch-delivery-retry",
       command: "status",
@@ -369,6 +411,8 @@ describe("watch registry lifecycle", () => {
       cwd: null,
       sessionId: "session-delivery",
     });
+    await watchModule.handlePollResult(w, unrelatedForBaseline);
+    injectMessageMock.mockRejectedValueOnce(new Error("hydration failed"));
     const result = { exit_code: 0, stdout: "ready", stderr: "", timed_out: false };
     await watchModule.handlePollResult(w, result);
     expect(watchModule.listWatches().find((item) => item.id === w.id)?.deliveryError)
@@ -393,7 +437,7 @@ describe("notify_telegram (schema field → WatchConfig)", () => {
     expect(src).toContain("notifyTelegram: notify_telegram === true");
     // And the firing path actually pings when the flag is set.
     expect(src).toContain("if (w.notifyTelegram)");
-    expect(src).toContain("telegramPing");
+    expect(src).toContain("watchTelegramPing");
   });
 });
 
@@ -487,12 +531,25 @@ describe("match-mode replay dedup (chat scrolling duplicates / context fill)", (
     injectMessageMock.mockClear();
   });
 
-  it("fires ONCE for a persistent condition on identical output", async () => {
+  it("a later new result retries when its chat delivery fails", async () => {
+    const w = await mkWatch();
+    w.condition = 'stdout.includes("FAILED")';
+    await watchModule.handlePollResult(w, { exit_code: 0, stdout: "STATUS: OK", stderr: "", timed_out: false });
+    injectMessageMock.mockRejectedValueOnce(new Error("transient persistence failure"));
+    const changed = { exit_code: 0, stdout: "STATUS: FAILED", stderr: "", timed_out: false };
+    await watchModule.handlePollResult(w, changed);
+    await watchModule.handlePollResult(w, changed);
+    expect(injectMessageMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("the first already-matching poll establishes a baseline without firing", async () => {
     const w = await mkWatch();
     const same = { exit_code: 0, stdout: "STATUS: OK", stderr: "", timed_out: false };
     await watchModule.handlePollResult(w,same);
     await watchModule.handlePollResult(w,same);
     await watchModule.handlePollResult(w,same);
+    expect(injectMessageMock).not.toHaveBeenCalled();
+    await watchModule.handlePollResult(w,{ ...same, stdout: "STATUS: OK\nNEW RESULT" });
     expect(injectMessageMock).toHaveBeenCalledTimes(1);
   });
 
@@ -500,7 +557,15 @@ describe("match-mode replay dedup (chat scrolling duplicates / context fill)", (
     const w = await mkWatch();
     await watchModule.handlePollResult(w,{ exit_code: 0, stdout: "STATUS: OK", stderr: "", timed_out: false });
     await watchModule.handlePollResult(w,{ exit_code: 0, stdout: "STATUS: OK\nNEW LINE", stderr: "", timed_out: false });
-    expect(injectMessageMock).toHaveBeenCalledTimes(2);
+    expect(injectMessageMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("a condition that starts false and becomes true fires only on the transition", async () => {
+    const w = await mkWatch();
+    w.condition = "exit_code !== 0";
+    await watchModule.handlePollResult(w, { exit_code: 0, stdout: "STATUS: OK", stderr: "", timed_out: false });
+    await watchModule.handlePollResult(w, { exit_code: 1, stdout: "STATUS: DOWN", stderr: "", timed_out: false });
+    expect(injectMessageMock).toHaveBeenCalledTimes(1);
   });
 
   it("clears the dedup when the condition stops matching — flapping states re-fire", async () => {
@@ -508,6 +573,7 @@ describe("match-mode replay dedup (chat scrolling duplicates / context fill)", (
     w.condition = "exit_code !== 0";
     const down = { exit_code: 1, stdout: "STATUS: DOWN", stderr: "", timed_out: false };
     const ok = { exit_code: 0, stdout: "STATUS: OK", stderr: "", timed_out: false };
+    await watchModule.handlePollResult(w, ok); // baseline, no firing
     // down → fires; recovers → no match, dedup cleared; down again → re-fires.
     await watchModule.handlePollResult(w,down);
     await watchModule.handlePollResult(w,ok);
@@ -521,7 +587,7 @@ describe("match-mode replay dedup (chat scrolling duplicates / context fill)", (
     const same = { exit_code: 0, stdout: "tick", stderr: "", timed_out: false };
     await watchModule.handlePollResult(w,same);
     await watchModule.handlePollResult(w,same);
-    expect(injectMessageMock).toHaveBeenCalledTimes(1);
+    expect(injectMessageMock).not.toHaveBeenCalled();
   });
 
   it("survives the (stdout || \"\") coalesce style without bogus re-fires", async () => {
@@ -533,7 +599,7 @@ describe("match-mode replay dedup (chat scrolling duplicates / context fill)", (
     const res = { exit_code: 0, stdout: "… ALL_EVALS_DONE …", stderr: "", timed_out: false };
     await watchModule.handlePollResult(w,res);
     await watchModule.handlePollResult(w,res);
-    expect(injectMessageMock).toHaveBeenCalledTimes(1);
+    expect(injectMessageMock).not.toHaveBeenCalled();
   });
 });
 

@@ -103,6 +103,23 @@ export function isProjectBound(projectId: string, prefs: { boundProjects: Record
   return Object.prototype.hasOwnProperty.call(prefs.boundProjects, projectId);
 }
 
+/** Watch phone notifications are project-scoped, not a global bot route.
+ *  Re-check on BOTH watch creation and firing so unbinding takes effect
+ *  even while a command is running. No project identity means no phone
+ *  notification: a watch must never fall back to the owner's private chat. */
+export async function watchTelegramProjectAllowed(projectId: string | null): Promise<boolean> {
+  if (!projectId) return false;
+  return isProjectBound(projectId, await loadAssistantPrefs());
+}
+
+export async function watchTelegramPing(text: string, projectId: string | null): Promise<void> {
+  if (!(await watchTelegramProjectAllowed(projectId))) return;
+  // Import lazily: this module already imports chatStore, which imports the
+  // watch tool. Avoid another static store <-> assistant cycle on this path.
+  const { telegramPing } = await import("./index");
+  await telegramPing(text);
+}
+
 // ── Session resolution (group-store pattern) ─────────────────────────────
 
 /** Resolve the session a /tell should land in: the project's CURRENT active

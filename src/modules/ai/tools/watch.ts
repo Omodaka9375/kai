@@ -117,8 +117,8 @@ export interface WatchConfig {
   mode: WatchMode;
   /** Human-readable label shown when the watch fires. */
   label?: string;
-  /** ALSO ping the owner's Telegram when this watch fires (needs the
-   *  personal assistant enabled + bound). */
+  /** Opt into a phone notification for this firing. Creation and firing both
+   *  require the owning project to have been explicitly sent to Telegram. */
   notifyTelegram?: boolean;
   /** Shell session ID used for execution. */
   shellId: number;
@@ -187,7 +187,7 @@ export async function startWatch(config: WatchConfig): Promise<WatchState> {
         shouldDeliver,
       );
     }),
-    nextDue: Date.now(),
+    nextDue: Date.now() + config.intervalSecs * 1000,
     inFlight: false,
     consecutiveFailures: 0,
     lastError: null,
@@ -238,6 +238,10 @@ export function reapSessionWatches(sessionId: string): void {
 }
 
 /** Get all active watch configs (for listing). */
+export function onWatchSchedulerTick(): void {
+  schedulerTick();
+}
+
 export function listWatches(): WatchConfig[] {
   return Array.from(watches.values())
     .filter((w) => w.active)
@@ -302,6 +306,16 @@ export async function handlePollResult(
     }
     w.consecutiveFailures = 0;
     w.lastError = null;
+    if (!w.hasBaseline) {
+      // Creation is not a state change. Establish a baseline on the first
+      // successful poll instead of firing just because the condition was
+      // already true at setup. Later distinct matches still fire; a state
+      // that leaves the condition and re-enters it does the same.
+      w.lastResult = fingerprint;
+      w.hasBaseline = true;
+      if (check.value) w.lastFired = firedResultKey(result);
+      return;
+    }
     if (check.value) {
       // Replay dedup: a condition that keeps matching on IDENTICAL output
       // fires ONCE, not once per poll. Each re-fire used to inject a fresh
@@ -792,18 +806,21 @@ async function injectWatchResult(
     }
   }
 
-  // Optional Telegram ping: the same firing ALSO reaches the owner's phone
-  // when the watch opted in. Fail-soft — no assistant → silent no-op.
+  // Optional Telegram ping: only a project explicitly bound for Telegram
+  // can reach the owner's phone. Re-check after delivery because the user
+  // may have unbound it while the poll ran. No project binding = no phone.
   if (w.notifyTelegram) {
-    void import("@/modules/assistant")
-      .then(({ telegramPing }) => {
+    const ownerProject = projectIdForSession(sessionId);
+    void import("@/modules/assistant/projectBridge")
+      .then(({ watchTelegramPing }) => {
         if (!w.active) return;
-        return telegramPing(
+        return watchTelegramPing(
           `Watch fired: ${w.label ?? w.command}\n\n${stdoutTrimmed.slice(0, 3000)}`,
+          ownerProject,
         );
       })
       .catch(() => {
-        /* assistant module not loadable — ignore */
+        /* bridge unavailable is fail-soft; the desktop result already landed */
       });
   }
 }
@@ -834,7 +851,7 @@ export function buildWatchTools(ctx: ToolContext) {
   return {
     watch_create: tool({
       description:
-        "Create a periodic watch on a shell command. The command is polled every N seconds. When the condition matches (or output changes, in change-detection mode), the result is injected into the conversation as new information. Use for CI/CD monitoring, build status polling, process watching, and git change detection. Watches are automatically stopped when the session ends. IMPORTANT: while the watch is active, DO NOT poll the same thing yourself with sleep loops or repeated manual runs — the watch fires by itself and your turn blocks; end your turn and wait for the injection. Use watch_list to see active watches, watch_kill to stop one.",
+        "Create a periodic watch on a shell command, starting after the requested interval. The first successful poll establishes a baseline and never notifies; later new matches (or output changes) are injected into the conversation as new information. Use for CI/CD monitoring, build status polling, process watching, and git change detection. Watches are automatically stopped when the session ends. IMPORTANT: while the watch is active, DO NOT poll the same thing yourself with sleep loops or repeated manual runs — the watch fires by itself and your turn blocks; end your turn and wait for the injection. Use watch_list to see active watches, watch_kill to stop one. Telegram notifications additionally require the project to have been explicitly sent to Telegram.",
       inputSchema: z.object({
         command: z.string().describe("Shell command to run periodically."),
         interval_secs: z.number().min(5).max(300).describe("Polling interval in seconds (5-300)."),
@@ -846,7 +863,7 @@ export function buildWatchTools(ctx: ToolContext) {
         ),
         label: z.string().optional().describe("Human-readable label for notifications."),
         notify_telegram: z.boolean().optional().describe(
-          "ALSO send a Telegram ping to the user when this watch fires (requires the personal assistant to be enabled and bound). Use for long-running jobs the user walks away from.",
+          "ALSO send a Telegram ping when this watch fires, but only when this project was explicitly sent to Telegram. Bound means a specific desktop project, not merely a configured or enabled assistant bot. Required at create time and checked again at firing time; unbound projects stay desktop-only. Use for long-running jobs the user walks away from.",
         ),
       }),
       needsApproval: true,
@@ -887,6 +904,15 @@ export function buildWatchTools(ctx: ToolContext) {
           const client = nativeForContext(ctx);
           const cwd = ctx.getCwd();
           const sandboxOverride = await sandboxOverrideForContext(ctx);
+          const projectId = ctx.projectId ?? projectIdForSession(sessionId);
+          if (notify_telegram === true) {
+            const { watchTelegramProjectAllowed } = await import("@/modules/assistant/projectBridge");
+            if (!(await watchTelegramProjectAllowed(projectId))) {
+              return {
+                error: "Telegram notifications are only available for a project explicitly sent to Telegram. Bind this project in its session menu, then create the watch again. The watch was NOT created.",
+              };
+            }
+          }
           const shellId = await client.shellSessionOpen(cwd);
           const id = `watch_${generateId().slice(0, 6)}`;
           try {

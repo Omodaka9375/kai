@@ -59,12 +59,15 @@ import {
   listBoundProjects,
   tellProject,
   unbindProjectFromTelegram,
+  watchTelegramPing,
   __resetProjectMonitorForTest,
 } from "./projectBridge";
 
 const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
 const bridge = read("./projectBridge.ts");
 const index = read("./index.ts");
+const telegramPingMock = vi.hoisted(() => vi.fn(async () => undefined));
+vi.mock("./index", () => ({ telegramPing: telegramPingMock }));
 const menuItem = read("../ai/components/TelegramMonitorMenuItem.tsx");
 
 // chatStore mock: sessions + injectMessage spy.
@@ -106,8 +109,27 @@ beforeEach(() => {
   testRouting.busy = false;
   activeSessions.splice(0, activeSessions.length, { id: "s-1", workspaceRoot: "D:/Code/demo", title: "demo" });
   injectMessageMock.mockReset();
+  telegramPingMock.mockClear();
   ensureChatHydratedMock.mockClear();
   steeringMock.mockClear();
+});
+
+describe("project-scoped watch notifications", () => {
+  it("an unbound project and missing identity never ping the owner", async () => {
+    await watchTelegramPing("unexpected", "unbound-project");
+    await watchTelegramPing("unexpected", null);
+    expect(telegramPingMock).not.toHaveBeenCalled();
+  });
+
+  it("a bound project pings, but an unbind while in flight suppresses it", async () => {
+    await bindProjectForTelegramWith("demo-id", "D:/Code/demo", "demo", "s-1");
+    await watchTelegramPing("expected", "demo-id");
+    await vi.waitFor(() => expect(telegramPingMock).toHaveBeenCalledWith("expected"));
+    await unbindProjectFromTelegram("demo-id");
+    telegramPingMock.mockClear();
+    await watchTelegramPing("must stay local", "demo-id");
+    expect(telegramPingMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("bindings", () => {
