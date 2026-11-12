@@ -4,6 +4,17 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [2.2.9]
+
+- Media: updated native providers to current models and APIs: OpenAI GPT Image 2.6 Flare, Google Nano Banana 2.1, xAI Grok Imagine Image 2.0, and Google Gemini Omni 1.2 Flash.
+- Media: added xAI Grok Imagine Video 1.5 Lite generation with polling and download.
+- Media: image editing now works with Google, OpenAI, and xAI, and generated images retain their real dimensions and local paths for follow-up edits or animation.
+- Media: fixed Google video requests by enabling stored interactions required for URI delivery.
+- Media: different reference images no longer share cached results.
+- Assistant: Telegram delivery failures are not silent now.
+
+---
+
 ## [2.2.8]
 
 - Media: fixed the image lightbox text painting on top of it.
