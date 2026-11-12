@@ -4,6 +4,15 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [2.2.8]
+
+- Media: fixed the image lightbox text painting on top of it.
+- Media: save button on media uses a native save dialog.
+- Media: video generation moved to Google Gemini Omni Flash (the old Veo 3.1 endpoint was shut down).
+- Media: a generated image path are summarized to a short note and saved.
+
+---
+
 ## [2.2.7]
 
 - Projects: right-click a project tile to change its icon and color.
