@@ -33,6 +33,7 @@ import {
   swapImagePartsToText,
   countInlineImageParts,
   isProviderImageType,
+  summarizeMediaOutputs,
 } from "../extraction";
 import type { ProviderKeys } from "./keyring";
 import { createProxyFetch } from "./proxyFetch";
@@ -693,10 +694,17 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // the UI messages keep the image so the transcript still shows it. `canSee`
   // was resolved above (shared with prompt assembly).
   let swappedImageParts = 0;
+  // Generated-media tool results (generate_image / generate_video) carry the
+  // FULL base64 payload; without this the megabytes re-ride every later
+  // request and one image can blow the context window. The UI transcript
+  // keeps the payload (MediaMessage renders from it) — only the model-bound
+  // copy is summarized to a short note + savedPath.
   const history = normalizeForProvider(
-    canSee
-      ? rawHistory
-      : await swapImagePartsToText(rawHistory),
+    summarizeMediaOutputs(
+      canSee
+        ? rawHistory
+        : await swapImagePartsToText(rawHistory),
+    ),
     provider,
   );
   if (!canSee) {

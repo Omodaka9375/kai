@@ -2,6 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { getKey } from "../lib/keyring";
 import { generateGoogleVideo } from "../lib/media/google-video";
+import { persistGeneratedMedia } from "../lib/media/persist";
 import type { VideoResult } from "../lib/media/types";
 import { resolvePath } from "./context";
 import { spawnMediaTask } from "../lib/media/task";
@@ -136,8 +137,21 @@ Only call it again if the user asks for a NEW, different video.`,
                 aspectRatio: aspect_ratio,
                 referenceImage,
               }),
-            ).then((results) => {
+            ).then(async (results) => {
             const first = results[0]!;
+            // Persist to ~/.kai/media/ — follow-up tools need a PATH, and the
+            // model-bound summary references this file instead of replaying
+            // megabytes of base64 on every later request.
+            const savedPaths = await Promise.all(
+              results.map((r, i) =>
+                persistGeneratedMedia(native, {
+                  kind: "video",
+                  prompt,
+                  mimeType: r.mimeType,
+                  base64: r.base64 ?? "",
+                  index: i,
+                })),
+            );
             return {
               type: "video" as const,
               provider: first.provider,
@@ -145,12 +159,14 @@ Only call it again if the user asks for a NEW, different video.`,
               durationSeconds: first.durationSeconds,
               url: first.url,
               base64: first.base64,
-              videos: results.map((r) => ({
+              savedPath: savedPaths[0],
+              videos: results.map((r, i) => ({
                 url: r.url,
                 base64: r.base64,
                 mimeType: r.mimeType,
                 durationSeconds: r.durationSeconds,
                 thumbnailBase64: r.thumbnailBase64,
+                savedPath: savedPaths[i],
               })),
               prompt,
             };

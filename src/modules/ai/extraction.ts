@@ -254,6 +254,97 @@ export const PROVIDER_IMAGE_TYPES = new Set([
   "image/gif",
 ]);
 
+// ── Generated-media summarization for the model-bound history ──────────────
+//
+// 2026-11-12 report: "generate an image, then a video FROM the image" blew
+// the context window (712k tokens over a 262k limit). The resolved
+// generate_image/generate_video tool result carries the FULL base64 payload
+// (megabytes), `convertToModelMessages` serializes it into the tool-result
+// text, and it re-rides EVERY later request of the session. The model never
+// needs the pixels — it needs to know the generation SUCCEEDED and where
+// the file lives (savedPath powers the edit/animate follow-ups).
+//
+// The UI transcript keeps the full payload (MediaMessage renders from it);
+// only the MODEL-bound copy is summarized. Runs before compaction so the
+// compact pass sees small strings, not base64 monsters it cannot fit.
+
+/**
+ * Replace generated-media payloads in tool-result parts with a short
+ * summary. A result matches when it looks like a media tool output
+ * (`type: "image" | "video"` with base64/bytes). Non-matching parts and
+ * messages pass through by identity.
+ */
+export function summarizeMediaOutputs(messages: ModelMessage[]): ModelMessage[] {
+  let touched = false;
+  const out = messages.map((m): ModelMessage => {
+    if (!Array.isArray(m.content)) return m;
+    let msgTouched = false;
+    const content = (m.content as Record<string, unknown>[]).map((part) => {
+      if (part.type !== "tool-result") return part;
+      const output = part.output;
+      if (!isMediaResultShape(output)) return part;
+      msgTouched = true;
+      return { ...part, output: mediaSummary(output) };
+    });
+    if (!msgTouched) return m;
+    touched = true;
+    return { ...m, content } as ModelMessage;
+  });
+  return touched ? out : messages;
+}
+
+type MediaResultShape = {
+  type: "image" | "video";
+  provider?: string;
+  mimeType?: string;
+  width?: number;
+  height?: number;
+  durationSeconds?: number;
+  savedPath?: string;
+  url?: string;
+  error?: string;
+  prompt?: string;
+  count?: number;
+  [k: string]: unknown;
+};
+
+/** Recognize a resolved generate_image/generate_video tool output. */
+export function isMediaResultShape(v: unknown): v is MediaResultShape {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return false;
+  const o = v as Record<string, unknown>;
+  return (
+    (o.type === "image" || o.type === "video") &&
+    (typeof o.base64 === "string" || typeof o.url === "string")
+  );
+}
+
+/** Short stand-in for a resolved media payload, referenced by path. */
+function mediaSummary(o: MediaResultShape): Record<string, unknown> {
+  const bits: string[] = [];
+  bits.push(o.type === "video" ? "video" : "image");
+  if (o.width && o.height) bits.push(`${o.width}x${o.height}`);
+  if (typeof o.durationSeconds === "number" && o.durationSeconds > 0) {
+    bits.push(`${o.durationSeconds}s`);
+  }
+  if (o.provider) bits.push(`provider: ${o.provider}`);
+  const summary: Record<string, unknown> = {
+    type: o.type,
+    summary: `generated ${bits.join(", ")}`,
+    savedPath: o.savedPath,
+  };
+  if (o.savedPath) {
+    summary.note =
+      o.type === "image"
+        ? "The image is saved at savedPath. Pass that path to generate_image (imagePath) to EDIT it or generate_video (imagePath) to ANIMATE it."
+        : "The video is saved at savedPath.";
+  } else {
+    // No path (persist failed): the file exists ONLY in the chat card — the
+    // model must not claim it can read or re-use it.
+    summary.note = "The media is displayed in the chat card only (not saved to disk).";
+  }
+  return summary;
+}
+
 /** True when a media type is a provider-safe IMAGE payload. */
 export function isProviderImageType(mediaType: string | null | undefined): boolean {
   if (!mediaType) return false;

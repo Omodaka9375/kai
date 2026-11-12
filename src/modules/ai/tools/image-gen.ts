@@ -10,6 +10,7 @@ import {
   type ImageProvider,
 } from "../lib/media/providerChoice";
 import { spawnMediaTask } from "../lib/media/task";
+import { persistGeneratedMedia } from "../lib/media/persist";
 import type { ImageResult } from "../lib/media/types";
 import { resolvePath } from "./context";
 import { nativeForContext, type ToolContext } from "./context";
@@ -136,25 +137,42 @@ Only call it again if the user asks for a NEW, different picture.`,
             // burst of 4 concurrent requests is what produces spurious 429s.
             generateMany(wanted, () =>
               callProvider(engine, key, { prompt, size, quality, referenceImage }),
-            ).then((results) => ({
-              type: "image" as const,
-              provider: results[0]!.provider,
-              mimeType: results[0]!.mimeType,
-              width: results[0]!.width,
-              height: results[0]!.height,
-              base64: results[0]!.base64,
-              url: results[0]!.url,
-              // Only present for multi-image requests; MediaMessage renders
-              // every entry and falls back to the single fields above.
-              images: results.map((r) => ({
-                base64: r.base64,
-                url: r.url,
-                mimeType: r.mimeType,
-                width: r.width,
-                height: r.height,
-              })),
-              prompt,
-            })),
+            ).then(async (results) => {
+              // Persist to ~/.kai/media/ — follow-up tools (edit / animate)
+              // need a PATH, and the model-bound summary references this
+              // file instead of replaying megabytes of base64.
+              const savedPaths = await Promise.all(
+                results.map((r, i) =>
+                  persistGeneratedMedia(native, {
+                    kind: "image",
+                    prompt,
+                    mimeType: r.mimeType,
+                    base64: r.base64 ?? "",
+                    index: i,
+                  })),
+              );
+              return {
+                type: "image" as const,
+                provider: results[0]!.provider,
+                mimeType: results[0]!.mimeType,
+                width: results[0]!.width,
+                height: results[0]!.height,
+                base64: results[0]!.base64,
+                url: results[0]!.url,
+                savedPath: savedPaths[0],
+                // Only present for multi-image requests; MediaMessage renders
+                // every entry and falls back to the single fields above.
+                images: results.map((r, i) => ({
+                  base64: r.base64,
+                  url: r.url,
+                  mimeType: r.mimeType,
+                  width: r.width,
+                  height: r.height,
+                  savedPath: savedPaths[i],
+                })),
+                prompt,
+              };
+            }),
           3 * 60_000,
           dedupeKey,
         );
