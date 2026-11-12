@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import type { Chat } from "@ai-sdk/react";
+import { Chat } from "@ai-sdk/react";
 import type { UIMessage } from "ai";
+import { lastAssistantMessageIsCompleteWithApprovalResponses } from "ai";
 import { applyApprovalResponseToChat, clearSessionStopped, markSessionStopped, settleInterruptedToolMessages, wasSessionStopped } from "./approvalResponses";
 
 /**
@@ -118,6 +119,30 @@ describe("session stop marker", () => {
     clearSessionStopped("interrupted");
     expect(wasSessionStopped("interrupted")).toBe(false);
   });
+
+  it("records a real SDK stop before the final interrupted-run callback", async () => {
+    const onFinish = vi.fn();
+    const chat = new Chat({
+      id: "interrupted-turn",
+      transport: {
+        async sendMessages({ abortSignal }: { abortSignal: AbortSignal }) {
+          await new Promise<void>((resolve) => {
+            if (abortSignal.aborted) { resolve(); return; }
+            abortSignal.addEventListener("abort", () => resolve(), { once: true });
+          });
+          return new ReadableStream({ start: (controller) => controller.close() });
+        },
+        async reconnectToStream() { return null; },
+      } as never,
+      onFinish,
+    });
+    void chat.sendMessage({ text: "run one" });
+    await vi.waitFor(() => expect(chat.status).toBe("submitted"));
+    await chat.stop();
+    await vi.waitFor(() => expect(onFinish).toHaveBeenCalledOnce());
+    expect(onFinish.mock.calls[0]![0]).toMatchObject({ isAbort: true });
+    expect(chat.status).toBe("ready");
+  });
 });
 
 describe("settleInterruptedToolMessages", () => {
@@ -135,6 +160,30 @@ describe("settleInterruptedToolMessages", () => {
     });
     expect(settled[0]!.parts[2]).toMatchObject({ state: "output-error" });
     expect(settled[0]!.parts[3]).toBe(done);
+  });
+
+  it("revokes the approval response so an aborted command cannot self-resume", () => {
+    const messages = [{
+      id: "a1", role: "assistant",
+      parts: [approvalPart(true)],
+    }] as UIMessage[];
+    const settled = settleInterruptedToolMessages(messages);
+    expect(settled[0]!.parts[0]).toMatchObject({
+      state: "output-error", toolCallId: "tc-1",
+    });
+    expect(lastAssistantMessageIsCompleteWithApprovalResponses({ messages: settled })).toBe(false);
+  });
+
+  it("scopes cleanup to the interrupted command, not a newly dispatched one", () => {
+    const messages = [{
+      id: "a1", role: "assistant", parts: [
+        { ...approvalPart(true), toolCallId: "old" },
+        { ...approvalPart(), toolCallId: "next", state: "input-available" },
+      ],
+    }] as UIMessage[];
+    const settled = settleInterruptedToolMessages(messages, new Set(["old"]));
+    expect(settled[0]!.parts[0]).toMatchObject({ state: "output-error" });
+    expect(settled[0]!.parts[1]).toMatchObject({ state: "input-available" });
   });
 
   it("leaves pending approval cards for the approval release path", () => {

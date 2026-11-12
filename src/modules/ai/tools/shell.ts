@@ -109,6 +109,15 @@ async function getSessionShell(
   return promise;
 }
 
+function retireSessionShell(key: string, id: number): void {
+  const entry = sessionShells.get(key);
+  sessionShells.delete(key);
+  if (!entry) return;
+  void entry.promise.then((openedId) => {
+    if (openedId === id) return entry.native.shellSessionClose(openedId);
+  }).catch(() => {});
+}
+
 function workspaceSessionKey(sessionId: string, env = currentWorkspaceEnv()): string {
   return `${sessionId}:${workspaceScopeKey(env)}`;
 }
@@ -320,10 +329,14 @@ export function buildShellTools(ctx: ToolContext) {
         const effectiveTimeout = timeout_secs ?? slowCommandTimeout(command);
         const abortSignal = options?.abortSignal;
         let shellId: number | null = null;
-        let cancelled = false;
+        let cancelled = abortSignal?.aborted ?? false;
         const onAbort = () => {
           cancelled = true;
           if (shellId === null) return;
+          // An aborted command must not leave its native shell holding the
+          // cancellation flag or a hung run for the next turn. Retire the
+          // exact entry opened for this command; a new shell is independent.
+          retireSessionShell(shellKey, shellId);
           void native.shellSessionCancel(shellId).catch((e) => {
             console.debug("shellSessionCancel on abort failed:", e);
           });
@@ -335,6 +348,7 @@ export function buildShellTools(ctx: ToolContext) {
           const openedShellId = await getSessionShell(shellKey, cwd, native);
           shellId = openedShellId;
           if (cancelled) {
+            retireSessionShell(shellKey, openedShellId);
             // An earlier tool cancelled during this shared open may already
             // have queued work here. Retire it instead of dispatching after
             // its cancellation was consumed by that earlier command.

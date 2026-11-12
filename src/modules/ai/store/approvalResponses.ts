@@ -51,8 +51,18 @@ export const COMPLETE_PART_STATES = new Set([
 /** The SDK stops the request but does not synthesize results for executing
  *  tools. Give interrupted calls a terminal UI/persistence state instead of
  *  leaving them "running" forever. Pending approval cards are handled by
- *  releasePendingApprovals below, not mislabeled as command failures. */
-export function settleInterruptedToolMessages(messages: UIMessage[]): UIMessage[] {
+ *  releasePendingApprovals below, not mislabeled as command failures.
+ *
+ *  CRITICAL: approval-responded means the SDK will start a continuation
+ *  automatically. Converting only the ERROR state leaves the approval marker
+ *  intact, so a stopped approved command self-resumes as soon as its abort
+ *  finishes. Delete that marker as well. When interruptedToolCallIds is
+ *  supplied, calls not in the set belong to a later turn and must not be
+ *  touched by this delayed cleanup. */
+export function settleInterruptedToolMessages(
+  messages: UIMessage[],
+  interruptedToolCallIds?: ReadonlySet<string>,
+): UIMessage[] {
   let changed = false;
   const settled = messages.map((m) => {
     if (m.role !== "assistant") return m;
@@ -61,14 +71,20 @@ export function settleInterruptedToolMessages(messages: UIMessage[]): UIMessage[
       const part = p as Record<string, unknown>;
       const type = String(part.type ?? "");
       const state = String(part.state ?? "");
+      const callId = (part as { toolCallId?: unknown }).toolCallId;
+      if (
+        interruptedToolCallIds &&
+        (typeof callId !== "string" || !interruptedToolCallIds.has(callId))
+      ) return p;
       if ((!type.startsWith("tool-") && type !== "dynamic-tool") ||
           !["input-available", "input-streaming", "approval-responded"].includes(state)) {
         return p;
       }
       changed = true;
       messageChanged = true;
+      const { approval: _revokedContinuation, ...rest } = part;
       return {
-        ...part,
+        ...rest,
         state: "output-error",
         errorText: "Command stopped by the user.",
       };

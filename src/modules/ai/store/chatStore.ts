@@ -2409,11 +2409,15 @@ function stripIncompleteToolMessages(messages: UIMessage[]): UIMessage[] {
   return changed ? out : messages;
 }
 
-function releasePendingApprovals(chat: Chat<UIMessage>): void {
+function releasePendingApprovals(
+  chat: Chat<UIMessage>,
+  interruptedToolCallIds?: ReadonlySet<string>,
+): void {
   // Chat.stop() aborts the request but does not synthesize tool results.
   // Settle executing parts locally so the transcript cannot retain amber
-  // "running" cards after the user interrupted the command.
-  chat.messages = settleInterruptedToolMessages(chat.messages);
+  // "running" cards after the user interrupted the command. A delayed abort
+  // may arrive after another turn started: only its own calls are settled.
+  chat.messages = settleInterruptedToolMessages(chat.messages, interruptedToolCallIds);
 
   if (!hasPendingApprovals(chat)) return;
   // Absence of permission is denial: latch every still-pending approval id
@@ -2553,11 +2557,14 @@ function describeApproval(
  * blocked. So on stop we also strip those stale parts, which drops
  * `approvalsPending` back to 0 and frees the session.
  */
-function releaseStoppedSessionTools(sessionId: string): void {
+function releaseStoppedSessionTools(
+  sessionId: string,
+  interruptedToolCallIds?: ReadonlySet<string>,
+): void {
   if (!wasSessionStopped(sessionId)) return;
   clearSessionStopped(sessionId);
   const chat = chats.get(sessionId);
-  if (chat) releasePendingApprovals(chat);
+  if (chat) releasePendingApprovals(chat, interruptedToolCallIds);
   patchSessionAgentMeta(sessionId, {
     status: "idle",
     approvalsPending: 0,

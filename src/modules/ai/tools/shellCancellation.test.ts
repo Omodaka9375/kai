@@ -92,6 +92,29 @@ describe("bash_run cancellation and shell replacement", () => {
     expect(native.shellSessionClose).toHaveBeenCalledWith(42);
   });
 
+  it("allows a later turn to replace an aborted native shell", async () => {
+    native.shellSessionOpen.mockResolvedValueOnce(45).mockResolvedValueOnce(46);
+    let abandonOldCommand = false;
+    native.shellSessionRun.mockImplementation((id: number) =>
+      id === 45 && !abandonOldCommand ? new Promise(() => {}) : Promise.resolve(okResult),
+    );
+    const execute = buildShellTools(context()).bash_run.execute as unknown as Execute;
+    const first = new AbortController();
+    const running = execute({ command: "pnpm verify" }, { abortSignal: first.signal });
+    await vi.waitFor(() => expect(native.shellSessionRun).toHaveBeenCalledOnce());
+    first.abort();
+    // A late native cancellation normally abandons the previous call before
+    // this next one; model the small intentional overlap of old and new.
+    abandonOldCommand = true;
+    await expect(execute({ command: "git diff --check" }, {
+      abortSignal: new AbortController().signal,
+    })).resolves.toMatchObject({ exit_code: 0 });
+    await running;
+    expect(native.shellSessionRun).toHaveBeenCalledWith(
+      46, "git diff --check", "D:/project", undefined, null,
+    );
+  });
+
   it("runs a replacement shell even if the interrupted native call never settles", async () => {
     native.shellSessionOpen.mockResolvedValueOnce(43).mockResolvedValueOnce(44);
     native.shellSessionRun.mockImplementation((id: number) =>
