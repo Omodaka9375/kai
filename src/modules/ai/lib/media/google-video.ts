@@ -9,7 +9,7 @@ import type { VideoResult } from "./types";
 //        { model, input: [{type:"text",text} | {type:"image",data,mime_type}],
 //          response_format: { type:"video", aspect_ratio, resolution,
 //                              duration, delivery:"uri" },
-//          store:false, background:false, stream:false }
+//          store:true, background:false, stream:false }
 //   → SYNCHRONOUS unary: the POST blocks until the render finishes (the
 //     Rust proxy allows 600s) and returns
 //     steps[].model_output.content[] = { type:"video", uri, mime_type }.
@@ -112,9 +112,13 @@ export async function generateGoogleVideo(
         delivery: "uri",
       },
       generation_config: generationConfig,
-      // Synchronous unary, nothing retained server-side (no multi-turn).
+      // Synchronous unary. URI delivery requires a stored interaction:
+      // with store:false Google rejects every submit before rendering
+      // ("store=true is required when response format has video delivery
+      // set to URI"). No multi-turn IDs are retained by KAI; the rendered
+      // bytes are saved locally below.
       background: false,
-      store: false,
+      store: true,
       stream: false,
     }),
     apiKey,
@@ -134,8 +138,9 @@ export async function generateGoogleVideo(
 
   // Defensive: background=false should block until done, but if the POST
   // ever returns early (docs drift, proxy edge), poll the interaction
-  // instead of failing on the first response. GET returns the video inline
-  // or with its uri, so the same parser covers both.
+  // instead of failing on the first response. A later GET returns the video
+  // as inline base64 even when the initial POST used URI delivery; only the
+  // initial response is guaranteed to contain the uri.
   let video = findVideoPart(created);
   if (!video && created.id) {
     video = await pollInteraction(created.id, apiKey, opts.signal);
@@ -185,7 +190,7 @@ async function pollInteraction(id: string, apiKey: string, signal?: AbortSignal)
     const json = JSON.parse(resp) as { status?: string; error?: { message?: string } };
     if (json.error) throw new Error(`Video generation failed: ${json.error.message}`);
     const part = findVideoPart(json);
-    if (part && (part.data || part.uri)) return part;
+    if (part) return part;
     if (json.status === "failed" || json.status === "cancelled") {
       throw new Error(`Video generation failed (status: ${json.status})`);
     }
