@@ -17,6 +17,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { saveTextViaDialog } from "@/modules/ai/lib/media/save";
 import {
   extractTableDataFromElement,
   tableDataToCSV,
@@ -48,14 +49,14 @@ function tableDataToPlain(data: TableData): string {
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
-function W(filename: string, body: string, mime: string) {
-  const blob = new Blob([body], { type: mime });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
+// Native save dialog -> fs write. The previous blob-URL + <a download>
+// trick was a silent no-op under the Tauri webview (no download manager),
+// so the download menu items did nothing.
+function saveTableFile(filename: string, text: string) {
+  const ext = filename.includes(".") ? filename.split(".").pop()! : "txt";
+  void saveTextViaDialog({ defaultName: filename, text, extension: ext }).catch(
+    (err) => console.error("[kai] table save failed:", err),
+  );
 }
 
 // ── Context for controls config ────────────────────────────────────────
@@ -206,9 +207,8 @@ function TableDownloadDropdown({ className }: { className?: string }) {
     const data = extractTableDataFromElement(table);
     const text =
       format === "csv" ? tableDataToCSV(data) : tableDataToMarkdown(data);
-    const mime = format === "csv" ? "text/csv" : "text/markdown";
     const ext = format === "csv" ? "csv" : "md";
-    W(`table.${ext}`, text, mime);
+    saveTableFile(`table.${ext}`, text);
     setOpen(false);
   };
 

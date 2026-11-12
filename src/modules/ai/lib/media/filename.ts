@@ -9,7 +9,8 @@
  * is about producing a short, portable, extension-correct name instead.
  */
 
-const MIME_EXT: Record<string, string> = {
+/** Shared with the media save-dialog helper (extension filter). */
+export const MIME_EXT: Record<string, string> = {
   "image/png": "png",
   "image/jpeg": "jpg",
   "image/jpg": "jpg",

@@ -492,6 +492,50 @@ async fn new_project_folder(app: tauri::AppHandle) -> Result<Option<String>, Str
     Ok(Some(path))
 }
 
+/// One entry of a save-dialog file-type filter ("PNG image" -> ["png"]).
+#[derive(serde::Deserialize)]
+pub struct SaveDialogFilter {
+    name: String,
+    extensions: Vec<String>,
+}
+
+/// Native SAVE dialog for media downloads (generated images / videos).
+/// Returns the chosen absolute path (forward slashes), or None when the
+/// user cancelled. The webview's own `<a download>` trick is a silent
+/// no-op under wry/WebView2 — the host must run the dialog and the write,
+/// so the frontend pairs this command with `fs_write_file_bytes`.
+#[tauri::command]
+async fn save_file_dialog(
+    app: tauri::AppHandle,
+    default_name: String,
+    filters: Option<Vec<SaveDialogFilter>>,
+) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let mut builder = app.dialog().file().set_title("Save file");
+    if !default_name.trim().is_empty() {
+        builder = builder.set_file_name(&default_name);
+    }
+    // Start in the OS Downloads folder when it exists — that is where a
+    // browser download would have landed, so the muscle memory carries over.
+    if let Some(dir) = dirs::download_dir() {
+        builder = builder.set_directory(dir);
+    }
+    if let Some(list) = filters {
+        for f in list {
+            // add_filter wants &[&str]; the extensions cross the IPC
+            // boundary as owned Strings, so borrow each one in place.
+            let exts: Vec<&str> = f.extensions.iter().map(|s| s.as_str()).collect();
+            builder = builder.add_filter(f.name, &exts);
+        }
+    }
+    builder.save_file(move |p| {
+        let _ = tx.send(p.map(|pb| pb.to_string().replace('\\', "/")));
+    });
+    // None = user cancelled the dialog — not an error.
+    rx.await.map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Distinguish concurrent instances so their mutable app-global artifacts
@@ -927,6 +971,7 @@ app.manage(Mutex::new(None::<fs::env_probe::EnvInventory>));
             modules::updater::update_install,
             pick_project_folder,
             new_project_folder,
+            save_file_dialog,
             secrets::secrets_get,
             secrets::secrets_set,
             secrets::secrets_delete,

@@ -1,6 +1,6 @@
-import { memo, useMemo, useState } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 import { MediaLightbox } from "./MediaLightbox";
-import { safeMediaFilename } from "../lib/media/filename";
+import { saveMediaViaDialog } from "../lib/media/save";
 import Image02Icon from "@hugeicons/core-free-icons/Image02Icon";
 import Download04Icon from "@hugeicons/core-free-icons/Download04Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -136,17 +136,23 @@ export const MediaMessage = memo(function MediaMessage({ output }: Props) {
     veo: "Veo 3.1",
   }[output.provider] ?? output.provider;
 
-  const download = (entry?: ImageEntry) => {
-    const a = document.createElement("a");
-    a.href = entry ? entrySrc(entry) : src;
-    // A real filename, not the prompt sentence (the OS save dialog used to
-    // receive the whole description as the name AND lose the extension).
-    a.download = safeMediaFilename(output.prompt, {
-      mimeType: entry?.mimeType ?? output.mimeType,
-      kind: output.type,
-    });
-    a.click();
-  };
+  // Native save dialog -> fs_write_file_bytes. The old <a download> click
+  // was a silent no-op under the Tauri webview (no download manager), so
+  // the Save button did nothing. Cancellation is not an error.
+  const download = useCallback(
+    async (entry?: ImageEntry) => {
+      try {
+        await saveMediaViaDialog({
+          src: entry ? entrySrc(entry) : src,
+          prompt: output.prompt,
+          kind: output.type,
+        });
+      } catch (err) {
+        console.error("[kai] media save failed:", err);
+      }
+    },
+    [src, output.prompt, output.type],
+  );
 
   return (
     <>
@@ -218,7 +224,7 @@ export const MediaMessage = memo(function MediaMessage({ output }: Props) {
           </span>
           <button
             type="button"
-            onClick={() => download()}
+            onClick={() => void download()}
             className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground opacity-0 transition-opacity hover:bg-muted/60 hover:text-foreground group-hover/media:opacity-100"
             title="Download"
           >

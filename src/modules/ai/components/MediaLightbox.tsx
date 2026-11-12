@@ -3,14 +3,7 @@ import Download04Icon from "@hugeicons/core-free-icons/Download04Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { safeMediaFilename } from "../lib/media/filename";
-
-/** `data:image/png;base64,...` -> `image/png`. Undefined for blob/http URLs,
- *  where the caller's `kind` supplies the fallback extension. */
-function mimeTypeFromDataUri(src: string): string | undefined {
-  const m = /^data:([^;,]+)[;,]/.exec(src);
-  return m?.[1];
-}
+import { saveMediaViaDialog } from "../lib/media/save";
 
 type Props = {
   /** Base64 data URI or blob URL. */
@@ -34,17 +27,17 @@ export function MediaLightbox({ src, alt, kind, onClose }: Props) {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [onKeyDown]);
 
-  const download = () => {
-    const a = document.createElement("a");
-    a.href = src;
-    // `alt` is the full prompt - never a filename. It flooded the save
-    // dialog's name field and broke extension parsing.
-    a.download = safeMediaFilename(alt, {
-      mimeType: mimeTypeFromDataUri(src),
-      kind,
-    });
-    a.click();
-  };
+  // Native save dialog -> fs_write_file_bytes. The old <a download> click
+  // was a silent no-op under the Tauri webview (no download manager), so
+  // the Download button did nothing.
+  const download = useCallback(async () => {
+    try {
+      // `alt` is the full prompt - passed only for the default filename.
+      await saveMediaViaDialog({ src, prompt: alt, kind });
+    } catch (err) {
+      console.error("[kai] media save failed:", err);
+    }
+  }, [src, alt, kind]);
 
   // Portaled to document.body: the chat wraps every message part in a
   // framer-motion div (PartAppear) with willChange: transform, which makes
@@ -82,7 +75,7 @@ export function MediaLightbox({ src, alt, kind, onClose }: Props) {
         <div className="absolute top-3 right-3 flex gap-1.5">
           <button
             type="button"
-            onClick={download}
+            onClick={() => void download()}
             className="flex size-8 items-center justify-center rounded-full bg-black/60 text-white/80 transition-colors hover:bg-black/80 hover:text-white"
             title="Download"
           >

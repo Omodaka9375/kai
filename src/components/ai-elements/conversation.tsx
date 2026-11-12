@@ -8,6 +8,7 @@ import Download01Icon from "@hugeicons/core-free-icons/Download01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ComponentProps } from "react";
 import { useCallback } from "react";
+import { saveTextViaDialog } from "@/modules/ai/lib/media/save";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 
 export type ConversationProps = ComponentProps<typeof StickToBottom>;
@@ -143,16 +144,15 @@ export const ConversationDownload = ({
   ...props
 }: ConversationDownloadProps) => {
   const handleDownload = useCallback(() => {
+    // Native save dialog -> fs write. The previous blob-URL + <a download>
+    // trick was a silent no-op under the Tauri webview (no download
+    // manager), so the export button did nothing.
     const markdown = messagesToMarkdown(messages, formatMessage);
-    const blob = new Blob([markdown], { type: "text/markdown" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = filename;
-    document.body.append(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
+    void saveTextViaDialog({
+      defaultName: filename,
+      text: markdown,
+      extension: filename.includes(".") ? filename.split(".").pop()! : "md",
+    }).catch((err) => console.error("[kai] conversation export failed:", err));
   }, [messages, filename, formatMessage]);
 
   return (
