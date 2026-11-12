@@ -846,9 +846,9 @@ app.manage(Mutex::new(None::<fs::env_probe::EnvInventory>));
         })
         .manage(pty::PtyState::default())
         // Close-to-tray backstop: hide the main window instead of closing it.
-        // The frontend's onCloseRequested guard handles the normal path (and
-        // its own first-hide toast); this catches closes the webview can't
-        // answer. The tray's "Quit KAI" exits via app.exit, which bypasses
+        // The frontend's onCloseRequested guard handles the normal path;
+        // this catches closes the webview can't answer. Hiding is silent.
+        // The tray's "Quit KAI" exits via app.exit, which bypasses
         // this handler — the only true exit for the main window.
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

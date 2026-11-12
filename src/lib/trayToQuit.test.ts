@@ -77,9 +77,10 @@ describe("Rust tray + close backstop (modules/tray.rs)", () => {
     expect(tray).toMatch(/prevent_close\(\);[\s\S]*?win\.hide\(\)/);
   });
 
-  it("first-hide notification is one-shot per process", () => {
-    expect(tray).toContain("NOTIFIED_HIDE");
-    expect(tray).toContain("swap(true");
+  it("hides silently without the repetitive keeps-running notification", () => {
+    expect(tray).not.toContain("notify_hidden_once");
+    expect(tray).not.toContain('.title("KAI keeps running")');
+    expect(tray).not.toContain("NotificationExt");
   });
 });
 

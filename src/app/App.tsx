@@ -63,7 +63,8 @@ import {
 import { PreviewStack, type PreviewPaneHandle } from "@/modules/preview";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import { onKeysChanged, setSidebarView, setSidebarWidth, SIDEBAR_WIDTH_DEFAULT, SIDEBAR_WIDTH_MIN, SIDEBAR_WIDTH_MAX } from "@/modules/settings/store";
+import { onKeysChanged, setSidebarView, SIDEBAR_WIDTH_DEFAULT, SIDEBAR_WIDTH_MIN, SIDEBAR_WIDTH_MAX } from "@/modules/settings/store";
+import { flushProjectLayouts, getProjectLayout, patchProjectLayout } from "@/modules/workspace/projectLayout";
 import { ShortcutsDialog } from "@/modules/shortcuts";
 import { useAppShortcuts } from "./useAppShortcuts";
 import { useProjectsMenu } from "./projectsMenu";
@@ -207,6 +208,7 @@ function ActiveSurfaces(props: {
  *  child, and every visual/behavioral gate is a tiny context subscriber. */
 export const ProjectWorkspace = memo(function ProjectWorkspace() {
   const runtime = useProjectRuntime();
+  const initialLayout = runtime ? getProjectLayout(runtime.id) : null;
   const projectsMenu = useProjectsMenu();
   // ACTIVATION REFS (2026-11-02): document-level listeners and lazy tool
   // callbacks check activation via this ref - it is kept current by the
@@ -269,9 +271,8 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
   const explorerReturnFocusRef = useRef<HTMLElement | null>(null);
 
   const sidebarRef = useRef<PanelImperativeHandle | null>(null);
-  const sidebarWidthRef = useRef(SIDEBAR_WIDTH_DEFAULT);
-  const sidebarWidthWriteTimerRef = useRef(0);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const sidebarWidthRef = useRef(initialLayout?.sidebar.width ?? SIDEBAR_WIDTH_DEFAULT);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(initialLayout?.sidebar.collapsed ?? false);
   const [sidebarView, setSidebarViewState] = useState<SidebarViewId>("explorer");
   const persistSidebarView = useCallback((view: SidebarViewId) => {
     setSidebarViewState(view);
@@ -289,9 +290,8 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
   // gap past it). Two rules keep it correct:
   //   1. only the foreground instance writes the var (onResize gate below);
   //   2. the foreground instance re-syncs the var on every activation.
-  // Width and collapsed state are naturally per-project — each instance owns
-  // its panel for its whole mounted life, so there is nothing to save/restore
-  // across switches beyond the var itself.
+  // Each project owns its panel and a persisted layout record; only the
+  // foreground panel writes the document-global expanded-window offset.
   const writeWorkspaceLeft = useCallback((inPixels: number) => {
     const handleW = inPixels > 0 ? 1 : 0;
     document.documentElement.style.setProperty(
@@ -316,7 +316,7 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
   const toggleSidebar = useCallback(() => {
     const p = sidebarRef.current;
     if (!p) return;
-    if (p.getSize().asPercentage <= 0) p.expand();
+    if (p.getSize().asPercentage <= 0) p.resize(`${sidebarWidthRef.current}px`);
     else p.collapse();
   }, []);
   const cycleSidebarView = useCallback(
@@ -336,22 +336,16 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
     },
     [persistSidebarView, sidebarView],
   );
-  const persistSidebarWidth = useCallback((next: number) => {
-    sidebarWidthRef.current = next;
-    if (sidebarWidthWriteTimerRef.current) {
-      window.clearTimeout(sidebarWidthWriteTimerRef.current);
+  const persistSidebarGeometry = useCallback((width: number, collapsed: boolean) => {
+    if (width > 0) sidebarWidthRef.current = width;
+    if (runtime) {
+      patchProjectLayout(runtime.id, {
+        sidebar: { width: sidebarWidthRef.current, collapsed },
+      });
     }
-    sidebarWidthWriteTimerRef.current = window.setTimeout(() => {
-      sidebarWidthWriteTimerRef.current = 0;
-      void setSidebarWidth(next);
-    }, 200);
-  }, []);
-  useEffect(() => {
-    return () => {
-      if (sidebarWidthWriteTimerRef.current) {
-        window.clearTimeout(sidebarWidthWriteTimerRef.current);
-      }
-    };
+  }, [runtime]);
+  useEffect(() => () => {
+    void flushProjectLayouts();
   }, []);
 
   const toggleExplorerFocus = useCallback(() => {
@@ -550,34 +544,24 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
     void initPrefs();
   }, [initPrefs]);
 
-  // Apply persisted sidebar geometry once prefs hydrate. Per-PID WebView2
-  // profiles mean localStorage no longer survives launches, so the store is
-  // the authoritative restore path.
+  // Layouts hydrate before workspaces mount. Always start on the file tree:
+  // eager git mount would race the explorer and PTY initialization.
   useEffect(() => {
     if (!prefsHydrated) return;
-    const s = usePreferencesStore.getState();
-    sidebarWidthRef.current = s.sidebarWidth;
-    // ALWAYS start on the file tree. The persisted view is intentionally not
-    // restored here: if source-control was the last view, every launch opened
-    // the git panel first — it kicks off its snapshot + auto-fetch at mount
-    // and races the file tree / PTY init for the main thread, which reads as
-    // startup lag. The git panel is one click away on the rail when wanted.
     setSidebarViewState("explorer");
-
-    const applyWidth = () => {
+    const applyGeometry = () => {
       const panel = sidebarRef.current;
-      if (panel && s.sidebarWidth !== SIDEBAR_WIDTH_DEFAULT) {
-        panel.resize(`${s.sidebarWidth}px`);
-      }
+      if (!panel || !runtime) return;
+      const sidebar = getProjectLayout(runtime.id).sidebar;
+      if (sidebar.collapsed) panel.collapse();
+      else panel.resize(`${sidebar.width}px`);
     };
-    // The panel ref may not be attached yet when prefs resolve (hydration can
-    // beat the resizable panel mount). Retry once on the next frame.
-    applyWidth();
-    if (s.sidebarWidth !== SIDEBAR_WIDTH_DEFAULT && !sidebarRef.current) {
-      const raf = requestAnimationFrame(applyWidth);
+    applyGeometry();
+    if (!sidebarRef.current) {
+      const raf = requestAnimationFrame(applyGeometry);
       return () => cancelAnimationFrame(raf);
     }
-  }, [prefsHydrated]);
+  }, [prefsHydrated, runtime]);
   const projectModelIds = usePreferencesStore((s) => s.projectModelIds);
 
   const hydrateSessions = useChatStore((s) => s.hydrateSessions);
@@ -1873,13 +1857,13 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
               <ResizablePanel
                 id="sidebar"
                 panelRef={sidebarRef}
-                defaultSize={`${sidebarWidthRef.current}px`}
+                defaultSize={initialLayout?.sidebar.collapsed ? 0 : `${sidebarWidthRef.current}px`}
                 minSize={`${SIDEBAR_WIDTH_MIN}px`}
                 maxSize={`${SIDEBAR_WIDTH_MAX}px`}
                 collapsible
                 collapsedSize={0}
                 onResize={(size) => {
-                  if (size.inPixels > 0) persistSidebarWidth(size.inPixels);
+                  persistSidebarGeometry(size.inPixels, size.inPixels === 0);
                   setSidebarCollapsed(size.inPixels === 0);
                   // Track the workspace left edge (project rail + sidebar +
                   // handle) for the expanded agent window positioning.

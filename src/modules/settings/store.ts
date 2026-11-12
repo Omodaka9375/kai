@@ -238,7 +238,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   commitSigningEnabled: false,
   commitSigningMode: "auto",
   commitSigningKey: "",
-  sidebarWidth: 200,
+  sidebarWidth: 201,
   modelPickerWidth: 544,
   sidebarView: "explorer",
 
@@ -561,8 +561,9 @@ function clampScrollback(value: number): number {
   );
 }
 
-export const SIDEBAR_WIDTH_DEFAULT = 200;
 export const SIDEBAR_WIDTH_MIN = 200;
+// One pixel above the collapse threshold: compact by default, but still open.
+export const SIDEBAR_WIDTH_DEFAULT = SIDEBAR_WIDTH_MIN + 1;
 export const SIDEBAR_WIDTH_MAX = 480;
 
 export function clampSidebarWidth(value: number): number {

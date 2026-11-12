@@ -104,6 +104,24 @@ describe("multi-project workspace ownership", () => {
     expect(rowEnd).toBeLessThan(statusBar);
   });
 
+  it("hydrates and persists geometry per project, including collapse", () => {
+    const layout = readFileSync(
+      new URL("../modules/workspace/projectLayout.ts", import.meta.url),
+      "utf8",
+    );
+    const gate = readFileSync(new URL("./workspaceActivation.tsx", import.meta.url), "utf8");
+    const mini = readFileSync(new URL("../modules/ai/components/AiMiniWindow.tsx", import.meta.url), "utf8");
+    expect(shell).toContain("hydrateProjectLayouts()");
+    expect(workspace).toContain("getProjectLayout(runtime.id)");
+    expect(workspace).toContain("persistSidebarGeometry(size.inPixels, size.inPixels === 0)");
+    expect(layout).toContain('new LazyStore("kai-project-layouts.json"');
+    expect(layout).toContain("panelOpen: boolean");
+    expect(gate).toContain("getProjectLayout(projectRuntime.id).aiWindow");
+    expect(gate).toContain("panelOpen: aiWindow.panelOpen");
+    expect(gate).toContain("useChatStore.subscribe");
+    expect(mini).not.toContain('aria-label="Resize AI window"');
+  });
+
   it("positions the expanded AI window from the FOREGROUND project's sidebar only", () => {
     // --kai-workspace-left is document-global, but every project mounts its
     // own sidebar panel and background panels fire onResize on mount. The var

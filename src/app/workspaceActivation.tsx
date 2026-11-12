@@ -57,6 +57,7 @@ import { useAgentsStore } from "@/modules/ai/store/agentsStore";
 import { useSkillsStore, refreshProjectSkills } from "@/modules/ai/store/skillsStore";
 import { useMcpStore } from "@/modules/ai/store/mcpStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
+import { getProjectLayout, patchProjectLayout } from "@/modules/workspace/projectLayout";
 import { setLastWorkspaceCwd, setRecentProjects } from "@/modules/settings/store";
 import type { ModelId } from "@/modules/ai/config";
 
@@ -262,10 +263,38 @@ export function WorkspaceActivationGate(props: ActivationGateProps) {
     useAgentsStore.getState().setRoot(root);
   }, [isActive, prefsHydrated, explorerRoot, projectModelIds, prefDefaultModel]);
 
+  // Restore the incoming project's AI presentation, not the outgoing project's
+  // global mini/panel state. Fixed docked geometry stays unchanged.
+  useEffect(() => {
+    if (!isActive || !projectRuntime) return;
+    const aiWindow = getProjectLayout(projectRuntime.id).aiWindow;
+    useChatStore.setState({
+      mini: { open: aiWindow.open, expanded: aiWindow.expanded },
+      panelOpen: aiWindow.panelOpen,
+    });
+  }, [isActive, projectRuntime]);
+
   // ── Session flip + live-bridge activation (was the live effect's
   //    startTransition'd activate()) ─────────────────────────────────────────
   useEffect(() => {
     if (!isActive || !projectRuntime) return;
+    // Subscribe BEFORE restore. The inactive gate unmounted first, so no
+    // outgoing project's writer is left to stamp the incoming state onto it.
+    let previous = useChatStore.getState();
+    const unsubscribe = useChatStore.subscribe((state) => {
+      if (
+        state.mini === previous.mini &&
+        state.panelOpen === previous.panelOpen
+      ) return;
+      previous = state;
+      patchProjectLayout(projectRuntime.id, {
+        aiWindow: {
+          open: state.mini.open,
+          expanded: state.mini.expanded,
+          panelOpen: state.panelOpen,
+        },
+      });
+    });
     // startTransition: these GLOBAL chatStore writes re-render every
     // useChatStore subscriber app-wide. Deferring them out of the
     // visibility-flip paint keeps the project switch from blocking the
@@ -286,7 +315,8 @@ export function WorkspaceActivationGate(props: ActivationGateProps) {
       onActivateLive();
     };
     startTransition(activate);
-  }, [isActive]);
+    return unsubscribe;
+  }, [isActive, projectRuntime]);
 
   // ── Session stamp: the global active id briefly names the OUTGOING
   //    project's chat on a flip — never stamp that id onto this project. ──

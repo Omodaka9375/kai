@@ -20,16 +20,10 @@
 //!  - Quit paths (tray menu item, tray double-click on platforms that map
 //!    it, `app.exit(0)`) bypass the guard: they call `app.exit`, which does
 //!    not route through CloseRequested.
-//!  - First-hide notification: a one-shot toast ("KAI keeps running…")
-//!    the first time the window is hidden per process. Prevents the
-//!    "where did my app go" moment, says how to reach it again, and how to
-//!    truly quit. The settings toggle then controls whether the WINDOW
-//!    close hides at all.
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, Runtime};
-use tauri_plugin_notification::NotificationExt;
 
 /// Wrapper matching the builder's handler shape: the listener receives
 /// (&Window, &WindowEvent); the label is derived here once.
@@ -40,10 +34,6 @@ pub fn on_window_close_requested<R: Runtime>(
 ) {
     on_close_requested_inner(app, window.label(), api)
 }
-
-/// One-shot guard for the "KAI keeps running in the tray" toast.
-static NOTIFIED_HIDE: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
 
 /// Load the tray icon from the bundled default icon set. Falls back to
 /// Tauri's embedded window icon if the file is missing (dev checkouts
@@ -114,30 +104,14 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) -> Result<(), tauri::Error> {
     Ok(())
 }
 
-/// Notify once per process when the main window is hidden to the tray.
-/// Called from the window-event backstop below. Fire-and-forget: a failed
-/// notification must never break the hide.
-pub fn notify_hidden_once<R: Runtime>(app: &AppHandle<R>) {
-    if NOTIFIED_HIDE.swap(true, std::sync::atomic::Ordering::AcqRel) {
-        return; // already shown this process
-    }
-    let _ = app
-        .notification()
-        .builder()
-        .title("KAI keeps running")
-        .body("Agents keep working. Click the tray icon to reopen; right-click → Quit KAI to exit.")
-        .show();
-}
-
 /// Window-event handler installed on the Tauri builder. Intercepts the OS
 /// close (titlebar X, taskbar close, Alt+F4) for the MAIN window and hides
 /// it instead, keeping the process (and every agent run) alive.
 ///
 /// This is the BACKSTOP for the frontend's onCloseRequested guard — the JS
-/// path normally handles this (and shows the first-hide toast via the same
-/// notification plugin); this arm catches closes the webview can't answer
-/// (crashed page, dev server down, JS exception before the listener
-/// installed).
+/// path normally handles this; this arm catches closes the webview can't
+/// answer (crashed page, dev server down, JS exception before the listener
+/// installed). Hiding is deliberately silent.
 ///
 /// NOTE: because this handler runs on every `CloseRequested`, the ONLY way
 /// the main window's close exits the process is an explicit `app.exit` —
@@ -153,7 +127,6 @@ fn on_close_requested_inner<R: Runtime>(
     }
     api.prevent_close();
     if let Some(win) = app.get_webview_window("main") {
-        notify_hidden_once(app);
         let _ = win.hide();
     }
 }

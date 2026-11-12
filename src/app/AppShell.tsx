@@ -33,6 +33,7 @@ import {
 } from "@/modules/workspace";
 import { ProjectWorkspace } from "./App";
 import { ProjectRailItemsContext, ProjectsMenuContext } from "./projectsMenu";
+import { hydrateProjectLayouts } from "@/modules/workspace/projectLayout";
 import { LazyStore } from "@tauri-apps/plugin-store";
 import { Spinner } from "@/components/ui/spinner";
 
@@ -124,6 +125,8 @@ export default function App() {
       setBootStep("loading preferences");
       await bootAwait(usePreferencesStore.getState().init(), () => undefined, "preferences.init");
       const prefs = usePreferencesStore.getState();
+      setBootStep("restoring project layouts");
+      await bootAwait(hydrateProjectLayouts(), () => undefined, "projectLayouts.hydrate");
       setBootStep("resolving home directory");
       const home = await bootAwait(
         homeDir().then((p) => p.replace(/\\/g, "/")),
