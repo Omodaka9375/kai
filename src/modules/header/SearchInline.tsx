@@ -78,7 +78,7 @@ export const SearchInline = forwardRef<SearchInlineHandle, Props>(
     }, [userShortcuts]);
 
     const placeholder = useMemo(() => {
-      return shortcutText ? `Search (${shortcutText})` : "Search";
+      return shortcutText ? `${shortcutText}` : "Search";
     }, [shortcutText]);
 
     const tooltipTitle = useMemo(() => {
