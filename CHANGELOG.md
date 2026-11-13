@@ -4,6 +4,18 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [3.0.0]
+
+- Chat: generated images and videos no longer ride every request as base64; the model gets a short summary with the saved path, and the context meter counts that instead of preview bytes.
+- Chat: video cards play inline again (CSP allowed data: for images but not media).
+- Media: Google image generation works again (the endpoint only accepts image/jpeg responses now).
+- Watches: first poll waits for the interval, and Telegram pings only fire for projects explicitly sent to Telegram.
+- Assistant: screenshots taken by the agent display from a local file path.
+- Assistant: an interrupted command can no longer cancel later turns.
+- Projects: each project remembers its own sidebar and AI window layout.
+
+---
+
 ## [2.2.9]
 
 - Media: updated native providers to current models and APIs: OpenAI GPT Image 2.6 Flare, Google Nano Banana 2.1, xAI Grok Imagine Image 2.0, and Google Gemini Omni 1.2 Flash.
