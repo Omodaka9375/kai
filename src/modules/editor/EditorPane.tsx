@@ -3,6 +3,8 @@ import {
   findPrevious,
   replaceNext as cmReplaceNext,
   replaceAll as cmReplaceAll,
+  RegExpCursor,
+  SearchCursor,
   SearchQuery,
   setSearchQuery,
 } from "@codemirror/search";
@@ -117,6 +119,13 @@ export type EditorPaneHandle = {
   replaceNext: () => void;
   replaceAll: () => void;
   clearQuery: () => void;
+  /** Count matches of the query in the document (capped). null = invalid
+   *  query (e.g. broken regexp) or no editor attached. */
+  countMatches: (
+    search: string,
+    caseSensitive: boolean,
+    regexp: boolean,
+  ) => number | null;
   focus: () => void;
   getSelection: () => string | null;
   getPath: () => string;
@@ -351,6 +360,39 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
               return true;
             },
           },
+          {
+            // Route find/replace to the header's themed SearchInline instead
+            // of CodeMirror's stock panel (which paints its own unstyled DOM
+            // — the "metallic" addon). searchKeymap is disabled below, so
+            // these are the ONLY find bindings. The current selection seeds
+            // the query (single-line only) via the event detail.
+            key: "Mod-f",
+            preventDefault: true,
+            run: (view) => {
+              const { from, to } = view.state.selection.main;
+              const sel = from !== to ? view.state.sliceDoc(from, to) : "";
+              window.dispatchEvent(
+                new CustomEvent("Kai:editor-search", {
+                  detail: { replace: false, selection: sel },
+                }),
+              );
+              return true;
+            },
+          },
+          {
+            key: "Mod-h",
+            preventDefault: true,
+            run: (view) => {
+              const { from, to } = view.state.selection.main;
+              const sel = from !== to ? view.state.sliceDoc(from, to) : "";
+              window.dispatchEvent(
+                new CustomEvent("Kai:editor-search", {
+                  detail: { replace: true, selection: sel },
+                }),
+              );
+              return true;
+            },
+          },
         ]),
       ],
       [],
@@ -463,6 +505,43 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
           view.dispatch({
             effects: setSearchQuery.of(new SearchQuery({ search: "" })),
           });
+        },
+        countMatches: (search, caseSensitive, regexp) => {
+          const view = cmRef.current?.view;
+          if (!view || !search) return null;
+          try {
+            const doc = view.state.doc;
+            // Cap the walk: huge files don't need an exact count past the
+            // display limit (the UI shows 999+), and the counter runs on
+            // every keystroke while typing.
+            const CAP = 1000;
+            let count = 0;
+            if (regexp) {
+              const cursor = new RegExpCursor(doc, search, {
+                ignoreCase: !caseSensitive,
+              });
+              while (!cursor.done && count < CAP) {
+                if (cursor.value) count++;
+                cursor.next();
+              }
+            } else {
+              const cursor = new SearchCursor(
+                doc,
+                search,
+                0,
+                doc.length,
+                caseSensitive ? undefined : (s) => s.toLowerCase(),
+              );
+              while (!cursor.done && count < CAP) {
+                count++;
+                cursor.next();
+              }
+            }
+            return count;
+          } catch {
+            // Invalid regexp mid-typing — not an error, just no count.
+            return null;
+          }
         },
         focus: () => {
           cmRef.current?.view?.focus();
@@ -598,7 +677,10 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
             autocompletion: true,
             highlightActiveLine: true,
             highlightSelectionMatches: true,
-            searchKeymap: true,
+            // The stock find panel is replaced by the header's SearchInline
+            // (routed via the Mod-f/Mod-h keymap above). Its keymap would
+            // also grab Enter/Escape/mod-g for a panel that never opens.
+            searchKeymap: false,
           }}
         />
       </div>

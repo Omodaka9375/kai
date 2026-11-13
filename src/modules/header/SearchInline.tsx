@@ -184,6 +184,62 @@ export const SearchInline = forwardRef<SearchInlineHandle, Props>(
       if (!isEditor) setShowReplace(false);
     }, [isEditor]);
 
+    // ── Editor Ctrl+F / Ctrl+H routing ─────────────────────────────────
+    // The editor's Mod-f/Mod-h keymap dispatches this event INSTEAD of
+    // opening CodeMirror's stock search panel. Seed the query from the
+    // editor selection (single-line only, same as VS Code), then focus.
+    useEffect(() => {
+      const onEditorSearch = (e: Event) => {
+        const detail = (e as CustomEvent<{ replace?: boolean; selection?: string }>).detail ?? {};
+        const sel =
+          detail.selection && !detail.selection.includes("\n")
+            ? detail.selection
+            : "";
+        if (detail.replace) {
+          setShowReplace(true);
+          if (compact) setOpenInCompact(true);
+          if (sel) {
+            setQ(sel);
+            syncSearch(sel);
+          }
+          pendingReplaceFocusRef.current = true;
+          requestAnimationFrame(() => {
+            if (replaceInputRef.current) {
+              replaceInputRef.current.focus();
+              pendingReplaceFocusRef.current = false;
+            }
+          });
+        } else {
+          if (sel) {
+            setQ(sel);
+            syncSearch(sel);
+          }
+          focus();
+        }
+      };
+      window.addEventListener("Kai:editor-search", onEditorSearch);
+      return () => window.removeEventListener("Kai:editor-search", onEditorSearch);
+    }, [compact, focus, syncSearch]);
+
+    // ── Match count (editor target only) ───────────────────────────────
+    const [matchCount, setMatchCount] = useState<number | null>(null);
+    useEffect(() => {
+      if (target?.kind !== "editor" || !q) {
+        setMatchCount(null);
+        return;
+      }
+      let cancelled = false;
+      // Small debounce: the count walks the document per keystroke.
+      const t = setTimeout(() => {
+        const n = target.handle.countMatches(q, caseSensitive, useRegexp);
+        if (!cancelled) setMatchCount(n);
+      }, 120);
+      return () => {
+        cancelled = true;
+        clearTimeout(t);
+      };
+    }, [q, caseSensitive, useRegexp, target]);
+
     return (
       <motion.div
         layout
@@ -214,7 +270,7 @@ export const SearchInline = forwardRef<SearchInlineHandle, Props>(
                   ref={setInputRef}
                   value={q}
                   placeholder={placeholder}
-                  className="h-7 w-full bg-muted/80 pr-16 pl-7 text-[13px]! placeholder:text-muted-foreground/70 focus-visible:ring-0"
+                  className={`h-7 w-full bg-muted/80 text-[13px]! placeholder:text-muted-foreground/70 focus-visible:ring-0 ${isEditor ? "pr-24" : "pr-16"} pl-7`}
                   onChange={(e) => {
                     const next = e.target.value;
                     setQ(next);
@@ -240,6 +296,14 @@ export const SearchInline = forwardRef<SearchInlineHandle, Props>(
                 />
                 {/* Toggle buttons */}
                 <div className="absolute top-1/2 right-1.5 flex -translate-y-1/2 items-center gap-0.5">
+                  {isEditor && q && matchCount !== null && (
+                    <span
+                      className="tabular-nums text-[10px] text-muted-foreground/70"
+                      title="Matches"
+                    >
+                      {matchCount >= 1000 ? "999+" : matchCount}
+                    </span>
+                  )}
                   {isEditor && (
                     <>
                       <button
