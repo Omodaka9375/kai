@@ -522,7 +522,14 @@ function Bridge({
   //     session — the group store itself has no Chat subscription).
   //  2. Flush any group messages that queued while the agent was busy —
   //     deliver-on-idle is the group's no-interruption contract.
-    if (runStatus === "idle") {
+    if (runStatus === "idle" && approvalsPending === 0) {
+      // APPROVAL PAUSE IS NOT RUN SETTLE (same trap the auto-verify effect
+      // below already fixed for verify): a parked approval card maps to
+      // runStatus idle here while the run is mid-flight. Mirroring or
+      // consuming provisions in that window would end the group delivery
+      // unanswered ("agent replied in its own project's chat") and the
+      // mid-run flush would inject a queued delivery into a paused run.
+      // Skip everything until the run's REAL settle.
       // MIRROR GATE (resolveMirrorReply — PURE, NON-CONSUMING): a reply is
       // mirrored into the group transcript ONLY when this session had a
       // group delivery awaiting an answer. Without the gate, any idle reply

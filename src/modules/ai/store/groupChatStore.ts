@@ -1,5 +1,6 @@
 import { LazyStore } from "@tauri-apps/plugin-store";
 import { agentBus } from "../lib/eventBus";
+import { approvalContinuationPending } from "./approvalResponses";
 import {
   getChat,
   getProjectActiveSession,
@@ -1694,6 +1695,20 @@ export function resolveMirrorReply(
     .reverse()
     .find((m) => m.role === "assistant");
   if (!lastAssistant) return null;
+  // APPROVAL CONTINUATION IS NOT A SETTLED REPLY (the "agent replied in its
+  // own project's chat" bug, 2026-11-13): a tool call with an approval card
+  // ends the request — the SDK status settles to "ready" MID-RUN (a parked
+  // approval-requested part, or a multi-second approval-responded window
+  // while transport prep + network latency run). The bridge's idle mirror
+  // path fires in that window and used to mirror the PRE-TOOL narration
+  // text and CONSUME the provision, so the run's real final answer (the one
+  // carrying the @-mentions) never mirrored and stayed in the project chat.
+  // A last assistant message that still carries an approval-requested OR
+  // approval-responded part means the run is mid-flight: mirror nothing —
+  // the post-continuation settle re-runs this resolve with the final text
+  // (the provision is only consumed at the actual append).
+  if (approvalContinuationPending((lastAssistant.parts ?? []) as unknown[]))
+    return null;
   // Same marker hygiene as the persona path: a project agent that echoed
   // fence markers (its own session's tool output is fenced) must not paint
   // them into the group transcript — and the bridge reuses this text for

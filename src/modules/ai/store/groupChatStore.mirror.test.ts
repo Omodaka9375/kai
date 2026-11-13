@@ -202,6 +202,63 @@ describe("resolveMirrorReply — the causality gate (pure, non-consuming)", () =
     const local = [msg("asst-local", "assistant", "local reply")];
     expect(resolveMirrorReply("sess-local", local, null, null)).toBeNull();
   });
+
+  it("an approval-parked run does NOT mirror its pre-tool text (the 'replied in project chat' bug)", async () => {
+    // THE 2026-11-13 REPORT: a group participant calls a tool mid-turn.
+    // The approval card ends the request — status settles to "ready" while
+    // the run is mid-flight. The bridge's idle arm used to mirror the
+    // PRE-TOOL narration and consume the provision, so the run's real final
+    // answer (carrying the @-mentions) stayed in the project chat.
+    const g = await makeGroup();
+    armReplyProvision("sess-b", g.id);
+    const parked: UIMessage = {
+      id: "asst-parked",
+      createdAt: new Date(),
+      role: "assistant",
+      parts: [
+        { type: "text", text: "Let me check the failing test first." },
+        { type: "tool-bash_run", state: "approval-requested" },
+      ],
+    } as unknown as UIMessage;
+    const history = [msg("user", "user", "[group] please check"), parked];
+    // Parked blip: no mirror, no consume.
+    expect(resolveMirrorReply("sess-b", history, "asst-old", null)).toBeNull();
+    expect(peekReplyProvision("sess-b")).toBe(g.id);
+    // The approval-responded continuation window (multi-second transport
+    // prep + network latency) is equally NOT a settle.
+    const continued: UIMessage = {
+      ...parked,
+      id: "asst-parked",
+      parts: [
+        { type: "text", text: "Let me check the failing test first." },
+        { type: "tool-bash_run", state: "approval-responded" },
+      ],
+    } as unknown as UIMessage;
+    expect(
+      resolveMirrorReply("sess-b", [msg("user", "user", "[group] x"), continued], "asst-old", null),
+    ).toBeNull();
+    expect(peekReplyProvision("sess-b")).toBe(g.id);
+    // The run settles with the final answer — now it resolves, text is the
+    // FINAL message, not the pre-tool narration.
+    const settled: UIMessage = {
+      id: "asst-final",
+      createdAt: new Date(),
+      role: "assistant",
+      parts: [
+        { type: "tool-bash_run", state: "output-available" },
+        { type: "text", text: "the test was X — @A see my fix" },
+      ],
+    } as unknown as UIMessage;
+    const m = resolveMirrorReply(
+      "sess-b",
+      [msg("user", "user", "[group] please check"), parked, settled],
+      "asst-old",
+      null,
+    );
+    expect(m).not.toBeNull();
+    expect(m!.text).toBe("the test was X — @A see my fix");
+    expect(m!.assistantId).toBe("asst-final");
+  });
 });
 
 describe("multi-turn conversation flow (delivery -> reply -> next delivery)", () => {
