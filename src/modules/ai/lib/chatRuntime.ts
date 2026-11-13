@@ -199,6 +199,10 @@ export function makeChatSync(
   // one shot — a second overflow after a successful compact means the tail
   // itself is oversized and only the manual card can tell the user.
   const overflowRetriesRef = { current: 0 };
+  // Render-cascade auto-retries: React #185 ("Maximum update depth exceeded")
+  // is a UI-tree failure, not a provider failure — one bounded retry like
+  // the overflow budget; a persistent loop re-errors onto the manual card.
+  const renderRetriesRef = { current: 0 };
 
   const toolContext: ToolContext = (() => {
     // Base context from live state, with shadow-session redirection: while
@@ -426,6 +430,7 @@ export function makeChatSync(
       // retry budget this run consumed is forgiven.
       stallRetriesRef.current = 0;
       overflowRetriesRef.current = 0;
+      renderRetriesRef.current = 0;
       deps.patchAgentMeta({
         hitStepCap: info.hitStepCap,
         finishReason: info.finishReason,
@@ -631,6 +636,53 @@ export function makeChatSync(
             }, 0);
             return;
           }
+        }
+      }
+
+      // ── Render-cascade recovery ────────────────────────────────────────
+      // "Minified React error #185" ("Maximum update depth exceeded" in
+      // dev builds) is thrown by React's nested-sync-commit limit inside the
+      // UI tree while this request streams — the request/provider are
+      // healthy. Routing it to the manual error card (the old behavior)
+      // killed a healthy run with a message the user cannot act on. Treat
+      // it like a stall: ONE regenerate() (drops the orphaned partial and
+      // re-runs over the same history). A persistent render loop burns the
+      // single-shot budget and lands on the manual card as before.
+      if (
+        isActive() &&
+        (msg.includes("Minified React error #185") ||
+          msg.includes("Maximum update depth exceeded"))
+      ) {
+        const MAX_RENDER_RETRIES = 1;
+        if (renderRetriesRef.current < MAX_RENDER_RETRIES) {
+          renderRetriesRef.current += 1;
+          appendSessionEvent(sessionId, {
+            kind: "retry",
+            reason: "render-cascade",
+            attempt: renderRetriesRef.current,
+          });
+          console.info(
+            "[kai] render cascade (React #185) — auto-recovering " +
+              `(${renderRetriesRef.current}/${MAX_RENDER_RETRIES})`,
+          );
+          deps.patchAgentMeta({
+            status: "streaming",
+            error: null,
+            summaryNotice: {
+              at: Date.now(),
+              text: "The interface hit an internal update limit mid-stream — retrying automatically.",
+            },
+          });
+          setTimeout(() => {
+            void chatRef.current?.regenerate().catch((retryErr) => {
+              console.error("[kai] render-cascade retry failed:", retryErr);
+              deps.patchAgentMeta({
+                status: "error",
+                error: resolveErrorDisplay(retryErr),
+              });
+            });
+          }, 0);
+          return;
         }
       }
 

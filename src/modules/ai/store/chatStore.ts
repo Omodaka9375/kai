@@ -850,7 +850,30 @@ export function patchSessionAgentMeta(sessionId: string, patch: Partial<AgentMet
     const { status: _ignored, ...rest } = patch;
     patch = rest;
   }
-  const next = { ...getSessionAgentMeta(sessionId), ...patch };
+  const current = getSessionAgentMeta(sessionId);
+  const next = { ...current, ...patch };
+  // NO-OP DEDUPE: every patch fans out as a zustand setState (new object
+  // identity, so every s.agentMeta subscriber re-renders) plus a manual
+  // listener pass, and each zustand notification dispatches at React
+  // SyncLane. The bridge's status effect patches on EVERY throttled
+  // message flush with unchanged fields (~20/s while streaming), so
+  // without this check each streaming second queued ~20 pointless sync
+  // commits. Chained cascades of those are exactly what climbs React's
+  // nested-update counter to the #185 "Maximum update depth exceeded"
+  // throw mid-run. Skip the whole fan-out when all fields are equal.
+  let changed = false;
+  for (const key of Object.keys(next)) {
+    if (
+      !Object.is(
+        (current as unknown as Record<string, unknown>)[key],
+        (next as unknown as Record<string, unknown>)[key],
+      )
+    ) {
+      changed = true;
+      break;
+    }
+  }
+  if (!changed) return;
   sessionAgentMeta.set(sessionId, next);
   sessionMetaVersion++;
   const ownerId = projectIdForSession(sessionId);

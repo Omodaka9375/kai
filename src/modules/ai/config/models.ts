@@ -750,6 +750,9 @@ export function registerExternalModelLookup(fn: (id: string) => ModelInfo | unde
   externalModelLookup = fn;
 }
 
+/** Ids already warned about in this process (see getModel). */
+const warnedUnknownModels = new Set<string>();
+
 export function getModel(id: ModelId): ModelInfo {
   // Check hardcoded models first.
   const m =
@@ -759,7 +762,14 @@ export function getModel(id: ModelId): ModelInfo {
     // Fall back to a synthetic entry instead of crashing. A saved session
     // may reference a model that was removed from MODELS or hasn't loaded
     // yet via the OpenRouter dynamic fetch. The user can switch models.
-    console.warn(`Unknown model "${id}" — using synthetic fallback.`);
+    // Warn ONCE per id per process: at boot every consumer of the selected
+    // model id (pickers, capability checks, meta, context math) resolves
+    // before the OpenRouter dynamic list lands, which used to spam the
+    // on-disk log with dozens of identical warnings for one unknown id.
+    if (!warnedUnknownModels.has(id)) {
+      warnedUnknownModels.add(id);
+      console.warn(`Unknown model "${id}" — using synthetic fallback.`);
+    }
     return {
       id,
       provider: "openrouter" as ProviderId,
