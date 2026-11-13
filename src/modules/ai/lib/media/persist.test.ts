@@ -152,10 +152,10 @@ const persistSrc = readFileSync(new URL("./persist.ts", import.meta.url), "utf8"
 
 describe("media context fix wiring (2026-11-12)", () => {
   it("agent.ts summarizes media outputs in the model-bound history", () => {
-    // The summarize call wraps the vision-swap result INSIDE
-    // normalizeForProvider — pin both the import and the call shape.
-    expect(agentSrc).toContain("summarizeMediaOutputs,");
-    expect(agentSrc).toMatch(/normalizeForProvider\(\s*summarizeMediaOutputs\(/);
+    // Pin AFTER normalization: provider-specific tool serialization cannot
+    // reintroduce a wrapped payload the summarizer has already discarded.
+    expect(agentSrc).toContain("summarizeMediaOutputs");
+    expect(agentSrc).toMatch(/const history = summarizeMediaOutputs\(\s*normalizeForProvider\(/);
   });
 
   it("both media tools persist results and surface savedPath", () => {
@@ -172,10 +172,11 @@ describe("media context fix wiring (2026-11-12)", () => {
 
   it("the summarizer drops base64 from the model-bound copy only", () => {
     // The summary builder must NOT copy base64/bytes/image fields through.
-    const extractionSrc = readFileSync(new URL("../../extraction.ts", import.meta.url), "utf8");
-    const summaryBlock = extractionSrc.slice(
-      extractionSrc.indexOf("function mediaSummary"),
-      extractionSrc.indexOf("True when a media type is a provider-safe"),
+    const summarySrc = readFileSync(new URL("./modelSummary.ts", import.meta.url), "utf8");
+    const summaryStart = summarySrc.indexOf("export function mediaSummary(");
+    const summaryBlock = summarySrc.slice(
+      summaryStart,
+      summarySrc.indexOf("/** Safe for both", summaryStart),
     );
     expect(summaryBlock).not.toMatch(/\bbase64\b/);
     expect(summaryBlock).not.toMatch(/\bbytes\b/);

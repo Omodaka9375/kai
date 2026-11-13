@@ -33,8 +33,8 @@ import {
   swapImagePartsToText,
   countInlineImageParts,
   isProviderImageType,
-  summarizeMediaOutputs,
 } from "../extraction";
+import { summarizeMediaOutputs } from "./media/modelSummary";
 import type { ProviderKeys } from "./keyring";
 import { createProxyFetch } from "./proxyFetch";
 import { normalizeForProvider } from "./providerNormalize";
@@ -699,13 +699,13 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // request and one image can blow the context window. The UI transcript
   // keeps the payload (MediaMessage renders from it) — only the model-bound
   // copy is summarized to a short note + savedPath.
-  const history = normalizeForProvider(
-    summarizeMediaOutputs(
+  const history = summarizeMediaOutputs(
+    normalizeForProvider(
       canSee
         ? rawHistory
         : await swapImagePartsToText(rawHistory),
+      provider,
     ),
-    provider,
   );
   if (!canSee) {
     swappedImageParts = countInlineImageParts(rawHistory);

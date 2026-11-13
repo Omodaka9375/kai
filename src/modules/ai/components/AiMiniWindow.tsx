@@ -48,6 +48,7 @@ import { TelegramMonitorMenuItem } from "./TelegramMonitorMenuItem";
 import { estimateCost, getModel, getModelContextLimit } from "../config";
 import { effectiveContextLimit, SYSTEM_OVERHEAD_TOKENS } from "../lib/compact";
 import { type SessionMeta } from "../lib/sessions";
+import { estimateContextTokens } from "../lib/media/contextTokens";
 import { absoluteTime, relativeTime } from "../lib/relativeTime";
 import { normalizeWorkspacePath } from "../lib/workspacePath";
 import {
@@ -450,30 +451,8 @@ function Header({
   );
 }
 
-function estimateTokens(messages: UIMessage[]): number {
-  let chars = 0;
-  for (const m of messages) {
-    for (const p of m.parts) {
-      if (p.type === "text") {
-        chars += (p as { text?: string }).text?.length ?? 0;
-      } else if (p.type === "reasoning") {
-        chars += (p as { text?: string }).text?.length ?? 0;
-      } else if (typeof p.type === "string" && p.type.startsWith("tool-")) {
-        const tp = p as unknown as { input?: unknown; output?: unknown };
-        if (tp.input) chars += JSON.stringify(tp.input).length;
-        if (tp.output) chars += JSON.stringify(tp.output).length;
-      } else if (p.type === "file") {
-        // Count file/image parts — data URLs can be multi-MB.
-        // Image tokens vary by provider (e.g. OpenAI: ~85 tokens per 512×512 tile),
-        // but a rough estimate of data length / 4 gives a conservative lower bound.
-        const fp = p as { url?: string; data?: string };
-        const data = fp.url ?? fp.data ?? "";
-        chars += data.length;
-      }
-    }
-  }
-  return Math.ceil(chars / 4);
-}
+// The provider receives a short media summary, not the raw display payload.
+const estimateTokens = estimateContextTokens;
 
 function formatTokens(n: number): string {
   if (n < 1000) return String(n);

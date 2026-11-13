@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getModel, getModelContextLimit, type ModelId } from "../config";
 import { runAgentStream, type AgentUsageDelta, type StackInfo } from "./agent";
 import { compactModelMessagesDetailed } from "./compact";
+import { summarizeMediaOutputs } from "./media/modelSummary";
 import type { ProviderKeys } from "./keyring";
 import { mcpManager } from "./mcpManager";
 import { buildSessionState } from "./sessionState";
@@ -582,12 +583,13 @@ async function maybeSummarize(
 
   // Run the fast compaction check on the model-message form to see if we
   // need summarization (avoids duplicating byte-counting logic).
-  const modelMsgs = await convertToModelMessages(messages);
+  const modelMsgs = summarizeMediaOutputs(await convertToModelMessages(messages));
   const compact = compactModelMessagesDetailed(modelMsgs, contextLimit);
   if (!compact.needsSummarization) return messages;
 
   // Gate on actual token volume — skip summarization if the conversation
-  // is too small for it to be worth the overhead.
+  // is too small for it to be worth the overhead. Generated-media display
+  // payloads are not model tokens and must not trip this gate.
   const tokenEstimate = JSON.stringify(modelMsgs).length / 4;
   if (tokenEstimate < MIN_TOKEN_ESTIMATE_FOR_SUMMARY) return messages;
 
