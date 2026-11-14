@@ -7,11 +7,15 @@ import {
   getGroupStoreVersion,
   getGroups,
   getPersonaApprovals,
+  groupsForProject,
   subscribeGroupChats,
 } from "../store/groupChatStore";
 import {
+  activeProjectId,
+  getActiveProjectVersion,
   getSessionAgentMeta,
   getSessionMetaVersion,
+  subscribeActiveProject,
   subscribeSessionAgentMeta,
   useChatStore,
 } from "../store/chatStore";
@@ -30,7 +34,12 @@ export function GroupPill() {
     getGroupStoreVersion,
   );
   const openMiniToStack = useChatStore((s) => s.openMiniToStack);
-  const groupPanelExpanded = useChatStore((s) => s.groupPanelExpanded);
+  const stackSurface = useChatStore((s) => s.stackRail.surface);
+  const activeProjectVersion = useSyncExternalStore(
+    subscribeActiveProject,
+    getActiveProjectVersion,
+    getActiveProjectVersion,
+  );
   // Approval state lives in session meta, not the group store. Subscribe
   // here or a background participant's waiting badge appears/clears late.
   const sessionMetaVersion = useSyncExternalStore(
@@ -42,6 +51,20 @@ export function GroupPill() {
   // panel is the expanded surface.
   const groups = useMemo(() => getGroups(), [version]);
   const liveCount = groups.filter((g) => g.endedAt === null).length;
+  // STRIP SHARING: in minimized-AI mode (the branch that renders THIS pill
+  // while mini.open is false) a live group paints its own pill on the same
+  // +42px strip. Both are fixed z-40 with the same rect - without a lift
+  // the later-painted AI pill buried the group pill (2026-11-14). Same
+  // predicate AiMiniWindow uses for its +84px docked lift: the ACTIVE
+  // project is a participant in a live group, and the group does NOT own
+  // the slot. In group mode the panel occupies above and the tray pill is
+  // hidden (activeId !== null), so this pill keeps +42 there.
+  const groupPillVisible = useMemo(
+    () =>
+      stackSurface !== "group" &&
+      groupsForProject(activeProjectId() ?? "").length > 0,
+    [version, activeProjectVersion, stackSurface],
+  );
   // Pending approvals across ALL live groups — personas (registry) PLUS
   // background participant sessions awaiting approval cards (2026-11-02
   // audit NIT: the badge counted only persona cards, so a background
@@ -75,12 +98,11 @@ export function GroupPill() {
   // there are no group approvals - liveCount is 0).
   const aiMode = !useMemo(() => getGroups().some((g) => g.endedAt === null), [version]);
 
-  // Full view: the group panel overlays the workspace down to the +42px
-  // strip — the pill's own strip. Hide instead of painting over/below it.
-  // This must stay AFTER every hook: expanding the group keeps this pill
-  // mounted, so an early return here changes the hook order and crashes.
-  if (groupPanelExpanded) return null;
-
+  // Full view (2026-11-14): NO self-hide anymore. The expanded group panel
+  // ends at the +42px strip, so this pill stacks INTO the strip below it -
+  // the same behavior the AI-expanded state already had for the group pill.
+  // The old `if (groupPanelExpanded) return null` made the collapsed AI
+  // chat unreachable while the group was full-view.
   return (
     <button
       type="button"
@@ -93,7 +115,10 @@ export function GroupPill() {
         // height, sits at the bottom edge of the expanded group panel.
         "fixed z-40 flex h-8 items-center gap-1.5 rounded-lg border border-border/60 bg-card px-2.5",
         "text-[11px] text-muted-foreground shadow-md transition-colors hover:bg-accent hover:text-foreground",
-        "right-2 w-[min(34rem,calc(100vw-2rem))] bottom-[calc(var(--kai-input-bar-h,0px)+42px)]",
+        "right-2 w-[min(34rem,calc(100vw-2rem))]",
+        groupPillVisible
+          ? "bottom-[calc(var(--kai-input-bar-h,0px)+84px)]"
+          : "bottom-[calc(var(--kai-input-bar-h,0px)+42px)]",
       )}
     >
       <HugeiconsIcon icon={AiBrain02Icon} size={12} strokeWidth={1.75} className="shrink-0 text-muted-foreground" />

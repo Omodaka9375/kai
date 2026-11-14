@@ -791,8 +791,9 @@ describe("source pins — trust boundary & wiring", () => {
     expect(panel).toContain('stackSurface === "group" && active !== null');
     expect(panel).toContain("closeGroupFromStack();");
     // The group pill and the expanded group panel are the same width as the
-    // AI mini window; the pill hides while the group is expanded (gated by
-    // the panel's OWN expanded boolean — 2026-11-01, see groupChatUx).
+    // AI mini window. 2026-11-14: the pill no longer self-hides when the
+    // group is full-view - it stacks into the +42px strip below the panel
+    // (same behavior the AI-expanded state had for the group pill).
     expect(panel).toContain("w-[min(34rem,calc(100vw-2rem))]");
     expect(pill).toContain("w-[min(34rem,calc(100vw-2rem))]");
     expect(panel).toMatch(
@@ -824,7 +825,7 @@ describe("source pins — trust boundary & wiring", () => {
       "bottom-[calc(var(--kai-input-bar-h,0px)+84px)] h-[min(42rem,calc(100vh-var(--kai-input-bar-h,0px)-134px))]",
     );
     expect(panel).toContain("ArrowExpand01Icon");
-    expect(pill).toContain("groupPanelExpanded");
+    expect(pill).not.toContain("if (groupPanelExpanded) return null;");
   });
 
   it("the panel root stays FIXED - twMerge demotes a second position class (2026-11-02)", () => {

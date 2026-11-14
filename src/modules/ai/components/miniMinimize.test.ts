@@ -48,15 +48,18 @@ describe("AI mini window minimize-to-pill (source pins)", () => {
     expect(pill).toContain("animate-pulse rounded-full bg-emerald-500");
   });
 
-  it("full-view hiding stays below all hooks (expand must not crash)", () => {
-    // ActiveSurfaces keeps the same pill mounted when the group expands.
-    // An early return before the final memo changes its hook count.
-    const earlyReturn = pill.indexOf("if (groupPanelExpanded) return null;");
-    const lastMemo = pill.indexOf("const aiMode = !useMemo(");
-    expect(earlyReturn).toBeGreaterThan(-1);
-    expect(lastMemo).toBeGreaterThan(-1);
-    expect(earlyReturn).toBeGreaterThan(lastMemo);
+  it("the pill stays visible under an expanded group panel (no self-hide)", () => {
+    // 2026-11-14: the old `if (groupPanelExpanded) return null` self-hide
+    // made the collapsed AI chat UNREACHABLE while the group was full-view,
+    // while the AI-expanded state kept the group pill visible. The expanded
+    // geometry ends at the +42px strip, so the pill stacks INTO the strip
+    // below the panel - hooks before render stay intact (no early return).
+    expect(pill).not.toContain("if (groupPanelExpanded) return null;");
+    // Minimized AI + live group: the AI pill lifts to +84 so the group pill
+    // keeps +42 (the two used to paint the same rect, AI pill on top).
+    expect(pill).toContain(
+      'bottom-[calc(var(--kai-input-bar-h,0px)+84px)]',
+    );
     expect(pill).toContain("subscribeSessionAgentMeta");
-    expect(pill).toContain("[version, groups, sessionMetaVersion]");
   });
 });
