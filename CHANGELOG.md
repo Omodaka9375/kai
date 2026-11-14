@@ -4,6 +4,24 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [3.0.1]
+
+- Terminal: fixed the blank first terminal when opening a project on Windows.
+- UI: Git Graph shrinks an expanded AI window or group panel out of the way, like opening a file from the explorer.
+- UI: the expand toggle sits at the left edge of the AI and group chat headers, with minimize staying at the far right.
+- Group chat: the pill below a window stretches to the expanded window's width instead of staying fixed.
+- Group chat: expanded/docked state now carries across pill-click swaps both ways..
+- Group chat: stop button is icon-only, and the composer matches the main input bar's padding and height.
+- Group chat: collapsed header hides the group name; Members/Coordinator/End are icon-only.
+- Sessions: pin and unpin in the session picker; pinned sessions stack on top and show a highlighted row.
+- Chat: body text uses chat-scale typography with dimmed prose so bold and headings stand out.
+- Chat: a quote picked in one project no longer appears in every project's input bar.
+- Editing: non-breaking spaces pasted from web/Word no longer break agent edit matching.
+- Search: the inline search placeholder shows just the shortcut.
+- MCP: Detail popover with author, full description, external links, required environment variables, and trust signals.
+
+---
+
 ## [3.0.0]
 
 - Chat: with generated media the model gets a short summary with the saved path.
