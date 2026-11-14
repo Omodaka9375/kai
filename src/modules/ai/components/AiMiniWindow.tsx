@@ -611,6 +611,7 @@ function SessionPicker() {
   const newSession = useChatStore((s) => s.newSession);
   const deleteSession = useChatStore((s) => s.deleteSession);
   const togglePinSession = useChatStore((s) => s.togglePinSession);
+  const focusInput = useChatStore((s) => s.focusInput);
   const workspaceRoot = useChatStore((s) => s.live.getWorkspaceRoot());
 
   // RULES OF HOOKS: every hook must run on every render. This component
@@ -676,7 +677,16 @@ function SessionPicker() {
           more room than 288px. */}
       <DropdownMenuContent align="end" className="max-h-[60vh] min-w-64 max-w-80 overflow-y-auto">
         <DropdownMenuItem
-          onSelect={() => newSession()}
+          onSelect={() => {
+            newSession();
+            // FOCUS THE INPUT BAR (2026-11-14 ask): the user opens a new
+            // session to type in it, so the caret belongs in the AI input
+            // immediately. focusInput bumps focusSignal and the composer
+            // effect focuses the textarea — but Radix restores focus to the
+            // menu TRIGGER after this handler (menu-close choreography),
+            // which would undo a synchronous focus. Defer past the close.
+            setTimeout(() => focusInput(null), 50);
+          }}
           className="gap-2 text-xs"
         >
           <HugeiconsIcon icon={Add01Icon} size={12} strokeWidth={1.75} />
