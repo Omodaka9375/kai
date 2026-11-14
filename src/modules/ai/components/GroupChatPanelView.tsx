@@ -704,6 +704,36 @@ export function ParticipantDot({
   );
 }
 
+/**
+ * PER-PARTICIPANT TINT (2026-11-14 ask): each agent gets a stable accent
+ * color so replies are distinguishable at a glance. The palette is the
+ * theme's own hue tokens (Tailwind utilities like `text-red-500` — literal
+ * strings, compiled; NEVER interpolated, or Tailwind purges them). The
+ * hash is over the participant's projectId, so a project keeps its color
+ * across groups and restarts.
+ */
+const PARTICIPANT_TINTS = [
+  { name: "blue", text: "text-blue-600 dark:text-blue-400", border: "border-l-blue-500/60", bg: "bg-blue-500/[0.05]", dot: "bg-blue-500" },
+  { name: "violet", text: "text-violet-600 dark:text-violet-400", border: "border-l-violet-500/60", bg: "bg-violet-500/[0.05]", dot: "bg-violet-500" },
+  { name: "emerald", text: "text-emerald-600 dark:text-emerald-400", border: "border-l-emerald-500/60", bg: "bg-emerald-500/[0.05]", dot: "bg-emerald-500" },
+  { name: "amber", text: "text-amber-600 dark:text-amber-400", border: "border-l-amber-500/60", bg: "bg-amber-500/[0.05]", dot: "bg-amber-500" },
+  { name: "rose", text: "text-rose-600 dark:text-rose-400", border: "border-l-rose-500/60", bg: "bg-rose-500/[0.05]", dot: "bg-rose-500" },
+  { name: "cyan", text: "text-cyan-600 dark:text-cyan-400", border: "border-l-cyan-500/60", bg: "bg-cyan-500/[0.05]", dot: "bg-cyan-500" },
+  { name: "orange", text: "text-orange-600 dark:text-orange-400", border: "border-l-orange-500/60", bg: "bg-orange-500/[0.05]", dot: "bg-orange-500" },
+  { name: "fuchsia", text: "text-fuchsia-600 dark:text-fuchsia-400", border: "border-l-fuchsia-500/60", bg: "bg-fuchsia-500/[0.05]", dot: "bg-fuchsia-500" },
+] as const;
+
+/** Deterministic FNV-1a over the projectId — same project, same tint,
+ *  across groups and app runs. */
+function tintForProject(projectId: string) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < projectId.length; i++) {
+    h ^= projectId.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return PARTICIPANT_TINTS[h % PARTICIPANT_TINTS.length];
+}
+
 function Transcript({ group }: { group: GroupChat }) {
   const version = useSyncExternalStore(
     subscribeGroupChats,
@@ -786,7 +816,23 @@ function Transcript({ group }: { group: GroupChat }) {
                     m.from === "user" && "justify-end",
                   )}
                 >
-                  <span className="font-medium text-foreground">
+                  {m.from === "agent" ? (
+                    // Author dot in the participant's tint — instant visual
+                    // grouping of each agent's messages on quick look.
+                    <span
+                      aria-hidden
+                      className={cn("size-1.5 shrink-0 rounded-full", tintForProject(m.projectId).dot)}
+                    />
+                  ) : null}
+                  <span
+                    className={cn(
+                      "font-medium",
+                      m.from === "user"
+                        ? "text-foreground"
+                        : // Tinted author name: the strongest at-a-glance cue.
+                          tintForProject(m.projectId).text,
+                    )}
+                  >
                     {m.from === "user" ? "You" : nameFor(m.projectId)}
                   </span>
                   <span>
@@ -797,7 +843,24 @@ function Transcript({ group }: { group: GroupChat }) {
                       : "replied"}
                   </span>
                 </div>
-                <GroupMessageBody text={m.text} from={m.from} />
+                {m.from === "agent" ? (
+                  // Tinted wrapper (2026-11-14): a colored left border +
+                  // faint per-agent fill. GroupMessageBody stays untouched
+                  // (it's memoized with a pinned call shape) - the tint is
+                  // the parent's className so each agent's replies group
+                  // visually on quick look.
+                  <div
+                    className={cn(
+                      "rounded-lg border-l-2",
+                      tintForProject(m.projectId).border,
+                      tintForProject(m.projectId).bg,
+                    )}
+                  >
+                    <GroupMessageBody text={m.text} from={m.from} />
+                  </div>
+                ) : (
+                  <GroupMessageBody text={m.text} from={m.from} />
+                )}
               </div>
             ),
           )
