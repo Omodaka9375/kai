@@ -21,6 +21,7 @@ import {
   iconDisplayName,
   loadFullPack,
   projectIconCss,
+  projectIconFillCss,
   subscribeFullPack,
   useProjectIcon,
 } from "./projectIcons";
@@ -89,6 +90,10 @@ export function ProjectIconPicker({
     pendingColor && pendingColor !== "auto" ? pendingColor : undefined,
     project.id,
   );
+  const previewFill = projectIconFillCss(
+    pendingColor && pendingColor !== "auto" ? pendingColor : undefined,
+    project.id,
+  );
 
   const applyColor = (color: string) => {
     setPendingColor(color);
@@ -111,8 +116,8 @@ export function ProjectIconPicker({
             surface to be judgeable. */}
         <div className="flex items-center gap-3 rounded-lg border border-border/60 bg-accent/40 px-3 py-2">
           <span
-            className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border/70 bg-card"
-            style={{ color: previewColor }}
+            className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border/70"
+            style={{ background: previewFill, color: previewColor }}
           >
             <HugeiconsIcon
               icon={previewIcon ?? Folder01Icon}

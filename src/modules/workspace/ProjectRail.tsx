@@ -25,7 +25,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } 
 import { SIDEBAR_RAIL_HEIGHT } from "@/modules/sidebar";
 import { useProjectRunningTerminals } from "@/modules/terminal/lib/terminalActivity";
 import { ProjectIconPicker } from "./ProjectIconPicker";
-import { projectIconCss, useProjectIcon } from "./projectIcons";
+import { projectIconCss, projectIconFillCss, useProjectIcon } from "./projectIcons";
 
 export type ProjectSwitcherItem = {
   id: string;
@@ -111,16 +111,28 @@ function TerminalRunningText({ projectId }: { projectId: string }) {
 /** The tile's glyph: a custom hugeicons glyph when the project has one
  * (resolved lazily - non-curated names arrive with the code-split pack and
  * render the folder until then), else the folder. Custom colors ride the
- * same muted hsl(45% 52%) family as the original auto hash. */
+ * same muted hsl(45% 52%) family as the original auto hash.
+ *
+ * APP-ICON BADGE (2026-11-14 ask): the glyph no longer floats bare - it
+ * sits on a filled rounded square in the project's own hue (low alpha) so
+ * the glyph reads in CONTRAST against its tint, the way app icons render.
+ * The badge is 24px inside the 36px tile button; slightly stronger fill
+ * when the project is active. */
 function TileGlyph({ project, active }: { project: ProjectSwitcherItem; active: boolean }) {
   const icon = useProjectIcon(project.icon);
   return (
-    <HugeiconsIcon
-      icon={icon ?? Folder01Icon}
-      size={17}
-      strokeWidth={active ? 2 : 1.75}
-      style={{ color: projectIconCss(project.color, project.id) }}
-    />
+    <span
+      aria-hidden
+      className="flex size-6 shrink-0 items-center justify-center rounded-md"
+      style={{ background: projectIconFillCss(project.color, project.id, active) }}
+    >
+      <HugeiconsIcon
+        icon={icon ?? Folder01Icon}
+        size={15}
+        strokeWidth={active ? 2 : 1.75}
+        style={{ color: projectIconCss(project.color, project.id) }}
+      />
+    </span>
   );
 }
 

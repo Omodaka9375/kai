@@ -57,14 +57,20 @@ export const PROJECT_ICON_COLORS: Array<{ key: ProjectIconColorKey; label: strin
   { key: "pink", label: "Pink" },
 ];
 
-/** Deterministic per-project hue: hash -> hsl(h, 45%, 52%). Same scheme the
- * rail used since day one, kept as the "auto" fallback. */
-export function autoProjectIconColor(projectId: string): string {
+/** Deterministic per-project hue: hash -> h, shared by the glyph color and
+ * the badge fill (autoProjectIconColor's original algorithm). */
+function autoProjectIconHue(projectId: string): number {
   let h = 0;
   for (let i = 0; i < projectId.length; i++) {
     h = (h * 31 + projectId.charCodeAt(i)) >>> 0;
   }
-  return `hsl(${h % 360} 45% 52%)`;
+  return h % 360;
+}
+
+/** Deterministic per-project hue: hash -> hsl(h, 45%, 52%). Same scheme the
+ * rail used since day one, kept as the "auto" fallback. */
+export function autoProjectIconColor(projectId: string): string {
+  return `hsl(${autoProjectIconHue(projectId)} 45% 52%)`;
 }
 
 /** Resolve a tile's icon color: preset hue, or the project's auto hash. */
@@ -73,6 +79,22 @@ export function projectIconCss(color: string | undefined, projectId: string): st
     return `hsl(${COLOR_HUES[color as Exclude<ProjectIconColorKey, "auto">]} 45% 52%)`;
   }
   return autoProjectIconColor(projectId);
+}
+
+/** BADGE FILL (2026-11-14): the tile glyph now sits on a filled rounded
+ * square (the app-icon look) instead of floating bare - the fill is the
+ * SAME hue at low alpha, so the glyph reads in contrast against its own
+ * tint. Alpha (not a darker lightness) keeps the rail's card bg visible. */
+export function projectIconFillCss(
+  color: string | undefined,
+  projectId: string,
+  active = false,
+): string {
+  const h =
+    color && color !== "auto" && color in COLOR_HUES
+      ? COLOR_HUES[color as Exclude<ProjectIconColorKey, "auto">]
+      : autoProjectIconHue(projectId);
+  return `hsl(${h} 45% 52% / ${active ? 0.26 : 0.16})`;
 }
 
 // ---------------------------------------------------------------------------
