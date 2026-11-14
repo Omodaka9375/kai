@@ -72,6 +72,20 @@ type Session = {
   hasSlot: boolean;
   /** Set to true once the PTY has delivered at least one byte of output. */
   receivedOutput: boolean;
+  /** Set to true once the PTY has delivered ANY byte, visible or not.
+  *  Distinct from receivedOutput: a DSR-blocked shell delivers invisible
+  *  control bytes (not "received output"), while a WEDGED ConPTY pipe
+  *  delivers nothing at all — the silent-respawn watchdog keys on this. */
+  receivedAny: boolean;
+  /** Decoded startup output accumulated while no VISIBLE byte has arrived
+  *  (cap SILENT_PREFIX_CAP). The DSR-query signature is detected over this
+  *  prefix — real ConPTY startup emits a soup of control sequences with the
+   *  cursor query buried mid-chunk, not a bare 4-byte `\x1b[6n` chunk. */
+  invisiblePrefix: string;
+  /** Wedged-pipe respawns performed by the silent watchdog (budget-capped
+   *  so a persistently broken spawn ladders to a visible error, not an
+   *  infinite close/respawn loop). */
+  silentRespawns: number;
   /** performance.now() of the LAST PTY output byte — feeds the pool's
    *  eviction scorer (leafProducedRecently): a leaf that produced output
    *  seconds ago is a RUNNING command; its renderer is expensive to take
@@ -111,6 +125,18 @@ const ATTACH_RETRY_BOUND = 40;
 // this watchdog so it fails, resets the flag, and retries like any other error.
 const PTY_OPEN_TIMEOUT_MS = 20_000;
 
+// A PTY that has delivered not a single byte (control or visible) this long
+// after a successful open has a wedged ConPTY output pipe — the leaf=7 shape
+// in term-debug.log: "pty open ok", keystrokes forwarded, buffer empty
+// forever. The pipe never recovers on its own; the only working remedy is
+// the user closing the tab and respawning. This watchdog automates that.
+const SILENT_RESPAWN_MS = 7_000;
+// Cap on automated silent respawns per session. Past this, write a visible
+// error into the pane instead of looping forever.
+const SILENT_RESPAWN_MAX = 2;
+// Cap on the accumulated invisible startup prefix scanned for the DSR
+// signature (the 6n always lands in the first chunk in practice).
+const INVISIBLE_PREFIX_CAP = 512;
 
 configureRendererPool({
   resolveLeaf(leafId) {
@@ -168,6 +194,9 @@ function ensureSession(leafId: number, initialCwd?: string, env?: Session["env"]
     dormantRing: new DormantRing(),
     hasSlot: false,
     receivedOutput: false,
+    receivedAny: false,
+    invisiblePrefix: "",
+    silentRespawns: 0,
     lastOutputAt: 0,
     firstOutputWasDsrQuery: false,
     spawnEpoch: 0,
@@ -195,6 +224,7 @@ const textDecoder = new TextDecoder("utf-8", { fatal: false });
 function deliverPtyBytes(leafId: number, bytes: Uint8Array): void {
   const s = sessions.get(leafId);
   if (!s) return;
+  s.receivedAny = true;
   const slot = getSlotForLeaf(leafId);
   // Only count output as "received" once it reaches a live renderer. Bytes that
   // merely land in the dormant ring have not been shown to the user yet — and
@@ -218,27 +248,53 @@ function deliverPtyBytes(leafId: number, bytes: Uint8Array): void {
         leafId,
         `first output delivered to renderer — ${describeRenderEnv(s.container)}`,
       );
-    let preview = "";
+    let chunkText = "";
     try {
-      preview = new TextDecoder().decode(bytes.slice(0, 48));
+      chunkText = new TextDecoder().decode(bytes);
     } catch {
-      // preview is best-effort
+      // chunkText is best-effort
     }
     // receivedOutput gates the prompt nudges (resize at 500ms, CR at 3s).
     // The nudges must NOT be silenced by invisible control bytes: a shell
     // blocked on a DSR response delivers OSC/DSR bytes with no prompt text,
     // then hangs waiting for the reply. Counting that as "output received"
     // would disable every recovery nudge → the intermittent blank first
-    // terminal. Only bytes with VISIBLE content count.
-    const hasVisible = /[\x20-\x7e]/.test(preview);
+    // terminal. Only bytes with VISIBLE content count — anywhere in the
+    // chunk, not just its head: a real ConPTY first chunk is a soup of
+    // control sequences FOLLOWED by prompt text; sampling only the first
+    // 48 bytes classified those as invisible too.
+    const hasVisible = /[\x20-\x7e]/.test(chunkText);
     if (hasVisible) {
       s.receivedOutput = true;
-    } else if (!s.firstOutputWasDsrQuery) {
-      // Exact-match the known block signature: first output is ONLY a
-      // cursor-position query. Broad matches risk CPR-ing into a shell
-      // that sent 6n alongside real prompt bytes and already got its reply.
-      // Sticky: a later control-only chunk must not clear the signature.
-      s.firstOutputWasDsrQuery = preview === "\x1b[6n";
+    } else {
+      // DSR signature over the ACCUMULATED invisible prefix (2026-11-14):
+      // the old exact test (preview === "\x1b[6n") required the whole first
+      // chunk to be exactly the 4-byte query. Real ConPTY startup emits
+      // `\x1b[?25h`-style sequences with the 6n buried mid-chunk or in a
+      // later chunk, so the rescue never armed and the DSR-blocked pwsh
+      // stayed blank forever (leaf=12/14 in term-debug.log: "first output
+      // delivered" + empty buffer minutes later). The SAFETY property of
+      // the old narrow test is preserved differently: the signature only
+      // arms while NO visible byte has EVER arrived — a shell that sent 6n
+      // alongside prompt bytes renders (visible arrives → gate closes) and
+      // xterm answers its own 6n, so a CPR can never be sent into a shell
+      // that already got its reply. Sticky once set.
+      if (s.invisiblePrefix.length < INVISIBLE_PREFIX_CAP) {
+        s.invisiblePrefix += chunkText.slice(
+          0,
+          INVISIBLE_PREFIX_CAP - s.invisiblePrefix.length,
+        );
+      }
+      if (
+        !s.firstOutputWasDsrQuery &&
+        s.invisiblePrefix.includes("\x1b[6n")
+      ) {
+        s.firstOutputWasDsrQuery = true;
+        logLeaf(
+          leafId,
+          "DSR cursor query in startup output (no visible bytes yet) — CPR nudge armed",
+        );
+      }
     }
   }
   s.lastOutputAt = performance.now();
@@ -302,6 +358,9 @@ function openPtySession(
       s.ptyOpening = false;
       s.pty = pty;
       s.receivedOutput = false;
+      s.receivedAny = false;
+      s.invisiblePrefix = "";
+      s.firstOutputWasDsrQuery = false;
       logLeaf(leafId, `pty open ok (attempt ${attempt})`);
       if (s.cols > 0 && s.rows > 0) pty.resize(s.cols, s.rows);
 
@@ -365,16 +424,56 @@ function openPtySession(
         }
       });
       nudge(1500, () => {
-        // Early path for the EXACT known signature: first output was
-        // only `\x1b[6n` and nothing visible has arrived since — the
+        // Early path for the known signature: startup output contains
+        // the DSR query and nothing visible has arrived since — the
         // shell is blocked on the DSR reply right now. Answer it at
-        // 1.5s instead of blanking the pane for 6. Exact-match gate
-        // (broad `includes("6n")` would CPR into shells that already
-        // got their reply alongside real prompt bytes).
+        // 1.5s instead of blanking the pane for 6. (2026-11-14: the
+        // signature is detected over the accumulated invisible prefix,
+        // not an exact whole-chunk match — see deliverPtyBytes.)
         if (s.firstOutputWasDsrQuery) {
           sendCpr();
         }
       });
+
+      // SILENT-PIPE WATCHDOG (2026-11-14): "pty open ok" but not ONE byte
+      // (control or visible) ever arrives — a wedged ConPTY output pipe
+      // (leaf=7 in term-debug.log: keystrokes forwarded, buffer empty
+      // forever, no retry ever fires because nothing fails). The only
+      // working remedy is close + respawn; automate it before the user has
+      // to. Distinct from receivedOutput: a DSR-blocked shell DID emit
+      // invisible bytes, and CPR nudges own that case.
+      const silentId = setTimeout(() => {
+        s.nudgeTimers = s.nudgeTimers.filter((t) => t !== silentId);
+        if (s.disposed || s.shellExited || s.pty !== pty) return;
+        if (s.receivedAny) return; // bytes flowed — not a wedged pipe
+        if (s.silentRespawns >= SILENT_RESPAWN_MAX) {
+          logLeaf(
+            leafId,
+            `silent-pty watchdog: no bytes after ${SILENT_RESPAWN_MS}ms and respawn budget exhausted — surfacing error`,
+          );
+          const slot = getSlotForLeaf(leafId);
+          if (slot) {
+            writeLiveToSlot(
+              slot,
+              new TextEncoder().encode(
+                `\r\n\x1b[31mTerminal produced no output after ${SILENT_RESPAWN_MAX + 1} attempts — close and reopen this tab.\x1b[0m\r\n`,
+              ),
+            );
+          }
+          return;
+        }
+        s.silentRespawns += 1;
+        logLeaf(
+          leafId,
+          `silent-pty watchdog: 0 bytes ${SILENT_RESPAWN_MS}ms after open (attempt ${s.silentRespawns}/${SILENT_RESPAWN_MAX}) — closing wedged PTY and respawning`,
+        );
+        s.spawnEpoch += 1; // the late exit event of the killed PTY is ignored
+        s.ptyOpening = true;
+        pty.close();
+        s.pty = null;
+        openPtySession(leafId, s, s.initialCwd, 0);
+      }, SILENT_RESPAWN_MS);
+      s.nudgeTimers.push(silentId);
     })
     .catch((e) => {
       if (watchdog) clearTimeout(watchdog);
@@ -427,12 +526,20 @@ async function openPtyForSession(
   // preference takes effect once hydration completes (subsequent tabs).
   const pref = usePreferencesStore.getState();
   const shell = IS_WINDOWS ? pref.defaultShell : undefined;
+  // Capture the epoch THIS pty was spawned under. A stale pty's exit event
+  // (e.g. the silent-pty watchdog or respawnSession closing a wedged PTY)
+  // must not mark the freshly respawned shell as dead mid-recovery.
+  const epoch = s.spawnEpoch;
   return openPty(
     startCols,
     startRows,
     {
       onData: (bytes) => deliverPtyBytes(leafId, bytes),
       onExit: (code) => {
+        if (epoch !== s.spawnEpoch) {
+          logLeaf(leafId, "stale pty exit ignored (superseded spawn)");
+          return;
+        }
         s.shellExited = true;
         s.pty = null;
         markTerminalIdle(leafId);
@@ -691,6 +798,9 @@ export async function respawnSession(
   s.shellExited = false;
   s.pendingExit = null;
   s.receivedOutput = false;
+  s.receivedAny = false;
+  s.invisiblePrefix = "";
+  s.firstOutputWasDsrQuery = false;
   s.spawnEpoch += 1; // invalidate any in-flight spawn so it can't re-claim s.pty
 
   const slot = getSlotForLeaf(leafId);
