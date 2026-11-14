@@ -284,10 +284,11 @@ function escapeRe(s: string): string {
  * Aider-style whitespace-tolerant find.
  *
  * The model usually gets the TOKENS right and the WHITESPACE wrong (tabs
- * vs spaces, collapsed runs, re-wrapped spacing, trailing drift). Build a
- * regex from old_string where every whitespace run becomes tolerant —
- * intra-line runs match [ \t]* (the model may have eaten or added the
- * space), inter-line runs require the newline (\n) to exist but absorb
+ * vs spaces, collapsed runs, re-wrapped spacing, trailing drift, NBSP
+ * paste artifacts). Build a regex from old_string where every whitespace
+ * run becomes tolerant —
+ * intra-line runs match [ \t\u00a0]* (the model may have eaten or added
+ * the space), inter-line runs require the newline (\n) to exist but absorb
  * any indentation and blank-line drift around it — and return every match
  * with its TRUE region in the original text.
  *
@@ -320,7 +321,12 @@ function fuzzyHits(
   for (const part of parts) {
     if (part === "") continue;
     if (/^\s+$/.test(part)) {
-      pattern += part.includes("\n") ? "[\\s]*\\n[\\s]*" : "[ \\t]*";
+      // \u00a0 (NBSP) joins the tolerant run: it is the most common PASTE
+      // artifact (web/Word/chat) and renders as a plain space in terminals
+      // and read_file output, so an anchor differing from the file ONLY by
+      // NBSP-vs-space is visually identical yet byte-different — the same
+      // failure shape the punctuation tier was built for.
+      pattern += part.includes("\n") ? "[\\s]*\\n[\\s]*" : "[ \\t\\u00a0]*";
     } else {
       pattern += escapeRe(part);
     }
@@ -498,7 +504,7 @@ function buildPunctPattern(needle: string): {
   for (const part of parts) {
     if (part === "") continue;
     if (/^\s+$/.test(part)) {
-      pattern += part.includes("\n") ? "[\\s]*\\n[\\s]*" : "[ \\t]*";
+      pattern += part.includes("\n") ? "[\\s]*\\n[\\s]*" : "[ \\t\\u00a0]*";
       absIdx += part.length;
       continue;
     }

@@ -175,6 +175,32 @@ describe("whitespace-tolerant fallback", () => {
     expect(files.get("/ws/f.ts")).toBe("\tgo();\n  stay();\n");
   });
 
+  it("NBSP paste artifact: plain-space needle matches NBSP file line", async () => {
+    // Text pasted from web/Word carries U+00A0; terminals and read_file
+    // render it as a plain space, so a visually identical anchor must
+    // still match. The splice replaces the FILE's region, so the line is
+    // rewritten with the needle's plain spaces.
+    files.set("/ws/n.ts", "const x\u00a0=\u00a01;\nnext();\n");
+    const r = await runEdit({
+      path: "/ws/n.ts",
+      old_string: "const x = 1;",
+      new_string: "const x = 2;",
+    });
+    expect(r.ok).toBe(true);
+    expect(files.get("/ws/n.ts")).toBe("const x = 2;\nnext();\n");
+  });
+
+  it("NBSP in the needle matches a plain-space file line (reverse drift)", async () => {
+    files.set("/ws/o.ts", "const x = 1;\nnext();\n");
+    const r = await runEdit({
+      path: "/ws/o.ts",
+      old_string: "const x\u00a0=\u00a01;",
+      new_string: "const x = 2;",
+    });
+    expect(r.ok).toBe(true);
+    expect(files.get("/ws/o.ts")).toBe("const x = 2;\nnext();\n");
+  });
+
   it("genuinely absent old_string still errors with did-you-mean", async () => {
     files.set("/ws/g.ts", "hello world\n");
     const r = await runEdit({
