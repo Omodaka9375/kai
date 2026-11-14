@@ -579,6 +579,66 @@ describe("chatStore exports", () => {
   });
 });
 
+describe("session pinning", () => {
+  it("togglePinSession pins + unpins without bumping updatedAt, and persists the flag", async () => {
+    const { useChatStore, setActiveProjectRuntime } = await import("./chatStore");
+    const store = useChatStore;
+    const { saveSessionsListForRoot, loadAll } = await import("../lib/sessions");
+    const { createProjectRuntime } = await import(
+      "@/modules/workspace/projectRuntime"
+    );
+    const root = "D:/pin-toggle";
+    await saveSessionsListForRoot(root, [
+      { id: "pin-b", title: "B", createdAt: 1, updatedAt: 9, lastMessageCount: 1, workspaceRoot: root, workspaceEnv: { kind: "local" as const } },
+      { id: "pin-a", title: "A", createdAt: 2, updatedAt: 5, lastMessageCount: 1, workspaceRoot: root, workspaceEnv: { kind: "local" as const } },
+    ] as never);
+    // Foreground the pin project: an earlier test in this file leaves the
+    // owned-b runtime active, and both hydration merge and persistence
+    // persist routes ride the foreground runtime.
+    const rt = await createProjectRuntime(root);
+    setActiveProjectRuntime(rt);
+    await store.getState().hydrateSessions(root);
+
+    store.getState().togglePinSession("pin-a");
+    const pinned = store.getState().sessions.find((s) => s.id === "pin-a")!;
+    expect(pinned.pinned).toBe(true);
+    // Pinning is bookkeeping, not activity: updatedAt must not move.
+    expect(pinned.updatedAt).toBe(5);
+    await new Promise((r) => setTimeout(r, 0));
+    expect((await loadAll()).sessions.find((s) => s.id === "pin-a")?.pinned).toBe(true);
+
+    store.getState().togglePinSession("pin-a");
+    expect(
+      store.getState().sessions.find((s) => s.id === "pin-a")!.pinned,
+    ).toBeUndefined();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(
+      (await loadAll()).sessions.find((s) => s.id === "pin-a")?.pinned,
+    ).toBeUndefined();
+
+    // Reset process-global store state: later tests re-hydrate anyway, but a
+    // stale activeSessionId from this root would leak into them.
+    store.setState({
+      sessions: [],
+      activeSessionId: null,
+      sessionsHydrated: false,
+      lastHydratedWorkspace: null,
+    });
+  });
+
+  it("the picker stacks pinned sessions on top and offers the toggle (source pin)", async () => {
+    const src = await import("node:fs").then((fs) =>
+      fs.readFileSync(
+        new URL("../components/AiMiniWindow.tsx", import.meta.url),
+        "utf8",
+      ),
+    );
+    expect(src).toContain("a.pinned ? -1 : 1");
+    expect(src).toContain("onTogglePin={() => togglePinSession(s.id)}");
+    expect(src).toContain('data-session-pin');
+  });
+});
+
 describe("describeApproval subject derivation (audit 'Unknown' regression)", () => {
   // Source-contract: the tool name lives in part.type ("tool-<name>") for
   // regular tools and under toolName only for dynamic-tool parts. A

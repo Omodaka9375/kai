@@ -31,6 +31,7 @@ import MinusSignIcon from "@hugeicons/core-free-icons/MinusSignIcon";
 import FilterIcon from "@hugeicons/core-free-icons/FilterIcon";
 import GitMergeIcon from "@hugeicons/core-free-icons/GitMergeIcon";
 import PencilEdit01Icon from "@hugeicons/core-free-icons/PencilEdit01Icon";
+import Pin02Icon from "@hugeicons/core-free-icons/Pin02Icon";
 import TerminalIcon from "@hugeicons/core-free-icons/TerminalIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { motion } from "motion/react";
@@ -595,6 +596,7 @@ function SessionPicker() {
   const switchSession = useChatStore((s) => s.switchSession);
   const newSession = useChatStore((s) => s.newSession);
   const deleteSession = useChatStore((s) => s.deleteSession);
+  const togglePinSession = useChatStore((s) => s.togglePinSession);
   const workspaceRoot = useChatStore((s) => s.live.getWorkspaceRoot());
 
   // RULES OF HOOKS: every hook must run on every render. This component
@@ -621,7 +623,12 @@ function SessionPicker() {
     });
   }, [sessions, workspaceRoot, activeId]);
 
-  const sorted = [...filteredSessions].sort((a, b) => b.updatedAt - a.updatedAt);
+  // Pinned sessions stack on top (most recent first within the stack) and
+  // stay there until unpinned; everything else keeps the updatedAt order.
+  const sorted = [...filteredSessions].sort((a, b) => {
+    if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
+    return b.updatedAt - a.updatedAt;
+  });
   const [menuOpen, setMenuOpen] = useState(false);
 
   const active = sessions.find((s) => s.id === activeId) ?? null;
@@ -672,6 +679,7 @@ function SessionPicker() {
             otherSessions={sorted.filter((o) => o.id !== s.id)}
             onSelect={() => switchSession(s.id)}
             onDelete={() => deleteSession(s.id)}
+            onTogglePin={() => togglePinSession(s.id)}
           />
         ))}
       </DropdownMenuContent>
@@ -685,12 +693,14 @@ function SessionRow({
   otherSessions,
   onSelect,
   onDelete,
+  onTogglePin,
 }: {
   session: SessionMeta;
   active: boolean;
   otherSessions: SessionMeta[];
   onSelect: () => void;
   onDelete: () => void;
+  onTogglePin: () => void;
 }) {
   const renameSession = useChatStore((s) => s.renameSession);
   const mergeSession = useChatStore((s) => s.mergeSession);
@@ -749,6 +759,7 @@ function SessionRow({
           target?.closest("[data-session-delete]") ||
           target?.closest("[data-session-edit]") ||
           target?.closest("[data-session-merge]") ||
+          target?.closest("[data-session-pin]") ||
           target?.tagName === "INPUT"
         ) {
           e.preventDefault();
@@ -804,10 +815,22 @@ function SessionRow({
             // Idle: full row width — the action icons take NO layout space.
             // Hover/focus-within: reserve room on the right for them so the
             // title never runs under the floated icon cluster.
-            "transition-[padding] duration-150 group-hover:pr-14 group-focus-within:pr-14",
+            "transition-[padding] duration-150",
+            // 4 hover icons when the merge control is present, 3 otherwise.
+            otherSessions.length > 0
+              ? "group-hover:pr-20 group-focus-within:pr-20"
+              : "group-hover:pr-14 group-focus-within:pr-14",
           )}
         >
           {session.title || "New chat"}
+          {session.pinned ? (
+            <span
+              title="Pinned - stacks at the top of the list"
+              className="ml-1 inline-flex items-center align-middle text-primary"
+            >
+              <HugeiconsIcon icon={Pin02Icon} size={10} strokeWidth={1.75} />
+            </span>
+          ) : null}
           {relativeTime(session.updatedAt ?? session.createdAt) ? (
             <span
               className={cn(
@@ -833,6 +856,24 @@ function SessionRow({
             "group-focus-within:pointer-events-auto group-focus-within:opacity-100",
           )}
         >
+          <button
+            type="button"
+            data-session-pin
+            onClick={(e) => {
+              e.stopPropagation();
+              onTogglePin();
+            }}
+            title={session.pinned ? "Unpin session" : "Pin to top"}
+            aria-label={session.pinned ? "Unpin session" : "Pin to top"}
+            className={cn(
+              "rounded p-0.5 transition-colors",
+              session.pinned
+                ? "text-primary hover:bg-accent"
+                : "text-muted-foreground hover:bg-accent hover:text-foreground",
+            )}
+          >
+            <HugeiconsIcon icon={Pin02Icon} size={11} strokeWidth={1.75} />
+          </button>
           {otherSessions.length > 0 ? (
             <Popover open={mergeOpen} onOpenChange={setMergeOpen}>
               <PopoverTrigger asChild>

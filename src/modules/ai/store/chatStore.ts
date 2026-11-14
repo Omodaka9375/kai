@@ -391,6 +391,10 @@ type StoreState = {
   restoreSession: (id: string) => void;
   deleteSession: (id: string) => void;
   renameSession: (id: string, title: string) => void;
+  /** Pin/unpin a session. Pinned sessions stack on top of the picker and
+   *  stay there (most recent first within the stack) until unpinned. Does
+   *  NOT bump updatedAt — pinning is bookkeeping, not activity. */
+  togglePinSession: (id: string) => void;
   /** Persist messages of a session and bump its updatedAt + auto-title. */
   persistMessages: (id: string, messages: UIMessage[]) => void;
   /** User-driven compaction of the ACTIVE session (the /compact command):
@@ -1878,6 +1882,18 @@ export const useChatStore = create<StoreState>((set, get) => ({
     const next = get().sessions.map((s) =>
       s.id === id ? { ...s, title, updatedAt: Date.now() } : s,
     );
+    set({ sessions: next });
+    persistActiveSessionsList(next);
+  },
+
+  togglePinSession: (id) => {
+    const next = get().sessions.map((s) => {
+      if (s.id !== id) return s;
+      const { pinned, ...rest } = s;
+      // Unpin REMOVES the key entirely instead of writing false — same
+      // shape rule as autoApprove: absent means "unset" in the store file.
+      return pinned ? rest : { ...s, pinned: true };
+    });
     set({ sessions: next });
     persistActiveSessionsList(next);
   },

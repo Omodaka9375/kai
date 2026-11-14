@@ -19,6 +19,9 @@ export type SessionMeta = {
   /** Auto-approve mode the user chose for this session; persisted so a
    *  relaunch doesn't silently reset "Allow" back to "Ask". */
   autoApprove?: "off" | "all";
+  /** User-pinned: the session stacks at the top of the picker (most recent
+   *  first within the pinned stack) until unpinned. Persisted. */
+  pinned?: boolean;
 };
 
 const STORE_PATH = "kai-sessions.json";
