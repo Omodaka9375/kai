@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { HugeiconsIcon } from "@hugeicons/react";
+import CrownIcon from "@hugeicons/core-free-icons/CrownIcon";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -32,12 +34,21 @@ export function CoordinatorMenu({ group }: { group: GroupChat }) {
       <PopoverTrigger asChild>
         <Button
           type="button"
-          size="sm"
+          size="icon"
           variant="ghost"
-          className="h-6 shrink-0 gap-1 rounded-full border border-border/60 px-2.5 text-[11px]"
-          title="Who coordinates this group"
+          className="size-6 shrink-0 rounded-full border border-border/60 text-muted-foreground"
+          title={
+            isAgentCoord
+              ? "Coordination delegated to a participant agent"
+              : "You coordinate this group"
+          }
+          aria-label={
+            isAgentCoord
+              ? "Coordination delegated to a participant agent"
+              : "You coordinate this group"
+          }
         >
-          {isAgentCoord ? "Delegated" : "You coordinate"}
+          <HugeiconsIcon icon={CrownIcon} size={12} strokeWidth={1.75} />
           {pending > 0 ? (
             <span className="size-1.5 animate-pulse rounded-full bg-primary" />
           ) : null}

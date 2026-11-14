@@ -695,12 +695,17 @@ export function ParticipantsMenu({
       <PopoverTrigger asChild>
         <Button
           type="button"
-          size="sm"
+          size="icon"
           variant="ghost"
-          className="h-6 shrink-0 rounded-full border border-border/60 px-2.5 text-[11px]"
+          className="size-6 shrink-0 rounded-full border border-border/60 text-muted-foreground"
           title="Group participants"
+          aria-label="Group participants"
         >
-          Members
+          <HugeiconsIcon
+            icon={UserMultiple02Icon}
+            size={12}
+            strokeWidth={1.75}
+          />
         </Button>
       </PopoverTrigger>
       <PopoverContent

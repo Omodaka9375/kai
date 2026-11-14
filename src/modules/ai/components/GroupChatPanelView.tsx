@@ -11,6 +11,7 @@ import ArrowExpand01Icon from "@hugeicons/core-free-icons/ArrowExpand01Icon";
 import ArrowShrink01Icon from "@hugeicons/core-free-icons/ArrowShrink01Icon";
 import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 import LeftToRightBlockQuoteIcon from "@hugeicons/core-free-icons/LeftToRightBlockQuoteIcon";
+import Logout03Icon from "@hugeicons/core-free-icons/Logout03Icon";
 import Link01Icon from "@hugeicons/core-free-icons/Link01Icon";
 import Mic01Icon from "@hugeicons/core-free-icons/Mic01Icon";
 import MinusSignIcon from "@hugeicons/core-free-icons/MinusSignIcon";
@@ -484,7 +485,7 @@ function PanelHeader({
             aria-label="Group name"
             className="min-w-0 flex-1 rounded-md border border-border/70 bg-background/60 px-1.5 py-0.5 text-[12px] font-medium outline-none focus:border-primary/50"
           />
-        ) : (
+        ) : expanded ? (
           <>
             <span
               className="min-w-0 truncate text-[12px] font-medium"
@@ -509,7 +510,7 @@ function PanelHeader({
               />
             </button>
           </>
-        )}
+        ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-0.5">
         <span className="flex h-6 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-border/60 px-2.5 text-[10.5px] font-medium text-muted-foreground">
@@ -578,13 +579,14 @@ function PanelHeader({
             </Button>
             <Button
               type="button"
-              size="sm"
+              size="icon"
               variant="ghost"
-              className="h-6 shrink-0 rounded-full border border-border/60 px-2.5 text-[11px]"
+              className="size-6 shrink-0 rounded-full border border-border/60 text-muted-foreground"
               title="End group chat - every agent keeps running as before"
+              aria-label="End group chat"
               onClick={onEnd}
             >
-              End
+              <HugeiconsIcon icon={Logout03Icon} size={12} strokeWidth={1.75} />
             </Button>
           </>
         )}
