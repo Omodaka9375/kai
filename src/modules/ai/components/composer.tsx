@@ -172,6 +172,20 @@ export function AiComposerProvider({ children }: ProviderProps) {
   const [pendingQuote, setPendingQuote] = useState<PendingQuote | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // CROSS-PROJECT QUOTE GUARD (2026-11-14): ONE provider serves every
+  // project's input bar, so a quote picked from project A's transcript
+  // rendered in EVERY project's input bar (and would have posted to
+  // whichever agent the user sent from next). The draft reset above clears
+  // value/files on the session flip; the quote - and snippet/slash picks,
+  // the same leak class - belongs to the session it was picked in, so it
+  // clears on the same trigger. Submit already consumes the quote one-shot;
+  // this covers the switch-away case.
+  useEffect(() => {
+    setPendingQuote(null);
+    setPickedSnippets([]);
+    setPickedCommands([]);
+  }, [sessionId]);
+
   // Transient slash-command outcome. The main window has no transcript
   // (AgentRunBridge is headless; the transcript lives in the mini window),
   // so without this a refused /compact ("wait for the run…", "already
