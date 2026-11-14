@@ -230,6 +230,27 @@ export function AiComposerProvider({ children }: ProviderProps) {
     return () => window.removeEventListener("Kai:ai-attach-file", onAttach);
   }, [runtime]);
 
+  // MEDIA SETTLEMENT (2026-11-14): generation jobs are detached from the
+  // agent run, so the turn usually ends BEFORE the image/video arrives -
+  // the user is left unsure whether it is still rendering, done, or
+  // failed (the card update is easy to miss). task.ts dispatches
+  // Kai:media-settled when a job settles; surface it in the notice bar
+  // under the input. Session-scoped: a background project's generation
+  // must not pop a notice into the visible composer.
+  useEffect(() => {
+    const onMediaSettled = (e: Event) => {
+      const detail = (
+        e as CustomEvent<{ sessionId: string | null; message: string }>
+      ).detail;
+      if (!detail?.message) return;
+      if (detail.sessionId && detail.sessionId !== sessionId) return;
+      showNotice(detail.message);
+    };
+    window.addEventListener("Kai:media-settled", onMediaSettled);
+    return () =>
+      window.removeEventListener("Kai:media-settled", onMediaSettled);
+  }, [sessionId, showNotice]);
+
   // Quote-from-transcript (right-click Quote on a chat message). Replaces
   // any pending quote - one quote per message, like every chat app.
   useEffect(() => {

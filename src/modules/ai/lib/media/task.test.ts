@@ -130,4 +130,79 @@ describe("background media task lifecycle", () => {
     expect(src).toMatch(/export function spawnMediaTask\(\s*sessionId: string \| null,\s*toolCallId: string,\s*run: \(\) => Promise<unknown>,\s*timeoutMs/);
     expect(src).not.toMatch(/signal: AbortSignal \| undefined/);
   });
+
+  it("dispatches a Kai:media-settled event on success and failure", async () => {
+    // The user-facing settlement signal (2026-11-14): the job is detached
+    // from the run, so without an announcement the user cannot tell done
+    // from dead. The composer's notice bar listens for this event.
+    // Node test env has no window - stub the minimum the dispatcher needs.
+    const listeners: ((e: { type: string; detail: unknown }) => void)[] = [];
+    vi.stubGlobal("window", {
+      addEventListener: (_: string, fn: unknown) => listeners.push(fn as never),
+      removeEventListener: (_: string, fn: unknown) => {
+        const i = listeners.indexOf(fn as never);
+        if (i >= 0) listeners.splice(i, 1);
+      },
+      dispatchEvent: (e: { type: string; detail: unknown }) => {
+        for (const fn of [...listeners]) fn(e);
+        return true;
+      },
+    });
+    const events: {
+      type: string;
+      detail: { sessionId: string; message: string; ok: boolean };
+    }[] = [];
+    listeners.push((e) => events.push(e as never));
+    try {
+      spawnMediaTask("s", "call-ok", async () => ({
+        type: "image",
+        base64: "bytes",
+        images: [{ base64: "bytes" }],
+      }));
+      await vi.advanceTimersByTimeAsync(0);
+      spawnMediaTask("s", "call-err", async () => {
+        throw new Error("quota exceeded");
+      });
+      await vi.advanceTimersByTimeAsync(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(events).toHaveLength(2);
+    expect(events[0]!.detail).toEqual({
+      sessionId: "s",
+      message: "image generation finished (1 total) - see it in the chat.",
+      ok: true,
+    });
+    expect(events[1]!.detail.message).toContain("image generation failed");
+    expect(events[1]!.detail.message).toContain("quota exceeded");
+    expect(events[1]!.detail.ok).toBe(false);
+  });
+
+  it("session deletion settles silently - no settled event for a dead chat", async () => {
+    // job.silent (session deleted) suppresses the card patch AND the
+    // announcement: there is no chat left to notify. Stop (user-initiated)
+    // DOES announce - same asymmetry as the visible-card rule above.
+    const listeners: ((e: { type: string; detail: unknown }) => void)[] = [];
+    vi.stubGlobal("window", {
+      addEventListener: (_: string, fn: unknown) => listeners.push(fn as never),
+      removeEventListener: (_: string, fn: unknown) => {
+        const i = listeners.indexOf(fn as never);
+        if (i >= 0) listeners.splice(i, 1);
+      },
+      dispatchEvent: (e: { type: string; detail: unknown }) => {
+        for (const fn of [...listeners]) fn(e);
+        return true;
+      },
+    });
+    const events: { type: string; detail: unknown }[] = [];
+    listeners.push((e) => events.push(e));
+    try {
+      spawnMediaTask("s", "call", () => new Promise(() => {}));
+      cancelMediaTasksForSession("s"); // silent form - session deleted
+      await vi.advanceTimersByTimeAsync(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(events).toHaveLength(0);
+  });
 });

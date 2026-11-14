@@ -26,6 +26,49 @@ const COMPLETED_KEY_CAP = 12;
 
 const DEFAULT_MEDIA_TIMEOUT_MS = 10 * 60_000;
 
+/**
+ * USER-FACING SETTLEMENT SIGNAL (2026-11-14): the generation job is
+ * detached from the agent run, so the turn usually ends (and the model
+ * goes quiet) BEFORE the image/video arrives - leaving the user unsure
+ * whether the generation is still running, done, or failed. The card
+ * update is easy to miss when the user is looking at the composer.
+ * Dispatch a window event so any UI surface can announce the outcome;
+ * the composer's notice bar (under the input) listens and shows it.
+ * Plain window event keeps this module decoupled - same pattern as
+ * Kai:ai-attach-file / Kai:term-command-end.
+ */
+export function notifyMediaSettled(
+  sessionId: string,
+  output: unknown,
+): void {
+  if (typeof window === "undefined") return;
+  const isVideo =
+    !!output && typeof output === "object" && (output as { type?: string }).type === "video";
+  const kind = isVideo ? "video" : "image";
+  const failed =
+    !output ||
+    typeof output !== "object" ||
+    "error" in (output as Record<string, unknown>);
+  let message: string;
+  if (failed) {
+    const err =
+      (output as { error?: unknown })?.error instanceof Error
+        ? ((output as { error: Error }).error.message)
+        : String((output as { error?: unknown })?.error ?? "unknown error");
+    message = `${kind} generation failed: ${err.slice(0, 160)}`;
+  } else {
+    const count =
+      (output as { images?: unknown[] })?.images?.length ??
+      ((output as { videos?: unknown[] })?.videos?.length ?? 1);
+    message = `${kind} generation finished (${count} total) - see it in the chat.`;
+  }
+  window.dispatchEvent(
+    new CustomEvent("Kai:media-settled", {
+      detail: { sessionId, message, ok: !failed },
+    }),
+  );
+}
+
 function rememberCompleted(sessionId: string, jobKey: string, output: unknown) {
   // Only successes: a failure must be retryable.
   if (!output || typeof output !== "object" || "error" in output) return;
@@ -158,6 +201,7 @@ export function spawnMediaTask(
     for (const id of job.toolCallIds) {
       useChatStore.getState().resolveMedia(sessionId, id, output);
     }
+    notifyMediaSettled(sessionId, output);
   };
 
   job.timer = setTimeout(() => {
