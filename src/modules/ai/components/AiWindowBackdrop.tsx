@@ -10,6 +10,22 @@ export const AI_EXPANDED_WINDOW_GEOMETRY =
   "top-[2.85rem] right-2 bottom-[calc(var(--kai-input-bar-h,0px)+42px)] left-[calc(var(--kai-workspace-left,0px)+8px)]";
 
 /**
+ * Expanded geometry with a collapsed pill stacked below (2026-11-14).
+ *
+ * The pill strip band is NOT free space under an expanded surface: a pill
+ * anchors at bottom-[input+42px] and is 32px tall, so it occupies the band
+ * 42..74px above the input bar. The plain expanded geometry's bottom edge
+ * (+42px) sits at the pill's BOTTOM edge, i.e. the expanded window's lowest
+ * 32px covered the pill band entirely - the group pill vanished behind an
+ * expanded AI window, and the AI pill floated INSIDE the expanded group
+ * panel's bottom edge. When a pill is stacked below, the expanded surface
+ * must rise by one pill strip (84 = 42 base + 42 pill), exactly like the
+ * docked window's +84 lift.
+ */
+export const AI_EXPANDED_WINDOW_GEOMETRY_WITH_PILL =
+  "top-[2.85rem] right-2 bottom-[calc(var(--kai-input-bar-h,0px)+84px)] left-[calc(var(--kai-workspace-left,0px)+8px)]";
+
+/**
  * Opaque matte behind an EXPANDED AI surface.
  *
  * Both expanded surfaces are rounded-cornered cards with translucent borders
@@ -27,14 +43,27 @@ export const AI_EXPANDED_WINDOW_GEOMETRY =
  * document.documentElement, so body-level placement still resolves them.
  * Rendered only while expanded; it is flat color, so it pops in and out
  * without animation while the surface animates over it.
+ *
+ * `pillBelow` picks the matching expanded geometry - the matte must cover the
+ * exact rect the surface paints, pill-lifted or not.
  */
-export function AiWindowBackdrop({ active }: { active: boolean }) {
+export function AiWindowBackdrop({
+  active,
+  pillBelow = false,
+}: {
+  active: boolean;
+  pillBelow?: boolean;
+}) {
   if (!active) return null;
   return createPortal(
     <div
       aria-hidden
       data-ai-window-backdrop
-      className={`pointer-events-none fixed z-30 bg-background ${AI_EXPANDED_WINDOW_GEOMETRY}`}
+      className={`pointer-events-none fixed z-30 bg-background ${
+        pillBelow
+          ? AI_EXPANDED_WINDOW_GEOMETRY_WITH_PILL
+          : AI_EXPANDED_WINDOW_GEOMETRY
+      }`}
     />,
     document.body,
   );

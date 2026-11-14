@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { useSourceControl } from "@/modules/source-control";
 import type { SidebarViewId } from "@/modules/sidebar";
 import { native } from "@/modules/ai/lib/native";
+import { useChatStore } from "@/modules/ai/store/chatStore";
 import { findLeafCwd } from "@/modules/terminal";
 import type { Tab } from "@/modules/tabs";
 
@@ -182,6 +183,13 @@ export function useSourceControlWiring(args: {
     try {
       const repo = await native.gitResolveRepo(contextPath);
       if (!repo) return;
+      // Same visibility rule as handleOpenFile (App.tsx): an expanded AI
+      // window or group panel covers the whole workspace, so the newly
+      // opened Git Graph tab would be invisible behind it. Shrink
+      // whichever surface is expanded before opening the tab.
+      const s = useChatStore.getState();
+      if (s.mini.expanded) s.collapseMini();
+      if (s.groupPanelExpanded) s.setGroupPanelExpanded(false);
       openCommitHistoryTab({ repoRoot: repo.repoRoot, branch: repo.branch });
     } catch {
       /* noop */

@@ -812,12 +812,15 @@ describe("source pins — trust boundary & wiring", () => {
     // while the group panel covers its strip.
     expect(chatStore).toContain("groupPanelExpanded: false");
     expect(panel).toContain("groupPanelExpanded");
-    // Expanded geometry is a shared const (AI_EXPANDED_WINDOW_GEOMETRY in
+    // Expanded geometry is a shared const (AI_EXPANDED_WINDOW_GEOMETRY* in
     // AiWindowBackdrop.tsx) so the corner-crack matte behind the panel can
     // never drift from the rect the panel paints. The panel must import and
-    // interpolate it, not carry its own copy.
-    expect(panel).toContain("AI_EXPANDED_WINDOW_GEOMETRY");
-    expect(panel).toContain("${AI_EXPANDED_WINDOW_GEOMETRY} rounded-xl");
+    // interpolate it, not carry its own copy. 2026-11-14: the panel's
+    // expanded branch uses the PILL-LIFTED variant - the AI pill always
+    // stacks below it while the group owns the slot, and the plain +42
+    // bottom edge is the pill's BOTTOM edge (would cover the pill band).
+    expect(panel).toContain("AI_EXPANDED_WINDOW_GEOMETRY_WITH_PILL");
+    expect(panel).toContain("${AI_EXPANDED_WINDOW_GEOMETRY_WITH_PILL} rounded-xl");
     // Docked group + AI pill: the +84px bottom anchor also needs the extra
     // 42px subtracted from height. Otherwise the panel grows upward past
     // the equivalent AI window's top edge when the viewport is short.

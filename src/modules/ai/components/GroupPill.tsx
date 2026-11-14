@@ -35,6 +35,7 @@ export function GroupPill() {
   );
   const openMiniToStack = useChatStore((s) => s.openMiniToStack);
   const stackSurface = useChatStore((s) => s.stackRail.surface);
+  const groupPanelExpanded = useChatStore((s) => s.groupPanelExpanded);
   const activeProjectVersion = useSyncExternalStore(
     subscribeActiveProject,
     getActiveProjectVersion,
@@ -65,6 +66,12 @@ export function GroupPill() {
       groupsForProject(activeProjectId() ?? "").length > 0,
     [version, activeProjectVersion, stackSurface],
   );
+  // WIDTH STRETCH (2026-11-14 ask): while the group panel above is
+  // EXPANDED, this pill anchors to the expanded geometry's left edge
+  // instead of the fixed mini-window width - the collapsed pill spans
+  // the same width as the window above it. Docked panel above (or AI
+  // minimized, nothing above) keeps the 34rem twin width.
+  const stretchBelowExpanded = stackSurface === "group" && groupPanelExpanded;
   // Pending approvals across ALL live groups — personas (registry) PLUS
   // background participant sessions awaiting approval cards (2026-11-02
   // audit NIT: the badge counted only persona cards, so a background
@@ -115,7 +122,9 @@ export function GroupPill() {
         // height, sits at the bottom edge of the expanded group panel.
         "fixed z-40 flex h-8 items-center gap-1.5 rounded-lg border border-border/60 bg-card px-2.5",
         "text-[11px] text-muted-foreground shadow-md transition-colors hover:bg-accent hover:text-foreground",
-        "right-2 w-[min(34rem,calc(100vw-2rem))]",
+        stretchBelowExpanded
+          ? "right-2 left-[calc(var(--kai-workspace-left,0px)+8px)]"
+          : "right-2 w-[min(34rem,calc(100vw-2rem))]",
         groupPillVisible
           ? "bottom-[calc(var(--kai-input-bar-h,0px)+84px)]"
           : "bottom-[calc(var(--kai-input-bar-h,0px)+42px)]",

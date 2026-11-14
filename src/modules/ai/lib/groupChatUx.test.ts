@@ -90,7 +90,7 @@ describe("panel ✕ is minimize; the pill ✕ ends and deletes", () => {
 describe("composer mirrors the AI input bar", () => {
   it("borderless transparent textarea (no boxed Input element)", () => {
     expect(panel).toMatch(
-      /min-h-8 flex-1 resize-none rounded-lg bg-transparent/,
+      /flex-1 resize-none rounded-lg bg-transparent/,
     );
     // The boxed <Input from ui/input is gone from the COMPOSER. Scoped to
     // the composer slice (2026-11-01): the InvitePicker persona filter is a

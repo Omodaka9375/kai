@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/lib/utils";
 import {
   AiWindowBackdrop,
-  AI_EXPANDED_WINDOW_GEOMETRY,
+  AI_EXPANDED_WINDOW_GEOMETRY_WITH_PILL,
 } from "./AiWindowBackdrop";
 import { Button } from "@/components/ui/button";
 import ArrowExpand01Icon from "@hugeicons/core-free-icons/ArrowExpand01Icon";
@@ -303,7 +303,7 @@ export function GroupChatPanel({
           expanded panel's rounded corners let editor content leak through.
           Rendered OUTSIDE the AnimatePresence (a fragment inside it would
           break the motion.div's exit animation). */}
-      <AiWindowBackdrop active={expanded && groupExpanded} />
+      <AiWindowBackdrop active={expanded && groupExpanded} pillBelow />
       <InvitePicker
         open={pickerOpen}
         onOpenChange={setPickerOpen}
@@ -344,9 +344,14 @@ export function GroupChatPanel({
               // the mini window's full-workspace overlay (and owns the
               // +42px strip — the AI pill hides); docked keeps the same
               // width, height formula, and the +84px anchor (AI pill below).
+              // EXPANDED consistency (2026-11-14): the AI pill stacks
+              // below the expanded panel (GroupPill always renders while
+              // the group owns the slot), so the expanded branch uses the
+              // pill-lifted geometry - the plain +42 bottom edge is the
+              // pill's BOTTOM edge, covering the pill band entirely.
               groupExpanded
-                ? `${AI_EXPANDED_WINDOW_GEOMETRY} rounded-xl`
-                : "right-2 w-[min(34rem,calc(100vw-2rem))] bottom-[calc(var(--kai-input-bar-h,0px)+84px)] h-[min(42rem,calc(100vh-var(--kai-input-bar-h,0px)-134px))]",
+                ? `${AI_EXPANDED_WINDOW_GEOMETRY_WITH_PILL} rounded-xl`
+                : "right-2 w-[min(34rem,calc(100vw-2rem))] bottom-[calc(var(--kai-input-bar-h,0px)+84px)] h-[min(42rem,calc(100vh-var(--kai-input-bar-h,0px)-134px))]"
             )}
           >
             <div
@@ -455,6 +460,23 @@ function PanelHeader({
   return (
     <div className="relative flex h-11 shrink-0 items-center gap-3 border-b border-border/60 px-3">
       <div className="flex min-w-0 flex-1 items-center gap-2">
+        {/* Expand toggle LEFTMOST (2026-11-14 ask) - minimize stays at the
+            far right. Same arrangement as the AI mini window's header. */}
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          className="size-5 shrink-0"
+          aria-label={expanded ? "Collapse to mini window" : "Expand to panel"}
+          title={expanded ? "Collapse to mini window" : "Expand to panel"}
+          onClick={onToggleExpand}
+        >
+          <HugeiconsIcon
+            icon={expanded ? ArrowShrink01Icon : ArrowExpand01Icon}
+            size={11}
+            strokeWidth={1.75}
+          />
+        </Button>
         <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted/70 text-muted-foreground">
           <HugeiconsIcon icon={Link01Icon} size={13} strokeWidth={1.75} />
         </span>
@@ -568,14 +590,14 @@ function PanelHeader({
             <CoordinatorMenu group={group} />
             <Button
               type="button"
-              size="sm"
+              size="icon"
               variant="ghost"
-              className="h-6 shrink-0 gap-1 rounded-full border border-border/60 px-2.5 text-[11px]"
+              className="size-6 shrink-0 rounded-full border border-border/60 text-muted-foreground"
               title="Stop every busy participant agent now"
+              aria-label="Stop every busy participant agent now"
               onClick={onStopAll}
             >
               <HugeiconsIcon icon={StopIcon} size={11} strokeWidth={1.75} />
-              Stop
             </Button>
             <Button
               type="button"
@@ -590,10 +612,10 @@ function PanelHeader({
             </Button>
           </>
         )}
-        {/* Minimize ( _ ), NOT close: hands the expanded slot back to the
-            AI mini window but the group keeps running — the tray pill at
-            the bottom of the gutter re-opens it. Ending the group lives on
-            the collapsed pill's ✕ (and the End button above). */}
+        {/* Minimize ( _ ) at the FAR RIGHT, NOT close: hands the expanded
+            slot back to the AI mini window but the group keeps running — the
+            tray pill at the bottom of the gutter re-opens it. Ending the
+            group lives on the collapsed pill's ✕ (and the End button). */}
         <Button
           type="button"
           size="icon"
@@ -604,23 +626,6 @@ function PanelHeader({
           onClick={onClose}
         >
           <HugeiconsIcon icon={MinusSignIcon} size={11} strokeWidth={1.75} />
-        </Button>
-        {/* Expand toggle LAST on the right — same trailing position as the
-            AI mini window's header (consistency ask, 2026-11-01). */}
-        <Button
-          type="button"
-          size="icon"
-          variant="ghost"
-          className="size-5"
-          aria-label={expanded ? "Collapse to mini window" : "Expand to panel"}
-          title={expanded ? "Collapse to mini window" : "Expand to panel"}
-          onClick={onToggleExpand}
-        >
-          <HugeiconsIcon
-            icon={expanded ? ArrowShrink01Icon : ArrowExpand01Icon}
-            size={11}
-            strokeWidth={1.75}
-          />
         </Button>
       </div>
       {resumeRefusal ? (
@@ -1233,6 +1238,11 @@ function Composer({ group }: { group: GroupChat }) {
       </div>
     );
   }
+  // PADDING PARITY (2026-11-14 ask): the main bar is a min-h-[42px]
+  // vertically-centered strip whose padding lives on an inner rounded-lg
+  // px-1 py-1 container. Quote/error rows flip it to py-2, like the main
+  // bar's chips rule.
+  const hasRows = pendingQuote !== null || sendError !== null;
   return (
     <div
       className={cn(
@@ -1242,9 +1252,11 @@ function Composer({ group }: { group: GroupChat }) {
         // panel edge-to-edge instead of a small centered box. No width cap
         // when expanded — the AI input bar has none either; the strip spans
         // the whole panel like the main chat.
-        "flex shrink-0 flex-col gap-1.5 border-t border-border/60 bg-card/40 px-3 py-2",
+        "flex shrink-0 flex-col justify-center border-t border-border/60 bg-card/40 px-3",
+        hasRows ? "py-2" : "min-h-[42px] py-0",
       )}
     >
+      <div className="flex flex-col gap-1.5 rounded-lg px-1 py-1">
       {pendingQuote && (
         <div className="flex items-center gap-1.5 rounded-lg border-l-2 border-primary/70 bg-muted/50 px-2 py-1">
           <HugeiconsIcon
@@ -1380,14 +1392,13 @@ function Composer({ group }: { group: GroupChat }) {
           className={cn(
             // AiInputBar's textarea contract: transparent, borderless,
             // flex-1 — reads as one continuous strip with the picker and
-            // send button, not a boxed input. Grows with content up to a
-            // practical cap (the panel stays usable with a long draft).
-            // py-1.5: a textarea's content sits at the TOP of its box —
-            // with min-h-8 (32px) around a ~20px line and no vertical
-            // padding, the caret and placeholder glued to the top edge.
-            // 6px top/bottom centers the single line; taller drafts scroll
-            // (max-h-24) so the padding never clips.
-            "min-h-8 flex-1 resize-none rounded-lg bg-transparent px-1 py-1.5 text-[12.5px] leading-relaxed outline-none",
+            // send button, not a boxed input. NO min-h/py of its own: the
+            // root strip (min-h-[42px] + justify-center) plus the inner
+            // py-1 container do the vertical centering, exactly like the
+            // main bar — the old min-h-8 + py-1.5 kept dead space INSIDE
+            // the textarea box. Grows with content up to a practical cap
+            // (max-h-24) so a long draft never eats the panel.
+            "flex-1 resize-none rounded-lg bg-transparent text-[12.5px] leading-relaxed outline-none",
             "overflow-x-hidden whitespace-pre-wrap break-words [overflow-wrap:anywhere]",
             "placeholder:text-muted-foreground/60 focus-visible:ring-1 focus-visible:ring-ring/50",
             "max-h-24 overflow-y-auto",
@@ -1448,6 +1459,7 @@ function Composer({ group }: { group: GroupChat }) {
           <HugeiconsIcon icon={SentIcon} size={15} strokeWidth={1.75} />
         </Button>
       </div>
+      </div>
     </div>
   );
 }
@@ -1468,6 +1480,14 @@ function GroupListTray({
   onEnd: (id: string) => void | Promise<void>;
 }) {
   // ONE pill for the whole gutter: it names the most recent live group and
+  // WIDTH STRETCH (2026-11-14 ask): while the AI window above is EXPANDED,
+  // this pill anchors to the expanded geometry's left edge instead of the
+  // fixed mini-window width - the collapsed pill spans the same width as
+  // the window above it. Hooks must run before the early returns below.
+  const stretchBelowExpanded = useChatStore(
+    (s) => s.mini.open && s.mini.expanded,
+  );
+  // ONE pill for the whole gutter: it names the most recent live group and
   // expands whichever group it names. While a group is expanded it is the
   // panel, not the pill - so with a group owning the slot the pill is hidden
   // entirely (App renders the AI pill instead).
@@ -1487,7 +1507,10 @@ function GroupListTray({
         // the bottom of the right gutter below the AI window/pill.
         "fixed z-40 flex h-8 items-center gap-1.5 rounded-lg border border-border/60 bg-card px-2.5",
         "text-[11px] text-muted-foreground shadow-md transition-colors hover:bg-accent hover:text-foreground",
-        "right-2 w-[min(34rem,calc(100vw-2rem))] bottom-[calc(var(--kai-input-bar-h,0px)+42px)]",
+        "right-2 bottom-[calc(var(--kai-input-bar-h,0px)+42px)]",
+        stretchBelowExpanded
+          ? "left-[calc(var(--kai-workspace-left,0px)+8px)]"
+          : "w-[min(34rem,calc(100vw-2rem))]",
       )}
     >
       <button

@@ -102,11 +102,15 @@ describe("composer @-mention targeting (replaces the All dropdown)", () => {
     expect(panel).toMatch(/ParticipantDot participant=\{/);
   });
 
-  it("the textarea pads vertically so the caret/placeholder sit centered (not glued to the top)", () => {
-    // min-h-8 (32px) around a ~20px line with no vertical padding left the
-    // caret + placeholder flush with the top edge (textarea content always
-    // renders at the top of its box). py-1.5 centers the single line.
-    expect(panel).toMatch(
+  it("vertical centering lives on the strip + inner container, like the main bar (2026-11-14)", () => {
+    // The old min-h-8 + py-1.5 put the padding INSIDE the textarea box;
+    // now the composer mirrors AiInputBar exactly: the root strip is
+    // min-h-[42px] with justify-center, and the inner rounded-lg px-1
+    // py-1 container owns the breathing room - no dead space inside the
+    // textarea itself.
+    expect(panel).toMatch(/min-h-\[42px\] py-0/);
+    expect(panel).toMatch(/rounded-lg px-1 py-1/);
+    expect(panel).not.toMatch(
       /bg-transparent px-1 py-1\.5 text-\[12\.5px\]/,
     );
   });

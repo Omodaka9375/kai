@@ -9,6 +9,7 @@ import {
 } from "@/modules/ai/lib/mcpRegistry";
 import { useMcpStore } from "@/modules/ai/store/mcpStore";
 import { McpInstallDialog } from "./McpInstallDialog";
+import { McpDetailPopover } from "./McpDetailPopover";
 import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
 import CheckmarkCircle02Icon from "@hugeicons/core-free-icons/CheckmarkCircle02Icon";
 import Download01Icon from "@hugeicons/core-free-icons/Download01Icon";
@@ -230,9 +231,22 @@ export function ExtensionsView() {
                 </div>
                 <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                   <div className="flex items-center gap-1.5">
-                    <span className="truncate text-[12px] font-medium text-foreground">
-                      {s.title || displayName(s.name)}
-                    </span>
+                    {/* Clickable title -> detail popover (author, full
+                        description, links, env vars - the row can't show
+                        these). 2026-11-14 ask. */}
+                    <McpDetailPopover
+                      entry={entry}
+                      installed={installed}
+                      onInstall={() => install(entry)}
+                    >
+                      <button
+                        type="button"
+                        title="Server details"
+                        className="min-w-0 cursor-pointer truncate rounded text-left text-[12px] font-medium text-foreground transition-colors hover:text-primary hover:underline hover:decoration-primary/50 hover:underline-offset-2"
+                      >
+                        {s.title || displayName(s.name)}
+                      </button>
+                    </McpDetailPopover>
                     <span className="shrink-0 rounded bg-muted/50 px-1 py-0.5 text-[9px] text-muted-foreground">
                       {transport}
                     </span>

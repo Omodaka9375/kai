@@ -18,14 +18,20 @@ describe("AI mini window minimize-to-pill (source pins)", () => {
   );
   const pill = readFileSync(new URL("./GroupPill.tsx", import.meta.url), "utf8");
 
-  it("the header has a minimize button before the expand arrow", () => {
+  it("expand toggle sits leftmost, minimize at the far right (2026-11-14 ask)", () => {
     expect(mini).toContain('aria-label="Minimize to pill"');
-    // Order: minimize button rendered BEFORE the expand toggle in the
-    // header's trailing cluster, matching the group panel's header.
-    const minIdx = mini.indexOf('aria-label="Minimize to pill"');
+    // Order FLIPPED (2026-11-14): expand toggle now lives at the header's
+    // LEFT edge (leading cluster), minimize stays in the trailing cluster
+    // at the far right - same arrangement as the group panel's header.
     const expIdx = mini.indexOf('aria-label={expandLabel}');
-    expect(minIdx).toBeGreaterThan(-1);
-    expect(minIdx).toBeLessThan(expIdx);
+    const agentIdx = mini.indexOf('<AgentSwitcher isMiniWindow />');
+    const minIdx = mini.indexOf('aria-label="Minimize to pill"');
+    expect(expIdx).toBeGreaterThan(-1);
+    expect(agentIdx).toBeGreaterThan(-1);
+    // Expand is before everything else in the leading cluster...
+    expect(expIdx).toBeLessThan(agentIdx);
+    // ...and minimize is the trailing cluster's LAST control.
+    expect(minIdx).toBeGreaterThan(expIdx);
   });
 
   it("minimize keeps the panel open - it hides the window, not the AI", () => {

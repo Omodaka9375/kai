@@ -1275,16 +1275,38 @@ export const useChatStore = create<StoreState>((set, get) => ({
   // store (not component state) so the two surfaces can swap each other
   // without prop-drilling across the app-level panel.
   stackRail: { surface: "ai" },
-  // Group panel full-view state — the twin of mini.expanded. Every slot
-  // swap RESETS it: a freshly opened group starts docked, and handing the
-  // slot back to AI collapses it. A stale true would full-screen the panel
-  // the next time it opens.
+  // Group panel full-view state — the twin of mini.expanded. Pill-click
+  // swaps CARRY it (see openMiniToStack/openGroupToStack); explicit
+  // close/✕ resets it via closeGroupFromStack. A stale true would
+  // full-screen the panel the next time it opens.
   groupPanelExpanded: false,
   setGroupPanelExpanded: (expanded) => set({ groupPanelExpanded: expanded }),
+  // EXPANDED-STATE CARRY (2026-11-14 ask): the expanded/docked choice is
+  // the USER's, not each surface's - swapping via a pill click carries the
+  // outgoing surface's expanded state to the incoming one, so an expanded
+  // group panel swaps to an expanded AI window and vice versa; no jump to
+  // docked mid-session. Explicit minimize (AI _ button / group _) keeps its
+  // own shrink semantics - those still reset.
   openMiniToStack: () =>
-    set((s) => ({ mini: { open: true, expanded: s.mini.expanded }, stackRail: { surface: "ai" }, groupPanelExpanded: false })),
+    set((s) => ({
+      mini: {
+        open: true,
+        expanded:
+          s.stackRail.surface === "group"
+            ? s.groupPanelExpanded
+            : s.mini.expanded,
+      },
+      stackRail: { surface: "ai" },
+      groupPanelExpanded: false,
+    })),
   openGroupToStack: () =>
-    set(() => ({ stackRail: { surface: "group" }, groupPanelExpanded: false })),
+    set((s) => ({
+      stackRail: { surface: "group" },
+      groupPanelExpanded:
+        s.stackRail.surface === "group"
+          ? s.groupPanelExpanded
+          : s.mini.open && s.mini.expanded,
+    })),
   /** Close (✕) the group panel: the AI mini window automatically comes
    *  back — either AI or the group owns the expanded slot, never neither. */
   closeGroupFromStack: () =>

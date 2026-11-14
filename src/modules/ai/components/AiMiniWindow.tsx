@@ -132,7 +132,11 @@ const SUGGESTIONS = [
   },
 ];
 
-import { AiWindowBackdrop, AI_EXPANDED_WINDOW_GEOMETRY } from "./AiWindowBackdrop";
+import {
+  AiWindowBackdrop,
+  AI_EXPANDED_WINDOW_GEOMETRY,
+  AI_EXPANDED_WINDOW_GEOMETRY_WITH_PILL,
+} from "./AiWindowBackdrop";
 
 export function AiMiniWindow() {
   const sessionId = useChatStore((s) => s.activeSessionId);
@@ -234,8 +238,9 @@ export function AiMiniWindow() {
     <>
       {/* Corner-crack matte: the expanded window's rounded corners + translucent
           border let editor/terminal content leak through; this covers the rect
-          behind it (see AiWindowBackdrop). */}
-      <AiWindowBackdrop active={expanded} />
+          behind it (see AiWindowBackdrop). pillBelow keeps the matte matched to
+          the lifted geometry when the group pill stacks below. */}
+      <AiWindowBackdrop active={expanded} pillBelow={groupPillVisible} />
       <motion.div
       initial={{ opacity: 0, y: 12, scale: 0.98 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -248,8 +253,15 @@ export function AiMiniWindow() {
         "shadow-[0_1px_0_0_rgba(255,255,255,0.04)_inset,0_24px_48px_-12px_rgba(0,0,0,0.45),0_8px_16px_-8px_rgba(0,0,0,0.3)]",
         "ring-1 ring-black/5 dark:ring-white/5",
         "transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
+        // EXPANDED CONSISTENCY (2026-11-14): a live group pill below lifts
+        // the EXPANDED window too, not just the docked one. The pill band
+        // is 42..74px above the input bar; the plain expanded bottom edge
+        // (+42px) is the pill's BOTTOM edge, so the expanded window's
+        // lowest 32px covered the pill entirely - the docked state stacked
+        // correctly but expanding swallowed the group pill row. Lift to +84,
+        // same arithmetic as the docked branch.
         expanded
-          ? `${AI_EXPANDED_WINDOW_GEOMETRY} rounded-xl`
+          ? `${groupPillVisible ? AI_EXPANDED_WINDOW_GEOMETRY_WITH_PILL : AI_EXPANDED_WINDOW_GEOMETRY} rounded-xl`
           : "right-2 bottom-[calc(var(--kai-input-bar-h,0px)+42px)] h-[min(42rem,calc(100vh-var(--kai-input-bar-h,0px)-92px))] w-[min(34rem,calc(100vw-2rem))]",
         // Shrink up by one pill height + gap when the group pill is stacked
         // below (84 = 42 base + 42 pill).
@@ -411,6 +423,19 @@ function Header({
   return (
     <div className="relative flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border/60 px-3">
       <div className="flex min-w-0 items-center gap-1.5">
+        {/* Expand toggle LEFTMOST (2026-11-14 ask) - minimize stays at the
+            far right. Same arrangement as the group panel's header. */}
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          onClick={onExpand}
+          className="size-5 shrink-0"
+          aria-label={expandLabel}
+          title={expandLabel}
+        >
+          <HugeiconsIcon icon={expanded ? ArrowShrink01Icon : ArrowExpand01Icon} size={11} strokeWidth={1.75} />
+        </Button>
         <AgentSwitcher isMiniWindow />
         <SandboxBadge />
         {messages !== undefined ? (
@@ -419,8 +444,8 @@ function Header({
       </div>
       <div className="flex shrink-0 items-center gap-1">
         <SessionPicker />
-        {/* Minimize ( _ ) BEFORE the expand arrow - same order as the group
-            panel's header (minimize, then expand), 2026-11-06 ask.
+        {/* Minimize ( _ ) at the FAR RIGHT - same trailing position as the
+            group panel's header (2026-11-14 ask).
             Minimize collapses the window to the AI pill in the bottom
             strip; the agent keeps running; the pill re-opens it. */}
         {onMinimize ? (
@@ -436,17 +461,6 @@ function Header({
             <HugeiconsIcon icon={MinusSignIcon} size={11} strokeWidth={1.75} />
           </Button>
         ) : null}
-        <Button
-          type="button"
-          size="icon"
-          variant="ghost"
-          onClick={onExpand}
-          className="size-5"
-          aria-label={expandLabel}
-          title={expandLabel}
-        >
-          <HugeiconsIcon icon={expanded ? ArrowShrink01Icon : ArrowExpand01Icon} size={11} strokeWidth={1.75} />
-        </Button>
       </div>
     </div>
   );
@@ -770,6 +784,12 @@ function SessionRow({
       className={cn(
         "group relative flex items-center justify-between gap-2 text-xs",
         active && "bg-accent/40",
+        // Pinned rows read at a glance (2026-11-14 ask): a faint primary
+        // tint plus a left accent bar - subtle enough not to fight the
+        // active row's stronger bg-accent/40, but obvious next to plain
+        // unpinned rows.
+        session.pinned &&
+          "bg-primary/[0.06] before:absolute before:inset-y-1 before:left-0 before:w-0.5 before:rounded-full before:bg-primary/50",
       )}
     >
       {editing ? (
