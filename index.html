@@ -29,25 +29,51 @@
       // visible in the window itself, no devtools required.
       (function () {
         var errors = [];
+        var dismissed = false;
+        var trapLog = null;
         function paint() {
           var el = document.getElementById("kai-boot-trap");
           if (!el) {
             el = document.createElement("div");
             el.id = "kai-boot-trap";
             el.style.cssText =
-              "position:fixed;inset:16px;z-index:2147483647;overflow:auto;" +
-              "padding:16px;border-radius:8px;font:12px/1.6 monospace;" +
+              "position:fixed;top:16px;right:16px;max-width:560px;max-height:45vh;" +
+              "z-index:2147483647;overflow:auto;padding:10px 32px 10px 12px;border-radius:8px;" +
+              "font:11px/1.6 monospace;box-shadow:0 8px 24px rgba(0,0,0,.4);" +
               "color:#fca5a5;background:rgba(10,10,10,.95);white-space:pre-wrap;";
+            var close = document.createElement("button");
+            close.type = "button";
+            close.textContent = "\u00d7";
+            close.setAttribute("aria-label", "Dismiss error overlay");
+            close.style.cssText =
+              "position:absolute;top:6px;right:6px;width:20px;height:20px;padding:0;" +
+              "border:1px solid rgba(252,165,165,.35);border-radius:4px;line-height:18px;" +
+              "background:transparent;color:#fca5a5;font:12px monospace;cursor:pointer;";
+            close.onclick = function () {
+              dismissed = true;
+              el.style.display = "none";
+            };
+            el.appendChild(close);
+            trapLog = document.createElement("div");
+            el.appendChild(trapLog);
             document.body.appendChild(el);
           }
-          el.textContent = errors.join("\n\n");
+          trapLog.textContent = errors.join("\n\n");
+          if (!dismissed) el.style.display = "block";
         }
         function add(msg) {
           errors.push(msg);
+          // A NEW error after dismissal re-shows the overlay; the user can
+          // close it again. Only stale errors stay hidden.
+          dismissed = false;
           if (document.body) paint();
           document.title = "KAI boot error";
         }
         window.addEventListener("error", function (e) {
+          // Benign spec-mandated throw: an observer callback changed layout
+          // and the browser re-reports next frame. Not a bug; the overlay
+          // must not block the app over it.
+          if (/^ResizeObserver loop/.test(e.message || "")) return;
           add(
             "Unhandled error: " +
               (e.message || "unknown") +
