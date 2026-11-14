@@ -346,6 +346,26 @@ export const MessageResponse = memo(
       <Streamdown
         className={cn(
           "size-full min-w-0 max-w-full overflow-wrap-anywhere [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_blockquote]:max-w-full [&_p]:max-w-full [&_pre]:max-w-full",
+          // CHAT-SCALE TYPOGRAPHY (2026-11-14): Streamdown's element defaults
+          // are doc-scale - h2 = text-2xl (24px), h1 = text-3xl - grotesque
+          // against the 12px chat body. And strong gets ONLY font-semibold,
+          // so agents that write **bold lead-ins** instead of # headings
+          // produced a flat wall: same size, same color, weight the sole
+          // signal. Two layers fix both: (1) a chat heading scale, semibold,
+          // full foreground, tightened margins; (2) body text (p/li) dimmed
+          // one step to foreground/85 so bold lead-ins, strong and headings
+          // pop BY CONTRAST - hierarchy survives even when the agent never
+          // emits a heading. The arbitrary-variant selectors outrank
+          // Streamdown's own utility classes (0,1,1 vs 0,1,0).
+          "[&_h1]:mt-4 [&_h1]:mb-1.5 [&_h1]:text-[15px] [&_h1]:font-semibold [&_h1]:leading-snug [&_h1]:text-foreground",
+          "[&_h2]:mt-4 [&_h2]:mb-1.5 [&_h2]:text-sm [&_h2]:font-semibold [&_h2]:leading-snug [&_h2]:text-foreground",
+          "[&_h3]:mt-3 [&_h3]:mb-1 [&_h3]:text-[13px] [&_h3]:font-semibold [&_h3]:leading-snug [&_h3]:text-foreground",
+          "[&_h4]:mt-3 [&_h4]:mb-1 [&_h4]:text-xs [&_h4]:font-semibold [&_h4]:text-foreground",
+          "[&_h5]:mt-3 [&_h5]:mb-1 [&_h5]:text-xs [&_h5]:font-semibold [&_h5]:text-foreground",
+          "[&_h6]:mt-3 [&_h6]:mb-1 [&_h6]:text-xs [&_h6]:font-semibold [&_h6]:text-foreground",
+          "[&_strong]:text-foreground [&_b]:text-foreground",
+          "[&_p]:text-foreground/85 [&_li]:text-foreground/85",
+          "[&_hr]:my-3 [&_hr]:border-border/60",
           className,
         )}
         linkSafety={{ enabled: false }}
