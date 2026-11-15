@@ -37,10 +37,14 @@ describe("the gate is the production predictor, imported", () => {
     expect(store).toMatch(/predictAutoApproval\(\{\s*\n\s*autoApprove: "all",/);
   });
 
-  it("predictAutoApproval still refuses elevated, screen, and signed commits", () => {
+  it("predictAutoApproval still refuses elevated, screen, signed commits, and standing authority", () => {
     expect(pred).toContain('if (args.input?.elevated === true) {');
     expect(pred).toContain("PRIVACY_APPROVAL_TOOLS");
     expect(pred).toContain("signingApprovalRequired &&");
+    // 2026-11-15: group auto-allow inherits this too, so a persona in an
+    // Allow group can no longer rewrite app settings, register an MCP
+    // server, author a skill, start a watch, or delete a persona silently.
+    expect(pred).toContain("STANDING_AUTHORITY_TOOLS");
   });
 
   it("auto-allowed calls skip the card registry entirely", () => {

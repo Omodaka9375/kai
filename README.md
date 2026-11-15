@@ -150,7 +150,7 @@ Auto-update is built in.
 2. Add an API key for any provider — or point to a local model
 3. Press `Ctrl+I` to open the AI agent
 
-Keys are stored in the OS keychain. No account required.
+Keys never leave your machine: macOS Keychain or Windows Credential Manager, and a user-only (`0600`) file on Linux. No account required.
 
 ## Keyboard Shortcuts
 

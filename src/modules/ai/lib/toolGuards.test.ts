@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   collectCommandArgs,
   collectPathArgs,
+  canonicalReadFloor,
   evaluateToolGuards,
   pathReadFloorGuard,
   shellFloorGuard,
@@ -56,8 +57,8 @@ describe("collectCommandArgs", () => {
 });
 
 describe("pathReadFloorGuard", () => {
-  it("denies a secret path on ANY tool, even one with no inline check", () => {
-    const reason = pathReadFloorGuard({
+  it("denies a secret path on ANY tool, even one with no inline check", async () => {
+    const reason = await pathReadFloorGuard({
       name: "mcp_server__do_thing",
       args: { path: "/home/me/.ssh/id_rsa" },
     });
@@ -65,50 +66,134 @@ describe("pathReadFloorGuard", () => {
     expect(reason).toMatch(/id_rsa|ssh|sensitive/i);
   });
 
-  it("allows an innocuous path", () => {
+  it("allows an innocuous path", async () => {
     expect(
-      pathReadFloorGuard({ name: "read_file", args: { path: "src/app.ts" } }),
+      await pathReadFloorGuard({ name: "read_file", args: { path: "src/app.ts" } }),
     ).toBeUndefined();
+  });
+
+  it("CATCHES a symlink hop into a protected dir (the 2026-11-15 fix)", async () => {
+    // A literal path with nothing suspicious about it whose canonical form
+    // lands in ~/.ssh. The old synchronous floor pattern-matched the literal
+    // string only, so this sailed through — which is exactly how an MCP file
+    // tool (no inline canonical check) could read a key.
+    const reason = await canonicalReadFloor(
+      "D:/repo/notes.txt",
+      async () => "/home/me/.ssh/id_rsa",
+    );
+    expect(reason.ok).toBe(false);
+    if (!reason.ok) {
+      expect(reason.reason).toMatch(/protected|sensitive/i);
+    }
+  });
+
+  it("allows a path whose canonical form is also allowed", async () => {
+    const r = await canonicalReadFloor(
+      "src/a.ts",
+      async () => "/home/me/repo/src/a.ts",
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  it("allows a not-yet-existing path (canonicalize throws)", async () => {
+    // New-file writes legitimately fail canonicalization. Failing closed here
+    // would break every create; the tool's own write check still applies.
+    const r = await canonicalReadFloor("src/new.ts", async () => {
+      throw new Error("ENOENT");
+    });
+    expect(r.ok).toBe(true);
+  });
+
+  it("denies BEFORE canonicalizing when the literal is already a secret", async () => {
+    // Keeps the deny reason pointing at what the model typed, and avoids the
+    // IPC round trip on paths that are refused anyway.
+    const canonicalize = vi.fn(async () => "/tmp/x");
+    const reason = await canonicalReadFloor("/home/me/.env", canonicalize);
+    expect(reason.ok).toBe(false);
+    expect(canonicalize).not.toHaveBeenCalled();
+  });
+
+  it("the floor guard canonicalizes every collected path", async () => {
+    // Proves the async floor is what runs, not just the literal matcher: a
+    // path arg that only looks dangerous after resolution must be refused.
+    const spy = vi.fn(async (p: string) =>
+      p === "D:/repo/ok.txt" ? "/home/me/.ssh/id_ed25519" : p,
+    );
+    const guard: ToolGuard = async ({ args }) => {
+      for (const p of collectPathArgs(args)) {
+        const r = await canonicalReadFloor(p, spy);
+        if (!r.ok) return `Blocked by central tool guard: ${r.reason}`;
+      }
+      return undefined;
+    };
+    const reason = await guard({
+      name: "mcp__read",
+      args: { file_path: "D:/repo/ok.txt" },
+    });
+    expect(reason).toMatch(/Blocked by central tool guard/);
+    expect(spy).toHaveBeenCalledWith("D:/repo/ok.txt");
   });
 });
 
 describe("shellFloorGuard", () => {
-  it("denies a destructive command smuggled in a command field", () => {
+  it("denies a destructive command smuggled in a command field", async () => {
     expect(
-      shellFloorGuard({
+      await shellFloorGuard({
         name: "mcp_run",
         args: { command: "rm -rf / --no-preserve-root" },
       }),
     ).toMatch(/Blocked by central tool guard/);
   });
 
-  it("allows a benign command", () => {
+  it("allows a benign command", async () => {
     expect(
-      shellFloorGuard({ name: "bash_run", args: { command: "pnpm test" } }),
+      await shellFloorGuard({ name: "bash_run", args: { command: "pnpm test" } }),
     ).toBeUndefined();
   });
 });
 
 describe("evaluateToolGuards — monotonicity", () => {
-  it("first denial wins and a later permissive guard cannot undo it", () => {
+  it("first denial wins and a later permissive guard cannot undo it", async () => {
     const deny: ToolGuard = () => "nope";
     const ignoreEverything: ToolGuard = () => undefined;
     // Order matters only for WHICH reason surfaces, never for the outcome:
-    expect(evaluateToolGuards({ name: "t", args: {} }, [deny, ignoreEverything])).toBe("nope");
-    expect(evaluateToolGuards({ name: "t", args: {} }, [ignoreEverything, deny])).toBe("nope");
+    expect(await evaluateToolGuards({ name: "t", args: {} }, [deny, ignoreEverything])).toBe("nope");
+    expect(await evaluateToolGuards({ name: "t", args: {} }, [ignoreEverything, deny])).toBe("nope");
   });
 
-  it("a crashing guard FAILS CLOSED even when it is the only guard", () => {
+  it("an ASYNC guard's denial also wins, in either order", async () => {
+    const asyncDeny: ToolGuard = async () => "nope-async";
+    const asyncSilent: ToolGuard = async () => undefined;
+    expect(
+      await evaluateToolGuards({ name: "t", args: {} }, [asyncSilent, asyncDeny]),
+    ).toBe("nope-async");
+    expect(
+      await evaluateToolGuards({ name: "t", args: {} }, [asyncDeny, () => undefined]),
+    ).toBe("nope-async");
+  });
+
+  it("a crashing guard FAILS CLOSED even when it is the only guard", async () => {
     const boom: ToolGuard = () => {
       throw new Error("guard crashed");
     };
     const deny: ToolGuard = () => "denied-by-second";
-    expect(evaluateToolGuards({ name: "t", args: {} }, [boom, deny])).toMatch(
-      /guard failed.*refusing to execute/i,
-    );
-    expect(evaluateToolGuards({ name: "t", args: {} }, [boom])).toMatch(
-      /guard failed.*refusing to execute/i,
-    );
+    expect(
+      await evaluateToolGuards({ name: "t", args: {} }, [boom, deny]),
+    ).toMatch(/guard failed.*refusing to execute/i);
+    expect(
+      await evaluateToolGuards({ name: "t", args: {} }, [boom]),
+    ).toMatch(/guard failed.*refusing to execute/i);
+  });
+
+  it("an ASYNC guard that rejects FAILS CLOSED too", async () => {
+    // The new canonicalize call is IPC: a rejected promise is the realistic
+    // crash shape now, and it must not degrade into permission.
+    const boomAsync: ToolGuard = async () => {
+      throw new Error("ipc died mid-canonicalize");
+    };
+    expect(
+      await evaluateToolGuards({ name: "t", args: {} }, [boomAsync]),
+    ).toMatch(/guard failed.*refusing to execute/i);
   });
 });
 

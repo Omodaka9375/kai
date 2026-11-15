@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   predictAutoApproval,
+  STANDING_AUTHORITY_TOOLS,
   type AutoApprovalPrediction,
 } from "./autoApprovePrediction";
 
@@ -52,6 +53,80 @@ describe("predictAutoApproval (the mirror)", () => {
     ).toBe(false);
   });
 
+  it("standing-authority tools are never auto-approved, even in all mode", () => {
+    // The 2026-11-15 finding: Allow mode had exactly three carve-outs, so
+    // every tool that changes the agent's PERMANENT permissions auto-approved
+    // with zero cards — customInstructions/defaultShell writes, MCP server
+    // registration, skill authoring, watches, persona deletion.
+    for (const toolName of STANDING_AUTHORITY_TOOLS) {
+      expect(
+        predictAutoApproval(base({ toolName, input: {} })),
+      ).toBe(false);
+    }
+  });
+
+  it("the standing-authority set covers the escalation primitives by name", () => {
+    // Pinned individually: dropping one of these silently re-opens the hole.
+    // settings_update_restricted carries customInstructions, defaultShell,
+    // autostart and subagentMaxSteps (the agent's own leash).
+    expect(STANDING_AUTHORITY_TOOLS.has("settings_update_restricted")).toBe(true);
+    expect(STANDING_AUTHORITY_TOOLS.has("mcp_add_server")).toBe(true);
+    expect(STANDING_AUTHORITY_TOOLS.has("create_skill")).toBe(true);
+    expect(STANDING_AUTHORITY_TOOLS.has("update_skill")).toBe(true);
+    expect(STANDING_AUTHORITY_TOOLS.has("watch_create")).toBe(true);
+    expect(STANDING_AUTHORITY_TOOLS.has("delete_persona")).toBe(true);
+  });
+
+  it("the cosmetic settings tool STAYS auto-approvable (Allow still works)", () => {
+    // The set is deliberately narrow: theme/editor/terminal comfort prefs are
+    // reversible cosmetics with no persistent authority. Over-blocking would
+    // make Allow mode useless and invite users to disable the guard.
+    expect(predictAutoApproval(base({ toolName: "settings_update", input: {} }))).toBe(true);
+    expect(
+      predictAutoApproval(base({ toolName: "bash_run", input: { command: "pnpm test" } })),
+    ).toBe(true);
+    expect(
+      predictAutoApproval(base({ toolName: "edit", input: { path: "a.ts" } })),
+    ).toBe(true);
+  });
+
+  it("every listed tool actually has an approval card (no dead guards)", () => {
+    // A needsApproval:false tool never reaches this gate, so listing it would
+    // read as a guard while doing nothing. Fail loudly if one drifts to false.
+    const files: Record<string, string> = {
+      settings_update_restricted: "../tools/settings.ts",
+      mcp_add_server: "../tools/mcpTools.ts",
+      create_skill: "../tools/skills.ts",
+      update_skill: "../tools/skills.ts",
+      watch_create: "../tools/watch.ts",
+      delete_persona: "../tools/persona.ts",
+    };
+    for (const [name, rel] of Object.entries(files)) {
+      const src = readFileSync(new URL(rel, import.meta.url), "utf8");
+      const decl = src.indexOf(`${name}: tool({`);
+      expect(decl).toBeGreaterThan(-1);
+      const body = src.slice(decl, decl + 4000);
+      expect(body).toMatch(/needsApproval:\s*true/);
+    }
+  });
+
+  it("KAI.md documents the standing-authority carve-outs by name", () => {
+    // The doc line claiming the never-auto-approved set was already stale once
+    // (it listed three carve-outs). Pin it to the code so it cannot drift again.
+    const kaiMd = readFileSync(
+      new URL("../../../../KAI.md", import.meta.url),
+      "utf8",
+    );
+    const line = kaiMd
+      .split(/\r?\n/)
+      .find((l) => l.includes("Card carve-outs"));
+    expect(line).toBeDefined();
+    for (const name of STANDING_AUTHORITY_TOOLS) {
+      expect(line).toContain(name);
+    }
+    expect(line).toContain("STANDING_AUTHORITY_TOOLS");
+  });
+
   it("signed-commit approval requirement blocks git commit predictions", () => {
     expect(
       predictAutoApproval(
@@ -96,13 +171,15 @@ describe("lockstep with AgentRunBridge (the real gate)", () => {
     "utf8",
   );
 
-  it("the bridge still enforces the same three carve-outs in the same order", () => {
-    // Order matters: elevated → privacy → signed commit, then approve.
+  it("the bridge still enforces the same carve-outs in the same order", () => {
+    // Order matters: elevated → privacy → standing authority → signed commit,
+    // then approve.
     // 2026-10-31: the carve-outs are SHAPE-based (no bash_run name match) so
     // MCP (`server__*`) wrappers stop for the same clicks — pinned below.
     const order: [string, number][] = [
       ["input?.elevated === true", -1],
       ["PRIVACY_APPROVAL_TOOLS.has(toolName)", -1],
+      ["STANDING_AUTHORITY_TOOLS.has(toolName)", -1],
       ["isSignedCommit =", -1],
       ["autoApprovedRef.current.add(id)", -1],
     ];
@@ -112,6 +189,16 @@ describe("lockstep with AgentRunBridge (the real gate)", () => {
       expect(idx).toBeGreaterThan(prev);
       prev = idx;
     }
+  });
+
+  it("the bridge imports the authority set instead of re-declaring it", () => {
+    // Single source of truth: PRIVACY_APPROVAL_TOOLS is duplicated between
+    // the two files (only string-pinned above), so the newer, broader set is
+    // IMPORTED — drift becomes a compile error, not a silent security hole.
+    expect(bridge).toMatch(
+      /import\s*\{[\s\S]*?STANDING_AUTHORITY_TOOLS[\s\S]*?\}\s*from\s*"\.\.\/lib\/autoApprovePrediction"/,
+    );
+    expect(bridge).not.toMatch(/const STANDING_AUTHORITY_TOOLS\s*[:=]/);
   });
 
   it("the carve-outs hold for MCP tools too (shape-based, not name-based)", () => {

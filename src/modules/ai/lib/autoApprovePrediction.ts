@@ -28,6 +28,40 @@ const PRIVACY_APPROVAL_TOOLS: ReadonlySet<string> = new Set([
   "look_at_screen",
 ]);
 
+/**
+ * Tools that change the agent's STANDING authority or leave persistent
+ * artifacts that outlive the run. Even under autoApprove: "all" these must
+ * stop for a click — Allow means "do my task without pestering me", not
+ * "re-program what I am allowed to do in every future session".
+ *
+ * The distinction the original gate missed: elevated bash / screen capture /
+ * signed commits are the only carve-outs, so every tool below silently
+ * auto-approved in Allow mode. That let the agent, with zero prompts:
+ *   - rewrite `customInstructions` (text appended to EVERY future prompt)
+ *     and `defaultShell` (what every one-shot exec runs through),
+ *   - register an MCP server whose tools then load into later sessions,
+ *   - author a skill (standing reusable instructions, and a skill's
+ *     `mcp_servers` relaunch silently on `#handle`),
+ *   - start a watch (recurring unattended shell execution),
+ *   - delete a persona (irreversible).
+ *
+ * This mirrors, for the interactive path, what `personaWorkspace.ts` already
+ * does for headless personas ("global user-surface tools that mutate state
+ * OUTLIVING the run"). The agent's own leash (`subagentMaxSteps`) rides
+ * inside `settings_update_restricted`, so it is covered by the first entry.
+ *
+ * Only card-bearing tools belong here: a `needsApproval:false` tool never
+ * reaches this gate, so listing it would be dead code that reads as a guard.
+ */
+export const STANDING_AUTHORITY_TOOLS: ReadonlySet<string> = new Set([
+  "settings_update_restricted",
+  "mcp_add_server",
+  "create_skill",
+  "update_skill",
+  "watch_create",
+  "delete_persona",
+]);
+
 /** Detect a `git commit` invocation (not commit-tree) inside a bash_run
  *  command. Mirrors the bridge's isGitCommitCommand. */
 function isGitCommitCommand(command: string | undefined): boolean {
@@ -63,6 +97,10 @@ export function predictAutoApproval(
   }
   // Screen capture's approval card IS the privacy boundary.
   if (PRIVACY_APPROVAL_TOOLS.has(args.toolName)) return false;
+  // Standing-authority changes (app behavior, MCP registration, skills,
+  // watches, persona deletion) are never auto-approved — Allow governs the
+  // current task, not what the agent may permanently reconfigure.
+  if (STANDING_AUTHORITY_TOOLS.has(args.toolName)) return false;
   // Commit-signing "ask for approval" outranks autoApprove: "all". Command-
   // shaped inputs across first-party and MCP shapes (command/cmd/script —
   // the same field set the central tool guards probe).

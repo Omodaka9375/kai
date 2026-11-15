@@ -30,7 +30,10 @@ import {
 import { hasLeakedToolCall } from "../lib/leakedToolCall";
 import { setProjectHasNews } from "../store/projectStatus";
 import { offerToDigest } from "../lib/desktopDigest";
-import { predictAutoApproval } from "../lib/autoApprovePrediction";
+import {
+  predictAutoApproval,
+  STANDING_AUTHORITY_TOOLS,
+} from "../lib/autoApprovePrediction";
 import { activeProjectId, projectIdForSession } from "../store/chatStore";
 import { isApprovalDenied, noteApprovalDenied } from "../lib/approvalLatch";
 import { applyApprovalResponseToChat } from "../store/chatStore";
@@ -840,6 +843,13 @@ function Bridge({
         // This is the enforcement half of the fix; the prompt rules only make
         // the model less eager, they can't guarantee consent.
         if (PRIVACY_APPROVAL_TOOLS.has(toolName)) continue;
+        // Standing-authority changes (app behavior, MCP registration, skills,
+        // watches, persona deletion) must never auto-approve. Allow governs
+        // the CURRENT task, not what the agent may permanently reconfigure
+        // for every future session — without this, `customInstructions`,
+        // `defaultShell`, and the agent's own `subagentMaxSteps` leash were
+        // all writable with zero cards in Allow mode.
+        if (STANDING_AUTHORITY_TOOLS.has(toolName)) continue;
         // Commit signing "ask for approval" — a `git commit` from the agent
         // must be reviewed before signing, even under autoApprove: "all".
         // SHAPE-based (2026-10-31): any command-shaped input (command / cmd /

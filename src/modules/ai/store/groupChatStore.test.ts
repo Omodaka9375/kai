@@ -534,9 +534,11 @@ describe("source pins — trust boundary & wiring", () => {
     // MANUAL count (what auto-approve will NOT resolve) instead:
     // the runStatus gate, the digest approval offer, and the openMini
     // nudge. The manual count mirrors the bridge's own carve-outs via
-    // predictAutoApproval (elevated / privacy / signed commit).
-    expect(bridge).toContain(
-      "import { predictAutoApproval } from \"../lib/autoApprovePrediction\";",
+    // predictAutoApproval (elevated / privacy / signed commit / standing
+    // authority). Whitespace-tolerant: prettier wraps this import to multiple
+    // lines whenever a second name is added, which used to break the pin.
+    expect(bridge).toMatch(
+      /import\s*\{[^}]*\bpredictAutoApproval\b[^}]*\}\s*from\s*"\.\.\/lib\/autoApprovePrediction"/,
     );
     // 2026-11-03 perf pass: the raw + manual counts derive from ONE memo
     // (two full message scans per 50ms flush became one; identical values).
