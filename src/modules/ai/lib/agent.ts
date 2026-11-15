@@ -27,6 +27,7 @@ import {
   type ThinkingMode,
 } from "../config";
 import { buildTools, type ToolContext } from "../tools/tools";
+import { primeXBearerPresence, xBearerKnownAbsent } from "../tools/social";
 import { compactModelMessagesDetailed } from "./compact";
 import {
   modelCanSee,
@@ -654,6 +655,12 @@ export async function runAgentStream(opts: RunAgentOptions) {
 
   const fencePrompt = opts.fenceState ? fenceSystemPrompt(opts.fenceState) : "";
 
+  // Resolve credential-dependent tool availability BEFORE the system prompt
+  // is assembled — the X notice below needs the result, and buildSocialTools
+  // (called inside buildTools) reads the same cache to prune social_read.
+  await primeXBearerPresence();
+  const xUnconfigured = xBearerKnownAbsent();
+
   // Resolve vision capability ONCE, before both prompt assembly and the
   // history transform, so the model is never told it can see when the
   // request will strip images (and vice versa). For custom endpoints the
@@ -733,7 +740,14 @@ export async function runAgentStream(opts: RunAgentOptions) {
   const systemContent = opts.planMode
     ? `${stableSystem}\n\n${PLAN_MODE_PROMPT}`
     : stableSystem;
-  const messages: ModelMessage[] = [{ role: "system", content: systemContent }];
+  // X/Twitter coverage notice: when the bearer token is absent the tool is
+  // pruned, and the model must know WHY it's missing and what to use
+  // instead — otherwise "what are people saying on X about Y" requests
+  // silently downgrade with no explanation and the model retries nothing.
+  const systemWithNotices = xUnconfigured
+    ? `${systemContent}\n\n## X (Twitter) — NOT AVAILABLE\nThe social_read tool is disabled because no X developer Bearer token is configured. Do NOT try to read X/Twitter content. For social sentiment around a topic, use web_search or platform_reach (GitHub/Reddit/HN) instead; for X specifically, say the user can configure a token in Settings → General → X (Twitter).`
+    : systemContent;
+  const messages: ModelMessage[] = [{ role: "system", content: systemWithNotices }];
   messages.push(...compactedHistory);
 
   const finalMessages = applyCacheBreakpoints(messages, provider);
@@ -882,7 +896,15 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // — it is not an opt-in defense like fencing, it is the guarantee that
   // credentials never leave the machine. Order: redact → annotate → fence.
   const tools = buildTools(opts.toolContext, opts.mcpTools);
-  const redactedTools = withToolRedaction(tools as Record<string, unknown>);
+  // Defense in depth: buildSocialTools already prunes itself via the
+  // primed cache; this second filter guarantees no social_read leaks into
+  // the toolset even if the builder is bypassed (MCP merge, future refactor).
+  const prunedTools = xUnconfigured
+    ? Object.fromEntries(
+        Object.entries(tools).filter(([name]) => name !== "social_read"),
+      )
+    : tools;
+  const redactedTools = withToolRedaction(prunedTools as Record<string, unknown>);
   // Central deny-only guard: the backstop for any tool that skipped its
   // inline security check — notably MCP tools, whose inputs we never see
   // server-side. It wraps the redaction layer so a denial short-circuits
@@ -919,7 +941,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
       planMode: opts.planMode === true,
       autoApprove: opts.autoApprove ?? "off",
       thinkingMode: String(thinkingMode),
-      systemPrompt: systemContent,
+      systemPrompt: systemWithNotices,
       toolNames: Object.keys(fencedTools).sort(),
       mcpServerCount: opts.mcpSummary?.length ?? 0,
       messageCount: finalMessages.length,

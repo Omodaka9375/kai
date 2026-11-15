@@ -148,7 +148,33 @@ const TWEET_FIELDS = "created_at,public_metrics,entities";
 
 // ── Tool ───────────────────────────────────────────────────────────────────
 
+/**
+ * Cached bearer-token presence. The agent primes it at run start (before
+ * tools are built) so `buildSocialTools` can PRUNE the tool when X is not
+ * configured — a tool the model can see but not use is a step-wasting trap:
+ * the model calls it, gets "not configured", and has to redo the plan with
+ * web_search. Absent the token, the tool never enters the toolset and the
+ * system prompt says why. null = "not primed yet" (tests, Settings previews)
+ * → keep the tool; the execute-time error remains the safety net.
+ */
+let bearerPresent: boolean | null = null;
+
+/** Prime the presence cache. Called at the start of every agent run. */
+export async function primeXBearerPresence(): Promise<boolean> {
+  bearerPresent = await xBearerSet();
+  return bearerPresent;
+}
+
+/** True only when the cache was primed AND no token exists. */
+export function xBearerKnownAbsent(): boolean {
+  return bearerPresent === false;
+}
+
 export function buildSocialTools(_ctx: ToolContext) {
+  if (xBearerKnownAbsent()) {
+    // No token → no tool. The model cannot waste a step calling it.
+    return {} as Record<string, never>;
+  }
   return {
     social_read: tool({
       needsApproval: false,
@@ -283,6 +309,7 @@ export async function setXBearer(token: string): Promise<void> {
     account: X_BEARER_ACCOUNT,
     password: t,
   });
+  bearerPresent = true; // keep the cache in sync with the keychain
 }
 
 export async function clearXBearer(): Promise<void> {
@@ -291,6 +318,7 @@ export async function clearXBearer(): Promise<void> {
   } catch {
     /* absent */
   }
+  bearerPresent = false;
 }
 
 export async function xBearerSet(): Promise<boolean> {
