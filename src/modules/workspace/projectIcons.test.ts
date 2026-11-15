@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import * as fullPack from "@hugeicons/core-free-icons";
@@ -86,6 +86,61 @@ describe("project icon customization (2026-11-11)", () => {
     };
     walk(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
     expect(offenders).toEqual([]);
+  });
+
+  it("every deep per-icon hugeicons import resolves to a real file", () => {
+    // Why this exists: `@hugeicons/core-free-icons` ships an ambient
+    // wildcard type (src/vite-env.d.ts) so `import Foo from
+    // "@hugeicons/core-free-icons/Foo"` typechecks for ANY name, and its
+    // barrel re-exports ALIASES that have no per-icon file. A name can be
+    // present in `fullPack` (so the curated-glyph test above passes) and
+    // still fail to resolve at build time. That exact hole shipped:
+    // StaffSection imported HistoryIcon, which the index defines but
+    // dist/esm/ has no file for, and `vite build` died on it while tsc stayed
+    // green. Only Rollup reads the package's `exports` map, so we assert
+    // against the same on-disk files here — turning a minutes-long release
+    // build failure into a sub-second test failure.
+    const esmDir = new URL(
+      "../../../node_modules/@hugeicons/core-free-icons/dist/esm",
+      import.meta.url,
+    ).pathname.replace(/^\/([A-Za-z]:)/, "$1");
+    expect(existsSync(esmDir)).toBe(true); // sanity: package layout changed
+    // The predicate must actually discriminate, or "no missing imports" is
+    // vacuous. HistoryIcon is the real regression: exported by the barrel,
+    // absent as a per-icon file. If the pack ever ships it properly, drop this
+    // line — its only job is to prove the check below can fail.
+    expect(existsSync(join(esmDir, "NotebookIcon.js"))).toBe(true);
+    expect(existsSync(join(esmDir, "HistoryIcon.js"))).toBe(false);
+
+    const missing: string[] = [];
+    let scanned = 0;
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir)) {
+        const p = join(dir, entry);
+        if (statSync(p).isDirectory()) walk(p);
+        else if (/\.(ts|tsx)$/.test(entry)) {
+          const src = readFileSync(p, "utf8");
+          // Real import statements only — ignore the specifier appearing in
+          // prose/comments (e.g. the example above).
+          const re = /import\s+(?:type\s+)?[A-Za-z0-9_]+\s+from\s+"@hugeicons\/core-free-icons\/([A-Za-z0-9]+)"/g;
+          for (const m of src.matchAll(re)) {
+            scanned += 1;
+            const name = m[1]!;
+            if (!existsSync(join(esmDir, `${name}.js`))) {
+              missing.push(`${name}  <-  ${p.replace(/\\/g, "/").split("/src/")[1] ?? p}`);
+            }
+          }
+        }
+      }
+    };
+    // Whole src tree (NOT just src/modules): the shipped break was in
+    // src/settings/sections/StaffSection.tsx, outside the modules subtree.
+    walk(new URL("../..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
+    // Non-vacuity: the tree has hundreds of these imports, so a count near
+    // zero means the regex or the walk root broke — a gate that scans nothing
+    // would "pass" forever while shipping another HistoryIcon.
+    expect(scanned).toBeGreaterThan(100);
+    expect(missing).toEqual([]);
   });
 
   it("AppShell persists overrides under a dedicated key keyed by canonical root", () => {

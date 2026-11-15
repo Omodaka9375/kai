@@ -27,10 +27,10 @@ import { useMcpStore } from "@/modules/ai/store/mcpStore";
 import { useSkillsStore } from "@/modules/ai/store/skillsStore";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import Calendar01Icon from "@hugeicons/core-free-icons/Calendar01Icon";
-import HistoryIcon from "@hugeicons/core-free-icons/HistoryIcon";
 import LockKeyIcon from "@hugeicons/core-free-icons/LockKeyIcon";
-import PuzzleIcon from "@hugeicons/core-free-icons/PuzzleIcon";
+import NotebookIcon from "@hugeicons/core-free-icons/NotebookIcon";
 import SparklesIcon from "@hugeicons/core-free-icons/SparklesIcon";
+import PuzzleIcon from "@hugeicons/core-free-icons/PuzzleIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { SectionHeader } from "../components/SectionHeader";
@@ -297,7 +297,7 @@ export function StaffSection() {
                 key={info.sessionId}
                 icon={
                   <HugeiconsIcon
-                    icon={HistoryIcon}
+                    icon={NotebookIcon}
                     size={14}
                     strokeWidth={1.75}
                     className={ROW_ICON}
