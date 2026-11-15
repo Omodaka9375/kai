@@ -643,6 +643,12 @@ function UserMessageView({
         {forkable && messageIndex !== undefined && (
           <ForkButton messageIndex={messageIndex} />
         )}
+        {/* Copy for user messages too (same CopyButton assistant messages
+            use). Strips context blocks first — chips/selections are metadata
+            the user didn't type, so copying should yield what they wrote. */}
+        {!isWatchMessage && stripped.text ? (
+          <CopyButton getText={() => stripUserContextBlocks(rawText).text || rawText} />
+        ) : null}
         <MessageContent>
           {commandName ? <CommandSnippet name={commandName} /> : null}
           {stripped.chips.length > 0 ? (
