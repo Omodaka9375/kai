@@ -132,23 +132,22 @@ fn probe_secret_service() -> bool {
     const SERVICE: &str = "kai-backend-probe";
     const ACCOUNT: &str = "canary";
     const VALUE: &str = "kai-probe-value";
-    let span = tracing::error_span!("secrets_probe");
-    let _guard = span.enter();
     let ok = (|| -> Result<(), keyring::Error> {
         let entry = keyring::Entry::new(SERVICE, ACCOUNT)?;
         entry.set_password(VALUE)?;
         let readback = entry.get_password()?;
         if readback != VALUE {
-            return Err(keyring::Error::TooLong(format!(
-                "canary readback mismatch: {:?}",
-                readback
-            )));
+            // TooLong(String, u32): name + offending length.
+            return Err(keyring::Error::TooLong(
+                format!("canary readback mismatch: {readback:?}"),
+                readback.len() as u32,
+            ));
         }
         entry.delete_credential()?;
         Ok(())
     })()
     .is_ok();
-    tracing::info!(reachable = ok, "secret service probe finished");
+    log::info!("[kai:secrets] secret service probe finished, reachable={}", ok);
     ok
 }
 
@@ -197,7 +196,7 @@ fn resolve_backend(app: &AppHandle, state: &SecretsState) -> Result<Backend, Str
         // reachable (probe proved it); a failed migration leaves the file,
         // which the file-fallback read path below still honors.
         if let Err(e) = migrate_file_to_keyring(app) {
-            tracing::warn!(error = %e, "keyring migration failed; file kept");
+            log::warn!("[kai:secrets] keyring migration failed; file kept: {e}");
         }
         Backend::Keyring
     } else {
@@ -261,7 +260,7 @@ pub async fn secrets_get(
                     // the probe): serve from the file if it still exists so
                     // a key is never lost to a backend flap.
                     Err(err) => {
-                        tracing::warn!(error = %err, "keyring read failed; falling back to file");
+                        log::warn!("[kai:secrets] keyring read failed; falling back to file: {err}");
                         with_store(&app, &state, |m| m.get(&key(&service, &account)).cloned())
                     }
                 },
