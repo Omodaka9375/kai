@@ -251,13 +251,10 @@ export function GroupChatPanel({
       // the old default joined EVERY participant name into the group name,
       // and that name rides every delivery prefix into each session — a
       // 5-member group burned a full line of context per message. Bounded
-      // now: "KAI ↔ Code Reviewer +2" — first invitee plus a count — and
-      // renamable inline from the header.
-      const inviteeNames = [...invitees, ...personaItems].map((i) => i.name);
-      const shortName =
-        inviteeNames.length === 0
-          ? inviter.name
-          : `${inviter.name} ↔ ${inviteeNames[0]}${inviteeNames.length > 1 ? ` +${inviteeNames.length - 1}` : ""}`;
+      // now and creative: a themed name from the store's pool (War Room,
+      // Council, …) — roster names already show in the participant list, so
+      // the header should carry identity, not a name census. Renamable
+      // inline from the header.
       const g = await createGroupChat(
         {
           projectId: inviter.id,
@@ -273,7 +270,8 @@ export function GroupChatPanel({
           })),
           ...personaItems,
         ],
-        shortName,
+        // No explicit name → the store's creative pool default. The user
+        // can rename inline from the header.
       );
       if (g && personas.length > 0) {
         // Re-add via the validated store path (idempotent per persona) so a
@@ -513,6 +511,7 @@ function PanelHeader({
               className="min-w-0 truncate text-[12px] font-medium"
               title={group.name}
             >
+              <span className="text-muted-foreground/70">Group: </span>
               {group.name}
             </span>
             <button
@@ -1588,7 +1587,7 @@ function GroupListTray({
           strokeWidth={1.75}
           className="shrink-0 text-muted-foreground"
         />
-        <span className="truncate">{g.name}</span>
+        <span className="truncate">Group: {g.name}</span>
       </button>
       {/* Small ✕ on the pill's right edge: ends AND deletes the group —
           the true close the panel's minimize is not. Confirmation-free by

@@ -450,6 +450,35 @@ const listeners = new Set<() => void>();
 const sendQueues = new Map<string, QueuedMessage[]>(); // sessionId -> pending
 /** sessionId -> groupId, so the bridge can mirror replies without scanning. */
 const sessionGroups = new Map<string, string>();
+
+// ── Default group naming ──────────────────────────────────────────────────
+// Auto-names are creative (user request 2026-11-15): a themed pool instead
+// of the old "X ↔ Y" / "X + N more" roster strings. Roster names are
+// already visible in the participant list — a name that just repeats them
+// wastes the header. The pool is picked deterministically per group id so
+// the same group always keeps the same name across restarts, and the
+// counter disambiguates multiple concurrent groups.
+export const GROUP_NAME_POOL = [
+  "War Room",
+  "Round Table",
+  "Council",
+  "Hivemind",
+  "Task Force",
+  "Junction",
+  "Think Tank",
+  "Sync Room",
+  "All Hands",
+  "Situation Room",
+] as const;
+
+let autoGroupNameCounter = 0;
+
+/** Creative default name: themed pool entry + a running counter. */
+export function defaultGroupName(): string {
+  const pick = GROUP_NAME_POOL[autoGroupNameCounter % GROUP_NAME_POOL.length];
+  const n = ++autoGroupNameCounter;
+  return n === 1 ? pick : `${pick} ${n}`;
+}
 /** Sessions that received a group delivery and have not yet replied. Only
  *  these mirror into the transcript/relay — a reply is mirrored when it was
  *  PROVOKED by group activity, never because the user happened to chat with
@@ -742,7 +771,7 @@ export async function createGroupChat(
   }
   const group: GroupChat = {
     id: newGroupId(),
-    name: groupName?.trim() || `${inviter.name} + ${invitees.length} more`,
+    name: groupName?.trim() || defaultGroupName(),
     coordinator: { kind: "user" },
     participants: [
       { ...inviter, sessionId: inviterSession, joinedAt: Date.now() },

@@ -94,6 +94,7 @@ import {
   resumeGroupChat,
   sendGroupMessage,
   flushQueuedForSession,
+  GROUP_NAME_POOL,
 } from "./groupChatStore";
 
 beforeEach(() => {
@@ -390,9 +391,7 @@ describe("group chat store — lifecycle", () => {
     await expect(renameGroupChat("nope", "x")).resolves.toBeUndefined();
   });
 
-  it("the auto-name is BOUNDED: first invitee + count, never every participant (2026-11-01)", async () => {
-    // The panel builds the default name; the STORE fallback must stay short
-    // too ("X + N more" shape, no name list).
+  it("the auto-name is a creative pool pick, not a roster census (2026-11-15)", async () => {
     const g = await createGroupChat(
       { projectId: "a", sessionId: "s1", root: "/a", name: "alpha" },
       [
@@ -402,7 +401,13 @@ describe("group chat store — lifecycle", () => {
       ],
       "", // empty groupName → the store fallback
     );
-    expect(g!.name).toBe("alpha + 3 more");
+    // Pool name (from GROUP_NAME_POOL), never a participant-name string.
+    // Past the first few groups the name carries a counter suffix
+    // ("Council 13") to disambiguate concurrent groups.
+    const [poolName, num] = g!.name.split(" ");
+    expect(GROUP_NAME_POOL as readonly string[]).toContain(poolName);
+    if (num) expect(Number(num)).toBeGreaterThan(1);
+    expect(g!.name).not.toMatch(/alpha|beta|gamma|delta|\+/);
     expect(g!.name.length).toBeLessThan(30);
   });
 
@@ -737,10 +742,12 @@ describe("source pins — trust boundary & wiring", () => {
   });
 
   it("group naming is SHORT + renamable (2026-11-01): bounded auto-name, header rename, no tool-code rename", () => {
-    // The panel's auto-name formula: first invitee + count — never every name.
-    expect(panel).toMatch(
-      /\$\{inviter\.name\} ↔ \$\{inviteeNames\[0\]\}\$\{inviteeNames\.length > 1 \? ` \+\$\{inviteeNames\.length - 1\}` : ""\}/,
-    );
+    // The panel no longer builds its own name formula — creation passes no
+    // explicit name and the store's creative pool default applies (pinned
+    // separately below). The old "X ↔ Y +N" roster format is GONE.
+    expect(panel).not.toMatch(/inviteeNames/);
+    // ...and the store pool is what actually generates names.
+    expect(store).toContain("GROUP_NAME_POOL");
     // The header has the inline rename UI (edit → renameGroupChat).
     expect(panel).toContain('title="Rename group"');
     expect(panel).toMatch(/renameGroupChat\(group\.id, nameDraft\)/);
