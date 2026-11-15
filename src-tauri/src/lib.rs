@@ -314,7 +314,7 @@ fn settings_panel_key(tab: Option<&str>) -> String {
     };
     if matches!(
         key.as_str(),
-        "general" | "shortcuts" | "models" | "agents" | "snippets" | "mcp" | "sandbox" | "security" | "voice" | "assistant" | "external" | "about"
+        "general" | "shortcuts" | "models" | "agents" | "snippets" | "mcp" | "sandbox" | "security" | "staff" | "voice" | "assistant" | "external" | "about"
     ) {
         key
     } else {
@@ -333,6 +333,7 @@ fn settings_panel_title(key: &str) -> String {
         "mcp" => "MCP Servers",
         "sandbox" => "Sandbox",
         "security" => "Security",
+        "staff" => "Staff",
         "voice" => "Voice",
         "external" => "Assistant",
         "assistant" => "Assistant",
@@ -591,6 +592,7 @@ pub fn run() {
                     "settings-mcp",
                     "settings-sandbox",
                     "settings-security",
+                    "settings-staff",
                     "settings-voice",
                     "settings-assistant",
                     "settings-about",
@@ -944,6 +946,7 @@ app.manage(Mutex::new(None::<fs::env_probe::EnvInventory>));
             modules::session_journal::session_events_append,
             modules::session_journal::session_events_recent,
             modules::session_journal::session_events_clear,
+            modules::session_journal::session_journal_list,
             modules::sandbox::shadow::shadow_status,
             modules::sandbox::shadow::shadow_create,
             modules::sandbox::shadow::shadow_merge,

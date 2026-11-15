@@ -9,8 +9,15 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 
-const { buildTurnEvent, appendSessionEvent, appendSessionEvents, sessionEventsClear } =
-  await import("./sessionEvents");
+import type { SessionEvent, SessionJournalEntry } from "./sessionEvents";
+
+const {
+  buildTurnEvent,
+  appendSessionEvent,
+  appendSessionEvents,
+  sessionEventsClear,
+  summarizeJournal,
+} = await import("./sessionEvents");
 const { invoke } = await import("@tauri-apps/api/core");
 
 describe("buildTurnEvent", () => {
@@ -96,5 +103,83 @@ describe("append plumbing (fire-and-forget)", () => {
       "session_events_clear",
       expect.objectContaining({ sessionId: "s-del" }),
     );
+  });
+});
+
+describe("sessionJournalList (client)", () => {
+  it("invokes session_journal_list with no args", async () => {
+    vi.mocked(invoke).mockClear();
+    vi.mocked(invoke).mockResolvedValueOnce([]);
+    const { sessionJournalList } = await import("./sessionEvents");
+    await sessionJournalList();
+    expect(invoke).toHaveBeenCalledWith("session_journal_list");
+  });
+});
+
+describe("summarizeJournal (pure roll-up)", () => {
+  // The on-disk entry type carries the server-stamped `ts` (the writer
+  // never sets it, the reader always sees it), so fixtures use it here.
+  const turn = (
+    over: Partial<Extract<SessionEvent, { kind: "turn" }>> & { ts?: number },
+  ): SessionJournalEntry => ({
+    kind: "turn",
+    modelId: "gpt-5.5",
+    provider: "openai",
+    canSee: false,
+    planMode: false,
+    autoApprove: "off",
+    thinkingMode: "off",
+    systemHash: 1,
+    systemLength: 100,
+    toolNames: [],
+    mcpServerCount: 0,
+    messageCount: 1,
+    ts: 1000,
+    ...over,
+  });
+
+  it("counts turns, context events and anomalies, dedup-sorts models", () => {
+    const s = summarizeJournal([
+      turn({ modelId: "b-model", ts: 3 }),
+      turn({ modelId: "a-model", ts: 2 }),
+      turn({ modelId: "b-model", ts: 1 }),
+      { kind: "compact", droppedCount: 1, contextLimit: 10, ts: 4 },
+      { kind: "retry", reason: "x", attempt: 1, ts: 5 },
+      { kind: "loop-nudge", toolName: "edit", repeatCount: 3, ts: 6 },
+    ]);
+    expect(s.events).toBe(6);
+    expect(s.turns).toBe(3);
+    expect(s.contextEvents).toBe(1);
+    expect(s.anomalies).toBe(2);
+    expect(s.models).toEqual(["a-model", "b-model"]);
+    expect(s.lastTs).toBe(6);
+  });
+
+  it("takes lastAutoApprove from the NEWEST turn even when input is unsorted", () => {
+    // sessionEventsRecent returns newest-first, but the roll-up must not
+    // depend on that ordering to pick the current mode.
+    const s = summarizeJournal([
+      turn({ autoApprove: "all", ts: 500 }),
+      turn({ autoApprove: "off", ts: 100 }),
+    ]);
+    expect(s.lastAutoApprove).toBe("all");
+    const s2 = summarizeJournal([
+      turn({ autoApprove: "off", ts: 100 }),
+      turn({ autoApprove: "all", ts: 500 }),
+    ]);
+    expect(s2.lastAutoApprove).toBe("all");
+  });
+
+  it("empty journal summarizes to zeros with no model and null mode", () => {
+    const s = summarizeJournal([]);
+    expect(s).toMatchObject({
+      events: 0,
+      turns: 0,
+      contextEvents: 0,
+      anomalies: 0,
+      models: [],
+      lastAutoApprove: null,
+      lastTs: 0,
+    });
   });
 });

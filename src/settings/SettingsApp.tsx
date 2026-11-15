@@ -10,6 +10,7 @@ import SparklesIcon from "@hugeicons/core-free-icons/SparklesIcon";
 import UserMultiple02Icon from "@hugeicons/core-free-icons/UserMultiple02Icon";
 import KeyboardIcon from "@hugeicons/core-free-icons/KeyboardIcon";
 import Shield01Icon from "@hugeicons/core-free-icons/Shield01Icon";
+import UserGroupIcon from "@hugeicons/core-free-icons/UserGroupIcon";
 import Mic01Icon from "@hugeicons/core-free-icons/Mic01Icon";
 import GlobeIcon from "@hugeicons/core-free-icons/GlobeIcon";
 import { lazy, Suspense, useEffect } from "react";
@@ -25,6 +26,7 @@ const SkillsSection = lazy(() => import("./sections/SkillsSection").then((m) => 
 const McpSection = lazy(() => import("./sections/McpSection").then((m) => ({ default: m.McpSection })));
 const SandboxSection = lazy(() => import("./sections/SandboxSection").then((m) => ({ default: m.SandboxSection })));
 const SecuritySection = lazy(() => import("./sections/SecuritySection").then((m) => ({ default: m.SecuritySection })));
+const StaffSection = lazy(() => import("./sections/StaffSection").then((m) => ({ default: m.StaffSection })));
 const VoiceSection = lazy(() => import("./sections/VoiceSection").then((m) => ({ default: m.VoiceSection })));
 const ExternalSection = lazy(() => import("./sections/ExternalSection").then((m) => ({ default: m.ExternalSection })));
 // "Assistant" panel — file kept as ExternalSection.tsx (renaming would churn
@@ -43,6 +45,7 @@ const TABS: TabDef[] =
     { id: "mcp", label: "MCP Servers", icon: PuzzleIcon, component: McpSection },
     { id: "sandbox", label: "Sandbox", icon: Shield01Icon, component: SandboxSection },
     { id: "security", label: "Security", icon: Shield01Icon, component: SecuritySection },
+    { id: "staff", label: "Staff", icon: UserGroupIcon, component: StaffSection },
     { id: "voice", label: "Voice", icon: Mic01Icon, component: VoiceSection },
     { id: "assistant", label: "Assistant", icon: GlobeIcon, component: ExternalSection },
     { id: "about", label: "About", icon: InformationCircleIcon, component: AboutSection },
@@ -57,6 +60,7 @@ const VALID_TABS: SettingsTab[] = [
   "mcp",
   "sandbox",
   "security",
+  "staff",
   "voice",
   "assistant",
   "about",

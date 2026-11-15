@@ -30,6 +30,7 @@ import Settings01Icon from "@hugeicons/core-free-icons/Settings01Icon";
 import Shield01Icon from "@hugeicons/core-free-icons/Shield01Icon";
 import SidebarLeftIcon from "@hugeicons/core-free-icons/SidebarLeftIcon";
 import SparklesIcon from "@hugeicons/core-free-icons/SparklesIcon";
+import UserGroupIcon from "@hugeicons/core-free-icons/UserGroupIcon";
 import UserMultiple02Icon from "@hugeicons/core-free-icons/UserMultiple02Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
@@ -157,6 +158,7 @@ export function FileMenu({
           <MenuTile icon={PuzzleIcon} label="MCP Servers" desc="External tool servers" onSelect={() => void openSettingsWindow("mcp")} />
           <MenuTile icon={Shield01Icon} label="Sandbox" desc="Shadow mode" onSelect={() => void openSettingsWindow("sandbox")} />
           <MenuTile icon={LockKeyIcon} label="Security" desc="Approvals & audit" onSelect={() => void openSettingsWindow("security")} />
+          <MenuTile icon={UserGroupIcon} label="Staff" desc="Agents, skills & journals" onSelect={() => void openSettingsWindow("staff")} />
           <MenuTile icon={Mic01Icon} label="Voice" desc="Speech & TTS" onSelect={() => void openSettingsWindow("voice")} />
           <MenuTile icon={GlobeIcon} label="Assistant" desc="Telegram channels" onSelect={() => void openSettingsWindow("assistant")} />
         </div>

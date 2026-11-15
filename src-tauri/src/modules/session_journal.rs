@@ -208,6 +208,67 @@ pub fn session_events_recent(
     Ok(events)
 }
 
+/// One row of `session_journal_list`: what the Staff screen needs to render
+/// the session list without reading every file's contents.
+#[derive(serde::Serialize)]
+pub struct JournalInfo {
+    /// The session id, recovered from the file stem (the same value passed
+    /// back into `session_events_recent`).
+    #[serde(rename = "sessionId")]
+    pub session_id: String,
+    /// Journal size in bytes, so the UI can show a rough activity weight.
+    #[serde(rename = "sizeBytes")]
+    pub size_bytes: u64,
+    /// Last-write time in Unix ms, used to sort newest-first.
+    #[serde(rename = "mtimeMs")]
+    pub mtime_ms: i64,
+}
+
+/// List session journals that exist on disk (newest first, capped). The
+/// transcript store knows current sessions, but a journal can outlive its
+/// store entry's visibility in another window, and the Settings webview has
+/// no hydrated session list at all — so this enumerates the ground truth.
+/// Metadata only (no event bodies): cheap, and the UI fetches details for the
+/// one session the user actually opens.
+#[tauri::command]
+pub fn session_journal_list() -> Result<Vec<JournalInfo>, String> {
+    let dir = journal_dir()?;
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(e) => e,
+        // No sessions dir yet means simply no journals — not an error.
+        Err(_) => return Ok(Vec::new()),
+    };
+    let mut out: Vec<JournalInfo> = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        // Keep only live `<id>.jsonl`; rotated `<id>.jsonl.1` has extension
+        // "1" and is folded into its live file by session_events_recent.
+        if path.extension().and_then(|s| s.to_str()) != Some("jsonl") {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let Ok(meta) = entry.metadata() else {
+            continue;
+        };
+        let mtime_ms = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        out.push(JournalInfo {
+            session_id: stem.to_string(),
+            size_bytes: meta.len(),
+            mtime_ms,
+        });
+    }
+    out.sort_by_key(|j| std::cmp::Reverse(j.mtime_ms));
+    out.truncate(200);
+    Ok(out)
+}
+
 /// Delete a session's journal (session deleted). Errors ignored — the file
 /// may never have been created.
 #[tauri::command]

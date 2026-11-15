@@ -60,6 +60,14 @@ export type SessionEvent =
       repeatCount: number;
     };
 
+/**
+ * A journal event as it exists ON DISK (read via session_events_recent).
+ * Identical to the write-side SessionEvent except for the server-stamped
+ * `ts` — the writer never sets it (the Rust side adds the clock), so it is
+ * absent from `SessionEvent` but always present when you read a journal back.
+ */
+export type SessionJournalEntry = SessionEvent & { ts?: number };
+
 /** Hash a string to a stable 32-bit id for change-detection (NOT security). */
 function hashText(s: string): number {
   return djb2(s);
@@ -137,4 +145,77 @@ export function sessionEventsRecent(
 export function sessionEventsClear(sessionId: string): void {
   if (!sessionId) return;
   void invoke("session_events_clear", { sessionId }).catch(() => {});
+}
+
+/** One session journal that exists on disk. Metadata only — the Staff screen
+ *  needs to enumerate journals (the Settings webview has no hydrated session
+ *  list to fan out over) without reading every file's event bodies. */
+export type JournalInfo = {
+  sessionId: string;
+  sizeBytes: number;
+  mtimeMs: number;
+};
+
+/** List session journals on disk, newest first (capped at 200 by the
+ *  command). Returns [] when the sessions dir does not exist yet. */
+export function sessionJournalList(): Promise<JournalInfo[]> {
+  return invoke<JournalInfo[]>("session_journal_list");
+}
+
+/** Roll-up of one session's journal for a glanceable Staff-screen row.
+ *  Pure so it is unit-testable against fixture events. */
+export type JournalSummary = {
+  events: number;
+  turns: number;
+  /** Context-management events: compactions, summarizations, vision swaps. */
+  contextEvents: number;
+  /** Retries + loop-nudges — the "the run went sideways" signal. */
+  anomalies: number;
+  /** Distinct model ids the session actually sent requests with. */
+  models: string[];
+  /** The most recent turn's auto-approve mode, or null if no turn logged. */
+  lastAutoApprove: string | null;
+  lastTs: number;
+};
+
+export function summarizeJournal(events: SessionJournalEntry[]): JournalSummary {
+  const models = new Set<string>();
+  const s: JournalSummary = {
+    events: events.length,
+    turns: 0,
+    contextEvents: 0,
+    anomalies: 0,
+    models: [],
+    lastAutoApprove: null,
+    lastTs: 0,
+  };
+  // Events arrive newest-first from sessionEventsRecent, but do not rely on
+  // the caller's order for the "last turn" field.
+  let lastTurnTs = -1;
+  for (const ev of events) {
+    const ts = ev.ts ?? 0;
+    if (ts > s.lastTs) s.lastTs = ts;
+    switch (ev.kind) {
+      case "turn": {
+        s.turns += 1;
+        if (ev.modelId) models.add(ev.modelId);
+        if (ts > lastTurnTs) {
+          lastTurnTs = ts;
+          s.lastAutoApprove = ev.autoApprove ?? null;
+        }
+        break;
+      }
+      case "compact":
+      case "summarize":
+      case "vision-ocr":
+        s.contextEvents += 1;
+        break;
+      case "retry":
+      case "loop-nudge":
+        s.anomalies += 1;
+        break;
+    }
+  }
+  s.models = [...models].sort();
+  return s;
 }
