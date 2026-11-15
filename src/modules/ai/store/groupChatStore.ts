@@ -455,9 +455,11 @@ const sessionGroups = new Map<string, string>();
 // Auto-names are creative (user request 2026-11-15): a themed pool instead
 // of the old "X ↔ Y" / "X + N more" roster strings. Roster names are
 // already visible in the participant list — a name that just repeats them
-// wastes the header. The pool is picked deterministically per group id so
-// the same group always keeps the same name across restarts, and the
-// counter disambiguates multiple concurrent groups.
+// wastes the header. The pick is RANDOM (user request 2026-11-15): the
+// counter-based deterministic walk was replaced because repeated names
+// across restarts read as a bug, not a feature. A same-name collision
+// within a project is re-rolled so two live groups in one project never
+// share a name.
 export const GROUP_NAME_POOL = [
   "War Room",
   "Round Table",
@@ -471,13 +473,38 @@ export const GROUP_NAME_POOL = [
   "Situation Room",
 ] as const;
 
-let autoGroupNameCounter = 0;
+/** Live pool: defaults, replaced by the user's pool from preferences. */
+let namePool: string[] = [...GROUP_NAME_POOL];
 
-/** Creative default name: themed pool entry + a running counter. */
-export function defaultGroupName(): string {
-  const pick = GROUP_NAME_POOL[autoGroupNameCounter % GROUP_NAME_POOL.length];
-  const n = ++autoGroupNameCounter;
-  return n === 1 ? pick : `${pick} ${n}`;
+/** Set the user's custom name pool (Settings → General). Empty → default. */
+export function setGroupNamePool(custom: string[] | null | undefined): void {
+  const cleaned = (custom ?? [])
+    .map((n) => n.trim())
+    .filter((n) => n.length > 0 && n.length <= 40);
+  namePool = cleaned.length > 0 ? cleaned : [...GROUP_NAME_POOL];
+}
+
+/** The pool currently in effect (defaults when the user set none). */
+export function getGroupNamePool(): string[] {
+  return namePool;
+}
+
+/** Random pick, re-rolled on a same-project collision. */
+export function defaultGroupName(existingNames: ReadonlySet<string> = new Set()): string {
+  const pool = namePool.length > 0 ? namePool : [...GROUP_NAME_POOL];
+  // Try every pool entry once; if ALL are taken in this project, fall back
+  // to a numbered variant of a random pick so creation can never fail.
+  const shuffled = [...pool];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  const free = shuffled.find((n) => !existingNames.has(n));
+  if (free) return free;
+  const base = shuffled[0]!;
+  let n = 2;
+  while (existingNames.has(`${base} ${n}`)) n++;
+  return `${base} ${n}`;
 }
 /** Sessions that received a group delivery and have not yet replied. Only
  *  these mirror into the transcript/relay — a reply is mirrored when it was
@@ -771,7 +798,11 @@ export async function createGroupChat(
   }
   const group: GroupChat = {
     id: newGroupId(),
-    name: groupName?.trim() || defaultGroupName(),
+    name: groupName?.trim() || defaultGroupName(
+      // Avoid colliding with any LIVE group name (all projects): names are
+      // user-facing identifiers, and two groups sharing one is confusing.
+      new Set([...groups.values()].filter((g) => g.endedAt === null).map((g) => g.name)),
+    ),
     coordinator: { kind: "user" },
     participants: [
       { ...inviter, sessionId: inviterSession, joinedAt: Date.now() },

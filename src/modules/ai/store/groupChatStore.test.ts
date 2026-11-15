@@ -78,6 +78,8 @@ vi.mock("../lib/agent", () => ({
 import { getModel, DEFAULT_MODEL_ID } from "../config";
 import {
   __resetGroupChatsForTest,
+  getGroupNamePool,
+  setGroupNamePool,
   addParticipants,
   addPersonaParticipants,
   appendGroupMessage,
@@ -402,13 +404,35 @@ describe("group chat store — lifecycle", () => {
       "", // empty groupName → the store fallback
     );
     // Pool name (from GROUP_NAME_POOL), never a participant-name string.
-    // Past the first few groups the name carries a counter suffix
-    // ("Council 13") to disambiguate concurrent groups.
-    const [poolName, num] = g!.name.split(" ");
-    expect(GROUP_NAME_POOL as readonly string[]).toContain(poolName);
-    if (num) expect(Number(num)).toBeGreaterThan(1);
+    // RANDOM pick (2026-11-15): the name is always a bare pool entry on the
+    // first collision-free roll; counter suffixes only appear when every
+    // pool name is already taken by a live group.
+    expect(GROUP_NAME_POOL as readonly string[]).toContain(g!.name);
     expect(g!.name).not.toMatch(/alpha|beta|gamma|delta|\+/);
     expect(g!.name.length).toBeLessThan(30);
+  });
+
+  it("a custom pool replaces the default and is user-editable (2026-11-15)", async () => {
+    setGroupNamePool(["Alpha Squad", "Beta Crew"]);
+    const g = await createGroupChat(
+      { projectId: "a", sessionId: "s1", root: "/a", name: "alpha" },
+      [{ projectId: "b", root: "/b", name: "beta" }],
+      "",
+    );
+    expect(["Alpha Squad", "Beta Crew"]).toContain(g!.name);
+    // Collision check: with a fresh set of participants (single-membership
+    // forbids reusing the same invitee), a second group still gets a
+    // DIFFERENT name from the pool.
+    const g2 = await createGroupChat(
+      { projectId: "e", sessionId: "s2", root: "/e", name: "epsilon" },
+      [{ projectId: "f", root: "/f", name: "zeta" }],
+      "",
+    );
+    expect(["Alpha Squad", "Beta Crew"]).toContain(g2!.name);
+    expect(g2!.name).not.toBe(g!.name);
+    // Reset restores the built-in pool.
+    setGroupNamePool(null);
+    expect(getGroupNamePool()[0]).toBe("War Room");
   });
 
   it("flushQueuedForSession delivers queued messages as one merged wake", async () => {

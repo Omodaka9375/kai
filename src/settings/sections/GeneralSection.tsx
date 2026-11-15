@@ -31,6 +31,7 @@ import {
   setTerminalWebglEnabled,
   setVimMode,
   setEditorWordWrap,
+  setGroupNamePool,
   type EditorThemeId,
 } from "@/modules/settings/store";
 import { useTheme } from "@/modules/theme";
@@ -401,6 +402,71 @@ export function GeneralSection() {
 
       <GmailCard />
       <SocialCard />
+      <GroupNamePoolCard />
+    </div>
+  );
+}
+
+/**
+ * Group-chat name pool card. The user's custom pool of names for auto-named
+ * group chats, one per line; empty uses the built-in pool. Saved as a plain
+ * preference (not a secret) and pushed live to the group store.
+ */
+function GroupNamePoolCard() {
+  const saved = usePreferencesStore((s) => s.groupNamePool);
+  const [draft, setDraft] = useState<string | null>(null);
+  const [status, setStatus] = useState("");
+
+  const value = draft ?? saved;
+  const names = value.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+
+  const onSave = async () => {
+    await setGroupNamePool(value);
+    setDraft(null);
+    setStatus("Saved. New group chats will pick from your names.");
+    setTimeout(() => setStatus(""), 4000);
+  };
+
+  const onReset = async () => {
+    await setGroupNamePool("");
+    setDraft(null);
+    setStatus("Reset to the built-in pool.");
+    setTimeout(() => setStatus(""), 4000);
+  };
+
+  return (
+    <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card/50 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-sm font-medium">Group chat name pool</span>
+        <div className="flex items-center gap-2">
+          {value.trim() ? (
+            <Button size="xs" variant="ghost" onClick={() => void onReset()}>
+              Reset
+            </Button>
+          ) : null}
+          <Button size="xs" variant="secondary" onClick={() => void onSave()} disabled={draft === null}>
+            Save
+          </Button>
+        </div>
+      </div>
+      <p className="text-[11px] leading-relaxed text-muted-foreground">
+        Names new group chats pick from, one per line. A random entry is
+        chosen per group; leave empty to use the built-in pool.
+      </p>
+      <textarea
+        value={value}
+        onChange={(e) => setDraft(e.target.value)}
+        placeholder={"War Room\nRound Table\nCouncil"}
+        rows={Math.min(8, Math.max(3, names.length || 3))}
+        aria-label="Group name pool"
+        className="w-full resize-y rounded-md border border-border/70 bg-background/60 px-2 py-1.5 font-mono text-[12px] outline-none focus:border-primary/50"
+      />
+      <div className="flex items-center justify-between">
+        <span className="text-[10.5px] text-muted-foreground">
+          {names.length} name{names.length === 1 ? "" : "s"}
+        </span>
+        {status ? <span className="text-[10.5px] text-emerald-600 dark:text-emerald-400">{status}</span> : null}
+      </div>
     </div>
   );
 }

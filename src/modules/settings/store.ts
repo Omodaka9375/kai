@@ -100,6 +100,8 @@ export type Preferences = {
   radioEnabled: boolean;
   /** Persisted SomaFM station id (empty = none picked yet). */
   radioStationId: string;
+  /** Custom group-chat name pool, one name per line. Empty = built-in pool. */
+  groupNamePool: string;
   /** Voice input mode: "api" (OpenAI whisper), "assemblyai" (Universal-3.5
    *  Pro via the Sync STT API), "local" (whisper.cpp), "browser"
    *  (SpeechRecognition fallback). */
@@ -171,6 +173,7 @@ const KEY_SIDEBAR_VIEW = "sidebarView";
 const KEY_UPDATER_LAST_CHECK = "updaterLastCheck";
 const KEY_RADIO_ENABLED = "radioEnabled";
 const KEY_RADIO_STATION = "radioStationId";
+const KEY_GROUP_NAME_POOL = "groupNamePool";
 /** User-accepted spell-check words (AI input "Add to dictionary"). */
 const KEY_SPELL_USER_WORDS = "spellUserWords";
 const KEY_VOICE_STT_MODE = "voiceSttMode";
@@ -245,6 +248,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   updaterLastCheck: 0,
   radioEnabled: false,
   radioStationId: "",
+  groupNamePool: "",
   voiceSttMode: "api",
   voiceSttModel: "base.en",
   voiceSttApiModel: "whisper-1",
@@ -375,6 +379,8 @@ export async function loadPreferences(): Promise<Preferences> {
         get<boolean>(KEY_RADIO_ENABLED) ?? DEFAULT_PREFERENCES.radioEnabled,
       radioStationId:
         get<string>(KEY_RADIO_STATION) ?? DEFAULT_PREFERENCES.radioStationId,
+      groupNamePool:
+        get<string>(KEY_GROUP_NAME_POOL) ?? DEFAULT_PREFERENCES.groupNamePool,
       voiceSttMode:
         (get<string>(KEY_VOICE_STT_MODE) as Preferences["voiceSttMode"]) ??
         DEFAULT_PREFERENCES.voiceSttMode,
@@ -459,6 +465,10 @@ export async function setRadioEnabled(value: boolean): Promise<void> {
 
 export async function setRadioStationId(value: string): Promise<void> {
   await writePref(KEY_RADIO_STATION, value ?? "");
+}
+
+export async function setGroupNamePool(value: string): Promise<void> {
+  await writePref(KEY_GROUP_NAME_POOL, value ?? "");
 }
 
 /** Load the user's personal spell-check dictionary (accepted words). */
@@ -760,6 +770,7 @@ export async function onPreferencesChange(
     [KEY_UPDATER_LAST_CHECK]: "updaterLastCheck",
     [KEY_RADIO_ENABLED]: "radioEnabled",
     [KEY_RADIO_STATION]: "radioStationId",
+    [KEY_GROUP_NAME_POOL]: "groupNamePool",
     [KEY_VOICE_STT_MODE]: "voiceSttMode",
     [KEY_VOICE_STT_MODEL]: "voiceSttModel",
     [KEY_VOICE_STT_API_MODEL]: "voiceSttApiModel",
