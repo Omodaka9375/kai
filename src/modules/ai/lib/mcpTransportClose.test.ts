@@ -48,3 +48,27 @@ describe("MCP stdio transport close() teardown safety", () => {
     expect(invokes.length).toBe(1);
   });
 });
+
+describe("mid-session server death is surfaced (2026-11-15)", () => {
+  it("an exit while the session is live fires onUnexpectedClose (guarded by closed)", () => {
+    // A server that dies 20 minutes in must NOT stay "connected" — that was
+    // the reported bug: tools kept failing with zero user-visible signal.
+    const exitCase = src.indexOf('case "exit"');
+    expect(exitCase).toBeGreaterThan(-1);
+    const guard = src.indexOf("!this.closed", exitCase);
+    expect(guard).toBeGreaterThan(exitCase);
+    expect(src).toContain("onUnexpectedClose?.(event.code ?? null)");
+  });
+
+  it("markServerDead flips status to error and drops the corpse's tools", () => {
+    expect(src).toContain("markServerDead(config.id, config.name, code)");
+    const dead = src.indexOf("private markServerDead(");
+    expect(dead).toBeGreaterThan(-1);
+    const body = src.slice(dead, src.indexOf("/** Disconnect a single", dead));
+    expect(body).toContain('status: "error"');
+    expect(body).toContain("tools: {}");
+    // Only a server that WAS connected counts; the in-flight connect's own
+    // timeout owns the "died during handshake" case.
+    expect(body).toContain('!== "connected"');
+  });
+});

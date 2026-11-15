@@ -43,6 +43,9 @@ class TauriStdioTransport {
   onclose?: () => void;
   onerror?: (error: Error) => void;
   onmessage?: (message: unknown) => void;
+  /** Set by the manager: the server process died mid-session (exit without
+   *  an intentional close()). Never fired after close() has begun. */
+  onUnexpectedClose?: (code: number | null) => void;
 
   constructor(config: McpServerConfig) {
     this.config = config;
@@ -72,6 +75,11 @@ class TauriStdioTransport {
               `[mcp:${this.config.name}] exited with code ${event.code}`,
             );
           }
+          // An exit while the session is still live is a server DEATH, not
+          // a teardown — surface it so the UI stops showing "connected" and
+          // getActiveTools stops serving the corpse. close() has set its
+          // `closed` flag first, so intentional disconnects never fire this.
+          if (!this.closed) this.onUnexpectedClose?.(event.code ?? null);
           this.onclose?.();
           break;
         case "error":
@@ -277,6 +285,10 @@ class McpClientManager {
 
       if (config.transport === "stdio") {
         const transport = new TauriStdioTransport(config);
+        // Mid-session death must be visible: without this a crashing server
+        // stayed "connected" forever and its tools kept failing silently.
+        transport.onUnexpectedClose = (code) =>
+          this.markServerDead(config.id, config.name, code);
         client = await withTimeout(
           createMCPClient({ transport: transport as never }),
           McpClientManager.CONNECTION_TIMEOUT_MS,
@@ -395,6 +407,26 @@ class McpClientManager {
       });
       this.notify(config.id, errStatus);
     }
+  }
+
+  /** A stdio server process died mid-session: flip its status to error and
+   *  drop its tools so getActiveTools/getConnectedServerSummaries stop
+   *  serving it. Skipped while connecting (the in-flight handshake's own
+   *  timeout produces the error) and after intentional disconnects. */
+  private markServerDead(
+    id: string,
+    name: string,
+    code: number | null,
+  ): void {
+    const managed = this.clients.get(id);
+    if (!managed || managed.status.status !== "connected") return;
+    const status: McpServerStatus = {
+      status: "error",
+      error: `MCP server "${name}" exited unexpectedly${code != null ? ` (code ${code})` : ""}. Its tools are unavailable until reconnect.`,
+      toolCount: 0,
+    };
+    this.clients.set(id, { ...managed, status, tools: {} });
+    this.notify(id, status);
   }
 
   /** Disconnect a single MCP server. */
