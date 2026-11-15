@@ -4,7 +4,7 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
-## [3.1.0]
+## [3.0.2]
 
 - Chat: a new session opens ready to type.
 - Group chat: each agent's replies get their own tint.
