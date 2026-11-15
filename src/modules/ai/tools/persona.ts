@@ -5,6 +5,7 @@ import { newAgentId, useAgentsStore } from "../store/agentsStore";
 import { setSessionPreferences } from "../store/sessionPreferences";
 import { useChatStore } from "../store/chatStore";
 import { BUILTIN_AGENTS, type Agent, type AgentIconId } from "../lib/agents";
+import { agentAuthorship } from "../lib/authorship";
 
 /**
  * PERSONA tools (2026-11-01): the user creates or switches the conversation's
@@ -97,6 +98,11 @@ export function buildPersonaTools(ctx: ToolContext) {
           instructions,
           icon: (icon ?? "spark") as AgentIconId,
           builtIn: false,
+          // Attribution: this is the ONLY way a persona becomes
+          // agent-authored (Settings → Agents writes the same shape without
+          // it). Lets the Staff screen answer "who gave the agent this
+          // standing role?".
+          createdBy: agentAuthorship(),
         };
         useAgentsStore.getState().upsert(agent);
         activatePersona(ctx, agent.id);

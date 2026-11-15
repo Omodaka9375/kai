@@ -96,6 +96,59 @@ describe("parseSkillMd / serializeSkillMd", () => {
     expect(parsed.description).toBe("line one line two");
   });
 
+  it("created-by round-trips through serialize/parse", () => {
+    const tag = { by: "agent" as const, via: "Coder", at: 1730000000000 };
+    const text = serializeSkillMd({
+      name: "agent-made",
+      description: "d",
+      content: "b",
+      createdBy: tag,
+    });
+    expect(text).toContain("created-by: { by: agent, via: Coder, at: 1730000000000 }");
+    const parsed = parseSkillMd(text)!;
+    expect(parsed.createdBy).toEqual(tag);
+  });
+
+  it("created-by without a via parses to a bare agent tag", () => {
+    const parsed = parseSkillMd(
+      [
+        "---",
+        "name: n",
+        "description: d",
+        "created-by: { by: agent, at: 111 }",
+        "---",
+        "",
+        "b",
+      ].join("\n"),
+    )!;
+    expect(parsed.createdBy).toEqual({ by: "agent", at: 111 });
+  });
+
+  it("absent or malformed created-by parses to null (never guessed)", () => {
+    const mk = (line: string) =>
+      parseSkillMd(
+        ["---", "name: n", "description: d", line, "---", "", "b"].join("\n"),
+      )!;
+    expect(mk("license: MIT").createdBy).toBeNull();
+    expect(mk("created-by: agent").createdBy).toBeNull();
+    expect(mk("created-by: { by: human, at: 1 }").createdBy).toBeNull();
+    expect(mk("created-by: { garbage").createdBy).toBeNull();
+  });
+
+  it("a via name containing a comma drops the via hint but keeps the tag", () => {
+    // The subset parser splits fields on commas; the SERIALIZER is the one
+    // that refuses to write a comma-into the value, so round-trip degrades
+    // gracefully instead of corrupting the frontmatter.
+    const text = serializeSkillMd({
+      name: "x",
+      description: "d",
+      content: "b",
+      createdBy: { by: "agent", via: "Ann, the Boss", at: 5 },
+    });
+    expect(text).toContain("created-by: { by: agent, at: 5 }");
+    expect(parseSkillMd(text)!.createdBy).toEqual({ by: "agent", at: 5 });
+  });
+
   it("unknown frontmatter keys are ignored (community-skill forward compat)", () => {
     const text = [
       "---",

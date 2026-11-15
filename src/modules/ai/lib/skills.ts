@@ -40,6 +40,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { homeDir } from "@tauri-apps/api/path";
+import type { AgentAuthorship } from "./authorship";
 import type { WorkspaceEnv } from "@/modules/workspace/env";
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -65,6 +66,10 @@ export type Skill = {
   dir: string;
   /** Absolute SKILL.md path (forward slashes). */
   skillMdPath: string;
+  /** Parsed `created-by` frontmatter. ONLY create_skill writes it; the
+   *  Settings UI and hand-authored files carry nothing. Absence = user OR
+   *  predates the field — never infer "user" from a missing tag. */
+  createdBy?: AgentAuthorship;
 };
 
 /** Draft shape for creating/writing a skill (no fs coordinates). */
@@ -75,6 +80,7 @@ export type SkillDraft = {
   content: string;
   mcpServers?: string[];
   agentHidden?: boolean;
+  createdBy?: AgentAuthorship;
 };
 
 // ── Handle helpers (unchanged contract from the legacy snippet system) ─────
@@ -108,6 +114,7 @@ export type ParsedFrontmatter = {
   handle: string | null;
   mcpServers: string[];
   agentHidden: boolean;
+  createdBy: AgentAuthorship | null;
   body: string;
 };
 
@@ -127,6 +134,7 @@ export function parseSkillMd(text: string): ParsedFrontmatter | null {
   let handle: string | null = null;
   let mcpServers: string[] = [];
   let agentHidden = false;
+  let createdBy: AgentAuthorship | null = null;
   for (const line of raw.split(/\r?\n/)) {
     const kv = /^([A-Za-z][A-Za-z0-9-]*):\s*(.*)$/.exec(line);
     if (!kv) continue;
@@ -143,9 +151,30 @@ export function parseSkillMd(text: string): ParsedFrontmatter | null {
         .map((s) => s.trim())
         .filter(Boolean);
       mcpServers = list;
+    } else if (key === "created-by") {
+      // Subset format: `created-by: { by: agent, via: Coder, at: 1730000000000 }`.
+      // Values must not contain commas (via = persona display name; a name
+      // with a comma simply drops the via hint, never the tag). Malformed →
+      // treated as absent (community skills with an unknown key stay valid).
+      const pairs = /^\{(.*)\}$/.exec(value);
+      if (pairs) {
+        const fields = new Map<string, string>();
+        for (const part of pairs[1]!.split(",")) {
+          const kv = /^\s*([A-Za-z][A-Za-z0-9-]*)\s*:\s*(.*?)\s*$/.exec(part);
+          if (kv) fields.set(kv[1]!.toLowerCase(), kv[2]!);
+        }
+        if (fields.get("by") === "agent") {
+          const at = Number(fields.get("at"));
+          createdBy = {
+            by: "agent",
+            ...(fields.get("via") ? { via: fields.get("via") } : {}),
+            at: Number.isFinite(at) ? at : 0,
+          };
+        }
+      }
     }
   }
-  return { name, description, handle, mcpServers, agentHidden, body };
+  return { name, description, handle, mcpServers, agentHidden, createdBy, body };
 }
 
 /** Serialize a draft to full SKILL.md text (mirror of parseSkillMd). */
@@ -159,6 +188,11 @@ export function serializeSkillMd(draft: SkillDraft): string {
   if (draft.mcpServers && draft.mcpServers.length > 0)
     lines.push(`mcp-servers: [${draft.mcpServers.join(", ")}]`);
   if (draft.agentHidden) lines.push(`agent: false`);
+  if (draft.createdBy?.by === "agent") {
+    const c = draft.createdBy;
+    const via = c.via && !c.via.includes(",") ? ` via: ${c.via},` : "";
+    lines.push(`created-by: { by: agent,${via} at: ${c.at} }`);
+  }
   lines.push("---", "");
   return `${lines.join("\n")}\n${draft.content.trim()}\n`;
 }
@@ -315,6 +349,7 @@ export async function scanSkills(
       scope,
       dir,
       skillMdPath,
+      ...(parsed.createdBy ? { createdBy: parsed.createdBy } : {}),
     });
   }
   out.sort((a, b) => a.name.localeCompare(b.name));
@@ -343,6 +378,21 @@ export async function writeSkill(
   if (!isValidSkillName(draft.name)) {
     throw new Error(`invalid skill name "${draft.name}" — lowercase kebab only`);
   }
+  // `created-by` is a CREATION stamp: an overwrite never erases it unless the
+  // draft explicitly sets its own. Without this, a user editing an
+  // agent-authored skill in Settings (whose draft carries no tag) would
+  // silently drop the attribution, and attribution that disappears on an
+  // unrelated edit is worse than none — it reads as "user made this".
+  let toSerialize = draft;
+  if (!draft.createdBy) {
+    const prev = await ioReadFile(`${root}/${draft.name}/SKILL.md`, workspace);
+    if (prev != null) {
+      const priorTag = parseSkillMd(prev)?.createdBy;
+      if (priorTag) toSerialize = { ...draft, createdBy: priorTag };
+    }
+  }
+  draft = toSerialize;
+
   const dir = `${root}/${draft.name}`;
   await ioCreateDir(dir, workspace);
   // FIX 6: containment on the skill dir itself (a symlinked <name> folder

@@ -19,6 +19,9 @@ export type Agent = {
   instructions: string;
   icon: AgentIconId;
   builtIn: boolean;
+  /** Present ONLY when an agent tool (create_persona) made this persona.
+   *  Absence = user-created OR predates the field — never infer "user". */
+  createdBy?: import("./authorship").AgentAuthorship;
 };
 
 export const BUILTIN_AGENTS: readonly Agent[] = [

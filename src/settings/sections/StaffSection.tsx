@@ -9,6 +9,7 @@ import {
 import { cn } from "@/lib/utils";
 import { AGENT_ICONS } from "@/modules/ai/components/AgentSwitcher";
 import { BUILTIN_AGENTS, type Agent } from "@/modules/ai/lib/agents";
+import { authorshipLabel, type AgentAuthorship } from "@/modules/ai/lib/authorship";
 import {
   listReminders,
   type Reminder,
@@ -40,12 +41,12 @@ import { SectionHeader } from "../components/SectionHeader";
  * leave behind: personas, reusable skills, connected tool servers, scheduled
  * reminders, and the per-session journal (what each run actually saw).
  *
- * Scope (v1, D3): INVENTORY, not attribution. There is currently no
- * created-by field on any of these records — a persona, skill, or MCP server
- * the agent made is byte-identical to one you added by hand — so nothing here
- * claims who made what. That would be fiction. Provenance is a deliberate
- * follow-up: add `createdBy` at the three choke points (agentsStore.upsert,
- * tools/mcpTools.ts, tools/skills.ts) and these rows light up with it.
+ * Attribution: agent-created personas, skills, and MCP servers carry a
+ * `createdBy` tag stamped at their choke point (tools/persona.ts,
+ * tools/skills.ts, tools/mcpTools.ts — see lib/authorship.ts). Only records
+ * created AFTER that landed can be tagged, so an untagged row means "added by
+ * the user, or predates tagging" — never "made by the user" as a fact.
+ * Tags survive later edits: creation authorship is preserved on update.
  *
  * The audit / denial log lives in the Security panel (it is the same append-
  * only trail); we link there rather than render a second copy.
@@ -92,6 +93,26 @@ function ItemRow({
         </span>
       ) : null}
     </Comp>
+  );
+}
+
+/** Shown ONLY when a record carries an agent-creation tag. An untagged row
+ *  stays blank — absence means user-created OR predates the field, so
+ *  rendering "user" there would be a guess dressed up as a fact. */
+function AuthorBadge({ tag }: { tag?: AgentAuthorship }) {
+  const label = authorshipLabel(tag);
+  if (!label) return null;
+  return (
+    <span
+      title={
+        tag?.at
+          ? `Created by the agent ${relativeTime(tag.at)}`
+          : "Created by the agent"
+      }
+      className="shrink-0 rounded-md bg-violet-500/10 px-1.5 py-0.5 text-[9.5px] font-medium text-violet-600 dark:text-violet-400"
+    >
+      {label}
+    </span>
   );
 }
 
@@ -261,7 +282,7 @@ export function StaffSection() {
     <div className="flex flex-col gap-7">
       <SectionHeader
         title="Staff"
-        description="Everything the agent can reach and leave behind, in one place: personas, reusable skills, connected tool servers, scheduled reminders, and the per-session journal. Inventory only — KAI does not yet record who created each item, so no row here claims an author."
+        description="Everything the agent can reach and leave behind, in one place: personas, reusable skills, connected tool servers, scheduled reminders, and the per-session journal. Rows the agent itself created carry an agent badge. A row without one was added by you or predates the tag — KAI does not guess."
       />
 
       {/* Sessions & journals first: it is the surface found nowhere else. */}
@@ -334,9 +355,12 @@ export function StaffSection() {
             title={a.name}
             meta={a.builtIn ? "built-in" : "custom"}
             detail={
-              <span className="shrink-0 text-[10px] text-muted-foreground/70">
-                {a.instructions.length.toLocaleString()} chars
-              </span>
+              <>
+                <AuthorBadge tag={a.createdBy} />
+                <span className="shrink-0 text-[10px] text-muted-foreground/70">
+                  {a.instructions.length.toLocaleString()} chars
+                </span>
+              </>
             }
           />
         ))}
@@ -359,6 +383,7 @@ export function StaffSection() {
               />
             }
             title={`#${s.handle}`}
+            detail={<AuthorBadge tag={s.createdBy} />}
             meta={s.mcpServers.length > 0 ? `+${s.mcpServers.length} MCP` : undefined}
           />
         ))}
@@ -387,16 +412,19 @@ export function StaffSection() {
             }
             title={s.name}
             detail={
-              <span
-                className={cn(
-                  "shrink-0 rounded-full px-1.5 text-[10px]",
-                  s.enabled
-                    ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-                    : "bg-muted text-muted-foreground",
-                )}
-              >
-                {s.enabled ? "enabled" : "off"}
-              </span>
+              <>
+                <AuthorBadge tag={s.createdBy} />
+                <span
+                  className={cn(
+                    "shrink-0 rounded-full px-1.5 text-[10px]",
+                    s.enabled
+                      ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                      : "bg-muted text-muted-foreground",
+                  )}
+                >
+                  {s.enabled ? "enabled" : "off"}
+                </span>
+              </>
             }
             meta={s.transport}
           />

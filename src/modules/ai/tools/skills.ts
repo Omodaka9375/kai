@@ -49,6 +49,7 @@ import {
   type SkillDraft,
 } from "../lib/skills";
 import { currentWorkspaceEnv } from "@/modules/workspace/env";
+import { agentAuthorship } from "../lib/authorship";
 import { notifySkillsChanged } from "../store/skillsStore";
 
 /** Char cap for the instructions body — a SKILL.md is a procedure, not a book. */
@@ -169,6 +170,10 @@ export function buildSkillTools(ctx: ToolContext) {
           description: description.trim(),
           content: instructions.trim(),
           mcpServers: mcp_servers ?? [],
+          // create_skill is the ONLY author path that stamps; the Settings
+          // editor writes the same shape without it, and update_skill
+          // preserves whatever tag already exists.
+          createdBy: agentAuthorship(),
         };
         try {
           const skillMdPath = await secureSkillWrite(
@@ -235,6 +240,10 @@ export function buildSkillTools(ctx: ToolContext) {
             content: (instructions ?? existing?.content ?? "").trim(),
             mcpServers: existing?.mcpServers ?? [],
             agentHidden: existing?.agentHidden,
+            // Preserve CREATION authorship: an agent editing a user's skill
+            // must not re-assign it to itself; an agent-authored skill keeps
+            // its original tag (not the editor's persona).
+            createdBy: existing?.createdBy,
           };
           if (!draft.description || !draft.content) {
             return { error: "Refusing to write an empty description or instructions body." };

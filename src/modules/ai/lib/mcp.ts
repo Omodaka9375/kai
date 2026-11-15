@@ -27,6 +27,11 @@ export type McpServerConfig = {
    *  model streams, NOT tool execution (deliberately). Defaults to
    *  DEFAULT_MCP_TOOL_TIMEOUT_MS when unset; set 0 to disable. */
   toolTimeoutMs?: number;
+  /** Present ONLY when an agent tool (mcp_add_server) registered this server.
+   *  Absence = user-added via Settings OR predates the field — never infer
+   *  "user". On update the original value is preserved (an agent editing a
+   *  user's server does not re-assign authorship to itself). */
+  createdBy?: import("./authorship").AgentAuthorship;
 };
 
 /** Default MCP tool-call budget: generous enough for a slow real API,

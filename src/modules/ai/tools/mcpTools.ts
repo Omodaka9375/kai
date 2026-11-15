@@ -15,6 +15,7 @@ import { z } from "zod";
 import { newMcpServerId } from "../lib/mcp";
 import { mcpManager } from "../lib/mcpManager";
 import { useMcpStore } from "../store/mcpStore";
+import { agentAuthorship } from "../lib/authorship";
 import type { ToolContext } from "./context";
 
 /** How long to wait for the connect to settle before reporting "connecting". */
@@ -106,6 +107,11 @@ export function buildMcpTools(_ctx: ToolContext) {
             ? { toolTimeoutMs: input.toolTimeoutMs ?? existing?.toolTimeoutMs }
             : {}),
           enabled: input.enabled ?? true,
+          // Preserve creation authorship on update; stamp it only when this
+          // call actually creates the server (mcp_add_server = agent path;
+          // the Settings UI adds the same shape without this field).
+          createdBy:
+            existing?.createdBy ?? agentAuthorship(),
         };
 
         // Same store path the Settings UI takes: persist to kai-mcp.json,
