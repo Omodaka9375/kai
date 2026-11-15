@@ -14,7 +14,7 @@ type OpenRouterModelRaw = {
   description?: string;
   context_length?: number;
   architecture?: { modality?: string; instruct_type?: string; tokenizer?: string };
-  pricing?: { prompt?: string; completion?: string };
+  pricing?: { prompt?: string; completion?: string; input_cache_read?: string };
   top_provider?: { is_moderated?: boolean };
 };
 
@@ -292,7 +292,6 @@ function shouldSkip(id: string): boolean {
   for (const prefix of SKIP_PREFIXES) {
     if (lower.startsWith(prefix)) return true;
   }
-  // Skip models explicitly marked as moderated in OpenRouter.
   return false;
 }
 
@@ -311,8 +310,11 @@ export function parseOpenRouterModels(rawJson: string): { models: ModelInfo[]; c
   for (const m of data) {
     if (!m.id) continue;
     if (shouldSkip(m.id)) continue;
-    // Skip models marked as moderated by OpenRouter (usually means not accessible).
-    if (m.top_provider?.is_moderated) continue;
+    // NOTE: do NOT filter on top_provider.is_moderated. It means the provider
+    // applies content filtering to the endpoint, NOT that the model is
+    // unreachable. The old comment claimed the latter and silently hid
+    // current flagships: the Claude Fable and Meta Muse lines ship with
+    // is_moderated: true, so they never reached the picker at all.
 
     const label = deriveLabel(m.id, m.name);
     const isFree =
@@ -349,9 +351,31 @@ export function parseOpenRouterModels(rawJson: string): { models: ModelInfo[]; c
     if (m.pricing?.prompt != null && m.pricing?.completion != null) {
       const input = parseFloat(m.pricing.prompt);
       const output = parseFloat(m.pricing.completion);
-      if (input > 0 || output > 0) {
-        // OpenRouter prices are per-token; convert to $/1M tokens.
-        pricing[m.id] = { input: input * 1_000_000, output: output * 1_000_000 };
+      if (Number.isFinite(input) && Number.isFinite(output)) {
+        // OpenRouter prices are per-token; convert to $/1M tokens. The
+        // multiply reintroduces float dust (8e-7 * 1e6 = 0.7999999999999999),
+        // so round to 6 decimals — finer than any real per-million price and
+        // enough to keep the persisted catalog and the UI output clean.
+        const perMillion = (perToken: number): number =>
+          Math.round(perToken * 1_000_000 * 1_000_000) / 1_000_000;
+        // A free variant registers at $0 instead of being skipped: with no
+        // entry estimateCost() returns null and the "Session cost" row
+        // vanishes, which reads as "unknown" on a model that genuinely costs
+        // nothing.
+        const entry: ModelPricing = {
+          input: perMillion(input),
+          output: perMillion(output),
+        };
+        // Cache reads cost ~10x less than fresh input on most providers. This
+        // field was never read, so every cache hit billed at full input price.
+        const cacheRead =
+          m.pricing.input_cache_read != null
+            ? parseFloat(m.pricing.input_cache_read)
+            : NaN;
+        if (Number.isFinite(cacheRead) && cacheRead >= 0) {
+          entry.cacheRead = perMillion(cacheRead);
+        }
+        pricing[m.id] = entry;
       }
     }
   }

@@ -955,12 +955,23 @@ export function registerDynamicPricing(pricing: Record<string, ModelPricing>): v
   Object.assign(dynamicPricing, pricing);
 }
 
+/**
+ * $/1M tokens for a model, or null when KAI has no price for it. Checks the
+ * hand-maintained registry first, then the OpenRouter catalog fetched at
+ * runtime. This is the ONLY pricing lookup the UI may use: the bundled
+ * `tokenlens` catalog resolved just 12 of the 69 registry models and priced
+ * the rest at $0.00, which is worse than admitting we do not know.
+ */
+export function getModelPricing(modelId: string | undefined): ModelPricing | null {
+  if (!modelId) return null;
+  return MODEL_PRICING[modelId] ?? dynamicPricing[modelId] ?? null;
+}
+
 export function estimateCost(
   modelId: string | undefined,
   usage: { inputTokens: number; outputTokens: number; cachedInputTokens: number },
 ): number | null {
-  if (!modelId) return null;
-  const p = MODEL_PRICING[modelId] ?? dynamicPricing[modelId];
+  const p = getModelPricing(modelId);
   if (!p) return null;
   const fresh = Math.max(0, usage.inputTokens - usage.cachedInputTokens);
   const cached = usage.cachedInputTokens;

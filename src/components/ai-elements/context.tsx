@@ -8,10 +8,10 @@ import {
 } from "@/components/ui/hover-card";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
+import { estimateCost, getModelPricing } from "@/modules/ai/config";
 import type { LanguageModelUsage } from "ai";
 import type { ComponentProps } from "react";
 import { createContext, useContext, useMemo } from "react";
-import { getUsage } from "tokenlens";
 
 const PERCENT_MAX = 100;
 const ICON_RADIUS = 10;
@@ -20,6 +20,46 @@ const ICON_CENTER = 12;
 const ICON_STROKE_WIDTH = 2;
 
 type ModelId = string;
+
+const USD = new Intl.NumberFormat("en-US", {
+  currency: "USD",
+  style: "currency",
+});
+
+/**
+ * Price a single usage line from KAI's own registry (static table + runtime
+ * OpenRouter catalog), or null when KAI has no price for the model.
+ *
+ * This replaces the bundled `tokenlens` lookup, which knew none of KAI's
+ * current models and returned an empty cost object — every row then formatted
+ * `undefined ?? 0` as a confident "$0.00" for models that cost real money.
+ * Unknown now renders as no price rather than a wrong one.
+ *
+ * Cached input is a SUBSET of `inputTokens` (the provider reports it that
+ * way), so the Input line bills only the uncached remainder and the Cache
+ * line bills the cached part. That keeps the rows additive and matches
+ * `estimateCost`, which the footer uses for the total.
+ *
+ * Reasoning tokens are billed at the output rate: vendors price them as
+ * completion tokens, and KAI's `outputTokens` excludes them.
+ */
+function lineCost(
+  modelId: ModelId | undefined,
+  tokens: number,
+  rate: "input" | "output" | "cacheRead",
+  cachedTokens = 0,
+): number | null {
+  const p = getModelPricing(modelId);
+  if (!p || tokens <= 0) return null;
+  const billable = rate === "input" ? Math.max(0, tokens - cachedTokens) : tokens;
+  const unit = rate === "cacheRead" ? (p.cacheRead ?? p.input) : p[rate];
+  return (billable * unit) / 1_000_000;
+}
+
+/** Render a computed line cost, or nothing when KAI has no price. */
+function fmtCost(cost: number | null): string | undefined {
+  return cost == null ? undefined : USD.format(cost);
+}
 
 interface ContextSchema {
   usedTokens: number;
@@ -197,19 +237,13 @@ export const ContextContentFooter = ({
   ...props
 }: ContextContentFooterProps) => {
   const { modelId, usage } = useContextValue();
-  const costUSD = modelId
-    ? getUsage({
-        modelId,
-        usage: {
-          input: usage?.inputTokens ?? 0,
-          output: usage?.outputTokens ?? 0,
-        },
-      }).costUSD?.totalUSD
-    : undefined;
-  const totalCost = new Intl.NumberFormat("en-US", {
-    currency: "USD",
-    style: "currency",
-  }).format(costUSD ?? 0);
+  const totalCost = USD.format(
+    estimateCost(modelId, {
+      inputTokens: usage?.inputTokens ?? 0,
+      outputTokens: usage?.outputTokens ?? 0,
+      cachedInputTokens: usage?.cachedInputTokens ?? 0,
+    }) ?? 0,
+  );
 
   return (
     <div
@@ -266,16 +300,9 @@ export const ContextInputUsage = ({
     return null;
   }
 
-  const inputCost = modelId
-    ? getUsage({
-        modelId,
-        usage: { input: inputTokens, output: 0 },
-      }).costUSD?.totalUSD
-    : undefined;
-  const inputCostText = new Intl.NumberFormat("en-US", {
-    currency: "USD",
-    style: "currency",
-  }).format(inputCost ?? 0);
+  const inputCostText = fmtCost(
+    lineCost(modelId, inputTokens, "input", usage?.cachedInputTokens ?? 0),
+  );
 
   return (
     <div
@@ -306,16 +333,7 @@ export const ContextOutputUsage = ({
     return null;
   }
 
-  const outputCost = modelId
-    ? getUsage({
-        modelId,
-        usage: { input: 0, output: outputTokens },
-      }).costUSD?.totalUSD
-    : undefined;
-  const outputCostText = new Intl.NumberFormat("en-US", {
-    currency: "USD",
-    style: "currency",
-  }).format(outputCost ?? 0);
+  const outputCostText = fmtCost(lineCost(modelId, outputTokens, "output"));
 
   return (
     <div
@@ -346,16 +364,7 @@ export const ContextReasoningUsage = ({
     return null;
   }
 
-  const reasoningCost = modelId
-    ? getUsage({
-        modelId,
-        usage: { reasoningTokens },
-      }).costUSD?.totalUSD
-    : undefined;
-  const reasoningCostText = new Intl.NumberFormat("en-US", {
-    currency: "USD",
-    style: "currency",
-  }).format(reasoningCost ?? 0);
+  const reasoningCostText = fmtCost(lineCost(modelId, reasoningTokens, "output"));
 
   return (
     <div
@@ -386,16 +395,7 @@ export const ContextCacheUsage = ({
     return null;
   }
 
-  const cacheCost = modelId
-    ? getUsage({
-        modelId,
-        usage: { cacheReads: cacheTokens, input: 0, output: 0 },
-      }).costUSD?.totalUSD
-    : undefined;
-  const cacheCostText = new Intl.NumberFormat("en-US", {
-    currency: "USD",
-    style: "currency",
-  }).format(cacheCost ?? 0);
+  const cacheCostText = fmtCost(lineCost(modelId, cacheTokens, "cacheRead"));
 
   return (
     <div
