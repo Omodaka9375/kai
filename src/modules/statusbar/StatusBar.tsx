@@ -15,6 +15,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { CwdBreadcrumb } from "./CwdBreadcrumb";
 import { WorkspaceEnvSelector } from "./WorkspaceEnvSelector";
 import { McpStatusPill } from "./McpStatusPill";
+import { LocalModelStatusPill } from "./LocalModelStatusPill";
 import { RadioMarquee } from "@/modules/radio";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import type { WorkspaceEnv } from "@/modules/workspace";
@@ -95,6 +96,7 @@ export function StatusBar({
           </Tooltip>
         ) : null}
         <McpStatusPill />
+        <LocalModelStatusPill />
       </div>
       {/* Center column — the radio marquee lives here, truly centered. */}
       <div className="flex min-w-0 items-center justify-center">

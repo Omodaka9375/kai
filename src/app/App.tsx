@@ -63,6 +63,7 @@ import {
 import { PreviewStack, type PreviewPaneHandle } from "@/modules/preview";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import { usePreferencesStore } from "@/modules/settings/preferences";
+import { runLocalModelProbe } from "@/modules/ai/lib/localModelProbe";
 import { onKeysChanged, setSidebarView, SIDEBAR_WIDTH_DEFAULT, SIDEBAR_WIDTH_MIN, SIDEBAR_WIDTH_MAX } from "@/modules/settings/store";
 import { flushProjectLayouts, getProjectLayout, patchProjectLayout } from "@/modules/workspace/projectLayout";
 import { ShortcutsDialog } from "@/modules/shortcuts";
@@ -563,6 +564,18 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
     }
   }, [prefsHydrated, runtime]);
   const projectModelIds = usePreferencesStore((s) => s.projectModelIds);
+
+  // Local-model drift probe: after preferences hydrate, check that the
+  // configured OpenAI-compatible endpoint actually serves the stored model
+  // id. Async and non-blocking — the pill surfaces the result only when the
+  // model is missing (or the endpoint is down). The user swaps local models
+  // between sessions; without this, KAI silently runs a stale id.
+  const compatBaseURL = usePreferencesStore((s) => s.openaiCompatibleBaseURL);
+  const compatModelId = usePreferencesStore((s) => s.openaiCompatibleModelId);
+  useEffect(() => {
+    if (!prefsHydrated) return;
+    void runLocalModelProbe(compatBaseURL, compatModelId);
+  }, [prefsHydrated, compatBaseURL, compatModelId]);
 
   const hydrateSessions = useChatStore((s) => s.hydrateSessions);
 
