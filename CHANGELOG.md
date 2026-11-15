@@ -4,6 +4,18 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [3.1.0]
+
+- Chat: a new session opens ready to type.
+- Group chat: each agent's replies get their own tint.
+- Media: a notice shows when an image or video finishes generating.
+- Projects: cleaner icon badge on the project tiles.
+- Models: cost estimates are accurate, and more current models now appear.
+- MCP: a status-bar warning shows when a connected tool stops working.
+- Warning overlays are now smaller and closable.
+
+---
+
 ## [3.0.1]
 
 - Terminal: fixed the blank first terminal when opening a project on Windows.
