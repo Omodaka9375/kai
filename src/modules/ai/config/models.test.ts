@@ -18,33 +18,33 @@ import { getModelPricing, MODELS } from "./models";
 const UNPRICED_PLACEHOLDERS: readonly string[] = ["openai-compatible-custom"];
 
 /** Real models still missing a MODEL_PRICING entry. Every entry here is a
- *  known bug. This list must only ever get SHORTER — see the second test. */
+ *  known gap. This list must only ever get SHORTER — see the second test. */
 const UNPRICED_TODO: readonly string[] = [
-  // Direct Mistral API
+  // Direct Mistral API. Priced models are Large 4 / Medium 3.5 / Codestral,
+  // but mistral.ai's pricing page is JS-rendered and the docs pricing route
+  // moved — no scrapeable per-million numbers yet (2026-11-15).
   "mistral-large-latest",
   "mistral-medium-latest",
   "codestral-latest",
-  // Cerebras
-  "gpt-oss-120b",
+  // Cerebras dropped Llama 3.3 70B and Qwen 3 32B from its published dev
+  // price sheet (now GPT OSS 120B + Qwen 3.8 27B). Registry refresh is the
+  // real fix (G); pricing a possibly-retired id would invent data.
   "llama3.3-70b",
   "qwen-3-32b",
-  // Groq
-  "openai/gpt-oss-20b",
+  // Groq: console.groq.com/pricing and the docs pricing page both 404
+  // (2026-11-15); the price sheet moved behind the new console.
   "llama-3.3-70b-versatile",
   "deepseek-r1-distill-llama-70b",
-  // OpenRouter hardcoded picks (priced under their bare id, not this form)
-  "anthropic/claude-opus-4-7",
-  "anthropic/claude-sonnet-4-6",
+  // Seed rows for models that ARE in the live OpenRouter catalog: at
+  // runtime the catalog fetch registers their price in dynamicPricing, so
+  // the static table deliberately omits them (one source of truth).
+  "openai/gpt-oss-20b",
   "openai/gpt-5.5",
   "openai/gpt-5.4-mini",
   "google/gemini-3.1-pro-preview",
-  "x-ai/grok-4.20-reasoning",
   "deepseek/deepseek-v4-pro",
-  "deepseek/deepseek-reasoner",
-  "meta-llama/llama-4-scout-17b-16e-instruct",
   "meta-llama/llama-4-maverick",
   "moonshotai/kimi-k2.5",
-  "mistralai/mistral-large-latest",
 ];
 
 const exempt = new Set<string>([...UNPRICED_PLACEHOLDERS, ...UNPRICED_TODO]);
