@@ -81,6 +81,16 @@ keyring = { version = "3.6", default-features = false, features = [
 	"apple-native",
 ] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# sync-secret-service = the D-Bus Secret Service backend (gnome-keyring /
+# kwallet). Enabled ONLY on Linux so the native-keyring probe can use it;
+# mac/Windows use their own native features above. crypto-rust avoids an
+# OpenSSL system dependency for the probe's D-Bus handshake.
+keyring = { version = "3.6", default-features = false, features = [
+	"sync-secret-service",
+	"crypto-rust",
+] }
+
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { version = "3.6", default-features = false, features = [
 	"windows-native",

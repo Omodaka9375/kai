@@ -27,6 +27,7 @@ import {
 import { setNetworkPolicy, setDefaultShell } from "@/modules/settings/store";
 import { IS_WINDOWS } from "@/lib/platform";
 import { usePreferencesStore } from "@/modules/settings/preferences";
+import { secretsBackendInfo, type SecretsBackendInfo } from "@/modules/ai/lib/secretsBackend";
 import { SectionHeader } from "../components/SectionHeader";
 import { SettingRow } from "../components/SettingRow";
 import { cn } from "@/lib/utils";
@@ -272,8 +273,48 @@ export function SecuritySection() {
         </div>
       )}
 
+      <KeyStorageBlock />
       <CommitSigningBlock />
     </div>
+  );
+}
+
+function KeyStorageBlock() {
+  const [info, setInfo] = useState<SecretsBackendInfo | null>(null);
+
+  useEffect(() => {
+    secretsBackendInfo().then(setInfo).catch(() => setInfo(null));
+  }, []);
+
+  if (!info) return null; // probe in flight or backend unavailable
+
+  const label = {
+    keychain: "macOS Keychain",
+    "credential-manager": "Windows Credential Manager",
+    "secret-service": "System keyring (Secret Service)",
+    file: "Local file (0600)",
+  }[info.backend] ?? info.backend;
+
+  return (
+    <SettingRow
+      title="API key storage"
+      description={
+        info.encrypted
+          ? `Keys are encrypted at rest in the ${label}.`
+          : "Keys are stored as a plaintext file readable by processes running as your user. Start a keyring service (gnome-keyring or kwallet) and restart KAI to migrate them into encrypted storage."
+      }
+    >
+      <span
+        className={cn(
+          "shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-medium",
+          info.encrypted
+            ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+            : "bg-amber-500/15 text-amber-600 dark:text-amber-400",
+        )}
+      >
+        {label}
+      </span>
+    </SettingRow>
   );
 }
 
