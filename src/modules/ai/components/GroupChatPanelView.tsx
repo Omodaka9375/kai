@@ -251,7 +251,7 @@ export function GroupChatPanel({
       // the old default joined EVERY participant name into the group name,
       // and that name rides every delivery prefix into each session — a
       // 5-member group burned a full line of context per message. Bounded
-      // now and creative: a themed name from the store's pool (War Room,
+      // now and creative: a themed name from the store's pool (Idea Lab,
       // Council, …) — roster names already show in the participant list, so
       // the header should carry identity, not a name census. Renamable
       // inline from the header.

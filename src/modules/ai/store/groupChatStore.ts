@@ -460,17 +460,20 @@ const sessionGroups = new Map<string, string>();
 // across restarts read as a bug, not a feature. A same-name collision
 // within a project is re-rolled so two live groups in one project never
 // share a name.
+// TONE CONTRACT (2026-11-16 ask): names are positive or neutral — no
+// military/conflict terms (the old "War Room", "Task Force", and
+// "Situation Room" are gone). Collaborative-workshop vibes only.
 export const GROUP_NAME_POOL = [
-  "War Room",
+  "Idea Lab",
   "Round Table",
   "Council",
   "Hivemind",
-  "Task Force",
+  "Summit",
   "Junction",
   "Think Tank",
   "Sync Room",
   "All Hands",
-  "Situation Room",
+  "Huddle",
 ] as const;
 
 /** Live pool: defaults, replaced by the user's pool from preferences. */

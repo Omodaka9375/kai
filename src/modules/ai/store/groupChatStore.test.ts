@@ -432,7 +432,7 @@ describe("group chat store — lifecycle", () => {
     expect(g2!.name).not.toBe(g!.name);
     // Reset restores the built-in pool.
     setGroupNamePool(null);
-    expect(getGroupNamePool()[0]).toBe("War Room");
+    expect(getGroupNamePool()[0]).toBe("Idea Lab");
   });
 
   it("flushQueuedForSession delivers queued messages as one merged wake", async () => {
