@@ -88,7 +88,7 @@ export const SLASH_COMMANDS: Record<string, SlashCommandMeta> = {
   clean: {
     name: "clean",
     invocation: "/clean",
-    label: "Toggle memory for this session (tabula rasa)",
+    label: "Toggle memory for this session",
     icon: EraserIcon,
   },
 };
