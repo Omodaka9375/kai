@@ -1882,6 +1882,18 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
             <ResizablePanelGroup
               orientation="horizontal"
               className="min-h-0 flex-1"
+              // HIT-TARGET SHRUNK (2026-11-16 report: "hovering the input
+              // bar sometimes shows a <-> drag icon"). The library's
+              // default resizeTargetMinimumSize.fine = 10 inflates the 1px
+              // separator's hover/cursor hit strip to 10px — ~4.5px of it
+              // overhangs INTO the workspace panel, and the input bar sits
+              // flush against that boundary, so the strip covered the bar's
+              // left edge and the doc-level cursor rule ("*, *:hover
+              // { cursor: col-resize !important }") flipped the pointer
+              // over it. fine: 4 matches the handle's painted affordance
+              // (w-px line + w-1 glow) and keeps the overhang sub-2px;
+              // coarse stays 20 for touch.
+              resizeTargetMinimumSize={{ coarse: 20, fine: 4 }}
             >
               <ResizablePanel
                 id="sidebar"
@@ -1942,7 +1954,7 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
                 <div className="flex h-full min-h-0 flex-col">
                   <div className={cn("relative min-h-0 flex-1", sidebarCollapsed && "pl-1")}>
                     {splitTab ? (
-                      <ResizablePanelGroup orientation="horizontal" className="h-full">
+                      <ResizablePanelGroup orientation="horizontal" className="h-full" resizeTargetMinimumSize={{ coarse: 20, fine: 4 }}>
                         <ResizablePanel id="ws-primary" defaultSize="50%" minSize="20%">
                           {workspaceSurface}
                         </ResizablePanel>
