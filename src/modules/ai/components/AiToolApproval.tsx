@@ -17,7 +17,15 @@ import { memo, useCallback, useState } from "react";
 import { useChatStore } from "../store/chatStore";
 import { abortSession, getSessionAutoApprove, getSessionAutoApproveVersion } from "../store/chatStore";
 import { setEditedToolInput } from "../lib/toolInputOverrides";
-import { predictAutoApproval } from "../lib/autoApprovePrediction";
+import {
+  predictAutoApproval,
+  STANDING_AUTHORITY_TOOLS,
+} from "../lib/autoApprovePrediction";
+import {
+  grantStandingAuthorityAlwaysAllow,
+  hasStandingAuthorityGrant,
+} from "../lib/standingAuthorityGrants";
+import { auditAppend, AUDIT_KINDS } from "../lib/audit";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { getToolActionInfo, analyzeShellCommand } from "../lib/policy";
 import { presentationFor } from "../lib/toolPresentations";
@@ -74,6 +82,9 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue, proxy }: Props) 
   const signingApprovalRequired = usePreferencesStore(
     (s) => s.commitSigningEnabled && s.commitSigningMode === "approval",
   );
+  const authorityGrants = usePreferencesStore(
+    (s) => s.standingAuthorityAlwaysAllowed,
+  );
   const willBeAutoApproved =
     !proxy &&
     predictAutoApproval({
@@ -81,7 +92,15 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue, proxy }: Props) 
       toolName,
       input,
       signingApprovalRequired,
+      alwaysAllowedAuthorityTools: authorityGrants,
     });
+  // ALWAYS-ALLOW GRANT (2026-11-16): a granted authority tool renders the
+  // flat row in ANY mode — the bridge approves it on the same predicate.
+  // The button below (authority tools only) writes the grant; this early
+  // render makes the CURRENT card collapse too, not just future ones.
+  const hasGrant =
+    !proxy && hasStandingAuthorityGrant(toolName, { standingAuthorityAlwaysAllowed: authorityGrants });
+  const isAuthorityTool = STANDING_AUTHORITY_TOOLS.has(toolName);
 
   const isShell = toolName === "bash_run" || toolName === "bash_background";
   const isMemory = toolName === "save_memory";
@@ -143,7 +162,7 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue, proxy }: Props) 
   // approval-responded transition has no border and uses px-2 py-1.5 — a
   // bordered box here made the whole row visibly jump when the state
   // flipped. Match the Tool row geometry so the swap is dot-color only.
-  if (wasAutoApproved || willBeAutoApproved) {
+  if (wasAutoApproved || willBeAutoApproved || hasGrant) {
     return (
       <div className="flex w-full items-center gap-2 rounded-md px-2 py-1.5">
           {/* Dot language, matching the tool cards — a green check-circle
@@ -160,7 +179,7 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue, proxy }: Props) 
             {label}
           </span>
           <span className="ml-auto text-[10px] text-emerald-600 dark:text-emerald-400">
-            auto-approved
+            {hasGrant ? "always allowed" : "auto-approved"}
           </span>
       </div>
     );
@@ -373,6 +392,34 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue, proxy }: Props) 
               <HugeiconsIcon icon={Tick02Icon} size={12} strokeWidth={2} />
               {isElevated ? "Approve elevation" : "Approve"}
             </Button>
+            {/* ALWAYS ALLOW (2026-11-16): standing-authority tools only —
+                grant this exact tool permanent cardless passage (both Ask
+                and Allow modes), revocable in Settings → Security. Approves
+                this call in the same click. Never for elevated/privacy —
+                those buttons don't exist here. */}
+            {isAuthorityTool && !proxy ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  void grantStandingAuthorityAlwaysAllow(toolName).catch(
+                    console.error,
+                  );
+                  auditAppend(
+                    AUDIT_KINDS.approvalApprove,
+                    toolName,
+                    `approval card: always-allow granted (this tool no longer asks)`,
+                    String(input.path ?? input.name ?? input.skillName ?? ""),
+                  );
+                  onRespond(true);
+                }}
+                title="Approve this call and stop asking for this tool in every mode. Revoke in Settings → Security."
+                className="h-7 gap-1.5 text-[11px]"
+              >
+                <HugeiconsIcon icon={Tick02Icon} size={12} strokeWidth={2} />
+                Always Allow
+              </Button>
+            ) : null}
           </>
         )}
       </div>
@@ -398,10 +445,17 @@ export const AiToolApproval = memo(AiToolApprovalImpl, (a, b) => {
   // on, so card and behavior can't diverge.
   const modeVersionA = getSessionAutoApproveVersion();
   const modeVersionB = getSessionAutoApproveVersion();
+  // GRANTS ARE A COMPARATOR INPUT too: clicking "Always Allow" on one card
+  // grants the tool session-wide — every OTHER pending card for the same
+  // tool must re-render (to the flat granted row / away from it on revoke).
+  const grantsA = usePreferencesStore.getState().standingAuthorityAlwaysAllowed;
+  const grantsB = grantsA;
   return (
     a.toolName === b.toolName &&
     a.part.approval.id === b.part.approval.id &&
     modeVersionA === modeVersionB &&
+    grantsA.length === grantsB.length &&
+    grantsA.join("\u0000") === grantsB.join("\u0000") &&
     a.queue?.queued === b.queue?.queued &&
     a.queue?.position === b.queue?.position &&
     a.queue?.total === b.queue?.total

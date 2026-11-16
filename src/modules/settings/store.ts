@@ -131,6 +131,10 @@ export type Preferences = {
    *  provider calls are NEVER restricted — the agent must stay able to
    *  think. Policy layer, not an OS firewall (that's Sandbox workspaceOnly). */
   networkPolicy: "full" | "lan";
+  /** Standing-authority tools the user explicitly granted via the approval
+   *  card's "Always Allow" button — these stop asking for approval in BOTH
+   *  Ask and Allow modes. Managed/revoked in Settings → Security. */
+  standingAuthorityAlwaysAllowed: string[];
 };
 
 const STORE_PATH = "Kai-settings.json";
@@ -186,6 +190,7 @@ const KEY_VOICE_TTS_API_MODEL = "voiceTtsApiModel";
 const KEY_VOICE_TTS_LOCAL_VOICE = "voiceTtsLocalVoice";
 const KEY_VOICE_TTS_ASSEMBLY_VOICE = "voiceTtsAssemblyVoice";
 const KEY_NETWORK_POLICY = "networkPolicy";
+const KEY_STANDING_AUTHORITY_ALWAYS_ALLOWED = "standingAuthorityAlwaysAllowed";
 
 export const TERMINAL_FONT_SIZE_DEFAULT = 14;
 export const TERMINAL_FONT_SIZE_MIN = 8;
@@ -259,6 +264,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   voiceTtsApiModel: "gpt-4o-mini-tts",
   voiceTtsLocalVoice: "en_US-lessac-medium",
   networkPolicy: "full",
+  standingAuthorityAlwaysAllowed: [],
 };
 
 const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
@@ -406,7 +412,12 @@ export async function loadPreferences(): Promise<Preferences> {
       get<Preferences["networkPolicy"]>(KEY_NETWORK_POLICY) === "lan"
         ? "lan"
         : "full",
-    };
+    standingAuthorityAlwaysAllowed:
+      get<string[]>(KEY_STANDING_AUTHORITY_ALWAYS_ALLOWED)
+        ?.filter((n) => typeof n === "string")
+        .filter((n) => STANDING_AUTHORITY_TOOL_IDS.has(n)) ??
+      DEFAULT_PREFERENCES.standingAuthorityAlwaysAllowed,
+  };
 }
 
 export async function setTheme(value: ThemePref): Promise<void> {
@@ -437,6 +448,30 @@ export async function setProjectModelId(workspaceRoot: string, modelId: string):
 
 export async function setNetworkPolicy(value: "full" | "lan"): Promise<void> {
   await writePref(KEY_NETWORK_POLICY, value === "lan" ? "lan" : "full");
+}
+
+/** The standing-authority tools that can carry an Always Allow grant.
+ *  MUST stay in lockstep with STANDING_AUTHORITY_TOOLS in
+ *  modules/ai/lib/autoApprovePrediction.ts — duplicated here because store.ts
+ *  is the lowest-level module (importing up into the AI module would create a
+ *  cycle). autoApprovePrediction.test.ts pins the two against each other. */
+const STANDING_AUTHORITY_TOOL_IDS: ReadonlySet<string> = new Set([
+  "settings_update_restricted",
+  "mcp_add_server",
+  "create_skill",
+  "update_skill",
+  "watch_create",
+  "delete_persona",
+  "save_memory",
+]);
+
+export async function setStandingAuthorityAlwaysAllowed(
+  value: string[],
+): Promise<void> {
+  const clean = Array.from(
+    new Set(value.filter((n) => STANDING_AUTHORITY_TOOL_IDS.has(n))),
+  );
+  await writePref(KEY_STANDING_AUTHORITY_ALWAYS_ALLOWED, clean);
 }
 
 export async function setDefaultModel(value: ModelId): Promise<void> {
@@ -781,6 +816,7 @@ export async function onPreferencesChange(
     [KEY_VOICE_TTS_LOCAL_VOICE]: "voiceTtsLocalVoice",
     [KEY_VOICE_TTS_ASSEMBLY_VOICE]: "voiceTtsAssemblyVoice",
     [KEY_NETWORK_POLICY]: "networkPolicy",
+    [KEY_STANDING_AUTHORITY_ALWAYS_ALLOWED]: "standingAuthorityAlwaysAllowed",
   };
   // Same-process writes still fire onChange immediately; cross-window writes
   // arrive via the Tauri event emitted by writePref().

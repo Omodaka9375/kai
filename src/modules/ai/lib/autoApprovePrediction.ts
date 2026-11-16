@@ -84,6 +84,11 @@ export type AutoApprovalPrediction = {
   input: Record<string, unknown> | undefined;
   /** Commit signing is set to "ask for approval". */
   signingApprovalRequired: boolean;
+  /** Standing-authority tools the user granted "Always Allow" on the
+   *  approval card. Read from the preferences store by the callers; kept
+   *  as an explicit arg (not a store import) so this module stays pure and
+   *  both callers pass the SAME list. Absent = no grants. */
+  alwaysAllowedAuthorityTools?: readonly string[];
 };
 
 /** True when the bridge WILL auto-approve this pending call. Mirrors the
@@ -104,8 +109,16 @@ export function predictAutoApproval(
   if (PRIVACY_APPROVAL_TOOLS.has(args.toolName)) return false;
   // Standing-authority changes (app behavior, MCP registration, skills,
   // watches, persona deletion) are never auto-approved — Allow governs the
-  // current task, not what the agent may permanently reconfigure.
-  if (STANDING_AUTHORITY_TOOLS.has(args.toolName)) return false;
+  // current task, not what the agent may permanently reconfigure. EXCEPT
+  // an explicit user grant ("Always Allow" on the card, revocable in
+  // Settings → Security): that is a per-tool decision the user already
+  // made, not session-level Allow being stretched.
+  if (
+    STANDING_AUTHORITY_TOOLS.has(args.toolName) &&
+    !(args.alwaysAllowedAuthorityTools ?? []).includes(args.toolName)
+  ) {
+    return false;
+  }
   // Commit-signing "ask for approval" outranks autoApprove: "all". Command-
   // shaped inputs across first-party and MCP shapes (command/cmd/script —
   // the same field set the central tool guards probe).
@@ -120,4 +133,21 @@ export function predictAutoApproval(
     return false;
   }
   return true;
+}
+
+/** True when NO approval card should wait for the user, in ANY mode — the
+ *  one-click grant case. Ask mode never bypasses anything EXCEPT an
+ *  explicitly granted authority tool: the user clicked "Always Allow" on
+ *  that exact tool, so the card would be a rubber stamp they already
+ *  stamped. Everything else (elevated, privacy, signed commits, non-granted
+ *  authority tools) still stops in Ask mode. Used by the bridge's manual
+ *  pending-count and by the card renderer to know a grant applies. */
+export function isAlwaysAllowedAuthorityTool(
+  toolName: string,
+  alwaysAllowedAuthorityTools: readonly string[] | undefined,
+): boolean {
+  return (
+    STANDING_AUTHORITY_TOOLS.has(toolName) &&
+    (alwaysAllowedAuthorityTools ?? []).includes(toolName)
+  );
 }

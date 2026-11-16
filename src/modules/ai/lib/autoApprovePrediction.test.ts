@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   predictAutoApproval,
+  isAlwaysAllowedAuthorityTool,
   STANDING_AUTHORITY_TOOLS,
   type AutoApprovalPrediction,
 } from "./autoApprovePrediction";
@@ -63,6 +64,46 @@ describe("predictAutoApproval (the mirror)", () => {
         predictAutoApproval(base({ toolName, input: {} })),
       ).toBe(false);
     }
+  });
+
+  it("an Always Allow grant unlocks its own tool ONLY (2026-11-16)", () => {
+    // The user clicked "Always Allow" on save_memory's card: that exact tool
+    // now passes the gate under Allow mode…
+    expect(
+      predictAutoApproval(
+        base({ toolName: "save_memory", input: { entry: "x" }, alwaysAllowedAuthorityTools: ["save_memory"] }),
+      ),
+    ).toBe(true);
+    // …and every OTHER authority tool still stops.
+    for (const toolName of STANDING_AUTHORITY_TOOLS) {
+      if (toolName === "save_memory") continue;
+      expect(
+        predictAutoApproval(
+          base({ toolName, input: {}, alwaysAllowedAuthorityTools: ["save_memory"] }),
+        ),
+      ).toBe(false);
+    }
+    // A grant never stretches to non-authority carve-outs.
+    expect(
+      predictAutoApproval(
+        base({ input: { command: "x", elevated: true }, alwaysAllowedAuthorityTools: ["save_memory"] }),
+      ),
+    ).toBe(false);
+    expect(
+      predictAutoApproval(
+        base({ toolName: "look_at_screen", input: {}, alwaysAllowedAuthorityTools: ["save_memory"] }),
+      ),
+    ).toBe(false);
+  });
+
+  it("isAlwaysAllowedAuthorityTool: grant applies in BOTH modes, non-authority names never", () => {
+    const grants = ["save_memory"];
+    expect(isAlwaysAllowedAuthorityTool("save_memory", grants)).toBe(true);
+    expect(isAlwaysAllowedAuthorityTool("save_memory", [])).toBe(false);
+    expect(isAlwaysAllowedAuthorityTool("save_memory", undefined)).toBe(false);
+    // A non-authority tool "granted" by a tampered store is ignored.
+    expect(isAlwaysAllowedAuthorityTool("bash_run", ["bash_run"])).toBe(false);
+    expect(isAlwaysAllowedAuthorityTool("edit", ["edit"])).toBe(false);
   });
 
   it("the standing-authority set covers the escalation primitives by name", () => {
@@ -273,7 +314,7 @@ describe("lockstep with AgentRunBridge (the real gate)", () => {
     expect(queueIdx).toBeGreaterThan(predIdx);
     expect(fullCardIdx).toBeGreaterThan(predIdx);
     // The flat row renders on prediction OR on the responded transition.
-    expect(card).toContain("if (wasAutoApproved || willBeAutoApproved) {");
+    expect(card).toContain("if (wasAutoApproved || willBeAutoApproved || hasGrant) {");
     // Proxy cards never predict (their sessions run on other surfaces'
     // approval routing, not this window's auto-approve).
     expect(card).toMatch(/!proxy &&\s*\n?\s*predictAutoApproval/);
@@ -285,11 +326,47 @@ describe("lockstep with AgentRunBridge (the real gate)", () => {
       "utf8",
     );
     const flat = card2.slice(
-      card2.indexOf("if (wasAutoApproved || willBeAutoApproved) {"),
+      card2.indexOf("if (wasAutoApproved || willBeAutoApproved || hasGrant) {"),
       card2.indexOf("// Queued behind an earlier approval"),
     );
     expect(flat).toContain("rounded-md px-2 py-1.5");
     expect(flat).not.toContain("border-border");
     expect(flat).toContain("auto-approved");
+  });
+
+  it("ALWAYS ALLOW (2026-11-16): card grants, bridge consults grants, Security revokes", () => {
+    // The card renders the button ONLY for authority tools in non-proxy
+    // mode, and it approves the current call in the same click.
+    expect(card).toContain("isAuthorityTool && !proxy");
+    expect(card).toContain("grantStandingAuthorityAlwaysAllow(toolName)");
+    expect(card).toMatch(/grantStandingAuthorityAlwaysAllow\(toolName\)[\s\S]{0,400}?onRespond\(true\)/);
+    // The bridge passes the grants to the predictor AND skips the manual
+    // count for granted tools (no rubber-stamp cards in Ask mode).
+    expect(bridge).toMatch(/predictAutoApproval\(\{[\s\S]{0,300}alwaysAllowedAuthorityTools,/);
+    expect(card).toContain("alwaysAllowedAuthorityTools: authorityGrants");
+    expect(bridge).toContain("isAlwaysAllowedAuthorityTool(");
+    // The card's memo comparator re-renders on grant changes (a card frozen
+    // pre-grant must collapse when the grant lands).
+    expect(card).toContain("grantsA.length === grantsB.length");
+    // SecuritySection is the revocation surface.
+    const security = readFileSync(
+      new URL("../../../settings/sections/SecuritySection.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(security).toContain("revokeStandingAuthorityAlwaysAllow");
+  });
+
+  it("the persona gate passes the same grant list (one gate, one grant source)", () => {
+    // groupChatStore's persona auto-allow consults the SAME preferences
+    // field — a grant the user clicked on a desktop card silences the
+    // persona card too.
+    const store = readFileSync(
+      new URL("../store/groupChatStore.ts", import.meta.url),
+      "utf8",
+    );
+    expect(store).toContain("alwaysAllowedAuthorityTools:");
+    expect(store).toMatch(
+      /standingAuthorityAlwaysAllowed/,
+    );
   });
 });

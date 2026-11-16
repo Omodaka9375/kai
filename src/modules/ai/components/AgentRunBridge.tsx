@@ -32,6 +32,7 @@ import { setProjectHasNews } from "../store/projectStatus";
 import { offerToDigest } from "../lib/desktopDigest";
 import {
   predictAutoApproval,
+  isAlwaysAllowedAuthorityTool,
   STANDING_AUTHORITY_TOOLS,
 } from "../lib/autoApprovePrediction";
 import { activeProjectId, projectIdForSession } from "../store/chatStore";
@@ -285,6 +286,12 @@ function Bridge({
   const signingApprovalRequired = usePreferencesStore(
     (s) => s.commitSigningEnabled && s.commitSigningMode === "approval",
   );
+  // ALWAYS-ALLOW GRANTS (2026-11-16): per-tool standing-authority grants the
+  // user clicked on the approval card; revocable in Settings → Security. A
+  // granted tool auto-approves in BOTH modes — the user already decided.
+  const alwaysAllowedAuthorityTools = usePreferencesStore(
+    (s) => s.standingAuthorityAlwaysAllowed,
+  );
 
   // ---- Manual-attention count -------------------------------------------
   // (2026-11-02 report: "left an agent in auto mode, got 'needs your
@@ -329,16 +336,28 @@ function Bridge({
             toolName: type.replace(/^tool-/, ""),
             input,
             signingApprovalRequired,
+            alwaysAllowedAuthorityTools,
           })
         ) {
           // Auto-approve WILL resolve this one on its own - not manual.
+          continue;
+        }
+        // An ALWAYS-ALLOW grant resolves this one too — the user clicked
+        // "Always Allow" on this exact tool's card; waiting again would be
+        // a rubber stamp.
+        if (
+          isAlwaysAllowedAuthorityTool(
+            type.replace(/^tool-/, ""),
+            alwaysAllowedAuthorityTools,
+          )
+        ) {
           continue;
         }
         manual++;
       }
     }
     return { approvalsPending: approvals, manualApprovalsPending: manual };
-  }, [messages, autoApprove, signingApprovalRequired]);
+  }, [messages, autoApprove, signingApprovalRequired, alwaysAllowedAuthorityTools]);
 
   // ---- Background completion bookkeeping ---------------------------------
   // OS notification popups were REMOVED here (2026-10-29): they interrupted
@@ -890,7 +909,7 @@ function Bridge({
         }, 0);
       }
     }
-  }, [messages, autoApprove, respond, markAutoApproved, signingApprovalRequired]);
+  }, [messages, autoApprove, respond, markAutoApproved, signingApprovalRequired, alwaysAllowedAuthorityTools]);
 
   // ---- AI diff tab management ----------------------------------------------
   // We track which approvalIds have already opened a tab so re-renders don't

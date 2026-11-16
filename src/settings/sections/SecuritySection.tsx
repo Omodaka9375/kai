@@ -10,6 +10,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { native, type GpgKey, type GpgStatus } from "@/modules/ai/lib/native";
+import { revokeStandingAuthorityAlwaysAllow } from "@/modules/ai/lib/standingAuthorityGrants";
+import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 import {
   setCommitSigningEnabled,
   setCommitSigningMode,
@@ -68,6 +70,9 @@ function formatTime(ts: number): string {
 export function SecuritySection() {
   const networkPolicy = usePreferencesStore((s) => s.networkPolicy);
   const defaultShell = usePreferencesStore((s) => s.defaultShell);
+  const authorityGrants = usePreferencesStore(
+    (s) => s.standingAuthorityAlwaysAllowed,
+  );
 
   const onNetworkPolicy = (v: "full" | "lan") => {
     if (v === networkPolicy) return;
@@ -275,6 +280,53 @@ export function SecuritySection() {
 
       <KeyStorageBlock />
       <CommitSigningBlock />
+
+      {/* ALWAYS-ALLOW GRANTS (2026-11-16): standing-authority tools the user
+          granted cardless passage from the approval card. The revocation
+          surface — the card itself has no un-grant path. */}
+      <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card/50 p-4">
+        <div className="text-sm font-medium">Always allowed</div>
+        <div className="text-[10.5px] leading-relaxed text-muted-foreground">
+          Standing-authority tools you granted "Always Allow" on an approval
+          card. These run without asking in both Ask and Allow modes. Revoke
+          to bring back the approval card.
+        </div>
+        {authorityGrants.length === 0 ? (
+          <div className="text-[11px] italic text-muted-foreground/70">
+            No grants. The approval card's "Always Allow" button (shown only
+            for tools that change persistent agent authority — memory, skills,
+            MCP servers, app settings, watches, personas) lists them here.
+          </div>
+        ) : (
+          <div className="flex flex-wrap gap-1.5">
+            {authorityGrants.map((name) => (
+              <span
+                key={name}
+                className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-muted/40 px-2.5 py-1 font-mono text-[10.5px]"
+              >
+                {name}
+                <button
+                  type="button"
+                  aria-label={`Revoke always-allow for ${name}`}
+                  title="Revoke — this tool asks for approval again"
+                  onClick={() =>
+                    void revokeStandingAuthorityAlwaysAllow(name).catch(
+                      (e) => console.error("revoke failed:", e),
+                    )
+                  }
+                  className="text-muted-foreground/70 transition-colors hover:text-destructive"
+                >
+                  <HugeiconsIcon
+                    icon={Cancel01Icon}
+                    size={10}
+                    strokeWidth={2}
+                  />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

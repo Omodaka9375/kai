@@ -1390,6 +1390,12 @@ async function runPersonaReply(
                 toolName: c.toolName,
                 input,
                 signingApprovalRequired,
+                // User-clicked "Always Allow" grants apply to personas too:
+                // one gate, one grant list (the desktop bridge passes the
+                // same store field).
+                alwaysAllowedAuthorityTools:
+                  usePreferencesStore.getState()
+                    .standingAuthorityAlwaysAllowed,
               })
             ) {
               // AUDIT: the transcript alone can't prove what ran - auto
