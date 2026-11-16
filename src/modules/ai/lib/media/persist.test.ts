@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
-import { persistGeneratedMedia, type PersistFs } from "./persist";
+import { persistGeneratedMedia, persistUploadedMedia, type PersistFs } from "./persist";
 import {
   isMediaResultShape,
   summarizeMediaOutputs,
@@ -143,6 +143,34 @@ describe("persistGeneratedMedia", () => {
   });
 });
 
+// ── Behavioral: persistUploadedMedia (2026-11-16 upload-path fix) ──────────
+
+describe("persistUploadedMedia", () => {
+  it("writes an uploaded image under ~/.kai/media with the upload- prefix", async () => {
+    const path = await persistUploadedMedia(fsMock, {
+      name: "screenshot 2026 (1).png",
+      mimeType: "image/png",
+      base64: "QUJD",
+    });
+    expect(path).toMatch(/^C:\/Users\/test\/\.kai\/media\/upload-screenshot-2026-1-png-\d{8}-\d{6}\.png$/);
+    const calls = (fsMock.writeFileBytes as ReturnType<typeof vi.fn>).mock.calls;
+    const [target, bytes] = calls[calls.length - 1]!;
+    expect(target).toBe(path);
+    expect(bytes).toEqual([65, 66, 67]);
+  });
+
+  it("returns undefined on empty base64 (no garbage writes)", async () => {
+    const path = await persistUploadedMedia(fsMock, { name: "x.png", mimeType: "image/png", base64: "" });
+    expect(path).toBeUndefined();
+  });
+
+  it("never throws when the write fails", async () => {
+    (fsMock.writeFileBytes as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("disk full"));
+    const path = await persistUploadedMedia(fsMock, { name: "x.png", mimeType: "image/png", base64: "QUJD" });
+    expect(path).toBeUndefined();
+  });
+});
+
 // ── Source pins: the wiring cannot silently regress ───────────────────────
 
 const agentSrc = readFileSync(new URL("../agent.ts", import.meta.url), "utf8");
@@ -186,5 +214,18 @@ describe("media context fix wiring (2026-11-12)", () => {
     expect(persistSrc).toContain("/.kai/media");
     expect(persistSrc).toContain("kai_home_dir");
     expect(persistSrc).toContain("writeFileBytes");
+  });
+
+  it("the composer persists uploaded images and tells the model the path (2026-11-16)", () => {
+    const composerSrc = readFileSync(
+      new URL("../../components/composer.tsx", import.meta.url),
+      "utf8",
+    );
+    // Send path: every image attachment gets persisted...
+    expect(composerSrc).toContain("persistUploadedMedia(native");
+    // ...and the composed text carries the durable path block.
+    expect(composerSrc).toMatch(/attachmentPathBlocks\.push\(\s*`<attachment name="\$\{f\.name\}" savedAt="\$\{path\}">/);
+    // The block list is part of the composed message (not dropped).
+    expect(composerSrc).toContain("attachmentPathBlocks.join(\"\\n\\n\"),");
   });
 });

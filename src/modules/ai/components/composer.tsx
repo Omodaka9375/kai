@@ -19,6 +19,8 @@ import {
   spreadsheetToText,
 } from "../lib/documentParser";
 import type { SpreadsheetData } from "../lib/native";
+import { native } from "../lib/native";
+import { persistUploadedMedia } from "../lib/media/persist";
 import { expandSkillTokens, type Skill } from "../lib/skills";
 import { tryRunSlashCommand, type SlashCommandMeta } from "../lib/slashCommands";
 import { buildQuoteBlock } from "../lib/chatText";
@@ -506,6 +508,31 @@ export function AiComposerProvider({ children }: ProviderProps) {
         (f) =>
           `<file name="${f.name}" mediaType="${f.mediaType}">\n${f.text ?? ""}\n</file>`,
       );
+    // UPLOADED-IMAGE PATH BLOCKS (2026-11-16): picker attachments have no
+    // file path, so tools that read images from disk (generate_image /
+    // generate_video `imagePath`, media save) had nothing to reference —
+    // "user uploads an image and the agent can't see it". Persist each
+    // image attachment to ~/.kai/media/ at send time (best-effort) and
+    // tell the model the durable path alongside the inline image part.
+    const attachmentPathBlocks: string[] = [];
+    for (const f of files) {
+      if (f.kind !== "image" || !f.url) continue;
+      try {
+        const b64 = f.url.split(",")[1] ?? "";
+        const path = await persistUploadedMedia(native, {
+          name: f.name,
+          mimeType: f.mediaType,
+          base64: b64,
+        });
+        if (path) {
+          attachmentPathBlocks.push(
+            `<attachment name="${f.name}" savedAt="${path}">The attached image ${f.name} is also saved at the file path above — pass that path to tools that need a file (e.g. generate_image / generate_video imagePath). Do not ask the user to re-provide the image.</attachment>`,
+          );
+        }
+      } catch {
+        // Best-effort: the image still rides inline as a file part.
+      }
+    }
     const selectionBlocks = files
       .filter((f) => f.kind === "selection")
       .map(
@@ -567,6 +594,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
       quoteBlock ?? "",
       selectionBlocks.join("\n\n"),
       fileBlocks.join("\n\n"),
+      attachmentPathBlocks.join("\n\n"),
       bodyAfterTokens,
     ]
       .filter(Boolean)

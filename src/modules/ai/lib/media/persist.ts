@@ -97,3 +97,49 @@ export async function persistGeneratedMedia(
     return undefined;
   }
 }
+
+/**
+ * Persist a USER-UPLOADED image attachment to ~/.kai/media/ and return its
+ * path (2026-11-16 report: "user uploads an image and wants the edit-image
+ * tool; the agent can't see it").
+ *
+ * Composer picker attachments arrive as data URLs with NO file path, so the
+ * model could see the image inline but had nothing to pass to the tools that
+ * read from disk (generate_image / generate_video `imagePath`, media save,
+ * future edit tools). Persisting at SEND time gives every upload a durable
+ * path — the same trick generated media already use, in the same directory.
+ *
+ * The `upload-` prefix + second-precision timestamp keeps uploads from
+ * colliding with each other or with generated files. Best-effort like its
+ * sibling: NEVER throws, returns undefined on any failure (the attachment
+ * still rides inline; the path notice is simply omitted).
+ */
+export async function persistUploadedMedia(
+  fs: PersistFs,
+  opts: {
+    name: string;
+    mimeType: string;
+    base64: string;
+  },
+): Promise<string | undefined> {
+  const { name, mimeType, base64 } = opts;
+  if (!base64 || base64.length > MAX_BASE64_CHARS) return undefined;
+  const bytes = base64ToBytes(base64);
+  if (!bytes || bytes.length === 0) return undefined;
+
+  const dir = await mediaDir();
+  if (!dir) return undefined;
+
+  // safeMediaFilename sanitizes the ORIGINAL upload name into a stem and
+  // appends the timestamp; the prefix marks provenance (upload vs generated).
+  const filename = `upload-${safeMediaFilename(name, { mimeType, kind: "image" })}`;
+  const target = `${dir}/${filename}`;
+  try {
+    await fs.createDir(dir).catch(() => {});
+    await fs.writeFileBytes(target, Array.from(bytes));
+    return target;
+  } catch (e) {
+    console.warn("[kai] uploaded media persist failed:", e);
+    return undefined;
+  }
+}
