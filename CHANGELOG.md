@@ -4,6 +4,12 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [3.1.1]
+
+- Approve: Always approve flow edge case fixed.
+
+---
+
 ## [3.1.0]
 
 - AI: Local vision models get the image delivered with the next request. Truly text-only models still get OCR.
