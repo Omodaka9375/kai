@@ -4,7 +4,12 @@ import type { ToolContext } from "./context";
 import { newAgentId, useAgentsStore } from "../store/agentsStore";
 import { setSessionPreferences } from "../store/sessionPreferences";
 import { useChatStore } from "../store/chatStore";
-import { BUILTIN_AGENTS, type Agent, type AgentIconId } from "../lib/agents";
+import {
+  BUILTIN_AGENTS,
+  type Agent,
+  type AgentIconId,
+} from "../lib/agents";
+import { MODELS } from "../config";
 import { agentAuthorship } from "../lib/authorship";
 
 /**
@@ -86,11 +91,24 @@ export function buildPersonaTools(ctx: ToolContext) {
           .enum(ICON_IDS)
           .optional()
           .describe("Picker icon (optional, default: spark)."),
+        model: z
+          .string()
+          .optional()
+          .describe(
+            "OPTIONAL model id to pin this persona to (route-to-model). Must be an exact registry model id (e.g. \"anthropic/claude-sonnet-5\", \"google/gemini-3-pro\", \"openai-compatible-custom\"). Only set it when the user explicitly names a model for this persona — absent means the persona follows the app's selected model.",
+          ),
       }),
       needsApproval: false,
-      execute: async ({ name, instructions, description, icon }) => {
+      execute: async ({ name, instructions, description, icon, model }) => {
         const cleanName = name.trim().slice(0, 40);
         if (!cleanName) return { ok: false, error: "empty name" };
+        // Route-to-model: accept ONLY a real registry id (an unrecognized
+        // string is dropped, not stored — a typo'd pin would silently route
+        // the persona nowhere and the user would see no error).
+        const pinnedModel =
+          model && MODELS.some((m) => m.id === model)
+            ? (model as Agent["modelId"])
+            : undefined;
         const agent: Agent = {
           id: newAgentId(),
           name: cleanName,
@@ -98,6 +116,7 @@ export function buildPersonaTools(ctx: ToolContext) {
           instructions,
           icon: (icon ?? "spark") as AgentIconId,
           builtIn: false,
+          ...(pinnedModel ? { modelId: pinnedModel } : {}),
           // Attribution: this is the ONLY way a persona becomes
           // agent-authored (Settings → Agents writes the same shape without
           // it). Lets the Staff screen answer "who gave the agent this

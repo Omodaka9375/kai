@@ -1,4 +1,5 @@
 import { LazyStore } from "@tauri-apps/plugin-store";
+import type { ModelId } from "../config";
 import {
   DIFF_REVIEW_PROTOCOL,
   SECURITY_AUDIT_PROTOCOL,
@@ -20,8 +21,15 @@ export type Agent = {
   icon: AgentIconId;
   builtIn: boolean;
   /** Present ONLY when an agent tool (create_persona) made this persona.
-   *  Absence = user-created OR predates the field — never infer "user". */
+ *  Absence = user-created OR predates the field — never infer "user". */
   createdBy?: import("./authorship").AgentAuthorship;
+  /** Route-to-model (2026-11-16): pin this persona to a specific model.
+ *  ABSENT = follow the app's currently selected model (the pre-existing
+ *  behavior). Applies where the persona IS the agent — group-chat persona
+ *  runs (runPersonaReply) — not to interactive sessions where the user's
+ *  status-bar model pick governs. Editable in Settings → Agents (immediate
+ *  effect: persona runs read the store fresh on every reply). */
+  modelId?: ModelId;
 };
 
 export const BUILTIN_AGENTS: readonly Agent[] = [

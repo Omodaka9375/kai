@@ -70,6 +70,7 @@ vi.mock("./agentsStore", async (importOriginal) => {
 });
 
 import { buildPersonaTools } from "../tools/persona";
+import { DEFAULT_MODEL_ID } from "../config";
 import { getSessionPreferences, removeSessionPreferences } from "./sessionPreferences";
 
 type PersonaTools = {
@@ -138,6 +139,50 @@ describe("create_persona", () => {
     const tools = buildPersonaTools(fgCtx) as unknown as PersonaTools;
     const res = await tools.create_persona.execute({ name: "   ", instructions: "x" });
     expect(res.ok).toBe(false);
+  });
+
+  it("ROUTE-TO-MODEL: a valid registry model id is pinned; junk is dropped, absent stays default", async () => {
+    // 2026-11-16: create_persona's optional `model` pins the persona's
+    // group-chat runs to a specific model. Only real registry ids are
+    // stored — a typo'd string is dropped (the persona follows the app's
+    // selected model) instead of silently routing nowhere.
+    const tools = buildPersonaTools(fgCtx) as unknown as {
+      create_persona: {
+        needsApproval?: boolean;
+        execute: (i: {
+          name: string;
+          instructions: string;
+          description?: string;
+          icon?: string;
+          model?: string;
+        }) => Promise<{ ok: boolean; id?: string }>;
+      };
+    };
+    const res = await tools.create_persona.execute({
+      name: "Pinned",
+      instructions: "x",
+      model: DEFAULT_MODEL_ID, // a real registry id
+    });
+    expect(res.ok).toBe(true);
+    const saved = shared.upsert.mock.calls[0]?.[0] as { modelId?: string };
+    expect(saved.modelId).toBe(DEFAULT_MODEL_ID);
+
+    const resJunk = await tools.create_persona.execute({
+      name: "JunkPin",
+      instructions: "x",
+      model: "not-a-real-model-id",
+    });
+    expect(resJunk.ok).toBe(true);
+    const savedJunk = shared.upsert.mock.calls[1]?.[0] as { modelId?: string };
+    expect(savedJunk.modelId).toBeUndefined();
+
+    const resNone = await tools.create_persona.execute({
+      name: "NoPin",
+      instructions: "x",
+    });
+    expect(resNone.ok).toBe(true);
+    const savedNone = shared.upsert.mock.calls[2]?.[0] as { modelId?: string };
+    expect(savedNone.modelId).toBeUndefined();
   });
 });
 

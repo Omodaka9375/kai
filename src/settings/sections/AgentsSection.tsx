@@ -16,9 +16,12 @@ import {
   type AgentIconId,
 } from "@/modules/ai/lib/agents";
 import { newAgentId, useAgentsStore } from "@/modules/ai/store/agentsStore";
+import { getModel } from "@/modules/ai/config";
 import { usePreferencesStore } from "@/modules/settings/preferences";
+import { SearchableModelPicker } from "../components/SearchableModelPicker";
 import { setCustomInstructions, setSubagentMaxSteps } from "@/modules/settings/store";
 import Add01Icon from "@hugeicons/core-free-icons/Add01Icon";
+import AiBrain02Icon from "@hugeicons/core-free-icons/AiBrain02Icon";
 import CheckmarkCircle02Icon from "@hugeicons/core-free-icons/CheckmarkCircle02Icon";
 import Delete02Icon from "@hugeicons/core-free-icons/Delete02Icon";
 import Edit02Icon from "@hugeicons/core-free-icons/Edit02Icon";
@@ -164,6 +167,16 @@ function AgentCard({
           <span className="line-clamp-2 text-[10.5px] leading-relaxed text-muted-foreground">
             {agent.description}
           </span>
+          {/* Route-to-model badge: a pinned persona names its model so the
+              card shows the routing at a glance. Absent = follows the
+              app's selected model (no badge — the default needs no
+              label). */}
+          {agent.modelId ? (
+            <span className="mt-0.5 inline-flex w-fit items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 text-[9.5px] font-medium text-primary">
+              <HugeiconsIcon icon={AiBrain02Icon} size={9} strokeWidth={2} className="shrink-0" />
+              {getModel(agent.modelId).label}
+            </span>
+          ) : null}
         </div>
       </div>
       <div className="mt-0.5 flex items-center justify-between gap-1">
@@ -292,6 +305,25 @@ function AgentEditorDialog({
               placeholder="One line — shown in the agent picker"
               className="h-8 text-[12px]"
             />
+          </div>
+          <div className="flex flex-col gap-1">
+            <Label>Route to model</Label>
+            {/* Route-to-model (2026-11-16): "Follow app default" rides
+                whatever the status-bar picker has selected (pre-existing
+                behavior); picking a model pins THIS persona's group-chat
+                runs to it. Saved with the agent — upsert persists and
+                broadcasts, so a running group's next persona reply uses
+                the new pick (runPersonaReply reads the store fresh). */}
+            <SearchableModelPicker
+              value={draft.modelId ?? null}
+              onChange={(id) =>
+                setDraft(id ? { ...draft, modelId: id as Agent["modelId"] } : { ...draft, modelId: undefined })
+              }
+            />
+            <span className="text-[10px] leading-relaxed text-muted-foreground">
+              Used when this persona runs as an agent (group chats). Follow
+              app default keeps the model the status-bar picker selects.
+            </span>
           </div>
           <div className="flex flex-col gap-1">
             <Label>Instructions</Label>

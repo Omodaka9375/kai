@@ -1034,6 +1034,30 @@ describe("persona participants", () => {
     // Tool: coordinator sees persona-aware participant descriptions.
     expect(groupTool).toContain("isPersonaParticipantId");
   });
+
+  it("ROUTE-TO-MODEL (2026-11-16): persona runs prefer the persona's pinned model", () => {
+    // runPersonaReply must consult persona.modelId FIRST, falling back to
+    // the app's selected model — the whole point of per-persona model
+    // routing. Read fresh per reply, so Settings edits take effect
+    // immediately (no restart, no group restart).
+    const store = readFileSync(
+      new URL("./groupChatStore.ts", import.meta.url),
+      "utf8",
+    );
+    const personaModelIdx = store.indexOf("persona.modelId ?? state.selectedModelId");
+    const personaLookupIdx = store.indexOf("BUILTIN_AGENTS.find((x) => x.id === agentId)");
+    expect(personaModelIdx).toBeGreaterThan(-1);
+    // The routing sits AFTER the persona object resolves (it reads the
+    // persona's own field) and BEFORE the model build.
+    const buildIdx = store.indexOf("buildLanguageModel(m.provider");
+    expect(buildIdx).toBeGreaterThan(personaModelIdx);
+    expect(personaLookupIdx).toBeGreaterThan(-1);
+    const agentsLib = readFileSync(
+      new URL("../lib/agents.ts", import.meta.url),
+      "utf8",
+    );
+    expect(agentsLib).toContain("modelId?: ModelId");
+  });
 });
 
 

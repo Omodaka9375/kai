@@ -1164,7 +1164,12 @@ async function runPersonaReply(
       selectedModelId?: ModelId;
       apiKeys?: ProviderKeys;
     };
-    const modelId = state.selectedModelId;
+    // ROUTE-TO-MODEL (2026-11-16): a persona pinned to a specific model
+    // (Agent.modelId, set in Settings → Agents or via create_persona's
+    // optional model field) runs on THAT model; absent = the app's
+    // selected model, the pre-existing behavior. Read fresh per reply, so
+    // a Settings edit takes effect on the persona's very next turn.
+    const modelId = persona.modelId ?? state.selectedModelId;
     if (!modelId) throw new Error("no model is selected for persona replies");
     const m = getModel(modelId);
     const keys = state.apiKeys ?? EMPTY_PROVIDER_KEYS;
