@@ -63,7 +63,7 @@ import {
 import { PreviewStack, type PreviewPaneHandle } from "@/modules/preview";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import { runLocalModelProbe } from "@/modules/ai/lib/localModelProbe";
+import { clearLocalModelProbe, runLocalModelProbe } from "@/modules/ai/lib/localModelProbe";
 import { onKeysChanged, setSidebarView, SIDEBAR_WIDTH_DEFAULT, SIDEBAR_WIDTH_MIN, SIDEBAR_WIDTH_MAX } from "@/modules/settings/store";
 import { flushProjectLayouts, getProjectLayout, patchProjectLayout } from "@/modules/workspace/projectLayout";
 import { ShortcutsDialog } from "@/modules/shortcuts";
@@ -572,10 +572,26 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
   // between sessions; without this, KAI silently runs a stale id.
   const compatBaseURL = usePreferencesStore((s) => s.openaiCompatibleBaseURL);
   const compatModelId = usePreferencesStore((s) => s.openaiCompatibleModelId);
+  const selectedModelId = useChatStore((s) => s.selectedModelId);
+  // Gate: probe ONLY while the compat endpoint is (or could be) the active
+  // provider — the global selection or any project's saved model. The stored
+  // baseURL/model prefs survive switching to a cloud model; without this gate
+  // a once-configured LM Studio that is now off read as a permanent "Model:
+  // offline" pill while nothing is using it. Not applicable → clear any stale
+  // verdict (the generation bump inside also voids an in-flight probe).
+  const compatSelected =
+    selectedModelId === "openai-compatible-custom" ||
+    Object.values(projectModelIds ?? {}).some(
+      (m) => m === "openai-compatible-custom",
+    );
   useEffect(() => {
     if (!prefsHydrated) return;
+    if (!compatSelected) {
+      clearLocalModelProbe();
+      return;
+    }
     void runLocalModelProbe(compatBaseURL, compatModelId);
-  }, [prefsHydrated, compatBaseURL, compatModelId]);
+  }, [prefsHydrated, compatSelected, compatBaseURL, compatModelId]);
 
   const hydrateSessions = useChatStore((s) => s.hydrateSessions);
 

@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { evaluateModelListing } from "./localModelProbe";
-import { runLocalModelProbe, useLocalModelProbeStore } from "./localModelProbe";
+import {
+  clearLocalModelProbe,
+  runLocalModelProbe,
+  useLocalModelProbeStore,
+} from "./localModelProbe";
 
 /**
  * Local-model drift probe contract tests. The IPC probe itself is one
@@ -10,6 +14,10 @@ import { runLocalModelProbe, useLocalModelProbeStore } from "./localModelProbe";
 
 const invokeMock = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
+// The runner reads the compat provider's stored key; mock the keyring module
+// so tests never touch secrets_* and can assert the Bearer header shape.
+const getKeyMock = vi.hoisted(() => vi.fn(async (): Promise<string | null> => null));
+vi.mock("./keyring", () => ({ getKey: getKeyMock }));
 
 describe("evaluateModelListing (pure verdict)", () => {
   const listing = (ids: string[]) =>
@@ -44,6 +52,8 @@ describe("evaluateModelListing (pure verdict)", () => {
 describe("runLocalModelProbe (store transitions)", () => {
   beforeEach(() => {
     invokeMock.mockReset();
+    getKeyMock.mockReset();
+    getKeyMock.mockImplementation(async () => null);
     useLocalModelProbeStore.setState({ status: { state: "idle" } });
   });
 
@@ -94,5 +104,55 @@ describe("runLocalModelProbe (store transitions)", () => {
   it("empty model id skips the probe entirely (nothing configured)", async () => {
     await runLocalModelProbe("http://127.0.0.1:1234/v1", "");
     expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it("a stored compat key rides the probe as a Bearer header", async () => {
+    getKeyMock.mockResolvedValueOnce("sk-local-key");
+    invokeMock.mockResolvedValue({ status: 200, body: [] });
+    await runLocalModelProbe("http://127.0.0.1:1234/v1", "llama-3.3");
+    const call = invokeMock.mock.calls.find(([cmd]) => cmd === "ai_http_request");
+    expect(call).toBeDefined();
+    expect(call![1].headers.Authorization).toBe("Bearer sk-local-key");
+  });
+
+  it("401 (auth demanded) maps to silent auth-required, never a false offline", async () => {
+    invokeMock.mockResolvedValue({ status: 401, body: [] });
+    await runLocalModelProbe("http://127.0.0.1:1234/v1", "llama-3.3");
+    expect(useLocalModelProbeStore.getState().status.state).toBe("auth-required");
+  });
+
+  it("a superseded probe never lands its stale verdict (generation token)", async () => {
+    const enc = (s: string) => Array.from(new TextEncoder().encode(s));
+    const gates: Array<(v: { status: number; body: number[] }) => void> = [];
+    invokeMock.mockImplementation(
+      () => new Promise((res) => gates.push(res as never)),
+    );
+    const first = runLocalModelProbe("http://127.0.0.1:1234/v1", "old-model");
+    const second = runLocalModelProbe("http://127.0.0.1:1234/v1", "new-model");
+    // runLocalModelProbe awaits the keyring read BEFORE invoking; flush the
+    // microtask chain so both pending invoke calls exist.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(gates.length).toBe(2);
+    // Newer probe resolves FIRST with its model present → ok lands.
+    gates[1]!({ status: 200, body: enc(JSON.stringify({ data: [{ id: "new-model" }] })) });
+    await second;
+    // Older probe resolves LAST; its "missing" verdict must be dropped.
+    gates[0]!({ status: 200, body: enc(JSON.stringify({ data: [{ id: "other" }] })) });
+    await first;
+    expect(useLocalModelProbeStore.getState().status.state).toBe("ok");
+  });
+
+  it("clearLocalModelProbe voids in-flight verdicts and resets the store", async () => {
+    const enc = (s: string) => Array.from(new TextEncoder().encode(s));
+    const gates: Array<(v: { status: number; body: number[] }) => void> = [];
+    invokeMock.mockImplementation(
+      () => new Promise((res) => gates.push(res as never)),
+    );
+    const p = runLocalModelProbe("http://127.0.0.1:1234/v1", "m");
+    await new Promise((r) => setTimeout(r, 0)); // let the invoke call exist
+    clearLocalModelProbe();
+    gates[0]!({ status: 200, body: enc(JSON.stringify({ data: [{ id: "m" }] })) });
+    await p;
+    expect(useLocalModelProbeStore.getState().status.state).toBe("idle");
   });
 });

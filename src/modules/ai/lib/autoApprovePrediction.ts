@@ -43,7 +43,11 @@ const PRIVACY_APPROVAL_TOOLS: ReadonlySet<string> = new Set([
  *   - author a skill (standing reusable instructions, and a skill's
  *     `mcp_servers` relaunch silently on `#handle`),
  *   - start a watch (recurring unattended shell execution),
- *   - delete a persona (irreversible).
+ *   - delete a persona (irreversible),
+ *   - persist memory entries (`save_memory`): MEMORY.md is injected into
+ *     EVERY future session's system prompt — the same standing-authority
+ *     archetype as customInstructions, reachable by anything that can steer
+ *     the model (fetched page, MCP output, poisoned repo file).
  *
  * This mirrors, for the interactive path, what `personaWorkspace.ts` already
  * does for headless personas ("global user-surface tools that mutate state
@@ -60,6 +64,7 @@ export const STANDING_AUTHORITY_TOOLS: ReadonlySet<string> = new Set([
   "update_skill",
   "watch_create",
   "delete_persona",
+  "save_memory",
 ]);
 
 /** Detect a `git commit` invocation (not commit-tree) inside a bash_run

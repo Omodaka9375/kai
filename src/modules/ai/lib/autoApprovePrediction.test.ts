@@ -75,6 +75,9 @@ describe("predictAutoApproval (the mirror)", () => {
     expect(STANDING_AUTHORITY_TOOLS.has("update_skill")).toBe(true);
     expect(STANDING_AUTHORITY_TOOLS.has("watch_create")).toBe(true);
     expect(STANDING_AUTHORITY_TOOLS.has("delete_persona")).toBe(true);
+    // save_memory (2026-11-16): MEMORY.md rides into every future session's
+    // system prompt — the customInstructions archetype, same class.
+    expect(STANDING_AUTHORITY_TOOLS.has("save_memory")).toBe(true);
   });
 
   it("the cosmetic settings tool STAYS auto-approvable (Allow still works)", () => {
@@ -100,6 +103,7 @@ describe("predictAutoApproval (the mirror)", () => {
       update_skill: "../tools/skills.ts",
       watch_create: "../tools/watch.ts",
       delete_persona: "../tools/persona.ts",
+      save_memory: "../tools/memory.ts",
     };
     for (const [name, rel] of Object.entries(files)) {
       const src = readFileSync(new URL(rel, import.meta.url), "utf8");

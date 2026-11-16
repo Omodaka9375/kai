@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { create } from "zustand";
 import { z } from "zod";
+import { getKey } from "./keyring";
 
 /**
  * Local-model configuration drift probe (2026-11-15).
@@ -34,7 +35,10 @@ export type LocalModelStatus =
   | { state: "checking" }
   | { state: "ok" }
   | { state: "missing"; configuredId: string; available: string[] }
-  | { state: "unreachable"; error: string };
+  | { state: "unreachable"; error: string }
+  /** Endpoint is up but demands credentials we do not have — unverifiable,
+   *  so the pill stays silent (never a false "offline"). */
+  | { state: "auth-required" };
 
 type LocalModelProbeStore = {
   status: LocalModelStatus;
@@ -79,10 +83,14 @@ export function evaluateModelListing(
   return { ok, available: ids };
 }
 
-/** Probe one endpoint: GET /models, check the configured id against it. */
+/** Probe one endpoint: GET /models, check the configured id against it.
+ *  Sends the compat provider's stored key when one exists — the real model
+ *  call authenticates, so a key-protected endpoint would 401 a bare probe
+ *  and read as "offline" while healthy. */
 export async function probeLocalModel(
   baseUrl: string,
   configuredId: string,
+  authKey?: string | null,
 ): Promise<LocalModelStatus> {
   const clean = baseUrl.trim().replace(/\/+$/, "");
   if (!clean) return { state: "unreachable", error: "no base URL configured" };
@@ -91,7 +99,10 @@ export async function probeLocalModel(
     const resp = await invoke<{ status: number; body: number[] }>("ai_http_request", {
       url,
       method: "GET",
-      headers: { "User-Agent": "kai-model-probe" },
+      headers: {
+        "User-Agent": "kai-model-probe",
+        ...(authKey ? { Authorization: `Bearer ${authKey}` } : {}),
+      },
       body: null,
       bodyBase64: null,
       // Local endpoints (LM Studio on 127.0.0.1:1234, Ollama on 11434) are
@@ -104,6 +115,11 @@ export async function probeLocalModel(
       // Endpoint reachable but no /models route — cannot verify, say nothing
       // rather than falsely warning (older llama.cpp builds lack it).
       return { state: "ok" };
+    }
+    if (resp.status === 401 || resp.status === 403) {
+      // Up but demanding auth we do not have (or a wrong key): NOT "offline",
+      // and unverifiable — same honesty class as 404, silence not a warning.
+      return { state: "auth-required" };
     }
     if (resp.status < 200 || resp.status >= 300) {
       return { state: "unreachable", error: `HTTP ${resp.status}` };
@@ -118,14 +134,35 @@ export async function probeLocalModel(
   }
 }
 
-/** Top-level runner: store-driving wrapper around probeLocalModel. */
+/** In-flight generation: only the NEWEST started probe may land a verdict.
+ *  The App effect re-fires on every baseURL/modelId change without aborting
+ *  the previous run, so two probes can overlap and resolve in any order —
+ *  without the token the SLOWER (older) one would overwrite the fresh
+ *  verdict and the pill would show the wrong state until the next change. */
+let probeGeneration = 0;
+
+/** Top-level runner: store-driving wrapper around probeLocalModel. Resolves
+ *  the compat provider's stored key (read lazily from the keyring, never
+ *  persisted anywhere) so an authenticated endpoint verifies instead of
+ *  401-ing, and generation-guards the landing so a superseded run cannot
+ *  overwrite a newer verdict. */
 export async function runLocalModelProbe(
   baseUrl: string,
   modelId: string,
 ): Promise<void> {
-  const store = useLocalModelProbeStore.getState();
   if (!modelId) return;
-  store.set({ state: "checking" });
-  const status = await probeLocalModel(baseUrl, modelId);
+  const gen = ++probeGeneration;
+  useLocalModelProbeStore.getState().set({ state: "checking" });
+  const authKey = await getKey("openai-compatible").catch(() => null);
+  const status = await probeLocalModel(baseUrl, modelId, authKey);
+  if (gen !== probeGeneration) return; // superseded — drop the stale verdict
   useLocalModelProbeStore.getState().set(status);
+}
+
+/** Clear the verdict (compat endpoint no longer selected anywhere — see the
+ *  App.tsx gate). Bumps the generation so an in-flight probe cannot land a
+ *  verdict for a configuration nothing uses anymore. */
+export function clearLocalModelProbe(): void {
+  probeGeneration++;
+  useLocalModelProbeStore.getState().set({ state: "idle" });
 }
