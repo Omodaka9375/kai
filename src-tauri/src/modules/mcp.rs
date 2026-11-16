@@ -57,6 +57,120 @@ fn quote_cmd_arg(arg: &str) -> String {
     format!("\"{escaped}\"")
 }
 
+/// NUL-terminated UTF-16 for the W-suffix registry APIs.
+#[cfg(target_os = "windows")]
+fn utf16z(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+/// Read the `Path` value under `hkey\subkey` as a string. RegGetValueW
+/// expands REG_EXPAND_SZ values automatically (RRF_RT_REG_SZ accepts both
+/// REG_SZ and the expanded form of REG_EXPAND_SZ), so `%SystemRoot%`-style
+/// entries come back expanded. Returns None on any failure — callers fall
+/// back to the inherited PATH for that source.
+#[cfg(target_os = "windows")]
+fn reg_path_value(
+    hkey: windows_sys::Win32::System::Registry::HKEY,
+    subkey: &str,
+) -> Option<String> {
+    use windows_sys::Win32::System::Registry::{RegGetValueW, RRF_RT_REG_SZ};
+    let sub = utf16z(subkey);
+    let val = utf16z("Path");
+    let mut ty: u32 = 0;
+    let mut len: u32 = 0;
+    // Size probe (pvData = null) then the real read.
+    let rc = unsafe {
+        RegGetValueW(
+            hkey,
+            sub.as_ptr(),
+            val.as_ptr(),
+            RRF_RT_REG_SZ,
+            &mut ty,
+            std::ptr::null_mut(),
+            &mut len,
+        )
+    };
+    if rc != 0 || len < 2 {
+        return None;
+    }
+    let mut buf = vec![0u16; (len / 2) as usize];
+    let rc = unsafe {
+        RegGetValueW(
+            hkey,
+            sub.as_ptr(),
+            val.as_ptr(),
+            RRF_RT_REG_SZ,
+            &mut ty,
+            buf.as_mut_ptr().cast(),
+            &mut len,
+        )
+    };
+    if rc != 0 {
+        return None;
+    }
+    let n = (len / 2) as usize;
+    // Strip the trailing NUL if present (len includes it).
+    let end = if n > 0 && buf[n - 1] == 0 { n - 1 } else { n };
+    Some(String::from_utf16_lossy(&buf[..end]))
+}
+
+/// Rebuild the PATH a NORMAL login launch would have, for children KAI
+/// spawns when KAI itself was launched with a truncated environment.
+///
+/// 2026-11-16 (v3.1.x report): a KAI started from the MSI finish page
+/// (parent msiexec) — or from any elevated parent — inherits a
+/// MACHINE-ONLY PATH: every user-PATH entry is stripped, so MCP servers
+/// configured with bare commands (`uvx`, `npx` shims in `~\.local\bin`,
+/// Python `Scripts\`, nvm) die at spawn with "Connection closed" even
+/// though the binaries exist. The fix mirrors what Explorer does for a
+/// normal launch: read the live registry (HKLM machine PATH, then HKCU
+/// user PATH) and append the entries missing from the inherited PATH.
+/// Current-PATH order is untouched (only additions), failures return the
+/// inherited PATH unchanged, and a normally-launched KAI gains nothing
+/// (every registry entry is already present, so the set diff is empty).
+#[cfg(target_os = "windows")]
+fn merged_windows_path() -> String {
+    use std::collections::HashSet;
+    use windows_sys::Win32::System::Registry::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+
+    fn norm(e: &str) -> String {
+        // Windows path lookup is case-insensitive; ignore trailing separator.
+        e.trim_end_matches('\\').to_lowercase()
+    }
+
+    let current = std::env::var("PATH").unwrap_or_default();
+    let mut have: HashSet<String> = current.split(';').map(norm).collect();
+    let mut merged = current.clone();
+    let mut added = 0usize;
+
+    // Machine first, then user — the same order the OS merges them, so a
+    // shadowing entry (same dir in both) keeps its machine position.
+    let machine = reg_path_value(
+        HKEY_LOCAL_MACHINE,
+        "SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment",
+    );
+    let user = reg_path_value(HKEY_CURRENT_USER, "Environment");
+    for source in [machine, user].into_iter().flatten() {
+        for entry in source.split(';') {
+            let key = norm(entry);
+            if key.is_empty() || have.contains(&key) {
+                continue;
+            }
+            have.insert(key);
+            merged.push(';');
+            merged.push_str(entry);
+            added += 1;
+        }
+    }
+    if added > 0 {
+        log::info!(
+            "mcp spawn: inherited PATH was missing {added} registry PATH \
+             entries (installer/elevated launch?) — merged them back in"
+        );
+    }
+    merged
+}
+
 #[derive(Default)]
 pub struct McpState {
     sessions: RwLock<HashMap<u32, McpSession>>,
@@ -87,6 +201,12 @@ pub fn mcp_stdio_open(
         use std::os::windows::process::CommandExt;
         let mut c = Command::new("cmd.exe");
         c.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        // INSTALLER-LAUNCH FIX: cmd.exe inherits KAI's PATH, which for an
+        // installer/elevation-launched KAI is machine-only (user entries
+        // stripped). Give the resolver the registry-merged PATH instead so
+        // bare commands (uvx, npx shims, python Scripts) resolve like they
+        // do in a normal login launch. No-op when nothing is missing.
+        c.env("PATH", merged_windows_path());
                                       // Build a single command line with each component quoted for cmd.exe.
                                       // The previous `command arg1 arg2` join misparsed paths with spaces
                                       // (e.g. `C:\Program Files\nodejs\npx.cmd`) and let `&`/`|`/`>` in
