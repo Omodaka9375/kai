@@ -125,7 +125,13 @@
       font-weight: 700;
       letter-spacing: -0.04em;
       margin: 0 0 20px;
+      display: flex;
+      align-items: center;
+      gap: 0.08em;
     }
+    /* Logo wordmark (2026-11-16): the h1 renders the brand image, not text.
+       Height follows the old text size so the masthead rhythm is unchanged. */
+    .masthead h1 img { height: clamp(2.9rem, 8vw, 5.4rem); width: auto; display: block; }
     .masthead h1 .cursor { color: var(--ink-4); font-weight: 400; }
     .masthead .dek {
       font-family: var(--serif);
@@ -359,7 +365,8 @@
     /* ————— footer / colophon ————— */
     footer { background: var(--ink); color: var(--paper); border-bottom: 0; }
     footer .wrap { padding-top: 40px; padding-bottom: 40px; display: flex; flex-wrap: wrap; gap: 32px; justify-content: space-between; align-items: baseline; }
-    footer .fn { font-family: var(--serif); font-size: 1.3rem; }
+    footer .fn { display: inline-flex; align-items: center; gap: 10px; }
+    footer .fn img { height: 28px; width: auto; display: block; }
     footer p { margin: 0; font-family: var(--mono); font-size: 0.72rem; line-height: 1.8; color: #a0a09e; max-width: 46ch; }
     footer a { color: var(--paper); }
     @media (prefers-color-scheme: dark) { footer p { color: #909090; } }
@@ -405,7 +412,7 @@
   <!-- Masthead -->
   <header class="masthead">
     <div class="wrap">
-      <h1>kai<span class="cursor">_</span></h1>
+      <h1><img src="logo.png" alt="Kai" /><span class="cursor">_</span></h1>
       <p class="dek">
         A <strong>minimal, private</strong> AI-native terminal emulator. A fast, cross-platform
         terminal with an agent that actually <strong>reads, edits, and runs</strong> your code —
@@ -631,7 +638,7 @@
 
   <footer>
     <div class="wrap">
-      <div class="fn">kai_</div>
+      <div class="fn"><img src="logo.png" alt="Kai" /></div>
       <p>
         Kai is open source under <a href="https://github.com/Omodaka9375/kai/blob/main/LICENSE">Apache-2.0</a>.<br />
         <a href="https://github.com/Omodaka9375/kai">GitHub</a> ·

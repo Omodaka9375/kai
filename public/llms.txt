@@ -1,0 +1,27 @@
+# KAI — AI-native terminal emulator
+
+> KAI is a free, open-source (Apache-2.0) AI-native terminal emulator. Tauri 2 + Rust backend with portable-pty sessions, React 19 + TypeScript + xterm.js client, and BYOK AI built on the Vercel AI SDK v6. Bring your own key for OpenAI, Anthropic, Google, Groq, xAI, Cerebras, DeepSeek, Mistral, OpenRouter, z.ai, or any OpenAI-compatible endpoint (LM Studio, Ollama, vLLM, llama.cpp). macOS, Linux, and Windows.
+
+KAI runs the agent loop on top of `streamText`, not an experimental wrapper: per-tool approval cards, an append-only security audit trail, optional OS-level sandboxing of agent shells, shadow-mode file isolation, MCP server support, subagents, skills, and an integrated editor, file explorer, git panel, and web preview. Everything the AI does goes through tools that respect explicit user consent.
+
+## Docs
+
+- [Landing page](https://omodaka9375.github.io/kai/): feature tour, screenshots, and download links.
+- [README](https://github.com/Omodaka9375/kai/blob/main/README.md): quick start, install options per OS, and project overview.
+- [CHANGELOG](https://github.com/Omodaka9375/kai/blob/main/CHANGELOG.md): release history.
+
+## Downloads
+
+- [Latest release](https://github.com/Omodaka9375/kai/releases/latest): installers for Windows (NSIS, no admin), macOS, and Linux (AppImage, .deb, .rpm).
+
+## Project
+
+- [Source](https://github.com/Omodaka9375/kai): the repository.
+- [Issues](https://github.com/Omodaka9375/kai/issues): bug reports and feature requests.
+- [License](https://github.com/Omodaka9375/kai/blob/main/LICENSE): Apache-2.0.
+
+## For agents working in a KAI checkout
+
+- `KAI.md` (workspace root): the project's living architecture doc — module layout, tool inventory, cross-platform conventions, and known gotchas. Read it before making changes.
+- `CHANGELOG.md`: document user-visible changes per release.
+- Frontend type check: `pnpm exec tsc --noEmit`. Tests: `pnpm exec vitest run`. Rust checks: `cd src-tauri && cargo check && cargo clippy`.
