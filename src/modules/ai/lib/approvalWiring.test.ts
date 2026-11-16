@@ -55,7 +55,14 @@ describe("approval responses flow through the denial latch", () => {
     // No persistent per-command grants: compound shell commands cannot
     // create an invisible bypass around per-call review.
     expect(bridge).not.toContain("isCommandAllowed");
-    expect(bridge).toContain('if (autoApprove !== "all") return;');
+    // 2026-11-16 fix: the Ask-mode gate is grant-aware now (an ALWAYS-ALLOW
+    // granted tool responds in Ask mode too) — pin the grant-aware shape.
+    expect(bridge).toContain(
+      'if (autoApprove !== "all") {\n          if (!granted) continue;',
+    );
+    expect(bridge).toContain(
+      "else if (STANDING_AUTHORITY_TOOLS.has(toolName) && !granted)",
+    );
     // The SDK applier lives in exactly ONE place: the helper's normal path
     // (./approvalResponses, extracted 2026-11-10; chatStore re-exports it).
     const helper = src("../store/approvalResponses.ts");

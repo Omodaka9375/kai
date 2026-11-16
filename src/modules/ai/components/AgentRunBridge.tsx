@@ -833,9 +833,6 @@ function Bridge({
   // consumes manualApprovalsPending.)
 
   useEffect(() => {
-    // Approvals are per-call in Ask mode; Allow auto-approves the session,
-    // with the stronger consent boundaries below always kept manual.
-    if (autoApprove !== "all") return;
     for (const m of messages) {
       if (m.role !== "assistant") continue;
       for (const p of m.parts as AnyPart[]) {
@@ -862,19 +859,41 @@ function Bridge({
         // This is the enforcement half of the fix; the prompt rules only make
         // the model less eager, they can't guarantee consent.
         if (PRIVACY_APPROVAL_TOOLS.has(toolName)) continue;
-        // Standing-authority changes (app behavior, MCP registration, skills,
-        // watches, persona deletion) must never auto-approve. Allow governs
-        // the CURRENT task, not what the agent may permanently reconfigure
-        // for every future session — without this, `customInstructions`,
-        // `defaultShell`, and the agent's own `subagentMaxSteps` leash were
-        // all writable with zero cards in Allow mode.
-        if (STANDING_AUTHORITY_TOOLS.has(toolName)) continue;
+        // ALWAYS-ALLOW GRANT (2026-11-16 fix): an explicit per-tool grant
+        // (Settings revocable) responds in BOTH modes — this is the tool the
+        // user clicked "Always Allow" on, so waiting again is a rubber
+        // stamp. The card RENDERER already collapses granted tools to a flat
+        // buttonless row and the manual-count skips them; before this
+        // restructure the responder skipped them in BOTH modes (Ask: the
+        // early return; Allow: the STANDING_AUTHORITY skip below), so a
+        // granted call parked a buttonless card forever — the run just
+        // stopped. Elevated/privacy above outrank the grant (disjoint from
+        // the authority set by construction, but kept first defensively).
+        const granted = isAlwaysAllowedAuthorityTool(
+          toolName,
+          alwaysAllowedAuthorityTools,
+        );
+        // Mode gates, in grant-aware order:
+        //  - Ask mode ("off"): ONLY granted tools respond.
+        //  - Allow mode ("all"): everything responds EXCEPT the
+        //    standing-authority set (app behavior, MCP registration, skills,
+        //    watches, persona deletion — Allow governs the CURRENT task, not
+        //    what the agent may permanently reconfigure for future sessions)
+        //    unless explicitly granted.
+        if (autoApprove !== "all") {
+          if (!granted) continue;
+        } else if (STANDING_AUTHORITY_TOOLS.has(toolName) && !granted) {
+          continue;
+        }
         // Commit signing "ask for approval" — a `git commit` from the agent
         // must be reviewed before signing, even under autoApprove: "all".
         // SHAPE-based (2026-10-31): any command-shaped input (command / cmd /
         // script — the same field set the central tool guards probe for MCP
         // tools) carries the gate, not just first-party bash_run. An MCP git
         // wrapper committing while signing is "ask" stops for the click.
+        // OUTRANKS an ALWAYS-ALLOW grant: signature review is the user's
+        // own assertion, never rubber-stamped (a granted watch_create with
+        // a commit-shaped command still waits).
         const isSignedCommit =
           signingApprovalRequired &&
           isGitCommitCommand(
@@ -900,7 +919,17 @@ function Bridge({
           // switching Allow → Ask mid-step must also cancel every scheduled
           // approval for calls not yet approved — the timer fires a
           // macrotask after schedule, and a multi-tool step queued several.
-          if (getSessionAutoApprove(sessionId) !== "all") return;
+          // A GRANT survives the mode toggle (the user's decision is
+          // per-tool, not per-mode) but is re-read from the live prefs at
+          // fire time, so a Settings revocation landing between schedule
+          // and fire cancels the approval.
+          const stillGranted = isAlwaysAllowedAuthorityTool(
+            toolName,
+            usePreferencesStore.getState().standingAuthorityAlwaysAllowed,
+          );
+          if (getSessionAutoApprove(sessionId) !== "all" && !stillGranted) {
+            return;
+          }
           respond(id, true);
           // Mark the store only after the deferred response fired: marking
           // at schedule time grew autoApprovedIds with ids whose cards were
@@ -909,6 +938,8 @@ function Bridge({
         }, 0);
       }
     }
+    // alwaysAllowedAuthorityTools is live above: schedule-time grant checks;
+    // fire-time grant checks re-read the store (toggles/revocations mid-step).
   }, [messages, autoApprove, respond, markAutoApproved, signingApprovalRequired, alwaysAllowedAuthorityTools]);
 
   // ---- AI diff tab management ----------------------------------------------

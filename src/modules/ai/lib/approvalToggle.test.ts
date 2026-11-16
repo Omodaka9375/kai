@@ -37,14 +37,18 @@ describe("allow/ask mid-run toggle (source pins)", () => {
     // The fire-time gate: a timer scheduled under Allow dies if the user
     // has since switched the session to Ask. Must read the session-scoped
     // map (getSessionAutoApprove), not the presentation-only store field.
+    // 2026-11-16 fix: the gate is grant-aware — an ALWAYS-ALLOW grant
+    // survives the mode toggle (the user's decision is per-tool, not
+    // per-mode) but is re-read from the LIVE prefs at fire time, so a
+    // Settings revocation landing between schedule and fire cancels it.
     expect(bridge).toContain(
-      'if (getSessionAutoApprove(sessionId) !== "all") return;',
+      'if (getSessionAutoApprove(sessionId) !== "all" && !stillGranted) {',
     );
     // And the gate sits INSIDE the setTimeout callback (fire time), not
     // before it (schedule time).
     const timerIdx = bridge.indexOf("setTimeout(() => {");
     const gateIdx = bridge.indexOf(
-      'if (getSessionAutoApprove(sessionId) !== "all") return;',
+      'if (getSessionAutoApprove(sessionId) !== "all" && !stillGranted) {',
     );
     expect(timerIdx).toBeGreaterThan(-1);
     expect(gateIdx).toBeGreaterThan(timerIdx);

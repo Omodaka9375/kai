@@ -303,7 +303,12 @@ describe("lockstep with AgentRunBridge (the real gate)", () => {
   });
 
   it("the bridge still auto-approves on a deferred timer (the reason the prediction exists)", () => {
-    expect(bridge).toContain("if (autoApprove !== \"all\") return;");
+    // 2026-11-16 fix: the Ask-mode gate is no longer an unconditional early
+    // return — a granted tool responds in Ask mode too — so pin the
+    // grant-aware gate + the deferred timer instead.
+    expect(bridge).toContain(
+      'if (autoApprove !== "all") {\n          if (!granted) continue;',
+    );
     expect(bridge).toMatch(/setTimeout\(\(\) => \{[\s\S]*respond\(id, true\)/);
   });
 
@@ -354,6 +359,33 @@ describe("lockstep with AgentRunBridge (the real gate)", () => {
       "utf8",
     );
     expect(security).toContain("revokeStandingAuthorityAlwaysAllow");
+  });
+
+  it("ALWAYS ALLOW (2026-11-16 fix): the bridge RESPONDS to granted tools in BOTH modes", () => {
+    // The original ALWAYS ALLOW wiring updated every VIEW (the card
+    // renderer, the manual pending count, the predictor) but not the
+    // responder effect: its Ask-mode early return and Allow-mode
+    // STANDING_AUTHORITY skip left a granted call parked on a BUTTONLESS
+    // card forever — the run just stopped. The user report: "every time
+    // agent runs [an] action I [always] approved it stops."
+    // Pins, in effect order:
+    const effect = bridge.slice(
+      bridge.indexOf("Auto-approve effect"),
+    );
+    // 1. The unconditional Ask-mode early return is GONE (a granted tool
+    //    responds in Ask mode now).
+    expect(effect).not.toMatch(
+      /autoApprove !== "all"\)[^\n]*\n\s*return;/,
+    );
+    // 2. Schedule time: the grant gates BOTH mode branches.
+    expect(effect).toContain("const granted = isAlwaysAllowedAuthorityTool(");
+    expect(effect).toContain("if (autoApprove !== \"all\") {\n          if (!granted) continue;");
+    expect(effect).toContain("else if (STANDING_AUTHORITY_TOOLS.has(toolName) && !granted)");
+    // 3. Fire time: the grant is RE-READ from the live store (a Settings
+    //    revocation landing between schedule and fire cancels the approval).
+    expect(effect).toMatch(
+      /stillGranted = isAlwaysAllowedAuthorityTool\(\s*toolName,\s*usePreferencesStore\.getState\(\)\.standingAuthorityAlwaysAllowed,/,
+    );
   });
 
   it("the persona gate passes the same grant list (one gate, one grant source)", () => {
