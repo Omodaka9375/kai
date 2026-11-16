@@ -2,7 +2,7 @@ import Shield01Icon from "@hugeicons/core-free-icons/Shield01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useState } from "react";
 import { useChatStore } from "../store/chatStore";
-import { loadSandboxMode, SANDBOX_LABELS } from "../lib/sandbox";
+import { loadSandboxMode, SANDBOX_LABELS, subscribeSandboxChanged } from "../lib/sandbox";
 import type { SandboxMode } from "../lib/native";
 
 /** Session sandbox indicator — shows the active per-project policy mode. */
@@ -15,8 +15,21 @@ export function SandboxBadge() {
     void loadSandboxMode(root).then((m) => {
       if (alive) setMode(m);
     });
+    // Settings → Sandbox lives in a separate webview; subscribe to its
+    // change event so the badge re-reads (post-invalidation) live. The
+    // old effect keyed on [root] only — a mode change never re-ran it.
+    let unlisten: (() => void) | null = null;
+    void subscribeSandboxChanged(() => {
+      void loadSandboxMode(root).then((m) => {
+        if (alive) setMode(m);
+      });
+    }).then((u) => {
+      if (alive) unlisten = u;
+      else u();
+    });
     return () => {
       alive = false;
+      unlisten?.();
     };
   }, [root]);
 

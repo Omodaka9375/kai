@@ -1,4 +1,5 @@
 import { describe, expect, it, beforeEach } from "vitest";
+import { readFileSync } from "node:fs";
 import { IS_WINDOWS } from "@/lib/platform";
 import {
   __setSandboxModeForTests,
@@ -293,5 +294,51 @@ describe("splitShellArgs", () => {
     expect(splitShellArgs("cat 'my file.txt'")).toEqual(["cat", "my file.txt"]);
     expect(splitShellArgs("a && b")).toEqual(["a", "b"]);
     expect(splitShellArgs("cmd --flag")).toEqual(["cmd", "--flag"]);
+  });
+});
+
+// ── Cross-window invalidation (source pins) ─────────────────────────────
+// 2026-11-16 report: "sandbox pill is not changing when I change sandbox
+// in settings". The settings page is a SEPARATE WEBVIEW — its
+// invalidateSandboxCache() call cleared only that window's module state;
+// the main window's cache (badge + tool gating) stayed stale until a
+// project switch or restart. The fix mirrors the write through a Tauri
+// event (the PREFS_CHANGED_EVENT pattern) so every window reloads.
+describe("sandbox config change propagation (source pins)", () => {
+  const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
+  const libSrc = read("./sandbox.ts");
+  const badgeSrc = read("../components/SandboxBadge.tsx");
+  const sectionSrc = read("../../../settings/sections/SandboxSection.tsx");
+
+  it("settings writes notify every window, not just the local one", () => {
+    // The settings section broadcasts through the notifier (which drops
+    // the local cache too) instead of the local-only invalidator.
+    expect(sectionSrc).toContain("notifySandboxConfigChanged()");
+    expect(sectionSrc).not.toContain("invalidateSandboxCache()");
+  });
+
+  it("the notifier drops the cache and emits the cross-window event", () => {
+    expect(libSrc).toContain(
+      'const SANDBOX_CHANGED_EVENT = "Kai://sandbox-changed";',
+    );
+    // notifySandboxConfigChanged = invalidate + broadcast, fire-and-forget
+    // (comment lines allowed between the calls, but nothing else).
+    expect(libSrc).toMatch(
+      /export function notifySandboxConfigChanged\(\): void \{\s*invalidateSandboxCache\(\);[\s\S]*?void emit\(SANDBOX_CHANGED_EVENT\)/,
+    );
+    // The subscription invalidates BEFORE invoking the callback, so the
+    // callback's loadSandboxMode hits IPC instead of the stale cache.
+    expect(libSrc).toMatch(
+      /listen\(SANDBOX_CHANGED_EVENT, \(\) => \{\s*invalidateSandboxCache\(\);\s*cb\(\);/,
+    );
+    // Non-Tauri contexts (tests) degrade to a no-op unlisten.
+    expect(libSrc).toContain(".catch(() => () => {})");
+  });
+
+  it("the badge re-reads the mode on the change event", () => {
+    expect(badgeSrc).toContain("subscribeSandboxChanged(");
+    // Unlisten resolves async: applied when the component is still alive,
+    // called immediately otherwise (no leaked listener on fast unmount).
+    expect(badgeSrc).toContain("unlisten?.();");
   });
 });

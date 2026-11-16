@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { native, type SandboxMode, type SandboxSetupEvent, type SandboxStatus } from "@/modules/ai/lib/native";
-import { invalidateSandboxCache } from "@/modules/ai/lib/sandbox";
+import { notifySandboxConfigChanged } from "@/modules/ai/lib/sandbox";
 import { auditAppend, AUDIT_KINDS } from "@/modules/ai/lib/audit";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { IS_WINDOWS } from "@/lib/platform";
@@ -103,7 +103,7 @@ export function SandboxSection() {
     setMode(next);
     try {
       await native.sandboxSaveConfig(root, next);
-      invalidateSandboxCache();
+      notifySandboxConfigChanged();
       auditAppend(
         AUDIT_KINDS.sandboxChange,
         "sandbox",

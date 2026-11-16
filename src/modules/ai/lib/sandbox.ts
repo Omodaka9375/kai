@@ -10,6 +10,7 @@
 import type { SandboxMode } from "./native";
 import { native } from "./native";
 import { IS_WINDOWS } from "@/lib/platform";
+import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 export type SandboxCache = { root: string; mode: SandboxMode; client?: unknown } | null;
 
@@ -289,6 +290,37 @@ export async function loadSandboxMode(
 /** Drop the cache — after settings writes or workspace switches. */
 export function invalidateSandboxCache(): void {
   cached = null;
+}
+
+// ── Cross-window invalidation ────────────────────────────────────────────
+//
+// The settings page runs in its own webview (separate JS context), so its
+// `invalidateSandboxCache()` call only cleared THAT window's module state —
+// the main window's cache (tool gating + the session badge) stayed stale
+// until a project switch or restart, and the sandbox pill never updated.
+// Mirror the write through a Tauri event (same pattern as
+// PREFS_CHANGED_EVENT in settings/store.ts) so every window reloads.
+
+const SANDBOX_CHANGED_EVENT = "Kai://sandbox-changed";
+
+/** Call AFTER a sandbox config write (Settings → Sandbox): drop the local
+ *  cache AND broadcast the change to every window. */
+export function notifySandboxConfigChanged(): void {
+  invalidateSandboxCache();
+  // Fire-and-forget: outside the Tauri runtime (tests) emit rejects; a
+  // failed broadcast must never fail the settings save.
+  void emit(SANDBOX_CHANGED_EVENT).catch(() => {});
+}
+
+/** Subscribe to sandbox config changes (Settings → Sandbox in another
+ *  webview). Invalidates the cache first so the callback's reload hits
+ *  IPC, not the stale cache. Returns an unlisten fn (or a no-op when the
+ *  Tauri runtime is absent — tests, non-Tauri contexts). */
+export function subscribeSandboxChanged(cb: () => void): Promise<UnlistenFn> {
+  return listen(SANDBOX_CHANGED_EVENT, () => {
+    invalidateSandboxCache();
+    cb();
+  }).catch(() => () => {});
 }
 
 /** Test seam: pin the mode resolved for `loadSandboxMode`, bypassing IPC. */
