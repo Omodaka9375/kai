@@ -1,10 +1,19 @@
 import { Button } from "@/components/ui/button";
 import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import {
@@ -138,6 +147,7 @@ function DefaultModelBlock({
   onTest: () => void;
 }) {
   const m = getModel(defaultModel);
+  const [open, setOpen] = useState(false);
 
   const isAvailable = (modelId: string, providerId: ProviderId): boolean => {
     if (modelId === "openai-compatible-custom")
@@ -160,16 +170,23 @@ function DefaultModelBlock({
           Test model
         </Button>
       </div>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
+      {/* SEARCHABLE (2026-11-16 report): this was the one model picker with
+          NO search — a plain grouped dropdown where the OpenAI Compatible
+          group sits near the bottom, so picking a local/custom endpoint
+          meant scrolling. Same Popover + cmdk pattern as
+          SearchableModelPicker; typing "local", "custom", "ollama" etc.
+          matches against labels, descriptions, provider names, and hint
+          keywords. */}
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
           <Button
             variant="outline"
-            className="h-9 justify-between gap-2 px-2.5 text-[12px]"
+            className="h-9 justify-between gap-2 px-2.5 text-[12px] font-normal"
           >
-            <span className="flex items-center gap-2">
+            <span className="flex min-w-0 items-center gap-2">
               <ProviderIcon provider={m.provider} size={14} />
-              <span>{m.label}</span>
-              <span className="text-muted-foreground">· {m.hint}</span>
+              <span className="truncate">{m.label}</span>
+              <span className="shrink-0 text-muted-foreground">· {m.hint}</span>
             </span>
             <HugeiconsIcon
               icon={ArrowDown01Icon}
@@ -178,59 +195,69 @@ function DefaultModelBlock({
               className="opacity-70"
             />
           </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
-          align="start"
-          side="bottom"
-          sideOffset={6}
-          avoidCollisions={false}
-          className="min-w-[280px] p-1"
-        >
-          <div className="max-h-[240px] overflow-y-auto overscroll-contain pr-1">
-            {PROVIDERS.map((p) => {
-              const models = MODELS.filter((x) => x.provider === p.id);
-              if (models.length === 0) return null;
-              const hasKey = providerNeedsKey(p.id) ? !!keys[p.id] : true;
-              return (
-                <div key={p.id} className="px-1 pt-1.5 first:pt-1">
-                  <div className="mb-0.5 flex items-center gap-1.5 px-2 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
-                    <ProviderIcon provider={p.id} size={11} />
-                    <span>{p.label}</span>
-                    {!hasKey ? (
-                      <span className="ml-auto text-[9.5px] normal-case tracking-normal text-muted-foreground/70">
-                        no key
-                      </span>
-                    ) : null}
-                  </div>
-                  {models.map((mod) => {
-                    const available = isAvailable(mod.id, p.id);
-                    return (
-                      <DropdownMenuItem
-                        key={mod.id}
-                        disabled={!available}
-                        onSelect={() =>
-                          available && void setDefaultModel(mod.id as ModelId)
-                        }
-                        className={cn(
-                          "flex items-start gap-2 text-[12px]",
-                          mod.id === defaultModel && "bg-accent/50",
-                        )}
-                      >
-                        <span className="flex flex-1 flex-col">
-                          <span>{mod.label}</span>
-                          <span className="text-[10px] text-muted-foreground">
-                            {mod.description}
+        </PopoverTrigger>
+        <PopoverContent align="start" sideOffset={6} className="w-96 p-0">
+          <Command>
+            <CommandInput placeholder="Search models… (try: local, custom, ollama)" />
+            <CommandList>
+              <CommandEmpty>No models found.</CommandEmpty>
+              {PROVIDERS.map((p) => {
+                const models = MODELS.filter((x) => x.provider === p.id);
+                if (models.length === 0) return null;
+                const hasKey = providerNeedsKey(p.id) ? !!keys[p.id] : true;
+                return (
+                  <CommandGroup key={p.id} heading={p.label}>
+                    {models.map((mod) => {
+                      const available = isAvailable(mod.id, p.id);
+                      return (
+                        <CommandItem
+                          key={mod.id}
+                          value={mod.id}
+                          keywords={[
+                            mod.label,
+                            mod.description,
+                            mod.hint,
+                            p.label,
+                            ...(("tags" in mod ? mod.tags : undefined) ?? []),
+                          ]}
+                          disabled={!available}
+                          data-checked={mod.id === defaultModel ? true : undefined}
+                          onSelect={() => {
+                            if (!available) return;
+                            void setDefaultModel(mod.id as ModelId);
+                            setOpen(false);
+                          }}
+                          className={cn(
+                            "flex items-start gap-2 text-[12px]",
+                            mod.id === defaultModel && "bg-accent/50",
+                          )}
+                        >
+                          <span className="flex flex-1 flex-col">
+                            <span>{mod.label}</span>
+                            <span className="text-[10px] text-muted-foreground">
+                              {mod.description}
+                            </span>
                           </span>
-                        </span>
-                      </DropdownMenuItem>
-                    );
-                  })}
-                </div>
-              );
-            })}
-          </div>
-        </DropdownMenuContent>
-      </DropdownMenu>
+                          {!available ? (
+                            <span className="shrink-0 pt-0.5 text-[9.5px] text-muted-foreground/70">
+                              no key
+                            </span>
+                          ) : null}
+                        </CommandItem>
+                      );
+                    })}
+                    {!hasKey ? (
+                      <div className="px-2 pb-1 text-[9.5px] text-muted-foreground/60">
+                        no key
+                      </div>
+                    ) : null}
+                  </CommandGroup>
+                );
+              })}
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
     </div>
   );
 }
