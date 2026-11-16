@@ -9,6 +9,14 @@ export type SessionPreferences = {
   personaId?: string;
   archivedAt?: number;
   draft?: string;
+  /** MEMORY-BLIND session (the /clean slash command, 2026-11-16): when
+   *  true, this session's requests DO NOT load the project's MEMORY.md
+   *  into the system prompt — a tabula-rasa view of the project. The FILE
+   *  is untouched: every other session (and other agents) keep their
+   *  memory. Per-session, persisted so the flag survives restarts.
+   *  save_memory still works from this session (it writes the shared
+   *  file — deliberate: knowledge discovered here should persist). */
+  memoryClean?: boolean;
 };
 
 const store = new LazyStore("kai-session-preferences.json", { defaults: {}, autoSave: 200 });

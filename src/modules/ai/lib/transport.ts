@@ -29,6 +29,7 @@ import {
 import { cleanOldCheckpoints, sweepLegacyCheckpoints } from "./checkpoints";
 import { getRelevantFiles, formatRelevantFiles } from "./relevance";
 import { loadProjectMemoryCached } from "./memory";
+import { getSessionPreferences } from "../store/sessionPreferences";
 import { getShadow } from "./shadow";
 import { nativeForContext } from "../tools/context";
 import { workspaceScopeKey } from "@/modules/workspace/env";
@@ -201,10 +202,18 @@ export function createContextAwareTransport(deps: Deps) {
       ? formatRulesForPrompt(projectRules)
       : null;
     // Load auto-memory (agent-written persistent project knowledge).
-    const autoMemory = await loadProjectMemoryCached(
-      live.workspaceRoot,
-      projectNative,
-    );
+    // MEMORY-BLIND SESSIONS (/clean, 2026-11-16): a memoryClean session
+    // skips ONLY this block — the project's MEMORY.md stays on disk and
+    // every other session/agent keeps loading it. The session still gets
+    // KAI.md project rules (architecture facts, not accumulated
+    // conclusions — a memory-blind agent still needs to navigate the
+    // repo) and can still save_memory (writes the shared file, so
+    // discoveries made with fresh eyes persist).
+    const autoMemory =
+      sessionId !== "unknown" &&
+      getSessionPreferences(sessionId).memoryClean === true
+        ? null
+        : await loadProjectMemoryCached(live.workspaceRoot, projectNative);
     const autoMemoryBlock = autoMemory?.trim()
       ? `\n\n## AUTO MEMORY — Agent-written project knowledge\n${autoMemory.trim()}`
       : "";

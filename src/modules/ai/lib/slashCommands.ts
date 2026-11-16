@@ -1,6 +1,7 @@
 import CheckListIcon from "@hugeicons/core-free-icons/CheckListIcon";
 import SparklesIcon from "@hugeicons/core-free-icons/SparklesIcon";
 import ArrowShrink01Icon from "@hugeicons/core-free-icons/ArrowShrink01Icon";
+import EraserIcon from "@hugeicons/core-free-icons/EraserIcon";
 import { usePlanStore } from "../store/planStore";
 
 /**
@@ -84,6 +85,12 @@ export const SLASH_COMMANDS: Record<string, SlashCommandMeta> = {
     label: "Compress context in place",
     icon: ArrowShrink01Icon,
   },
+  clean: {
+    name: "clean",
+    invocation: "/clean",
+    label: "Toggle memory for this session (tabula rasa)",
+    icon: EraserIcon,
+  },
 };
 
 export const Kai_CMD_RE =
@@ -129,6 +136,34 @@ export async function tryRunSlashCommand(input: string): Promise<SlashOutcome> {
       const { useChatStore } = await import("../store/chatStore");
       const result = useChatStore.getState().compactActiveSession();
       return { kind: "handled", toast: result };
+    }
+    case "clean": {
+      // PER-SESSION memory bypass (2026-11-16): toggles this session's
+      // memoryClean flag — from the NEXT request on, this session's system
+      // prompt loads NO MEMORY.md (tabula rasa within the current chat).
+      // The file is untouched: other sessions and agents keep their memory.
+      // /clean off restores loading. save_memory still works either way.
+      const { useChatStore } = await import("../store/chatStore");
+      const { getSessionPreferences, setSessionPreferences } = await import(
+        "../store/sessionPreferences"
+      );
+      const store = useChatStore.getState();
+      const sessionId =
+        (store as { activeSessionId?: string | null }).activeSessionId ?? null;
+      if (!sessionId) {
+        return { kind: "handled", toast: "No active session" };
+      }
+      const turnOff = tail === "off" || tail === "exit";
+      const nowClean = turnOff
+        ? false
+        : !getSessionPreferences(sessionId).memoryClean;
+      setSessionPreferences(sessionId, { memoryClean: nowClean || undefined });
+      return {
+        kind: "handled",
+        toast: nowClean
+          ? "Memory off for this session — next request starts blank (project memory untouched). /clean off to restore."
+          : "Memory restored for this session.",
+      };
     }
     default:
       return { kind: "none" };
