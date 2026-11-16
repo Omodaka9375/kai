@@ -23,7 +23,7 @@ import {
 
 const REPO_URL = "https://github.com/Omodaka9375/kai";
 const AUTHOR_URL = "https://github.com/Omodaka9375";
-const WEBSITE = "https://omodaka9375.github.io/kai";
+const WEBSITE = "https://kaiide.com";
 
 const PLATFORM_LABEL: Record<string, string> = {
   macos: "macOS",

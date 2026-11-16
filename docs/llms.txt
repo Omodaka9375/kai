@@ -6,7 +6,7 @@ KAI runs the agent loop on top of `streamText`, not an experimental wrapper: per
 
 ## Docs
 
-- [Landing page](https://omodaka9375.github.io/kai/): feature tour, screenshots, and download links.
+- [Landing page](https://kaiide.com/): feature tour, screenshots, and download links.
 - [README](https://github.com/Omodaka9375/kai/blob/main/README.md): quick start, install options per OS, and project overview.
 - [CHANGELOG](https://github.com/Omodaka9375/kai/blob/main/CHANGELOG.md): release history.
 
