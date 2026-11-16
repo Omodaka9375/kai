@@ -4,6 +4,15 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [3.1.2]
+
+- MCP: servers launched from an installer can resolve commands (uvx, npx).
+- Sandbox: mode changes in Settings now reach the AI window, in every window.
+- Sandbox: the sandbox pill in the AI window is now a picker.
+- Chat: uploaded image attachments are saved to ~/.kai/media and the model gets their file path.
+
+---
+
 ## [3.1.1]
 
 - Approve: Always approve flow edge case fixed.
