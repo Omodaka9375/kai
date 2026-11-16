@@ -264,10 +264,40 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+
+      # 2026-11-16 (v3.1.0 post-mortem): this job USED to consume the
+      # notes through needs.create-release.outputs.release-body — the
+      # multi-line heredoc output survived create-release's own steps
+      # (the draft body was attached correctly) but arrived EMPTY here,
+      # failing the guard AFTER all four builds had already uploaded.
+      # Cross-job multiline output propagation is the flaky class; extract
+      # LOCALLY instead (same awk as create-release, checked out at the
+      # same tag commit). The draft body remains create-release's job; the
+      # latest.json notes ride this local extraction. v3.0.2's release
+      # page also silently fell back to the generic text for the same
+      # root cause (mislabeled changelog heading + fallback masking it).
+      - name: Extract release notes from CHANGELOG.md
+        id: notes
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          section=$(awk -v v="## [${version}]" '
+            $0 == v { found=1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md)
+          if [ -z "$section" ]; then
+            section="See the assets to download and install. Auto-update is built in."
+          fi
+          echo "body<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$section" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
       - name: Inject release notes into latest.json
         uses: actions/github-script@v7
         env:
-          RELEASE_BODY: ${{ needs.create-release.outputs.release-body }}
+          RELEASE_BODY: ${{ steps.notes.outputs.body }}
         with:
           script: |
             const fs = require('fs');
