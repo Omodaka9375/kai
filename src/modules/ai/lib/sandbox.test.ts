@@ -341,4 +341,19 @@ describe("sandbox config change propagation (source pins)", () => {
     // called immediately otherwise (no leaked listener on fast unmount).
     expect(badgeSrc).toContain("unlisten?.();");
   });
+
+  it("the badge is a PICKER, not just a status (2026-11-16)", () => {
+    // The pill saves the mode itself (same path as Settings): save →
+    // broadcast → audit. notifySandboxConfigChanged is what keeps the
+    // pill, Settings, and every window in lockstep.
+    expect(badgeSrc).toContain("native.sandboxSaveConfig(root, next);");
+    expect(badgeSrc).toContain("notifySandboxConfigChanged();");
+    expect(badgeSrc).toContain("AUDIT_KINDS.sandboxChange");
+    // Renders on "off" too (dimmed), else the sandbox could never be
+    // turned ON from the pill. The old early-return is gone.
+    expect(badgeSrc).not.toContain('if (mode === "off") return null;');
+    // Dropdown over the same three modes as Settings.
+    expect(badgeSrc).toContain("DropdownMenuRadioGroup");
+    expect(badgeSrc).toMatch(/id: "off"[\s\S]*id: "readOnly"[\s\S]*id: "workspaceOnly"/);
+  });
 });
