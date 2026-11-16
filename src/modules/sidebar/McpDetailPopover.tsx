@@ -6,6 +6,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import {
+  runtimeCommandFor,
   type McpRegistryEntry,
 } from "@/modules/ai/lib/mcpRegistry";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -124,7 +125,9 @@ export function McpDetailPopover({
           {installPkg ? (
             <DetailRow label="Package">
               <span className="font-mono text-[10px]">
-                {installPkg.runtimeHint ?? "npx"} {installPkg.identifier}
+                {runtimeCommandFor(installPkg)
+                  ? `${runtimeCommandFor(installPkg)} ${installPkg.identifier}`
+                  : `${installPkg.registryType}: ${installPkg.identifier}`}
               </span>
             </DetailRow>
           ) : null}

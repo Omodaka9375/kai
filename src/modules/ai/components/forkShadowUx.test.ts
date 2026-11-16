@@ -38,17 +38,16 @@ describe("fork discoverability", () => {
     expect(chat).not.toMatch(/<svg[^>]*viewBox="0 0 16 16"[^>]*>\s*<path d="M5 3v4/);
   });
 
-  it("the fork button is visible at rest (not hover-only)", () => {
-    // opacity-70 at rest was opacity-0 before - the button only appeared on
-    // message hover, which is why users never noticed it. Scoped to the
-    // ForkButton's own class string, not the whole file (other hover-reveal
-    // affordances legitimately use opacity-0).
+  it("the fork button reveals on message hover, same contract as CopyButton", () => {
+    // 2026-11-16: hover-only again (matching CopyButton) - the two message
+    // actions must behave identically. The discoverability concern the old
+    // opacity-70 pin addressed is now covered by the session-menu entry and
+    // tooltip. Scoped to ForkButton's own class string, not the whole file.
     const fork = chat.slice(
       chat.indexOf('title="Fork: branch the conversation'),
-      chat.indexOf("function CopyButton"),
+      chat.indexOf("function CommandSnippet"),
     );
-    expect(fork).toContain("opacity-70 group-hover/msg:opacity-100");
-    expect(fork).not.toContain("opacity-0 group-hover/msg:opacity-100");
+    expect(fork).toContain("opacity-0 group-hover/msg:opacity-100");
   });
 
   it("the fork tooltip names the feature and cross-references Shadow", () => {

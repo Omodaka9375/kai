@@ -50,6 +50,12 @@ export type SessionEvent =
       swappedParts: number;
     }
   | {
+      /** Screenshot pixels delivered via the user-message handoff (vision
+       *  model on a wire that cannot carry tool-result images). */
+      kind: "vision-splice";
+      images: number;
+    }
+  | {
       kind: "retry";
       reason: string;
       attempt: number;

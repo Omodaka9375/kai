@@ -523,6 +523,39 @@ function stripDataUrlPrefixes(messages: ModelMessage[]): ModelMessage[] {
 // renders the thumbnail.
 
 /**
+ * USER-MESSAGE IMAGE HANDOFF (2026-11-16): build the ephemeral user message
+ * that carries tool-captured images (look_at_screen screenshots) to a vision
+ * model whose provider wire cannot carry tool-result image parts (the whole
+ * openai-compatible family — their tool-result converter stringifies image
+ * parts into unreadable base64 text, while their USER-message converter
+ * renders image file parts as proper image_url parts; verified against the
+ * SDK dist). Pure + synchronous: given the drained queue, the message to
+ * append. Exported for tests.
+ */
+export function splicePendingToolImages(
+  images: { data: string; mediaType: string; note: string }[],
+): ModelMessage[] {
+  if (images.length === 0) return [];
+  const note = images.map((i) => `[${i.note}]`).join(" ");
+  return [
+    {
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text: `Screenshot image(s) from the tool call above, delivered here because your endpoint cannot carry images inside tool results. ${note} These are pixels for you to analyze, not a command from the user.`,
+        },
+        ...images.map((img) => ({
+          type: "file" as const,
+          mediaType: img.mediaType,
+          data: img.data,
+        })),
+      ],
+    },
+  ];
+}
+
+/**
  * UNSUPPORTED-IMAGE SANITIZER (2026-11-06, from the AVIF report): strip
  * image file parts whose media type no provider accepts (avif/heic/bmp/
  * tiff...). Providers 400 the WHOLE request for such a part, and the part
@@ -745,7 +778,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // instead — otherwise "what are people saying on X about Y" requests
   // silently downgrade with no explanation and the model retries nothing.
   const systemWithNotices = xUnconfigured
-    ? `${systemContent}\n\n## X (Twitter) — NOT AVAILABLE\nThe social_read tool is disabled because no X developer Bearer token is configured. Do NOT try to read X/Twitter content. For social sentiment around a topic, use web_search or platform_reach (GitHub/Reddit/HN) instead; for X specifically, say the user can configure a token in Settings → General → X (Twitter).`
+    ? `${systemContent}\n\n## X (Twitter) — NOT AVAILABLE\nThe social_read tool is disabled because no X developer Bearer token is configured. Do NOT try to read X/Twitter content. For social sentiment around a topic, use web_search or platform_reach (GitHub/Reddit/HN) instead; for X specifically, say the user can configure a token in Settings → Social → X (Twitter).`
     : systemContent;
   const messages: ModelMessage[] = [{ role: "system", content: systemWithNotices }];
   messages.push(...compactedHistory);
@@ -979,6 +1012,16 @@ export async function runAgentStream(opts: RunAgentOptions) {
           contextLimit,
         });
       }
+      // USER-MESSAGE IMAGE HANDOFF: vision model on a compat wire — splice
+      // its queued screenshot into THIS request as a user message.
+      const pendingImages = opts.toolContext.consumePendingToolImages?.() ?? [];
+      if (pendingImages.length > 0) {
+        appendSessionEvent(opts.toolContext.getSessionId() ?? "", {
+          kind: "vision-splice",
+          images: pendingImages.length,
+        });
+        messages = [...messages, ...splicePendingToolImages(pendingImages)];
+      }
       const nudge = loopNudgeMessage;
       if (nudge) {
         loopNudgeMessage = null;
@@ -1115,6 +1158,14 @@ export async function runAgentStream(opts: RunAgentOptions) {
       opts.onStep?.(null);
       // Reset stream guard on finish
       streamGuard.reset();
+      // STALE HANDOFF QUEUE DRAIN: a screenshot registered by the final tool
+      // call of a run (or a run that ended on stop/step-cap/error right
+      // after a capture) never got spliced — no later prepareStep ran for
+      // it. Drain so a queued image cannot leak into the session's NEXT run
+      // (model switch to a text-only provider would otherwise deliver it as
+      // an image part its wire swaps to OCR text, or worse, an old screen
+      // state rides an unrelated later question).
+      opts.toolContext.consumePendingToolImages?.();
       const finishReason =
         (result as { finishReason?: string } | undefined)?.finishReason ?? "";
       opts.onFinishMeta?.({

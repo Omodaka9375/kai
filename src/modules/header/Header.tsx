@@ -150,7 +150,7 @@ export function FileMenu({
           Settings
         </DropdownMenuLabel>
         <div className="grid grid-cols-2 gap-1">
-          <MenuTile icon={Settings01Icon} label="General" desc="Theme, behavior, Gmail" onSelect={() => void openSettingsWindow("general")} />
+          <MenuTile icon={Settings01Icon} label="General" desc="Theme, behavior, startup" onSelect={() => void openSettingsWindow("general")} />
           <MenuTile icon={KeyboardIcon} label="Shortcuts" desc="Key bindings" onSelect={() => void openSettingsWindow("shortcuts")} />
           <MenuTile icon={AiScanIcon} label="Models" desc="Providers & API keys" onSelect={() => void openSettingsWindow("models")} />
           <MenuTile icon={UserMultiple02Icon} label="Agents" desc="Sub-agent registry" onSelect={() => void openSettingsWindow("agents")} />
@@ -160,6 +160,7 @@ export function FileMenu({
           <MenuTile icon={LockKeyIcon} label="Security" desc="Approvals & audit" onSelect={() => void openSettingsWindow("security")} />
           <MenuTile icon={UserGroupIcon} label="Staff" desc="Agents, skills & journals" onSelect={() => void openSettingsWindow("staff")} />
           <MenuTile icon={Mic01Icon} label="Voice" desc="Speech & TTS" onSelect={() => void openSettingsWindow("voice")} />
+          <MenuTile icon={UserMultiple02Icon} label="Social" desc="Gmail & X access" onSelect={() => void openSettingsWindow("social")} />
           <MenuTile icon={GlobeIcon} label="Assistant" desc="Telegram channels" onSelect={() => void openSettingsWindow("assistant")} />
         </div>
         <DropdownMenuSeparator className="my-1.5" />

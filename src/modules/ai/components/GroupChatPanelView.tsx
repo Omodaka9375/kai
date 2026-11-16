@@ -505,8 +505,12 @@ function PanelHeader({
             aria-label="Group name"
             className="min-w-0 flex-1 rounded-md border border-border/70 bg-background/60 px-1.5 py-0.5 text-[12px] font-medium outline-none focus:border-primary/50"
           />
-        ) : expanded ? (
+        ) : (
           <>
+            {/* Name shown in BOTH states (2026-11-16): names are short pool
+                picks now, so the docked mini window shows the same header
+                identity the expanded panel does. Rename available inline in
+                both. */}
             <span
               className="min-w-0 truncate text-[12px] font-medium"
               title={group.name}
@@ -531,7 +535,7 @@ function PanelHeader({
               />
             </button>
           </>
-        ) : null}
+        )}
       </div>
       <div className="flex shrink-0 items-center gap-0.5">
         <span className="flex h-6 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-border/60 px-2.5 text-[10.5px] font-medium text-muted-foreground">

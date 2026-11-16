@@ -5,7 +5,7 @@
  *
  * Auth reality (verified live 2026-10-30): X has NO free read tier — search
  * and timelines need a paid developer subscription's Bearer token. The user
- * pastes that token once in Settings → General; it is stored under keychain
+ * pastes that token once in Settings → Social; it is stored under keychain
  * service "kai", account "x-bearer-token".
  *
  * Two operations exist (matching what the app-only Bearer can do):
@@ -78,7 +78,7 @@ async function xGet(
   if (!token) {
     return {
       error:
-        "X is not configured — paste your developer Bearer token in Settings → General → X (Twitter).",
+        "X is not configured — paste your developer Bearer token in Settings → Social → X (Twitter).",
     };
   }
   return proxyJson(url, { headers: { Authorization: `Bearer ${token.trim()}` } });
@@ -92,7 +92,7 @@ function errText(r: { json: unknown; text: string }): string {
 /** Surface X's status codes as actionable guidance, not raw JSON. */
 function explainStatus(status: number, r: { json: unknown; text: string }): string {
   const detail = errText(r);
-  if (status === 401) return `X rejected the Bearer token (401): ${detail}. Re-paste the token in Settings → General.`;
+  if (status === 401) return `X rejected the Bearer token (401): ${detail}. Re-paste the token in Settings → Social.`;
   if (status === 403) return `X refused this call (403): ${detail}. Your developer tier may not include this endpoint — search/timelines need Basic or higher.`;
   if (status === 429) return `X rate limit hit (429): ${detail}. Wait a moment before retrying.`;
   if (status === 404) return `Not found on X (404): ${detail}.`;

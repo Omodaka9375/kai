@@ -1,5 +1,4 @@
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -31,7 +30,6 @@ import {
   setTerminalWebglEnabled,
   setVimMode,
   setEditorWordWrap,
-  setGroupNamePool,
   type EditorThemeId,
 } from "@/modules/settings/store";
 import { useTheme } from "@/modules/theme";
@@ -43,15 +41,15 @@ import Sun03Icon from "@hugeicons/core-free-icons/Sun03Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { SectionHeader } from "../components/SectionHeader";
 import { SettingRow } from "../components/SettingRow";
-import {
-  clearGmailSecret,
-  gmailAccountEmail,
-  setGmailSecret,
-} from "@/modules/ai/tools/gmail";
-import { clearXBearer, setXBearer, xBearerSet } from "@/modules/ai/tools/social";
+
+// NOTE (2026-11-16): the Gmail and X cards moved to SocialSection.tsx
+// (hamburger → Social), and the group-chat name pool card was removed —
+// group creation already assigns a random pool name and the group header
+// has inline rename, which covers the user-facing need without a
+// settings-side pool editor.
 
 const APPEARANCE: {
   id: ThemePref;
@@ -252,7 +250,7 @@ export function GeneralSection() {
                   void openUrl("https://somafm.com/support/")
                 }
               >
-                Donate here
+                Support them here
               </button>
               .
             </>
@@ -373,9 +371,6 @@ export function GeneralSection() {
         </SettingRow>
       </div>
 
-
-
-
       <div className="flex flex-col gap-2">
         <Label>Startup</Label>
         <div className="flex flex-col gap-2">
@@ -399,187 +394,6 @@ export function GeneralSection() {
           </SettingRow>
         </div>
       </div>
-
-      <GmailCard />
-      <SocialCard />
-      <GroupNamePoolCard />
-    </div>
-  );
-}
-
-/**
- * Group-chat name pool card. The user's custom pool of names for auto-named
- * group chats, one per line; empty uses the built-in pool. Saved as a plain
- * preference (not a secret) and pushed live to the group store.
- */
-function GroupNamePoolCard() {
-  const saved = usePreferencesStore((s) => s.groupNamePool);
-  const [draft, setDraft] = useState<string | null>(null);
-  const [status, setStatus] = useState("");
-
-  const value = draft ?? saved;
-  const names = value.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-
-  const onSave = async () => {
-    await setGroupNamePool(value);
-    setDraft(null);
-    setStatus("Saved. New group chats will pick from your names.");
-    setTimeout(() => setStatus(""), 4000);
-  };
-
-  const onReset = async () => {
-    await setGroupNamePool("");
-    setDraft(null);
-    setStatus("Reset to the built-in pool.");
-    setTimeout(() => setStatus(""), 4000);
-  };
-
-  return (
-    <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card/50 p-4">
-      <div className="flex items-center justify-between gap-3">
-        <span className="text-sm font-medium">Group chat name pool</span>
-        <div className="flex items-center gap-2">
-          {value.trim() ? (
-            <Button size="xs" variant="ghost" onClick={() => void onReset()}>
-              Reset
-            </Button>
-          ) : null}
-          <Button size="xs" variant="secondary" onClick={() => void onSave()} disabled={draft === null}>
-            Save
-          </Button>
-        </div>
-      </div>
-      <p className="text-[11px] leading-relaxed text-muted-foreground">
-        Names new group chats pick from, one per line. A random entry is
-        chosen per group; leave empty to use the built-in pool.
-      </p>
-      <textarea
-        value={value}
-        onChange={(e) => setDraft(e.target.value)}
-        placeholder={"War Room\nRound Table\nCouncil"}
-        rows={Math.min(8, Math.max(3, names.length || 3))}
-        aria-label="Group name pool"
-        className="w-full resize-y rounded-md border border-border/70 bg-background/60 px-2 py-1.5 font-mono text-[12px] outline-none focus:border-primary/50"
-      />
-      <div className="flex items-center justify-between">
-        <span className="text-[10.5px] text-muted-foreground">
-          {names.length} name{names.length === 1 ? "" : "s"}
-        </span>
-        {status ? <span className="text-[10.5px] text-emerald-600 dark:text-emerald-400">{status}</span> : null}
-      </div>
-    </div>
-  );
-}
-
-/**
- * Gmail read-only access card. The agent's gmail_read tool searches the
- * user's own inbox over IMAP with an app password — no OAuth, no GCP
- * project, no MCP server. The stored secret is "<email> <app-password>" in
- * the OS keychain (service "kai", account "gmail-app-password").
- *
- * Read-only is enforced in the Rust module: connect/login, UID SEARCH,
- * UID FETCH, LOGOUT — there is no code path that can write or send.
- */
-function GmailCard() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [configuredEmail, setConfiguredEmail] = useState<string | null>(null);
-  const [status, setStatus] = useState("");
-  const [isError, setIsError] = useState(false);
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    void gmailAccountEmail().then(setConfiguredEmail);
-  }, []);
-
-  const onSave = async () => {
-    setBusy(true);
-    setIsError(false);
-    setStatus("");
-    try {
-      await setGmailSecret(email, password);
-      setConfiguredEmail(await gmailAccountEmail());
-      setEmail("");
-      setPassword("");
-      setStatus("Saved. The agent can now search your Gmail (read-only).");
-    } catch (e) {
-      setIsError(true);
-      setStatus(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const onRemove = async () => {
-    setBusy(true);
-    try {
-      await clearGmailSecret();
-      setConfiguredEmail(null);
-      setStatus("Gmail access removed.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card/50 p-4">
-      <div className="flex items-baseline justify-between gap-2">
-        <div className="text-sm font-medium">Gmail (read-only)</div>
-        {configuredEmail ? (
-          <div className="truncate text-[10.5px] text-muted-foreground">{configuredEmail}</div>
-        ) : null}
-      </div>
-      <div className="text-[10.5px] text-muted-foreground">
-        Agent cannot send or modify mail. Needs a{" "}
-        <button
-          type="button"
-          title="Opens Google's app-password page (2-Step Verification required)"
-          onClick={() => void openUrl("https://myaccount.google.com/apppasswords")}
-          className="text-foreground/90 underline-offset-2 hover:underline"
-        >
-          Google app password
-        </button>
-        . Requires 2-Step Verification. Stored in your OS keychain.
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <Input
-          type="email"
-          value={email}
-          placeholder={configuredEmail ?? "you@gmail.com"}
-          onChange={(e) => setEmail(e.target.value)}
-          className="h-8 min-w-[8rem] flex-[2]"
-        />
-        <Input
-          type="password"
-          value={password}
-          placeholder="app password"
-          onChange={(e) => setPassword(e.target.value)}
-          className="h-8 min-w-[8rem] flex-[2]"
-        />
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={busy || !email.trim() || !password.trim()}
-          onClick={() => void onSave()}
-        >
-          Save
-        </Button>
-        {configuredEmail ? (
-          <Button variant="ghost" size="sm" disabled={busy} onClick={() => void onRemove()}>
-            Remove
-          </Button>
-        ) : null}
-      </div>
-      {status ? (
-        <div
-          className={cn(
-            "rounded-lg px-3 py-1.5 text-xs",
-            isError ? "bg-red-500/10 text-red-500" : "bg-primary/5 text-muted-foreground",
-          )}
-        >
-          {status}
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -589,108 +403,5 @@ function Label({ children }: { children: React.ReactNode }) {
     <span className="text-[11px] font-medium tracking-tight text-muted-foreground">
       {children}
     </span>
-  );
-}
-
-/**
- * X (Twitter) card — developer Bearer token for the agent's read-only
- * social_read tool. Same storage contract as the Gmail card: OS keychain
- * under service "kai", never the settings store.
- *
- * Read-only is enforced in social.ts: only search + timeline GETs are
- * implemented — no code path can post, like, or follow.
- */
-function SocialCard() {
-  const [xToken, setXToken] = useState("");
-  const [xConfigured, setXConfigured] = useState(false);
-  const [status, setStatus] = useState("");
-  const [isError, setIsError] = useState(false);
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    void xBearerSet().then(setXConfigured);
-  }, []);
-
-  const onSaveX = async () => {
-    setBusy(true);
-    setIsError(false);
-    setStatus("");
-    try {
-      await setXBearer(xToken);
-      setXConfigured(true);
-      setXToken("");
-      setStatus("Saved. The agent can now search X and read account timelines (read-only).");
-    } catch (e) {
-      setIsError(true);
-      setStatus(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const onRemoveX = async () => {
-    setBusy(true);
-    try {
-      await clearXBearer();
-      setXConfigured(false);
-      setStatus("X token removed.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card/50 p-4">
-      <div className="flex items-baseline justify-between gap-2">
-        <div className="text-sm font-medium">X / Twitter (read-only)</div>
-        {xConfigured ? (
-          <div className="text-[10.5px] text-muted-foreground">configured</div>
-        ) : null}
-      </div>
-      <div className="text-[10.5px] text-muted-foreground">
-        Agent cannot post, like, or follow. Needs your developer{" "}
-        <button
-          type="button"
-          title="Opens the X developer portal (create a project to get a Bearer token)"
-          onClick={() => void openUrl("https://developer.x.com/en/portal/dashboard")}
-          className="text-foreground/90 underline-offset-2 hover:underline"
-        >
-          Bearer token
-        </button>
-        . Stored in your OS keychain.
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <Input
-          type="password"
-          value={xToken}
-          placeholder="Bearer token"
-          onChange={(e) => setXToken(e.target.value)}
-          className="h-8 min-w-[8rem] flex-[3]"
-        />
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={busy || !xToken.trim()}
-          onClick={() => void onSaveX()}
-        >
-          Save
-        </Button>
-        {xConfigured ? (
-          <Button variant="ghost" size="sm" disabled={busy} onClick={() => void onRemoveX()}>
-            Remove
-          </Button>
-        ) : null}
-      </div>
-      {status ? (
-        <div
-          className={cn(
-            "rounded-lg px-3 py-1.5 text-xs",
-            isError ? "bg-red-500/10 text-red-500" : "bg-primary/5 text-muted-foreground",
-          )}
-        >
-          {status}
-        </div>
-      ) : null}
-    </div>
   );
 }

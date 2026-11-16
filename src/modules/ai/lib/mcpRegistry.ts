@@ -53,6 +53,30 @@ export type McpRegistryResponse = {
   };
 };
 
+/**
+ * The runtime command that executes a registry package's identifier.
+ *
+ * The registry's own `runtimeHint` wins when present. When it's absent
+ * (common — the live Browserr entry has none), derive from `registryType`:
+ * npm → npx, pypi → uvx (uv's package runner). NO blind "npx" default —
+ * Browserr is a pypi package and the old fallback displayed "npx
+ * browserr-mcp" in the detail popover AND used it as the actual install
+ * command, which would fail (2026-11-16 report). Unknown registry types
+ * return null: the caller shows the registry type instead of inventing a
+ * command, and stdio install refuses rather than spawning a wrong runtime.
+ */
+export function runtimeCommandFor(pkg: McpRegistryPackage): string | null {
+  if (pkg.runtimeHint) return pkg.runtimeHint;
+  switch (pkg.registryType) {
+    case "npm":
+      return "npx";
+    case "pypi":
+      return "uvx";
+    default:
+      return null;
+  }
+}
+
 /** Fetch a page of MCP servers from the official registry. */
 export async function fetchRegistryServers(opts?: {
   search?: string;

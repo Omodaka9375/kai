@@ -99,8 +99,12 @@ export function buildScreenTools(ctx: ToolContext) {
       // The openai-compatible family (DeepSeek, Mistral, OpenRouter, z.ai,
       // Groq, xAI, Cerebras, LM Studio, custom endpoints) cannot: their
       // converters stringify tool-result content parts, so an image part
-      // would become megabytes of unreadable base64 text. There we fall back
-      // to OCR text (same path as text-only model attachments).
+      // would become megabytes of unreadable base64 text. BUT those same
+      // converters render image file parts in USER messages as proper
+      // image_url parts (verified against the SDK dist) — so a model that
+      // can SEE images on such a provider gets the screenshot spliced into
+      // the next request as a user message (registerPendingToolImage). Only
+      // a truly text-only model falls back to OCR text.
       toModelOutput: async ({ output }) => {
         const o = output as { image?: { dataUrl?: string } } | undefined;
         const dataUrl = o?.image?.dataUrl;
@@ -125,6 +129,25 @@ export function buildScreenTools(ctx: ToolContext) {
                 mediaType,
               } as never,
             ],
+          };
+        }
+        // Vision model on a wire that cannot carry tool-result images: hand
+        // the pixels to the next request via the user-message channel. The
+        // tool result itself tells the model the image follows separately —
+        // "attached below" resolves the immediate-vs-next ambiguity.
+        if (ctx.canSeeImages?.()) {
+          const focusNote =
+            o && "focus" in o && typeof (o as { focus?: unknown }).focus === "string"
+              ? ` (focus: ${(o as { focus: string }).focus})`
+              : "";
+          ctx.registerPendingToolImage?.({
+            data: b64,
+            mediaType,
+            note: `screenshot${focusNote}`,
+          });
+          return {
+            type: "text",
+            value: "Screenshot captured; the image is attached below as a user message. Analyze it to answer the user.",
           };
         }
         return { type: "text", value: await ocrText(dataUrl) };
@@ -161,14 +184,18 @@ async function capture(display: string, focus?: string) {
   };
 }
 
-/** OCR text for providers that cannot receive tool-result images. */
+/** OCR text for models that cannot see images at all (no vision support on
+ *  any channel). The wording describes the MODEL's limitation, not the wire's
+ *  — a vision model on an openai-compatible wire never reaches this text
+ *  (its screenshot rides the user-message handoff instead). */
 async function ocrText(dataUrl: string): Promise<string> {
   try {
     const text = await extractAttachmentText({
       url: dataUrl,
       mediaType: "image/jpeg",
     });
-    if (text) return `[screenshot — OCR text, provider cannot receive images]\n${text}`;
+    if (text)
+      return `[screenshot — OCR text; the selected model cannot process images directly]\n${text}`;
   } catch (e) {
     console.warn("[kai] screenshot OCR failed:", e);
   }

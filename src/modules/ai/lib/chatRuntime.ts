@@ -34,7 +34,7 @@ import { FileTracker } from "../lib/fileTracker";
 import { type ProviderKeys } from "../lib/keyring";
 import type { LoopDetectionResult } from "../lib/streamGuard";
 import type { ToolContext } from "../tools/tools";
-import { canDeliverToolResultImages } from "../tools/context";
+import { canDeliverToolResultImages, type PendingToolImage } from "../tools/context";
 import { modelCanSee } from "../extraction";
 
 /** Store/ambient state the runtime reads or writes, injected by chatStore. */
@@ -205,6 +205,11 @@ export function makeChatSync(
   const renderRetriesRef = { current: 0 };
 
   const toolContext: ToolContext = (() => {
+    // USER-MESSAGE IMAGE HANDOFF queue (see context.ts): populated by
+    // look_at_screen when a vision model sits on a wire that cannot carry
+    // tool-result images; drained by runAgentStream's prepareStep. Owned by
+    // the IIFE closure so every run of this session shares one queue.
+    const pendingToolImages: PendingToolImage[] = [];
     // Base context from live state, with shadow-session redirection: while
     // a shadow session is active for this project, tools see the shadow
     // tree (cwd + workspace root translated). Real paths pass through when
@@ -289,6 +294,31 @@ export function makeChatSync(
           modelCanSee(selectedModelId, runtimeModelName, visionOverride),
         );
       },
+      // Same vision resolution as supportsToolResultImages, minus the wire
+      // gate: a vision model on an openai-compatible endpoint passes THIS
+      // and fails THAT — that combination routes screenshots through the
+      // user-message handoff queue below.
+      canSeeImages: () => {
+        const selectedModelId = deps.getSelectedModelId();
+        const prefs = usePreferencesStore.getState();
+        const runtimeModelName =
+          selectedModelId === "openai-compatible-custom"
+            ? prefs.openaiCompatibleModelId
+            : null;
+        const visionOverride =
+          selectedModelId === "openai-compatible-custom"
+            ? (prefs.openaiCompatibleVision ?? "auto")
+            : null;
+        return modelCanSee(
+          selectedModelId,
+          runtimeModelName,
+          visionOverride,
+        );
+      },
+      registerPendingToolImage: (image) => {
+        pendingToolImages.push(image);
+      },
+      consumePendingToolImages: () => pendingToolImages.splice(0),
     };
   })();
 

@@ -101,6 +101,28 @@ export type ToolContext = {
    */
   supportsToolResultImages?: () => boolean;
   /**
+   * Whether the SELECTED model can understand image content AT ALL (the
+   * modelCanSee resolution: registry vision tag / custom-endpoint override /
+   * runtime-name heuristic). Distinct from supportsToolResultImages: a vision
+   * model on an openai-compatible endpoint passes THIS and fails THAT — its
+   * screenshots are delivered through the user-message channel instead
+   * (registerPendingToolImage). Absent = false (OCR fallback).
+   */
+  canSeeImages?: () => boolean;
+  /**
+   * USER-MESSAGE IMAGE HANDOFF (2026-11-16): the openai-compatible converter
+   * stringifies image parts inside TOOL results (unreadable base64 text) but
+   * renders image file parts in USER messages as proper image_url parts —
+   * verified against the installed SDK dist. So a vision model on those
+   * providers gets its screenshot spliced into the NEXT request as a user
+   * message instead of being OCR'd. A tool registers the image at capture
+   * time; the agent loop (prepareStep) consumes it. Ephemeral by design —
+   * nothing lands in the persisted transcript, matching how first-party
+   * providers elide screenshot payloads from later turns anyway.
+   */
+  registerPendingToolImage?: (image: PendingToolImage) => void;
+  consumePendingToolImages?: () => PendingToolImage[];
+  /**
    * Per-context sandbox confinement that OVERRIDES the module-global
    * Settings → Sandbox (which is owned by App.tsx for the active desktop
    * project). Returns null/undefined = use the global sandbox (normal desktop
@@ -110,6 +132,16 @@ export type ToolContext = {
    * the desktop agent over the shared global root.
    */
   getSandboxOverride?: () => import("../lib/sandbox").SandboxOverride | null;
+};
+
+/** One image queued for user-message delivery on the next model request. */
+export type PendingToolImage = {
+  /** Raw base64 payload (no data: prefix). */
+  data: string;
+  /** Provider-safe media type (image/jpeg, image/png, ...). */
+  mediaType: string;
+  /** Short note the model reads next to the image. */
+  note: string;
 };
 
 /**

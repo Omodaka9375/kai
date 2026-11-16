@@ -69,7 +69,7 @@ function ForkButton({ messageIndex }: { messageIndex: number }) {
       onClick={onClick}
       disabled={forking}
       title="Fork: branch the conversation from this message into a new chat — same project files. (To isolate FILES, use Shadow mode in the session menu.)"
-      className="shrink-0 size-6 flex items-center justify-center rounded-md border border-border/40 bg-background/50 text-muted-foreground opacity-70 group-hover/msg:opacity-100 transition-all hover:bg-accent hover:text-foreground shadow-sm"
+      className="shrink-0 size-6 flex items-center justify-center rounded-md border border-border/40 bg-background/50 text-muted-foreground opacity-0 group-hover/msg:opacity-100 transition-all hover:bg-accent hover:text-foreground shadow-sm"
     >
       <HugeiconsIcon icon={GitForkIcon} size={13} strokeWidth={1.75} />
     </button>

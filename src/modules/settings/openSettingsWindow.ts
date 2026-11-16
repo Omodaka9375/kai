@@ -11,6 +11,7 @@ export type SettingsTab =
   | "security"
   | "staff"
   | "voice"
+  | "social"
   | "assistant"
   | "about";
 

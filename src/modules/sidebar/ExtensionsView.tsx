@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import { newMcpServerId, type McpServerConfig } from "@/modules/ai/lib/mcp";
 import {
   fetchRegistryServers,
+  runtimeCommandFor,
   type McpRegistryEntry,
   type McpRegistryPackage,
 } from "@/modules/ai/lib/mcpRegistry";
@@ -212,6 +213,14 @@ export function ExtensionsView() {
               (p) => p.transport.type === "stdio",
             );
             const hasRemote = (s.remotes?.length ?? 0) > 0;
+            // stdio packages need a resolvable runtime command; when the
+            // registry gives neither a hint nor a known registryType, the
+            // install would silently no-op — flag the row instead.
+            const stdioPkg = s.packages?.find(
+              (p) => p.transport.type === "stdio",
+            );
+            const installable =
+              !hasStdio || (stdioPkg ? runtimeCommandFor(stdioPkg) !== null : false);
             const transport = hasStdio
               ? "stdio"
               : hasRemote
@@ -270,7 +279,7 @@ export function ExtensionsView() {
                       />
                       Installed
                     </span>
-                  ) : (
+                  ) : installable ? (
                     <Button
                       size="xs"
                       variant="outline"
@@ -284,6 +293,13 @@ export function ExtensionsView() {
                       />
                       Install
                     </Button>
+                  ) : (
+                    <span
+                      title="No runnable package: the registry entry lists no supported runtime (npm/npx or pypi/uvx) and no remote endpoint."
+                      className="text-[10px] text-muted-foreground/70"
+                    >
+                      No runnable package
+                    </span>
                   )}
                 </div>
               </li>
@@ -337,7 +353,11 @@ function registryEntryToConfig(
 ): McpServerConfig | null {
   const stdioPkg = s.packages?.find((p) => p.transport.type === "stdio");
   if (stdioPkg) {
-    const command = stdioPkg.runtimeHint ?? "npx";
+    // No blind "npx" fallback: an unknown runtime type must refuse the
+    // install rather than spawn a wrong command (runtimeCommandFor derives
+    // from registryType when the registry gives no hint).
+    const command = runtimeCommandFor(stdioPkg);
+    if (!command) return null;
     const args: string[] = [];
     if (stdioPkg.runtimeArguments) {
       for (const arg of stdioPkg.runtimeArguments) args.push(arg.value);

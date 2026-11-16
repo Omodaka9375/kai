@@ -96,13 +96,13 @@ export const TOOL_CATALOG: readonly ToolEntry[] = [
     name: "gmail_read",
     tier: "read",
     blurb:
-      "Search and read your Gmail (read-only). Off by default — needs the app password from Settings → General.",
+      "Search and read your Gmail (read-only). Off by default — needs the app password from Settings → Social.",
   },
   {
     name: "social_read",
     tier: "read",
     blurb:
-      "Search X/Twitter and read account timelines — read-only. Off by default — needs the developer Bearer token from Settings → General.",
+      "Search X/Twitter and read account timelines — read-only. Off by default — needs the developer Bearer token from Settings → Social.",
   },
 
   // ── WRITE: mutate files / state / spend API credits (fenced to scratch). ─
