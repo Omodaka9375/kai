@@ -6,19 +6,16 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ## [3.1.0]
 
-- AI: on local and OpenAI-compatible endpoints the agent now actually sees screenshots. Vision models get the real image delivered with the next request (spliced as a user message, the only position those providers carry images in) instead of OCR text that claimed the provider could not receive images. Truly text-only models still get OCR.
-- Staff: new Staff panel in Settings with a live inventory of the agent's personas, skills, MCP servers, and reminders, plus a per-session journal viewer that shows what the model actually saw each turn.
-- Staff: agent-created personas, skills, and MCP servers carry authorship badges, so anything the agent set up on its own is distinguishable from what you configured.
-- Security: tools with standing authority (memory, skills, MCP servers, app settings) now require an approval card even under Allow mode, so an agent can no longer rewrite things that persist into future sessions without asking.
-- Security: the central tool guard re-checks symlinked paths, and the local-model probe only runs when a compatible provider is actually selected.
-- Linux: API keys move into the system keyring (Secret Service) when it is reachable, with a one-time migration from the plaintext fallback; the Security panel shows which storage backend is active. Also fixes Linux-only compile errors in the keyring module.
-- Models: a startup probe for local OpenAI-compatible endpoints checks the configured model id against the server's /models list and warns in the status bar when it has drifted or the endpoint is unreachable.
-- Settings: new Social panel (in the hamburger menu) hosting the Gmail and X/Twitter account cards; General is now appearance, editor, terminal, and startup only.
-- Settings: the SomaFM card reads "Support them here".
-- Group chat: new groups get a short creative name from a themed pool (War Room, Council, and friends), shown with a "Group:" label on the header and the tray pill, renamable inline; the name is now visible in the docked mini window too, not only when expanded.
+- AI: Local vision models get the image delivered with the next request. Truly text-only models still get OCR.
+- Staff: new Staff panel in Settings with a live inventory of the agent's personas, skills, MCP servers, and reminders for audit.
+- Security: the central tool guard re-checks symlinked paths.
+- Linux: API keys move into the system keyring (Secret Service) when it is reachable, with a one-time migration from the plaintext fallback.
+- Models: a startup probe for local OpenAI-compatible endpoints
+- Settings: new Social panel hosting the Gmail and X/Twitter account cards.
+- Group chat: new groups get a short creative name shown with a "Group:" label on the header.
 - Chat: user messages have a copy button next to fork, and both reveal on hover.
-- MCP: the Extensions popover and installer derive the run command from the package's registry type (npx for npm, uvx for pypi) instead of assuming npx, so Browserr and other Python packages display and install correctly; packages with no known runtime are refused with an explanation.
-- MCP: the X/Twitter read tool is pruned when no Bearer token is configured, and the system notice tells the model to use web search instead of retrying X.
+- MCP: packages with no known runtime are refused with an explanation.
+- MCP: the X/Twitter read tool is pruned when no Bearer token is configured.
 
 ---
 
