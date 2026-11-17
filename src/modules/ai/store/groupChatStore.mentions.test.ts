@@ -11,8 +11,10 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
  * deliverAgentMentions (same matcher as the composer's resolver), so an
  * agent's "@Name ..." in its reply lands as a delivery to that member.
  *
- * Guard: a MENTION_CHAIN_MAX cap on agent-to-agent exchanges (two agents
- * ping-ponging must surface, not loop); a human message resets the chain.
+ * Guard: a dynamic ping-pong breaker (2026-11-18 redesign) - a strict
+ * two-participant alternation sustained past MENTION_PINGPONG_ROUNDS trips
+ * a SILENT 60s cooldown (no system note, self-heals); any human message
+ * resets it instantly. Legitimate multi-agent chains never trip it.
  *
  * @coordinator alias (2026-11-01): "in group chat make agents refer to
  * coordinator with @coordinator to mention or tag him" — a STABLE token
@@ -61,7 +63,7 @@ import {
   getGroup,
   matchParticipantByToken,
   sendGroupMessage,
-  MENTION_CHAIN_MAX,
+  MENTION_PINGPONG_ROUNDS,
 } from "./groupChatStore";
 
 const injectMessageMock = shared.injectMessage;
@@ -194,20 +196,18 @@ describe("deliverAgentMentions — routing engine", () => {
     // but the router still ran. Cap sanity below.
   });
 
-  it("the chain cap surfaces a ping-pong as a system note, and a human message resets it", async () => {
+  it("a strict two-agent ping-pong trips a SILENT cooldown (no system note); a human message resets instantly", async () => {
     const g = await makeGroup();
     shared.activeSessions.set("proj-b", "sess-b");
     const live = () => getGroup(g.id)!;
     const systemNote = () =>
       live().messages.some(
         (m) =>
-          m.from === "system" && m.text.includes("@-mention routing paused"),
+          m.from === "system" &&
+          m.text.includes("@-mention routing paused"),
       );
-    // Burn the chain: agent-to-agent exchanges up to the cap. (2026-11-04
-    // pacing fix) the counter only burns when a mention actually ROUTES —
-    // use a real "@beta" mention, not a non-matching token, or the loop
-    // delivers nothing and never reaches the cap.
-    for (let i = 0; i < MENTION_CHAIN_MAX; i++) {
+    // Strict A<->B alternation: (rounds * 2) exchanges = at the budget.
+    for (let i = 0; i < MENTION_PINGPONG_ROUNDS * 2; i++) {
       await deliverAgentMentions(
         g.id,
         i % 2 === 0 ? "proj-a" : "proj-b",
@@ -215,15 +215,22 @@ describe("deliverAgentMentions — routing engine", () => {
       );
     }
     expect(systemNote()).toBe(false);
-    // One past the cap: routing refuses + notes.
+    // One more reverse edge: past the budget - routing pauses, SILENTLY.
     const blocked = await deliverAgentMentions(
       g.id,
       "proj-a",
       "@beta ping again",
     );
     expect(blocked.deliveries).toHaveLength(0);
-    expect(systemNote()).toBe(true);
-    // Human message resets the chain — routing works again.
+    expect(systemNote()).toBe(false); // invisible by design (2026-11-18)
+    // Cooldown also blocks the OTHER direction.
+    const blocked2 = await deliverAgentMentions(
+      g.id,
+      "proj-b",
+      "@alpha pong again",
+    );
+    expect(blocked2.deliveries).toHaveLength(0);
+    // Human message resets - routing works again immediately.
     await sendGroupMessage(g.id, "ok team, continue");
     injectMessageMock.mockClear();
     const resumed = await deliverAgentMentions(
@@ -232,6 +239,26 @@ describe("deliverAgentMentions — routing engine", () => {
       "@beta what is the status?",
     );
     expect(resumed.deliveries).toHaveLength(1);
+  });
+
+  it("legitimate multi-agent chains never trip the breaker (third party / broadcast breaks alternation)", async () => {
+    const g = await makeGroup();
+    // Third participant joins the alternation: any non-reverse edge resets
+    // the tracker, so arbitrarily long productive chains route forever.
+    const { addParticipants } = await import("./groupChatStore");
+    await addParticipants(g.id, [
+      { projectId: "proj-c", root: "/c", name: "gamma" },
+    ]);
+    shared.activeSessions.set("proj-b", "sess-b");
+    shared.activeSessions.set("proj-c", "sess-c");
+    injectMessageMock.mockClear();
+    // 30 exchanges cycling three agents: never a strict A<->B echo.
+    for (let i = 0; i < 30; i++) {
+      const from = ["proj-a", "proj-b", "proj-c"][i % 3];
+      const toName = ["@gamma", "@alpha", "@beta"][i % 3];
+      const out = await deliverAgentMentions(g.id, from, toName);
+      expect(out.deliveries.length).toBeGreaterThan(0);
+    }
   });
 });
 

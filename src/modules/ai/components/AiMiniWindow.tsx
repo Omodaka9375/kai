@@ -69,6 +69,7 @@ import { Input } from "@/components/ui/input";
 import { usePlanStore } from "../store/planStore";
 import { AgentSwitcher } from "./AgentSwitcher";
 import { AiChatView, GameOfLifeSpinner } from "./AiChat";
+import { useChatFontSize, installChatZoomShortcuts } from "../lib/chatFont";
 import { PlanDiffReview } from "./PlanDiffReview";
 import { TodoStrip } from "./TodoStrip";
 import { useComposer } from "./composer";
@@ -304,6 +305,8 @@ function Body({
   const c = useComposer();
 
   const chat = useMemo(() => getOrCreateChat(sessionId), [sessionId]);
+  const chatFont = useChatFontSize();
+  installChatZoomShortcuts();
   const transcriptReady = useDeferredTranscript(chat);
   // Same rationale as AgentRunBridge: the mini window is always mounted and
   // shares the Chat with the main bridge — an unthrottled subscriber here
@@ -326,7 +329,10 @@ function Body({
         {helpers.messages.length === 0 ? (
           <EmptyState onPick={focusInput} />
         ) : transcriptReady ? (
-          <div className="flex min-h-0 flex-1 flex-col [&_.text-sm]:text-[12px] [&_p]:leading-relaxed">
+          <div
+            className="flex min-h-0 flex-1 flex-col [&_.text-sm]:text-[length:var(--kai-chat-font)] [&_p]:leading-relaxed"
+            style={chatFont.rootStyle}
+          >
             <AiChatView
               messages={helpers.messages}
               status={helpers.status}

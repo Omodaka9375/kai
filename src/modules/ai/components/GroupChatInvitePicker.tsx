@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -40,7 +41,39 @@ import {
   type GroupChat,
 } from "../store/groupChatStore";
 import type { ProjectSwitcherItem } from "@/modules/workspace/ProjectRail";
+import { getSessionPreferences } from "../store/sessionPreferences";
+import { getProjectPersona } from "../store/projectRegistry";
 import { ParticipantDot } from "./GroupChatPanelView";
+
+/**
+ * Display name for a participant: PROJECT-PERSONA pairs read as
+ * "Persona (Project)" — e.g. "Assistant (Work)" — so the user can tell WHICH
+ * persona backs WHICH project while chatting (2026-11-17 ask; several
+ * projects can run different personas, and the bare project name hid that).
+ *
+ * Persona resolution mirrors the RUNTIME's chain exactly (chatStore's
+ * getAgentPersonaId): the SESSION's pinned persona wins, then the project's
+ * persona. No persona (or "__none__") → the plain project name, unchanged.
+ * PERSONA participants (synthetic persona: ids) keep their own persona name —
+ * they have no project to qualify.
+ */
+export function participantDisplayName(
+  p: GroupChat["participants"][number],
+): string {
+  if (isPersonaParticipantId(p.projectId)) return p.name;
+  let personaId: string | undefined;
+  if (p.sessionId) {
+    personaId = getSessionPreferences(p.sessionId).personaId;
+  }
+  if (!personaId) personaId = getProjectPersona(p.projectId);
+  if (!personaId || personaId === "__none__") return p.name;
+  const { customAgents } = useAgentsStore.getState();
+  const persona =
+    customAgents.find((a) => a.id === personaId) ??
+    BUILTIN_AGENTS.find((a) => a.id === personaId);
+  if (!persona || persona.name === p.name) return p.name;
+  return `${persona.name} (${p.name})`;
+}
 
 /**
  * Group-chat invitation surfaces, extracted from GroupChatPanelView
@@ -648,10 +681,16 @@ export function ParticipantsMenu({
   group,
   candidates,
   onStopOne,
+  trigger,
 }: {
   group: GroupChat;
   candidates: ProjectSwitcherItem[];
   onStopOne: (projectId: string) => void;
+  /** Optional custom trigger (2026-11-17 merge ask): the header's former
+   *  static count pill becomes the dropdown's trigger, so the count, the
+   *  live-status dot and the participant list are ONE control. Falls back
+   *  to the original icon button when omitted. */
+  trigger?: (open: boolean) => ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const live = getGroup(group.id) ?? group;
@@ -693,20 +732,24 @@ export function ParticipantsMenu({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button
-          type="button"
-          size="icon"
-          variant="ghost"
-          className="size-6 shrink-0 rounded-full border border-border/60 text-muted-foreground"
-          title="Group participants"
-          aria-label="Group participants"
-        >
-          <HugeiconsIcon
-            icon={UserMultiple02Icon}
-            size={12}
-            strokeWidth={1.75}
-          />
-        </Button>
+        {trigger ? (
+          trigger(open)
+        ) : (
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            className="size-6 shrink-0 rounded-full border border-border/60 text-muted-foreground"
+            title="Group participants"
+            aria-label="Group participants"
+          >
+            <HugeiconsIcon
+              icon={UserMultiple02Icon}
+              size={12}
+              strokeWidth={1.75}
+            />
+          </Button>
+        )}
       </PopoverTrigger>
       <PopoverContent
         align="end"
@@ -720,7 +763,12 @@ export function ParticipantsMenu({
             key={p.projectId}
             className="flex w-full items-center justify-between rounded px-2 py-1.5"
           >
-            <span className="min-w-0 flex-1 truncate">{p.name}</span>
+            <span
+              className="min-w-0 flex-1 truncate"
+              title={participantDisplayName(p)}
+            >
+              {participantDisplayName(p)}
+            </span>
             <div className="flex items-center gap-1.5">
               <ParticipantDot participant={p} groupId={live.id} />
               {participantActivity(p.sessionId, live.id) !== "idle" ? (

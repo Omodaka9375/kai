@@ -604,6 +604,17 @@ async function maybeSummarize(
 
   // Surface the compressing state in the chat UI (spinner + notice).
   useChatStore.getState().patchAgentMeta({ summarizing: true });
+  // PAINT YIELD (2026-11-17 report: "on long chats, after a break, my first
+  // message makes the whole AI panel go blank then recovers"): everything
+  // above plus summarizeMessagesNow below is one continuous synchronous
+  // main-thread block over the full history. Without this yield the commit
+  // that shows the spinner never PAINTS — the block starts in the same
+  // task — and WebView2 (transparent window) drops its last presented frame
+  // during the multi-second block, so the panel goes blank until the run
+  // starts. Double-rAF guarantees the spinner is on screen; the timeout
+  // keeps a hidden/throttled webview (background session woken by a
+  // watch) from stalling on a rAF that fires once per minute.
+  await yieldForPaint();
   try {
     const fileSnapshot = deps.toolContext.fileTracker.getSnapshot();
     const sessionId = deps.getSessionId?.() ?? null;
@@ -652,6 +663,36 @@ function findUIMessageTailCutoff(
 }
 
 // ── Misc ──────────────────────────────────────────────────────────────
+
+/** Yield to the renderer long enough for the previous commit to PAINT.
+ *
+ *  Double requestAnimationFrame (the second fires after the frame that
+ *  composites the first's layout), raced against a timeout: hidden/
+ *  backgrounded webviews throttle rAF to ~1/min (WebView2 timer policy)
+ *  and a purely-rAF yield would stall a background session's run — the
+ *  watch-wake path — for a full minute. 80ms covers two frames at 60Hz
+ *  with slack, and even when the timeout loses the race the commit has
+ *  usually painted; the block that follows merely starts ~immediately
+ *  instead of after the second frame. */
+export function yieldForPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof requestAnimationFrame !== "function") {
+      setTimeout(resolve, 0);
+      return;
+    }
+    let settled = false;
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(fallback);
+      resolve();
+    };
+    const fallback = setTimeout(done, 80);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(done);
+    });
+  });
+}
 
 export const CONTEXT_BLOCK_RE =
   /^<terminal-context[^>]*>[\s\S]*?<\/terminal-context>\n*/;

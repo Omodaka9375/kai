@@ -7,6 +7,7 @@ import {
   AI_EXPANDED_WINDOW_GEOMETRY_WITH_PILL,
 } from "./AiWindowBackdrop";
 import { Button } from "@/components/ui/button";
+import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
 import ArrowExpand01Icon from "@hugeicons/core-free-icons/ArrowExpand01Icon";
 import ArrowShrink01Icon from "@hugeicons/core-free-icons/ArrowShrink01Icon";
 import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
@@ -68,13 +69,14 @@ import {
 } from "../store/groupChatStore";
 import type { ProjectSwitcherItem } from "@/modules/workspace/ProjectRail";
 import { CoordinatorMenu } from "./CoordinatorMenu";
-import { InvitePicker, ParticipantsMenu } from "./GroupChatInvitePicker";
+import { InvitePicker, ParticipantsMenu, participantDisplayName } from "./GroupChatInvitePicker";
 import {
   buildQuoteBlock,
   quoteExcerpt,
   splitQuoteBlock,
 } from "../lib/chatText";
 import { unfence } from "../lib/fence";
+import { useChatFontSize, installChatZoomShortcuts } from "../lib/chatFont";
 
 /**
  * Cross-project group chat panel — app-level surface (mounted once in
@@ -154,6 +156,12 @@ export function GroupChatPanel({
     [openGroupId, version],
   );
   const expanded = stackSurface === "group" && active !== null;
+
+  // Chat font size (Settings → General → Chat; Ctrl+scroll / Ctrl+±/0 inside
+  // the panel): shared preference with the AI mini window — one knob drives
+  // BOTH chat surfaces, per the 2026-11-17 ask.
+  const chatFontRootStyle = useChatFontSize().rootStyle;
+  installChatZoomShortcuts();
 
   // Auto-open the newest group when created; close the panel state when the
   // open group vanishes (deleted, etc.). If it owned the expanded slot, the
@@ -351,6 +359,7 @@ export function GroupChatPanel({
                 ? `${AI_EXPANDED_WINDOW_GEOMETRY_WITH_PILL} rounded-xl`
                 : "right-2 w-[min(34rem,calc(100vw-2rem))] bottom-[calc(var(--kai-input-bar-h,0px)+84px)] h-[min(42rem,calc(100vh-var(--kai-input-bar-h,0px)-134px))]"
             )}
+            style={chatFontRootStyle}
           >
             <div
               aria-hidden
@@ -538,19 +547,43 @@ function PanelHeader({
         )}
       </div>
       <div className="flex shrink-0 items-center gap-0.5">
-        <span className="flex h-6 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-border/60 px-2.5 text-[10.5px] font-medium text-muted-foreground">
-          <span
-            className={cn(
-              "size-1.5 shrink-0 rounded-full",
-              group.endedAt !== null
-                ? "bg-muted-foreground/40"
-                : "bg-emerald-500",
+        {group.endedAt !== null ? (
+          <span className="flex h-6 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-border/60 px-2.5 text-[10.5px] font-medium text-muted-foreground">
+            <span className="size-1.5 shrink-0 rounded-full bg-muted-foreground/40" />
+            Ended
+          </span>
+        ) : (
+          <ParticipantsMenu
+            group={group}
+            candidates={candidates}
+            onStopOne={(pid) => void stopGroupParticipant(group.id, pid)}
+            trigger={(open) => (
+              <button
+                type="button"
+                title="Participants — click to view, invite, stop or remove"
+                aria-label="Participants"
+                aria-expanded={open}
+                className={cn(
+                  "flex h-6 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-border/60 px-2.5 text-[10.5px] font-medium transition-colors hover:border-foreground/30 hover:text-foreground",
+                  open && "border-foreground/30 text-foreground",
+                )}
+              >
+                <span className="size-1.5 shrink-0 rounded-full bg-emerald-500" />
+                {group.participants.length} participant
+                {group.participants.length === 1 ? "" : "s"}
+                <HugeiconsIcon
+                  icon={ArrowDown01Icon}
+                  size={10}
+                  strokeWidth={1.75}
+                  className={cn(
+                    "shrink-0 text-muted-foreground/70 transition-transform",
+                    open ? "rotate-0" : "rotate-180",
+                  )}
+                />
+              </button>
             )}
           />
-          {group.endedAt !== null
-            ? "Ended"
-            : `${group.participants.length} participant${group.participants.length === 1 ? "" : "s"}`}
-        </span>
+        )}
         {group.coordinator.kind === "agent" && group.endedAt === null ? (
           <span
             className="mr-1 shrink-0 rounded-md bg-primary/10 px-1.5 py-1 text-[10px] font-medium text-primary"
@@ -585,11 +618,6 @@ function PanelHeader({
         ) : (
           <>
             <GroupAutoApproveToggle group={group} />
-            <ParticipantsMenu
-              group={group}
-              candidates={candidates}
-              onStopOne={(pid) => void stopGroupParticipant(group.id, pid)}
-            />
             <CoordinatorMenu group={group} />
             <Button
               type="button"
@@ -769,14 +797,17 @@ function Transcript({ group }: { group: GroupChat }) {
     prevCountRef.current = live.messages.length;
   }, [live.messages]);
   const nameFor = useCallback(
-    (projectId: string) =>
-      live.participants.find((p) => p.projectId === projectId)?.name ??
-      projectId,
+    (projectId: string) => {
+      const p = live.participants.find((x) => x.projectId === projectId);
+      // "Persona (Project)" — same identity the participants dropdown shows
+      // (2026-11-17 ask), so the sender label matches the roster.
+      return p ? participantDisplayName(p) : projectId;
+    },
     [live],
   );
   return (
     <Conversation contextRef={scrollCtx}>
-      <ConversationContent className="gap-3 px-4 py-4">
+      <ConversationContent className="gap-3 px-4 py-4 [&_.text-sm]:text-[length:var(--kai-chat-font)]">
         {live.messages.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center px-8 text-center">
             <span className="mb-3 flex size-10 items-center justify-center rounded-xl bg-muted/50 text-muted-foreground/70">
@@ -1466,7 +1497,10 @@ function Composer({ group }: { group: GroupChat }) {
             // (max-h-24) so a long draft never eats the panel.
             "flex-1 resize-none rounded-lg bg-transparent text-[12.5px] leading-relaxed outline-none",
             "overflow-x-hidden whitespace-pre-wrap break-words [overflow-wrap:anywhere]",
-            "placeholder:text-muted-foreground/60 focus-visible:ring-1 focus-visible:ring-ring/50",
+            // NO focus ring (2026-11-18 ask): the blinking cursor is enough
+            // focus indication — the ring read as a boxed input while the
+            // strip contract above says borderless/continuous.
+            "placeholder:text-muted-foreground/60",
             "max-h-24 overflow-y-auto",
           )}
         />

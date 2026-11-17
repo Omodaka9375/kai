@@ -128,16 +128,42 @@ const GROUP_RELAY_MAX_HOPS = 24;
 const relayDepth = new Map<string, number>();
 
 /**
- * AGENT @-MENTION chain guard (2026-11-01): every @-mention routed from one
- * participant's reply to another increments the group's chain counter; past
- * MENTION_CHAIN_MAX routed exchanges the store refuses to relay further
- * (system note) — two agents @-ping-ponging each other must surface to the
- * user, not loop silently. A human message into the group resets the chain
- * (same circuit-breaker contract as the coordinator relayDepth reset).
+ * AGENT @-MENTION ping-pong breaker (2026-11-01; 2026-11-18 redesign).
+ *
+ * OLD: a static cap of 8 routed exchanges (any shape) + a long system note.
+ * It tripped on LEGITIMATE multi-agent chains (the cap counted every
+ * routed exchange, not just loops) and the note exposed internal mechanics
+ * while demanding user action ("send a message to reset the chain").
+ *
+ * NEW — dynamic and silent:
+ *  - Trips ONLY on a strict TWO-PARTICIPANT alternation (A→B, B→A, A→B,
+ *    ...) sustained for MENTION_PINGPONG_ROUNDS full round trips — the
+ *    actual infinite-loop shape. Any third participant, any broadcast
+ *    reply (2+ mention targets), and any human message resets the
+ *    alternation, so productive multi-agent chains never trip it.
+ *  - Tripping PAUSES routing for MENTION_PAUSE_COOLDOWN_MS, then
+ *    AUTO-RESUMES — the group self-heals with no user action. A genuine
+ *    ping-pong re-trips on its next exchange; a productive chain that
+ *    happens to include a 2-agent back-and-forth resumes and continues.
+ *  - NO system note: the pause is invisible by design (2026-11-18 ask —
+ *    "user don't need to see it, should just work"). The transcript
+ *    already shows what each agent said; the breaker only governs how
+ *    long an unattended two-agent echo may run.
  */
-export const MENTION_CHAIN_MAX = 8;
-/** groupId -> routed @-mention exchanges since the last human message. */
-const mentionChain = new Map<string, number>();
+export const MENTION_PINGPONG_ROUNDS = 4;
+export const MENTION_PAUSE_COOLDOWN_MS = 60_000;
+
+type MentionState = {
+  /** Consecutive strictly-alternating directed exchanges (2 = one round trip). */
+  alternation: number;
+  /** The last routed edge, for reverse-direction detection. */
+  from: string;
+  to: string;
+  /** Routing paused until this timestamp (ms epoch) after a trip. */
+  pausedUntil: number;
+};
+/** groupId -> ping-pong breaker state. */
+const mentionState = new Map<string, MentionState>();
 
 /**
  * Reply-coalescing buffer: participant replies awaiting delivery to the
@@ -856,8 +882,9 @@ export async function sendGroupMessage(
   if (!g || g.endedAt !== null) return [];
   // USER intervention is the relay-cap circuit breaker: any human message
   // into the group resets the agent-driven hop depth of its coordinator AND
-  // the @-mention chain (the agents may have been ping-ponging below).
-  mentionChain.delete(groupId);
+  // the @-mention ping-pong breaker (the agents may have been ping-ponging
+  // below, and a human turn ends any unattended two-agent echo).
+  mentionState.delete(groupId);
   if (g.coordinator.kind === "agent") {
     relayDepth.delete(g.coordinator.sessionId);
   }
@@ -1648,9 +1675,9 @@ export async function deliverAgentMentions(
   // CAP COUNTS ROUTED MENTIONS (2026-11-04 review): the counter used to
   // increment on every CALL, and both call sites invoke this on EVERY
   // mirrored reply (mention or not) — so 8 plain replies with zero
-  // mentions exhausted MENTION_CHAIN_MAX and emitted a bogus "paused"
-  // note. Resolve the targets FIRST, then count (and cap) only when at
-  // least one token actually routes.
+  // mentions exhausted the old static cap and emitted a bogus "paused"
+  // note. Resolve the targets FIRST; the ping-pong breaker below only
+  // engages when at least one token actually routes.
   const resolvedTargets: GroupParticipant[] = [];
   for (const token of tokens) {
     const normalized = token
@@ -1667,20 +1694,38 @@ export async function deliverAgentMentions(
   const deliveries: MentionDeliveryOutcome[] = [];
   const skipped: string[] = [];
   if (resolvedTargets.length > 0) {
-    // Cap: count ROUTED exchanges; a human message resets the chain.
-    const chain = (mentionChain.get(groupId) ?? 0) + 1;
-    mentionChain.set(groupId, chain);
-    if (chain > MENTION_CHAIN_MAX) {
-      await appendGroupMessage(groupId, {
-        from: "system",
-        projectId: "",
-        sessionId: "",
-        text: `@-mention routing paused after ${MENTION_CHAIN_MAX} agent-to-agent exchanges — send a message to the group to reset the chain.`,
-      });
+    const now = Date.now();
+    const st =
+      mentionState.get(groupId) ??
+      ({ alternation: 0, from: "", to: "", pausedUntil: 0 } as MentionState);
+    if (now < st.pausedUntil) {
+      // Cooldown window from a tripped ping-pong: drop this routing
+      // SILENTLY (no note — see the breaker's design note above).
       return { deliveries: [], skipped: [] };
     }
+    if (resolvedTargets.length === 1) {
+      // Single-target reply: the only shape that can ping-pong. Reverse
+      // edge detection — B→A right after A→B is the loop signature.
+      const to = resolvedTargets[0].projectId;
+      const isReverse = st.to === fromParticipantId && st.from === to;
+      st.alternation = isReverse ? st.alternation + 1 : 1;
+      st.from = fromParticipantId;
+      st.to = to;
+      if (st.alternation > MENTION_PINGPONG_ROUNDS * 2) {
+        // Strict A↔B alternation sustained past the round budget — pause
+        // and self-heal after the cooldown. Silent by design.
+        st.pausedUntil = now + MENTION_PAUSE_COOLDOWN_MS;
+        st.alternation = 0;
+        mentionState.set(groupId, st);
+        return { deliveries: [], skipped: [] };
+      }
+    } else {
+      // Broadcast reply (2+ targets): not a ping-pong — reset the tracker.
+      st.alternation = 0;
+    }
+    mentionState.set(groupId, st);
   } else {
-    // No mention routed: a plain reply — nothing to deliver, nothing to cap.
+    // No mention routed: a plain reply - nothing to deliver, nothing to cap.
     return { deliveries: [], skipped: [] };
   }
   // Targets were resolved above (pre-cap); iterate them directly — no
@@ -2025,9 +2070,9 @@ export async function endGroupChat(groupId: string): Promise<void> {
     // Term ends with the group: resume + re-delegate re-arm the preamble.
     g.preambleGiven = false;
   }
-  // NIT SWEEP (2026-11-02): the mention-chain counter is group-keyed —
-  // a resumed group starts a fresh chain instead of resuming at the cap.
-  mentionChain.delete(groupId);
+  // NIT SWEEP (2026-11-02): the ping-pong breaker state is group-keyed -
+  // a resumed group starts fresh instead of resuming paused.
+  mentionState.delete(groupId);
   await persist();
   notify();
 }
@@ -2127,7 +2172,7 @@ export async function deleteGroupChat(groupId: string): Promise<void> {
   // one entry per (group × persona) / per group for the app's lifetime —
   // swept only by the test reset. The fence-state cache deliberately
   // SURVIVES end/resume (nonce stability) but dies with the group.
-  mentionChain.delete(groupId);
+  mentionState.delete(groupId);
   for (const k of [...personaFenceStates.keys()]) {
     if (k.startsWith(`${groupId}::`)) personaFenceStates.delete(k);
   }
@@ -2495,7 +2540,7 @@ export function __resetGroupChatsForTest(): void {
   sendQueues.clear();
   sessionGroups.clear();
   relayDepth.clear();
-  mentionChain.clear();
+  mentionState.clear();
   personaFenceStates.clear();
   pendingReplies.clear();
   awaitingReply.clear();

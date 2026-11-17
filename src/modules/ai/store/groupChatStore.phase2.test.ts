@@ -4,8 +4,11 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 /**
  * Phase 2 contract: agent-as-coordinator delegation.
  *
- *  - delegateCoordination is HUMAN-action only (panel); the tool file can
- *    only SEND, never delegate — pinned by source.
+ *  - delegateCoordination is HUMAN-action only (panel) — with ONE carved
+ *    exception (2026-11-18): create_group's approval-gated execute may
+ *    self-delegate the creating agent, because the approval card IS the
+ *    human grant. buildGroupTools (send/invite) still never delegates -
+ *    pinned by source below.
  *  - send_to_project is fire-and-forget: delivers via the queue contract and
  *    returns a "reply arrives as your next message" note. Never polls.
  *  - Reply coalescing: N participants messaged → ONE merged wake, only when
@@ -227,10 +230,22 @@ describe("source pins — Phase 2 trust boundary", () => {
   const bridge = readFileSync(new URL("../components/AgentRunBridge.tsx", import.meta.url), "utf8");
   const menu = readFileSync(new URL("../components/CoordinatorMenu.tsx", import.meta.url), "utf8");
 
-  it("the tool file can SEND but never delegate — delegation is human-only", () => {
+  it("delegation from tool code exists ONLY inside create_group's approval-gated execute - buildGroupTools still never delegates", () => {
+    // NARROWED (2026-11-18 product decision): an AGENT-created group
+    // defaults the creating agent to coordinator — the approval card IS the
+    // human grant of membership + coordination. The ORIGINAL pin (zero
+    // delegateCoordination in the tool file) predates create_group.
+    // What stays enforced: buildGroupTools (send/invite/status — reachable
+    // by ANY delegated coordinator mid-conversation) never delegates; the
+    // one allowed call site lives after the create_group builder marker.
     expect(tools).toContain("sendFromCoordinator");
-    expect(tools).not.toContain("delegateCoordination");
     expect(menu).toContain("delegateCoordination");
+    const createGroupIdx = tools.indexOf("export function buildCreateGroupTool");
+    expect(createGroupIdx).toBeGreaterThan(-1);
+    const afterCreate = tools.slice(createGroupIdx);
+    expect(afterCreate).toContain("delegateCoordination");
+    const beforeCreate = tools.slice(0, createGroupIdx);
+    expect(beforeCreate).not.toContain("delegateCoordination(");
   });
 
   it("send_to_project is approval-required; project_status is auto", () => {

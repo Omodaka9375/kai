@@ -32,6 +32,10 @@ export type McpServerConfig = {
    *  "user". On update the original value is preserved (an agent editing a
    *  user's server does not re-assign authorship to itself). */
   createdBy?: import("./authorship").AgentAuthorship;
+  /** Registry version this config was installed from (Extensions view).
+   *  Used to detect registry updates: a mismatch offers Upgrade. Absent on
+   *  pre-feature installs and manual Settings entries. */
+  registryVersion?: string;
 };
 
 /** Default MCP tool-call budget: generous enough for a slow real API,

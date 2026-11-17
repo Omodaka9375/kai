@@ -26,6 +26,8 @@ import {
       setShowHidden,
   setRadioEnabled,
   setShowModelThinking,
+  setChatFontSize,
+  CHAT_FONT_SIZES,
   setTerminalFontSize,
   setTerminalScrollback,
   setTerminalWebglEnabled,
@@ -71,6 +73,7 @@ export function GeneralSection() {
   const editorWordWrap = usePreferencesStore((s) => s.editorWordWrap);
   const showHidden = usePreferencesStore((s) => s.showHidden);
   const showModelThinking = usePreferencesStore((s) => s.showModelThinking);
+  const chatFontSize = usePreferencesStore((s) => s.chatFontSize);
   const radioEnabled = usePreferencesStore((s) => s.radioEnabled);
   const terminalWebglEnabled = usePreferencesStore(
     (s) => s.terminalWebglEnabled,
@@ -116,6 +119,8 @@ export function GeneralSection() {
   const onPickTerminalFontSize = (size: number) => void setTerminalFontSize(size);
 
   const onPickScrollback = (lines: number) => void setTerminalScrollback(lines);
+
+  const onPickChatFontSize = (size: number) => void setChatFontSize(size);
 
   return (
     <div className="flex flex-col gap-6">
@@ -246,6 +251,44 @@ export function GeneralSection() {
             checked={showModelThinking}
             onCheckedChange={(v) => void setShowModelThinking(v)}
           />
+        </SettingRow>
+        <SettingRow
+          title="Font size"
+          description="AI chat and group chat text size. Ctrl+scroll or Ctrl+plus/minus inside a chat panel also adjusts this."
+        >
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                className="h-8 justify-between gap-2 rounded-none px-2.5 text-[12px]"
+              >
+                <span>{chatFontSize} px</span>
+                <HugeiconsIcon
+                  icon={ArrowDown01Icon}
+                  size={12}
+                  strokeWidth={2}
+                  className="opacity-70"
+                />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              className="min-w-[80px] rounded-none border border-border bg-popover p-0 shadow-none ring-0"
+            >
+              {CHAT_FONT_SIZES.map((size) => (
+                <DropdownMenuItem
+                  key={size}
+                  onSelect={() => onPickChatFontSize(size)}
+                  className={cn(
+                    "rounded-none px-3 py-1.5 text-[12px]",
+                    size === chatFontSize && "bg-accent/50",
+                  )}
+                >
+                  {size} px
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </SettingRow>
       </div>
 

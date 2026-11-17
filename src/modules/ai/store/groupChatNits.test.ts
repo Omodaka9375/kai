@@ -108,28 +108,34 @@ describe("N1: group-keyed maps are swept on end/delete", () => {
     expect(getGroup(g2!.id)).not.toBeNull();
   });
 
-  it("endGroupChat clears the mention chain for that group", async () => {
+  it("endGroupChat clears the ping-pong breaker state for that group", async () => {
     const g = await createGroupChat(
       { projectId: "a", sessionId: "s-a", root: "/a", name: "A" },
       [{ projectId: "b", root: "/b", name: "B" }],
     );
-    // One routed mention exchange consumes chain budget 1.
-    await deliverAgentMentions(g!.id, "a", "@b can you check?");
+    // Burn the strict alternation into a trip (pause + reset inside the
+    // breaker). The old test observed the (removed) cap note; the breaker
+    // is silent now, so we observe its EFFECT: with state cleared on end,
+    // a resumed group routes immediately; with stale state it would sit
+    // out the 60s cooldown.
+    const { MENTION_PINGPONG_ROUNDS } = await import("./groupChatStore");
+    for (let i = 0; i < MENTION_PINGPONG_ROUNDS * 2 + 1; i++) {
+      await deliverAgentMentions(
+        g!.id,
+        i % 2 === 0 ? "a" : "b",
+        i % 2 === 0 ? "@B ping" : "@A pong",
+      );
+    }
+    // Tripped: the next routed exchange is dropped (cooldown).
+    const duringCooldown = await deliverAgentMentions(g!.id, "a", "@B again");
+    expect(duringCooldown.deliveries).toHaveLength(0);
     await endGroupChat(g!.id);
-    // After end + a fresh delivery round on resume, the chain restarted —
-    // observable via the system note the cap produces only when the chain
-    // is EXHAUSTED. With the chain cleared, 8 more routed exchanges are
-    // allowed; without the clear, the 9th would trip the cap early. We
-    // assert the cap note is absent after end + 8 exchanges (cleared chain:
-    // budget 1..8 consumed post-end, no note until the 9th).
+    // After end (+resume), the breaker state is GONE: routing resumes
+    // immediately instead of waiting out the cooldown.
     const live = getGroup(g!.id)!;
     live.endedAt = null; // resume without the resume path's membership sweep
-    for (let i = 0; i < 7; i++) {
-      await deliverAgentMentions(g!.id, "a", "@b ping");
-    }
-    expect(
-      live.messages.some((m) => m.text.includes("routing paused")),
-    ).toBe(false);
+    const afterEnd = await deliverAgentMentions(g!.id, "a", "@B fresh start");
+    expect(afterEnd.deliveries.length).toBeGreaterThan(0);
   });
 });
 

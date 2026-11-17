@@ -19,7 +19,7 @@ import { buildMcpTools } from "./mcpTools";
 import { buildRadioTools } from "./radio";
 import { buildSettingsTools } from "./settings";
 import { buildVoiceTools } from "./voice";
-import { buildGroupTools } from "./group";
+import { buildGroupTools, buildCreateGroupTool } from "./group";
 import { buildGmailTools } from "./gmail";
 import { buildSocialTools } from "./social";
 import { buildReminderTools } from "./reminders";
@@ -50,6 +50,7 @@ export function buildCoreTools(ctx: import("./context").ToolContext) {
     ...buildSettingsTools(ctx),
     ...buildVoiceTools(ctx),
     ...buildGroupTools(ctx),
+    ...buildCreateGroupTool(ctx),
     ...buildPersonaTools(ctx),
     ...buildGmailTools(ctx),
     ...buildSocialTools(ctx),

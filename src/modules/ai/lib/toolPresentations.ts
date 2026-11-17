@@ -451,6 +451,16 @@ const REGISTRY: Record<string, ToolPresentation> = {
     fence: false,
     remoteSurface: false,
   },
+  create_group: {
+    label: "Group create",
+    approvalLabel: "Create group chat",
+    status: (a) =>
+      `Creating group${Array.isArray(a.members) ? ` with ${(a.members as string[]).length} members` : ""}`,
+    summary: (a) => str(a, "group_name") ?? "cross-project group",
+    effect: "COMMITTED",
+    fence: false,
+    remoteSurface: false,
+  },
   create_persona: {
     label: "New persona",
     status: (a) => `Creating ${String(a.name ?? "persona")} persona`,

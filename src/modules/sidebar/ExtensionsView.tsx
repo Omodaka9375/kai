@@ -34,6 +34,7 @@ export function ExtensionsView() {
   const requestIdRef = useRef(0);
   const installedServers = useMcpStore((s) => s.servers);
   const addServer = useMcpStore((s) => s.addServer);
+  const upgradeServer = useMcpStore((s) => s.upgradeServer);
   const hydrate = useMcpStore((s) => s.hydrate);
 
   useEffect(() => {
@@ -96,14 +97,48 @@ export function ExtensionsView() {
     if (cursor && !loading) void doFetch(query, cursor);
   };
 
-  const isInstalled = (s: McpRegistryEntry["server"]) => {
+  /** The installed config matching a registry entry, if any — for the
+   *  upgrade path. Name matching mirrors isInstalled. */
+  const installedConfigFor = (
+    s: McpRegistryEntry["server"],
+  ): McpServerConfig | undefined => {
     const targetName = s.title || displayName(s.name);
-    return installedServers.some(
+    return installedServers.find(
       (installed) =>
         installed.name === s.name ||
         installed.name === targetName ||
         installed.name === displayName(s.name),
     );
+  };
+
+  /** True when the installed copy predates the registry's version. Absent
+   *  registryVersion (pre-feature installs, manual entries) is NOT an
+   *  upgrade — we cannot know what it pins, and re-pinning could change a
+   *  hand-edited command. */
+  const needsUpgrade = (
+    s: McpRegistryEntry["server"],
+    installed: McpServerConfig | undefined,
+  ): installed is McpServerConfig =>
+    Boolean(
+      installed &&
+        installed.transport === "stdio" &&
+        installed.registryVersion &&
+        installed.registryVersion !== s.version,
+    );
+
+  /** Upgrade in place: same id, same env (API keys survive), new pinned
+   *  command from the fresh registry entry. The store disconnects the old
+   *  process before reconnecting so the runner re-resolves the new version
+   *  instead of keeping the cached old one alive. */
+  const upgrade = (entry: McpRegistryEntry, current: McpServerConfig) => {
+    const config = registryEntryToConfig(entry.server);
+    if (!config) return;
+    upgradeServer(current.id, {
+      name: config.name,
+      command: config.command,
+      args: config.args,
+      registryVersion: entry.server.version,
+    });
   };
 
   // Pending install: a registry entry whose package declares environment
@@ -116,6 +151,10 @@ export function ExtensionsView() {
   const install = (entry: McpRegistryEntry) => {
     const config = registryEntryToConfig(entry.server);
     if (!config) return;
+    // Stamp the registry version so future loads can offer Upgrade when
+    // the registry moves ahead (2026-11-17 report: new version visible but
+    // no upgrade path; delete+reinstall showed the OLD version again).
+    config.registryVersion = entry.server.version;
     const pkg = entry.server.packages?.find(
       (p) => p.transport.type === config.transport || p.transport.type === "stdio",
     );
@@ -208,7 +247,9 @@ export function ExtensionsView() {
         <ul className="flex flex-col">
           {entries.map((entry) => {
             const s = entry.server;
-            const installed = isInstalled(s);
+            const installedConfig = installedConfigFor(s);
+            const installed = Boolean(installedConfig);
+            const upgradable = needsUpgrade(s, installedConfig);
             const hasStdio = s.packages?.some(
               (p) => p.transport.type === "stdio",
             );
@@ -271,14 +312,31 @@ export function ExtensionsView() {
                 </div>
                 <div className="shrink-0 pt-0.5">
                   {installed ? (
-                    <span className="flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400">
-                      <HugeiconsIcon
-                        icon={CheckmarkCircle02Icon}
-                        size={12}
-                        strokeWidth={2}
-                      />
-                      Installed
-                    </span>
+                    upgradable && installedConfig ? (
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        className="h-6 gap-1 px-2 text-[10px]"
+                        title={`Installed ${installedConfig.registryVersion} — registry has ${s.version}. Upgrades the command in place; env/keys are kept, the old process is replaced on reconnect.`}
+                        onClick={() => upgrade(entry, installedConfig)}
+                      >
+                        <HugeiconsIcon
+                          icon={Download01Icon}
+                          size={11}
+                          strokeWidth={2}
+                        />
+                        Upgrade
+                      </Button>
+                    ) : (
+                      <span className="flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400">
+                        <HugeiconsIcon
+                          icon={CheckmarkCircle02Icon}
+                          size={12}
+                          strokeWidth={2}
+                        />
+                        Installed
+                      </span>
+                    )
                   ) : installable ? (
                     <Button
                       size="xs"

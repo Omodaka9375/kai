@@ -96,7 +96,11 @@ export type Preferences = {
   sidebarView: "explorer" | "source-control" | "extensions";
   /** Timestamp (ms) of the last automatic update check. */
   updaterLastCheck: number;
-  /** SomaFM status-bar radio — opt-in chill music feature. */
+  /** Chat font size in pixels for BOTH AI-chat and group-chat panels.
+   *  Ctrl+scroll and Ctrl+plus/minus/0 (when an AI/group window is hovered)
+   *  adjust it live. */
+  chatFontSize: number;
+  /** SomaFM status-bar radio - opt-in chill music feature. */
   radioEnabled: boolean;
   /** Show the model's inner-thinking (reasoning) blocks in the chat.
    *  On = the animated brain pill that expands to the reasoning text.
@@ -180,6 +184,7 @@ const KEY_MODEL_PICKER_WIDTH = "modelPickerWidth";
 const KEY_SIDEBAR_VIEW = "sidebarView";
 
 const KEY_UPDATER_LAST_CHECK = "updaterLastCheck";
+const KEY_CHAT_FONT_SIZE = "chatFontSize";
 const KEY_RADIO_ENABLED = "radioEnabled";
 const KEY_SHOW_MODEL_THINKING = "showModelThinking";
 const KEY_RADIO_STATION = "radioStationId";
@@ -202,8 +207,29 @@ export const TERMINAL_FONT_SIZE_DEFAULT = 14;
 export const TERMINAL_FONT_SIZE_MIN = 8;
 export const TERMINAL_FONT_SIZE_MAX = 32;
 
+// ── AI/group chat font size (Settings → General → Chat; Ctrl+scroll / Ctrl+±)
+export const CHAT_FONT_SIZE_DEFAULT = 12;
+export const CHAT_FONT_SIZE_MIN = 9;
+export const CHAT_FONT_SIZE_MAX = 24;
+
+function clampChatFontSize(value: number): number {
+  if (!Number.isFinite(value)) return CHAT_FONT_SIZE_DEFAULT;
+  return Math.min(
+    CHAT_FONT_SIZE_MAX,
+    Math.max(CHAT_FONT_SIZE_MIN, Math.round(value)),
+  );
+}
+
+export async function setChatFontSize(value: number): Promise<void> {
+  await writePref(KEY_CHAT_FONT_SIZE, clampChatFontSize(value));
+}
+
 export const TERMINAL_FONT_SIZES = [
   10, 12, 13, 14, 15, 16, 18, 20, 22, 24,
+] as const;
+
+export const CHAT_FONT_SIZES = [
+  9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24,
 ] as const;
 
 export const TERMINAL_SCROLLBACK_DEFAULT = 2000;
@@ -257,6 +283,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   sidebarView: "explorer",
 
   updaterLastCheck: 0,
+  chatFontSize: CHAT_FONT_SIZE_DEFAULT,
   radioEnabled: false,
   showModelThinking: true,
   radioStationId: "",
@@ -388,6 +415,9 @@ export async function loadPreferences(): Promise<Preferences> {
     updaterLastCheck:
       get<number>(KEY_UPDATER_LAST_CHECK) ??
       DEFAULT_PREFERENCES.updaterLastCheck,
+    chatFontSize: clampChatFontSize(
+      get<number>(KEY_CHAT_FONT_SIZE) ?? DEFAULT_PREFERENCES.chatFontSize,
+    ),
     radioEnabled:
       get<boolean>(KEY_RADIO_ENABLED) ?? DEFAULT_PREFERENCES.radioEnabled,
     showModelThinking:
@@ -817,6 +847,7 @@ export async function onPreferencesChange(
     [KEY_MODEL_PICKER_WIDTH]: "modelPickerWidth",
     [KEY_SIDEBAR_VIEW]: "sidebarView",
     [KEY_UPDATER_LAST_CHECK]: "updaterLastCheck",
+    [KEY_CHAT_FONT_SIZE]: "chatFontSize",
     [KEY_RADIO_ENABLED]: "radioEnabled",
     [KEY_SHOW_MODEL_THINKING]: "showModelThinking",
     [KEY_RADIO_STATION]: "radioStationId",

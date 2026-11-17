@@ -5,8 +5,11 @@ import {
   addParticipants,
   addPersonaParticipants,
   coordinatorGroupForSession,
+  createGroupChat,
+  delegateCoordination,
   getGroup,
   isPersonaParticipantId,
+  lastGroupRefusal,
   liveGroupForProject,
   participantActivity,
   sendFromCoordinator,
@@ -186,6 +189,194 @@ export function buildGroupTools(ctx: ToolContext) {
           : getProjectAgentStatus(project);
         const name = target?.name ?? project;
         return { project, name, status };
+      },
+    }),
+  };
+}
+
+/**
+ * create_group (2026-11-18): the agent-driven CREATE path. Until now group
+ * creation was human-only (panel InvitePicker) — an agent asked to "create
+ * a group with X" could only decline ("group chat is a UI thing"), because
+ * the coordinator tools below attach ONLY to a delegated coordinator of an
+ * EXISTING group. This tool closes the bootstrap gap.
+ *
+ * TRUST BOUNDARY — membership stays HUMAN-GRANTED, the approval card IS the
+ * grant: needsApproval is always-on (never auto-approved, same class as
+ * invite_agent; the STANDING_AUTHORITY carve-outs do not apply either). The
+ * card shows exactly which projects/personas will join, and the user clicks
+ * Allow before anything is created. After creation the group panel opens on
+ * the user's screen (same event invite_agent uses) so it is as visible as if
+ * they had opened it themselves.
+ *
+ * The INVITER is this session's project; the creating agent's session is the
+ * inviter's active session (the same record shape the panel writes).
+ *
+ * COORDINATOR DEFAULTS (2026-11-18 product decision): an AGENT-created group
+ * defaults the creating agent to coordinator (delegate_to_self, default
+ * true) — the user asked THAT agent to run the group, and the approval
+ * card IS the human grant of both membership and coordination. A
+ * USER-created group (panel) keeps the USER as coordinator, unchanged.
+ * delegate_to_self: false leaves the user as coordinator for the rare case
+ * the agent should not run it.
+ *
+ * PHASE-2 PIN, NARROWED (not dropped): delegation from tool code is allowed
+ * ONLY here, inside create_group's approval-gated execute — buildGroupTools
+ * still never delegates (the phase2 pin test asserts the call appears only
+ * after this function's marker).
+ *
+ * Available to EVERY session (not gated on coordinator status — that is the
+ * point), but returns an honest error when this tool context carries no
+ * project (assistant/headless contexts) or the project is busy elsewhere.
+ */
+export function buildCreateGroupTool(ctx: ToolContext) {
+  return {
+    create_group: tool({
+      description:
+        `Create a cross-project group chat between THIS project's agent and other open projects' agents and/or agent personas. Use when the user asks you to set up a group chat, coordinate several projects together, or bring agents into one conversation. Every member joining requires the user's approval on a card first; after creation the group panel opens on the user's screen and YOU become the group's coordinator by default (use send_to_project to message members and invite_agent to add more). Pass delegate_to_self: false to leave the user as coordinator. Invitable now: ` +
+        (() => {
+          const runtimes = ctx.getAllProjectRuntimes?.() ?? [];
+          const own = ctx.projectId;
+          const memberable = runtimes.filter(
+            (r) => r.id !== own && !liveGroupForProject(r.id),
+          );
+          const projects = memberable
+            .map((r) => `${runtimeName(r.root)} (project id: ${r.id})`);
+          const personas = [
+            ...useAgentsStore.getState().customAgents,
+            ...BUILTIN_AGENTS,
+          ].map((a) => `${a.name} (persona id: ${a.id})`);
+          const list = [...projects, ...personas].join("; ");
+          return list || "(nobody — open more projects or use personas)";
+        })() +
+        `. Your own project joins automatically as the inviter; do not include it in members.`,
+      inputSchema: z.object({
+        members: z
+          .array(z.string())
+          .min(1)
+          .describe(
+            "Who to bring into the group: project ids and/or persona ids (from the list in the tool description).",
+          ),
+        group_name: z
+          .string()
+          .optional()
+          .describe(
+            "Optional short group name. Defaults to a themed auto-name.",
+          ),
+        delegate_to_self: z
+          .boolean()
+          .optional()
+          .describe(
+            "Make YOU the group coordinator after creation (default true). Pass false only when the user should coordinate it themselves.",
+          ),
+      }),
+      needsApproval: true,
+      execute: async ({ members, group_name, delegate_to_self }) => {
+        const sessionId = ctx.getSessionId();
+        const ownProjectId = ctx.projectId;
+        if (!sessionId)
+          return { ok: false, note: "no active chat session" };
+        if (!ownProjectId)
+          return {
+            ok: false,
+            note: "this session has no project — groups are created between projects",
+          };
+        const runtimes = ctx.getAllProjectRuntimes?.() ?? [];
+        const own = runtimes.find((r) => r.id === ownProjectId);
+        if (!own)
+          return {
+            ok: false,
+            note: "this project has no open runtime",
+          };
+        // Already live elsewhere? SINGLE MEMBERSHIP applies to the inviter
+        // too — surface the store refusal instead of a silent null.
+        if (liveGroupForProject(ownProjectId)) {
+          return {
+            ok: false,
+            note: `this project is already in the live group "${liveGroupForProject(ownProjectId)!.name}" — end it first`,
+          };
+        }
+
+        // Resolve members: open projects and personas, split by kind.
+        const projectMembers: Array<{ projectId: string; root: string; name: string }> = [];
+        const personaMembers: string[] = [];
+        const unknown: string[] = [];
+        const { customAgents } = useAgentsStore.getState();
+        for (const m of members) {
+          const project = runtimes.find((r) => r.id === m && r.id !== ownProjectId);
+          if (project) {
+            projectMembers.push({
+              projectId: project.id,
+              root: project.root,
+              name: runtimeName(project.root),
+            });
+            continue;
+          }
+          const personaId = m.startsWith("persona:") ? m.slice("persona:".length) : m;
+          const persona =
+            customAgents.find((x) => x.id === personaId) ??
+            BUILTIN_AGENTS.find((x) => x.id === personaId);
+          if (persona) {
+            personaMembers.push(persona.id);
+            continue;
+          }
+          unknown.push(m);
+        }
+        if (unknown.length === members.length)
+          return {
+            ok: false,
+            note: `no invitable members matched: ${unknown.join(", ")}`,
+          };
+
+        // Same shapes the panel writes: inviter with THIS session, project
+        // invitees as records; personas joined AFTER creation (same two-step
+        // the panel performs — createGroupChat takes project invitees only).
+        const g = await createGroupChat(
+          {
+            projectId: ownProjectId,
+            sessionId,
+            root: own.root,
+            name: runtimeName(own.root),
+          },
+          projectMembers,
+          group_name,
+        );
+        if (!g) {
+          return {
+            ok: false,
+            note: lastGroupRefusal() ?? "group creation was refused",
+          };
+        }
+        if (personaMembers.length > 0) {
+          await addPersonaParticipants(g.id, personaMembers);
+        }
+        // AGENT-CREATED DEFAULT (2026-11-18): the creating agent becomes the
+        // group's coordinator — the approval card granted it. The ONLY
+        // tool-code call site of delegateCoordination (see the narrowed
+        // phase-2 pin in this file's header + phase2 test).
+        const selfCoordinate = delegate_to_self !== false;
+        if (selfCoordinate) {
+          await delegateCoordination(g.id, ownProjectId);
+        }
+        // OPEN THE GROUP PANEL — same event invite_agent dispatches, so the
+        // agent-created group is exactly as visible as a user-created one.
+        window.dispatchEvent(
+          new CustomEvent("Kai:open-group-chat", { detail: g.id }),
+        );
+        const live = getGroup(g.id);
+        return {
+          ok: true,
+          group_id: g.id,
+          group_name: live?.name ?? g.name,
+          note:
+            `Group created with ${live?.participants.length ?? 0} participants and the panel is now open for the user. ` +
+            (selfCoordinate
+              ? "You are the coordinator: use send_to_project to message members and invite_agent to add more."
+              : "The user coordinates the group.") +
+            (unknown.length
+              ? ` Skipped unknown members: ${unknown.join(", ")}.`
+              : ""),
+        };
       },
     }),
   };

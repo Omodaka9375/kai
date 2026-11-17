@@ -27,6 +27,12 @@ type McpState = {
   addServer: (server: McpServerConfig) => void;
   updateServer: (server: McpServerConfig) => void;
   removeServer: (id: string) => void;
+  /** Upgrade an installed stdio server to a NEW registry entry's command
+   *  args (same id, same env/keys — only command/args/name change). This is
+   *  the KILLING feature for the uvx/npx stale-cache trap: the runner
+   *  resolves the pinned version fresh on the next connect; the previously
+   *  running OLD process is disconnected first. */
+  upgradeServer: (id: string, patch: Partial<McpServerConfig>) => void;
   toggleServer: (id: string) => void;
   /** Connects all enabled servers. */
   connectAll: () => Promise<void>;
@@ -120,6 +126,20 @@ export const useMcpStore = create<McpState>((set, get) => {
         if (isMainWindow()) void mcpManager.disconnect(server.id);
         else requestControl({ kind: "disconnect", serverId: server.id });
       }
+    },
+
+    upgradeServer: (id, patch) => {
+      const server = get().servers.find((s) => s.id === id);
+      if (!server) return;
+      // Disconnect the OLD process FIRST: a live client keeps serving tools
+      // from the pinned old version while it exists; connect() would see the
+      // session alive and never re-spawn (2026-11-17 report: "deleted it,
+      // installed the new version, shows the old version" — the running old
+      // child + runner cache made every reinstall resolve stale).
+      if (isMainWindow()) void mcpManager.disconnect(id);
+      else requestControl({ kind: "disconnect", serverId: id });
+      const updated: McpServerConfig = { ...server, ...patch, id };
+      get().updateServer(updated);
     },
 
     removeServer: (id) => {
