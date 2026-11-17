@@ -29,7 +29,10 @@ const MODES: { id: SandboxMode; label: string; hint: string }[] = [
 ];
 
 const SHORT: Record<SandboxMode, string> = {
-  off: "off",
+  // "off" renders ICON-ONLY (2026-11-17 ask): a dimmed shield with no label
+  // reads as "inactive" without the noisy "off" text; an active mode keeps
+  // its label so the user sees WHICH confinement is on at a glance.
+  off: "",
   readOnly: "read-only",
   workspaceOnly: "workspace",
 };
@@ -118,7 +121,9 @@ export function SandboxBadge() {
             size={10}
             strokeWidth={1.75}
           />
-          {SHORT[mode]}
+          {SHORT[mode] ? (
+            <span>{SHORT[mode]}</span>
+          ) : null}
         </span>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" side="top" className="w-56">

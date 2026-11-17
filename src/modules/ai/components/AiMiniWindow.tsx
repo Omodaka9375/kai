@@ -437,10 +437,10 @@ function Header({
           <HugeiconsIcon icon={expanded ? ArrowShrink01Icon : ArrowExpand01Icon} size={11} strokeWidth={1.75} />
         </Button>
         <AgentSwitcher isMiniWindow />
-        <SandboxBadge />
         {messages !== undefined ? (
           <ContextIndicator messages={messages} />
         ) : null}
+        <SandboxBadge />
       </div>
       <div className="flex shrink-0 items-center gap-1">
         <SessionPicker />
