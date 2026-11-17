@@ -4,15 +4,22 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [3.1.3]
+
+- Approvals: denied tool calls tell the model why, so the agent acknowledges the rejection instead of improvising after a Deny.
+- Chat: commands interrupted with Stop show "canceled" (muted) instead of the red "failed" pill.
+- Windows: an installer-launched KAI that inherited Redirection Guard auto-relaunches with a clean process token at startup, fixing WinError 448 on junctioned node_modules in agent shells and tests.
+- AI window: context % indicator and sandbox pill swapped; the sandbox pill shows the shield icon alone when off (no "off" label).
+- Docs: landing page wordmark replaced with the logo, site moved to kaiide.com, llms.txt added.
+
+---
+
 ## [3.1.2]
 
 - MCP: servers launched from an installer can resolve commands (uvx, npx).
 - Sandbox: mode changes in Settings now reach the AI window, in every window.
 - Sandbox: the sandbox pill in the AI window is now a picker.
 - Chat: uploaded image attachments are saved to ~/.kai/media and the model gets their file path.
-- Approvals: denied tool calls tell the model why, so the agent acknowledges the rejection instead of improvising after a Deny.
-- Chat: commands interrupted with Stop show "canceled" (muted) instead of the red "failed" pill.
-- Windows: an installer-launched KAI that inherited Redirection Guard auto-relaunches with a clean process token at startup, fixing WinError 448 on junctioned node_modules in agent shells and tests.
 
 ---
 
