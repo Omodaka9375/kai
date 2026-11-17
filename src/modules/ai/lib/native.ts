@@ -313,6 +313,14 @@ export function createNative(getEnv: () => WorkspaceEnv) {
       path,
       workspace: env(),
     }),
+  // Headless Edge/Chrome HTML→PDF (emoji-capable). Rejects when no browser
+  // exists or the render fails; callers fall back to the jsPDF renderer.
+  renderHtmlToPdf: (htmlContent: string, targetPath: string) =>
+    invoke<void>("fs_render_html_to_pdf", {
+      htmlContent,
+      targetPath,
+      workspace: env(),
+    }),
   parseSpreadsheet: (path: string) =>
     invoke<SpreadsheetData>("fs_parse_spreadsheet", {
       path,

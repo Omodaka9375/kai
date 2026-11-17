@@ -559,6 +559,232 @@ pub fn fs_write_file_bytes(
     Ok(())
 }
 
+// ── HTML → PDF via headless Edge/Chrome (emoji-capable renderer) ───────
+
+/// Locate a Chromium-family browser able to `--print-to-pdf`.
+///
+/// EMOJI FIX (2026-11-17 user report): the jsPDF renderer maps emoji to the
+/// wrong glyphs because its Standard-14 fonts (helvetica/courier) carry no
+/// emoji coverage AT ALL and cannot embed any. A real browser rasterizes
+/// with the OS font stack (Windows: Segoe UI Emoji) and embeds those glyphs
+/// into the PDF as vectors, so the result renders in every PDF viewer.
+/// Edge is the primary target — it ships with Windows.
+fn find_chromium_browser() -> Option<std::path::PathBuf> {
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+    #[cfg(target_os = "windows")]
+    {
+        for env_key in ["ProgramFiles(x86)", "ProgramFiles", "ProgramW6432"] {
+            if let Some(root) = std::env::var_os(env_key) {
+                candidates.push(
+                    std::path::PathBuf::from(root)
+                        .join("Microsoft")
+                        .join("Edge")
+                        .join("Application")
+                        .join("msedge.exe"),
+                );
+            }
+        }
+        candidates.push(
+            std::path::Path::new(r"C:\Program Files\Microsoft\Edge\Application\msedge.exe").into(),
+        );
+        candidates.push(
+            std::path::Path::new(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe")
+                .into(),
+        );
+        for env_key in ["ProgramFiles", "ProgramFiles(x86)"] {
+            if let Some(root) = std::env::var_os(env_key) {
+                candidates.push(
+                    std::path::PathBuf::from(root)
+                        .join("Google")
+                        .join("Chrome")
+                        .join("Application")
+                        .join("chrome.exe"),
+                );
+            }
+        }
+        // PATH lookup last — covers winget/choco layouts.
+        candidates.extend(which_on_path(&["msedge.exe", "chrome.exe", "chromium.exe"]));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        candidates.push(
+            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge".into(),
+        );
+        candidates.push("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome".into());
+        candidates.push("/Applications/Chromium.app/Contents/MacOS/Chromium".into());
+        candidates.extend(which_on_path(&["microsoft-edge", "chrome", "chromium"]));
+    }
+    #[cfg(all(unix, not(target_os = "macos"), not(target_os = "windows")))]
+    {
+        candidates.extend(which_on_path(&[
+            "microsoft-edge",
+            "microsoft-edge-stable",
+            "chrome",
+            "chromium",
+            "chromium-browser",
+        ]));
+    }
+    candidates.into_iter().find(|p| p.is_file())
+}
+
+/// Resolve bare executables through PATH without pulling a `which` crate.
+fn which_on_path(names: &[&str]) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    let Some(path) = std::env::var_os("PATH") else {
+        return out;
+    };
+    for dir in std::env::split_paths(&path) {
+        for name in names {
+            let cand = dir.join(name);
+            if cand.is_file() {
+                out.push(cand);
+            }
+        }
+    }
+    out
+}
+
+fn file_url(p: &std::path::Path) -> String {
+    let s = p.display().to_string();
+    #[cfg(target_os = "windows")]
+    {
+        let s = s.replace('\\', "/");
+        // file:///C:/dir/x.html — the absolute-path form browsers accept.
+        format!("file:///{s}")
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        format!("file://{s}")
+    }
+}
+
+/// Render an HTML string to a PDF using a headless Chromium-family browser.
+///
+/// `html_content` is written to a private temp file (never the user's
+/// project), the browser prints it to a temp PDF, and the PDF is moved to
+/// `target_path` (parent dirs created). The temp profile dir isolates the
+/// headless run from any running browser instance (Edge refuses
+/// --print-to-pdf when it has to join an existing profile).
+///
+/// Err on EVERY failure mode (no browser, timeout, empty/short output) so
+/// the caller can fall back to the jsPDF renderer instead of reporting a
+/// success that produced no file.
+#[tauri::command]
+pub fn fs_render_html_to_pdf(
+    html_content: String,
+    target_path: String,
+    workspace: Option<WorkspaceEnv>,
+) -> Result<(), String> {
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    let browser = find_chromium_browser().ok_or("no Edge/Chrome found for PDF rendering")?;
+    let workspace = WorkspaceEnv::from_option(workspace);
+    let target = resolve_path(&target_path, &workspace);
+    let parent = target
+        .parent()
+        .ok_or_else(|| "path has no parent".to_string())?;
+
+    let unique = format!(
+        "{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.subsec_nanos())
+            .unwrap_or(0)
+    );
+    let tmp_dir = std::env::temp_dir().join(format!("kai-pdf-{unique}"));
+    std::fs::create_dir_all(&tmp_dir).map_err(|e| e.to_string())?;
+    let html_file = tmp_dir.join("render.html");
+    let pdf_file = tmp_dir.join("out.pdf");
+    let profile_dir = tmp_dir.join("profile");
+
+    let result = (|| -> Result<(), String> {
+        std::fs::write(&html_file, html_content.as_bytes())
+            .map_err(|e| format!("temp html write failed: {e}"))?;
+
+        let mut cmd = Command::new(&browser);
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        }
+        cmd.arg("--headless=new")
+            .arg("--disable-gpu")
+            .arg("--no-pdf-header-footer")
+            .arg(format!(
+                "--user-data-dir={}",
+                profile_dir.display()
+            ))
+            .arg(format!(
+                "--virtual-time-budget={}",
+                10_000
+            ))
+            .arg(format!("--print-to-pdf={}", pdf_file.display()))
+            .arg(file_url(&html_file))
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
+
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| format!("browser spawn failed: {e}"))?;
+
+        // Poll to a hard deadline: headless Chromium occasionally hangs on
+        // a locked profile; a blocked wait() would wedge the IPC thread.
+        let deadline = Instant::now() + Duration::from_secs(60);
+        loop {
+            match child.try_wait().map_err(|e| e.to_string())? {
+                Some(status) => {
+                    if !status.success() {
+                        let stderr = {
+                            let mut buf = String::new();
+                            if let Some(mut err) = child.stderr.take() {
+                                let _ = std::io::Read::read_to_string(&mut err, &mut buf);
+                            }
+                            buf
+                        };
+                        return Err(format!(
+                            "browser exited with {status}: {}",
+                            stderr.trim().get(..400).unwrap_or("")
+                        ));
+                    }
+                    break;
+                }
+                None => {
+                    if Instant::now() > deadline {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        return Err("browser render timed out (60s)".into());
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            }
+        }
+
+        let meta = std::fs::metadata(&pdf_file).map_err(|_| {
+            "browser produced no PDF (profile conflict or sandbox restriction)".to_string()
+        })?;
+        // Smallest plausible 1-page PDF is a few KB; anything tinier is a
+        // write failure, not a render result.
+        if meta.len() < 512 {
+            return Err("browser PDF output is empty".into());
+        }
+
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        // rename fails across volumes (temp on C:, target on D:) — fall back
+        // to copy.
+        if std::fs::rename(&pdf_file, &target).is_err() {
+            std::fs::copy(&pdf_file, &target).map_err(|e| e.to_string())?;
+        }
+        emit_fs_changed(&target);
+        Ok(())
+    })();
+
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+    result
+}
+
 // ── Spreadsheet parsing (calamine) ─────────────────────────────────────
 
 use calamine::Reader;

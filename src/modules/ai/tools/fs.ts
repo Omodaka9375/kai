@@ -2,6 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { invoke } from "@tauri-apps/api/core";
 import { isDocumentFile, parseDocument, parseDocx } from "../lib/documentParser";
+import { renderDocumentToPdf } from "../lib/pdfRender";
 import { djb2, readCacheEntry, READ_BYTE_CAP } from "../lib/hash";
 import {
   checkReadableCanonical,
@@ -413,7 +414,10 @@ export function buildFsTools(ctx: ToolContext) {
 
     convert_to_pdf: tool({
       description:
-        "Convert an existing .md, .txt, or .docx file into a professionally formatted PDF. Parent directories for target path are created automatically. Always asks the user before running.",
+        "Convert an existing .md, .txt, or .docx file into a professionally formatted PDF. " +
+        "Renders via headless Edge/Chrome (real typography, emoji, tables, code blocks); " +
+        "falls back to a plain-text renderer when no browser is installed. " +
+        "Parent directories for target path are created automatically. Always asks the user before running.",
       inputSchema: z.object({
         sourcePath: z
           .string()
@@ -451,8 +455,14 @@ export function buildFsTools(ctx: ToolContext) {
           // Read source file text
           let text = "";
           const isDocx = resolvedSource.toLowerCase().endsWith(".docx");
-          
+          let docxBytes: Uint8Array | undefined;
+
           if (isDocx) {
+            const bytes = await invoke<number[]>("fs_read_file_bytes", {
+              path: resolvedSource,
+              workspace: native.env,
+            });
+            docxBytes = new Uint8Array(bytes);
             text = await parseDocx(resolvedSource);
           } else {
             const r = await native.readFile(resolvedSource);
@@ -465,147 +475,34 @@ export function buildFsTools(ctx: ToolContext) {
             text = r.content;
           }
 
-          // Generate PDF
-          const { jsPDF } = await import("jspdf");
-          const doc = new jsPDF();
-          const pageWidth = doc.internal.pageSize.getWidth();
-          const pageHeight = doc.internal.pageSize.getHeight();
-          const margin = 20;
-          const contentWidth = pageWidth - margin * 2;
+          // Render: headless Edge/Chrome first (real font stack, emoji-capable,
+          // real markdown structure), jsPDF text renderer as the fallback for
+          // machines with no browser. Emoji previously mapped to wrong glyphs
+          // because jsPDF's Standard-14 fonts carry no emoji coverage.
+          const kind: "md" | "txt" | "docx" = isDocx
+            ? "docx"
+            : resolvedSource.toLowerCase().endsWith(".md")
+              ? "md"
+              : "txt";
+          const outcome = await renderDocumentToPdf({
+            resolvedTarget,
+            kind,
+            text,
+            docxBytes,
+            native,
+          });
 
-          const lines = text.split("\n");
-          let y = margin;
-
-          function checkNewPage(neededHeight: number) {
-            if (y + neededHeight > pageHeight - margin) {
-              doc.addPage();
-              y = margin;
-            }
-          }
-
-          let inCodeBlock = false;
-
-          for (let i = 0; i < lines.length; i++) {
-            const rawLine = lines[i].trim();
-            
-            // Code block toggle
-            if (rawLine.startsWith("```")) {
-              inCodeBlock = !inCodeBlock;
-              continue;
-            }
-
-            if (inCodeBlock) {
-              doc.setFont("courier", "normal");
-              doc.setFontSize(9);
-              doc.setTextColor(80, 80, 80);
-              const codeLines = doc.splitTextToSize(lines[i], contentWidth - 10);
-              for (const codeLine of codeLines) {
-                checkNewPage(5);
-                doc.text(codeLine, margin + 5, y);
-                y += 5;
-              }
-              continue;
-            }
-
-            if (rawLine.startsWith("# ")) {
-              const headingText = rawLine.slice(2);
-              doc.setFont("helvetica", "bold");
-              doc.setFontSize(18);
-              doc.setTextColor(33, 37, 41);
-              const headingLines = doc.splitTextToSize(headingText, contentWidth);
-              y += 4;
-              for (const line of headingLines) {
-                checkNewPage(8);
-                doc.text(line, margin, y);
-                y += 8;
-              }
-              y += 4;
-            } else if (rawLine.startsWith("## ")) {
-              const headingText = rawLine.slice(3);
-              doc.setFont("helvetica", "bold");
-              doc.setFontSize(14);
-              doc.setTextColor(33, 37, 41);
-              const headingLines = doc.splitTextToSize(headingText, contentWidth);
-              y += 3;
-              for (const line of headingLines) {
-                checkNewPage(7);
-                doc.text(line, margin, y);
-                y += 7;
-              }
-              y += 3;
-            } else if (rawLine.startsWith("### ")) {
-              const headingText = rawLine.slice(4);
-              doc.setFont("helvetica", "bold");
-              doc.setFontSize(12);
-              doc.setTextColor(33, 37, 41);
-              const headingLines = doc.splitTextToSize(headingText, contentWidth);
-              y += 2;
-              for (const line of headingLines) {
-                checkNewPage(6);
-                doc.text(line, margin, y);
-                y += 6;
-              }
-              y += 2;
-            } else if (rawLine.startsWith("- ") || rawLine.startsWith("* ")) {
-              const itemText = rawLine.slice(2);
-              doc.setFont("helvetica", "normal");
-              doc.setFontSize(10.5);
-              doc.setTextColor(50, 50, 50);
-              const itemLines = doc.splitTextToSize(itemText, contentWidth - 8);
-              let isFirstLine = true;
-              for (const line of itemLines) {
-                checkNewPage(6);
-                if (isFirstLine) {
-                  doc.text("•", margin + 2, y);
-                  doc.text(line, margin + 8, y);
-                  isFirstLine = false;
-                } else {
-                  doc.text(line, margin + 8, y);
-                }
-                y += 6;
-              }
-              y += 1.5;
-            } else if (rawLine === "") {
-              y += 4;
-            } else {
-              doc.setFont("helvetica", "normal");
-              doc.setFontSize(10.5);
-              doc.setTextColor(50, 50, 50);
-              const pLines = doc.splitTextToSize(lines[i], contentWidth);
-              for (const line of pLines) {
-                checkNewPage(6);
-                doc.text(line, margin, y);
-                y += 6;
-              }
-            }
-          }
-
-          // Auto-create parent directories for target file
-          const lastSep = Math.max(resolvedTarget.lastIndexOf("/"), resolvedTarget.lastIndexOf("\\"));
-          if (lastSep > 0) {
-            const parentDir = resolvedTarget.slice(0, lastSep);
-            try {
-              await native.createDir(parentDir);
-            } catch {
-              // already exists
-            }
-          }
-
-          // Output binary bytes
-          const arrayBuffer = doc.output("arraybuffer");
-          const uint8Array = new Uint8Array(arrayBuffer);
-          const bytes = Array.from(uint8Array);
-
-          // Write bytes to disk
-          await native.writeFileBytes(resolvedTarget, bytes);
           window.dispatchEvent(new CustomEvent("Kai:fs-changed", { detail: resolvedTarget }));
 
           return {
             sourcePath: resolvedSource,
             targetPath: resolvedTarget,
-            bytesWritten: bytes.length,
+            engine: outcome.engine,
             ok: true,
-            message: `Successfully converted and saved PDF to ${resolvedTarget}`,
+            message:
+              outcome.engine === "browser"
+                ? `Successfully converted and saved PDF to ${resolvedTarget}`
+                : `Saved PDF to ${resolvedTarget} with the basic text renderer (no Edge/Chrome found: ${outcome.reason.trim().slice(0, 160)})`,
           };
         } catch (e) {
           return { error: String(e), sourcePath: resolvedSource, targetPath: resolvedTarget };
