@@ -10,6 +10,9 @@ All notable changes to the KAI terminal emulator project are documented in this 
 - Sandbox: mode changes in Settings now reach the AI window, in every window.
 - Sandbox: the sandbox pill in the AI window is now a picker.
 - Chat: uploaded image attachments are saved to ~/.kai/media and the model gets their file path.
+- Approvals: denied tool calls tell the model why, so the agent acknowledges the rejection instead of improvising after a Deny.
+- Chat: commands interrupted with Stop show "canceled" (muted) instead of the red "failed" pill.
+- Windows: an installer-launched KAI that inherited Redirection Guard auto-relaunches with a clean process token at startup, fixing WinError 448 on junctioned node_modules in agent shells and tests.
 
 ---
 

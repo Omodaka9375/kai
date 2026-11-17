@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Chat } from "@ai-sdk/react";
 import type { UIMessage } from "ai";
 import { lastAssistantMessageIsCompleteWithApprovalResponses } from "ai";
-import { applyApprovalResponseToChat, clearSessionStopped, markSessionStopped, settleInterruptedToolMessages, wasSessionStopped } from "./approvalResponses";
+import { applyApprovalResponseToChat, clearSessionStopped, markSessionStopped, settleInterruptedToolMessages, wasSessionStopped, USER_INTERRUPTED_ERROR_TEXT, DEFAULT_DENY_REASON } from "./approvalResponses";
 
 /**
  * The stranded-approval contract (2026-11-09 report: reminder wake parked on
@@ -109,6 +109,43 @@ describe("applyApprovalResponseToChat", () => {
     expect(ok).toBe(false);
     expect(chat.sendMessage).not.toHaveBeenCalled();
   });
+
+  it("a denial carries a reason the model sees (default when none given)", () => {
+    // 2026-11-17: the SDK's execution-denied tool result includes `reason`.
+    // Without one the model got a bare denial and improvised (user report:
+    // "agent got confused after denying"). Approvals carry NO reason.
+    const chat = fakeChat([assistantWithCard]);
+    applyApprovalResponseToChat(chat, APPROVAL_ID, false);
+    const call = (chat.addToolApprovalResponse as ReturnType<typeof vi.fn>).mock.calls[0]![0] as {
+      approved: boolean;
+      reason?: string;
+    };
+    expect(call.approved).toBe(false);
+    expect(call.reason).toBe(DEFAULT_DENY_REASON);
+
+    const approved2 = fakeChat([assistantWithCard]);
+    applyApprovalResponseToChat(approved2, APPROVAL_ID, true);
+    const call2 = (approved2.addToolApprovalResponse as ReturnType<typeof vi.fn>).mock.calls[0]![0] as {
+      approved: boolean;
+      reason?: string;
+    };
+    expect(call2.approved).toBe(true);
+    expect(call2.reason).toBeUndefined();
+  });
+
+  it("a custom deny reason overrides the default, including stranded parts", () => {
+    const chat = fakeChat([assistantWithCard, rideAlongUser]);
+    applyApprovalResponseToChat(chat, APPROVAL_ID, false, "custom reason");
+    expect(chat.messages[0].parts[0]).toMatchObject({
+      state: "approval-responded",
+      approval: { id: APPROVAL_ID, approved: false, reason: "custom reason" },
+    });
+    const direct = fakeChat([assistantWithCard]);
+    applyApprovalResponseToChat(direct, APPROVAL_ID, false, "custom reason");
+    expect(direct.addToolApprovalResponse).toHaveBeenCalledWith(
+      expect.objectContaining({ approved: false, reason: "custom reason" }),
+    );
+  });
 });
 
 describe("session stop marker", () => {
@@ -156,10 +193,25 @@ describe("settleInterruptedToolMessages", () => {
     expect(settled[0]!.parts[0]).toBe(text);
     expect(settled[0]!.parts[1]).toMatchObject({
       state: "output-error",
-      errorText: "Command stopped by the user.",
+      errorText: USER_INTERRUPTED_ERROR_TEXT,
     });
     expect(settled[0]!.parts[2]).toMatchObject({ state: "output-error" });
     expect(settled[0]!.parts[3]).toBe(done);
+  });
+
+  it("interrupted calls carry the exported sentinel (canceled pill contract)", () => {
+    // The Tool card renders "canceled" (muted) instead of the red "failed"
+    // pill when errorText === USER_INTERRUPTED_ERROR_TEXT. The sentinel is
+    // compared by identity via the export, so pin that settle writes EXACTLY
+    // that constant (a drift here silently flips every interrupted card back
+    // to "failed").
+    const running = { type: "tool-bash_run", state: "input-available" };
+    const messages = [{ id: "a1", role: "assistant", parts: [running] }] as UIMessage[];
+    const settled = settleInterruptedToolMessages(messages);
+    expect((settled[0]!.parts[0] as { errorText?: string }).errorText).toBe(
+      USER_INTERRUPTED_ERROR_TEXT,
+    );
+    expect(USER_INTERRUPTED_ERROR_TEXT).toBe("Command stopped by the user.");
   });
 
   it("revokes the approval response so an aborted command cannot self-resume", () => {

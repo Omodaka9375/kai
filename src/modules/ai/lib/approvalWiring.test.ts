@@ -91,13 +91,34 @@ describe("approval responses flow through the denial latch", () => {
   it("the store responders are latch-guarded too (diff-tab path)", () => {
     const store = src("../store/chatStore.ts");
     // Anchor on the implementation arrow (unique — the interface uses a
-    // bare `=> void;` signature without the destructured body).
-    const anchor = "respondToApproval: (approvalId, approved) => {";
+    // bare `=> void;` signature without the destructured body). Carries an
+    // optional denial `reason` since 2026-11-17 (the model needs to see WHY
+    // it was denied; a bare execution-denied made it improvise).
+    const anchor = "respondToApproval: (approvalId, approved, reason) => {";
     const start = store.indexOf(anchor);
     expect(start).toBeGreaterThan(-1);
     const respond = store.slice(start, start + 600);
     expect(respond).toContain("noteApprovalDenied");
     expect(respond).toContain("isApprovalDenied");
+  });
+
+  it("denials carry a reason the model can act on (2026-11-17)", () => {
+    const helper = src("../store/approvalResponses.ts");
+    // The helper applies the default deny reason whenever none was given,
+    // and forwards it into the SDK applier + the stranded-part rewrite.
+    expect(helper).toContain("DEFAULT_DENY_REASON");
+    expect(helper).toMatch(
+      /const effectiveReason = !approved \? \(reason \?\? DEFAULT_DENY_REASON\) : undefined;/,
+    );
+    expect(helper).toMatch(
+      /addToolApprovalResponse\(\{ id: approvalId, approved, reason: effectiveReason \}\)/,
+    );
+    expect(helper).toMatch(
+      /approval: \{ id: approvalId, approved, reason: effectiveReason \}/,
+    );
+    // Persona denials (group chat) carry the same default reason.
+    const group = src("../store/groupChatStore.ts");
+    expect(group).toContain("DEFAULT_DENY_REASON_PERSONA");
   });
 
 });

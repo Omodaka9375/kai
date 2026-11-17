@@ -6,6 +6,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
+import { USER_INTERRUPTED_ERROR_TEXT } from "@/modules/ai/store/approvalResponses";
 import ArrowRight01Icon from "@hugeicons/core-free-icons/ArrowRight01Icon";
 import CheckListIcon from "@hugeicons/core-free-icons/CheckListIcon";
 import EyeIcon from "@hugeicons/core-free-icons/EyeIcon";
@@ -153,6 +154,14 @@ const ToolImpl = ({
   const label = presentationFor(toolName).label ?? prettyToolName(toolName);
   const summary = deriveSummary(toolName, input);
   const isError = state === "output-error";
+  // USER-INTERRUPTED ≠ FAILED (2026-11-17): settleInterruptedToolMessages
+  // marks Stop-interrupted calls with the exported sentinel errorText. An
+  // interrupted command is a user decision — render it muted ("canceled"),
+  // not as the red destructive "failed" pill. Identity compare via the
+  // exported constant so a coincidentally identical real failure message
+  // would need the SAME constant import to ever mask as canceled.
+  const wasUserInterrupted =
+    isError && errorText === USER_INTERRUPTED_ERROR_TEXT;
   // Outcome badge: _effect now persists into the transcript (stripped from
   // the model copy), so a card replayed days later still shows that a
   // PARTIAL edit landed 3/5 hunks or a ROLLED_BACK batch did nothing.
@@ -223,9 +232,11 @@ const ToolImpl = ({
           // this the amber > hollow snap read as a "jump" on fast tools.
           className={cn(
             "size-1.5 shrink-0 rounded-full transition-[background-color,box-shadow] duration-200 ease-out",
-            STATUS_DOT[state],
+            wasUserInterrupted
+              ? "bg-transparent ring-1 ring-inset ring-muted-foreground/40"
+              : STATUS_DOT[state],
           )}
-          aria-label={STATUS_LABEL[state]}
+          aria-label={wasUserInterrupted ? "canceled" : STATUS_LABEL[state]}
         />
         <HugeiconsIcon
           icon={Icon}
@@ -259,9 +270,14 @@ const ToolImpl = ({
             {effectBadge}
           </span>
         )}
-        {isError && (
+        {(isError && !wasUserInterrupted) && (
           <span className="shrink-0 text-[10px] font-medium text-destructive">
             failed
+          </span>
+        )}
+        {wasUserInterrupted && (
+          <span className="shrink-0 text-[10px] font-medium text-muted-foreground">
+            canceled
           </span>
         )}
       </CollapsibleTrigger>

@@ -314,7 +314,7 @@ type StoreState = {
   approvalResponder: ApprovalResponder | null;
   setApprovalResponder: (fn: ApprovalResponder | null) => void;
   setApprovalResponderForSession: (sessionId: string, fn: ApprovalResponder | null) => void;
-  respondToApproval: (approvalId: string, approved: boolean) => void;
+  respondToApproval: (approvalId: string, approved: boolean, reason?: string) => void;
 
   apiKeys: ProviderKeys;
   setApiKeys: (keys: ProviderKeys) => void;
@@ -1196,7 +1196,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
     else approvalResponders.delete(sessionId);
     if (get().activeSessionId === sessionId) set({ approvalResponder: fn });
   },
-  respondToApproval: (approvalId, approved) => {
+  respondToApproval: (approvalId, approved, reason) => {
     // Denial is monotonic: latch it so no deferred auto-approve/allowlist
     // callback can re-permit this exact call afterward. An approve that
     // arrives after a denial is dropped (the SDK is otherwise last-writer).
@@ -1212,21 +1212,21 @@ export const useChatStore = create<StoreState>((set, get) => ({
   if (owner) {
     const fn = approvalResponders.get(owner);
     if (fn) {
-      fn(approvalId, approved);
+      fn(approvalId, approved, reason);
       return;
     }
     // Owner chat resident but NO bridge responder registered for it (a
     // reminder/wake run parked in a session no bridge watches): apply to
     // the owner chat directly. Falling through would call the ACTIVE
-    // session's responder with a foreign approval id — a swallowed
+    // session's responder with a foreign approval id - a swallowed
     // "Tool call not found" and a card that pins forever.
     const ownerChat = chats.get(owner);
-    if (ownerChat && applyApprovalResponseToChat(ownerChat, approvalId, approved)) {
+    if (ownerChat && applyApprovalResponseToChat(ownerChat, approvalId, approved, reason)) {
       return;
     }
   }
   const fallback = get().approvalResponder;
-  if (fallback) fallback(approvalId, approved);
+  if (fallback) fallback(approvalId, approved, reason);
     // Do NOT abort on denial — the agent should see the "tool call denied"
     // result and continue gracefully. Aborting kills the entire agent run
     // for a single rejected tool call, which causes "(User canceled)" to
@@ -2522,6 +2522,7 @@ export function abortSession(sessionId: string): void {
 export function respondToApprovalStandalone(
   approvalId: string,
   approved: boolean,
+  reason?: string,
 ): void {
   const state = useChatStore.getState();
   // AUDIT: record the human decision — the one thing the agent's own
@@ -2537,18 +2538,18 @@ export function respondToApprovalStandalone(
   if (owner) {
     const fn = approvalResponders.get(owner);
     if (fn) {
-      fn(approvalId, approved);
+      fn(approvalId, approved, reason);
       return;
     }
     // Same no-responder hole as respondToApproval: apply to the owner chat
     // directly instead of dropping the decision on the wrong session.
     const ownerChat = chats.get(owner);
-    if (ownerChat && applyApprovalResponseToChat(ownerChat, approvalId, approved)) {
+    if (ownerChat && applyApprovalResponseToChat(ownerChat, approvalId, approved, reason)) {
       return;
     }
   }
   const fn = state.approvalResponder;
-  if (fn) fn(approvalId, approved);
+  if (fn) fn(approvalId, approved, reason);
   // Same rationale as respondToApproval: don't abort on denial.
   // The agent should see the denial and continue gracefully.
 }

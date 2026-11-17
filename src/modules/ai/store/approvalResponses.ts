@@ -25,7 +25,23 @@ import type { Chat, UIMessage } from "@ai-sdk/react";
 export type ApprovalResponder = (
   approvalId: string,
   approved: boolean,
+  reason?: string,
 ) => void;
+
+/** Default denial reason the model sees in its `execution-denied` tool
+ *  result (the SDK carries `reason` from addToolApprovalResponse through
+ *  the tool-approval-response into the model-bound history). Without it the
+ *  model gets a bare `execution-denied` with no explanation and improvises
+ *  — the 2026-11-17 "agent got confused after denying a card" report. */
+export const DEFAULT_DENY_REASON =
+  "The user denied this tool call on the approval card. Do not retry it or continue the plan — acknowledge the denial, ask what they would like instead, and wait.";
+
+/** Sentinel errorText settleInterruptedToolMessages writes for calls the
+ *  USER interrupted (Stop button / abort). Lets the UI render "canceled"
+ *  (muted) instead of the red "failed" pill — an interrupted command is a
+ *  user decision, not a failure. Compare by identity, not substring, so an
+ *  identical-looking errorText from a real failure cannot mask as canceled. */
+export const USER_INTERRUPTED_ERROR_TEXT = "Command stopped by the user.";
 
 const stoppedSessions = new Set<string>();
 
@@ -86,7 +102,7 @@ export function settleInterruptedToolMessages(
       return {
         ...rest,
         state: "output-error",
-        errorText: "Command stopped by the user.",
+        errorText: USER_INTERRUPTED_ERROR_TEXT,
       };
     });
     return messageChanged ? { ...m, parts } as UIMessage : m;
@@ -149,7 +165,10 @@ export function applyApprovalResponseToChat(
   chat: Chat<UIMessage>,
   approvalId: string,
   approved: boolean,
+  reason?: string,
 ): boolean {
+  // Every denial carries a reason the model can act on; approvals never do.
+  const effectiveReason = !approved ? (reason ?? DEFAULT_DENY_REASON) : undefined;
   const messages = chat.messages;
   let holderIdx = -1;
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -169,7 +188,7 @@ export function applyApprovalResponseToChat(
   if (holderIdx === -1) return false;
 
   if (holderIdx === messages.length - 1) {
-    void chat.addToolApprovalResponse({ id: approvalId, approved });
+    void chat.addToolApprovalResponse({ id: approvalId, approved, reason: effectiveReason });
     return true;
   }
 
@@ -188,7 +207,7 @@ export function applyApprovalResponseToChat(
           return {
             ...p,
             state: "approval-responded",
-            approval: { id: approvalId, approved },
+            approval: { id: approvalId, approved, reason: effectiveReason },
           } as typeof p;
         }
         return p;

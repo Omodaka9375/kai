@@ -653,6 +653,16 @@ pub fn run() {
             #[cfg(target_os = "windows")]
             crate::modules::pty::job::install_process_wide_kill_on_close();
 
+            // INSTALLER/AUTO-RESTART SANITIZER (2026-11-17): an
+            // installer-launched KAI inherits Redirection Guard ENFORCE from
+            // the elevated parent — every child then fails junctioned paths
+            // with WinError 448 (pnpm node_modules, tests). Must run BEFORE
+            // any child is spawned and before the kill-on-close job would
+            // kill the replacement: if the policy is enforced, swap this
+            // process for a cleanly-parented one (shell-created child) and
+            // exit. No-op on healthy launches. See modules/startup_env.rs.
+            crate::modules::startup_env::ensure_clean_process_token();
+
             // Dev builds navigate the (hidden) main window to devUrl. If no
             // server is listening there, the webview loads an error page into
             // an INVISIBLE window — the frontend never runs, never calls

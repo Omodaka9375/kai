@@ -171,9 +171,18 @@ function assertRunResumedWithDenial(approvalId: string, toolCallId: string) {
     type?: string;
     approvalId?: string;
     approved?: boolean;
+    reason?: string;
   }>;
+  // Teardown denials carry the default deny reason since 2026-11-17: a
+  // bare approved:false reads as an unexplained refusal and the persona
+  // improvises (same class as the foreground deny-confusion fix).
   expect(parts).toEqual([
-    { type: "tool-approval-response", approvalId, approved: false },
+    {
+      type: "tool-approval-response",
+      approvalId,
+      approved: false,
+      reason: expect.stringContaining("denied"),
+    },
   ]);
   void toolCallId;
 }

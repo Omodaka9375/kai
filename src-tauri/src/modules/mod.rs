@@ -13,6 +13,7 @@ pub mod pty;
 pub mod radio_proxy;
 pub mod sandbox;
 pub mod screen;
+pub mod startup_env;
 pub mod secrets;
 pub mod session_journal;
 pub mod shell;

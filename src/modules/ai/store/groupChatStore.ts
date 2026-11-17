@@ -1,6 +1,6 @@
 import { LazyStore } from "@tauri-apps/plugin-store";
 import { agentBus } from "../lib/eventBus";
-import { approvalContinuationPending } from "./approvalResponses";
+import { approvalContinuationPending, DEFAULT_DENY_REASON as DEFAULT_DENY_REASON_PERSONA } from "./approvalResponses";
 import {
   getChat,
   getProjectActiveSession,
@@ -1445,6 +1445,13 @@ async function runPersonaReply(
         type: "tool-approval-response" as const,
         approvalId: approvalIdByToolCall.get(c.toolCallId) ?? c.toolCallId,
         approved: decisions[i] ?? false,
+        // A denied persona call needs a reason in the model-bound tool
+        // result, same as foreground denials — a bare approved:false reads
+        // as an unexplained refusal and the persona improvises.
+        reason:
+          decisions[i] === false
+            ? DEFAULT_DENY_REASON_PERSONA
+            : undefined,
       }));
       accumulated = [
         ...accumulated,
