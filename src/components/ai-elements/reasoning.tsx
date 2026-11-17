@@ -6,7 +6,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
-import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
+import BrainIcon from "@hugeicons/core-free-icons/BrainIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useControllableState } from "@radix-ui/react-use-controllable-state";
 import type { ComponentProps, ReactNode } from "react";
@@ -178,16 +178,28 @@ export const ReasoningTrigger = memo(
       >
         {children ?? (
           <>
-            {getThinkingMessage(isStreaming, duration)}
+            {/* BRAIN PILL (2026-11-17 ask): the plain "Thinking" text +
+                chevron read as static text; a familiar animated icon makes
+                the affordance obvious. Pulsing while the model reasons,
+                static once done; a tiny duration label stays for context.
+                Rotation replaces the old chevron as the open/closed cue. */}
             <HugeiconsIcon
-              icon={ArrowDown01Icon}
-              size={11}
+              icon={BrainIcon}
+              size={12}
               strokeWidth={1.75}
               className={cn(
                 "transition-transform",
                 isOpen ? "rotate-0" : "rotate-180",
+                isStreaming && "animate-pulse",
               )}
             />
+            {isStreaming ? (
+              <Shimmer duration={1}>Thinking</Shimmer>
+            ) : duration !== undefined ? (
+              <span>{duration}s</span>
+            ) : (
+              <span>Thought process</span>
+            )}
           </>
         )}
       </CollapsibleTrigger>

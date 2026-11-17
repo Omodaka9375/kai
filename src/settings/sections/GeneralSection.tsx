@@ -23,8 +23,9 @@ import {
   setAutostart,
   setEditorTheme,
   setRestoreWindowState,
-  setShowHidden,
+      setShowHidden,
   setRadioEnabled,
+  setShowModelThinking,
   setTerminalFontSize,
   setTerminalScrollback,
   setTerminalWebglEnabled,
@@ -69,6 +70,7 @@ export function GeneralSection() {
   const vimMode = usePreferencesStore((s) => s.vimMode);
   const editorWordWrap = usePreferencesStore((s) => s.editorWordWrap);
   const showHidden = usePreferencesStore((s) => s.showHidden);
+  const showModelThinking = usePreferencesStore((s) => s.showModelThinking);
   const radioEnabled = usePreferencesStore((s) => s.radioEnabled);
   const terminalWebglEnabled = usePreferencesStore(
     (s) => s.terminalWebglEnabled,
@@ -230,6 +232,19 @@ export function GeneralSection() {
           <Switch
             checked={showHidden}
             onCheckedChange={(v) => void setShowHidden(v)}
+          />
+        </SettingRow>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <Label>Chat</Label>
+        <SettingRow
+          title="Show model inner thinking"
+          description="Show the animated brain pill for the model's reasoning blocks in the chat. When off, reasoning is hidden entirely."
+        >
+          <Switch
+            checked={showModelThinking}
+            onCheckedChange={(v) => void setShowModelThinking(v)}
           />
         </SettingRow>
       </div>

@@ -98,6 +98,11 @@ export type Preferences = {
   updaterLastCheck: number;
   /** SomaFM status-bar radio — opt-in chill music feature. */
   radioEnabled: boolean;
+  /** Show the model's inner-thinking (reasoning) blocks in the chat.
+   *  On = the animated brain pill that expands to the reasoning text.
+   *  Off = reasoning is hidden entirely from the UI. The toggle lives in
+   *  Settings -> General -> Chat. */
+  showModelThinking: boolean;
   /** Persisted SomaFM station id (empty = none picked yet). */
   radioStationId: string;
   /** Custom group-chat name pool, one name per line. Empty = built-in pool. */
@@ -176,6 +181,7 @@ const KEY_SIDEBAR_VIEW = "sidebarView";
 
 const KEY_UPDATER_LAST_CHECK = "updaterLastCheck";
 const KEY_RADIO_ENABLED = "radioEnabled";
+const KEY_SHOW_MODEL_THINKING = "showModelThinking";
 const KEY_RADIO_STATION = "radioStationId";
 const KEY_GROUP_NAME_POOL = "groupNamePool";
 /** User-accepted spell-check words (AI input "Add to dictionary"). */
@@ -252,6 +258,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
 
   updaterLastCheck: 0,
   radioEnabled: false,
+  showModelThinking: true,
   radioStationId: "",
   groupNamePool: "",
   voiceSttMode: "api",
@@ -381,8 +388,11 @@ export async function loadPreferences(): Promise<Preferences> {
     updaterLastCheck:
       get<number>(KEY_UPDATER_LAST_CHECK) ??
       DEFAULT_PREFERENCES.updaterLastCheck,
-      radioEnabled:
-        get<boolean>(KEY_RADIO_ENABLED) ?? DEFAULT_PREFERENCES.radioEnabled,
+    radioEnabled:
+      get<boolean>(KEY_RADIO_ENABLED) ?? DEFAULT_PREFERENCES.radioEnabled,
+    showModelThinking:
+      get<boolean>(KEY_SHOW_MODEL_THINKING) ??
+      DEFAULT_PREFERENCES.showModelThinking,
       radioStationId:
         get<string>(KEY_RADIO_STATION) ?? DEFAULT_PREFERENCES.radioStationId,
       groupNamePool:
@@ -496,6 +506,10 @@ export async function setRestoreWindowState(value: boolean): Promise<void> {
 
 export async function setRadioEnabled(value: boolean): Promise<void> {
   await writePref(KEY_RADIO_ENABLED, value);
+}
+
+export async function setShowModelThinking(value: boolean): Promise<void> {
+  await writePref(KEY_SHOW_MODEL_THINKING, value);
 }
 
 export async function setRadioStationId(value: string): Promise<void> {
@@ -804,6 +818,7 @@ export async function onPreferencesChange(
     [KEY_SIDEBAR_VIEW]: "sidebarView",
     [KEY_UPDATER_LAST_CHECK]: "updaterLastCheck",
     [KEY_RADIO_ENABLED]: "radioEnabled",
+    [KEY_SHOW_MODEL_THINKING]: "showModelThinking",
     [KEY_RADIO_STATION]: "radioStationId",
     [KEY_GROUP_NAME_POOL]: "groupNamePool",
     [KEY_VOICE_STT_MODE]: "voiceSttMode",

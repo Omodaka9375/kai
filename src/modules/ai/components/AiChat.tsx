@@ -21,6 +21,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
+import { usePreferencesStore } from "@/modules/settings/preferences";
 import { absoluteTime } from "../lib/relativeTime";
 import { motion } from "motion/react";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -1208,6 +1209,9 @@ const RenderedPart = memo(function RenderedPart({
   streaming: boolean;
   approvalQueue?: ApprovalQueueInfo | null;
 }) {
+  // SHOW/HIDE MODEL THINKING (Settings -> General -> Chat): when off,
+  // reasoning parts and inline <thinking> pills are not rendered at all.
+  const showModelThinking = usePreferencesStore((s) => s.showModelThinking);
   // Only text/reasoning parts stream. For them, throttle the visible text so
   // stripLeakedTokens + Streamdown run at most ~12 fps instead of per token.
   const rawText =
@@ -1224,6 +1228,20 @@ const RenderedPart = memo(function RenderedPart({
     // emit a separate reasoning part), split and render them as pills.
     if (/<thinking>|<\|thinking\||<\/thinking>/i.test(raw)) {
       const segments = splitThinkingBlocks(raw);
+      // Hidden thinking: strip the thinking segments and keep only the
+      // visible text (when any). No pills, no empty render.
+      if (!showModelThinking) {
+        const visibleOnly = segments
+          .filter((s) => !s.thinking)
+          .map((s) => stripLeakedTokens(s.text))
+          .join("");
+        if (!visibleOnly.trim() || isBlankMarkdown(visibleOnly)) return null;
+        return (
+          <MessageResponse streaming={streaming}>
+            {visibleOnly}
+          </MessageResponse>
+        );
+      }
       // Check if there's any non-thinking visible text after stripping tokens
       const hasVisibleText = segments.some((s) => {
         if (s.thinking) return false;
@@ -1263,6 +1281,7 @@ const RenderedPart = memo(function RenderedPart({
   }
 
   if (part.type === "reasoning") {
+    if (!showModelThinking) return null;
     if (!cleanedText) return null;
     return (
       <Reasoning>
