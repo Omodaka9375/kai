@@ -2092,6 +2092,13 @@ export const useChatStore = create<StoreState>((set, get) => ({
       // Passive ride-along: no wake, no queue. The message is already in
       // chat.messages (appended above) and will be in the next request's
       // history snapshot.
+      // PENDING-WAKE ARM (2026-11-17 audit): the deferred wake used to be
+      // deferred FOREVER — nothing re-checked after the run settled, so a
+      // fire during the last streaming phase of a long run sat unseen until
+      // the user's next message. Arm the marker; the bridge's true-idle
+      // path (runStatus idle AND no pending approvals — the run has really
+      // ended) takes it and sends the wake then.
+      notePendingWatchWake(id);
     } else if (!shouldDeliver || shouldDeliver()) {
       // Starting a run must not suspend polling until the model finishes.
       // The appended event remains in history if the provider request fails.
@@ -2370,6 +2377,30 @@ export async function sendMessage(text: string): Promise<boolean> {
 }
 
 // COMPLETE_PART_STATES lives in ./approvalResponses now.
+
+// ── Pending watch wakes ──────────────────────────────────────────────────
+// A watch fire that lands while the agent is mid-run is PASSIVE (see
+// injectMessage): it rides history instead of waking the model, so a live
+// run is never hijacked. But nothing re-checked after the run settled — a
+// fire during the LAST streaming phase of a long run (the walk-away CI/
+// deploy scenario watches exist for) then sat unseen until the user sent
+// something. The bridge's true-idle path consumes this marker and sends
+// the wake the passive fire deferred. Consume-once semantics (take = read
+// + clear) make double-wakes impossible: only ONE bridge effect flips it.
+const pendingWatchWake = new Set<string>();
+
+/** Record that a passive (ride-along) watch fire is waiting for the run to
+ *  settle. Fire-and-forget; cleared by takePendingWatchWake. */
+export function notePendingWatchWake(sessionId: string): void {
+  pendingWatchWake.add(sessionId);
+}
+
+/** Atomically read+clear the pending-wake marker for a session. */
+export function takePendingWatchWake(sessionId: string): boolean {
+  const had = pendingWatchWake.has(sessionId);
+  if (had) pendingWatchWake.delete(sessionId);
+  return had;
+}
 
 /**
  * True when a message's parts hold an approval that is pending OR just

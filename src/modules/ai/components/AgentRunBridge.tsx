@@ -17,6 +17,7 @@ import {
   type AgentMeta,
   getSessionSteeringMessage,
   setSessionSteeringMessage,
+  takePendingWatchWake,
   type AgentRunStatus,
 } from "../store/chatStore";
 import { verifyIfDirtyAtRunEnd } from "../lib/autoVerify";
@@ -672,6 +673,20 @@ function Bridge({
       // depth for the next round.
       if (coordGroup) noteCoordinatorRoundDone(sessionId);
       noteSessionIdle(sessionId);
+      // 3. PENDING WATCH WAKE (2026-11-17 audit): a watch fire that landed
+      // while this run was streaming was PASSIVE by design (no hijack of a
+      // live run) — but the deferral used to be forever, so a fire in the
+      // run's last phase never reached the model until the user typed. This
+      // block runs ONLY on the run's TRUE settle (idle + zero pending
+      // approvals, the same gate the group flush uses — an approval-parked
+      // blip cannot fire here), and take() is atomic: exactly one wake per
+      // armed fire, no double-send across effect re-runs. sendMessage() with
+      // no args re-requests over history, which already ends with the fire.
+      if (takePendingWatchWake(sessionId)) {
+        void chat.sendMessage().catch((e) => {
+          console.error("[kai] deferred watch wake failed:", e);
+        });
+      }
     } else if (runStatus === "error") {
       // A group participant that errored (bad key, provider outage, context
       // overflow) used to look like silence in the group transcript — the

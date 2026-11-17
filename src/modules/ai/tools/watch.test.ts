@@ -441,44 +441,72 @@ describe("notify_telegram (schema field → WatchConfig)", () => {
   });
 });
 
-describe("mid-run watch fires are passive (no queued self-initiated wake)", () => {
-  // REGRESSION (user report): "it fires in the middle of my conversation and
-  // messes everything up." A fire landing while the agent was streaming used
-  // to queue a self-initiated wake that fired the moment the run settled —
-  // interrupting the user's exchange with an unsolicited narrated response.
-  // The pending-wake queue (pendingWatchWakes / queueWatchWake /
-  // flushPendingWatchWakes / flushAllPendingWatchWakes) was REMOVED entirely:
-  // mid-run fires now sit in history and ride the next request; only idle
-  // fires wake inline.
-  it("injectMessage does NOT queue a wake when the agent is mid-run", async () => {
+describe("mid-run watch fires: passive immediately, deferred wake on TRUE settle", () => {
+  // CONTRACT (2026-11-17 audit, supersedes the 2026-11-09 removal): a fire
+  // landing while the agent is streaming must NOT wake inline (the original
+  // "fires in the middle of my conversation" hijack). But the pure-ride-along
+  // design DROPPED fires that landed in the run's last streaming phase - the
+  // model never saw them until the user typed (the walk-away CI scenario
+  // watches exist for). New contract, three legs:
+  //  1. injectMessage arms notePendingWatchWake in the passive branch and
+  //     does NOT call chat.sendMessage() there (no inline wake mid-run);
+  //  2. AgentRunBridge consumes takePendingWatchWake ONLY inside the
+  //     true-idle block (runStatus idle AND approvalsPending === 0) and
+  //     sends exactly one deferred wake;
+  //  3. the fire itself still rides history (the wake re-requests over it).
+  // The watch_create contract makes the wake solicited, not hijacking: the
+  // model was told to "end your turn and wait for the injection", and the
+  // injected text carries the keep-it-brief directive.
+  it("injectMessage arms the pending-wake marker and does not wake inline mid-run", async () => {
     const src = await import("node:fs").then((fs) =>
       fs.readFileSync(new URL("../store/chatStore.ts", import.meta.url), "utf8"),
     );
-    expect(src).not.toContain("pendingWatchWakes");
+    expect(src).toContain("notePendingWatchWake(id);");
+    // The passive branch itself must not send: the wake belongs to the
+    // bridge's true-settle path.
+    const armAt = src.indexOf("notePendingWatchWake(id);");
+    const passiveBranch = src.slice(Math.max(0, armAt - 700), armAt);
+    expect(passiveBranch).not.toContain("chat.sendMessage()");
+    // The old always-flush queue stays dead.
     expect(src).not.toContain("queueWatchWake");
     expect(src).not.toContain("flushPendingWatchWakes");
     expect(src).not.toContain("flushAllPendingWatchWakes");
-    // And the passive branch exists with the idle wake intact.
+    // The idle wake path stays intact.
     expect(src).toMatch(/hasPendingApprovals\(chat\)/);
     expect(src).toContain("chat.sendMessage()");
   });
 
-  it("watch.ts no longer flushes the removed queue", async () => {
-    const src = await import("node:fs").then((fs) =>
-      fs.readFileSync(new URL("./watch.ts", import.meta.url), "utf8"),
-    );
-    expect(src).not.toContain("flushAllPendingWatchWakes");
-    expect(src).not.toContain("flushPendingWatchWakes");
-  });
-
-  it("AgentRunBridge no longer flushes on settle", async () => {
+  it("AgentRunBridge sends the deferred wake exactly once, only on true idle", async () => {
     const src = await import("node:fs").then((fs) =>
       fs.readFileSync(
         new URL("../components/AgentRunBridge.tsx", import.meta.url),
         "utf8",
       ),
     );
+    expect(src).toContain("takePendingWatchWake(sessionId)");
+    // The consume must live inside the true-idle block (gated on
+    // runStatus === "idle" && approvalsPending === 0) - not on an approval
+    // blip's settle and not on error.
+    const gateAt = src.indexOf('runStatus === "idle" && approvalsPending === 0');
+    const consumeAt = src.indexOf("takePendingWatchWake(sessionId)");
+    expect(gateAt).toBeGreaterThan(-1);
+    expect(consumeAt).toBeGreaterThan(gateAt);
+    // Same idle block: the block spans the group-mirror logic (~8k chars), so
+    // the bound only proves "not in some distant unrelated effect".
+    expect(consumeAt - gateAt).toBeLessThan(9000);
+    // Exactly one consume site - take is atomic (read+clear), so a second
+    // effect re-run in the same settle window cannot double-send.
+    expect(src.split("takePendingWatchWake(").length - 1).toBe(1);
     expect(src).not.toContain("flushPendingWatchWakes");
+  });
+
+  it("watch.ts stays delivery-agnostic (no flush, no queue knowledge)", async () => {
+    const src = await import("node:fs").then((fs) =>
+      fs.readFileSync(new URL("./watch.ts", import.meta.url), "utf8"),
+    );
+    expect(src).not.toContain("flushAllPendingWatchWakes");
+    expect(src).not.toContain("flushPendingWatchWakes");
+    expect(src).not.toContain("notePendingWatchWake");
   });
 
   it("Set iteration DOES revisit a re-added item deleted then re-added mid-iteration", () => {
