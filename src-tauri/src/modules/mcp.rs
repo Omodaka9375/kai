@@ -69,49 +69,100 @@ fn utf16z(s: &str) -> Vec<u16> {
 /// entries come back expanded. Returns None on any failure — callers fall
 /// back to the inherited PATH for that source.
 #[cfg(target_os = "windows")]
+/// Decode a registry string value's UTF-16 buffer into a clean Rust string.
+///
+/// Strips ALL trailing nuls (a value stored with a double terminator — or a
+/// corrupted one — would otherwise leak a `\0` into the merged PATH, and
+/// `Command::env` refuses nul bytes, which killed EVERY stdio MCP spawn with
+/// "nul byte found in provided data"), and returns None for any INTERIOR
+/// nul (the value is unusable — a nul inside a PATH entry can never be right).
+#[cfg(target_os = "windows")]
+fn decode_reg_sz(buf: &[u16]) -> Option<String> {
+    let mut end = buf.len();
+    while end > 0 && buf[end - 1] == 0 {
+        end -= 1;
+    }
+    let s = String::from_utf16_lossy(&buf[..end]);
+    if s.contains('\0') {
+        return None;
+    }
+    Some(s)
+}
+
+/// Read a REG_SZ / REG_EXPAND_SZ string value from the registry.
+///
+/// 2026-11-17 (v3.1.3 report): ALL of a user's MCP servers died at spawn with
+/// "nul byte found in provided data" after updating. Two defects in this
+/// reader fed a nul byte into the merged PATH that `mcp_stdio_open` hands to
+/// `Command::env` (which rejects nul bytes — every stdio MCP spawn failed
+/// identically):
+///  1. only ONE trailing nul was stripped — a value stored with a double
+///     terminator (or an interior nul, which corrupted values carry)
+///     survived into the string;
+///  2. the RRF_RT_REG_SZ-only restriction rejected REG_EXPAND_SZ values —
+///     the type Windows writes for the USER Path whenever it contains %
+///     references — so the user PATH was silently never merged at all.
+///
+/// Now: both string types are accepted (RegGetValueW auto-expands
+/// REG_EXPAND_SZ unless RRF_NOEXPAND is set), the read retries once on
+/// ERROR_MORE_DATA (the value grew between the size probe and the read),
+/// and `decode_reg_sz` strips all trailing nuls / refuses interior ones.
+#[cfg(target_os = "windows")]
 fn reg_path_value(
     hkey: windows_sys::Win32::System::Registry::HKEY,
     subkey: &str,
 ) -> Option<String> {
-    use windows_sys::Win32::System::Registry::{RegGetValueW, RRF_RT_REG_SZ};
+    use windows_sys::Win32::Foundation::ERROR_MORE_DATA;
+    use windows_sys::Win32::System::Registry::{
+        RegGetValueW, RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ,
+    };
+
     let sub = utf16z(subkey);
     let val = utf16z("Path");
+    let flags = RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ;
     let mut ty: u32 = 0;
     let mut len: u32 = 0;
-    // Size probe (pvData = null) then the real read.
-    let rc = unsafe {
-        RegGetValueW(
-            hkey,
-            sub.as_ptr(),
-            val.as_ptr(),
-            RRF_RT_REG_SZ,
-            &mut ty,
-            std::ptr::null_mut(),
-            &mut len,
-        )
-    };
-    if rc != 0 || len < 2 {
-        return None;
+    // Size probe (pvData = null) then the real read; one retry when the value
+    // grew in between (ERROR_MORE_DATA updates lpcbData with the needed size).
+    for _ in 0..2 {
+        let rc = unsafe {
+            RegGetValueW(
+                hkey,
+                sub.as_ptr(),
+                val.as_ptr(),
+                flags,
+                &mut ty,
+                std::ptr::null_mut(),
+                &mut len,
+            )
+        };
+        if rc == ERROR_MORE_DATA || rc != 0 || len < 2 {
+            continue;
+        }
+        let mut buf = vec![0u16; (len / 2) as usize];
+        let rc = unsafe {
+            RegGetValueW(
+                hkey,
+                sub.as_ptr(),
+                val.as_ptr(),
+                flags,
+                &mut ty,
+                buf.as_mut_ptr().cast(),
+                &mut len,
+            )
+        };
+        if rc != 0 {
+            continue;
+        }
+        return decode_reg_sz(&buf[..(len / 2) as usize]).or_else(|| {
+            log::warn!(
+                "registry PATH value under {subkey} contains an interior nul \
+                 — skipping it (a nul byte in PATH kills every MCP spawn)"
+            );
+            None
+        });
     }
-    let mut buf = vec![0u16; (len / 2) as usize];
-    let rc = unsafe {
-        RegGetValueW(
-            hkey,
-            sub.as_ptr(),
-            val.as_ptr(),
-            RRF_RT_REG_SZ,
-            &mut ty,
-            buf.as_mut_ptr().cast(),
-            &mut len,
-        )
-    };
-    if rc != 0 {
-        return None;
-    }
-    let n = (len / 2) as usize;
-    // Strip the trailing NUL if present (len includes it).
-    let end = if n > 0 && buf[n - 1] == 0 { n - 1 } else { n };
-    Some(String::from_utf16_lossy(&buf[..end]))
+    None
 }
 
 /// Rebuild the PATH a NORMAL login launch would have, for children KAI
@@ -139,6 +190,10 @@ fn merged_windows_path() -> String {
     }
 
     let current = std::env::var("PATH").unwrap_or_default();
+    // Nul hygiene: an inherited PATH carrying a nul byte anywhere (corrupted
+    // parent env) would kill every child spawn via Command::env. Strip such
+    // entries; entries before the first nul are kept.
+    let current = current.split('\0').next().unwrap_or_default().to_string();
     let mut have: HashSet<String> = current.split(';').map(norm).collect();
     let mut merged = current.clone();
     let mut added = 0usize;
@@ -397,5 +452,40 @@ fn truncate(s: &str, max: usize) -> &str {
         // floor_char_boundary avoids panicking when `max` splits a multi-byte
         // char (e.g. €, emoji) — a panic would kill the stderr reader thread.
         &s[..s.floor_char_boundary(max)]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // decode_reg_sz is the pure decode half of reg_path_value; its registry
+    // half needs the real API. Pin the nul hygiene: 2026-11-17 report had ALL
+    // MCP servers dead with "nul byte found in provided data" because a nul
+    // survived this decode into Command::env("PATH", ...).
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn decode_reg_sz_strips_all_trailing_nuls() {
+        // Single terminator: normal case.
+        let buf: Vec<u16> = "C:\\bin".encode_utf16().chain(Some(0)).collect();
+        assert_eq!(decode_reg_sz(&buf).as_deref(), Some("C:\\bin"));
+        // DOUBLE terminator: the exact corrupted shape that leaked a nul and
+        // killed every MCP spawn — all trailing nuls must go.
+        let buf: Vec<u16> = "C:\\bin".encode_utf16().chain([0, 0]).collect();
+        assert_eq!(decode_reg_sz(&buf).as_deref(), Some("C:\\bin"));
+        // No terminator at all: fine.
+        let buf: Vec<u16> = "C:\\bin".encode_utf16().collect();
+        assert_eq!(decode_reg_sz(&buf).as_deref(), Some("C:\\bin"));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn decode_reg_sz_rejects_interior_nuls() {
+        // A nul INSIDE the value can never be a valid PATH entry — refuse the
+        // whole value instead of truncating silently.
+        let s = "C:\\bin\0C:\\evil";
+        let buf: Vec<u16> = s.encode_utf16().collect();
+        assert_eq!(decode_reg_sz(&buf), None);
     }
 }
