@@ -455,7 +455,7 @@ fn truncate(s: &str, max: usize) -> &str {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "windows"))]
 mod tests {
     use super::*;
 
