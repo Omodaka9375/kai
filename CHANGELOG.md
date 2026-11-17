@@ -4,6 +4,15 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [3.2.0]
+
+- PDF export: convert_to_pdf renders through headless Edge/Chrome with the real OS font stack, so emoji, tables and code blocks come out correct in any viewer; falls back to the plain-text renderer only when no browser is installed.
+- Windows: the auto-update restart used to hand KAI a machine-only PATH — every terminal, agent command and background process lost node/pnpm/uvx until a manual restart. All child spawns now get the registry-merged PATH.
+- Chat: Settings → General → Chat adds a "Show model inner thinking" toggle; the reasoning pill now uses an animated brain icon (pulsing while thinking) instead of static "Thinking" text.
+- Watches: a watch firing during a long-running command is no longer silently deferred forever — the agent is woken once the run truly settles.
+
+---
+
 ## [3.1.3]
 
 - Approvals: denied tool calls tell the model why, so the agent acknowledges the rejection instead of improvising after a Deny.
