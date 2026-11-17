@@ -25,6 +25,8 @@
 
 /// Command-line marker the relaunched instance carries. Prevents an
 /// infinite relaunch loop if the shell itself were ever mitigated.
+/// Windows-only: every consumer is cfg'd to windows.
+#[cfg(target_os = "windows")]
 const RELAUNCH_ARG: &str = "--kai-relaunched-clean-token";
 
 /// True when this process carries Redirection Trust Policy in ENFORCE mode.
