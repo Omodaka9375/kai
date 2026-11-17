@@ -723,6 +723,16 @@ pub(crate) fn build_oneshot_command(
         {
             use std::os::windows::process::CommandExt;
             cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+            // AUTO-RESTART / INSTALLER-LAUNCH FIX (2026-11-17 v3.1.4 report):
+            // the updater's auto-restart parents KAI to the NSIS installer,
+            // which hands the child a MACHINE-ONLY PATH — every user-PATH
+            // entry stripped. One-shot commands (agent shell runs, sessions,
+            // background processes) inherit it and node/pnpm/uvx vanish
+            // until KAI is manually restarted. Give every one-shot the
+            // registry-merged PATH (shared helper in modules/startup_env.rs);
+            // no-op on a healthy launch.
+            let merged = crate::modules::startup_env::merged_windows_path();
+            cmd.env("PATH", merged);
         }
         let is_cmd = shell
             .file_name()

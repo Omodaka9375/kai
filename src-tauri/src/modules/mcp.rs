@@ -57,174 +57,10 @@ fn quote_cmd_arg(arg: &str) -> String {
     format!("\"{escaped}\"")
 }
 
-/// NUL-terminated UTF-16 for the W-suffix registry APIs.
-#[cfg(target_os = "windows")]
-fn utf16z(s: &str) -> Vec<u16> {
-    s.encode_utf16().chain(std::iter::once(0)).collect()
-}
-
-/// Read the `Path` value under `hkey\subkey` as a string. RegGetValueW
-/// expands REG_EXPAND_SZ values automatically (RRF_RT_REG_SZ accepts both
-/// REG_SZ and the expanded form of REG_EXPAND_SZ), so `%SystemRoot%`-style
-/// entries come back expanded. Returns None on any failure — callers fall
-/// back to the inherited PATH for that source.
-#[cfg(target_os = "windows")]
-/// Decode a registry string value's UTF-16 buffer into a clean Rust string.
-///
-/// Strips ALL trailing nuls (a value stored with a double terminator — or a
-/// corrupted one — would otherwise leak a `\0` into the merged PATH, and
-/// `Command::env` refuses nul bytes, which killed EVERY stdio MCP spawn with
-/// "nul byte found in provided data"), and returns None for any INTERIOR
-/// nul (the value is unusable — a nul inside a PATH entry can never be right).
-#[cfg(target_os = "windows")]
-fn decode_reg_sz(buf: &[u16]) -> Option<String> {
-    let mut end = buf.len();
-    while end > 0 && buf[end - 1] == 0 {
-        end -= 1;
-    }
-    let s = String::from_utf16_lossy(&buf[..end]);
-    if s.contains('\0') {
-        return None;
-    }
-    Some(s)
-}
-
-/// Read a REG_SZ / REG_EXPAND_SZ string value from the registry.
-///
-/// 2026-11-17 (v3.1.3 report): ALL of a user's MCP servers died at spawn with
-/// "nul byte found in provided data" after updating. Two defects in this
-/// reader fed a nul byte into the merged PATH that `mcp_stdio_open` hands to
-/// `Command::env` (which rejects nul bytes — every stdio MCP spawn failed
-/// identically):
-///  1. only ONE trailing nul was stripped — a value stored with a double
-///     terminator (or an interior nul, which corrupted values carry)
-///     survived into the string;
-///  2. the RRF_RT_REG_SZ-only restriction rejected REG_EXPAND_SZ values —
-///     the type Windows writes for the USER Path whenever it contains %
-///     references — so the user PATH was silently never merged at all.
-///
-/// Now: both string types are accepted (RegGetValueW auto-expands
-/// REG_EXPAND_SZ unless RRF_NOEXPAND is set), the read retries once on
-/// ERROR_MORE_DATA (the value grew between the size probe and the read),
-/// and `decode_reg_sz` strips all trailing nuls / refuses interior ones.
-#[cfg(target_os = "windows")]
-fn reg_path_value(
-    hkey: windows_sys::Win32::System::Registry::HKEY,
-    subkey: &str,
-) -> Option<String> {
-    use windows_sys::Win32::Foundation::ERROR_MORE_DATA;
-    use windows_sys::Win32::System::Registry::{
-        RegGetValueW, RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ,
-    };
-
-    let sub = utf16z(subkey);
-    let val = utf16z("Path");
-    let flags = RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ;
-    let mut ty: u32 = 0;
-    let mut len: u32 = 0;
-    // Size probe (pvData = null) then the real read; one retry when the value
-    // grew in between (ERROR_MORE_DATA updates lpcbData with the needed size).
-    for _ in 0..2 {
-        let rc = unsafe {
-            RegGetValueW(
-                hkey,
-                sub.as_ptr(),
-                val.as_ptr(),
-                flags,
-                &mut ty,
-                std::ptr::null_mut(),
-                &mut len,
-            )
-        };
-        if rc == ERROR_MORE_DATA || rc != 0 || len < 2 {
-            continue;
-        }
-        let mut buf = vec![0u16; (len / 2) as usize];
-        let rc = unsafe {
-            RegGetValueW(
-                hkey,
-                sub.as_ptr(),
-                val.as_ptr(),
-                flags,
-                &mut ty,
-                buf.as_mut_ptr().cast(),
-                &mut len,
-            )
-        };
-        if rc != 0 {
-            continue;
-        }
-        return decode_reg_sz(&buf[..(len / 2) as usize]).or_else(|| {
-            log::warn!(
-                "registry PATH value under {subkey} contains an interior nul \
-                 — skipping it (a nul byte in PATH kills every MCP spawn)"
-            );
-            None
-        });
-    }
-    None
-}
-
-/// Rebuild the PATH a NORMAL login launch would have, for children KAI
-/// spawns when KAI itself was launched with a truncated environment.
-///
-/// 2026-11-16 (v3.1.x report): a KAI started from the MSI finish page
-/// (parent msiexec) — or from any elevated parent — inherits a
-/// MACHINE-ONLY PATH: every user-PATH entry is stripped, so MCP servers
-/// configured with bare commands (`uvx`, `npx` shims in `~\.local\bin`,
-/// Python `Scripts\`, nvm) die at spawn with "Connection closed" even
-/// though the binaries exist. The fix mirrors what Explorer does for a
-/// normal launch: read the live registry (HKLM machine PATH, then HKCU
-/// user PATH) and append the entries missing from the inherited PATH.
-/// Current-PATH order is untouched (only additions), failures return the
-/// inherited PATH unchanged, and a normally-launched KAI gains nothing
-/// (every registry entry is already present, so the set diff is empty).
-#[cfg(target_os = "windows")]
-fn merged_windows_path() -> String {
-    use std::collections::HashSet;
-    use windows_sys::Win32::System::Registry::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
-
-    fn norm(e: &str) -> String {
-        // Windows path lookup is case-insensitive; ignore trailing separator.
-        e.trim_end_matches('\\').to_lowercase()
-    }
-
-    let current = std::env::var("PATH").unwrap_or_default();
-    // Nul hygiene: an inherited PATH carrying a nul byte anywhere (corrupted
-    // parent env) would kill every child spawn via Command::env. Strip such
-    // entries; entries before the first nul are kept.
-    let current = current.split('\0').next().unwrap_or_default().to_string();
-    let mut have: HashSet<String> = current.split(';').map(norm).collect();
-    let mut merged = current.clone();
-    let mut added = 0usize;
-
-    // Machine first, then user — the same order the OS merges them, so a
-    // shadowing entry (same dir in both) keeps its machine position.
-    let machine = reg_path_value(
-        HKEY_LOCAL_MACHINE,
-        "SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment",
-    );
-    let user = reg_path_value(HKEY_CURRENT_USER, "Environment");
-    for source in [machine, user].into_iter().flatten() {
-        for entry in source.split(';') {
-            let key = norm(entry);
-            if key.is_empty() || have.contains(&key) {
-                continue;
-            }
-            have.insert(key);
-            merged.push(';');
-            merged.push_str(entry);
-            added += 1;
-        }
-    }
-    if added > 0 {
-        log::info!(
-            "mcp spawn: inherited PATH was missing {added} registry PATH \
-             entries (installer/elevated launch?) — merged them back in"
-        );
-    }
-    merged
-}
+// The registry-merged PATH repair (reg_path_value / decode_reg_sz /
+// merged_windows_path) moved to modules/startup_env.rs (2026-11-17): the
+// auto-restart truncated-PATH report showed it must cover EVERY child spawn
+// site, not just MCP. mcp_stdio_open calls the shared helper below.
 
 #[derive(Default)]
 pub struct McpState {
@@ -256,12 +92,15 @@ pub fn mcp_stdio_open(
         use std::os::windows::process::CommandExt;
         let mut c = Command::new("cmd.exe");
         c.creation_flags(0x08000000); // CREATE_NO_WINDOW
-        // INSTALLER-LAUNCH FIX: cmd.exe inherits KAI's PATH, which for an
-        // installer/elevation-launched KAI is machine-only (user entries
-        // stripped). Give the resolver the registry-merged PATH instead so
-        // bare commands (uvx, npx shims, python Scripts) resolve like they
-        // do in a normal login launch. No-op when nothing is missing.
-        c.env("PATH", merged_windows_path());
+        // INSTALLER-LAUNCH / AUTO-RESTART FIX: cmd.exe inherits KAI's PATH,
+        // which for an installer- or updater-launched KAI is machine-only
+        // (user entries stripped). Give the resolver the registry-merged
+        // PATH (shared helper in modules/startup_env.rs) so bare commands
+        // (uvx, npx shims, python Scripts) resolve like they do in a normal
+        // login launch. No-op when nothing is missing.
+        #[cfg(target_os = "windows")]
+        let merged = crate::modules::startup_env::merged_windows_path();
+        c.env("PATH", merged);
                                       // Build a single command line with each component quoted for cmd.exe.
                                       // The previous `command arg1 arg2` join misparsed paths with spaces
                                       // (e.g. `C:\Program Files\nodejs\npx.cmd`) and let `&`/`|`/`>` in
@@ -452,40 +291,5 @@ fn truncate(s: &str, max: usize) -> &str {
         // floor_char_boundary avoids panicking when `max` splits a multi-byte
         // char (e.g. €, emoji) — a panic would kill the stderr reader thread.
         &s[..s.floor_char_boundary(max)]
-    }
-}
-
-#[cfg(all(test, target_os = "windows"))]
-mod tests {
-    use super::*;
-
-    // decode_reg_sz is the pure decode half of reg_path_value; its registry
-    // half needs the real API. Pin the nul hygiene: 2026-11-17 report had ALL
-    // MCP servers dead with "nul byte found in provided data" because a nul
-    // survived this decode into Command::env("PATH", ...).
-
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn decode_reg_sz_strips_all_trailing_nuls() {
-        // Single terminator: normal case.
-        let buf: Vec<u16> = "C:\\bin".encode_utf16().chain(Some(0)).collect();
-        assert_eq!(decode_reg_sz(&buf).as_deref(), Some("C:\\bin"));
-        // DOUBLE terminator: the exact corrupted shape that leaked a nul and
-        // killed every MCP spawn — all trailing nuls must go.
-        let buf: Vec<u16> = "C:\\bin".encode_utf16().chain([0, 0]).collect();
-        assert_eq!(decode_reg_sz(&buf).as_deref(), Some("C:\\bin"));
-        // No terminator at all: fine.
-        let buf: Vec<u16> = "C:\\bin".encode_utf16().collect();
-        assert_eq!(decode_reg_sz(&buf).as_deref(), Some("C:\\bin"));
-    }
-
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn decode_reg_sz_rejects_interior_nuls() {
-        // A nul INSIDE the value can never be a valid PATH entry — refuse the
-        // whole value instead of truncating silently.
-        let s = "C:\\bin\0C:\\evil";
-        let buf: Vec<u16> = s.encode_utf16().collect();
-        assert_eq!(decode_reg_sz(&buf), None);
     }
 }

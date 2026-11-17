@@ -88,6 +88,17 @@ fn apply_common(cmd: &mut CommandBuilder, cwd: Option<String>) {
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     cmd.env("KAI_TERMINAL", "1");
+    // AUTO-RESTART / INSTALLER-LAUNCH FIX (2026-11-17 v3.1.4 report): the
+    // updater's auto-restart parents KAI to the NSIS installer, which hands
+    // the child a MACHINE-ONLY PATH — every user-PATH entry stripped. Every
+    // PTY shell then inherits it and node/pnpm/uvx vanish until the user
+    // manually restarts KAI. Give PTY shells the registry-merged PATH
+    // (shared helper in modules/startup_env.rs); no-op on a healthy launch.
+    #[cfg(target_os = "windows")]
+    {
+        let merged = crate::modules::startup_env::merged_windows_path();
+        cmd.env("PATH", merged);
+    }
     ensure_utf8_locale(cmd);
 
     let resolved_cwd = cwd
