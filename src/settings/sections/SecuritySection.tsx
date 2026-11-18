@@ -439,11 +439,8 @@ function CredentialVaultBlock() {
         <div className="text-sm font-medium">Credential vault</div>
       </div>
       <div className="text-[10.5px] leading-relaxed text-muted-foreground">
-        Secrets the agent can use without seeing them. Add a name (e.g.
-        HF_TOKEN) and its value — stored in the OS keyring. The agent injects
-        one into a command with <span className="font-mono">env:&#123; VAR: "vault:NAME" &#125;</span>;
-        the value is resolved by the host and masked if the command echoes
-        it. Agents cannot add, change, or read values — only you, here.
+        Secrets stored in the OS keyring. The agent can use them in commands
+        but never sees the values - only you can add or change them, here.
       </div>
 
       {entries === null ? (
