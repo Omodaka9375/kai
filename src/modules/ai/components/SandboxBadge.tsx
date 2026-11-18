@@ -118,7 +118,9 @@ export function SandboxBadge() {
         >
           <HugeiconsIcon
             icon={Shield01Icon}
-            size={10}
+            // 11px (2026-11-18): matches the persona/expand/minimize icons in
+            // the same mini-window header — 10px read visibly smaller/off.
+            size={11}
             strokeWidth={1.75}
           />
           {SHORT[mode] ? (
