@@ -69,7 +69,7 @@ import { Input } from "@/components/ui/input";
 import { usePlanStore } from "../store/planStore";
 import { AgentSwitcher } from "./AgentSwitcher";
 import { AiChatView, GameOfLifeSpinner } from "./AiChat";
-import { useChatFontSize, installChatZoomShortcuts } from "../lib/chatFont";
+import { installChatZoomShortcuts } from "../lib/chatFont";
 import { PlanDiffReview } from "./PlanDiffReview";
 import { TodoStrip } from "./TodoStrip";
 import { useComposer } from "./composer";
@@ -305,11 +305,11 @@ function Body({
   const c = useComposer();
 
   const chat = useMemo(() => getOrCreateChat(sessionId), [sessionId]);
-  const chatFont = useChatFontSize();
-  // SYMMETRIC CHAT ZOOM (2026-11-18): zoom on the TRANSCRIPT wrapper scales
-  // everything inside by one ratio — prose, code blocks, tables, labels —
-  // replacing the partial [&_.text-sm] font override that left
-  // MessageContent's fixed text-[12px] unscaled while code blocks grew.
+  // CHAT ZOOM (2026-11-18): applied ONCE, on AiChatView's ConversationContent
+  // — NOT on this wrapper. CSS zoom compounds when nested, so a zoom here
+  // PLUS the one inside AiChatView scaled the transcript quadratically
+  // ((px/12)²): at 16px everything rendered 1.78× instead of 1.33×, and the
+  // wide chrome-bearing code blocks were where the blowup was most visible.
   installChatZoomShortcuts();
   const transcriptReady = useDeferredTranscript(chat);
   // Same rationale as AgentRunBridge: the mini window is always mounted and
@@ -333,10 +333,7 @@ function Body({
         {helpers.messages.length === 0 ? (
           <EmptyState onPick={focusInput} />
         ) : transcriptReady ? (
-          <div
-            className="flex min-h-0 flex-1 flex-col [&_p]:leading-relaxed"
-            style={chatFont.rootStyle}
-          >
+          <div className="flex min-h-0 flex-1 flex-col [&_p]:leading-relaxed">
             <AiChatView
               messages={helpers.messages}
               status={helpers.status}
