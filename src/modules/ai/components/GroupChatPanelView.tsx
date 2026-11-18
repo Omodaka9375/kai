@@ -159,8 +159,9 @@ export function GroupChatPanel({
 
   // Chat font size (Settings → General → Chat; Ctrl+scroll / Ctrl+±/0 inside
   // the panel): shared preference with the AI mini window — one knob drives
-  // BOTH chat surfaces, per the 2026-11-17 ask.
-  const chatFontRootStyle = useChatFontSize().rootStyle;
+  // BOTH chat surfaces, per the 2026-11-17 ask. The zoom style itself is
+  // applied on the TRANSCRIPT (see Transcript) so headers/input keep their
+  // fixed size.
   installChatZoomShortcuts();
 
   // Auto-open the newest group when created; close the panel state when the
@@ -359,7 +360,6 @@ export function GroupChatPanel({
                 ? `${AI_EXPANDED_WINDOW_GEOMETRY_WITH_PILL} rounded-xl`
                 : "right-2 w-[min(34rem,calc(100vw-2rem))] bottom-[calc(var(--kai-input-bar-h,0px)+84px)] h-[min(42rem,calc(100vh-var(--kai-input-bar-h,0px)-134px))]"
             )}
-            style={chatFontRootStyle}
           >
             <div
               aria-hidden
@@ -779,6 +779,9 @@ function Transcript({ group }: { group: GroupChat }) {
   // messages while the user is at the bottom and shows the catch-up arrow
   // when they scroll up — instead of the plain div that never auto-scrolled.
   const scrollCtx = useRef<StickToBottomContext | null>(null);
+  // Transcript-scoped zoom style (same shared preference as the panel's
+  // installChatZoomShortcuts): scales ALL transcript content by one ratio.
+  const chatFontZoomStyle = useChatFontSize().rootStyle;
   // A NEW message from the USER always jumps to the bottom (their own send
   // must be visible — same rule as the main chat). Agent/system messages
   // just grow the bottom and follow via the stick-to-bottom lock — the
@@ -807,7 +810,14 @@ function Transcript({ group }: { group: GroupChat }) {
   );
   return (
     <Conversation contextRef={scrollCtx}>
-      <ConversationContent className="gap-3 px-4 py-4 [&_.text-sm]:text-[length:var(--kai-chat-font)]">
+      {/* SYMMETRIC CHAT ZOOM (2026-11-18): zoom the TRANSCRIPT, not the
+          panel root — code blocks, prose and labels scale by ONE ratio
+          (fixed text-[11.5px]/[12px] utilities and all), while the panel
+          header, composer and strips keep their fixed size. */}
+      <ConversationContent
+        className="gap-3 px-4 py-4"
+        style={chatFontZoomStyle}
+      >
         {live.messages.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center px-8 text-center">
             <span className="mb-3 flex size-10 items-center justify-center rounded-xl bg-muted/50 text-muted-foreground/70">

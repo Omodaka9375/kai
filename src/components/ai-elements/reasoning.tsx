@@ -171,7 +171,7 @@ export const ReasoningTrigger = memo(
     return (
       <CollapsibleTrigger
         className={cn(
-          "flex items-center gap-1.5 italic text-[11px] text-muted-foreground transition-colors hover:text-foreground",
+          "flex items-center gap-1.5 italic text-[11px] leading-none text-muted-foreground transition-colors hover:text-foreground",
           className,
         )}
         {...props}
@@ -182,7 +182,14 @@ export const ReasoningTrigger = memo(
                 chevron read as static text; a familiar animated icon makes
                 the affordance obvious. Pulsing while the model reasons,
                 static once done; a tiny duration label stays for context.
-                Rotation replaces the old chevron as the open/closed cue. */}
+                Rotation replaces the old chevron as the open/closed cue.
+                METRIC STABILITY (2026-11-18): every label variant must be
+                an INLINE element with the inherited line-height — the
+                Shimmer's default <p> carried its own taller box, so the
+                streaming→done label swap changed the row height and the
+                text visibly JUMPED against the icon (misaligned while
+                streaming). leading-none on the row pins one height for
+                all three states. */}
             <HugeiconsIcon
               icon={BrainIcon}
               size={12}
@@ -194,7 +201,7 @@ export const ReasoningTrigger = memo(
               )}
             />
             {isStreaming ? (
-              <Shimmer duration={1}>Thinking</Shimmer>
+              <Shimmer as="span" duration={1}>Thinking</Shimmer>
             ) : duration !== undefined ? (
               <span>{duration}s</span>
             ) : (

@@ -34,6 +34,7 @@ import Image01Icon from "@hugeicons/core-free-icons/Image01Icon";
 import LeftToRightBlockQuoteIcon from "@hugeicons/core-free-icons/LeftToRightBlockQuoteIcon";
 import TerminalIcon from "@hugeicons/core-free-icons/TerminalIcon";
 import { SLASH_COMMANDS, Kai_CMD_RE } from "../lib/slashCommands";
+import { useChatFontSize, installChatZoomShortcuts } from "../lib/chatFont";
 import { Spinner } from "@/components/ui/spinner";
 import { useChatStore, sendMessage, respondToApprovalStandalone, resolveErrorDisplay, approvalContinuationPending, getMediaOverride } from "../store/chatStore";
 import type {
@@ -236,6 +237,13 @@ export function AiChatView({
   clearError,
 }: Props) {
   const scrollCtx = useRef<StickToBottomContext | null>(null);
+  // SYMMETRIC CHAT ZOOM (2026-11-18): zoom the TRANSCRIPT by one ratio so
+  // prose, code blocks and labels scale together. The shortcuts install
+  // here so Ctrl+scroll works inside the DOCKED/expanded AI panel too
+  // (they were previously only installed by the mini window + group panel
+  // — the third surface was missed entirely).
+  const chatFontZoomStyle = useChatFontSize().rootStyle;
+  installChatZoomShortcuts();
   const isBusy = status === "submitted" || status === "streaming";
   const lastMessage = messages[messages.length - 1];
   const showSpinner = isBusy && lastMessage?.role === "user";
@@ -321,7 +329,7 @@ export function AiChatView({
   if (messages.length === 0) {
     return (
       <Conversation>
-        <ConversationContent>
+        <ConversationContent style={chatFontZoomStyle}>
           <ConversationEmptyState
             title="Ask anything"
             description="Explain command output, fix errors, generate snippets, or run a task."
@@ -364,7 +372,7 @@ export function AiChatView({
 
   return (
     <Conversation contextRef={scrollCtx}>
-        <ConversationContent className="gap-5 p-3 pb-6">
+        <ConversationContent className="gap-5 p-3 pb-6" style={chatFontZoomStyle}>
         {messages.map((m, idx) => {
           // Day separator: rendered whenever the calendar day changes
           // between consecutive timestamped messages. Messages without a

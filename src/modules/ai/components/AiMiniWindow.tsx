@@ -306,6 +306,10 @@ function Body({
 
   const chat = useMemo(() => getOrCreateChat(sessionId), [sessionId]);
   const chatFont = useChatFontSize();
+  // SYMMETRIC CHAT ZOOM (2026-11-18): zoom on the TRANSCRIPT wrapper scales
+  // everything inside by one ratio — prose, code blocks, tables, labels —
+  // replacing the partial [&_.text-sm] font override that left
+  // MessageContent's fixed text-[12px] unscaled while code blocks grew.
   installChatZoomShortcuts();
   const transcriptReady = useDeferredTranscript(chat);
   // Same rationale as AgentRunBridge: the mini window is always mounted and
@@ -330,7 +334,7 @@ function Body({
           <EmptyState onPick={focusInput} />
         ) : transcriptReady ? (
           <div
-            className="flex min-h-0 flex-1 flex-col [&_.text-sm]:text-[length:var(--kai-chat-font)] [&_p]:leading-relaxed"
+            className="flex min-h-0 flex-1 flex-col [&_p]:leading-relaxed"
             style={chatFont.rootStyle}
           >
             <AiChatView
