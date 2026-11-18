@@ -4,6 +4,15 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [3.2.1]
+
+- Credential vault: Settings → Security adds a keyring-backed vault for project-independent secrets (HF_TOKEN, passwords, keys). The agent injects one into any command with `env: { VAR: "vault:NAME" }` — the value is resolved by the host into the child process and masked as `<vault:VAR>` if the command echoes it; it never crosses into the model's context. Writes are UI-only (there is deliberately no agent tool to store secrets — a stored secret would also live in the chat transcript); the agent can only list names (`vault_list`) and ask you to add entries.
+- Chat zoom: Ctrl+scroll / Ctrl+±/0 now scales the whole transcript symmetrically — prose, code blocks, tables and labels grow by the same ratio (previously the fixed-px utilities meant code blocks grew while conversation text stayed put). Also removed a double-zoom on the AI mini window that scaled its content quadratically, blowing code blocks out of proportion.
+- Chat: the "Thinking"/"Thought process" label no longer jumps and misaligns against the brain icon — the streaming shimmer rendered as a taller block element than the settled label.
+- UI: the sandbox shield in the AI window header matches its neighbor icons (11px); the About panel points at kaiide.com.
+
+---
+
 ## [3.2.0]
 
 - PDF export: convert_to_pdf renders through headless Edge/Chrome with the real OS font stack, so emoji, tables and code blocks come out correct in any viewer; falls back to the plain-text renderer only when no browser is installed.
