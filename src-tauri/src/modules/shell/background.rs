@@ -28,6 +28,11 @@ pub struct BackgroundProc {
     pub owner: Option<String>,
     /// Human-readable label for listing / status display.
     pub label: Option<String>,
+    /// VAULT ENV (2026-11-18): the RESOLVED values this process was spawned
+    /// with (plain values, not `vault:` refs — refs never leave the command
+    /// layer). Held so log reads can mask echoes (mask_bg_logs); never
+    /// serialized or listed.
+    pub vault_env: std::sync::RwLock<std::collections::HashMap<String, String>>,
     /// Windows sandbox distro only: in-distro path of the pidfile the
     /// confined leader wrote. kill() reaps the in-distro process through it —
     /// killing the wsl.exe client alone does not reach in-distro processes.
@@ -153,6 +158,7 @@ pub fn spawn(
     owner: Option<String>,
     label: Option<String>,
     sandbox_root: Option<String>,
+    vault_env: Option<std::collections::HashMap<String, String>>,
 ) -> Result<Arc<BackgroundProc>, String> {
     let trimmed = command.trim().to_string();
     if trimmed.is_empty() {
@@ -219,7 +225,12 @@ pub fn spawn(
     if let (WorkspaceEnv::Local, Some(ref dir)) = (&workspace, &cwd) {
         cmd.current_dir(dir);
     }
-    cmd.stdin(Stdio::null())
+    // Vault env: apply BEFORE the stdio setup so nothing can observe the
+    // process between env-set and spawn. WSL needs WSLENV (see mod.rs).
+    let vault_applied = vault_env.clone().unwrap_or_default();
+    if !vault_applied.is_empty() {
+        super::apply_vault_env(&mut cmd, &workspace, &vault_applied);
+    }    cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
@@ -259,6 +270,7 @@ pub fn spawn(
         exit_unknown: AtomicBool::new(false),
         owner,
         label,
+        vault_env: std::sync::RwLock::new(vault_applied),
         #[cfg(windows)]
         sandbox_pid_file,
         #[cfg(windows)]

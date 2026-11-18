@@ -6,6 +6,7 @@ import { IS_WINDOWS } from "@/lib/platform";
 import { checkShellSandbox, sandboxExecRoot } from "../lib/sandbox";
 import { withExclusiveLock } from "../lib/mutationLock";
 import { nativeForContext, sandboxOverrideForContext, type ToolContext } from "./context";
+import { vaultEnvSchema } from "./vault";
 // Deep import, not the workspace barrel (chatStore imports this module; the
 // barrel drags ProjectRail -> groupChatStore into chatStore's eval before its
 // own module bindings are initialized — TDZ boot crash. See chatStore.ts).
@@ -292,9 +293,10 @@ export function buildShellTools(ctx: ToolContext) {
         elevated: z.boolean().optional().describe(
           "Run with administrator/root privileges. Triggers a UAC / auth dialog. Only for commands that cannot run unprivileged.",
         ),
+        env: vaultEnvSchema,
       }),
       needsApproval: true,
-      execute: async ({ command, timeout_secs, elevated }, options) => {
+      execute: async ({ command, timeout_secs, elevated, env }, options) => {
         const safety = checkShellCommand(command);
         if (!safety.ok) return { error: safety.reason };
         const surgeryHint = IS_WINDOWS && ctx.workspaceEnv?.kind !== "wsl"
@@ -430,6 +432,7 @@ export function buildShellTools(ctx: ToolContext) {
               cwd,
               effectiveTimeout,
               sandboxRoot,
+              env,
             ),
             3_600_000,
             abortSignal,
@@ -497,9 +500,10 @@ export function buildShellTools(ctx: ToolContext) {
       inputSchema: z.object({
         command: z.string(),
         cwd: z.string().nullable().optional(),
+        env: vaultEnvSchema,
       }),
       needsApproval: true,
-      execute: async ({ command, cwd }) => {
+      execute: async ({ command, cwd, env }) => {
         const safety = checkShellCommand(command);
         if (!safety.ok) return { error: safety.reason };
         const surgeryHint = IS_WINDOWS && ctx.workspaceEnv?.kind !== "wsl"
@@ -520,6 +524,7 @@ export function buildShellTools(ctx: ToolContext) {
             owner,
             label,
             await sandboxExecRoot(await sandboxOverrideForContext(ctx)),
+            env,
           );
           return { handle, command, cwd: effectiveCwd, ok: true };
         } catch (e) {

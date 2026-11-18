@@ -1,7 +1,9 @@
 mod modules;
 
 use modules::lock::mutex_lock;
-use modules::{diagnostics, fs, git, gpg, mcp, mcp_oauth, net, pty, screen, secrets, shell, workspace};
+use modules::{
+    diagnostics, fs, git, gpg, mcp, mcp_oauth, net, pty, screen, secrets, shell, vault, workspace,
+};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
@@ -875,6 +877,7 @@ app.manage(Mutex::new(None::<fs::env_probe::EnvInventory>));
         })
         .manage(shell::ShellState::default())
         .manage(secrets::SecretsState::default())
+        .manage(vault::VaultState::default())
         .manage(mcp_oauth::McpOAuthState::default())
         .manage({
             let registry = workspace::WorkspaceRegistry::default();
@@ -988,11 +991,14 @@ app.manage(Mutex::new(None::<fs::env_probe::EnvInventory>));
             pick_project_folder,
             new_project_folder,
             save_file_dialog,
-  secrets::secrets_get,
-  secrets::secrets_set,
-  secrets::secrets_delete,
-  secrets::secrets_get_all,
-  secrets::secrets_backend_info,
+            secrets::secrets_get,
+            secrets::secrets_set,
+            secrets::secrets_delete,
+            secrets::secrets_get_all,
+            secrets::secrets_backend_info,
+            vault::vault_list,
+            vault::vault_set,
+            vault::vault_delete,
             modules::gmail::gmail_search,
             modules::gmail::gmail_read_message,
             modules::telegram::telegram_start,

@@ -93,6 +93,7 @@ impl ShellSession {
         workspace_hint: Option<WorkspaceEnv>,
         timeout: Duration,
         sandbox_root: Option<&str>,
+        vault_env: Option<std::collections::HashMap<String, String>>,
     ) -> Result<SessionRunOutput, String> {
         let _run_guard = mutex_lock(&self.run_lock);
         let trimmed = command.trim().to_string();
@@ -148,13 +149,14 @@ impl ShellSession {
                 Some(&cancel),
                 sandbox_root.as_deref(),
                 fallback.as_deref(),
+                vault_env,
             ));
         });
         let raw = rx.recv().map_err(|e| e.to_string())??;
         let cancelled = self.cancel.load(Ordering::Acquire);
         self.pristine.store(false, Ordering::Release);
 
-        let (stdout_clean, cwd_after) = strip_cwd_sentinel(&raw.stdout, &self.sentinel);
+        let (mut stdout_clean, cwd_after) = strip_cwd_sentinel(&raw.stdout, &self.sentinel);
         if let Some(ref new_cwd) = cwd_after {
             let p = resolve_path(new_cwd, &self.workspace);
             if p.is_dir() {
@@ -188,6 +190,12 @@ impl ShellSession {
             Some(hint) => format!("{}\n{}", raw.stderr, hint),
             None => raw.stderr,
         };
+
+        // VAULT ECHO MASKING: run_blocking_cancellable already masked the
+        // streams against the injected values, so stdout/stderr arrive clean.
+        // Nothing further here — kept explicit so the invariant is visible
+        // at the session boundary too.
+        let _ = &mut stdout_clean;
 
         Ok(SessionRunOutput {
             stdout: stdout_clean,
@@ -425,6 +433,7 @@ mod cancellation_tests {
             None,
             Duration::from_secs(1),
             None,
+            None,
         ).expect_err("a closed session must not dispatch its command");
         assert_eq!(error, "shell session closed");
     }
@@ -439,7 +448,7 @@ mod cancellation_tests {
             let command = "Start-Sleep -Seconds 30".to_string();
             #[cfg(unix)]
             let command = "sleep 30".to_string();
-            session.run(command, None, None, Duration::from_secs(60), None)
+            session.run(command, None, None, Duration::from_secs(60), None, None)
         });
         std::thread::sleep(Duration::from_millis(400));
         cancel.store(true, Ordering::Release);

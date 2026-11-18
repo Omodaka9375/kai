@@ -27,6 +27,7 @@ import { buildPlatformReachTools } from "./platformReach";
 import { buildDomainTools } from "./domain";
 import { buildPersonaTools } from "./persona";
 import { buildSkillTools } from "./skills";
+import { buildVaultTools } from "./vault";
 
 export { resolvePath, type ToolContext } from "./context";
 
@@ -55,6 +56,7 @@ export function buildCoreTools(ctx: import("./context").ToolContext) {
     ...buildGmailTools(ctx),
     ...buildSocialTools(ctx),
     ...buildSkillTools(ctx),
+    ...buildVaultTools(ctx),
   } as const;
 }
 

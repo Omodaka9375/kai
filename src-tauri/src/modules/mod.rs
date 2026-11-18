@@ -21,4 +21,5 @@ pub mod telegram;
 pub mod tray;
 pub mod voice;
 pub mod updater;
+pub mod vault;
 pub mod workspace;

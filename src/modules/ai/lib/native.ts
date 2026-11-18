@@ -1,6 +1,11 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { currentWorkspaceEnv, type WorkspaceEnv } from "@/modules/workspace/env";
 
+export type VaultEntryInfo = {
+  name: string;
+  updated_at: number;
+};
+
 export type ReadResult =
   | { kind: "text"; content: string; size: number; format?: string }
   | { kind: "binary"; size: number }
@@ -371,6 +376,7 @@ export function createNative(getEnv: () => WorkspaceEnv) {
     cwd?: string | null,
     timeoutSecs?: number,
     sandboxRoot?: string | null,
+    envVars?: Record<string, string> | null,
   ) =>
     invoke<CommandOutput>("shell_run_command", {
       command,
@@ -378,6 +384,7 @@ export function createNative(getEnv: () => WorkspaceEnv) {
       timeoutSecs: timeoutSecs ?? null,
       workspace: env(),
       sandboxRoot: sandboxRoot ?? null,
+      env: envVars ?? null,
     }),
   runElevatedCommand: (
     command: string,
@@ -402,6 +409,7 @@ export function createNative(getEnv: () => WorkspaceEnv) {
     cwd?: string | null,
     timeoutSecs?: number,
     sandboxRoot?: string | null,
+    envVars?: Record<string, string> | null,
   ) =>
     invoke<{
       stdout: string;
@@ -418,6 +426,7 @@ export function createNative(getEnv: () => WorkspaceEnv) {
       timeoutSecs: timeoutSecs ?? null,
       workspace: env(),
       sandboxRoot: sandboxRoot ?? null,
+      env: envVars ?? null,
     }),
   shellSessionClose: (id: number) =>
     invoke<void>("shell_session_close", { id }),
@@ -444,6 +453,7 @@ export function createNative(getEnv: () => WorkspaceEnv) {
     owner?: string,
     label?: string,
     sandboxRoot?: string | null,
+    envVars?: Record<string, string> | null,
   ) =>
     invoke<number>("shell_bg_spawn", {
       command,
@@ -452,6 +462,7 @@ export function createNative(getEnv: () => WorkspaceEnv) {
       owner: owner ?? null,
       label: label ?? null,
       sandboxRoot: sandboxRoot ?? null,
+      env: envVars ?? null,
     }),
   shellBgLogs: (handle: number, sinceOffset?: number) =>
     invoke<{

@@ -587,6 +587,12 @@ const REGISTRY: Record<string, ToolPresentation> = {
     fence: true,
     remoteSurface: false,
   },
+    vault_list: {
+    label: "Vault",
+    effect: "NONE",
+    fence: true,
+    remoteSurface: false,
+  },
   reminder_list: {
     label: "Reminders",
     effect: "NONE",

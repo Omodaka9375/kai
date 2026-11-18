@@ -21,8 +21,10 @@ use std::time::{Duration, Instant};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
+use tauri::AppHandle;
 
 use crate::modules::lock::{rwlock_read, rwlock_write};
+use crate::modules::vault::{mask_vault_values, resolve_env_refs, VaultState};
 #[cfg(windows)]
 use crate::modules::workspace::validate_wsl_distro_name;
 use crate::modules::workspace::{resolve_path, WorkspaceEnv};
@@ -66,18 +68,34 @@ pub struct CommandOutput {
 /// the process is force-killed on timeout. We deliberately do NOT pipe into
 /// the user's interactive PTY — that would fight their input. AI tool calls
 /// are presented in chat as their own structured result.
+///
+/// VAULT ENV (2026-11-18): `env` values may be `vault:NAME` references —
+/// resolved HERE, in Rust, into the child's environment. Values never cross
+/// the IPC boundary toward the webview; the command's captured stdout/stderr
+/// are masked against the injected values before the result returns.
+// Arg count is dictated by Tauri's flat command params + the vault env
+// plumbed through the spawn chain; grouping into a struct would move the
+// flatness requirement into every caller for no design gain.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn shell_run_command(
+    app: AppHandle,
+    vault: tauri::State<'_, VaultState>,
     command: String,
     cwd: Option<String>,
     timeout_secs: Option<u64>,
     workspace: Option<WorkspaceEnv>,
     sandbox_root: Option<String>,
+    env: Option<HashMap<String, String>>,
 ) -> Result<CommandOutput, String> {
     let trimmed = command.trim().to_string();
     if trimmed.is_empty() {
         return Err("empty command".into());
     }
+
+    // Resolve vault refs on the async runtime (keyring IO) BEFORE the
+    // blocking worker thread — the worker stays sync-only.
+    let resolved_env = resolve_env_refs(&app, &vault, env)?;
 
     let workspace = WorkspaceEnv::from_option(workspace);
     let cwd_path = if let Some(dir) = cwd.as_deref().filter(|s| !s.is_empty()) {
@@ -102,7 +120,7 @@ pub async fn shell_run_command(
     let sandbox = sandbox_root.filter(|s| !s.is_empty());
     thread::spawn(move || {
         let _ = tx.send(run_blocking_sandbox(
-            trimmed, cwd_path, workspace, dur, sandbox,
+            trimmed, cwd_path, workspace, dur, sandbox, resolved_env,
         ));
     });
 
@@ -134,6 +152,7 @@ pub async fn shell_run_elevated(
     rx.recv().map_err(|e| e.to_string())?
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn run_blocking_cancellable_pub(
     command: String,
     cwd: Option<String>,
@@ -142,6 +161,7 @@ pub(crate) fn run_blocking_cancellable_pub(
     cancel: Option<&std::sync::atomic::AtomicBool>,
     sandbox_root: Option<&str>,
     sandbox_fallback_command: Option<&str>,
+    vault_env: Option<HashMap<String, String>>,
 ) -> Result<CommandOutput, String> {
     run_blocking_cancellable(
         command,
@@ -151,6 +171,7 @@ pub(crate) fn run_blocking_cancellable_pub(
         cancel,
         sandbox_root,
         sandbox_fallback_command,
+        vault_env,
     )
 }
 
@@ -161,8 +182,38 @@ fn run_blocking_sandbox(
     workspace: WorkspaceEnv,
     dur: Duration,
     sandbox_root: Option<String>,
+    vault_env: Option<HashMap<String, String>>,
 ) -> Result<CommandOutput, String> {
-    run_blocking_cancellable(command, cwd, workspace, dur, None, sandbox_root.as_deref(), None)
+    run_blocking_cancellable(
+        command,
+        cwd,
+        workspace,
+        dur,
+        None,
+        sandbox_root.as_deref(),
+        None,
+        vault_env,
+    )
+}
+
+/// Apply resolved vault env to a child Command. For WSL workspaces the child
+/// is wsl.exe — env vars do NOT flow into the distro unless the var is
+/// listed in WSLENV, so append the injected keys there (colon-separated,
+/// same semantics as a user-set WSLENV).
+pub(crate) fn apply_vault_env(cmd: &mut Command, workspace: &WorkspaceEnv, env: &HashMap<String, String>) {
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    if matches!(workspace, WorkspaceEnv::Wsl { .. }) {
+        let ours = env.keys().cloned().collect::<Vec<_>>().join(":");
+        let existing = std::env::var("WSLENV").unwrap_or_default();
+        let merged = if existing.is_empty() {
+            ours
+        } else {
+            format!("{existing}:{ours}")
+        };
+        cmd.env("WSLENV", merged);
+    }
 }
 
 /// Kill the process group led by `child` on Unix. The one-shot command is
@@ -177,6 +228,7 @@ fn kill_child_tree(child: &std::process::Child) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_blocking_cancellable(
     command: String,
     cwd: Option<String>,
@@ -185,6 +237,7 @@ fn run_blocking_cancellable(
     cancel: Option<&std::sync::atomic::AtomicBool>,
     sandbox_root: Option<&str>,
     sandbox_fallback_command: Option<&str>,
+    vault_env: Option<HashMap<String, String>>,
 ) -> Result<CommandOutput, String> {
     let mut cmd = match sandbox_root.filter(|r| !r.is_empty()) {
         Some(root) => {
@@ -219,6 +272,11 @@ fn run_blocking_cancellable(
     };
     if let (WorkspaceEnv::Local, Some(dir)) = (&workspace, cwd) {
         cmd.current_dir(dir);
+    }
+    if let Some(env) = vault_env.as_ref() {
+        if !env.is_empty() {
+            apply_vault_env(&mut cmd, &workspace, env);
+        }
     }
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -302,9 +360,28 @@ fn run_blocking_cancellable(
     let (stderr_bytes, stderr_truncated) =
         recv_drain_with_deadline(stderr_rx, DRAIN_GRACE_AFTER_KILL);
 
+    // ECHO MASKING: a child that received vault values can leak them into
+    // its own output (`env`, `set -x`, an echoed curl command line). Mask the
+    // injected values BEFORE the result crosses the IPC boundary — the
+    // webview and the model only ever see `<vault:VAR>`.
+    let has_vault = vault_env
+        .as_ref()
+        .is_some_and(|m| !m.is_empty());
+    let stdout = String::from_utf8_lossy(&stdout_bytes).into_owned();
+    let stderr = String::from_utf8_lossy(&stderr_bytes).into_owned();
+    let (stdout, stderr) = if has_vault {
+        let env = vault_env.as_ref().expect("checked non-empty above");
+        (
+            mask_vault_values(&stdout, env),
+            mask_vault_values(&stderr, env),
+        )
+    } else {
+        (stdout, stderr)
+    };
+
     Ok(CommandOutput {
-        stdout: String::from_utf8_lossy(&stdout_bytes).into_owned(),
-        stderr: String::from_utf8_lossy(&stderr_bytes).into_owned(),
+        stdout,
+        stderr,
         exit_code,
         timed_out,
         truncated: stdout_truncated || stderr_truncated,
@@ -406,8 +483,11 @@ pub fn shell_session_open(
     Ok(id)
 }
 
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn shell_session_run(
+    app: AppHandle,
+    vault: tauri::State<'_, VaultState>,
     state: tauri::State<'_, ShellState>,
     id: u32,
     command: String,
@@ -415,6 +495,7 @@ pub async fn shell_session_run(
     timeout_secs: Option<u64>,
     workspace: Option<WorkspaceEnv>,
     sandbox_root: Option<String>,
+    env: Option<HashMap<String, String>>,
 ) -> Result<SessionRunOutput, String> {
     let session = rwlock_read(&state.sessions)
         .get(&id)
@@ -425,10 +506,19 @@ pub async fn shell_session_run(
             .unwrap_or(DEFAULT_TIMEOUT_SECS)
             .clamp(1, MAX_TIMEOUT_SECS),
     );
+    // Vault refs resolve on the async runtime; the worker stays sync-only.
+    let resolved_env = resolve_env_refs(&app, &vault, env)?;
     let (tx, rx) = mpsc::channel();
     let sandbox = sandbox_root.filter(|s| !s.is_empty());
     thread::spawn(move || {
-        let _ = tx.send(session.run(command, cwd, workspace, dur, sandbox.as_deref()));
+        let _ = tx.send(session.run(
+            command,
+            cwd,
+            workspace,
+            dur,
+            sandbox.as_deref(),
+            resolved_env,
+        ));
     });
     rx.recv().map_err(|e| e.to_string())?
 }
@@ -457,16 +547,24 @@ pub fn shell_session_cancel(state: tauri::State<ShellState>, id: u32) -> Result<
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
-pub fn shell_bg_spawn(
-    state: tauri::State<ShellState>,
+pub async fn shell_bg_spawn(
+    app: AppHandle,
+    vault: tauri::State<'_, VaultState>,
+    state: tauri::State<'_, ShellState>,
     command: String,
     cwd: Option<String>,
     workspace: Option<WorkspaceEnv>,
     owner: Option<String>,
     label: Option<String>,
     sandbox_root: Option<String>,
+    env: Option<HashMap<String, String>>,
 ) -> Result<u32, String> {
+    // Vault refs resolve before the spawn; the injected values are applied
+    // by background::spawn and its ring-buffer reads get masked per-log-fetch
+    // (the buffer holds the RAW bytes; masking happens in shell_bg_logs).
+    let resolved_env = resolve_env_refs(&app, &vault, env)?;
     // Hold the write lock across reap → spawn → cap-check → insert so
     // concurrent callers don't race on the count and waste spawned processes.
     let mut map = rwlock_write(&state.bg);
@@ -488,6 +586,7 @@ pub fn shell_bg_spawn(
         owner,
         label,
         sandbox_root.filter(|s| !s.is_empty()),
+        resolved_env,
     )?;
     let mut map = rwlock_write(&state.bg);
     const BG_ID_BOUND: u32 = 128;
@@ -515,7 +614,26 @@ pub fn shell_bg_logs(
         .get(&handle)
         .cloned()
         .ok_or_else(|| "no background handle".to_string())?;
-    Ok(proc.read_logs(since_offset.unwrap_or(0)))
+    let mut resp = proc.read_logs(since_offset.unwrap_or(0));
+    mask_bg_logs(&proc, &mut resp);
+    Ok(resp)
+}
+
+/// Mask vault values in background-proc log reads. The ring buffer keeps RAW
+/// bytes (masking at push time would need the values on the reader thread);
+/// every log surface funnels through here, so this is the single choke point.
+pub(crate) fn mask_bg_logs(
+    proc: &BackgroundProc,
+    resp: &mut BackgroundLogResponse,
+) {
+    if resp.bytes.is_empty() {
+        return;
+    }
+    let env = rwlock_read(&proc.vault_env);
+    if env.is_empty() {
+        return;
+    }
+    resp.bytes = mask_vault_values(&resp.bytes, &env);
 }
 
 #[tauri::command]

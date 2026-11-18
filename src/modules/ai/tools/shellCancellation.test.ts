@@ -110,9 +110,9 @@ describe("bash_run cancellation and shell replacement", () => {
       abortSignal: new AbortController().signal,
     })).resolves.toMatchObject({ exit_code: 0 });
     await running;
-    expect(native.shellSessionRun).toHaveBeenCalledWith(
-      46, "git diff --check", "D:/project", undefined, null,
-    );
+      expect(native.shellSessionRun).toHaveBeenCalledWith(
+        46, "git diff --check", "D:/project", undefined, null, undefined,
+      );
   });
 
   it("runs a replacement shell even if the interrupted native call never settles", async () => {
@@ -123,9 +123,9 @@ describe("bash_run cancellation and shell replacement", () => {
     const execute = buildShellTools(context()).bash_run.execute as unknown as Execute;
     const oldController = new AbortController();
     const oldRun = execute({ command: "pnpm verify" }, { abortSignal: oldController.signal });
-    await vi.waitFor(() => expect(native.shellSessionRun).toHaveBeenCalledWith(
-      43, "pnpm verify", "D:/project", undefined, null,
-    ));
+      await vi.waitFor(() => expect(native.shellSessionRun).toHaveBeenCalledWith(
+        43, "pnpm verify", "D:/project", undefined, null, undefined,
+      ));
     cancelAllShellSessions("cancel-session");
     oldController.abort();
     await expect(oldRun).resolves.toMatchObject({ error: expect.stringContaining("cancelled") });
@@ -133,8 +133,8 @@ describe("bash_run cancellation and shell replacement", () => {
       abortSignal: new AbortController().signal,
     });
     expect(next).toMatchObject({ command: "pnpm test", exit_code: 0 });
-    expect(native.shellSessionRun).toHaveBeenCalledWith(
-      44, "pnpm test", "D:/project", 300, null,
+      expect(native.shellSessionRun).toHaveBeenCalledWith(
+        44, "pnpm test", "D:/project", 300, null, undefined,
     );
   });
 });
