@@ -489,7 +489,7 @@ function CredentialVaultBlock() {
             value={name}
             onChange={(ev) => setName(ev.target.value)}
             placeholder="NAME (letters, digits, _ or -)"
-            className="h-8 w-44 rounded-none font-mono text-[11.5px]"
+            className="h-8 w-44 font-mono text-[11.5px] placeholder:text-[10px]"
             spellCheck={false}
             autoComplete="off"
           />
@@ -498,7 +498,7 @@ function CredentialVaultBlock() {
             value={value}
             onChange={(ev) => setValue(ev.target.value)}
             placeholder="Value — never shown after save"
-            className="h-8 flex-1 rounded-none text-[11.5px]"
+            className="h-8 flex-1 text-[11.5px] placeholder:text-[10px]"
             autoComplete="off"
           />
           <Button
