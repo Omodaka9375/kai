@@ -123,7 +123,9 @@ describe("Workspaces grid behavior (source pins)", () => {
     // input), not the project AI chat.
     expect(grid).toContain("groupOfCell(projectId)");
     expect(grid).toContain("liveGroupForProject");
-    expect(grid).toContain("sendGroupMessage(group.id, trimmed)");
+    // 2026-11-19 card paste: the composed body (persisted image paths +
+  // text-chip <file> blocks) feeds the same fan-out.
+  expect(grid).toContain("sendGroupMessage(group.id, body)");
     expect(grid).toContain("GroupCardBody");
     // The panel mirrors its component-local openGroupId into the grid.
     expect(grid).toContain("export function mirrorOpenGroupId");
@@ -222,5 +224,17 @@ describe("Workspaces grid behavior (source pins)", () => {
     // discoverable without hovering a 12px arrow.
     expect(grid).toContain("bg-primary text-primary-foreground hover:bg-primary/90");
     expect(grid).toContain("canSend");
+  });
+
+  it("card inputs accept text + image pastes", () => {
+    // Paste plumbing wired on BOTH inputs; pills render for pending
+    // attachments; images ride sends as inline file parts.
+    expect(grid).toContain("const CardPastePills = memo");
+    expect(grid.match(/onPaste=\{onPaste\}/g)?.length).toBe(2);
+    expect(grid).toContain("imageFilesFromClipboard");
+    expect(grid).toContain("cardImageAttachment");
+    expect(grid).toContain("cardPasteChip");
+    expect(grid).toContain('type: "file"');
+    expect(grid).toContain("persistUploadedMedia");
   });
 });

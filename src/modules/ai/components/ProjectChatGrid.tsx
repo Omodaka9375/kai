@@ -52,6 +52,13 @@ import type { ProjectSwitcherItem } from "@/modules/workspace";
 import { projectIconCss, projectIconFillCss } from "@/modules/workspace/projectIcons";
 import { GRID_COLS, GRID_ROWS } from "../store/projectChatGrid";
 import {
+  type CardAttachment,
+  cardImageAttachment,
+  cardPasteChip,
+  imageFilesFromClipboard,
+  shouldAttachCardPaste,
+} from "../lib/cardPaste";
+import {
   liveGroupForProject,
   sendGroupMessage,
   subscribeGroupChats,
@@ -101,6 +108,54 @@ import {
  */
 
 type CellStatus = ProjectSwitcherItem["status"];
+
+/**
+ * CARD PASTE (2026-11-19): both card inputs accept text + image pastes.
+ * Long/structured text becomes a removable chip; images become a tiny
+ * thumbnail pill (provider-gated like the main composer) and ride the send
+ * as inline file parts. Shared logic lives in lib/cardPaste.ts.
+ */
+const CardPastePills = memo(function CardPastePills({
+  files,
+  onRemove,
+}: {
+  files: CardAttachment[];
+  onRemove: (id: string) => void;
+}) {
+  if (files.length === 0) return null;
+  return (
+    <div className="flex shrink-0 flex-wrap gap-1 px-3 pt-1.5">
+      {files.map((f) =>
+        f.kind === "image" ? (
+          <button
+            key={f.id}
+            type="button"
+            title={`${f.name} - remove`}
+            onClick={() => onRemove(f.id)}
+            className="shrink-0 rounded border border-border/60 p-px transition-colors hover:border-destructive/60"
+          >
+            <img
+              src={f.payload}
+              alt={f.name}
+              className="size-6 rounded-sm object-cover"
+              draggable={false}
+            />
+          </button>
+        ) : (
+          <button
+            key={f.id}
+            type="button"
+            title={`${f.name} - remove`}
+            onClick={() => onRemove(f.id)}
+            className="flex max-w-[130px] shrink-0 items-center rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[9.5px] text-muted-foreground transition-colors hover:border-destructive/60 hover:text-foreground"
+          >
+            <span className="truncate">{f.name}</span>
+          </button>
+        ),
+      )}
+    </div>
+  );
+});
 
 /**
  * CLIP FADES (2026-11-19 card polish): a card transcript is almost always
@@ -501,6 +556,38 @@ const GroupCardBody = memo(function GroupCardBody(props: GridCellProps & { group
   const [sendError, setSendError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const ended = group.endedAt !== null;
+  // CARD PASTE (2026-11-19): group sends are text-only (the fan-out is a
+  // string relay), so pasted IMAGES land as persisted-path attachments
+  // referenced by text ("image saved at ..."), and long text becomes a
+  // chip that inlines its body on send.
+  const [pasted, setPasted] = useState<CardAttachment[]>([]);
+  const pastedRef = useRef(pasted);
+  pastedRef.current = pasted;
+  const removePasted = useCallback(
+    (id: string) => setPasted((prev) => prev.filter((f) => f.id !== id)),
+    [],
+  );
+
+  const onPaste = useCallback(
+    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      const images = imageFilesFromClipboard(e.clipboardData);
+      if (images.length > 0) {
+        e.preventDefault();
+        void (async () => {
+          const next: CardAttachment[] = [];
+          for (const f of images) next.push(await cardImageAttachment(f));
+          setPasted((prev) => [...prev, ...next]);
+        })();
+        return;
+      }
+      const text = e.clipboardData?.getData("text/plain") ?? "";
+      if (shouldAttachCardPaste(text)) {
+        e.preventDefault();
+        setPasted((prev) => [...prev, cardPasteChip(text)]);
+      }
+    },
+    [],
+  );
 
   const nameFor = useCallback(
     (pid: string) => {
@@ -512,15 +599,44 @@ const GroupCardBody = memo(function GroupCardBody(props: GridCellProps & { group
 
   const send = useCallback(() => {
     const trimmed = textRef.current.trim();
-    if (!trimmed || ended || sending) return;
+    const files = pastedRef.current;
+    if (!trimmed && files.length === 0) return;
+    if (ended || sending) return;
     setSending(true);
     void (async () => {
       try {
-        const r = await sendGroupMessage(group.id, trimmed);
+        // Compose: persisted image paths first, then text-chip bodies, then
+        // the typed message (same order the AI cards use).
+        let body = trimmed;
+        for (const f of files) {
+          if (f.kind === "image") {
+            const b64 = f.payload.split(",")[1] ?? "";
+            try {
+              const { persistUploadedMedia } = await import("../lib/media/persist");
+              const { native } = await import("../lib/native");
+              const path = await persistUploadedMedia(native, {
+                name: f.name,
+                mimeType: f.mediaType,
+                base64: b64,
+              });
+              if (path) {
+                body = `${body ? body + "\n\n" : ""}[image attached: ${f.name} saved at ${path} - use read tools that accept image paths to view it]${body ? "" : "\n" + trimmed}`;
+              } else {
+                body = `${body}\n\n[image attached: ${f.name} - could not be saved to disk]`;
+              }
+            } catch {
+              body = `${body}\n\n[image attached: ${f.name} - could not be saved to disk]`;
+            }
+          } else {
+            body = `${body ? body + "\n\n" : ""}<file name="${f.name}" mediaType="${f.mediaType}">\n${f.payload}\n</file>`;
+          }
+        }
+        const r = await sendGroupMessage(group.id, body);
         if (r.length === 0 && !ended) {
           setSendError("no deliverable participants");
         } else {
           setText("");
+          setPasted([]);
           setSendError(null);
         }
       } catch (e) {
@@ -588,10 +704,12 @@ const GroupCardBody = memo(function GroupCardBody(props: GridCellProps & { group
           </Conversation>
         </AiErrorBoundary>
       </TranscriptFrame>
+      <CardPastePills files={pasted} onRemove={removePasted} />
       <div className="flex shrink-0 items-center gap-1.5 border-t border-border/40 bg-card/40 px-3 py-1.5">
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
+          onPaste={onPaste}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
@@ -600,17 +718,17 @@ const GroupCardBody = memo(function GroupCardBody(props: GridCellProps & { group
           }}
           rows={1}
           disabled={ended}
-          placeholder={ended ? "Group ended" : sendError ? sendError : "Message group…"}
+          placeholder={ended ? "Group ended" : sendError ? sendError : "Message group."}
           className="max-h-12 min-h-[20px] flex-1 resize-none bg-transparent text-[11px] leading-snug text-foreground outline-none placeholder:text-muted-foreground/50"
         />
         <button
           type="button"
           title="Send (Enter)"
-          disabled={ended || sending || !text.trim()}
+          disabled={ended || sending || (!text.trim() && pasted.length === 0)}
           onClick={send}
           className={cn(
             "shrink-0 rounded-full p-1 transition-colors",
-            text.trim() && !ended && !sending
+            (text.trim() || pasted.length > 0) && !ended && !sending
               ? "bg-primary text-primary-foreground hover:bg-primary/90"
               : "text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40",
           )}
@@ -732,25 +850,130 @@ const CellInput = memo(function CellInput({
     return () => clearTimeout(timer);
   }, [sessionId, text]);
 
-  const canSend = text.trim().length > 0 && !micTranscribing;
+  // CARD PASTE (2026-11-19): pending paste attachments (text chips + image
+  // pills) for THIS card, cleared on send. Image path blocks persist at
+  // send time (async, best-effort) - the same contract as the main composer.
+  const [pasted, setPasted] = useState<CardAttachment[]>([]);
+  const pastedRef = useRef(pasted);
+  pastedRef.current = pasted;
+  const removePasted = useCallback(
+    (id: string) => setPasted((prev) => prev.filter((f) => f.id !== id)),
+    [],
+  );
+
+  const onPaste = useCallback(
+    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      const images = imageFilesFromClipboard(e.clipboardData);
+      if (images.length > 0) {
+        e.preventDefault();
+        void (async () => {
+          const next: CardAttachment[] = [];
+          for (const f of images) next.push(await cardImageAttachment(f));
+          setPasted((prev) => [...prev, ...next]);
+        })();
+        return;
+      }
+      const text = e.clipboardData?.getData("text/plain") ?? "";
+      if (shouldAttachCardPaste(text)) {
+        e.preventDefault();
+        setPasted((prev) => [...prev, cardPasteChip(text)]);
+      }
+    },
+    [],
+  );
+
+  const canSend =
+    (text.trim().length > 0 || pasted.length > 0) && !micTranscribing;
 
   const send = useCallback(() => {
     const trimmed = textRef.current.trim();
-    if (!trimmed) return;
-    if (busy) {
-      // Busy cell: steering queue for THIS session — its AgentRunBridge
-      // stops the run and re-sends once idle (the composer's busy path).
-      setSessionSteeringMessage(sessionId, [{ type: "text", text: trimmed }]);
-    } else {
-      void chat.sendMessage({ role: "user", parts: [{ type: "text", text: trimmed }] });
-      patchSessionAgentMeta(sessionId, {
-        hitStepCap: false,
-        finishReason: "",
-        compactionNotice: null,
-        summaryNotice: null,
-      });
+    const files = pastedRef.current;
+    if (!trimmed && files.length === 0) return;
+    if (files.length === 0) {
+      // No attachments: the original pure-text path (steering keeps its
+      // exact wire shape).
+      if (busy) {
+        setSessionSteeringMessage(sessionId, [{ type: "text", text: trimmed }]);
+      } else {
+        void chat.sendMessage({ role: "user", parts: [{ type: "text", text: trimmed }] });
+        patchSessionAgentMeta(sessionId, {
+          hitStepCap: false,
+          finishReason: "",
+          compactionNotice: null,
+          summaryNotice: null,
+        });
+      }
+      setText("");
+      setSessionPreferences(sessionId, { draft: undefined });
+      return;
     }
+    // With attachments: compose text blocks first, then inline image file
+    // parts - the same wire shape the main composer produces. Image path
+    // blocks resolve before the send (async persistence, best-effort).
+    void (async () => {
+      const textBlocks = files
+        .filter((f) => f.kind === "text")
+        .map(
+          (f) =>
+            `<file name="${f.name}" mediaType="${f.mediaType}">\n${f.payload}\n</file>`,
+        );
+      const imageAtts = files.filter((f) => f.kind === "image");
+      const pathBlocks: string[] = [];
+      for (const f of imageAtts) {
+        const b64 = f.payload.split(",")[1] ?? "";
+        try {
+          const { persistUploadedMedia } = await import("../lib/media/persist");
+          const { native } = await import("../lib/native");
+          const path = await persistUploadedMedia(native, {
+            name: f.name,
+            mimeType: f.mediaType,
+            base64: b64,
+          });
+          if (path) {
+            pathBlocks.push(
+              `<attachment name="${f.name}" savedAt="${path}">The attached image ${f.name} is also saved at the file path above - pass that path to tools that need a file.</attachment>`,
+            );
+          }
+        } catch {
+          // Best-effort: the image still rides inline as a file part.
+        }
+      }
+      const composed = [...pathBlocks, ...textBlocks, trimmed]
+        .filter(Boolean)
+        .join("\n\n");
+      const parts: Array<
+        | { type: "text"; text: string }
+        | { type: "file"; mediaType: string; url: string; filename?: string }
+      > = [];
+      if (composed) parts.push({ type: "text", text: composed });
+      for (const f of imageAtts) {
+        parts.push({
+          type: "file",
+          mediaType: f.mediaType,
+          url: f.payload,
+          filename: f.name,
+        });
+      }
+      if (busy) {
+        setSessionSteeringMessage(
+          sessionId,
+          parts as unknown as Array<{ type: "text"; text: string }>,
+        );
+      } else {
+        void chat.sendMessage({
+          role: "user",
+          parts,
+        } as unknown as Parameters<typeof chat.sendMessage>[0]);
+        patchSessionAgentMeta(sessionId, {
+          hitStepCap: false,
+          finishReason: "",
+          compactionNotice: null,
+          summaryNotice: null,
+        });
+      }
+    })();
     setText("");
+    setPasted([]);
     setSessionPreferences(sessionId, { draft: undefined });
   }, [busy, chat, sessionId]);
 
@@ -769,11 +992,14 @@ const CellInput = memo(function CellInput({
   );
 
   return (
-    <div className="flex shrink-0 items-center gap-1.5 border-t border-border/40 bg-card/40 px-3 py-1.5">
+    <>
+      <CardPastePills files={pasted} onRemove={removePasted} />
+      <div className="flex shrink-0 items-center gap-1.5 border-t border-border/40 bg-card/40 px-3 py-1.5">
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={onKeyDown}
+        onPaste={onPaste}
         rows={1}
         placeholder={
           micTranscribing
@@ -846,6 +1072,7 @@ const CellInput = memo(function CellInput({
           <HugeiconsIcon icon={Mic01Icon} size={13} strokeWidth={1.75} />
         </button>
       )}
-    </div>
+      </div>
+    </>
   );
 });
