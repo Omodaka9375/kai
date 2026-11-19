@@ -6,6 +6,11 @@ import {
   type VisionOverride,
 } from "@/modules/ai/config";
 import type { KeyBinding, ShortcutId } from "@/modules/shortcuts/shortcuts";
+import {
+  DEFAULT_REPLY_STYLE,
+  sanitizeReplyStyle,
+  type ReplyStyle,
+} from "@/modules/ai/lib/replyStyle";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { LazyStore } from "@tauri-apps/plugin-store";
 
@@ -140,6 +145,10 @@ export type Preferences = {
    *  provider calls are NEVER restricted — the agent must stay able to
    *  think. Policy layer, not an OS firewall (that's Sandbox workspaceOnly). */
   networkPolicy: "full" | "lan";
+  /** Structured "how to write to me" fields (Settings -> Agents), rendered
+   *  into a prompt block next to custom instructions. Inspired by the
+   *  HUMANS.md 0.3 draft. Preferences only - never permissions. */
+  replyStyle: ReplyStyle;
   /** Standing-authority tools the user explicitly granted via the approval
    *  card's "Always Allow" button — these stop asking for approval in BOTH
    *  Ask and Allow modes. Managed/revoked in Settings → Security. */
@@ -202,6 +211,7 @@ const KEY_VOICE_TTS_LOCAL_VOICE = "voiceTtsLocalVoice";
 const KEY_VOICE_TTS_ASSEMBLY_VOICE = "voiceTtsAssemblyVoice";
 const KEY_NETWORK_POLICY = "networkPolicy";
 const KEY_STANDING_AUTHORITY_ALWAYS_ALLOWED = "standingAuthorityAlwaysAllowed";
+const KEY_REPLY_STYLE = "replyStyle";
 
 export const TERMINAL_FONT_SIZE_DEFAULT = 14;
 export const TERMINAL_FONT_SIZE_MIN = 8;
@@ -298,6 +308,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   voiceTtsApiModel: "gpt-4o-mini-tts",
   voiceTtsLocalVoice: "en_US-lessac-medium",
   networkPolicy: "full",
+  replyStyle: DEFAULT_REPLY_STYLE,
   standingAuthorityAlwaysAllowed: [],
 };
 
@@ -452,6 +463,7 @@ export async function loadPreferences(): Promise<Preferences> {
       get<Preferences["networkPolicy"]>(KEY_NETWORK_POLICY) === "lan"
         ? "lan"
         : "full",
+    replyStyle: sanitizeReplyStyle(get<Partial<ReplyStyle>>(KEY_REPLY_STYLE)),
     standingAuthorityAlwaysAllowed:
       get<string[]>(KEY_STANDING_AUTHORITY_ALWAYS_ALLOWED)
         ?.filter((n) => typeof n === "string")
@@ -488,6 +500,10 @@ export async function setProjectModelId(workspaceRoot: string, modelId: string):
 
 export async function setNetworkPolicy(value: "full" | "lan"): Promise<void> {
   await writePref(KEY_NETWORK_POLICY, value === "lan" ? "lan" : "full");
+}
+
+export async function setReplyStyle(value: ReplyStyle): Promise<void> {
+  await writePref(KEY_REPLY_STYLE, sanitizeReplyStyle(value));
 }
 
 /** The standing-authority tools that can carry an Always Allow grant.
@@ -862,6 +878,7 @@ export async function onPreferencesChange(
     [KEY_VOICE_TTS_LOCAL_VOICE]: "voiceTtsLocalVoice",
     [KEY_VOICE_TTS_ASSEMBLY_VOICE]: "voiceTtsAssemblyVoice",
     [KEY_NETWORK_POLICY]: "networkPolicy",
+    [KEY_REPLY_STYLE]: "replyStyle",
     [KEY_STANDING_AUTHORITY_ALWAYS_ALLOWED]: "standingAuthorityAlwaysAllowed",
   };
   // Same-process writes still fire onChange immediately; cross-window writes

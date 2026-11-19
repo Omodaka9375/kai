@@ -19,7 +19,8 @@ import { newAgentId, useAgentsStore } from "@/modules/ai/store/agentsStore";
 import { getModel } from "@/modules/ai/config";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { SearchableModelPicker } from "../components/SearchableModelPicker";
-import { setCustomInstructions, setSubagentMaxSteps } from "@/modules/settings/store";
+import { SettingRow } from "../components/SettingRow";
+import { setCustomInstructions, setReplyStyle, setSubagentMaxSteps } from "@/modules/settings/store";
 import Add01Icon from "@hugeicons/core-free-icons/Add01Icon";
 import AiBrain02Icon from "@hugeicons/core-free-icons/AiBrain02Icon";
 import CheckmarkCircle02Icon from "@hugeicons/core-free-icons/CheckmarkCircle02Icon";
@@ -27,7 +28,9 @@ import Delete02Icon from "@hugeicons/core-free-icons/Delete02Icon";
 import Edit02Icon from "@hugeicons/core-free-icons/Edit02Icon";
 import SparklesIcon from "@hugeicons/core-free-icons/SparklesIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { Switch } from "@/components/ui/switch";
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { ReplyStyle } from "@/modules/ai/lib/replyStyle";
 import { SectionHeader } from "../components/SectionHeader";
 
 const ICON_OPTIONS: AgentIconId[] = [
@@ -42,6 +45,7 @@ const ICON_OPTIONS: AgentIconId[] = [
 export function AgentsSection() {
   const customInstructions = usePreferencesStore((s) => s.customInstructions);
   const subagentMaxSteps = usePreferencesStore((s) => s.subagentMaxSteps);
+  const replyStyle = usePreferencesStore((s) => s.replyStyle);
   const customAgents = useAgentsStore((s) => s.customAgents);
   const activeAgentId = useAgentsStore((s) => s.activeId);
   const setActiveAgentId = useAgentsStore((s) => s.setActiveId);
@@ -70,6 +74,8 @@ export function AgentsSection() {
       />
 
       <CustomInstructionsBlock value={customInstructions} />
+
+      <ReplyStyleBlock value={replyStyle} />
 
       <SubagentStepsBlock value={subagentMaxSteps} />
 
@@ -452,6 +458,82 @@ function CustomInstructionsBlock({ value }: { value: string }) {
       <span className="self-end text-[10px] tabular-nums text-muted-foreground/60">
         {chars.toLocaleString()} characters
       </span>
+    </div>
+  );
+}
+
+/** REPLY STYLE (2026-11-19): structured "how to write to me" fields,
+ *  HUMANS.md-inspired. Live writes (no save button - each change persists
+ *  immediately via writePref, same as the theme/vim toggles) and render
+ *  deterministically into the USER REPLY STYLE prompt block. */
+function ReplyStyleBlock({ value }: { value: ReplyStyle }) {
+  const patch = (p: Partial<ReplyStyle>) =>
+    void setReplyStyle({ ...value, ...p });
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-0.5">
+        <Label>Reply style</Label>
+        <span className="text-[10.5px] text-muted-foreground/70">
+          How agents write to you. Preferences only - they shape replies,
+          never permissions or approval gates.
+        </span>
+      </div>
+      <div className="flex flex-col gap-1 rounded-lg border border-border/60 bg-card/40 px-3 py-2">
+        <SettingRow
+          title="Lead with a TL;DR"
+          description="Every reply opens with a one-line summary of the outcome."
+        >
+          <Switch
+            checked={value.leadWithTldr}
+            onCheckedChange={(v) => patch({ leadWithTldr: v })}
+          />
+        </SettingRow>
+        <div className="flex items-center justify-between gap-3 py-1">
+          <div className="flex flex-col gap-0.5">
+            <span className="text-[12px]">Word cap</span>
+            <span className="text-[10.5px] text-muted-foreground/70">
+              Keep the whole reply under this many words. 0 = no cap.
+            </span>
+          </div>
+          <input
+            type="number"
+            min={0}
+            max={2000}
+            value={value.maxWords || ""}
+            placeholder="0"
+            onChange={(e) => {
+              const n = parseInt(e.target.value, 10);
+              patch({
+                maxWords: Number.isFinite(n) && n > 0
+                  ? Math.min(2000, n)
+                  : 0,
+              });
+            }}
+            className="h-7 w-16 shrink-0 rounded-md border border-border bg-card/60 px-2 text-center text-[12px] tabular-nums focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+        </div>
+        <SettingRow
+          title="Batch questions at the end"
+          description="Never stop mid-task to ask. Questions wait for the end, each with a recommended pick so a plain yes approves it. Reversible choices are made and reported."
+        >
+          <Switch
+            checked={value.questionStyle === "end_of_task"}
+            onCheckedChange={(v) =>
+              patch({ questionStyle: v ? "end_of_task" : "as_they_come" })
+            }
+          />
+        </SettingRow>
+        <SettingRow
+          title="Interrupt only when blocked"
+          description="Reach me mid-task only when work cannot continue. Everything else waits."
+        >
+          <Switch
+            checked={value.interruptOnlyWhenBlocked}
+            onCheckedChange={(v) => patch({ interruptOnlyWhenBlocked: v })}
+          />
+        </SettingRow>
+      </div>
     </div>
   );
 }

@@ -17,6 +17,8 @@ import {
   useChatStore,
 } from "../store/chatStore";
 import { IS_WINDOWS, IS_MAC, IS_LINUX } from "@/lib/platform";
+import { usePreferencesStore } from "@/modules/settings/preferences";
+import { formatReplyStyleBlock } from "./replyStyle";
 
 import { extensionRegistry } from "./extensions";
 import { createFenceState, fence, type FenceState } from "./fence";
@@ -266,8 +268,17 @@ export function createContextAwareTransport(deps: Deps) {
       autoApprove === "all"
         ? "\n\n## AUTO-APPROVE MODE — ACTIVE\nAll tool calls (file edits, shell commands, etc.) are pre-approved and execute immediately. Do NOT stop to ask for permission or narrate what you're about to do — just call the tools directly. Chain all actions in a single turn until the task is complete."
         : "";
+    // REPLY STYLE (2026-11-19): structured "how to write to me" fields from
+    // Settings -> Agents (HUMANS.md-inspired). Preferences only, appended
+    // after the user's prose instructions so both survive intact. Empty
+    // (all defaults) adds no bytes - prompts stay prefix-cache friendly.
+    const replyStyleBlock = formatReplyStyleBlock(
+      usePreferencesStore.getState().replyStyle,
+    );
     const effectiveCustomInstructions =
-      (deps.getCustomInstructions() || "") + autoApproveHint;
+      (deps.getCustomInstructions() || "") +
+      (replyStyleBlock ? `\n\n${replyStyleBlock}` : "") +
+      autoApproveHint;
 
     const result = await runAgentStream({
       keys: deps.getKeys(),
