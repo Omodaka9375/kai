@@ -4,6 +4,19 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [3.3.0]
+
+- Workspaces: a new universal 2x4 project chat grid. One view of every open project's chat, each card live (lazy-loaded without a click), with its own input, shared voice recording, Ask/Allow approval pill, and a status dot that pulses while the agent runs or awaits input.
+- Workspaces: cards bind to the project's ACTIVE surface - the group panel when a live group owns the stack rail, otherwise the project's AI chat. Group cards render the group transcript and fan messages out to every participant.
+- Workspaces: opening the grid collapses the sidebar, hides the per-project AI window, the project rail, the status bar and the bottom composer for a tight universal view; the radio marquee moves into the top bar while music is on.
+- Workspaces: clicking a card opens that project and closes the grid, so the click never lands on a hidden workspace.
+- Workspaces: cards fill the full window down to a small bottom margin (no reserved status-bar gap), and wide code blocks and long text now wrap and scroll inside each card instead of clipping on the right.
+- Workspaces: uniform card borders (no "selected" outline in the universal view) and one 12px padding rhythm across every card region, so text and controls align on all cards.
+- Chat: display_image and display_video render in the chat only. The experimental terminal write path that could echo megabytes of base64 into the shell is removed.
+- Chat: the machine block added under uploaded images no longer leaks as raw text in the transcript.
+
+---
+
 ## [3.2.1]
 
 - Credential vault: Settings → Security adds a keyring-backed vault for project-independent secrets (HF_TOKEN, passwords, keys).

@@ -1876,9 +1876,14 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
               universal view; the projects it represents are IN the cards
               (tinted, named, clickable). Mount stays intact: the rail keeps
               its subscriptions; only its chrome vanishes. */}
+          {/* h-full: WITHOUT it the rail's aside loses the flex-row
+              stretch it had when it was a direct child here - its height
+              collapses to content and the bottom + button rides up under
+              the last project tile instead of staying at the window's
+              bottom edge. */}
           <div
             className={cn(
-              "transition-[width] duration-150",
+              "h-full transition-[width] duration-150",
               chatGridOpen && "pointer-events-none !w-0 overflow-hidden",
             )}
           >
