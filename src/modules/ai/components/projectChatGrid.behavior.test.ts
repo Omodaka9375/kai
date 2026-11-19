@@ -40,9 +40,12 @@ describe("Workspaces grid behavior (source pins)", () => {
   });
 
   it("grid geometry is absolute full-width (universal, not project-offset)", () => {
-    expect(grid).toContain('"inset-x-2 top-[2.85rem]');
+    // bottom-2: Workspaces hides both bottom bars, so the cards take the
+    // screen down to a small margin (no status-bar strip to reserve).
+    expect(grid).toContain('"inset-x-2 top-[2.85rem] bottom-2"');
     // The sidebar-dependent offset var is gone from the grid.
     expect(grid).not.toContain("kai-workspace-left");
+    expect(grid).not.toContain("kai-input-bar-h");
   });
 
   it("ActiveSurfaces renders nothing while the grid is open", () => {

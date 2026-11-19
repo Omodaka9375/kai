@@ -244,10 +244,13 @@ export function ProjectChatGrid({ items }: { items: ProjectSwitcherItem[] }) {
         // UNIVERSAL (2026-11-19): ABSOLUTE inside AppShell's post-rail
         // container — spans everything right of the rail, independent of
         // any project's sidebar (which is collapsed while this is open).
-        // Same vertical footprint as the expanded AI window: below the
-        // header, above the input-bar strip. No scroll: fixed 2x4 — the
-        // CARD transcripts scroll, this root never does.
-        "inset-x-2 top-[2.85rem] bottom-[calc(var(--kai-input-bar-h,0px)+42px)]",
+        // Tight universal view (2026-11-19): the grid renders ONLY while
+        // Workspaces is open, and that mode hides both the bottom AI input
+        // and the status bar - so there is no strip to reserve and the
+        // cards take the screen down to a small bottom margin. (The +42px
+        // calc here used to reserve the status-bar band that created a
+        // dead gap under the grid.)
+        "inset-x-2 top-[2.85rem] bottom-2",
       )}
     >
       {cells.map((cell) => (
