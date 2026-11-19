@@ -179,3 +179,31 @@ describe("skill blocks render as chips, not pasted bodies (2026-11-03 report)", 
     expect(source).toContain("out = out.replace(SKILL_RE, (_m, name: string) => {");
   });
 });
+
+describe("attachment blocks do not leak below uploaded images (2026-11-19 report)", () => {
+  // The composer (UPLOADED-IMAGE PATH BLOCKS, 2026-11-16) appends a machine
+  // block telling the model the durable path of each uploaded image. The
+  // transcript renders the image itself, so the block must vanish from the
+  // user's visible text — no chip, no raw markup.
+  it("strips the attachment block and keeps the user's own text", () => {
+    const msg =
+      'what is in this picture?\n\n<attachment name="cat.png" savedAt="C:/Users/me/.kai/media/cat.png">The attached image cat.png is also saved at the file path above - pass that path to tools that need a file. Do not ask the user to re-provide the image.</attachment>';
+    const { text, chips } = stripUserContextBlocks(msg);
+    expect(text).toBe("what is in this picture?");
+    expect(chips).toHaveLength(0);
+  });
+
+  it("strips the block even when it is the ONLY content (image-only message)", () => {
+    const msg =
+      '<attachment name="shot.png" savedAt="/home/u/.kai/media/shot.png">path plumbing text</attachment>';
+    const { text, chips } = stripUserContextBlocks(msg);
+    expect(text).toBe("");
+    expect(chips).toHaveLength(0);
+  });
+
+  it("does not chip or mangle text that merely mentions the word attachment", () => {
+    const { text, chips } = stripUserContextBlocks("look at the attachment please");
+    expect(text).toBe("look at the attachment please");
+    expect(chips).toHaveLength(0);
+  });
+});

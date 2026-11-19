@@ -26,6 +26,12 @@ const SNIPPET_RE = /<snippet\s+name="([^"]+)">\n?[\s\S]*?\n?<\/snippet>/g;
 // no agent round-trip), but the TRANSCRIPT must not dump it as raw text
 // (2026-11-03 report). Same chip as the legacy snippet form.
 const SKILL_RE = /<skill\s+name="([^"]+)">\n?[\s\S]*?\n?<\/skill>/g;
+// ATTACHMENT blocks (2026-11-16 image-path plumbing): the composer appends a
+// machine block telling the MODEL the durable path of an uploaded image. The
+// transcript already renders the image itself, so the block is not user text
+// and must not leak below the image (2026-11-19 report). No chip — the image
+// IS the visual. Tolerates missing/extra attributes.
+const ATTACHMENT_RE = /<attachment\b[^>]*>[\s\S]*?<\/attachment>/g;
 const QUOTE_RE = /<quote\s+author="([^"]*)">\n?([\s\S]*?)\n?<\/quote>/g;
 
 /** Unescape the attribute-encoding used when the block was written. */
@@ -96,6 +102,7 @@ export function stripUserContextBlocks(text: string): {
     chips.push({ kind: "snippet", name });
     return "";
   });
+  out = out.replace(ATTACHMENT_RE, "");
   return { text: out.trim(), chips };
 }
 
