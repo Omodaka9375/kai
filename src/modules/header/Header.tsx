@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { IS_MAC, KEY_SEP, USE_CUSTOM_WINDOW_CONTROLS } from "@/lib/platform";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import { usePreferencesStore } from "@/modules/settings/preferences";
+import { RadioMarquee } from "@/modules/radio";
 import {
   getBindingTokens,
   SHORTCUTS,
@@ -207,6 +208,7 @@ export function Header({
   const rootRef = useRef<HTMLDivElement>(null);
   const [compact, setCompact] = useState(false);
   const userShortcuts = usePreferencesStore((s) => s.shortcuts);
+  const radioEnabled = usePreferencesStore((s) => s.radioEnabled);
 
   const tokensFor = (id: ShortcutId): string => {
     const s = SHORTCUTS.find((s) => s.id === id);
@@ -240,15 +242,19 @@ export function Header({
       }`}
     >
       <div className="flex shrink-0 items-center gap-0.5">
-        <Button
-          onClick={onToggleSidebar}
-          title="Toggle sidebar"
-          variant="ghost"
-          size="icon-sm"
-          className="shrink-0 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-        >
-          <HugeiconsIcon icon={SidebarLeftIcon} size={18} strokeWidth={1.75} />
-        </Button>
+        {/* Sidebar toggle: hidden while Workspaces is open — the sidebar is
+            collapsed in that mode, so its toggle is meaningless chrome. */}
+        {!chatGridOpen && (
+          <Button
+            onClick={onToggleSidebar}
+            title="Toggle sidebar"
+            variant="ghost"
+            size="icon-sm"
+            className="shrink-0 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            <HugeiconsIcon icon={SidebarLeftIcon} size={18} strokeWidth={1.75} />
+          </Button>
+        )}
         <Button
           onClick={onToggleChatGrid}
           title={chatGridOpen ? "Close Workspaces (Esc)" : "Workspaces — all project chats"}
@@ -262,9 +268,19 @@ export function Header({
         >
           <HugeiconsIcon icon={DashboardSquare01Icon} size={18} strokeWidth={1.75} />
         </Button>
-        {projectName && !compact && (
+        {/* Current-project name: hidden in Workspaces mode — the mode is not
+            tied to any project; the cards carry their own names. */}
+        {projectName && !compact && !chatGridOpen && (
           <span className="ml-1 max-w-[180px] truncate text-xs font-medium text-muted-foreground" title={projectName}>
             {projectName}
+          </span>
+        )}
+        {/* Radio re-home (2026-11-19): the marquee lives in the status bar's
+            center column; while Workspaces hides that bar, it surfaces here
+            so playback controls stay reachable in grid mode. */}
+        {chatGridOpen && radioEnabled && (
+          <span className="ml-2 flex min-w-0 items-center">
+            <RadioMarquee />
           </span>
         )}
       </div>

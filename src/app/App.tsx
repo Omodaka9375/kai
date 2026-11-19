@@ -1871,12 +1871,24 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
           />
           <ActiveRefSink isActiveRef={isActiveRef} />
           <div className="flex min-h-0 flex-1">
-          <ProjectRail
-            onSwitch={(id) => projectsMenu?.switchProject(id)}
-            onAdd={() => void projectsMenu?.addProject()}
-            onNewProject={() => void projectsMenu?.newProject()}
-            onClose={(id) => projectsMenu?.closeProject(id)}
-          />
+          {/* WORKSPACES MODE (2026-11-19): while the grid is open the rail is
+              collapsed to zero width + pointer-events-none — the grid is a
+              universal view; the projects it represents are IN the cards
+              (tinted, named, clickable). Mount stays intact: the rail keeps
+              its subscriptions; only its chrome vanishes. */}
+          <div
+            className={cn(
+              "transition-[width] duration-150",
+              chatGridOpen && "pointer-events-none !w-0 overflow-hidden",
+            )}
+          >
+            <ProjectRail
+              onSwitch={(id) => projectsMenu?.switchProject(id)}
+              onAdd={() => void projectsMenu?.addProject()}
+              onNewProject={() => void projectsMenu?.newProject()}
+              onClose={(id) => projectsMenu?.closeProject(id)}
+            />
+          </div>
           <div className="flex h-full min-w-0 flex-1 flex-col">
           <Header
             tabs={tabs}
@@ -2108,17 +2120,23 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
           </div>
           </div>
 
-          <StatusBar
-            cwd={activeCwd}
-            filePath={activeFilePath}
-            home={home}
-            onCd={sendCd}
-            onWorkspaceChange={switchWorkspace}
-            hasComposer={hasComposer}
-            privateActive={
-              activeTab?.kind === "terminal" && activeTab.private === true
-            }
-          />
+          {/* WORKSPACES MODE (2026-11-19): the status bar hides with the
+              grid open - agents are pre-picked in their project cards, so
+              the per-workspace controls are dead chrome. The radio marquee
+              (if enabled) re-homes into the header while it is gone. */}
+          {!chatGridOpen && (
+            <StatusBar
+              cwd={activeCwd}
+              filePath={activeFilePath}
+              home={home}
+              onCd={sendCd}
+              onWorkspaceChange={switchWorkspace}
+              hasComposer={hasComposer}
+              privateActive={
+                activeTab?.kind === "terminal" && activeTab.private === true
+              }
+            />
+          )}
 
           {hasComposer ? (
             <AgentRunBridgeGate

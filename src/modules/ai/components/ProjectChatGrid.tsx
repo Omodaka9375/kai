@@ -33,6 +33,10 @@ import {
   getSessionMetaVersion,
   setSessionSteeringMessage,
   stopSession,
+  setSessionAutoApprove,
+  getSessionAutoApprove,
+  subscribeSessionAutoApprove,
+  getSessionAutoApproveVersion,
 } from "../store/chatStore";
 import {
   getSessionPreferences,
@@ -309,34 +313,41 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
           same hue scheme the rail tile uses, so each card reads as its
           project at a glance. Dot = project color (pulses on awaiting/
           running); label still carries the agent status. Click opens the
-          project. */}
-      <button
-        type="button"
-        title={`${name} — open project`}
-        onClick={() => switchProject(projectId)}
+          project. The Ask/Allow pill sits in the header row (NOT inside the
+          button - nested buttons are invalid HTML and the click would
+          bubble to open-project). */}
+      <div
         style={{ background: projectIconFillCss(color, projectId, active) }}
-        className="flex shrink-0 items-center gap-1.5 border-b border-border/40 px-2.5 py-1 text-left transition-colors hover:bg-accent/40"
+        className="flex shrink-0 items-center gap-1 border-b border-border/40 px-2 py-1"
       >
-        <span
-          className={cn(
-            "size-1.5 shrink-0 rounded-full",
-            status === "awaiting" && "animate-pulse",
-            status === "running" && "animate-pulse",
-            status === "error" && "bg-destructive",
-          )}
-          style={
-            status === "error"
-              ? undefined
-              : { background: projectIconCss(color, projectId) }
-          }
-        />
-        <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-foreground">
-          {name}
-        </span>
+        <button
+          type="button"
+          title={`${name} — open project`}
+          onClick={() => switchProject(projectId)}
+          className="flex min-w-0 flex-1 items-center gap-1.5 rounded text-left transition-colors hover:bg-accent/40"
+        >
+          <span
+            className={cn(
+              "size-1.5 shrink-0 rounded-full",
+              status === "awaiting" && "animate-pulse",
+              status === "running" && "animate-pulse",
+              status === "error" && "bg-destructive",
+            )}
+            style={
+              status === "error"
+                ? undefined
+                : { background: projectIconCss(color, projectId) }
+            }
+          />
+          <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-foreground">
+            {name}
+          </span>
+        </button>
+        {sessionId ? <SessionApprovePill sessionId={sessionId} /> : null}
         <span className="shrink-0 text-[9.5px] text-muted-foreground/70">
           {statusLabel(status)}
         </span>
-      </button>
+      </div>
 
       {group ? (
         <GroupCardBody group={group} {...props} projectId={projectId} />
@@ -352,6 +363,47 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
         </button>
       )}
     </div>
+  );
+});
+
+/** Ask/Allow pill for a card's OWN session (Workspaces, 2026-11-19):
+ *  same state as the project chat's AutoApproveToggle - the session-scoped
+ *  map via the version counter, NOT the legacy presentation field (that
+ *  follows the FOREGROUND session). Writes via setSessionAutoApprove so
+ *  the project chat's toggle follows the same state. Colors match the
+ *  toggle: Ask = amber (attention), Allow = green (free to run). */
+const SessionApprovePill = memo(function SessionApprovePill({
+  sessionId,
+}: {
+  sessionId: string;
+}) {
+  useSyncExternalStore(subscribeSessionAutoApprove, getSessionAutoApproveVersion);
+  const mode = getSessionAutoApprove(sessionId);
+  const onClick = useCallback(() => {
+    setSessionAutoApprove(sessionId, mode === "off" ? "all" : "off");
+  }, [sessionId, mode]);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={
+        mode === "off"
+          ? "Ask before every approval-required tool call"
+          : "Allow every tool call without asking (elevation, screen capture, and signed commits still ask)"
+      }
+      className={cn(
+        "flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-medium transition-colors hover:bg-accent/60",
+        mode === "off" ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400",
+      )}
+    >
+      <span
+        className={cn(
+          "size-1.5 shrink-0 rounded-full",
+          mode === "off" ? "bg-amber-500" : "bg-emerald-500",
+        )}
+      />
+      {mode === "off" ? "Ask" : "Allow"}
+    </button>
   );
 });
 

@@ -844,6 +844,26 @@ export function getSessionAgentMeta(sessionId: string): AgentMeta {
 export function getSessionAutoApprove(sessionId: string): "off" | "all" {
   return sessionAutoApprove.get(sessionId) ?? "off";
 }
+/**
+ * Session-targeted auto-approve setter (Workspaces cards, 2026-11-19):
+ * identical semantics to store.setAutoApprove but for ANY session, not
+ * just the active one - the card pill controls ITS project's session.
+ * Also updates the presentation field when the target IS the active
+ * session so the main composer's toggle stays in sync.
+ */
+export function setSessionAutoApprove(sessionId: string, mode: "off" | "all"): void {
+  sessionAutoApprove.set(sessionId, mode);
+  bumpAutoApproveVersion();
+  const next = useChatStore.getState().sessions.map((s) =>
+    s.id === sessionId ? { ...s, autoApprove: mode } : s,
+  );
+  const patch: { sessions: typeof next; autoApprove?: "off" | "all" } = { sessions: next };
+  if (useChatStore.getState().activeSessionId === sessionId) {
+    patch.autoApprove = mode;
+  }
+  useChatStore.setState(patch);
+  persistActiveSessionsList(next);
+}
 export function patchSessionAgentMeta(sessionId: string, patch: Partial<AgentMeta>): void {
   // A late token flush during stop must not make the session look active
   // again or trigger its steering path a second time.

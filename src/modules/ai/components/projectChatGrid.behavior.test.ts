@@ -74,6 +74,19 @@ describe("Workspaces grid behavior (source pins)", () => {
     expect(fn).toContain('aria-hidden={!panelOpen || chatGridOpen}');
   });
 
+  it("Workspaces mode hides the project rail, sidebar toggle and project name", () => {
+    // The rail collapses to zero width + pointer-events-none (mount kept
+    // for its subscriptions); the header drops the sidebar toggle and the
+    // current-project name (the mode is project-agnostic).
+    const railWrap = app.slice(
+      app.indexOf("<ProjectRail") - 400,
+      app.indexOf("<ProjectRail"),
+    );
+    expect(railWrap).toContain("pointer-events-none !w-0");
+    expect(header).toContain("{!chatGridOpen && (");
+    expect(header).toContain("projectName && !compact && !chatGridOpen");
+  });
+
   it("cards lazy-load their project chats without a visit", () => {
     // Every card resolves its project's active session on mount — the
     // background resolver reads the project's own sessions file from disk.
@@ -110,5 +123,38 @@ describe("Workspaces grid behavior (source pins)", () => {
       "utf8",
     );
     expect(panel).toContain("mirrorOpenGroupId(stackSurface === \"group\" ? openGroupId : null)");
+  });
+
+  it("each card header carries an Ask/Allow pill bound to its own session", () => {
+    // Same state as the project chat's AutoApproveToggle: the session-
+    // scoped map via the version counter, written through the session-
+    // targeted setter (NOT the legacy presentation field that follows the
+    // foreground session). Not nested inside the open-project button.
+    expect(grid).toContain("<SessionApprovePill sessionId={sessionId} />");
+    expect(grid).toContain("setSessionAutoApprove(sessionId, mode === \"off\" ? \"all\" : \"off\")");
+    expect(grid).toContain("getSessionAutoApprove(sessionId)");
+    expect(grid).toContain("subscribeSessionAutoApprove");
+    // The session-targeted setter exists in the store.
+    const store = readFileSync(
+      new URL("../store/chatStore.ts", import.meta.url),
+      "utf8",
+    );
+    expect(store).toContain("export function setSessionAutoApprove(");
+    // No button-in-button: the pill renders in the header DIV.
+    const headerBlock = grid.slice(
+      grid.indexOf("Slim header"),
+      grid.indexOf("Slim header") + 1700,
+    );
+    expect(headerBlock).toContain("<div");
+    expect(headerBlock).toContain("<SessionApprovePill");
+  });
+
+  it("the status bar hides in Workspaces mode", () => {
+    expect(app).toContain("{!chatGridOpen && (\n            <StatusBar");
+  });
+
+  it("the radio marquee re-homes into the header while the status bar is gone", () => {
+    expect(header).toContain("chatGridOpen && radioEnabled");
+    expect(header).toContain("<RadioMarquee />");
   });
 });
