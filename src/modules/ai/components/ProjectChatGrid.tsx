@@ -19,6 +19,10 @@ import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
 import { AiChatView } from "./AiChat";
 import { AiErrorBoundary } from "./AiErrorBoundary";
+import {
+  Conversation,
+  ConversationContent,
+} from "@/components/ai-elements/conversation";
 import { useWhisperRecording } from "../hooks/useWhisperRecording";
 import {
   getOrCreateChat,
@@ -43,6 +47,13 @@ import { subscribeProjectAgentStatus, getProjectAgentStatus } from "../store/pro
 import type { ProjectSwitcherItem } from "@/modules/workspace";
 import { projectIconCss, projectIconFillCss } from "@/modules/workspace/projectIcons";
 import { GRID_COLS, GRID_ROWS } from "../store/projectChatGrid";
+import {
+  liveGroupForProject,
+  sendGroupMessage,
+  subscribeGroupChats,
+  getGroupStoreVersion,
+  type GroupChat,
+} from "../store/groupChatStore";
 
 /**
  * WORKSPACES (the project chat grid, 2026-11-18; universal view 2026-11-19):
@@ -51,6 +62,13 @@ import { GRID_COLS, GRID_ROWS } from "../store/projectChatGrid";
  * bar) plus its own input and the shared mic, tinted with its project's
  * icon color. Ordering follows the project rail top-down; cards fill
  * row-major (rail 1-4 top row, 5-8 bottom row).
+ *
+ * SURFACE (2026-11-19): each card binds to the project's ACTIVE chat
+ * surface — the group panel when that project's live group owns the
+ * stack rail, else the project's active AI session. A group card renders
+ * the GROUP transcript (participant-tinted, same layout as the panel) and
+ * sends via sendGroupMessage (delivers to every participant's session);
+ * the status dot/label follow the project's agent status either way.
  *
  * UNIVERSAL VIEW (2026-11-19): opening Workspaces collapses the sidebar and
  * hides the per-project AI window — the grid is app-level, spanning the
@@ -117,6 +135,31 @@ export const SwitchProjectContextProvider = SwitchProjectContext.Provider;
 
 function sessionOfCell(projectId: string): string | null {
   return getProjectActiveSession(projectId);
+}
+
+/** The group a card should show, or null when the card is a plain AI chat.
+ *  A group counts only when it is LIVE and the project's panel currently
+ *  shows it (stack rail on "group" + that group open). */
+function groupOfCell(projectId: string): GroupChat | null {
+  const s = useChatStore.getState();
+  if (s.stackRail.surface !== "group") return null;
+  const g = liveGroupForProject(projectId);
+  return g && g.id === openGroupUiId ? g : null;
+}
+
+/** Open-group UI id: the panel's openGroupId is component-local, so the
+ *  panel mirrors it here on change (mirrorOpenGroupId below). Module-level
+ *  (not React state) so groupOfCell can read it synchronously. */
+let openGroupUiId: string | null = null;
+export function mirrorOpenGroupId(id: string | null): void {
+  if (openGroupUiId === id) return;
+  openGroupUiId = id;
+  for (const l of openGroupUiListeners) l();
+}
+const openGroupUiListeners = new Set<() => void>();
+function subscribeOpenGroupUi(listener: () => void): () => void {
+  openGroupUiListeners.add(listener);
+  return () => openGroupUiListeners.delete(listener);
 }
 
 function mergeTranscriptIntoDraft(
@@ -192,13 +235,14 @@ export function ProjectChatGrid({ items }: { items: ProjectSwitcherItem[] }) {
       data-project-chat-grid
       style={{ gridTemplateColumns: `repeat(${GRID_COLS}, minmax(0, 1fr))` }}
       className={cn(
-        "no-scrollbar-deep absolute z-40 grid grid-rows-2 overflow-hidden gap-2 rounded-2xl border border-border/60 bg-card text-[12px]",
+        "absolute z-40 grid grid-rows-2 overflow-hidden gap-2 rounded-2xl border border-border/60 bg-card text-[12px]",
         "shadow-[0_24px_48px_-12px_rgba(0,0,0,0.45)] ring-1 ring-black/5 dark:ring-white/5",
         // UNIVERSAL (2026-11-19): ABSOLUTE inside AppShell's post-rail
         // container — spans everything right of the rail, independent of
         // any project's sidebar (which is collapsed while this is open).
         // Same vertical footprint as the expanded AI window: below the
-        // header, above the input-bar strip. No scroll: fixed 2x4.
+        // header, above the input-bar strip. No scroll: fixed 2x4 — the
+        // CARD transcripts scroll, this root never does.
         "inset-x-2 top-[2.85rem] bottom-[calc(var(--kai-input-bar-h,0px)+42px)]",
       )}
     >
@@ -247,6 +291,12 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
     subscribeProjectActiveSessions,
     () => sessionOfCell(projectId),
   );
+  // GROUP SURFACE (2026-11-19): when this project's group panel owns the
+  // stack rail, the card shows the GROUP, not the project AI chat. Both
+  // subscriptions re-render the card when the surface flips either way.
+  useSyncExternalStore(subscribeOpenGroupUi, () => openGroupUiId);
+  useSyncExternalStore(subscribeGroupChats, getGroupStoreVersion);
+  const group = useMemo(() => groupOfCell(projectId), [projectId, sessionId]);
 
   return (
     <div
@@ -288,7 +338,9 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
         </span>
       </button>
 
-      {sessionId ? (
+      {group ? (
+        <GroupCardBody group={group} {...props} projectId={projectId} />
+      ) : sessionId ? (
         <CellBody sessionId={sessionId} {...props} projectId={projectId} />
       ) : (
         <button
@@ -300,6 +352,134 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
         </button>
       )}
     </div>
+  );
+});
+
+/** GROUP CARD BODY (2026-11-19): the group transcript, compact — same
+ *  message layout as the group panel (participant-tinted names, user
+ *  bubbles right-capped, system notes centered italic), plus a one-line
+ *  input that fans out via sendGroupMessage. No per-participant presence
+ *  strips or menus: the card is an at-a-glance surface; open the project
+ *  for the full panel. */
+const GroupCardBody = memo(function GroupCardBody(props: GridCellProps & { group: GroupChat }) {
+  const { group } = props;
+  const [text, setText] = useState("");
+  const textRef = useRef(text);
+  textRef.current = text;
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+  const ended = group.endedAt !== null;
+
+  const nameFor = useCallback(
+    (pid: string) => {
+      const p = group.participants.find((x) => x.projectId === pid);
+      return p ? p.name : pid;
+    },
+    [group.participants],
+  );
+
+  const send = useCallback(() => {
+    const trimmed = textRef.current.trim();
+    if (!trimmed || ended || sending) return;
+    setSending(true);
+    void (async () => {
+      try {
+        const r = await sendGroupMessage(group.id, trimmed);
+        if (r.length === 0 && !ended) {
+          setSendError("no deliverable participants");
+        } else {
+          setText("");
+          setSendError(null);
+        }
+      } catch (e) {
+        setSendError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setSending(false);
+      }
+    })();
+  }, [ended, sending, group.id]);
+
+  return (
+    <>
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <AiErrorBoundary>
+          <Conversation className="px-2 py-2">
+            <ConversationContent className="gap-2.5 px-1">
+              {group.messages.length === 0 ? (
+                <div className="flex flex-1 items-center justify-center px-3 text-center text-[11px] text-muted-foreground/70">
+                  No messages yet
+                </div>
+              ) : (
+                group.messages.map((m) =>
+                  m.from === "system" ? (
+                    <div
+                      key={m.id}
+                      className="px-1 text-center text-[10px] italic text-muted-foreground/70"
+                    >
+                      {m.text}
+                    </div>
+                  ) : (
+                    <div
+                      key={m.id}
+                      className={cn(
+                        "flex flex-col gap-0.5",
+                        m.from === "user" && "ml-auto max-w-[85%]",
+                      )}
+                    >
+                      <div
+                        className={cn(
+                          "flex items-center gap-1.5 text-[10px] text-muted-foreground",
+                          m.from === "user" && "justify-end",
+                        )}
+                      >
+                        <span className="font-medium text-foreground/80">
+                          {m.from === "user" ? "You" : nameFor(m.projectId)}
+                        </span>
+                      </div>
+                      <div
+                        className={cn(
+                          "whitespace-pre-wrap break-words text-[11px] leading-snug",
+                          m.from === "user"
+                            ? "rounded-lg bg-muted/70 px-2 py-1 text-foreground"
+                            : "text-foreground/90",
+                        )}
+                      >
+                        {m.text}
+                      </div>
+                    </div>
+                  ),
+                )
+              )}
+            </ConversationContent>
+          </Conversation>
+        </AiErrorBoundary>
+      </div>
+      <div className="flex shrink-0 items-center gap-1.5 border-t border-border/40 bg-card/40 px-2 py-1">
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              send();
+            }
+          }}
+          rows={1}
+          disabled={ended}
+          placeholder={ended ? "Group ended" : sendError ? sendError : "Message group…"}
+          className="max-h-12 min-h-[20px] flex-1 resize-none bg-transparent text-[11px] leading-snug text-foreground outline-none placeholder:text-muted-foreground/50"
+        />
+        <button
+          type="button"
+          title="Send (Enter)"
+          disabled={ended || sending || !text.trim()}
+          onClick={send}
+          className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
+        >
+          <HugeiconsIcon icon={NextIcon} size={12} strokeWidth={2} />
+        </button>
+      </div>
+    </>
   );
 });
 

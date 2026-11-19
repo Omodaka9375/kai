@@ -398,7 +398,16 @@ export default function App() {
           <GroupChatPanel projects={items} activeProjectId={activeId} />
           <AnimatePresence>
             {gridOpen && (
-              <SwitchProjectContextProvider value={switchProject}>
+              <SwitchProjectContextProvider
+                value={(id) => {
+                  // Opening a project from a card lands you IN it: close the
+                  // grid so the workspace is visible underneath (the grid
+                  // covers everything; a switch without a close leaves the
+                  // clicked project hidden and the click looking dead).
+                  useProjectChatGridStore.getState().setOpen(false);
+                  switchProject(id);
+                }}
+              >
                 <ProjectChatGrid items={items} />
               </SwitchProjectContextProvider>
             )}

@@ -69,6 +69,7 @@ import {
 } from "../store/groupChatStore";
 import type { ProjectSwitcherItem } from "@/modules/workspace/ProjectRail";
 import { CoordinatorMenu } from "./CoordinatorMenu";
+import { mirrorOpenGroupId } from "./ProjectChatGrid";
 import { InvitePicker, ParticipantsMenu, participantDisplayName } from "./GroupChatInvitePicker";
 import {
   buildQuoteBlock,
@@ -186,6 +187,15 @@ export function GroupChatPanel({
     if (stackSurface !== "group" && openGroupId !== null) {
       setOpenGroupId(null);
     }
+  }, [stackSurface, openGroupId]);
+
+  // WORKSPACES MIRROR (2026-11-19): the Workspaces grid binds a project's
+  // card to its group when the panel actively shows it. openGroupId is
+  // component-local, so mirror it (only while the panel owns the rail) into
+  // the grid's module-level read. Both deps re-run this; the mirror itself
+  // is a no-op when unchanged.
+  useEffect(() => {
+    mirrorOpenGroupId(stackSurface === "group" ? openGroupId : null);
   }, [stackSurface, openGroupId]);
 
   // PROJECT-SWITCH CLOSE (2026-11-01 report: "when a group chat is active

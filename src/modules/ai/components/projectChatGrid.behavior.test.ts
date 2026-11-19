@@ -80,4 +80,35 @@ describe("Workspaces grid behavior (source pins)", () => {
     expect(grid).toContain("resolveBackgroundProjectSession(cell.id)");
     expect(grid).not.toContain("No chat yet — click to load");
   });
+
+  it("clicking a card opens the project AND closes the grid", () => {
+    // The grid covers the whole workspace; a bare switch would leave the
+    // clicked project hidden underneath (the click looks dead). AppShell
+    // wraps switchProject with a grid close.
+    const shell = readFileSync(
+      new URL("../../../app/AppShell.tsx", import.meta.url),
+      "utf8",
+    );
+    const jsx = shell.indexOf("<SwitchProjectContextProvider");
+    const fn = shell.slice(jsx, jsx + 900);
+    expect(fn).toContain("setOpen(false)");
+    expect(fn).toContain("switchProject(id)");
+  });
+
+  it("a card binds to the group panel's group when it is the active surface", () => {
+    // groupOfCell: stack rail on "group" + the open group contains the
+    // project -> the card renders the GROUP (transcript + group fan-out
+    // input), not the project AI chat.
+    expect(grid).toContain("groupOfCell(projectId)");
+    expect(grid).toContain("liveGroupForProject");
+    expect(grid).toContain("sendGroupMessage(group.id, trimmed)");
+    expect(grid).toContain("GroupCardBody");
+    // The panel mirrors its component-local openGroupId into the grid.
+    expect(grid).toContain("export function mirrorOpenGroupId");
+    const panel = readFileSync(
+      new URL("./GroupChatPanelView.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(panel).toContain("mirrorOpenGroupId(stackSurface === \"group\" ? openGroupId : null)");
+  });
 });
