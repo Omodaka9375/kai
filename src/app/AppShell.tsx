@@ -12,6 +12,9 @@ import {
 } from "@/modules/ai/store/projectStatus";
 import { hydrateGroups, removeProjectFromGroups } from "@/modules/ai/store/groupChatStore";
 import { GroupChatPanel } from "@/modules/ai/components/GroupChatPanelView";
+import { ProjectChatGrid, SwitchProjectContextProvider } from "@/modules/ai/components/ProjectChatGrid";
+import { useProjectChatGridStore } from "@/modules/ai/store/projectChatGrid";
+import { AnimatePresence } from "motion/react";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   AlertDialog,
@@ -111,6 +114,14 @@ export default function App() {
   // preference write: each bump re-rendered AppShell → ALL mounted
   // workspaces → every editor pane + explorer + terminal wrapper, which
   // with 3 parallel projects was the hard switch freeze.
+  // PROJECT CHAT GRID (2026-11-18): the 2x4 per-project chat overview.
+  // AppShell-level because it needs `items` (rail order) + switchProject; it
+  // overlays the workspaces, which stay mounted underneath (agents and
+  // terminals keep streaming) — same hide-not-unmount rule as tabs.
+  // MUST live above the `if (!ready)` early return: this is a hook, and a
+  // hook below an early return changes hook counts between renders —
+  // exactly the minified React #310 that killed app boot the first time.
+  const gridOpen = useProjectChatGridStore((s) => s.open);
   useEffect(() => subscribeProjectAgentStatus(() => setStatusVersion((v) => v + 1)), []);
   useEffect(() => { void hydrateSessionPreferences(); }, []);
   useEffect(() => { void hydrateGroups(); }, []);
@@ -385,6 +396,13 @@ export default function App() {
       <div className="flex h-screen w-full">
         <div className="relative min-w-0 flex-1">
           <GroupChatPanel projects={items} activeProjectId={activeId} />
+          <AnimatePresence>
+            {gridOpen && (
+              <SwitchProjectContextProvider value={switchProject}>
+                <ProjectChatGrid items={items} />
+              </SwitchProjectContextProvider>
+            )}
+          </AnimatePresence>
           {projects.map((project) => (
             <div
               key={project.id}

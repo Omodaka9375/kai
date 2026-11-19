@@ -30,6 +30,7 @@ import {
 import { CustomContextMenu } from "@/modules/ai/components/CustomContextMenu";
 import { ApiTesterPane } from "@/modules/api-tester/ApiTesterPane";
 import { AiComposerProvider } from "@/modules/ai/components/composer";
+import { useProjectChatGridStore } from "@/modules/ai/store/projectChatGrid";
 import { registerChatFileOpen } from "@/modules/ai/components/ChatFileLink";
 import { AiErrorBoundary } from "@/modules/ai/components/AiErrorBoundary";
 import { redactSensitive } from "@/modules/ai/lib/redact";
@@ -174,7 +175,13 @@ function ActiveSurfaces(props: {
   panelOpen: boolean;
 }) {
   const isActive = useWorkspaceActive();
+  // WORKSPACES (2026-11-19): the universal grid view renders JUST itself —
+  // no per-project AI window/pill underneath (same z-40, it would paint
+  // over the grid). Read BEFORE the isActive early return: this is a hook,
+  // and hooks must stay above early returns (React #310 rule).
+  const gridOpen = useProjectChatGridStore((s) => s.open);
   if (!isActive) return null;
+  if (gridOpen) return null;
   const { hasComposer, miniOpen, stackSurface, panelOpen } = props;
   if (miniOpen && hasComposer && stackSurface !== "group") {
     return (
@@ -320,6 +327,42 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
     if (p.getSize().asPercentage <= 0) p.resize(`${sidebarWidthRef.current}px`);
     else p.collapse();
   }, []);
+  // PROJECT CHAT GRID (2026-11-18): header toggle + Escape exit. Esc only
+  // closes when nothing inside a cell owns the key (textarea Escape defers
+  // to IME/none here; xterm/CM never see it — the grid overlays them but
+  // they are inert underneath). The AiMiniWindow's own Escape handler
+  // guards on INPUT/TEXTAREA/contenteditable targets, so both can coexist.
+  const chatGridOpen = useProjectChatGridStore((s) => s.open);
+  const toggleChatGrid = useCallback(() => {
+    // UNIVERSAL VIEW (2026-11-19): opening Workspaces collapses the sidebar
+    // (the grid spans the full post-rail area — a visible sidebar behind it
+    // would just flash on close) and hides the per-project AI window below.
+    // Closing restores nothing automatically: the sidebar stays collapsed,
+    // one click on the sidebar toggle brings it back.
+    const s = useProjectChatGridStore.getState();
+    const opening = !s.open;
+    s.toggle();
+    if (opening) {
+      const p = sidebarRef.current;
+      if (p && p.getSize().asPercentage > 0) p.collapse();
+    }
+  }, []);
+  useEffect(() => {
+    if (!chatGridOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) {
+        // Let the field's own Escape behavior win (blur only); a second
+        // press with focus elsewhere closes the grid.
+        return;
+      }
+      e.preventDefault();
+      useProjectChatGridStore.getState().setOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [chatGridOpen]);
   const cycleSidebarView = useCallback(
     (view: SidebarViewId) => {
       const panel = sidebarRef.current;
@@ -1611,32 +1654,11 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
         term.focus();
         return true;
       },
-      // DISPLAY write — raw bytes into the xterm parser of the terminal pane,
-      // NOT shell stdin. The injector above is the shell-input path (used by
-      // approval-run commands); escape sequences like OSC 1337 inline images
-      // must be interpreted by the terminal, never typed into the shell.
-      writeToActiveTerminalDisplay: (data: string) => {
-        const isTerminalLike = (
-          x: (typeof tabs)[number] | undefined,
-        ): x is (typeof tabs)[number] & { activeLeafId: number } =>
-          !!x && x.kind === "terminal";
-        const active = tabs.find((x) => x.id === activeId);
-        const last = tabs.find((x) => x.id === lastTerminalTabIdRef.current);
-        const newest = [...tabs].reverse().find((x) => x.kind === "terminal");
-        const t = isTerminalLike(active)
-          ? active
-          : isTerminalLike(last)
-            ? last
-            : isTerminalLike(newest)
-              ? newest
-              : null;
-        if (!t) return false;
-        const term = terminalRefs.current.get(t.activeLeafId);
-        if (!term) return false;
-        // No focus steal — displaying an image shouldn't yank keyboard focus.
-        term.write(data);
-        return true;
-      },
+      // writeToActiveTerminalDisplay REMOVED (2026-11-19): display_image /
+      // display_video are chat-only now — agent media never goes to the
+      // user's terminal. The old display-write path here went to PTY stdin
+      // (the handle's write is shell input), typing megabytes of base64
+      // into the live shell (2026-11-19 report).
       getWorkspaceRoot: () => explorerRoot ?? launchCwd ?? home ?? null,
       getActiveFile: () => {
         const t = tabs.find((x) => x.id === activeId);
@@ -1871,6 +1893,8 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
             onSplitTab={toggleSplitTab}
             splitTabId={splitTabId}
             onToggleSidebar={toggleSidebar}
+            onToggleChatGrid={toggleChatGrid}
+            chatGridOpen={chatGridOpen}
             onSplit={handleSplitPane}
             onOpenShortcuts={() => setShortcutsOpen(true)}
             searchTarget={searchTarget}

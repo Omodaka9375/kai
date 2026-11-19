@@ -8,6 +8,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { WindowControls } from "@/components/WindowControls";
+import { cn } from "@/lib/utils";
 import { IS_MAC, KEY_SEP, USE_CUSTOM_WINDOW_CONTROLS } from "@/lib/platform";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import { usePreferencesStore } from "@/modules/settings/preferences";
@@ -29,6 +30,7 @@ import PuzzleIcon from "@hugeicons/core-free-icons/PuzzleIcon";
 import Settings01Icon from "@hugeicons/core-free-icons/Settings01Icon";
 import Shield01Icon from "@hugeicons/core-free-icons/Shield01Icon";
 import SidebarLeftIcon from "@hugeicons/core-free-icons/SidebarLeftIcon";
+import DashboardSquare01Icon from "@hugeicons/core-free-icons/DashboardSquare01Icon";
 import SparklesIcon from "@hugeicons/core-free-icons/SparklesIcon";
 import UserGroupIcon from "@hugeicons/core-free-icons/UserGroupIcon";
 import UserMultiple02Icon from "@hugeicons/core-free-icons/UserMultiple02Icon";
@@ -55,6 +57,8 @@ type Props = {
   onSplitTab: (id: number) => void;
   splitTabId: number | null;
   onToggleSidebar: () => void;
+  onToggleChatGrid: () => void;
+  chatGridOpen: boolean;
   onSplit: (dir: "row" | "col") => void;
   onOpenShortcuts: () => void;
   searchTarget: SearchTarget;
@@ -192,6 +196,8 @@ export function Header({
   onSplitTab,
   splitTabId,
   onToggleSidebar,
+  onToggleChatGrid,
+  chatGridOpen,
   onSplit,
   onOpenShortcuts,
   searchTarget,
@@ -242,6 +248,19 @@ export function Header({
           className="shrink-0 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           <HugeiconsIcon icon={SidebarLeftIcon} size={18} strokeWidth={1.75} />
+        </Button>
+        <Button
+          onClick={onToggleChatGrid}
+          title={chatGridOpen ? "Close Workspaces (Esc)" : "Workspaces — all project chats"}
+          aria-pressed={chatGridOpen}
+          variant="ghost"
+          size="icon-sm"
+          className={cn(
+            "shrink-0 rounded-md transition-colors hover:bg-accent hover:text-foreground",
+            chatGridOpen ? "text-foreground bg-accent" : "text-muted-foreground",
+          )}
+        >
+          <HugeiconsIcon icon={DashboardSquare01Icon} size={18} strokeWidth={1.75} />
         </Button>
         {projectName && !compact && (
           <span className="ml-1 max-w-[180px] truncate text-xs font-medium text-muted-foreground" title={projectName}>
