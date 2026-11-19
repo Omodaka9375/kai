@@ -456,7 +456,9 @@ const GroupCardBody = memo(function GroupCardBody(props: GridCellProps & { group
 
   return (
     <>
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      {/* Same bounded wrapper as CellBody: min-h-0 for scroll, min-w-0 so
+          long group messages wrap to the card instead of inflating it. */}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <AiErrorBoundary>
           <Conversation className="px-2 py-2">
             <ConversationContent className="gap-2.5 px-1">
@@ -558,12 +560,15 @@ const CellBody = memo(function CellBody(props: CellBodyProps) {
 
   return (
     <>
-      {/* min-h-0 flex COLUMN (2026-11-19 hover-scroll fix): AiChatView's
-          Conversation is `flex-1 overflow-y-auto` — without a bounded flex
-          height it grows to content, the parent clips, and the wheel over
-          the card scrolls nothing. Bounded here, it scrolls on hover and
-          stick-to-bottom pins to the newest text as it streams. */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      {/* Bounded flex COLUMN (2026-11-19): min-h-0 gives AiChatView's
+          Conversation (`flex-1 overflow-y-auto`) a bounded height, so it
+          scrolls on hover and stick-to-bottom pins to the newest text as
+          it streams. min-w-0: a flex item defaults to min-width:auto, so
+          a wide code block's intrinsic width would inflate this wrapper
+          past the narrow card and the card CLIPS on the right instead of
+          the block scrolling inside - Streamdown's code-block bodies
+          (overflow-x-auto) then scroll horizontally WITHIN the card. */}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <AiErrorBoundary>
           <AiChatView
             messages={helpers.messages}

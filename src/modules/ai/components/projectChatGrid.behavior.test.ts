@@ -33,10 +33,13 @@ describe("Workspaces grid behavior (source pins)", () => {
     expect(grid).toContain("projectIconCss(color, projectId)");
   });
 
-  it("transcript wrapper bounds height so hover-scroll works", () => {
-    // min-h-0 flex-1 flex-col: the Conversation (flex-1 overflow-y-auto)
-    // gets a bounded height, so wheel-over-card scrolls that card.
-    expect(grid).toContain('"flex min-h-0 flex-1 flex-col overflow-hidden"');
+  it("transcript wrapper bounds height AND width so hover-scroll and wrapping work", () => {
+    // min-h-0: the Conversation (flex-1 overflow-y-auto) gets a bounded
+    // height, so wheel-over-card scrolls that card. min-w-0: a flex item
+    // defaults to min-width:auto - without it a wide code block inflates
+    // the wrapper past the narrow card and the card clips on the right
+    // instead of the block scrolling INSIDE the card.
+    expect(grid).toContain('"flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"');
   });
 
   it("grid geometry is absolute full-width (universal, not project-offset)", () => {
