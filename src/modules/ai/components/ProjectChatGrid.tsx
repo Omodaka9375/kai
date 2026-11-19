@@ -308,8 +308,11 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
   return (
     <div
       className={cn(
-        "flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border",
-        active ? "border-primary/50 bg-background" : "border-border/60 bg-background/95",
+        // UNIFORM CARDS (2026-11-19): no selected outline in Workspaces -
+        // it is a universal view, the active card would just be whichever
+        // project the user last foregrounded. All cards share one border;
+        // the project-color tint and status dot carry the differences.
+        "flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-border/60 bg-background/95",
       )}
     >
       {/* Slim header, TINTED with the project's icon color (2026-11-19):
@@ -321,7 +324,7 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
           bubble to open-project). */}
       <div
         style={{ background: projectIconFillCss(color, projectId, active) }}
-        className="flex shrink-0 items-center gap-1 border-b border-border/40 px-2 py-1"
+        className="flex shrink-0 items-center gap-1 border-b border-border/40 px-3 py-1.5"
       >
         <button
           type="button"
@@ -460,8 +463,8 @@ const GroupCardBody = memo(function GroupCardBody(props: GridCellProps & { group
           long group messages wrap to the card instead of inflating it. */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <AiErrorBoundary>
-          <Conversation className="px-2 py-2">
-            <ConversationContent className="gap-2.5 px-1">
+          <Conversation className="px-3 py-2">
+            <ConversationContent className="gap-3">
               {group.messages.length === 0 ? (
                 <div className="flex flex-1 items-center justify-center px-3 text-center text-[11px] text-muted-foreground/70">
                   No messages yet
@@ -511,7 +514,7 @@ const GroupCardBody = memo(function GroupCardBody(props: GridCellProps & { group
           </Conversation>
         </AiErrorBoundary>
       </div>
-      <div className="flex shrink-0 items-center gap-1.5 border-t border-border/40 bg-card/40 px-2 py-1">
+      <div className="flex shrink-0 items-center gap-1.5 border-t border-border/40 bg-card/40 px-3 py-1.5">
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -575,6 +578,11 @@ const CellBody = memo(function CellBody(props: CellBodyProps) {
             status={helpers.status}
             error={helpers.error}
             clearError={helpers.clearError}
+            // CARD RHYTHM (2026-11-19): 12px horizontal padding on EVERY
+            // card region (header, transcript, input) so text and chrome
+            // share one aligned edge; slightly tighter message gap for
+            // the narrow card.
+            contentClassName="gap-4 px-3 pb-3"
           />
         </AiErrorBoundary>
       </div>
@@ -679,7 +687,7 @@ const CellInput = memo(function CellInput({
   );
 
   return (
-    <div className="flex shrink-0 items-center gap-1.5 border-t border-border/40 bg-card/40 px-2 py-1">
+    <div className="flex shrink-0 items-center gap-1.5 border-t border-border/40 bg-card/40 px-3 py-1.5">
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}

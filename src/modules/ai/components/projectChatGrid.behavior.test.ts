@@ -163,4 +163,32 @@ describe("Workspaces grid behavior (source pins)", () => {
     expect(header).toContain("chatGridOpen && radioEnabled");
     expect(header).toContain("<RadioMarquee />");
   });
+
+  it("cards are uniform - no selected outline in the universal view", () => {
+    // Every card shares one border; the active tint must NOT single a
+    // card out with a different outline.
+    expect(grid).toContain("rounded-xl border border-border/60 bg-background/95");
+    expect(grid).not.toContain("border-primary/50");
+  });
+
+  it("card regions share one horizontal padding rhythm", () => {
+    // Header strip, transcript (via AiChatView contentClassName), group
+    // transcript and both card inputs all sit on the same 12px edge.
+    expect(grid).toContain('className="flex shrink-0 items-center gap-1 border-b border-border/40 px-3 py-1.5"');
+    expect(grid).toContain('contentClassName="gap-4 px-3 pb-3"');
+    expect(grid).toContain('<Conversation className="px-3 py-2">');
+    const px3 = (grid.match(/px-3 /g) ?? []).length;
+    expect(px3).toBeGreaterThanOrEqual(3);
+    // The chrome rows must not revert to the old 8px edge. (Inner content
+    // padding like the group user-bubble's px-2 py-1 is fine.)
+    expect(grid).not.toContain("bg-card/40 px-2 py-1");
+  });
+
+  it("AiChatView accepts a transcript content class override", () => {
+    const chat = readFileSync(
+      new URL("./AiChat.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(chat).toContain("contentClassName");
+  });
 });

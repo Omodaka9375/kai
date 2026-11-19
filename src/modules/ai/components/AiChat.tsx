@@ -228,6 +228,10 @@ type Props = {
   status: ChatStatus;
   error: Error | undefined;
   clearError: () => void;
+  /** Extra classes for the ConversationContent (transcript) wrapper.
+   *  Surfaces with a fixed chrome rhythm (Workspaces cards) use it to
+   *  align the transcript's padding with their header/input rows. */
+  contentClassName?: string;
 };
 
 export function AiChatView({
@@ -235,6 +239,7 @@ export function AiChatView({
   status,
   error,
   clearError,
+  contentClassName,
 }: Props) {
   const scrollCtx = useRef<StickToBottomContext | null>(null);
   // SYMMETRIC CHAT ZOOM (2026-11-18): zoom the TRANSCRIPT by one ratio so
@@ -372,7 +377,10 @@ export function AiChatView({
 
   return (
     <Conversation contextRef={scrollCtx}>
-        <ConversationContent className="gap-5 p-3 pb-6" style={chatFontZoomStyle}>
+        <ConversationContent
+          className={cn("gap-5 p-3 pb-6", contentClassName)}
+          style={chatFontZoomStyle}
+        >
         {messages.map((m, idx) => {
           // Day separator: rendered whenever the calendar day changes
           // between consecutive timestamped messages. Messages without a
