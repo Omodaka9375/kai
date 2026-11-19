@@ -4,6 +4,13 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [3.3.1]
+
+- Workspaces: card inputs accept pastes. Long or structured text becomes a removable "Pasted:" chip instead of flooding the narrow input, and pasted screenshots become small thumbnail pills that ride the message as real image attachments (with the same format and size gates as the main composer, persisted to disk so the agent gets a file path). Group cards accept the same pastes.
+- UI: the Add Project button in the project rail stays pinned to the bottom edge of the window instead of riding up under the last project tile.
+
+---
+
 ## [3.3.0]
 
 - Workspaces: a new universal 2x4 project chat grid. One view of every open project's chat, each card live (lazy-loaded without a click), with its own input, shared voice recording, Ask/Allow approval pill, and a status dot that pulses while the agent runs or awaits input.
