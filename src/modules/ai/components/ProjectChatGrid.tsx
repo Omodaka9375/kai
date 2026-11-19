@@ -38,6 +38,7 @@ import {
   getProjectActiveSession,
   subscribeProjectActiveSessions,
 } from "../store/projectRegistry";
+import { resolveBackgroundProjectSession } from "../store/chatStore";
 import { subscribeProjectAgentStatus, getProjectAgentStatus } from "../store/projectStatus";
 import type { ProjectSwitcherItem } from "@/modules/workspace";
 import { projectIconCss, projectIconFillCss } from "@/modules/workspace/projectIcons";
@@ -133,6 +134,22 @@ export function ProjectChatGrid({ items }: { items: ProjectSwitcherItem[] }) {
   );
   const projectIds = useMemo(() => cells.map((cell) => cell.id), [cells]);
   const statuses = useProjectStatuses(projectIds);
+
+  // LAZY LOAD (2026-11-19): every card loads and streams on its own — no
+  // click-to-visit. A project whose sessions were never hydrated (never
+  // switched to since launch) resolves through the background resolver:
+  // it reads the project's own sessions file from disk, seeds the active
+  // session's history, and binds the project's active session in the
+  // registry. That registry write re-renders the card via its
+  // subscribeProjectActiveSessions subscription, and CellBody mounts with
+  // a seeded chat. The resolver dedupes in-flight calls, so re-running
+  // this effect is safe.
+  useEffect(() => {
+    for (const cell of cells) {
+      if (getProjectActiveSession(cell.id)) continue;
+      void resolveBackgroundProjectSession(cell.id).catch(() => {});
+    }
+  }, [cells]);
 
   // ── The ONE mic instance ──────────────────────────────────────────────
   const micTargetRef = useRef<string | null>(null);

@@ -2075,12 +2075,17 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
                       data-ai-input-bar
                       initial={false}
                       animate={{
-                        height: panelOpen ? "auto" : 0,
-                        opacity: panelOpen ? 1 : 0,
+                        // WORKSPACES (2026-11-19): the bottom composer hides
+                        // while the grid is open — every card carries its own
+                        // input, a second global one below is dead weight.
+                        // --kai-input-bar-h tracks this element's height, so
+                        // the grid's bottom offset extends automatically.
+                        height: panelOpen && !chatGridOpen ? "auto" : 0,
+                        opacity: panelOpen && !chatGridOpen ? 1 : 0,
                       }}
                       transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
                       className="overflow-hidden"
-                      aria-hidden={!panelOpen}
+                      aria-hidden={!panelOpen || chatGridOpen}
                       ref={inputBarRef}
                     >
                       {hasComposer ? (

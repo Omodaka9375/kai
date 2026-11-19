@@ -64,4 +64,20 @@ describe("Workspaces grid behavior (source pins)", () => {
     );
     expect(fn).toContain("p.collapse()");
   });
+
+  it("the bottom composer hides while the grid is open", () => {
+    const fn = app.slice(
+      app.indexOf("data-ai-input-bar"),
+      app.indexOf("data-ai-input-bar") + 1100,
+    );
+    expect(fn).toContain("panelOpen && !chatGridOpen");
+    expect(fn).toContain('aria-hidden={!panelOpen || chatGridOpen}');
+  });
+
+  it("cards lazy-load their project chats without a visit", () => {
+    // Every card resolves its project's active session on mount — the
+    // background resolver reads the project's own sessions file from disk.
+    expect(grid).toContain("resolveBackgroundProjectSession(cell.id)");
+    expect(grid).not.toContain("No chat yet — click to load");
+  });
 });
