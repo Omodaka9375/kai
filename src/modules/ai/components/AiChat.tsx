@@ -14,7 +14,7 @@ import {
   ReasoningContent,
   ReasoningTrigger,
 } from "@/components/ai-elements/reasoning";
-import { Tool } from "@/components/ai-elements/tool";
+import { Tool, toolVisualMeta, type ToolPart } from "@/components/ai-elements/tool";
 import {
   Collapsible,
   CollapsibleContent,
@@ -232,6 +232,11 @@ type Props = {
    *  Surfaces with a fixed chrome rhythm (Workspaces cards) use it to
    *  align the transcript's padding with their header/input rows. */
   contentClassName?: string;
+  /** CARD MODE (Workspaces, 2026-11-19): tool parts render as compact
+   *  rows (trailing state dot, chip background) and consecutive calls of
+   *  the same tool collapse into one expandable group - at ~290px wide
+   *  the doc-scale rows read as loose debris. */
+  compact?: boolean;
 };
 
 export function AiChatView({
@@ -240,6 +245,7 @@ export function AiChatView({
   error,
   clearError,
   contentClassName,
+  compact = false,
 }: Props) {
   const scrollCtx = useRef<StickToBottomContext | null>(null);
   // SYMMETRIC CHAT ZOOM (2026-11-18): zoom the TRANSCRIPT by one ratio so
@@ -405,14 +411,15 @@ export function AiChatView({
                 // from this attribute (App.tsx contextmenu handler).
                 data-msg-author={m.role === "user" ? "You" : (m.metadata as { agentName?: string } | undefined)?.agentName ?? "Kai"}
               >
-                <RenderedMessage
-                  message={m}
-                  onApproval={onApproval}
-                  streaming={m.id === streamingMessageId}
-                  forkable={!isBusy && m.role === "user" && idx > 0}
-                  messageIndex={idx}
-                  timestamp={ts}
-                />
+              <RenderedMessage
+                message={m}
+                onApproval={onApproval}
+                streaming={m.id === streamingMessageId}
+                forkable={!isBusy && m.role === "user" && idx > 0}
+                messageIndex={idx}
+                timestamp={ts}
+                compact={compact}
+              />
               </div>
             </Fragment>
           );
@@ -731,6 +738,7 @@ const RenderedMessage = memo(function RenderedMessage({
   forkable,
   messageIndex,
   timestamp,
+  compact,
 }: {
   message: UIMessage;
   onApproval: (id: string, approved: boolean) => void;
@@ -739,6 +747,7 @@ const RenderedMessage = memo(function RenderedMessage({
   messageIndex?: number;
   /** Per-message createdAt for hover tooltips; undefined = legacy/unknown. */
   timestamp?: number;
+  compact?: boolean;
 }) {
   // RULES OF HOOKS: RenderedMessage is now a hook-free dispatcher. The user
   // and assistant paths live in DIFFERENT child components, so React can
@@ -760,6 +769,7 @@ const RenderedMessage = memo(function RenderedMessage({
       onApproval={onApproval}
       streaming={streaming}
       timestamp={timestamp}
+      compact={compact}
     />
   );
 });
@@ -769,17 +779,20 @@ function AssistantMessageView({
   onApproval,
   streaming,
   timestamp,
+  compact,
 }: {
   message: UIMessage;
   onApproval: (id: string, approved: boolean) => void;
   streaming: boolean;
   timestamp?: number;
+  compact?: boolean;
 }) {
   const timeTitle = timestamp ? absoluteTime(timestamp) : undefined;
 
-  const groups = useMemo(() => buildPartGroups(message.parts as AnyPart[]), [
-    message.parts,
-  ]);
+  const groups = useMemo(
+    () => buildPartGroups(message.parts as AnyPart[], compact),
+    [message.parts, compact],
+  );
 
   // Sequential approval queue: when a step emits several approval-requested
   // tool calls, only the first is interactive — the rest render as compact
@@ -832,6 +845,13 @@ function AssistantMessageView({
                     </PartAppear>
                   );
                 }
+                if (g.kind === "calls") {
+                  return (
+                    <PartAppear key={`${message.id}-${g.key}`}>
+                      <ToolGroup toolName={g.toolName} parts={g.parts} />
+                    </PartAppear>
+                  );
+                }
                 const isReadSingle =
                   partType(g.part) === "tool-read_file" &&
                   ((g.part as { state?: string }).state ?? "") !==
@@ -857,6 +877,7 @@ function AssistantMessageView({
                     <RenderedPart
                       part={g.part}
                       onApproval={onApproval}
+                      compact={compact}
                       streaming={
                         streaming &&
                         (partType(g.part) === "text" ||
@@ -898,7 +919,8 @@ function AssistantMessageView({
 
 type Group =
   | { kind: "single"; part: AnyPart; idx: number; key: string }
-  | { kind: "reads"; parts: AnyPart[]; key: string };
+  | { kind: "reads"; parts: AnyPart[]; key: string }
+  | { kind: "calls"; toolName: string; parts: AnyPart[]; startIdx: number; key: string };
 
 function partType(p: AnyPart): string {
   return (p as { type?: string }).type ?? "";
@@ -910,6 +932,28 @@ function isReadFilePart(p: AnyPart): boolean {
   return state !== "approval-requested";
 }
 
+/** Tool name for grouping consecutive identical calls (compact mode), or
+ *  null when the part is not groupable: text/reasoning never group,
+ *  approval-requested parts must stay individually interactive, and media
+ *  tools render as inline results (MediaMessage), not rows. */
+function groupableToolName(p: AnyPart): string | null {
+  const t = partType(p);
+  if (t === "text" || t === "reasoning" || t === "step-start") return null;
+  const state = (p as { state?: string }).state ?? "";
+  if (state === "approval-requested") return null;
+  if (t === "dynamic-tool") {
+    const name = (p as { toolName?: string }).toolName ?? "";
+    if (name === "generate_image" || name === "generate_video") return null;
+    return name || null;
+  }
+  if (t.startsWith("tool-")) {
+    const name = t.slice(5);
+    if (name === "generate_image" || name === "generate_video") return null;
+    return name;
+  }
+  return null;
+}
+
 function partKey(p: AnyPart, idx: number): string {
   const tc = (p as { toolCallId?: string }).toolCallId;
   if (tc) return tc;
@@ -918,9 +962,32 @@ function partKey(p: AnyPart, idx: number): string {
   return `i-${idx}`;
 }
 
-function buildPartGroups(parts: AnyPart[]): Group[] {
+function buildPartGroups(parts: AnyPart[], compact?: boolean): Group[] {
   const out: Group[] = [];
   let run: { parts: AnyPart[]; startIdx: number } | null = null;
+  // Compact card mode: consecutive calls of the SAME tool collapse into a
+  // "calls" group (mirrors the reads grouping the wide surfaces already do
+  // for read_file) so a bash burst is one row, not five.
+  let callRun: { toolName: string; parts: AnyPart[]; startIdx: number } | null =
+    null;
+  const flushCalls = () => {
+    if (!callRun) return;
+    if (callRun.parts.length >= 2) {
+      out.push({
+        kind: "calls",
+        toolName: callRun.toolName,
+        parts: callRun.parts,
+        startIdx: callRun.startIdx,
+        key: `calls-${partKey(callRun.parts[0], callRun.startIdx)}`,
+      });
+    } else {
+      callRun.parts.forEach((p, k) => {
+        const idx = callRun!.startIdx + k;
+        out.push({ kind: "single", part: p, idx, key: partKey(p, idx) });
+      });
+    }
+    callRun = null;
+  };
   const flushRun = () => {
     if (!run) return;
     if (run.parts.length >= 2) {
@@ -939,14 +1006,29 @@ function buildPartGroups(parts: AnyPart[]): Group[] {
   };
   parts.forEach((p, i) => {
     if (isReadFilePart(p)) {
+      flushCalls();
       if (!run) run = { parts: [], startIdx: i };
       run.parts.push(p);
       return;
     }
     flushRun();
+    if (compact) {
+      const gname = groupableToolName(p);
+      if (gname) {
+        if (callRun && callRun.toolName === gname) {
+          callRun.parts.push(p);
+          return;
+        }
+        flushCalls();
+        callRun = { toolName: gname, parts: [p], startIdx: i };
+        return;
+      }
+    }
+    flushCalls();
     out.push({ kind: "single", part: p, idx: i, key: partKey(p, i) });
   });
   flushRun();
+  flushCalls();
   return out;
 }
 
@@ -1027,6 +1109,97 @@ function basename(p: string): string {
   const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
   return i >= 0 ? p.slice(i + 1) : p;
 }
+
+/**
+ * Compact card mode (Workspaces): collapse N consecutive calls of the same
+ * tool into ONE row - a "Run x3" chip that expands to the individual compact
+ * Tool rows. A bash burst is one line, not five. Header shows the tool glyph
+ * + label + count; trailing dots preview each call's state. Approval-needed
+ * and media parts never group (groupableToolName filters them), so every
+ * part here is a settled or running plain call.
+ */
+const ToolGroup = memo(function ToolGroup({
+  toolName,
+  parts,
+}: {
+  toolName: string;
+  parts: AnyPart[];
+}) {
+  const { label, Icon } = useMemo(() => toolVisualMeta(toolName), [toolName]);
+  return (
+    <Collapsible className="group/call overflow-hidden rounded-md border border-border/50 bg-card/50">
+      <CollapsibleTrigger
+        className={cn(
+          "flex w-full items-center gap-2 px-2 py-1 text-left text-[11.5px]",
+          "transition-colors hover:bg-muted/50",
+          "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+        )}
+      >
+        <HugeiconsIcon
+          icon={ArrowRight01Icon}
+          size={11}
+          strokeWidth={2}
+          className={cn(
+            "shrink-0 text-muted-foreground transition-transform",
+            "group-data-[state=open]/call:rotate-90",
+          )}
+        />
+        <HugeiconsIcon
+          icon={Icon}
+          size={13}
+          strokeWidth={1.75}
+          className="shrink-0 text-muted-foreground"
+        />
+        <span className="shrink-0 font-medium text-foreground">{label}</span>
+        <span className="shrink-0 text-[11px] text-muted-foreground">
+          {"\u00D7"}
+          {parts.length}
+        </span>
+        <span className="ml-auto flex shrink-0 items-center gap-1 group-data-[state=open]/call:invisible">
+          {parts.map((p, i) => {
+            const st = (p as { state?: string }).state ?? "";
+            const err = st === "output-error";
+            const denied = st === "output-denied";
+            const running =
+              st === "input-streaming" ||
+              st === "input-available" ||
+              st === "approval-responded";
+            return (
+              <span
+                key={i}
+                className={cn(
+                  "size-1.5 rounded-full",
+                  err
+                    ? "bg-destructive"
+                    : denied
+                      ? "bg-orange-500"
+                      : running
+                        ? "bg-amber-500 animate-pulse"
+                        : "bg-emerald-500/70",
+                )}
+              />
+            );
+          })}
+        </span>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="Kai-collapsible-content border-t border-border/30">
+        <div className="flex flex-col gap-1 px-1.5 py-1.5">
+          {parts.map((p, i) => (
+            <Tool
+              key={`${partKey(p, i)}-${i}`}
+              toolName={toolName}
+              state={(p as { state: ToolPart["state"] }).state}
+              input={(p as { input?: unknown }).input}
+              output={"output" in p ? (p as { output?: unknown }).output : undefined}
+              errorText={"errorText" in p ? (p as { errorText?: string }).errorText : undefined}
+              compact
+            />
+          ))}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+});
 
 const ReadGroup = memo(function ReadGroup({ parts }: { parts: AnyPart[] }) {
   const paths = useMemo(() => {
@@ -1219,11 +1392,13 @@ const RenderedPart = memo(function RenderedPart({
   onApproval,
   streaming,
   approvalQueue,
+  compact,
 }: {
   part: AnyPart;
   onApproval: (id: string, approved: boolean) => void;
   streaming: boolean;
   approvalQueue?: ApprovalQueueInfo | null;
+  compact?: boolean;
 }) {
   // SHOW/HIDE MODEL THINKING (Settings -> General -> Chat): when off,
   // reasoning parts and inline <thinking> pills are not rendered at all.
@@ -1316,6 +1491,7 @@ const RenderedPart = memo(function RenderedPart({
         part={part as unknown as AnyToolPart}
         onApproval={onApproval}
         approvalQueue={approvalQueue}
+        compact={compact}
       />
     );
   }
@@ -1327,10 +1503,12 @@ const RenderedTool = memo(function RenderedTool({
   part,
   onApproval,
   approvalQueue,
+  compact,
 }: {
   part: AnyToolPart;
   onApproval: (id: string, approved: boolean) => void;
   approvalQueue?: ApprovalQueueInfo | null;
+  compact?: boolean;
 }) {
   const toolName =
     part.type === "dynamic-tool"
@@ -1412,6 +1590,7 @@ const RenderedTool = memo(function RenderedTool({
       output={"output" in part ? part.output : undefined}
       errorText={"errorText" in part ? part.errorText : undefined}
       defaultOpen={toolName === "list_directory"}
+      compact={compact}
     />
   );
 });

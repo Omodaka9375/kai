@@ -39,7 +39,10 @@ describe("Workspaces grid behavior (source pins)", () => {
     // defaults to min-width:auto - without it a wide code block inflates
     // the wrapper past the narrow card and the card clips on the right
     // instead of the block scrolling INSIDE the card.
-    expect(grid).toContain('"flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"');
+    // The wrapper is now TranscriptFrame (clip fades + the bounded-flex
+    // contract live together).
+    expect(grid).toContain('className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"');
+    expect(grid).toContain("function useTranscriptClips");
   });
 
   it("grid geometry is absolute full-width (universal, not project-offset)", () => {
@@ -190,5 +193,34 @@ describe("Workspaces grid behavior (source pins)", () => {
       "utf8",
     );
     expect(chat).toContain("contentClassName");
+  });
+
+  it("cards render compact tool rows with grouped consecutive calls", () => {
+    // Card mode: the grid asks for compact; AiChatView collapses same-tool
+    // runs into a ToolGroup chip and renders Tool rows without the leading
+    // dot (trailing state dot instead).
+    expect(grid).toContain("contentClassName=\"gap-4 px-3 pb-3\"\n            // CARD MODE");
+    expect(grid).toMatch(/compact\n\s*\/>/);
+    const chat = readFileSync(
+      new URL("./AiChat.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(chat).toContain("const ToolGroup = memo");
+    expect(chat).toContain("function groupableToolName");
+    expect(chat).toContain("kind: \"calls\"");
+    const tool = readFileSync(
+      new URL("../../../components/ai-elements/tool.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(tool).toContain("compact?: boolean;");
+    expect(tool).toContain("const COMPACT_DOT");
+    expect(tool).toContain("export function toolVisualMeta");
+  });
+
+  it("send button announces itself once there is text", () => {
+    // Empty: muted glyph. Typed: filled primary disc - the action is
+    // discoverable without hovering a 12px arrow.
+    expect(grid).toContain("bg-primary text-primary-foreground hover:bg-primary/90");
+    expect(grid).toContain("canSend");
   });
 });

@@ -102,6 +102,80 @@ import {
 
 type CellStatus = ProjectSwitcherItem["status"];
 
+/**
+ * CLIP FADES (2026-11-19 card polish): a card transcript is almost always
+ * scrolled - mid-message text just CUTS at the rounded edge and there is no
+ * signal that more exists above. This wrapper paints soft background
+ * gradients at the top/bottom edges, but ONLY while content is actually
+ * clipped there (the transcript's role="log" scroll element is watched for
+ * scroll position + content resizes, streaming included). Static always-on
+ * fades would wash out the first/last line of short chats.
+ */
+function useTranscriptClips(ref: React.RefObject<HTMLDivElement | null>) {
+  const [clips, setClips] = useState({ top: false, bottom: false });
+  // No dep list by design: re-acquires the scroll element whenever React
+  // swaps subtrees (empty-state <-> transcript), and update() bails on
+  // equal state so the re-run is inert. Re-observes the content node too -
+  // a scroll container's own box never changes while text streams.
+  useEffect(() => {
+    const root = ref.current;
+    if (!root) return;
+    const el = root.querySelector<HTMLElement>('[role="log"]');
+    if (!el) return;
+    const update = () => {
+      setClips((c) => {
+        const top = el.scrollTop > 4;
+        const bottom =
+          el.scrollHeight - el.scrollTop - el.clientHeight > 4;
+        return c.top === top && c.bottom === bottom
+          ? c
+          : { top, bottom };
+      });
+    };
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    if (el.firstElementChild) ro.observe(el.firstElementChild);
+    return () => {
+      el.removeEventListener("scroll", update);
+      ro.disconnect();
+    };
+  });
+  return clips;
+}
+
+const TranscriptFrame = memo(function TranscriptFrame({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const clips = useTranscriptClips(ref);
+  return (
+    <div
+      ref={ref}
+      className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+    >
+      {children}
+      <div
+        aria-hidden
+        className={cn(
+          "pointer-events-none absolute inset-x-0 top-0 z-10 h-4 bg-gradient-to-b from-background to-transparent transition-opacity duration-200",
+          clips.top ? "opacity-100" : "opacity-0",
+        )}
+      />
+      <div
+        aria-hidden
+        className={cn(
+          "pointer-events-none absolute inset-x-0 bottom-0 z-10 h-4 bg-gradient-to-t from-background to-transparent transition-opacity duration-200",
+          clips.bottom ? "opacity-100" : "opacity-0",
+        )}
+      />
+    </div>
+  );
+});
+
 /** Live project-status map; re-reads on every agent-status transition. */
 function useProjectStatuses(projectIds: string[]): Record<string, CellStatus> {
   const [version, setVersion] = useState(0);
@@ -459,9 +533,9 @@ const GroupCardBody = memo(function GroupCardBody(props: GridCellProps & { group
 
   return (
     <>
-      {/* Same bounded wrapper as CellBody: min-h-0 for scroll, min-w-0 so
-          long group messages wrap to the card instead of inflating it. */}
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      {/* Same bounded wrapper as CellBody (TranscriptFrame carries the
+          min-h-0/min-w-0 contract + the clip fades). */}
+      <TranscriptFrame>
         <AiErrorBoundary>
           <Conversation className="px-3 py-2">
             <ConversationContent className="gap-3">
@@ -513,7 +587,7 @@ const GroupCardBody = memo(function GroupCardBody(props: GridCellProps & { group
             </ConversationContent>
           </Conversation>
         </AiErrorBoundary>
-      </div>
+      </TranscriptFrame>
       <div className="flex shrink-0 items-center gap-1.5 border-t border-border/40 bg-card/40 px-3 py-1.5">
         <textarea
           value={text}
@@ -534,7 +608,12 @@ const GroupCardBody = memo(function GroupCardBody(props: GridCellProps & { group
           title="Send (Enter)"
           disabled={ended || sending || !text.trim()}
           onClick={send}
-          className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
+          className={cn(
+            "shrink-0 rounded-full p-1 transition-colors",
+            text.trim() && !ended && !sending
+              ? "bg-primary text-primary-foreground hover:bg-primary/90"
+              : "text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40",
+          )}
         >
           <HugeiconsIcon icon={NextIcon} size={12} strokeWidth={2} />
         </button>
@@ -571,7 +650,7 @@ const CellBody = memo(function CellBody(props: CellBodyProps) {
           past the narrow card and the card CLIPS on the right instead of
           the block scrolling inside - Streamdown's code-block bodies
           (overflow-x-auto) then scroll horizontally WITHIN the card. */}
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      <TranscriptFrame>
         <AiErrorBoundary>
           <AiChatView
             messages={helpers.messages}
@@ -583,9 +662,12 @@ const CellBody = memo(function CellBody(props: CellBodyProps) {
             // share one aligned edge; slightly tighter message gap for
             // the narrow card.
             contentClassName="gap-4 px-3 pb-3"
+            // CARD MODE: compact tool rows (trailing state dot, chip bg)
+            // + consecutive same-tool calls collapse into one group row.
+            compact
           />
         </AiErrorBoundary>
-      </div>
+      </TranscriptFrame>
       <CellInput
         sessionId={sessionId}
         chat={chat}
@@ -697,8 +779,8 @@ const CellInput = memo(function CellInput({
           micTranscribing
             ? "Transcribing…"
             : busy
-              ? "Message the running agent…"
-              : "Ask…"
+              ? "Steer the running agent."
+              : "Message KAI."
         }
         className="max-h-12 min-h-[20px] flex-1 resize-none bg-transparent text-[11px] leading-snug text-foreground outline-none placeholder:text-muted-foreground/50"
       />
@@ -717,7 +799,15 @@ const CellInput = memo(function CellInput({
           title="Send (Enter)"
           disabled={!canSend}
           onClick={send}
-          className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
+          className={cn(
+            // PRIMARY ACTION ANNOUNCES ITSELF (2026-11-19): once there is
+            // something to send the glyph flips to a filled disc - a
+            // muted arrow at 12px was invisible until hover.
+            "shrink-0 rounded-full p-1 transition-colors",
+            canSend
+              ? "bg-primary text-primary-foreground hover:bg-primary/90"
+              : "text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40",
+          )}
         >
           <HugeiconsIcon icon={NextIcon} size={12} strokeWidth={2} />
         </button>

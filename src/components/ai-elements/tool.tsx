@@ -90,6 +90,35 @@ const STATUS_LABEL: Record<ToolPart["state"], string> = {
   "output-error": "error",
 };
 
+/**
+ * COMPACT (Workspaces cards, 2026-11-19): the leading 6px dot reads as
+ * layout debris at card width, so compact rows move the state signal to
+ * the END of the row where successive rows align it into a scannable
+ * column. Done gets a soft green ("what finished") instead of the hollow
+ * ring - at 11.5px the ring and a full dot are the same object.
+ */
+const COMPACT_DOT: Record<ToolPart["state"], string> = {
+  "approval-requested": "bg-amber-500 animate-pulse",
+  "approval-responded": "bg-amber-500 animate-pulse",
+  "input-streaming": "bg-amber-500 animate-pulse",
+  "input-available": "bg-amber-500 animate-pulse",
+  "output-available": "bg-emerald-500/70",
+  "output-denied": "bg-orange-500",
+  "output-error": "bg-destructive",
+};
+
+/** Icon + header label for a tool name - shared by ToolImpl and the
+ *  Workspaces consecutive-call group chip (ToolGroup in AiChat.tsx). */
+export function toolVisualMeta(toolName: string): {
+  label: string;
+  Icon: typeof File01Icon;
+} {
+  return {
+    label: presentationFor(toolName).label ?? prettyToolName(toolName),
+    Icon: TOOL_ICON[toolName] ?? ToolsIcon,
+  };
+}
+
 function deriveSummary(toolName: string, input: unknown): string | null {
   if (!input || typeof input !== "object") return null;
   const fn = presentationFor(toolName).summary;
@@ -102,6 +131,8 @@ export type ToolProps = ComponentProps<typeof Collapsible> & {
   input?: unknown;
   output?: unknown;
   errorText?: string;
+  /** Card-mode row: no leading dot, trailing state dot, chip background. */
+  compact?: boolean;
 };
 
 // Tools whose `input` carries large/streaming content (file bodies, sub-
@@ -147,6 +178,7 @@ const ToolImpl = ({
   output,
   errorText,
   defaultOpen,
+  compact = false,
   ...props
 }: ToolProps) => {
   const meta = TOOL_ICON[toolName];
@@ -224,20 +256,25 @@ const ToolImpl = ({
           "text-[12px] transition-colors",
           "hover:bg-muted/60 disabled:cursor-default disabled:hover:bg-transparent",
           "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+          // Compact rows read as deliberate objects, not floating debris:
+          // a static chip underlay replaces the hover-only background.
+          compact && "bg-muted/30 py-1",
         )}
       >
-        <span
-          // Cross-fade the dot: background-color covers solid state changes,
-          // box-shadow covers the solid > ring-inset (done) settle. Without
-          // this the amber > hollow snap read as a "jump" on fast tools.
-          className={cn(
-            "size-1.5 shrink-0 rounded-full transition-[background-color,box-shadow] duration-200 ease-out",
-            wasUserInterrupted
-              ? "bg-transparent ring-1 ring-inset ring-muted-foreground/40"
-              : STATUS_DOT[state],
-          )}
-          aria-label={wasUserInterrupted ? "canceled" : STATUS_LABEL[state]}
-        />
+        {!compact && (
+          <span
+            // Cross-fade the dot: background-color covers solid state changes,
+            // box-shadow covers the solid > ring-inset (done) settle. Without
+            // this the amber > hollow snap read as a "jump" on fast tools.
+            className={cn(
+              "size-1.5 shrink-0 rounded-full transition-[background-color,box-shadow] duration-200 ease-out",
+              wasUserInterrupted
+                ? "bg-transparent ring-1 ring-inset ring-muted-foreground/40"
+                : STATUS_DOT[state],
+            )}
+            aria-label={wasUserInterrupted ? "canceled" : STATUS_LABEL[state]}
+          />
+        )}
         <HugeiconsIcon
           icon={Icon}
           size={13}
@@ -280,6 +317,17 @@ const ToolImpl = ({
             canceled
           </span>
         )}
+        {compact && (
+          <span
+            className={cn(
+              "size-1.5 shrink-0 rounded-full",
+              wasUserInterrupted
+                ? "bg-transparent ring-1 ring-inset ring-muted-foreground/40"
+                : COMPACT_DOT[state],
+            )}
+            aria-label={wasUserInterrupted ? "canceled" : STATUS_LABEL[state]}
+          />
+        )}
       </CollapsibleTrigger>
 
       {canStop ? (
@@ -321,6 +369,7 @@ const ToolImpl = ({
 // state transition or the path summary changing — NOT every input-content
 // token. We compare the cheap derived summary instead of the input ref.
 export const Tool = memo(ToolImpl, (a, b) => {
+  if (a.compact !== b.compact) return false;
   if (a.toolName !== b.toolName || a.state !== b.state) return false;
   if (a.errorText !== b.errorText) return false;
   if (a.output !== b.output) return false;
