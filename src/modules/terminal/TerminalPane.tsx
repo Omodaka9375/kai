@@ -4,12 +4,12 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "re
 import { sanitizeDroppedText } from "./lib/dropText";
 import { useTerminalSession } from "./lib/useTerminalSession";
 
-export type TerminalPaneHandle = {
-  write: (data: string) => void;
-  focus: () => void;
-  getBuffer: (maxLines?: number) => string | null;
-  getSelection: () => string | null;
-};
+  export type TerminalPaneHandle = {
+    write: (data: string) => void;
+    focus: () => void;
+    getBuffer: (maxLines?: number) => string | null;
+    getSelection: () => string | null;
+  };
 
 type Props = {
   /** Stable identifier for this leaf (passed back through callbacks). */
@@ -98,16 +98,16 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, Props>(
       return () => cancelAnimationFrame(id);
     }, [resolvedTheme, session]);
 
-    useImperativeHandle(
-      ref,
-      () => ({
-        write: (data: string) => session.write(data),
-        focus: () => session.focus(),
-        getBuffer: (max?: number) => session.getBuffer(max),
-        getSelection: () => session.getSelection(),
-      }),
-      [session],
-    );
+      useImperativeHandle(
+        ref,
+        () => ({
+          write: (data: string) => session.write(data),
+          focus: () => session.focus(),
+          getBuffer: (max?: number) => session.getBuffer(max),
+          getSelection: () => session.getSelection(),
+        }),
+        [session],
+      );
 
     return (
       <div

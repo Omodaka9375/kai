@@ -48,15 +48,8 @@ export type ToolContext = {
    * Type a string into the active terminal at the prompt — without executing.
    * Returns false if there is no active terminal tab to inject into.
    */
-  injectIntoActivePty: (text: string) => boolean;
-  /**
-   * Write raw bytes to the active terminal's DISPLAY (the xterm parser), NOT
-   * the shell's stdin. Escape sequences (e.g. OSC 1337 inline images) are
-   * interpreted by the terminal; the shell never sees them. Returns false if
-   * there is no terminal tab to write into.
-   */
-  writeToActiveTerminalDisplay: (text: string) => boolean;
-  /** Open a new preview tab (in-app iframe) at the given URL. */
+    injectIntoActivePty: (text: string) => boolean;
+    /** Open a new preview tab (in-app iframe) at the given URL. */
   openPreview: (url: string) => boolean;
   /** Read cache: per-file { size, hash, coverage? } — `coverage` records
    *  whether the model saw the FULL file (write_file-safe) or a partial

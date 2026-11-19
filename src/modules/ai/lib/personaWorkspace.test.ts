@@ -74,7 +74,6 @@ describe("tool context policy", () => {
     expect(ctx.getTerminalContext()).toBeNull();
     expect(ctx.isActiveTerminalPrivate()).toBe(false);
     expect(ctx.injectIntoActivePty("x")).toBe(false);
-    expect(ctx.writeToActiveTerminalDisplay("x")).toBe(false);
     expect(ctx.openPreview("http://x")).toBe(false);
     expect(ctx.supportsToolResultImages?.()).toBe(false);
   });

@@ -312,12 +312,11 @@ async function makeAssistantToolContext(sessionId: string): Promise<ToolContext>
     // applies first (defense-in-depth), so even files inside scratch are
     // blocked if they match the secret patterns (.env, .pem, id_rsa, …).
     getSandboxOverride: () => ({ root, mode: "workspaceOnly" }),
-    // Live desktop context deliberately NOT wired — no terminal, no
-    // cross-project file access from the phone. The assistant is fenced.
-    writeToActiveTerminalDisplay: () => false,
-    injectIntoActivePty: () => false,
-    openPreview: () => false,
-  } as unknown as ToolContext;
+      // Live desktop context deliberately NOT wired — no terminal, no
+      // cross-project file access from the phone. The assistant is fenced.
+      injectIntoActivePty: () => false,
+      openPreview: () => false,
+    } as unknown as ToolContext;
 }
 
 /** ~/.kai/assistant — resolved via the Rust side so the path form is right

@@ -215,7 +215,6 @@ export function buildPersonaToolContext(
     getTerminalContext: () => null,
     isActiveTerminalPrivate: () => false,
     injectIntoActivePty: () => false,
-    writeToActiveTerminalDisplay: () => false,
     openPreview: () => false,
     // Session-scoped machinery keys off the synthetic persona id: shell
     // sessions, todos, subagent shells. It is a stable, unique key, so

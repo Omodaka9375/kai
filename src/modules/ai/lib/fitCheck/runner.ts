@@ -132,7 +132,6 @@ async function runOneMission(
     getTerminalContext: () => null,
     isActiveTerminalPrivate: () => false,
     injectIntoActivePty: () => false,
-    writeToActiveTerminalDisplay: () => false,
     openPreview: () => false,
     readCache: new Map(),
     getSessionId: () => null,

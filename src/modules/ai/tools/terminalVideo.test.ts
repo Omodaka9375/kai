@@ -1,34 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { shellQuoteForTest, videoMimeForTest } from "./terminalVideo";
-
-/**
- * Adversarial cases for the shellQuote gate. The command runs through the
- * Rust oneshot runner (PowerShell -File on Windows, sh elsewhere), so every
- * metachar must be rejected outright — an earlier draft had `&` outside the
- * regex character class, which accepted `x"; cmd; #` (statement injection).
- */
-describe("shellQuote gate", () => {
-  it("rejects statement/quoting injection attempts", () => {
-    for (const evil of [
-      'x"; calc; #',
-      "a;b",
-      'a"b',
-      "$(calc)",
-      "`calc`",
-      "a&b",
-      "C:\\Videos\\x.mp4",
-    ]) {
-      expect(() => shellQuoteForTest(evil)).toThrow();
-    }
-  });
-
-  it("allows ordinary paths and URLs (quoted)", () => {
-    for (const fine of ["plain-name.mp4", "my (final) cut.mp4", "https://host/v.mp4"]) {
-      expect(shellQuoteForTest(fine)).toBe(`"${fine}"`);
-    }
-  });
-});
+import { videoMimeForTest } from "./terminalVideo";
 
 describe("video MIME hints", () => {
   it("maps common containers", () => {
@@ -40,10 +12,12 @@ describe("video MIME hints", () => {
   });
 });
 
-/** SOURCE PINS (2026-11-06: "Videos should be displayed in chat as well as
- *  images" — display_video erroled "no active terminal tab to display into"
- *  instead of showing the video in the chat like generate_video does). */
-describe("display_video chat-card wiring (source pins)", () => {
+/** SOURCE PINS. display_video is CHAT-ONLY (2026-11-19): the old second
+ *  surface extracted a poster frame with ffmpeg and pushed an OSC 1337
+ *  inline image into the active terminal — agent output had no business in
+ *  the user's terminal, and the sibling image path had already misfired
+ *  into shell stdin. The ffmpeg/shell machinery is gone entirely. */
+describe("display_video chat-only wiring (source pins)", () => {
   const src = readFileSync(new URL("./terminalVideo.ts", import.meta.url), "utf8");
   const chat = readFileSync(
     new URL("../components/AiChat.tsx", import.meta.url),
@@ -57,19 +31,25 @@ describe("display_video chat-card wiring (source pins)", () => {
     expect(src).toContain("base64,");
   });
 
-  it("no ffmpeg no longer fails the tool — only skips the terminal poster", () => {
-    // The old hard return { ok:false, note:"ffmpeg not found..." } is gone.
-    expect(src).not.toContain("ok: false");
-    expect(src).toContain("skipping the terminal poster frame");
+  it("has no terminal write path, no ffmpeg, no shell quoting", () => {
+    expect(src).not.toContain("writeToActiveTerminalDisplay");
+    expect(src).not.toContain("injectIntoActivePty");
+    expect(src).not.toContain("hasFfmpeg");
+    expect(src).not.toContain("shellQuote");
+    expect(src).not.toContain("runCommand");
+    expect(src).not.toContain("buildOsc1337");
+    // The head comment still documents OSC 1337 for the terminal module's
+    // parser — but the TOOL must not build sequences.
+    expect(src).not.toContain("extractPosterFrame");
   });
 
-  it("no active terminal no longer errors — chat card is a first-class surface", () => {
-    // The old hard error on a missing terminal is gone; the only remaining
-    // error path fires when BOTH surfaces failed (oversized + no terminal).
-    expect(src).not.toContain('return { error: "no active terminal tab to display into" };');
-    // The chat bytes are read through the fs module under a size cap.
+  it("the chat bytes are read through the fs module under a size cap", () => {
     expect(src).toContain("CHAT_VIDEO_CAP_BYTES");
     expect(src).toContain("native.readFileBytes(localPath)");
+  });
+
+  it("tool description tells the model nothing goes to the terminal", () => {
+    expect(src).toContain("Nothing is ever written into the user's terminal");
   });
 
   it("AiChat routes display_video through MediaMessage", () => {

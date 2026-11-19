@@ -47,7 +47,6 @@ export type ChatRuntimeDeps = {
     getTerminalContext: () => string | null;
     isActiveTerminalPrivate: () => boolean;
     injectIntoActivePty: (text: string) => boolean;
-    writeToActiveTerminalDisplay: (text: string) => boolean;
     getWorkspaceRoot: () => string | null;
     openPreview: (url: string) => boolean;
   };
@@ -257,8 +256,6 @@ export function makeChatSync(
       getTerminalContext: () => deps.live.getTerminalContext(),
       isActiveTerminalPrivate: () => deps.live.isActiveTerminalPrivate(),
       injectIntoActivePty: (text: string) => deps.live.injectIntoActivePty(text),
-      writeToActiveTerminalDisplay: (text: string) =>
-        deps.live.writeToActiveTerminalDisplay(text),
       openPreview: (url: string) => deps.live.openPreview(url),
       readCache,
       getSessionId: () => sessionId,

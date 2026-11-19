@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { buildOsc1337, buildTerminalImageTools, parseOsc1337 } from "./terminalImage";
+import { buildTerminalImageTools } from "./terminalImage";
 import type { ToolContext } from "./context";
 
 /**
@@ -44,15 +44,23 @@ describe("display_image loads local files without base64 in model context", () =
   });
 });
 
-describe("OSC 1337 build/parse", () => {
-  it("round-trips name and data", () => {
-    const seq = buildOsc1337("QUJD", "pic.png", 3);
-    // parseOsc1337 takes the FULL OSC params (starting at "File=").
-    const m = seq.match(/^\x1b\]1337;(.+)\x07$/);
-    expect(m).not.toBeNull();
-    const parsed = parseOsc1337(m![1]!);
-    expect(parsed?.name).toBe("pic.png");
-    expect(parsed?.base64Data).toBe("QUJD");
+describe("display_image is chat-only (2026-11-19 design)", () => {
+  const src = readFileSync(new URL("./terminalImage.ts", import.meta.url), "utf8");
+
+  it("has no terminal-decoration write path at all", () => {
+    expect(src).not.toContain("writeToActiveTerminalDisplay");
+    expect(src).not.toContain("injectIntoActivePty");
+    expect(src).not.toContain("buildOsc1337");
+    expect(src).not.toContain("displayed_in: terminalDisplayed");
+  });
+
+  it("still emits the chat image card unconditionally", () => {
+    expect(src).toContain('type: "image" as const');
+    expect(src).toContain('displayed_in: "chat image card"');
+  });
+
+  it("tool description tells the model the image never goes to the terminal", () => {
+    expect(src).toContain("never written into the user's terminal");
   });
 });
 
@@ -75,8 +83,9 @@ describe("display_image chat-card wiring (source pins)", () => {
   it("no active terminal no longer errors — the chat card is unconditional", () => {
     // The old hard error is gone from the return path.
     expect(src).not.toContain('return { error: "no active terminal tab to display into" };');
-    // The terminal write is best-effort: ok or not, the card still returns.
-    expect(src).toContain("best-effort second surface");
+    // The card is the ONLY surface now (2026-11-19) — the best-effort
+    // terminal write is gone entirely.
+    expect(src).not.toContain("best-effort second surface");
   });
 
   it("AiChat routes display_image through MediaMessage", () => {
@@ -139,5 +148,22 @@ describe("display_image rejects placeholder/garbage payloads (2026-11-10 broken-
       { toolCallId: "t3", messages: [] },
     )) as Record<string, unknown>;
     expect(String(out.error)).toMatch(/recognized image header/i);
+  });
+});
+
+describe("display_image never writes base64 into shell stdin (2026-11-19 report)", () => {
+  const src = readFileSync(new URL("./terminalImage.ts", import.meta.url), "utf8");
+
+  // The report: with a terminal open, display_image pasted a huge base64
+  // blob into the terminal. Root cause: writeToActiveTerminalDisplay
+  // actually went to the PTY (shell stdin) — the shell echoed the OSC 1337
+  // sequence as plain text. Resolution went further than routing the
+  // sequence to the xterm parser: the terminal surface was REMOVED
+  // entirely (agent output belongs in the chat), so the whole write path
+  // is gone from the tool.
+  it("terminalImage has no terminal write path of any kind", () => {
+    expect(src).not.toContain("writeToActiveTerminalDisplay");
+    expect(src).not.toContain("injectIntoActivePty");
+    expect(src).not.toContain("buildOsc1337");
   });
 });

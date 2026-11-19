@@ -122,12 +122,10 @@ type Live = {
   getCwd: () => string | null;
   getTerminalContext: () => string | null;
   isActiveTerminalPrivate: () => boolean;
-  injectIntoActivePty: (text: string) => boolean;
-  /** Raw write to the active terminal's DISPLAY (xterm parser), not shell stdin. */
-  writeToActiveTerminalDisplay: (text: string) => boolean;
-  getWorkspaceRoot: () => string | null;
-  getActiveFile: () => string | null;
-  openPreview: (url: string) => boolean;
+    injectIntoActivePty: (text: string) => boolean;
+    getWorkspaceRoot: () => string | null;
+    getActiveFile: () => string | null;
+    openPreview: (url: string) => boolean;
 };
 
 // ── Error display — surface RetryError / APICallError details ──────────
@@ -430,12 +428,11 @@ type StoreState = {
 const NOOP_LIVE: Live = {
   getCwd: () => null,
   getTerminalContext: () => null,
-  isActiveTerminalPrivate: () => false,
-  injectIntoActivePty: () => false,
-  writeToActiveTerminalDisplay: () => false,
-  getWorkspaceRoot: () => null,
-  getActiveFile: () => null,
-  openPreview: () => false,
+    isActiveTerminalPrivate: () => false,
+    injectIntoActivePty: () => false,
+    getWorkspaceRoot: () => null,
+    getActiveFile: () => null,
+    openPreview: () => false,
 };
 
 const CHATS_LRU_CAP = 8;
@@ -1062,12 +1059,10 @@ const runtimeDeps: ChatRuntimeDeps = {
       useChatStore.getState().live.getTerminalContext(),
     isActiveTerminalPrivate: () =>
       useChatStore.getState().live.isActiveTerminalPrivate(),
-    injectIntoActivePty: (text) =>
-      useChatStore.getState().live.injectIntoActivePty(text),
-    writeToActiveTerminalDisplay: (text) =>
-      useChatStore.getState().live.writeToActiveTerminalDisplay(text),
-    getWorkspaceRoot: () => useChatStore.getState().live.getWorkspaceRoot(),
-    openPreview: (url) => useChatStore.getState().live.openPreview(url),
+      injectIntoActivePty: (text) =>
+        useChatStore.getState().live.injectIntoActivePty(text),
+      getWorkspaceRoot: () => useChatStore.getState().live.getWorkspaceRoot(),
+      openPreview: (url) => useChatStore.getState().live.openPreview(url),
   },
   getKeys: () => useChatStore.getState().apiKeys,
   getSelectedModelId: () => useChatStore.getState().selectedModelId,
@@ -1140,12 +1135,11 @@ function makeChatSync(sessionId: string): Chat<UIMessage> {
         getCwd: () => sessionRoot,
         getWorkspaceRoot: () => sessionRoot,
         getTerminalContext: () => null,
-        isActiveTerminalPrivate: () => false,
-        injectIntoActivePty: () => false,
-        writeToActiveTerminalDisplay: () => false,
-        openPreview: () => false,
-        getActiveFile: () => null,
-      } as unknown as Live)
+          isActiveTerminalPrivate: () => false,
+          injectIntoActivePty: () => false,
+          openPreview: () => false,
+          getActiveFile: () => null,
+        } as unknown as Live)
     : null;
   const liveFor = (): Live | undefined => {
     if (!sessionRoot) return (project ? getProjectLive(project.id) : undefined) as unknown as Live | undefined;
@@ -1158,10 +1152,9 @@ function makeChatSync(sessionId: string): Chat<UIMessage> {
     getWorkspaceRoot: () => liveFor()?.getWorkspaceRoot() ?? fallback.getWorkspaceRoot(),
     getActiveFile: () => liveFor()?.getActiveFile() ?? fallback.getActiveFile(),
     openPreview: (url: string) => liveFor()?.openPreview(url) ?? fallback.openPreview(url),
-    isActiveTerminalPrivate: () => liveFor()?.isActiveTerminalPrivate() ?? fallback.isActiveTerminalPrivate(),
-    injectIntoActivePty: (text: string) => liveFor()?.injectIntoActivePty(text) ?? fallback.injectIntoActivePty(text),
-    writeToActiveTerminalDisplay: (data: string) => liveFor()?.writeToActiveTerminalDisplay(data) ?? fallback.writeToActiveTerminalDisplay(data),
-  };
+      isActiveTerminalPrivate: () => liveFor()?.isActiveTerminalPrivate() ?? fallback.isActiveTerminalPrivate(),
+      injectIntoActivePty: (text: string) => liveFor()?.injectIntoActivePty(text) ?? fallback.injectIntoActivePty(text),
+    };
   return makeChatSyncRuntime(
     sessionId,
     {

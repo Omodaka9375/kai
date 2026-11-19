@@ -1,26 +1,24 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { nativeForContext, type ToolContext } from "./context";
-import { buildOsc1337 } from "./terminalImage";
-import { checkReadable, checkWritable } from "../lib/security";
+import { checkReadable } from "../lib/security";
 
 /**
- * Terminal video display — a poster-frame variant of the inline-image path.
+ * Video display — CHAT-ONLY (2026-11-19). An inline playable media card in
+ * the chat, exactly like generate_video's. The old second surface (extract a
+ * poster frame with ffmpeg and push an OSC 1337 inline image into the
+ * active terminal) is GONE: it wrote into the user's terminal where the
+ * agent had no business putting output, and its write path had already
+ * misfired into shell stdin on the image side (same design).
  *
- * WHY a poster frame, not real playback: OSC 1337 (iTerm2 inline images) is
- * image-only by protocol design and xterm has no video surface. The honest
- * "display video in the terminal" is: extract a frame via local ffmpeg,
- * render it inline through the same decoration pipeline as display_image,
- * and annotate it so the user knows it's a video and where the real thing is.
- *
- * ffmpeg is OPTIONAL — not every KAI machine has it. Fail-soft: without it
- * the tool returns a readable notice instead of erroring the agent's turn.
+ * There is no ffmpeg dependency anymore at all — the card plays the real
+ * bytes, no frame extraction needed.
  */
 
 /** Chat-playback cap. The bytes travel as number[] JSON over IPC
  *  (fs_read_file_bytes) - the same transport cost the 8 MB remote-download
- *  cap below is sized against. Above this the chat card is skipped and the
- *  terminal poster frame remains the display. */
+ *  cap below is sized against. Above this the card is skipped and the tool
+ *  returns the path so the user can open the file themselves. */
 const CHAT_VIDEO_CAP_BYTES = 8 * 1024 * 1024;
 
 /** Best-effort MIME from the extension - the <video> element only needs a
@@ -34,73 +32,8 @@ function videoMimeFor(path: string): string {
   return "video/mp4";
 }
 
-/** Cached ffmpeg probe — spawning a process per call is not free. */
-let ffmpegAvailable: boolean | null = null;
-async function hasFfmpeg(): Promise<boolean> {
-  if (ffmpegAvailable !== null) return ffmpegAvailable;
-  try {
-    const { native } = await import("../lib/native");
-    const r = await native.runCommand("ffmpeg -version", null, 8);
-    ffmpegAvailable = r.exit_code === 0;
-  } catch {
-    ffmpegAvailable = false;
-  }
-  return ffmpegAvailable;
-}
-
-/**
- * Quote a value for the ffmpeg command line AND reject every shell metachar.
- * The command runs through the Rust oneshot runner (PowerShell -File on
- * Windows, `$SHELL -lc` elsewhere), so metachars are live in BOTH dialects:
- * `"` breaks out of quoting, `;` chains statements, `$(` + backtick interpolate
- * inside double quotes, `&` chains, backslash escapes. The reject-list is a
- * SINGLE character class — an earlier draft had `&` outside the class, which
- * accepted `x"; cmd; #` (statement injection).
- */
-function shellQuote(s: string): string {
-  if (/[$`;&"\\]|\r|\n/.test(s)) {
-    throw new Error("unsupported characters in video path/URL");
-  }
-  return `"${s}"`;
-}
-
-/** Test seam — the gate itself, without building a command. */
-export const shellQuoteForTest = shellQuote;
 /** Test seam — the container→MIME hint used by the chat card. */
 export const videoMimeForTest = videoMimeFor;
-
-/**
- * Extract a poster frame (base64 PNG) from a local video file at `atSecs`.
- * 0.5s in avoids the all-black first frame many encoders produce.
- */
-async function extractPosterFrame(
-  source: string,
-  atSecs: number,
-): Promise<string> {
-  const { native } = await import("../lib/native");
-  // The frame file is derived by APPENDING to the source path, so it always
-  // lands in the source's directory — the append cannot traverse. The WRITE
-  // still goes through the same deny-lists as fs tools (shell-init files,
-  // protected dirs) because ffmpeg performs it outside the fs module.
-  const out = `${source}.kai-frame.png`;
-  const writeGate = checkWritable(out);
-  if (!writeGate.ok) throw new Error(writeGate.reason);
-  const cmd =
-    `ffmpeg -y -loglevel error -ss ${atSecs} -i ${shellQuote(source)} ` +
-    `-frames:v 1 ${shellQuote(out)}`;
-  const r = await native.runCommand(cmd, null, 30);
-  if (r.exit_code !== 0) {
-    throw new Error(
-      r.stderr?.trim().slice(0, 300) || `ffmpeg exited with ${r.exit_code}`,
-    );
-  }
-  // Read the frame bytes via the fs module (NOT shell) and encode to base64.
-  const bytes = await native.readFileBytes(out);
-  const b64 = bytesToBase64(bytes);
-  // Best-effort cleanup of the temp frame file; ignore failures.
-  void native.deleteFile(out).catch(() => {});
-  return b64;
-}
 
 /**
  * bytes → base64 in 8KB slices. `String.fromCharCode(...bytes)` overflows
@@ -122,10 +55,10 @@ export function buildTerminalVideoTools(ctx: ToolContext) {
   return {
     display_video: tool({
       description:
-        "Display a video to the user: an inline playable media card in the CHAT (like generate_video's), and — when a terminal tab is active — also an inline poster frame in the terminal (a single extracted frame, since terminals can't play video). " +
+        "Display a video to the user: an inline playable media card in the CHAT (like generate_video's). " +
         "Pass `path` for a local file OR `url` for a remote video (HTTP(S) only — remote URLs are first downloaded to a temp file). " +
-        "The chat card needs neither ffmpeg nor a terminal; the terminal poster frame additionally requires ffmpeg on PATH. " +
-        "The original file always remains at its path.",
+        "Local files over 8 MB are not embedded in chat — the tool returns the path instead; the user can open it. " +
+        "The original file always remains at its path. Nothing is ever written into the user's terminal.",
       inputSchema: z.object({
         path: z
           .string()
@@ -136,15 +69,9 @@ export function buildTerminalVideoTools(ctx: ToolContext) {
           .optional()
           .describe("HTTP(S) URL of the video to display."),
         name: z.string().optional().describe("Optional display filename."),
-        at_seconds: z
-          .number()
-          .min(0)
-          .max(600)
-          .optional()
-          .describe("Frame timestamp (default 0.5s in — avoids black first frames)."),
       }),
       needsApproval: true,
-      execute: async ({ path, url, name, at_seconds }) => {
+      execute: async ({ path, url, name }) => {
         if (!path && !url) {
           return { error: "Provide `path` (local file) or `url` (remote video)." };
         }
@@ -152,20 +79,9 @@ export function buildTerminalVideoTools(ctx: ToolContext) {
           return { error: "Provide only one of `path` or `url`." };
         }
 
-        const display = ctx.writeToActiveTerminalDisplay ?? ctx.injectIntoActivePty;
-        const write = (s: string) => display.call(ctx, s);
-
-        // 1. ffmpeg gate — needed ONLY for the terminal poster frame. The
-        //    chat card (below) works without it; without ffmpeg we simply
-        //    skip the terminal decoration instead of failing the tool.
-        const ffmpeg = await hasFfmpeg();
-        if (!ffmpeg) {
-          write("\x1b[33m[kai] display_video: no ffmpeg on PATH — skipping the terminal poster frame; the video is in the chat card.\x1b[0m\r\n");
-        }
-
-        // The name/label is interpolated into an OSC 1337 sequence — same
-        // control-byte gate as display_image (BEL/ESC would terminate the
-        // sequence early and inject trailing bytes as terminal input).
+        // The label rides the chat card only — no terminal interpolation
+        // anymore — but keep the control-byte gate anyway: it also flows into
+        // the result JSON the model sees.
         let label = name ?? (path ? path.split(/[\\/]/).pop()! : "video");
         if (/[\x00-\x1f\x7f]/.test(label)) {
           return { error: "name must not contain control bytes" };
@@ -183,7 +99,7 @@ export function buildTerminalVideoTools(ctx: ToolContext) {
         // (allowPrivateNetwork: false — model-callable fetchers never reach
         // loopback/private/metadata IPs), write through the fs module. The
         // previous curl-through-shell path both bypassed the proxy policy and
-        // was dead code: its malformed temp path always threw in shellQuote.
+        // was dead code (its malformed temp path always threw at quote time).
         if (url) {
           let parsed: URL;
           try {
@@ -223,28 +139,7 @@ export function buildTerminalVideoTools(ctx: ToolContext) {
           if (!name) label = url.split("/").pop()?.slice(0, 40) ?? "video";
         }
 
-        // 4. Extract the poster frame (base64 PNG via ffmpeg). Terminal-only
-        //    decoration — a failure here must not kill the chat card below.
-        let terminalDisplayed = false;
-        if (ffmpeg) {
-          try {
-            const b64 = await extractPosterFrame(localPath, at_seconds ?? 0.5);
-            const seq = buildOsc1337(b64, label, Math.ceil((b64.length * 3) / 4));
-            const ok = write(seq);
-            if (ok) {
-              terminalDisplayed = true;
-              // Status line so it's clear this is a video poster, not a photo.
-              write(
-                `\x1b[2m[kai] ▶ ${label} — poster frame at ${at_seconds ?? 0.5}s; full video: ${url ?? path}\x1b[0m\r\n`,
-              );
-            }
-          } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            write(`\x1b[31m[kai] ffmpeg frame extraction failed: ${msg}\x1b[0m\r\n`);
-          }
-        }
-
-        // 5. CHAT MEDIA CARD (2026-11-06: "Videos should be displayed in
+        // 4. CHAT MEDIA CARD (was 2026-11-06; now the ONLY surface, 2026-11-19).
         //    chat as well as images" — the tool previously erroled with
         //    "no active terminal tab to display into" when the user had no
         //    terminal open, even though the chat already renders generate_
@@ -265,31 +160,23 @@ export function buildTerminalVideoTools(ctx: ToolContext) {
           // video is.
         }
 
-        if (!terminalDisplayed && !base64) {
+        if (!base64) {
           return {
             error:
-              "could not display the video in chat (no readable bytes under the 8MB card cap) and no terminal tab is active. Open a terminal tab and retry, or point the user at the file path directly.",
+              "could not embed the video in chat (no readable bytes under the 8MB card cap). Point the user at the file path directly.",
           };
         }
 
         return {
           ok: true,
-          ...(base64
-            ? {
-                type: "video" as const,
-                provider: "file",
-                mimeType: videoMimeFor(localPath),
-                base64,
-                url: "",
-                durationSeconds: 0,
-                prompt: label,
-              }
-            : {}),
-          displayed_in: base64
-            ? terminalDisplayed
-              ? "chat media card + terminal poster frame"
-              : "chat media card"
-            : "active terminal (poster frame)",
+          type: "video" as const,
+          provider: "file",
+          mimeType: videoMimeFor(localPath),
+          base64,
+          url: "",
+          durationSeconds: 0,
+          prompt: label,
+          displayed_in: "chat media card",
           label,
           source: url ?? path,
         };
