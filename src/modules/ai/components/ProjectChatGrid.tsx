@@ -257,13 +257,6 @@ function useProjectStatuses(projectIds: string[]): Record<string, CellStatus> {
   return statuses;
 }
 
-function statusLabel(status: CellStatus): string {
-  if (status === "awaiting") return "needs input";
-  if (status === "error") return "error";
-  if (status === "running") return "running";
-  return "idle";
-}
-
 /** Switch callback supplied by the parent (AppShell) via context so the
  *  memoized cells don't take a changing prop. */
 const SwitchProjectContext = createContext<(id: string) => void>(() => {});
@@ -507,24 +500,38 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
         props.onDragOverCell(projectId);
       }}
       onDrop={(e) => e.preventDefault()}
+      style={
+        status !== "idle"
+          ? ({
+              "--kai-card-glow":
+                status === "error"
+                  ? "var(--destructive)"
+                  : projectIconCss(color, projectId),
+            } as React.CSSProperties)
+          : undefined
+      }
       className={cn(
         // UNIFORM CARDS (2026-11-19): no selected outline in Workspaces -
         // it is a universal view, the active card would just be whichever
         // project the user last foregrounded. All cards share one border;
-        // the project-color tint and status dot carry the differences.
+        // the project-color tint and the busy glow carry the differences.
         "flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-border/60 bg-background/95",
+        // BUSY GLOW (2026-11-20): the CARD is the status indicator - a
+        // pulsing glow ring in the project's icon color (error = red).
+        // Replaces the old header dot + status label.
+        status !== "idle" && "kai-card-glow",
         dragging && "opacity-50",
       )}
     >
       {/* Slim header, TINTED with the project's icon color (2026-11-19):
           same hue scheme the rail tile uses, so each card reads as its
-          project at a glance. Dot = project color (pulses on awaiting/
-          running); label still carries the agent status. Click opens the
-          project. The Ask/Allow pill sits in the header row (NOT inside the
-          button - nested buttons are invalid HTML and the click would
-          bubble to open-project). DRAG-TO-REORDER (2026-11-20): the header
-          strip is the drag handle - draggable ONLY here so transcript
-          inputs and selection inside the body stay untouched. */}
+          project at a glance. Status lives in the CARD's glow (see the
+          busy-glow note above), not here. Click opens the project. The
+          Ask/Allow pill sits in the header row (NOT inside the button -
+          nested buttons are invalid HTML and the click would bubble to
+          open-project). DRAG-TO-REORDER (2026-11-20): the header strip is
+          the drag handle - draggable ONLY here so transcript inputs and
+          selection inside the body stay untouched. */}
       <div
         draggable
         onDragStart={(e) => {
@@ -541,27 +548,11 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
           onClick={() => switchProject(projectId)}
           className="flex min-w-0 flex-1 items-center gap-1.5 rounded text-left transition-colors hover:bg-accent/40"
         >
-          <span
-            className={cn(
-              "size-1.5 shrink-0 rounded-full",
-              status === "awaiting" && "animate-pulse",
-              status === "running" && "animate-pulse",
-              status === "error" && "bg-destructive",
-            )}
-            style={
-              status === "error"
-                ? undefined
-                : { background: projectIconCss(color, projectId) }
-            }
-          />
           <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-foreground">
             {name}
           </span>
         </button>
         {sessionId ? <SessionApprovePill sessionId={sessionId} /> : null}
-        <span className="shrink-0 text-[9.5px] text-muted-foreground/70">
-          {statusLabel(status)}
-        </span>
         <HugeiconsIcon
           icon={Drag02Icon}
           size={10}

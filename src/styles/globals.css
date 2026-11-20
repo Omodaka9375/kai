@@ -324,3 +324,29 @@ html *::-webkit-scrollbar {
 .Kai-marquee[data-scrolling] {
   animation: Kai-marquee-left 14s linear 1.2s infinite;
 }
+
+/* Workspaces card busy glow (2026-11-20) - the card itself is the status
+   indicator: a pulsing glow ring in the project's icon color, injected as
+   --kai-card-glow by ProjectChatGrid. Replaces the old header dot +
+   status label. */
+@keyframes kai-card-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--kai-card-glow) 0%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 14px 1px color-mix(in srgb, var(--kai-card-glow) 55%, transparent),
+      0 0 4px 0 color-mix(in srgb, var(--kai-card-glow) 80%, transparent);
+  }
+}
+
+.kai-card-glow {
+  animation: kai-card-glow 1.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kai-card-glow {
+    animation: none;
+  }
+}

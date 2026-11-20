@@ -260,4 +260,28 @@ describe("Workspaces grid behavior (source pins)", () => {
     expect(store).toContain("function sanitizeGridOrder(");
     expect(store).toContain('[KEY_GRID_ORDER]: "gridOrder"');
   });
+
+  it("busy state is a card-level glow - no header dot, no status label", () => {
+    // 2026-11-20: the card itself pulses (kai-card-glow, project color via
+    // --kai-card-glow; error = destructive). The old header dot and the
+    // "idle/running" label are gone.
+    expect(grid).toContain("kai-card-glow");
+    expect(grid).toContain('"--kai-card-glow"');
+    expect(grid).toContain('status !== "idle" && "kai-card-glow"');
+    expect(grid).not.toContain("statusLabel");
+    // The glow color rides the same projectIconCss the dot used, and the
+    // stylesheet defines the animation + reduced-motion opt-out.
+    expect(grid).toContain("projectIconCss(color, projectId)");
+    const headerBlock = grid.slice(
+      grid.indexOf("Slim header"),
+      grid.indexOf("Slim header") + 2200,
+    );
+    expect(headerBlock).not.toContain("size-1.5");
+    const css = readFileSync(
+      new URL("../../../styles/globals.css", import.meta.url),
+      "utf8",
+    );
+    expect(css).toContain("@keyframes kai-card-glow");
+    expect(css).toContain("prefers-reduced-motion");
+  });
 });
