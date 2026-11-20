@@ -57,7 +57,11 @@ export const MessageContent = ({
 }: MessageContentProps) => (
   <div
     className={cn(
-      "flex w-fit min-w-0 max-w-full flex-col gap-2 overflow-hidden overflow-wrap-anywhere text-[12px] leading-relaxed",
+      // wrap-anywhere is the Tailwind v4 utility name. The class this
+      // replaced was an invented `overflow-wrap-*` form that v4 does not
+      // generate, so it was a silent no-op: long URLs and unbroken tokens
+      // overflowed the narrow Workspaces cards instead of wrapping.
+      "flex w-fit min-w-0 max-w-full flex-col gap-2 overflow-hidden wrap-anywhere text-[12px] leading-relaxed",
       "group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-sm group-[.is-user]:bg-muted/70 group-[.is-user]:px-3 group-[.is-user]:py-2 group-[.is-user]:text-foreground",
       "group-[.is-assistant]:w-full group-[.is-assistant]:max-w-full group-[.is-assistant]:text-foreground",
       className,
@@ -345,7 +349,14 @@ export const MessageResponse = memo(
     <ChatStreamingProvider value={streaming}>
       <Streamdown
         className={cn(
-          "size-full min-w-0 max-w-full overflow-wrap-anywhere [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_blockquote]:max-w-full [&_p]:max-w-full [&_pre]:max-w-full",
+          // max-w-full + min-w-0 on every wide block: a table or fence must
+          // NEVER widen the transcript. In the narrow Workspaces cards an
+          // intrinsic-width table used to inflate the card past its grid
+          // cell (the card clipped on the right instead of the table
+          // scrolling inside it).
+          "size-full min-w-0 max-w-full wrap-anywhere [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+          "[&_blockquote]:max-w-full [&_p]:max-w-full [&_pre]:max-w-full",
+          "[&_table]:max-w-full [&_[data-streamdown=table-wrapper]]:max-w-full [&_ul]:max-w-full [&_ol]:max-w-full",
           // CHAT-SCALE TYPOGRAPHY (2026-11-14): Streamdown's element defaults
           // are doc-scale - h2 = text-2xl (24px), h1 = text-3xl - grotesque
           // against the 12px chat body. And strong gets ONLY font-semibold,
@@ -357,12 +368,22 @@ export const MessageResponse = memo(
           // pop BY CONTRAST - hierarchy survives even when the agent never
           // emits a heading. The arbitrary-variant selectors outrank
           // Streamdown's own utility classes (0,1,1 vs 0,1,0).
+          //
+          // PROPORTIONAL BLOCKS (2026-11-20): every BLOCK element is pinned
+          // to the 12px body scale. Streamdown ships text-sm (14px) on
+          // table cells, inline code, h5/h6 and sup/sub, which made tables
+          // and inline snippets visibly LARGER than the prose around them
+          // in both the AI window and the Workspaces cards. Code fences stay
+          // a deliberate step DOWN (11.5px mono, in chat-code.tsx) - mono
+          // reads large at equal px, so 11.5 is the matching optical size.
+          "[&_table]:text-[12px] [&_th]:text-[12px] [&_td]:text-[12px] [&_th]:leading-relaxed [&_td]:leading-relaxed",
+          "[&_code]:text-[11px] [&_sup]:text-[10px] [&_sub]:text-[10px]",
           "[&_h1]:mt-4 [&_h1]:mb-1.5 [&_h1]:text-[15px] [&_h1]:font-semibold [&_h1]:leading-snug [&_h1]:text-foreground",
           "[&_h2]:mt-4 [&_h2]:mb-1.5 [&_h2]:text-sm [&_h2]:font-semibold [&_h2]:leading-snug [&_h2]:text-foreground",
           "[&_h3]:mt-3 [&_h3]:mb-1 [&_h3]:text-[13px] [&_h3]:font-semibold [&_h3]:leading-snug [&_h3]:text-foreground",
           "[&_h4]:mt-3 [&_h4]:mb-1 [&_h4]:text-xs [&_h4]:font-semibold [&_h4]:text-foreground",
-          "[&_h5]:mt-3 [&_h5]:mb-1 [&_h5]:text-xs [&_h5]:font-semibold [&_h5]:text-foreground",
-          "[&_h6]:mt-3 [&_h6]:mb-1 [&_h6]:text-xs [&_h6]:font-semibold [&_h6]:text-foreground",
+          "[&_h5]:mt-3 [&_h5]:mb-1 [&_h5]:text-[12px] [&_h5]:font-semibold [&_h5]:text-foreground",
+          "[&_h6]:mt-3 [&_h6]:mb-1 [&_h6]:text-[12px] [&_h6]:font-semibold [&_h6]:text-foreground",
           "[&_strong]:text-foreground [&_b]:text-foreground",
           "[&_p]:text-foreground/85 [&_li]:text-foreground/85",
           "[&_hr]:my-3 [&_hr]:border-border/60",

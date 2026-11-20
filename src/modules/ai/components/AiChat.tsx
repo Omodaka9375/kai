@@ -340,7 +340,7 @@ export function AiChatView({
   if (messages.length === 0) {
     return (
       <Conversation>
-        <ConversationContent style={chatFontZoomStyle}>
+        <ConversationContent className="min-w-0" style={chatFontZoomStyle}>
           <ConversationEmptyState
             title="Ask anything"
             description="Explain command output, fix errors, generate snippets, or run a task."
@@ -384,7 +384,12 @@ export function AiChatView({
   return (
     <Conversation contextRef={scrollCtx}>
         <ConversationContent
-          className={cn("gap-5 p-3 pb-6", contentClassName)}
+          // min-w-0: flex column children default to min-width:auto, so a
+          // single wide block (table, fence, unbroken token) would inflate
+          // this scroller past its container - in the narrow Workspaces
+          // cards that read as horizontal clipping instead of the block
+          // scrolling inside the card.
+          className={cn("min-w-0 gap-5 p-3 pb-6", contentClassName)}
           style={chatFontZoomStyle}
         >
         {messages.map((m, idx) => {

@@ -351,7 +351,12 @@ export const ChatTable = memo(function ChatTable({
   return (
     <ControlsCtx.Provider value={{ showCopy, showDownload, showFullscreen }}>
       <div
-        className="my-4 flex flex-col gap-2 rounded-lg border border-border bg-sidebar p-2"
+        // min-w-0 + max-w-full: the wrapper is a flex/grid child in the
+        // transcript; without min-w-0 it defaults to min-width:auto and a
+        // wide table's intrinsic width inflates the whole card (the narrow
+        // Workspaces cards clipped on the right). With it, the inner
+        // overflow-x-auto scroller takes the overflow instead.
+        className="my-4 flex min-w-0 max-w-full flex-col gap-2 rounded-lg border border-border bg-sidebar p-2"
         data-streamdown="table-wrapper"
       >
         {hasToolbar ? (
@@ -365,9 +370,9 @@ export const ChatTable = memo(function ChatTable({
             ) : null}
           </div>
         ) : null}
-        <div className="overflow-x-auto overflow-y-auto rounded-md border border-border bg-background">
+        <div className="min-w-0 max-w-full overflow-x-auto overflow-y-auto rounded-md border border-border bg-background">
           <table
-            className={cn("w-full divide-y divide-border", className)}
+            className={cn("w-full min-w-0 divide-y divide-border", className)}
             data-streamdown="table"
             {...rest}
           >
