@@ -28,9 +28,11 @@ describe("Workspaces grid behavior (source pins)", () => {
   });
 
   it("each card header is tinted with the project's icon color", () => {
-    // The rail's own color scheme: fill for the header strip, css for the dot.
+    // The rail's own color scheme: fill for the header strip. The per-
+    // project css color no longer appears on the card - status colors are
+    // now the rail DOT palette (see the busy-ring pin), not the project
+    // hue, so a running card cannot be confused with its own icon color.
     expect(grid).toContain("projectIconFillCss(color, projectId, active)");
-    expect(grid).toContain("projectIconCss(color, projectId)");
   });
 
   it("transcript wrapper bounds height AND width so hover-scroll and wrapping work", () => {
@@ -261,28 +263,40 @@ describe("Workspaces grid behavior (source pins)", () => {
     expect(store).toContain('[KEY_GRID_ORDER]: "gridOrder"');
   });
 
-  it("busy state is a card-level glow - no header dot, no status label", () => {
-    // 2026-11-20: the card itself pulses (kai-card-glow, project color via
-    // --kai-card-glow; error = destructive). The old header dot and the
-    // "idle/running" label are gone.
+  it("busy state is a card-level ring in the RAIL DOT palette - no dot, no label", () => {
+    // 2026-11-20 v3: the card pulses as an OVERLAY span (not a box-shadow
+    // on the card root - sibling cards paint over outer shadows in the
+    // dense grid, which made the effect invisible). Colors are the rail's
+    // tile-dot palette so both surfaces read identically.
     expect(grid).toContain("kai-card-glow");
     expect(grid).toContain('"--kai-card-glow"');
-    expect(grid).toContain('status !== "idle" && "kai-card-glow"');
+    expect(grid).toContain(
+      '{status !== "idle" && <span aria-hidden className="kai-card-glow" />}',
+    );
+    // Rail dot palette: emerald running / violet awaiting / red error.
+    expect(grid).toContain("running: \"#10b981\"");
+    expect(grid).toContain("awaiting: \"#8b5cf6\"");
+    expect(grid).toContain('error: "var(--destructive)"');
+    // The old header dot and status label stay gone.
     expect(grid).not.toContain("statusLabel");
-    // The glow color rides the same projectIconCss the dot used, and the
-    // stylesheet defines the animation + reduced-motion opt-out.
-    expect(grid).toContain("projectIconCss(color, projectId)");
     const headerBlock = grid.slice(
       grid.indexOf("Slim header"),
       grid.indexOf("Slim header") + 2200,
     );
     expect(headerBlock).not.toContain("size-1.5");
+    // Stylesheet: overlay ring geometry + animation + reduced-motion.
     const css = readFileSync(
       new URL("../../../styles/globals.css", import.meta.url),
       "utf8",
     );
     expect(css).toContain("@keyframes kai-card-glow");
     expect(css).toContain("prefers-reduced-motion");
+    const rule = css.slice(
+      css.indexOf(".kai-card-glow {"),
+      css.indexOf("@keyframes kai-card-glow"),
+    );
+    expect(rule).toContain("position: absolute");
+    expect(rule).toContain("pointer-events: none");
   });
 
   it("group card transcript rides the shared chat zoom (symmetric with AI cards)", () => {

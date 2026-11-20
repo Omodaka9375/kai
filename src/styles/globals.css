@@ -325,31 +325,45 @@ html *::-webkit-scrollbar {
   animation: Kai-marquee-left 14s linear 1.2s infinite;
 }
 
-/* Workspaces card busy glow (2026-11-20) - the card itself is the status
-   indicator: pulsing in the project's icon color, injected as
-   --kai-card-glow by ProjectChatGrid. Replaces the old header dot +
-   status label. Three layers so it reads in a dense 8px-gap grid:
-   a pulsing BORDER (never covered by neighboring cards), an INSET tint
-   (visible inside the card edges), and a strong outer ring. The 0%
-   keyframe keeps a baseline glow - a busy card never looks idle. */
+/* Workspaces card busy ring (2026-11-20 v3) - the card itself is the
+   status indicator, painted in the SAME palette as the rail's tile dot
+   (emerald running / violet awaiting / red error). The color arrives as
+   --kai-card-glow from ProjectChatGrid.
+
+   WHY AN OVERLAY ELEMENT, NOT box-shadow: in the dense 2x4 grid with 8px
+   gaps, a sibling card paints OVER an outer box-shadow, so the ring was
+   invisible no matter how bright it got. .kai-card-glow is an absolutely
+   positioned span INSIDE the card, above its content: the border ring is
+   drawn on the card's own layer (never occluded), and the halo lives
+   inside the card bounds where nothing can cover it. */
+.kai-card-glow {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+  border-radius: inherit;
+  /* Two rings, both on the card's own layer: a solid inset edge that
+     reads at any gap size, plus a soft inner halo for the "breathing"
+     feel. 0%/100% keeps a clearly visible baseline - a busy card must
+     never look idle between pulses. */
+  box-shadow:
+    inset 0 0 0 2px color-mix(in srgb, var(--kai-card-glow) 75%, transparent),
+    inset 0 0 18px color-mix(in srgb, var(--kai-card-glow) 30%, transparent);
+  animation: kai-card-glow 1.5s ease-in-out infinite;
+}
+
 @keyframes kai-card-glow {
   0%,
   100% {
-    border-color: color-mix(in srgb, var(--kai-card-glow) 80%, transparent);
     box-shadow:
-      inset 0 0 26px color-mix(in srgb, var(--kai-card-glow) 35%, transparent),
-      0 0 16px 2px color-mix(in srgb, var(--kai-card-glow) 70%, transparent);
+      inset 0 0 0 2px color-mix(in srgb, var(--kai-card-glow) 75%, transparent),
+      inset 0 0 18px color-mix(in srgb, var(--kai-card-glow) 30%, transparent);
   }
   50% {
-    border-color: color-mix(in srgb, var(--kai-card-glow) 100%, transparent);
     box-shadow:
-      inset 0 0 40px color-mix(in srgb, var(--kai-card-glow) 60%, transparent),
-      0 0 44px 8px color-mix(in srgb, var(--kai-card-glow) 100%, transparent);
+      inset 0 0 0 3px color-mix(in srgb, var(--kai-card-glow) 100%, transparent),
+      inset 0 0 40px color-mix(in srgb, var(--kai-card-glow) 55%, transparent);
   }
-}
-
-.kai-card-glow {
-  animation: kai-card-glow 1.4s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {

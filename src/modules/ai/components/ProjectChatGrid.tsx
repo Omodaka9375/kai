@@ -53,7 +53,7 @@ import { usePreferencesStore } from "@/modules/settings/preferences";
 import { setGridOrder } from "@/modules/settings/store";
 import { useChatFontSize } from "../lib/chatFont";
 import type { ProjectSwitcherItem } from "@/modules/workspace";
-import { projectIconCss, projectIconFillCss } from "@/modules/workspace/projectIcons";
+import { projectIconFillCss } from "@/modules/workspace/projectIcons";
 import { GRID_COLS, GRID_ROWS } from "../store/projectChatGrid";
 import {
   type CardAttachment,
@@ -112,6 +112,17 @@ import {
  */
 
 type CellStatus = ProjectSwitcherItem["status"];
+
+/** Card busy-ring colors - the SAME palette the rail's tile status dot
+ *  uses (ProjectRail TileStatusDot), so a glance at either surface reads
+ *  identically: emerald = agent running, violet = needs your input, red =
+ *  error. Literal values (not Tailwind classes) because the ring is
+ *  animated through color-mix, which needs a real color value. */
+const CARD_GLOW_COLOR: Record<Exclude<CellStatus, "idle">, string> = {
+  running: "#10b981", // emerald-500 (rail: steady emerald)
+  awaiting: "#8b5cf6", // violet-500 (rail: pulsing violet)
+  error: "var(--destructive)",
+};
 
 /**
  * CARD PASTE (2026-11-19): both card inputs accept text + image pastes.
@@ -504,10 +515,7 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
       style={
         status !== "idle"
           ? ({
-              "--kai-card-glow":
-                status === "error"
-                  ? "var(--destructive)"
-                  : projectIconCss(color, projectId),
+              "--kai-card-glow": CARD_GLOW_COLOR[status],
             } as React.CSSProperties)
           : undefined
       }
@@ -515,15 +523,19 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
         // UNIFORM CARDS (2026-11-19): no selected outline in Workspaces -
         // it is a universal view, the active card would just be whichever
         // project the user last foregrounded. All cards share one border;
-        // the project-color tint and the busy glow carry the differences.
-        "flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-border/60 bg-background/95",
-        // BUSY GLOW (2026-11-20): the CARD is the status indicator - a
-        // pulsing glow ring in the project's icon color (error = red).
-        // Replaces the old header dot + status label.
-        status !== "idle" && "kai-card-glow",
+        // the project-color tint and the busy ring carry the differences.
+        "relative flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-border/60 bg-background/95",
         dragging && "opacity-50",
       )}
     >
+      {/* BUSY RING (2026-11-20 v3): the CARD is the status indicator, in
+          the SAME palette as the rail's tile dot - emerald = agent
+          running, violet = needs your input, red = error. Painted as an
+          OVERLAY on the card's own top layer so it can never be hidden
+          behind card content or an adjacent card (the box-shadow-only
+          version was invisible in the dense 8px-gap grid). Replaces the
+          removed header dot + status label. */}
+      {status !== "idle" && <span aria-hidden className="kai-card-glow" />}
       {/* Slim header, TINTED with the project's icon color (2026-11-19):
           same hue scheme the rail tile uses, so each card reads as its
           project at a glance. Status lives in the CARD's glow (see the
