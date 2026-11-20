@@ -9,6 +9,20 @@ export function normalizeForProvider(
   messages: ModelMessage[],
   toProvider: ProviderId,
 ): ModelMessage[] {
+  // OPENAI (2026-11-20 GPT-5.6 Luna fix): the Responses API REQUIRES every
+  // replayed function_call to be accompanied by its paired reasoning item
+  // (rs_ -> fc_). The generic path below drops all-but-last-assistant
+  // reasoning and converts the survivor to a <thinking> text part - that
+  // strips providerOptions.openai.itemId, leaves the fc unpaired, and the
+  // API rejects the whole request ("function_call was provided without its
+  // required 'reasoning' item"). Keep reasoning parts verbatim for openai:
+  // the provider emits item_references for parts carrying openai itemIds
+  // and silently skips foreign/legacy ones (no itemId, no encrypted
+  // content), so stale traces from other providers are harmless.
+  if (toProvider === "openai") {
+    return messages.map((m) => stripProviderMeta(m, toProvider) as ModelMessage);
+  }
+
   // For non-Anthropic targets we convert `reasoning` parts to text tags so
   // the target can still see the chain of thought. But re-injecting the
   // ENTIRE reasoning history on every step bloats the context and degrades
