@@ -284,4 +284,15 @@ describe("Workspaces grid behavior (source pins)", () => {
     expect(css).toContain("@keyframes kai-card-glow");
     expect(css).toContain("prefers-reduced-motion");
   });
+
+  it("group card transcript rides the shared chat zoom (symmetric with AI cards)", () => {
+    // 2026-11-20: the group card's ConversationContent passes the SAME
+    // useChatFontSize ratio AiChatView applies - otherwise generated code
+    // blocks in AI cards render proportionally larger than group cards
+    // whenever the chat font preference is above the 12px default.
+    expect(grid).toContain("const chatFontZoomStyle = useChatFontSize().rootStyle;");
+    expect(grid).toContain(
+      '<ConversationContent className="gap-3" style={chatFontZoomStyle}>',
+    );
+  });
 });

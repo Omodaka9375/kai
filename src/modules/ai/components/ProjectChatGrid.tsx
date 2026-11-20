@@ -51,6 +51,7 @@ import { resolveBackgroundProjectSession } from "../store/chatStore";
 import { subscribeProjectAgentStatus, getProjectAgentStatus } from "../store/projectStatus";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { setGridOrder } from "@/modules/settings/store";
+import { useChatFontSize } from "../lib/chatFont";
 import type { ProjectSwitcherItem } from "@/modules/workspace";
 import { projectIconCss, projectIconFillCss } from "@/modules/workspace/projectIcons";
 import { GRID_COLS, GRID_ROWS } from "../store/projectChatGrid";
@@ -633,6 +634,12 @@ const GroupCardBody = memo(function GroupCardBody(props: GridCellProps & { group
   textRef.current = text;
   const [sendError, setSendError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  // SYMMETRIC CHAT ZOOM (2026-11-20): the group transcript rides the SAME
+  // shared chatFontSize ratio as AiChatView (AI cards, panels, mini
+  // window). Without it, generated code blocks and prose in AI cards
+  // rendered proportionally larger than the group cards whenever the
+  // preference was above the 12px default.
+  const chatFontZoomStyle = useChatFontSize().rootStyle;
   const ended = group.endedAt !== null;
   // CARD PASTE (2026-11-19): group sends are text-only (the fan-out is a
   // string relay), so pasted IMAGES land as persisted-path attachments
@@ -732,7 +739,7 @@ const GroupCardBody = memo(function GroupCardBody(props: GridCellProps & { group
       <TranscriptFrame>
         <AiErrorBoundary>
           <Conversation className="px-3 py-2">
-            <ConversationContent className="gap-3">
+            <ConversationContent className="gap-3" style={chatFontZoomStyle}>
               {group.messages.length === 0 ? (
                 <div className="flex flex-1 items-center justify-center px-3 text-center text-[11px] text-muted-foreground/70">
                   No messages yet
