@@ -217,18 +217,19 @@ function Bridge({
   const respond = useCallback(
     (id: string, approved: boolean) => {
       if (!approved) noteApprovalDenied(id);
-      else if (isApprovalDenied(id)) return;
+      else if (isApprovalDenied(id)) return false;
       try {
         // applyApprovalResponseToChat (not the hook's addToolApprovalResponse):
         // the SDK applier only rewrites the LAST message, so an approval part
         // stranded under a ride-along message (reminder/watch fire, steering,
         // user text appended while the run was parked on the card) made every
-        // later response a silent no-op — click did nothing, card pinned
+        // later response a silent no-op - click did nothing, card pinned
         // forever. The helper flips the part in place on ANY message and
         // continues the run.
-        applyApprovalResponseToChat(chat, id, approved);
+        return applyApprovalResponseToChat(chat, id, approved);
       } catch (e) {
         console.debug("[kai] stale approval ignored:", id, e);
+        return false;
       }
     },
     [chat],
@@ -917,7 +918,6 @@ function Bridge({
               | undefined,
           );
         if (isSignedCommit) continue;
-        autoApprovedRef.current.add(id);
         // Defer each response to its own macrotask. Approving N pending tool
         // calls synchronously in one effect pass chains N SDK store
         // notifications inside a single React commit cascade (approval write
@@ -945,11 +945,17 @@ function Bridge({
           if (getSessionAutoApprove(sessionId) !== "all" && !stillGranted) {
             return;
           }
-          respond(id, true);
-          // Mark the store only after the deferred response fired: marking
-          // at schedule time grew autoApprovedIds with ids whose cards were
-          // reaped before the timer ran (part gone = decision can't land).
-          markAutoApproved(id);
+          // Latch ONLY on an applied response (2026-11-20 card-stall fix):
+          // a respond that found no part (raced a steering stop / reaper)
+          // must stay unlatched so the next effect pass - pill toggle, any
+          // messages change - retries it instead of silently skipping.
+          if (respond(id, true)) {
+            autoApprovedRef.current.add(id);
+            // Mark the store only after the deferred response fired: marking
+            // at schedule time grew autoApprovedIds with ids whose cards were
+            // reaped before the timer ran (part gone = decision can't land).
+            markAutoApproved(id);
+          }
         }, 0);
       }
     }

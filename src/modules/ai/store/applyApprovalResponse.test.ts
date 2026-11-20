@@ -88,7 +88,11 @@ describe("applyApprovalResponseToChat", () => {
     expect(chat.addToolApprovalResponse).not.toHaveBeenCalled();
   });
 
-  it("denies a stranded part without continuing into an in-flight run", () => {
+  it("defers a stranded-part continuation while a request is in flight", () => {
+    // 2026-11-20 card-stall fix: the in-flight request holds a message
+    // SNAPSHOT, so skipping the send used to strand the approval forever.
+    // The continuation is now DEFERRED until the chat settles - never
+    // dropped. Synchronously nothing fires.
     const chat = fakeChat([assistantWithCard, rideAlongUser], {
       status: "streaming",
     });
@@ -98,9 +102,24 @@ describe("applyApprovalResponseToChat", () => {
       state: "approval-responded",
       approval: { id: APPROVAL_ID, approved: false },
     });
-    // A request is already in flight: the next request-builder pass picks
-    // the response up from history — do not stack a second one.
     expect(chat.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("the deferred continuation fires once the chat settles", async () => {
+    vi.useFakeTimers();
+    try {
+      const chat = fakeChat([assistantWithCard, rideAlongUser], {
+        status: "streaming",
+      });
+      applyApprovalResponseToChat(chat, APPROVAL_ID, true);
+      // Status flips to ready (the in-flight request ended) - the poll must
+      // continue the run instead of silently dropping it.
+      (chat as { status: string }).status = "ready";
+      await vi.advanceTimersByTimeAsync(300);
+      expect(chat.sendMessage).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("returns false for an unknown/stale approval id", () => {

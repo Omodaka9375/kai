@@ -215,12 +215,30 @@ export function applyApprovalResponseToChat(
     } as UIMessage;
   });
   // Continue the run over the (rewritten) history. If another request is
-  // already in flight, skip: the next request builder pass picks the
-  // approval-response up from any position.
-  if (chat.status !== "streaming" && chat.status !== "submitted") {
+  // already in flight, DEFER (2026-11-20 card-stall fix): there is no
+  // "next request builder pass" - the in-flight request holds a message
+  // SNAPSHOT (transport.sendMessages receives this.state.messages), so a
+  // skipped send stranded the approval forever and the run stalled
+  // silently. Wait for the chat to settle, then continue.
+  continueWhenReady(chat);
+  return true;
+}
+
+/** Poll until the chat is idle, then fire the continuation request.
+ *  Capped (~30s) so a wedged run can't spin forever - after the cap the
+ *  next user action (pill toggle, new message) retries via the bridge's
+ *  unlatched-id re-scan. */
+const CONTINUE_POLL_MS = 250;
+const CONTINUE_MAX_ATTEMPTS = 120;
+function continueWhenReady(chat: Chat<UIMessage>, attempt = 0): void {
+  if (chat.status === "ready") {
     void chat.sendMessage().catch((e) => {
       console.warn("[kai] approval continuation failed:", e);
     });
+    return;
   }
-  return true;
+  // "error" or a wedged run: give up silently - the stale-approval reaper
+  // and the bridge's unlatched re-scan own recovery from here.
+  if (attempt >= CONTINUE_MAX_ATTEMPTS) return;
+  setTimeout(() => continueWhenReady(chat, attempt + 1), CONTINUE_POLL_MS);
 }

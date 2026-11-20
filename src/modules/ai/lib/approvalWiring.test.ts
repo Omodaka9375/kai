@@ -51,7 +51,7 @@ describe("approval responses flow through the denial latch", () => {
     expect(sdkCalls.length).toBe(0);
     const helperCalls = bridge.match(/applyApprovalResponseToChat\(/g) ?? [];
     expect(helperCalls.length).toBe(1);
-    expect(bridge).toMatch(/respond\(id, true\);/);
+    expect(bridge).toMatch(/if \(respond\(id, true\)\) \{/);
     // No persistent per-command grants: compound shell commands cannot
     // create an invisible bypass around per-call review.
     expect(bridge).not.toContain("isCommandAllowed");
@@ -76,7 +76,10 @@ describe("approval responses flow through the denial latch", () => {
 
   it("respond() checks the latch at CALL time (both directions)", () => {
     expect(bridge).toMatch(/if \(!approved\) noteApprovalDenied\(id\);/);
-    expect(bridge).toMatch(/else if \(isApprovalDenied\(id\)\) return;/);
+    // `return false` (not bare `return`): respond reports whether the
+    // response APPLIED so the auto-approve effect latches only real ones
+    // (2026-11-20 card-stall fix). The latch check itself is unchanged.
+    expect(bridge).toMatch(/else if \(isApprovalDenied\(id\)\) return false;/);
   });
 
   it("the stale-approval reaper latches reaped ids as denials", () => {
