@@ -539,12 +539,22 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
       {/* Slim header, TINTED with the project's icon color (2026-11-19):
           same hue scheme the rail tile uses, so each card reads as its
           project at a glance. Status lives in the CARD's glow (see the
-          busy-glow note above), not here. Click opens the project. The
-          Ask/Allow pill sits in the header row (NOT inside the button -
-          nested buttons are invalid HTML and the click would bubble to
-          open-project). DRAG-TO-REORDER (2026-11-20): the header strip is
-          the drag handle - draggable ONLY here so transcript inputs and
-          selection inside the body stay untouched. */}
+          busy-glow note above), not here.
+
+          FULL-STRIP DRAG (2026-11-20): the WHOLE status bar is the drag
+          handle and the open target - no inner button spans the strip any
+          more. A <button> covering the bar swallowed dragstart (browsers do
+          not start a drag from a button inside a draggable ancestor), so
+          dragging only worked on the few pixels of padding and on the grip
+          icon. The title is now a plain span: the strip drags from
+          anywhere and select-none keeps a text selection from hijacking
+          the gesture.
+
+          DOUBLE-CLICK OPENS (2026-11-20): a single click on the bar no
+          longer switches project - it is a drag surface, and an accidental
+          click while grabbing used to yank the user out of Workspaces. The
+          guard skips double-clicks that land on a real control (the
+          Ask/Allow pill) so a fast pill toggle never opens the project. */}
       <div
         draggable
         onDragStart={(e) => {
@@ -552,25 +562,24 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
           props.onDragStartCell(projectId);
         }}
         onDragEnd={props.onDragEndCell}
+        onDoubleClick={(e) => {
+          // Controls inside the bar (Ask/Allow pill) own their clicks.
+          if ((e.target as HTMLElement).closest("button")) return;
+          switchProject(projectId);
+        }}
+        title={`${name} — double-click to open, drag to reorder`}
         style={{ background: projectIconFillCss(color, projectId, active) }}
-        className="flex shrink-0 items-center gap-1 border-b border-border/40 px-3 py-1.5"
+        className="flex shrink-0 cursor-grab select-none items-center gap-1 border-b border-border/40 px-3 py-1.5 active:cursor-grabbing"
       >
-        <button
-          type="button"
-          title={`${name} — open project`}
-          onClick={() => switchProject(projectId)}
-          className="flex min-w-0 flex-1 items-center gap-1.5 rounded text-left transition-colors hover:bg-accent/40"
-        >
-          <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-foreground">
-            {name}
-          </span>
-        </button>
+        <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-foreground">
+          {name}
+        </span>
         {sessionId ? <SessionApprovePill sessionId={sessionId} /> : null}
         <HugeiconsIcon
           icon={Drag02Icon}
           size={10}
           strokeWidth={1.5}
-          className="shrink-0 cursor-grab text-muted-foreground/50 active:cursor-grabbing"
+          className="shrink-0 text-muted-foreground/50"
           aria-hidden
         />
       </div>

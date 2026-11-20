@@ -182,7 +182,7 @@ describe("Workspaces grid behavior (source pins)", () => {
   it("card regions share one horizontal padding rhythm", () => {
     // Header strip, transcript (via AiChatView contentClassName), group
     // transcript and both card inputs all sit on the same 12px edge.
-    expect(grid).toContain('className="flex shrink-0 items-center gap-1 border-b border-border/40 px-3 py-1.5"');
+    expect(grid).toContain('className="flex shrink-0 cursor-grab select-none items-center gap-1 border-b border-border/40 px-3 py-1.5 active:cursor-grabbing"');
     expect(grid).toContain('contentClassName="gap-4 px-3 pb-3"');
     expect(grid).toContain('<Conversation className="px-3 py-2">');
     const px3 = (grid.match(/px-3 /g) ?? []).length;
@@ -245,12 +245,22 @@ describe("Workspaces grid behavior (source pins)", () => {
     // DRAG-TO-REORDER (2026-11-20): the header strip is the drag handle
     // (body inputs/selection untouched); the live sequence rides
     // dragOrder, the preferences store is written once on dragend.
+    // FULL-STRIP DRAG (2026-11-20): the strip itself is draggable - no
+    // full-width <button> inside it (buttons swallow dragstart from a
+    // draggable ancestor, which is what made the strip undraggable
+    // everywhere except the grip icon).
     expect(grid).toContain("draggable");
     expect(grid).toContain("onDragStartCell");
     expect(grid).toContain("onDragOverCell");
     expect(grid).toContain("onDragEndCell");
     expect(grid).toContain("const order = dragOrder ?? gridOrder;");
     expect(grid).toContain("void setGridOrder(dragOrder)");
+    const headerStrip = grid.slice(
+      grid.indexOf("Slim header"),
+      grid.indexOf("GroupCardBody group={group}"),
+    );
+    expect(headerStrip).not.toMatch(/<button[\s\S]*?open project/);
+    expect(headerStrip).toContain("select-none");
     // Grip affordance renders in the header.
     expect(grid).toContain("Drag02Icon");
     // The order persists in the preferences store (sanitized + synced).
@@ -261,6 +271,21 @@ describe("Workspaces grid behavior (source pins)", () => {
     expect(store).toContain("export async function setGridOrder(");
     expect(store).toContain("function sanitizeGridOrder(");
     expect(store).toContain('[KEY_GRID_ORDER]: "gridOrder"');
+  });
+
+  it("double-click on the status bar opens the project - single click does not", () => {
+    // 2026-11-20 ask: the bar is a drag surface, so a stray single click
+    // must not yank the user out of Workspaces. Guard skips double-clicks
+    // landing on real controls (Ask/Allow pill owns its clicks).
+    expect(grid).toContain("onDoubleClick");
+    expect(grid).toContain('closest("button")');
+    expect(grid).toContain("double-click to open");
+    // The old single-click opener button is gone from the strip.
+    const headerStrip = grid.slice(
+      grid.indexOf("Slim header"),
+      grid.indexOf("GroupCardBody group={group}"),
+    );
+    expect(headerStrip).not.toContain("switchProject(projectId)}\n        ");
   });
 
   it("busy state is a card-level ring in the RAIL DOT palette - no dot, no label", () => {
