@@ -264,7 +264,7 @@ export function buildConfiguredLanguageModel(
   });
 }
 
-const PLAN_MODE_PROMPT = `## PLAN MODE — ACTIVE
+export const PLAN_MODE_PROMPT = `## PLAN MODE — ACTIVE
 Mutating tools (write_file, edit, batch_edit, replace_exact, create_directory) will queue their changes for the user to review as a single diff. Do NOT execute bash_run or bash_background while plan mode is active — restrict yourself to reads (read_file, grep, glob, list_directory) and the queued mutations. After queueing the full set of edits, stop and return a brief summary; do not continue acting until the user has accepted/rejected.`;
 
 export function buildStableSystem(
@@ -771,9 +771,12 @@ export async function runAgentStream(opts: RunAgentOptions) {
     });
   }
 
-  const systemContent = opts.planMode
-    ? `${stableSystem}\n\n${PLAN_MODE_PROMPT}`
-    : stableSystem;
+  // PLAN MODE (2026-11-20): the plan-mode block rides the per-turn
+  // last-user injection in transport.ts, NOT here - a suffix here would
+  // rebuild the system prompt on every toggle and invalidate Anthropic 5.x
+  // thinking-block signatures (prefix check covers system + tools +
+  // messages). opts.planMode still feeds the session journal below.
+  const systemContent = stableSystem;
   // X/Twitter coverage notice: when the bearer token is absent the tool is
   // pruned, and the model must know WHY it's missing and what to use
   // instead — otherwise "what are people saying on X about Y" requests

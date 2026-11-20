@@ -2,7 +2,12 @@ import type { UIMessage } from "@ai-sdk/react";
 import { convertToModelMessages } from "ai";
 import { invoke } from "@tauri-apps/api/core";
 import { getModel, getModelContextLimit, type ModelId } from "../config";
-import { runAgentStream, type AgentUsageDelta, type StackInfo } from "./agent";
+import {
+  runAgentStream,
+  PLAN_MODE_PROMPT,
+  type AgentUsageDelta,
+  type StackInfo,
+} from "./agent";
 import { compactModelMessagesDetailed } from "./compact";
 import { summarizeMediaOutputs } from "./media/modelSummary";
 import type { ProviderKeys } from "./keyring";
@@ -234,8 +239,26 @@ export function createContextAwareTransport(deps: Deps) {
         ? getRelevantFiles(lastUserText, deps.toolContext.fileTracker, [])
         : [];
     const relevantBlock = formatRelevantFiles(relevantFiles);
+    // PER-TURN MODE BLOCKS (2026-11-20): auto-approve and plan-mode hints
+    // ride the LAST-USER injection (same slot as the env block) instead of
+    // the system prompt. Toggling Allow/Ask or plan mode used to REBUILD the
+    // system prompt mid-session, which invalidates Anthropic 5.x thinking-
+    // block signatures (the prefix check covers system + tools + messages)
+    // and 400s the whole run. The last-user slot is per-turn content, so
+    // the system prompt stays byte-stable for the life of the session.
+    const sessionIdForRun = deps.getSessionId?.() ?? null;
+    const autoApprove = sessionIdForRun
+      ? getSessionAutoApprove(sessionIdForRun)
+      : useChatStore.getState().autoApprove;
+    const autoApproveHint =
+      autoApprove === "all"
+        ? "## AUTO-APPROVE MODE — ACTIVE\nAll tool calls (file edits, shell commands, etc.) are pre-approved and execute immediately. Do NOT stop to ask for permission or narrate what you're about to do — just call the tools directly. Chain all actions in a single turn until the task is complete."
+        : "";
+    const planModeBlock = deps.getPlanMode?.() ? PLAN_MODE_PROMPT : "";
     const envWithRelevance =
-      [envBlock, relevantBlock].filter(Boolean).join("\n") || null;
+      [envBlock, relevantBlock, autoApproveHint, planModeBlock]
+        .filter(Boolean)
+        .join("\n\n") || null;
     // ── Context summarization ───────────────────────────────────────
     // Check if the conversation is approaching the context limit. If so,
     // summarize older messages and replace the history before running.
@@ -254,31 +277,19 @@ export function createContextAwareTransport(deps: Deps) {
     const mcpTools = mcpManager.getActiveTools();
     const mcpSummary = mcpManager.getConnectedServerSummaries();
 
-    // If auto-approve is 'all', tell the model it has full autonomy. Read
-    // the SESSION-SCOPED mode (the same source the bridge's approval gate
-    // uses) - the legacy global only reflects the active project, so a
-    // background session with its own mode off got the foreground's "all"
-    // hint injected (model stopped narrating / asking while its approvals
-    // were still gated), and vice versa.
-    const sessionIdForRun = deps.getSessionId?.() ?? null;
-    const autoApprove = sessionIdForRun
-      ? getSessionAutoApprove(sessionIdForRun)
-      : useChatStore.getState().autoApprove;
-    const autoApproveHint =
-      autoApprove === "all"
-        ? "\n\n## AUTO-APPROVE MODE — ACTIVE\nAll tool calls (file edits, shell commands, etc.) are pre-approved and execute immediately. Do NOT stop to ask for permission or narrate what you're about to do — just call the tools directly. Chain all actions in a single turn until the task is complete."
-        : "";
     // REPLY STYLE (2026-11-19): structured "how to write to me" fields from
     // Settings -> Agents (HUMANS.md-inspired). Preferences only, appended
     // after the user's prose instructions so both survive intact. Empty
     // (all defaults) adds no bytes - prompts stay prefix-cache friendly.
+    // NOTE: the auto-approve hint does NOT live here anymore - it rides the
+    // per-turn last-user injection above so a mid-session mode toggle can
+    // never change the system prompt (Anthropic 5.x signature prefix rule).
     const replyStyleBlock = formatReplyStyleBlock(
       usePreferencesStore.getState().replyStyle,
     );
     const effectiveCustomInstructions =
       (deps.getCustomInstructions() || "") +
-      (replyStyleBlock ? `\n\n${replyStyleBlock}` : "") +
-      autoApproveHint;
+      (replyStyleBlock ? `\n\n${replyStyleBlock}` : "");
 
     const result = await runAgentStream({
       keys: deps.getKeys(),
