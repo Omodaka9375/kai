@@ -55,9 +55,22 @@ describe("SearchableModelPicker contract", () => {
     expect(picker).toContain("getAllKeys");
   });
 
-  it("labels a registry miss with the raw id instead of crashing", () => {
-    expect(picker).toMatch(/MODELS\.find\(\(x\) => x\.id === value\)/);
-    expect(picker).toContain("Unknown");
+  it("labels a miss through getModel (registry + dynamic lookup, synthetic fallback)", () => {
+    // 2026-11-20: the list itself is the MERGED catalog (hardcoded +
+    // auto-synced OpenRouter - same source the status-bar picker shows),
+    // so ids resolve through getModel rather than a static MODELS.find.
+    // A true miss falls to getModel's synthetic entry (hint "Unknown")
+    // instead of crashing - pinned in the config registry tests.
+    expect(picker).toContain("getModel(value as ModelId)");
+  });
+
+  it("lists the merged OpenRouter catalog, not the static registry", () => {
+    // The whole point of the 2026-11-20 fix: the Route-to-model /
+    // Assistant model lists must match the status-bar picker's live list.
+    expect(picker).toContain("useOpenRouterModelsStore");
+    expect(picker).toContain("orFetch");
+    // Grouping runs over the merged list, not MODELS.filter.
+    expect(picker).not.toContain("MODELS.filter");
   });
 });
 
