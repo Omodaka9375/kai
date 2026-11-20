@@ -160,7 +160,7 @@ export function FileMenu({
         <div className="grid grid-cols-2 gap-1">
           <MenuTile icon={Settings01Icon} label="General" desc="Theme, behavior, startup" onSelect={() => void openSettingsWindow("general")} />
           <MenuTile icon={KeyboardIcon} label="Shortcuts" desc="Key bindings" onSelect={() => void openSettingsWindow("shortcuts")} />
-          <MenuTile icon={AiScanIcon} label="Models" desc="Providers & API keys" onSelect={() => void openSettingsWindow("models")} />
+          <MenuTile icon={AiScanIcon} label="API Keys" desc="Providers & models" onSelect={() => void openSettingsWindow("models")} />
           <MenuTile icon={UserMultiple02Icon} label="Agents" desc="Sub-agent registry" onSelect={() => void openSettingsWindow("agents")} />
           <MenuTile icon={SparklesIcon} label="Skills" desc="Reusable agent skills" onSelect={() => void openSettingsWindow("snippets")} />
           <MenuTile icon={PuzzleIcon} label="MCP Servers" desc="External tool servers" onSelect={() => void openSettingsWindow("mcp")} />
