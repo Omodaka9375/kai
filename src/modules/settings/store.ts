@@ -153,6 +153,10 @@ export type Preferences = {
    *  card's "Always Allow" button — these stop asking for approval in BOTH
    *  Ask and Allow modes. Managed/revoked in Settings → Security. */
   standingAuthorityAlwaysAllowed: string[];
+  /** Workspaces grid card order - project ids in display order. Ids absent
+   *  from the array sort after it (natural order). Sanitized on load/write:
+   *  strings only, deduped, capped. */
+  gridOrder: string[];
 };
 
 const STORE_PATH = "Kai-settings.json";
@@ -212,6 +216,7 @@ const KEY_VOICE_TTS_ASSEMBLY_VOICE = "voiceTtsAssemblyVoice";
 const KEY_NETWORK_POLICY = "networkPolicy";
 const KEY_STANDING_AUTHORITY_ALWAYS_ALLOWED = "standingAuthorityAlwaysAllowed";
 const KEY_REPLY_STYLE = "replyStyle";
+const KEY_GRID_ORDER = "gridOrder";
 
 export const TERMINAL_FONT_SIZE_DEFAULT = 14;
 export const TERMINAL_FONT_SIZE_MIN = 8;
@@ -281,6 +286,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   openaiCompatibleVision: "auto" as VisionOverride,
   uiThemeId: "default",
   recentProjects: [],
+  gridOrder: [],
   projectModelIds: {},
   subagentMaxSteps: 24,
   thinkingMode: "off" as ThinkingMode,
@@ -464,6 +470,7 @@ export async function loadPreferences(): Promise<Preferences> {
         ? "lan"
         : "full",
     replyStyle: sanitizeReplyStyle(get<Partial<ReplyStyle>>(KEY_REPLY_STYLE)),
+    gridOrder: sanitizeGridOrder(get<unknown>(KEY_GRID_ORDER)),
     standingAuthorityAlwaysAllowed:
       get<string[]>(KEY_STANDING_AUTHORITY_ALWAYS_ALLOWED)
         ?.filter((n) => typeof n === "string")
@@ -504,6 +511,26 @@ export async function setNetworkPolicy(value: "full" | "lan"): Promise<void> {
 
 export async function setReplyStyle(value: ReplyStyle): Promise<void> {
   await writePref(KEY_REPLY_STYLE, sanitizeReplyStyle(value));
+}
+
+/** Workspaces grid card order: project ids only, deduped, capped - a
+ *  runaway array would grow the prefs file on every drag. */
+const GRID_ORDER_MAX = 64;
+
+function sanitizeGridOrder(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  for (const v of value) {
+    if (typeof v === "string" && v.trim() !== "" && !out.includes(v)) {
+      out.push(v);
+    }
+    if (out.length >= GRID_ORDER_MAX) break;
+  }
+  return out;
+}
+
+export async function setGridOrder(value: string[]): Promise<void> {
+  await writePref(KEY_GRID_ORDER, sanitizeGridOrder(value));
 }
 
 /** The standing-authority tools that can carry an Always Allow grant.
@@ -879,6 +906,7 @@ export async function onPreferencesChange(
     [KEY_VOICE_TTS_ASSEMBLY_VOICE]: "voiceTtsAssemblyVoice",
     [KEY_NETWORK_POLICY]: "networkPolicy",
     [KEY_REPLY_STYLE]: "replyStyle",
+    [KEY_GRID_ORDER]: "gridOrder",
     [KEY_STANDING_AUTHORITY_ALWAYS_ALLOWED]: "standingAuthorityAlwaysAllowed",
   };
   // Same-process writes still fire onChange immediately; cross-window writes

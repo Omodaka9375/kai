@@ -14,6 +14,7 @@ import { useChat } from "@ai-sdk/react";
 import Mic01Icon from "@hugeicons/core-free-icons/Mic01Icon";
 import NextIcon from "@hugeicons/core-free-icons/NextIcon";
 import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
+import Drag02Icon from "@hugeicons/core-free-icons/Drag02Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
@@ -48,6 +49,8 @@ import {
 } from "../store/projectRegistry";
 import { resolveBackgroundProjectSession } from "../store/chatStore";
 import { subscribeProjectAgentStatus, getProjectAgentStatus } from "../store/projectStatus";
+import { usePreferencesStore } from "@/modules/settings/preferences";
+import { setGridOrder } from "@/modules/settings/store";
 import type { ProjectSwitcherItem } from "@/modules/workspace";
 import { projectIconCss, projectIconFillCss } from "@/modules/workspace/projectIcons";
 import { GRID_COLS, GRID_ROWS } from "../store/projectChatGrid";
@@ -304,10 +307,62 @@ function mergeTranscriptIntoDraft(
 }
 
 export function ProjectChatGrid({ items }: { items: ProjectSwitcherItem[] }) {
-  const cells = useMemo(
-    () => items.slice(0, GRID_ROWS * GRID_COLS),
-    [items],
+  // DRAG-TO-REORDER (2026-11-20): the persisted gridOrder preference drives
+  // display order; ids absent from it sort after (natural items order), so
+  // new projects append without touching the saved array. Drag lifecycle:
+  // dragId tracks WHICH card is carried (dimmed style + dragover checks);
+  // dragOrder holds the LIVE sequence while a drag is in flight -
+  // committed to the preferences store on dragend only, so a dragover
+  // storm never spams the prefs file.
+  const gridOrder = usePreferencesStore((s) => s.gridOrder);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dragOrder, setDragOrder] = useState<string[] | null>(null);
+  const handleDragStart = useCallback((id: string) => {
+    setDragId(id);
+    setDragOrder(null);
+  }, []);
+  const handleDragOverCard = useCallback(
+    (overId: string) => {
+      const from = dragId;
+      if (!from || from === overId) return;
+      setDragOrder((prev) => {
+        const base = prev ?? gridOrder;
+        const visible = items
+          .slice(0, GRID_ROWS * GRID_COLS)
+          .map((c) => c.id);
+        const eff = [
+          ...base.filter((id) => visible.includes(id)),
+          ...visible.filter((id) => !base.includes(id)),
+        ];
+        const fromIdx = eff.indexOf(from);
+        const toIdx = eff.indexOf(overId);
+        if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return prev;
+        const next = eff.slice();
+        next.splice(fromIdx, 1);
+        next.splice(toIdx, 0, from);
+        return next;
+      });
+    },
+    [dragId, gridOrder, items],
   );
+  const handleDragEnd = useCallback(() => {
+    if (dragOrder) void setGridOrder(dragOrder);
+    setDragOrder(null);
+    setDragId(null);
+  }, [dragOrder]);
+  const cells = useMemo(() => {
+    const visible = items.slice(0, GRID_ROWS * GRID_COLS);
+    // Live drag sequence wins over the persisted one so cards follow the
+    // pointer in real time; the store is updated once on dragend.
+    const order = dragOrder ?? gridOrder;
+    const pos = new Map(order.map((id, i) => [id, i]));
+    const UNRANKED = Number.MAX_SAFE_INTEGER;
+    return [...visible].sort((a, b) => {
+      const ai = pos.get(a.id) ?? UNRANKED;
+      const bi = pos.get(b.id) ?? UNRANKED;
+      return ai - bi;
+    });
+  }, [items, gridOrder, dragOrder]);
   const projectIds = useMemo(() => cells.map((cell) => cell.id), [cells]);
   const statuses = useProjectStatuses(projectIds);
 
@@ -397,6 +452,10 @@ export function ProjectChatGrid({ items }: { items: ProjectSwitcherItem[] }) {
           voiceError={voice.error}
           onMicDown={startCellVoice}
           onMicStop={stopCellVoice}
+          dragging={dragId === cell.id}
+          onDragStartCell={handleDragStart}
+          onDragOverCell={handleDragOverCard}
+          onDragEndCell={handleDragEnd}
         />
       ))}
     </motion.div>
@@ -417,10 +476,15 @@ type GridCellProps = {
   voiceError: string | null;
   onMicDown: (sessionId: string) => void;
   onMicStop: () => void;
+  /** Drag-to-reorder: true while THIS card is being carried. */
+  dragging: boolean;
+  onDragStartCell: (id: string) => void;
+  onDragOverCell: (id: string) => void;
+  onDragEndCell: () => void;
 };
 
 const GridCell = memo(function GridCell(props: GridCellProps) {
-  const { projectId, name, status, active, color } = props;
+  const { projectId, name, status, active, color, dragging } = props;
   const switchProject = useContext(SwitchProjectContext);
   // The project-LOCAL active session (background projects keep their own).
   const sessionId = useSyncExternalStore(
@@ -436,12 +500,20 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
 
   return (
     <div
+      onDragOver={(e) => {
+        // preventDefault makes this card a valid drop target so the
+        // live-reorder fires while the pointer is over it.
+        e.preventDefault();
+        props.onDragOverCell(projectId);
+      }}
+      onDrop={(e) => e.preventDefault()}
       className={cn(
         // UNIFORM CARDS (2026-11-19): no selected outline in Workspaces -
         // it is a universal view, the active card would just be whichever
         // project the user last foregrounded. All cards share one border;
         // the project-color tint and status dot carry the differences.
         "flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-border/60 bg-background/95",
+        dragging && "opacity-50",
       )}
     >
       {/* Slim header, TINTED with the project's icon color (2026-11-19):
@@ -450,8 +522,16 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
           running); label still carries the agent status. Click opens the
           project. The Ask/Allow pill sits in the header row (NOT inside the
           button - nested buttons are invalid HTML and the click would
-          bubble to open-project). */}
+          bubble to open-project). DRAG-TO-REORDER (2026-11-20): the header
+          strip is the drag handle - draggable ONLY here so transcript
+          inputs and selection inside the body stay untouched. */}
       <div
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.effectAllowed = "move";
+          props.onDragStartCell(projectId);
+        }}
+        onDragEnd={props.onDragEndCell}
         style={{ background: projectIconFillCss(color, projectId, active) }}
         className="flex shrink-0 items-center gap-1 border-b border-border/40 px-3 py-1.5"
       >
@@ -482,6 +562,13 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
         <span className="shrink-0 text-[9.5px] text-muted-foreground/70">
           {statusLabel(status)}
         </span>
+        <HugeiconsIcon
+          icon={Drag02Icon}
+          size={10}
+          strokeWidth={1.5}
+          className="shrink-0 cursor-grab text-muted-foreground/50 active:cursor-grabbing"
+          aria-hidden
+        />
       </div>
 
       {group ? (

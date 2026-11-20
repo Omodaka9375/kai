@@ -151,10 +151,11 @@ describe("Workspaces grid behavior (source pins)", () => {
       "utf8",
     );
     expect(store).toContain("export function setSessionAutoApprove(");
-    // No button-in-button: the pill renders in the header DIV.
+    // No button-in-button: the pill renders in the header DIV. Slice budget
+    // covers the drag-to-reorder grip + its comment (2026-11-20).
     const headerBlock = grid.slice(
       grid.indexOf("Slim header"),
-      grid.indexOf("Slim header") + 1700,
+      grid.indexOf("Slim header") + 2200,
     );
     expect(headerBlock).toContain("<div");
     expect(headerBlock).toContain("<SessionApprovePill");
@@ -236,5 +237,27 @@ describe("Workspaces grid behavior (source pins)", () => {
     expect(grid).toContain("cardPasteChip");
     expect(grid).toContain('type: "file"');
     expect(grid).toContain("persistUploadedMedia");
+  });
+
+  it("cards drag-reorder via a persisted gridOrder preference", () => {
+    // DRAG-TO-REORDER (2026-11-20): the header strip is the drag handle
+    // (body inputs/selection untouched); the live sequence rides
+    // dragOrder, the preferences store is written once on dragend.
+    expect(grid).toContain("draggable");
+    expect(grid).toContain("onDragStartCell");
+    expect(grid).toContain("onDragOverCell");
+    expect(grid).toContain("onDragEndCell");
+    expect(grid).toContain("const order = dragOrder ?? gridOrder;");
+    expect(grid).toContain("void setGridOrder(dragOrder)");
+    // Grip affordance renders in the header.
+    expect(grid).toContain("Drag02Icon");
+    // The order persists in the preferences store (sanitized + synced).
+    const store = readFileSync(
+      new URL("../../settings/store.ts", import.meta.url),
+      "utf8",
+    );
+    expect(store).toContain("export async function setGridOrder(");
+    expect(store).toContain("function sanitizeGridOrder(");
+    expect(store).toContain('[KEY_GRID_ORDER]: "gridOrder"');
   });
 });
