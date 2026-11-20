@@ -60,6 +60,9 @@ type Props = {
   onToggleSidebar: () => void;
   onToggleChatGrid: () => void;
   chatGridOpen: boolean;
+  /** Hamburger app menu trigger node (App supplies it so it shares the
+   *  rail's FileMenu handlers); rendered right of the Workspaces toggle. */
+  fileMenuSlot?: ReactNode;
   onSplit: (dir: "row" | "col") => void;
   onOpenShortcuts: () => void;
   searchTarget: SearchTarget;
@@ -199,6 +202,7 @@ export function Header({
   onToggleSidebar,
   onToggleChatGrid,
   chatGridOpen,
+  fileMenuSlot,
   onSplit,
   onOpenShortcuts,
   searchTarget,
@@ -268,6 +272,11 @@ export function Header({
         >
           <HugeiconsIcon icon={DashboardSquare01Icon} size={18} strokeWidth={1.75} />
         </Button>
+        {/* Hamburger app menu (2026-11-20): right of the Workspaces toggle.
+            App supplies the FileMenu-wrapped trigger (same handlers as the
+            rail's hamburger) — while Workspaces is open the rail is
+            collapsed, so this is the only reachable path to Settings. */}
+        {fileMenuSlot}
         {/* Current-project name: hidden in Workspaces mode — the mode is not
             tied to any project; the cards carry their own names. */}
         {projectName && !compact && !chatGridOpen && (

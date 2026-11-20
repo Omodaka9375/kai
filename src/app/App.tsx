@@ -1913,6 +1913,7 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
             onToggleSidebar={toggleSidebar}
             onToggleChatGrid={toggleChatGrid}
             chatGridOpen={chatGridOpen}
+            fileMenuSlot={fileMenuTrigger}
             onSplit={handleSplitPane}
             onOpenShortcuts={() => setShortcutsOpen(true)}
             searchTarget={searchTarget}
