@@ -30,6 +30,15 @@ export const THINKING_BUDGET_ANTHROPIC: Record<ThinkingMode, number> = {
   high: 32000,
 };
 
+/** Effort levels per thinking mode for Anthropic ADAPTIVE thinking
+ *  (4.6+ / 5.x models - these reject thinking:{type:"enabled"}). */
+export const ANTHROPIC_ADAPTIVE_EFFORT: Record<ThinkingMode, string> = {
+  off: "low",
+  low: "low",
+  medium: "medium",
+  high: "high",
+};
+
 /** Reasoning effort strings per mode for OpenAI. */
 export const THINKING_EFFORT_OPENAI: Record<ThinkingMode, string> = {
   off: "",

@@ -16,6 +16,7 @@ import {
   providerNeedsKey,
   SYSTEM_PROMPT,
   THINKING_BUDGET_ANTHROPIC,
+  ANTHROPIC_ADAPTIVE_EFFORT,
   THINKING_BUDGET_GOOGLE,
   THINKING_EFFORT_OPENAI,
   THINKING_EFFORT_OPENROUTER,
@@ -795,14 +796,31 @@ export async function runAgentStream(opts: RunAgentOptions) {
   const thinkingProviderOpts: Record<string, Record<string, unknown>> = {};
   if (thinkingMode !== "off" && (isReasoningModel || isCustomEndpoint)) {
     switch (provider) {
-      case "anthropic":
-        thinkingProviderOpts.anthropic = {
-          thinking: {
-            type: "enabled" as const,
-            budgetTokens: THINKING_BUDGET_ANTHROPIC[thinkingMode],
-          },
-        };
+      case "anthropic": {
+        // MODEL-AWARE (2026-11-20 wire check): Claude 4.7+ and all 5.x
+        // models REJECT thinking: {type:"enabled"} with a 400
+        // ("thinking.type.enabled is not supported") - they are
+        // adaptive-only (platform.claude.com thinking-troubleshooting
+        // table). Extended thinking (enabled + budget_tokens) is only
+        // valid on 4.5/4.6-class models. Adaptive mode is steered by the
+        // effort param instead of budget_tokens; the SDK adds its beta
+        // header itself.
+        const isLegacyAnthropic = /-4-5$/.test(modelId);
+        if (isLegacyAnthropic) {
+          thinkingProviderOpts.anthropic = {
+            thinking: {
+              type: "enabled" as const,
+              budgetTokens: THINKING_BUDGET_ANTHROPIC[thinkingMode],
+            },
+          };
+        } else {
+          thinkingProviderOpts.anthropic = {
+            thinking: { type: "adaptive" as const },
+            effort: ANTHROPIC_ADAPTIVE_EFFORT[thinkingMode],
+          };
+        }
         break;
+      }
       case "openai":
         thinkingProviderOpts.openai = {
           reasoningEffort: THINKING_EFFORT_OPENAI[thinkingMode],
@@ -987,6 +1005,13 @@ export async function runAgentStream(opts: RunAgentOptions) {
     tools: fencedTools,
     stopWhen: stepCountIs(MAX_AGENT_STEPS),
     abortSignal: opts.abortSignal,
+    // ANTHROPIC OUTPUT CAP (2026-11-20 wire check): the SDK's capability
+    // table has no entries for claude-opus-5 / claude-fable-5 /
+    // claude-sonnet-5, so they fall to the 4096-token unknown-model
+    // default and agentic runs truncate mid-tool-call. 64k is the
+    // documented output-cap class; SDK-known models clamp it themselves
+    // via isKnownModel, so this is safe across the registry.
+    ...(provider === "anthropic" ? { maxOutputTokens: 64_000 } : {}),
     // Inject a pending loop nudge into the immediate next request only.
     // Returning undefined leaves the step untouched (the common case).
     prepareStep: ({ messages: stepMessages }) => {
