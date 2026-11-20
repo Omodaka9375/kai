@@ -1006,7 +1006,7 @@ const CellInput = memo(function CellInput({
             ? "Transcribing…"
             : busy
               ? "Steer the running agent."
-              : "Message KAI."
+              : "Send a message"
         }
         className="max-h-12 min-h-[20px] flex-1 resize-none bg-transparent text-[11px] leading-snug text-foreground outline-none placeholder:text-muted-foreground/50"
       />
