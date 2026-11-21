@@ -14,7 +14,6 @@ import { useChat } from "@ai-sdk/react";
 import Mic01Icon from "@hugeicons/core-free-icons/Mic01Icon";
 import NextIcon from "@hugeicons/core-free-icons/NextIcon";
 import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
-import Drag02Icon from "@hugeicons/core-free-icons/Drag02Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
@@ -575,13 +574,6 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
           {name}
         </span>
         {sessionId ? <SessionApprovePill sessionId={sessionId} /> : null}
-        <HugeiconsIcon
-          icon={Drag02Icon}
-          size={10}
-          strokeWidth={1.5}
-          className="shrink-0 text-muted-foreground/50"
-          aria-hidden
-        />
       </div>
 
       {group ? (

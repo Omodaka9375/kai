@@ -261,8 +261,9 @@ describe("Workspaces grid behavior (source pins)", () => {
     );
     expect(headerStrip).not.toMatch(/<button[\s\S]*?open project/);
     expect(headerStrip).toContain("select-none");
-    // Grip affordance renders in the header.
-    expect(grid).toContain("Drag02Icon");
+    // Grip affordance removed (2026-11-21): the whole strip drags since
+    // the full-bar drag fix, so the icon is redundant chrome.
+    expect(grid).not.toContain("Drag02Icon");
     // The order persists in the preferences store (sanitized + synced).
     const store = readFileSync(
       new URL("../../settings/store.ts", import.meta.url),
@@ -271,6 +272,22 @@ describe("Workspaces grid behavior (source pins)", () => {
     expect(store).toContain("export async function setGridOrder(");
     expect(store).toContain("function sanitizeGridOrder(");
     expect(store).toContain('[KEY_GRID_ORDER]: "gridOrder"');
+  });
+
+  it("Workspaces mode hides the tab bar + launcher", () => {
+    // 2026-11-21 ask: in Workspaces mode the top bar has no + button - the
+    // grid owns the screen, so the new-tab launcher is dead chrome there.
+    const tabBar = readFileSync(
+      new URL("../../tabs/TabBar.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(tabBar).toContain("hideNew");
+    expect(tabBar).toContain("{...(hideNew ? { hidden: true } : {})}");
+    const header = readFileSync(
+      new URL("../../header/Header.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(header).toContain("hideNew={chatGridOpen}");
   });
 
   it("double-click on the status bar opens the project - single click does not", () => {

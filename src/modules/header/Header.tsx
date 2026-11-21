@@ -311,6 +311,7 @@ export function Header({
           onSplitTab={onSplitTab}
           splitTabId={splitTabId}
           onSplitPane={onSplit}
+          hideNew={chatGridOpen}
           compact={compact}
         />
         <div data-tauri-drag-region className="h-full min-w-2 flex-1" />
