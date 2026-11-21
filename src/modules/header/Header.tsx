@@ -296,24 +296,29 @@ export function Header({
       {!IS_MAC && <span className="mx-1 h-5 w-px shrink-0 bg-border" />}
       {IS_MAC && <span className="mr-1 h-full w-px shrink-0 bg-border" />}
       <div className="flex min-w-0 flex-1 items-center gap-2" data-tauri-drag-region>
-        <TabBar
-          tabs={tabs}
-          activeId={activeId}
-          onSelect={onSelect}
-          onNew={onNew}
-          onNewEditor={onNewEditor}
-          onNewApiTester={onNewApiTester}
-          onNewPrivate={onNewPrivate}
-          onClose={onClose}
-          onCloseOthers={onCloseOthers}
-          onPin={onPin}
-          onMove={onMove}
-          onSplitTab={onSplitTab}
-          splitTabId={splitTabId}
-          onSplitPane={onSplit}
-          hideNew={chatGridOpen}
-          compact={compact}
-        />
+        {/* FILE TABS HIDDEN IN WORKSPACES (2026-11-21): Workspaces is a
+            multi-CHAT surface, not file work - the tab strip (and its +
+            launcher) is meaningless chrome there and the drag-region
+            spacer below fills the freed width. */}
+        {!chatGridOpen && (
+          <TabBar
+            tabs={tabs}
+            activeId={activeId}
+            onSelect={onSelect}
+            onNew={onNew}
+            onNewEditor={onNewEditor}
+            onNewApiTester={onNewApiTester}
+            onNewPrivate={onNewPrivate}
+            onClose={onClose}
+            onCloseOthers={onCloseOthers}
+            onPin={onPin}
+            onMove={onMove}
+            onSplitTab={onSplitTab}
+            splitTabId={splitTabId}
+            onSplitPane={onSplit}
+            compact={compact}
+          />
+        )}
         <div data-tauri-drag-region className="h-full min-w-2 flex-1" />
       </div>
       <SearchInline ref={searchRef} target={searchTarget} compact={compact} />

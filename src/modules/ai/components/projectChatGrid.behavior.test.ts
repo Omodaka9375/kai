@@ -274,20 +274,19 @@ describe("Workspaces grid behavior (source pins)", () => {
     expect(store).toContain('[KEY_GRID_ORDER]: "gridOrder"');
   });
 
-  it("Workspaces mode hides the tab bar + launcher", () => {
-    // 2026-11-21 ask: in Workspaces mode the top bar has no + button - the
-    // grid owns the screen, so the new-tab launcher is dead chrome there.
+  it("Workspaces mode hides the tab bar + launcher entirely", () => {
+    // 2026-11-21 ask: Workspaces is a multi-CHAT surface, not file work -
+    // the whole tab strip (tabs AND the + launcher) is meaningless chrome
+    // in grid mode, so the Header conditionally renders TabBar away. The
+    // drag-region spacer fills the freed width.
+    expect(header).toContain("{!chatGridOpen && (\n          <TabBar");
+    // The earlier per-button hideNew prop is gone - hiding must happen at
+    // the TabBar mount, not per control inside it.
     const tabBar = readFileSync(
       new URL("../../tabs/TabBar.tsx", import.meta.url),
       "utf8",
     );
-    expect(tabBar).toContain("hideNew");
-    expect(tabBar).toContain("{...(hideNew ? { hidden: true } : {})}");
-    const header = readFileSync(
-      new URL("../../header/Header.tsx", import.meta.url),
-      "utf8",
-    );
-    expect(header).toContain("hideNew={chatGridOpen}");
+    expect(tabBar).not.toContain("hideNew");
   });
 
   it("double-click on the status bar opens the project - single click does not", () => {

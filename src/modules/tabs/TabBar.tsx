@@ -54,8 +54,6 @@ type Props = {
   splitTabId: number | null;
   /** Split active terminal pane (terminals only). */
   onSplitPane: (dir: "row" | "col") => void;
-  /** Workspaces mode: the + launcher hides (the grid has no tabs). */
-  hideNew?: boolean;
   compact?: boolean;
 };
 
@@ -74,7 +72,6 @@ export function TabBar({
   onSplitTab,
   splitTabId,
   onSplitPane,
-  hideNew,
   compact,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -491,9 +488,6 @@ export function TabBar({
               size="icon"
               className="size-7 shrink-0 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
               title="New tab"
-              // Workspaces mode has no tabs to launch into: the grid owns
-              // the screen, so the + launcher is dead chrome there.
-              {...(hideNew ? { hidden: true } : {})}
             >
               <HugeiconsIcon icon={PlusSignIcon} size={14} strokeWidth={2} />
             </Button>
