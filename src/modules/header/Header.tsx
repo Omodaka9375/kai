@@ -8,6 +8,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { WindowControls } from "@/components/WindowControls";
+import { cn } from "@/lib/utils";
 import { IS_MAC, KEY_SEP, USE_CUSTOM_WINDOW_CONTROLS } from "@/lib/platform";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import { usePreferencesStore } from "@/modules/settings/preferences";
@@ -258,42 +259,25 @@ export function Header({
             <HugeiconsIcon icon={SidebarLeftIcon} size={18} strokeWidth={1.75} />
           </Button>
         )}
-        {/* Hamburger app menu LEADS the chrome cluster in normal view
-            (2026-11-21 swap): the app menu is the primary entry point, so
-            it starts from the left. In Workspaces mode the two switch
-            places and the toggle leads. App supplies the FileMenu-wrapped
-            trigger (same handlers as the rail's hamburger) - while
-            Workspaces is open the rail is collapsed, so this is the only
-            reachable path to Settings. */}
-        {chatGridOpen ? (
-          <>
-            <Button
-              onClick={onToggleChatGrid}
-              title="Close Workspaces (Esc)"
-              aria-pressed={chatGridOpen}
-              variant="ghost"
-              size="icon-sm"
-              className="shrink-0 rounded-md bg-accent text-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              <HugeiconsIcon icon={DashboardSquare01Icon} size={18} strokeWidth={1.75} />
-            </Button>
-            {fileMenuSlot}
-          </>
-        ) : (
-          <>
-            {fileMenuSlot}
-            <Button
-              onClick={onToggleChatGrid}
-              title="Workspaces — all project chats"
-              aria-pressed={chatGridOpen}
-              variant="ghost"
-              size="icon-sm"
-              className="shrink-0 rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              <HugeiconsIcon icon={DashboardSquare01Icon} size={18} strokeWidth={1.75} />
-            </Button>
-          </>
-        )}
+        {/* Chrome order is CONSTANT across modes (2026-11-21): hamburger
+            app menu leads, Workspaces toggle follows - no mode-dependent
+            swap. App supplies the FileMenu-wrapped trigger (same handlers
+            as the rail's hamburger) - while Workspaces is open the rail is
+            collapsed, so this is the only reachable path to Settings. */}
+        {fileMenuSlot}
+        <Button
+          onClick={onToggleChatGrid}
+          title={chatGridOpen ? "Close Workspaces (Esc)" : "Workspaces — all project chats"}
+          aria-pressed={chatGridOpen}
+          variant="ghost"
+          size="icon-sm"
+          className={cn(
+            "shrink-0 rounded-md transition-colors hover:bg-accent hover:text-foreground",
+            chatGridOpen ? "text-foreground bg-accent" : "text-muted-foreground",
+          )}
+        >
+          <HugeiconsIcon icon={DashboardSquare01Icon} size={18} strokeWidth={1.75} />
+        </Button>
         {/* Current-project name: hidden in Workspaces mode — the mode is not
             tied to any project; the cards carry their own names. */}
         {projectName && !compact && !chatGridOpen && (
