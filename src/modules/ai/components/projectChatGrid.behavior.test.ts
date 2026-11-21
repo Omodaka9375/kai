@@ -182,7 +182,11 @@ describe("Workspaces grid behavior (source pins)", () => {
   it("card regions share one horizontal padding rhythm", () => {
     // Header strip, transcript (via AiChatView contentClassName), group
     // transcript and both card inputs all sit on the same 12px edge.
-    expect(grid).toContain('className="flex shrink-0 cursor-grab select-none items-center gap-1 border-b border-border/40 px-3 py-1.5 active:cursor-grabbing"');
+    // CURSOR (2026-11-21): hover is a POINTER (double-click opens); the
+    // grabbing hand only shows during a press / while the card is carried.
+    expect(grid).toContain("flex shrink-0 select-none items-center gap-1 border-b border-border/40 px-3 py-1.5");
+    expect(grid).toContain('dragging ? "cursor-grabbing" : "cursor-pointer active:cursor-grabbing"');
+    expect(grid).not.toContain("cursor-grab ");
     expect(grid).toContain('contentClassName="gap-4 px-3 pb-3"');
     expect(grid).toContain('<Conversation className="px-3 py-2">');
     const px3 = (grid.match(/px-3 /g) ?? []).length;
@@ -287,6 +291,19 @@ describe("Workspaces grid behavior (source pins)", () => {
       "utf8",
     );
     expect(tabBar).not.toContain("hideNew");
+  });
+
+  it("the status bar hovers as a pointer and only grabs while pressed", () => {
+    // 2026-11-21 ask: "hovering shows a dragging hand, but it is misleading -
+    // it should be a pointer so the user knows he can double-click; only on
+    // press-and-hold show the grabbing hand".
+    const headerStrip = grid.slice(
+      grid.indexOf("Slim header"),
+      grid.indexOf("GroupCardBody group={group}"),
+    );
+    expect(headerStrip).toContain("cursor-pointer");
+    expect(headerStrip).toContain("active:cursor-grabbing");
+    expect(headerStrip).not.toContain("cursor-grab \"");
   });
 
   it("double-click on the status bar opens the project - single click does not", () => {

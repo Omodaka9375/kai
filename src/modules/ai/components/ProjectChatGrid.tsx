@@ -553,7 +553,11 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
           longer switches project - it is a drag surface, and an accidental
           click while grabbing used to yank the user out of Workspaces. The
           guard skips double-clicks that land on a real control (the
-          Ask/Allow pill) so a fast pill toggle never opens the project. */}
+          Ask/Allow pill) so a fast pill toggle never opens the project.
+
+          CURSOR (2026-11-21): hover shows the POINTER, not a grab hand -
+          the bar's primary action is double-click-to-open. The grabbing
+          hand appears only during a press (or while the card is carried). */}
       <div
         draggable
         onDragStart={(e) => {
@@ -572,7 +576,16 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
             : `${name} — double-click to open, drag to reorder`
         }
         style={{ background: projectIconFillCss(color, projectId, active) }}
-        className="flex shrink-0 cursor-grab select-none items-center gap-1 border-b border-border/40 px-3 py-1.5 active:cursor-grabbing"
+        // CURSOR HONESTY (2026-11-21): a constant grab hand read as "this
+        // only drags", but a click on the bar also opens the project on
+        // double-click. Hover shows the POINTER (the click affordance); the
+        // grabbing hand appears only while the gesture is live - :active
+        // during a press, plus the explicit flag while this card is the one
+        // being carried (a native HTML5 drag can drop :active).
+        className={cn(
+          "flex shrink-0 select-none items-center gap-1 border-b border-border/40 px-3 py-1.5",
+          dragging ? "cursor-grabbing" : "cursor-pointer active:cursor-grabbing",
+        )}
       >
         {/* GROUP SURFACE IN THE TITLE (2026-11-21): a card swaps from the
             project AI chat to its GROUP transcript when the group panel owns
