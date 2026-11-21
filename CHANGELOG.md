@@ -4,6 +4,32 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [3.3.2]
+
+- Workspaces: tool approvals in a card now resolve on their own. A card was reading the foreground project's Ask/Allow mode, so cards for other projects showed a green "auto-approved" row and sat there until the pill was toggled twice.
+- Workspaces: a background project restores its saved Allow mode as soon as its card loads. Before, every card fell back to Ask.
+- Workspaces: green means the decision landed. A predicted approval shows a pulsing amber dot and "approving..." instead of a false green.
+- Workspaces: cards reorder by dragging, order is saved across restarts.
+- Workspaces: a running or awaiting card pulses with a ring in the rail's status colors. The header dot and the idle/running label are gone.
+- Workspaces: the card bar is the full drag handle, and double-click opens the project. It shows a pointer on hover and the grabbing hand only while pressed.
+- Workspaces: a card no longer goes blank when you send the first message in a new project.
+- Workspaces: group cards name the group in the title bar, so a group surface is never mistaken for the project chat.
+- Workspaces: the file tab strip and its + launcher are hidden in the universal view.
+- Workspaces: the top bar always shows hamburger, then Workspaces toggle, with exactly one hamburger per mode.
+- Workspaces: card input placeholder reads "Send a message".
+- Chat: generated blocks scale with the rest of the transcript. Tables, inline code and headings no longer render larger than the body text.
+- Chat: wide blocks and long tokens wrap inside the card instead of clipping on the right.
+- Chat: group card transcripts use the same chat zoom as the AI window.
+- Chat: Settings → Agents adds reply style fields (how-to-write-to-me), sent with every turn.
+- Approvals: a stranded approval continuation is no longer dropped, so an interrupted run does not stall on a card.
+- Anthropic: 4.6+ and 5.x models get adaptive thinking, fixing a 400 on every request. SDK-unknown ids get a larger output cap so agentic runs stop truncating mid tool call.
+- Anthropic: the system prompt stays stable, so toggling Ask/Allow or plan mode no longer breaks replayed thinking signatures.
+- OpenAI: reasoning parts stay on the wire for the Responses API, fixing unpaired function calls.
+- Models: Route to model and Assistant pickers list the same merged catalog as the status bar picker, so current OpenRouter models appear.
+- UI: the File menu tile for models is now "API Keys (providers & models)".
+
+---
+
 ## [3.3.1]
 
 - Workspaces: card inputs accept pastes. Group cards accept the same pastes.
