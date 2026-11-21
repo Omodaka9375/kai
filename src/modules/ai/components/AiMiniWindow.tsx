@@ -339,6 +339,9 @@ function Body({
               status={helpers.status}
               error={helpers.error}
               clearError={helpers.clearError}
+              // Owning session: approval cards read ITS Ask/Allow mode, not
+              // whichever session happens to be foreground.
+              sessionId={sessionId}
             />
           </div>
         ) : (

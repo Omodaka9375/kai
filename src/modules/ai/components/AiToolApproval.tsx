@@ -13,9 +13,14 @@ import ToolsIcon from "@hugeicons/core-free-icons/ToolsIcon";
 import UserWarning01Icon from "@hugeicons/core-free-icons/UserWarning01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ToolUIPart } from "ai";
-import { memo, useCallback, useState } from "react";
+import { memo, useCallback, useMemo, useState, useSyncExternalStore } from "react";
 import { useChatStore } from "../store/chatStore";
-import { abortSession, getSessionAutoApprove, getSessionAutoApproveVersion } from "../store/chatStore";
+import {
+  abortSession,
+  getSessionAutoApprove,
+  getSessionAutoApproveVersion,
+  subscribeSessionAutoApprove,
+} from "../store/chatStore";
 import { setEditedToolInput } from "../lib/toolInputOverrides";
 import {
   predictAutoApproval,
@@ -36,6 +41,16 @@ type Props = {
   onRespond: (approved: boolean) => void;
   /** Sequential approval queue: queued = render as a compact chip, not a card. */
   queue?: { queued: boolean; position: number; total: number } | null;
+  /** OWNING session (2026-11-21). Surfaces that show a NON-foreground
+   *  session (Workspaces cards for background projects) MUST pass it: the
+   *  auto-approve prediction below reads THIS session's Ask/Allow mode. It
+   *  used to read the foreground session's mode, so a card whose session
+   *  was on Ask rendered the buttonless green "auto-approved" row whenever
+   *  the FOREGROUND project was on Allow - the card sat there looking
+   *  approved while its own bridge never approved anything, and only a
+   *  pill toggle (which bumps the version and re-runs the prediction)
+   *  unstuck it. Absent = the active session. */
+  sessionId?: string;
   /** PROXY MODE (group panel + Telegram): this card decides on behalf of
    *  another surface - a group persona's headless run or a background
    *  project session. Differences: a "requested by <name>" subtitle, and
@@ -61,7 +76,7 @@ const TOOL_ICON: Record<string, typeof FilePlusIcon> = {
   save_memory: AiBrain03Icon,
 };
 
-function AiToolApprovalImpl({ part, toolName, onRespond, queue, proxy }: Props) {
+function AiToolApprovalImpl({ part, toolName, onRespond, queue, proxy, sessionId }: Props) {
   const meta = TOOL_ICON[toolName];
   const label = presentationFor(toolName).approvalLabel ?? toolName;
   const Icon = meta ?? ToolsIcon;
@@ -76,8 +91,22 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue, proxy }: Props) 
   // the bridge WILL approve render the flat row from the start. PROXY
   // cards are exempt: their sessions run behind the group panel / Telegram
   // with their own approval routing, never this window's auto-approve.
-  const sessionAutoApprove = useChatStore((s) =>
-    getSessionAutoApprove(s.activeSessionId ?? ""),
+  // The mode that governs THIS card is its OWNING session's mode. In
+  // Workspaces a card shows a background project's chat, whose pill state
+  // has nothing to do with the foreground session's toggle.
+  const activeSessionId = useChatStore((s) => s.activeSessionId);
+  const ownerSessionId = sessionId ?? activeSessionId ?? "";
+  // Version-derived memo: the mode map is module-level, so a plain read is
+  // not reactive - the counter is what re-runs the prediction when a pill
+  // flips either way.
+  const autoApproveVersion = useSyncExternalStore(
+    subscribeSessionAutoApprove,
+    getSessionAutoApproveVersion,
+    getSessionAutoApproveVersion,
+  );
+  const sessionAutoApprove = useMemo(
+    () => getSessionAutoApprove(ownerSessionId),
+    [ownerSessionId, autoApproveVersion],
   );
   const signingApprovalRequired = usePreferencesStore(
     (s) => s.commitSigningEnabled && s.commitSigningMode === "approval",
@@ -146,13 +175,13 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue, proxy }: Props) 
       // Abort the agent so it can't re-issue the original (unedited)
       // command. This is the ONLY place abortSession is called on
       // denial — normal Deny lets the agent see the rejection and
-      // continue gracefully.
-      const sessionId = useChatStore.getState().activeSessionId;
-      if (sessionId) abortSession(sessionId);
+      // continue gracefully. Aborts the OWNING session, not whatever is
+      // foreground (in Workspaces the card's project is usually not).
+      if (ownerSessionId) abortSession(ownerSessionId);
     } else {
       onRespond(true);
     }
-  }, [isMemory, isShell, isEditing, editedCommand, commandText, part.toolCallId, onRespond]);
+  }, [isMemory, isShell, isEditing, editedCommand, commandText, part.toolCallId, onRespond, ownerSessionId]);
 
   // Flat one-row state — rendered from the FIRST frame when the bridge is
   // guaranteed to auto-approve (prediction), and on the approval-responded
@@ -163,12 +192,25 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue, proxy }: Props) 
   // bordered box here made the whole row visibly jump when the state
   // flipped. Match the Tool row geometry so the swap is dot-color only.
   if (wasAutoApproved || willBeAutoApproved || hasGrant) {
+    // HONEST GREEN (2026-11-21): green means the decision LANDED. The
+    // prediction branch only says the bridge WILL approve it, and that gap
+    // was the Workspaces stall - a card whose own session was on Ask read
+    // the foreground session's Allow, painted a solid green "auto-approved"
+    // row with no buttons, and sat there forever while its bridge asked.
+    // While merely predicted the row now reads "approving…" in a muted
+    // tone; it turns green the moment the approval id is marked resolved.
+    const resolved = wasAutoApproved || hasGrant;
     return (
       <div className="flex w-full items-center gap-2 rounded-md px-2 py-1.5">
           {/* Dot language, matching the tool cards — a green check-circle
               icon here flashed between the approval and execution states
               and read as a glitch. */}
-          <span className="size-1.5 shrink-0 rounded-full bg-emerald-500" />
+          <span
+            className={cn(
+              "size-1.5 shrink-0 rounded-full",
+              resolved ? "bg-emerald-500" : "animate-pulse bg-amber-500",
+            )}
+          />
           <HugeiconsIcon
             icon={Icon}
             size={13}
@@ -178,8 +220,19 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue, proxy }: Props) 
           <span className="text-[12px] font-medium text-foreground">
             {label}
           </span>
-          <span className="ml-auto text-[10px] text-emerald-600 dark:text-emerald-400">
-            {hasGrant ? "always allowed" : "auto-approved"}
+          <span
+            className={cn(
+              "ml-auto text-[10px]",
+              resolved
+                ? "text-emerald-600 dark:text-emerald-400"
+                : "text-muted-foreground",
+            )}
+          >
+            {hasGrant
+              ? "always allowed"
+              : wasAutoApproved
+                ? "auto-approved"
+                : "approving…"}
           </span>
       </div>
     );
@@ -453,6 +506,12 @@ export const AiToolApproval = memo(AiToolApprovalImpl, (a, b) => {
   return (
     a.toolName === b.toolName &&
     a.part.approval.id === b.part.approval.id &&
+    // OWNING SESSION (2026-11-21): a card rebound to another session must
+    // re-evaluate which Ask/Allow mode governs it.
+    a.sessionId === b.sessionId &&
+    // NOTE: modeVersionA === modeVersionB is a no-op (both read the same
+    // counter); genuine mode reactivity comes from the impl's own
+    // useSyncExternalStore subscription below.
     modeVersionA === modeVersionB &&
     grantsA.length === grantsB.length &&
     grantsA.join("\u0000") === grantsB.join("\u0000") &&

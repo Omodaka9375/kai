@@ -59,5 +59,72 @@ describe("allow/ask mid-run toggle (source pins)", () => {
     // flat auto-approved row stays frozen after Allow -> Ask.
     expect(card).toContain("modeVersionA === modeVersionB");
     expect(card).toContain("getSessionAutoApproveVersion()");
+    // The REAL reactivity is the impl's own subscription: the comparator
+    // above reads the same counter twice and can never differ, so only
+    // useSyncExternalStore can re-render a memoized card on a mode flip.
+    expect(card).toContain("subscribeSessionAutoApprove,");
+    expect(card).toContain("useSyncExternalStore(");
+  });
+
+  it("a card reads the mode of the session that OWNS it, not the foreground", () => {
+    // 2026-11-21 report: "in Workspaces tool calls just writing green
+    // approved but it's stuck there until I toggle Allow to Ask and Allow
+    // again". Every Workspaces card shows a BACKGROUND project's chat, but
+    // the card read the FOREGROUND session's Ask/Allow mode: with the
+    // active project on Allow every other card painted the buttonless flat
+    // "auto-approved" row while its own bridge (correctly) asked - a
+    // parked run nobody could answer. Toggling the card's pill bumped the
+    // version, the prediction re-read the same wrong session... and only
+    // the second flip landed on "all" for the right session.
+    expect(card).toContain("const ownerSessionId = sessionId ?? activeSessionId ?? \"\";");
+    expect(card).toContain("getSessionAutoApprove(ownerSessionId)");
+    expect(card).not.toContain('getSessionAutoApprove(s.activeSessionId ?? "")');
+    // Surfaces that show a non-foreground session must pass it down.
+    const grid = readFileSync(
+      new URL("../components/ProjectChatGrid.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(grid).toContain("sessionId={sessionId}");
+    const chat = readFileSync(
+      new URL("../components/AiChat.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(chat).toContain("sessionId?: string;");
+    expect(chat).toContain("sessionId={sessionId}");
+  });
+
+  it("green means the decision landed - a predicted approval says approving", () => {
+    // The flat row used to be solid green with "auto-approved" from a
+    // PREDICTION alone, so a wrong prediction looked exactly like a
+    // finished decision. Predictions now read "approving…" muted; only a
+    // resolved id (or an Always-Allow grant) goes green.
+    expect(card).toContain('"approving…"');
+    expect(card).toContain("const resolved = wasAutoApproved || hasGrant;");
+    expect(card).toContain('resolved ? "bg-emerald-500" : "animate-pulse bg-amber-500"');
+  });
+
+  it("a background project resolved on demand restores its persisted Allow mode", () => {
+    // The map is memory-only and hydrateSessions seeds it ONLY for the
+    // project being visited, so a Workspaces card for a background project
+    // always fell back to "off" - even a project the user left on Allow
+    // showed a waiting card. resolveBackgroundProjectSession reads the
+    // project's own sessions file, so it seeds the same modes there.
+    const store = readFileSync(
+      new URL("../store/chatStore.ts", import.meta.url),
+      "utf8",
+    );
+    const fn = store.slice(
+      store.indexOf("export async function resolveBackgroundProjectSession("),
+      store.indexOf("setProjectActiveSession(projectId, persistedActiveId);"),
+    );
+    expect(fn).toContain("for (const s of loaded.sessions) {");
+    expect(fn).toContain('sessionAutoApprove.set(s.id, s.autoApprove);');
+    expect(fn).toContain("bumpAutoApproveVersion();");
+    // Seeded BEFORE the bind (the bridge re-renders the moment the project
+    // session is set, so a late seed would paint one wrong-mode frame).
+    const seedIdx = store.indexOf("bumpAutoApproveVersion();", store.indexOf("export async function resolveBackgroundProjectSession("));
+    const bindIdx = store.indexOf("setProjectActiveSession(projectId, persistedActiveId);");
+    expect(seedIdx).toBeGreaterThan(-1);
+    expect(seedIdx).toBeLessThan(bindIdx);
   });
 });

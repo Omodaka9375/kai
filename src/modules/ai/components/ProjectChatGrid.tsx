@@ -902,6 +902,13 @@ const CellBody = memo(function CellBody(props: CellBodyProps) {
             // CARD MODE: compact tool rows (trailing state dot, chip bg)
             // + consecutive same-tool calls collapse into one group row.
             compact
+            // OWNING SESSION (2026-11-21): a card shows a NON-foreground
+            // project's chat, so approval cards must read THIS session's
+            // Ask/Allow mode - reading the foreground project's mode made
+            // a card paint the buttonless green "auto-approved" row while
+            // its own bridge never approved anything (the card stalled
+            // until the pill was toggled twice).
+            sessionId={sessionId}
           />
         </AiErrorBoundary>
       </TranscriptFrame>

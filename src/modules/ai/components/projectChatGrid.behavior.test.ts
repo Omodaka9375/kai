@@ -209,7 +209,8 @@ describe("Workspaces grid behavior (source pins)", () => {
     // runs into a ToolGroup chip and renders Tool rows without the leading
     // dot (trailing state dot instead).
     expect(grid).toContain("contentClassName=\"gap-4 px-3 pb-3\"\n            // CARD MODE");
-    expect(grid).toMatch(/compact\n\s*\/>/);
+    // `compact` is followed by the owning-session prop now (2026-11-21).
+    expect(grid).toMatch(/compact\n[\s\S]{0,600}?sessionId=\{sessionId\}\n\s*\/>/);
     const chat = readFileSync(
       new URL("./AiChat.tsx", import.meta.url),
       "utf8",

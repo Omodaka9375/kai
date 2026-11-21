@@ -237,6 +237,14 @@ type Props = {
    *  the same tool collapse into one expandable group - at ~290px wide
    *  the doc-scale rows read as loose debris. */
   compact?: boolean;
+  /** OWNING session (2026-11-21). A surface that shows a NON-foreground
+   *  session (every Workspaces card but the active project's) must say so:
+   *  the approval card reads that session's Ask/Allow mode to predict
+   *  auto-approval, and reading the FOREGROUND session's mode instead made
+   *  a card render a buttonless green "approved" row for a call its own
+   *  session was still asking about - parked forever. Absent = the
+   *  surface shows the active session (AI panel / mini window). */
+  sessionId?: string;
 };
 
 export function AiChatView({
@@ -246,6 +254,7 @@ export function AiChatView({
   clearError,
   contentClassName,
   compact = false,
+  sessionId,
 }: Props) {
   const scrollCtx = useRef<StickToBottomContext | null>(null);
   // SYMMETRIC CHAT ZOOM (2026-11-18): zoom the TRANSCRIPT by one ratio so
@@ -429,6 +438,7 @@ export function AiChatView({
                 messageIndex={idx}
                 timestamp={ts}
                 compact={compact}
+                sessionId={sessionId}
               />
               </div>
             </Fragment>
@@ -749,6 +759,7 @@ const RenderedMessage = memo(function RenderedMessage({
   messageIndex,
   timestamp,
   compact,
+  sessionId,
 }: {
   message: UIMessage;
   onApproval: (id: string, approved: boolean) => void;
@@ -758,6 +769,8 @@ const RenderedMessage = memo(function RenderedMessage({
   /** Per-message createdAt for hover tooltips; undefined = legacy/unknown. */
   timestamp?: number;
   compact?: boolean;
+  /** Session that OWNS this transcript (approval cards read its mode). */
+  sessionId?: string;
 }) {
   // RULES OF HOOKS: RenderedMessage is now a hook-free dispatcher. The user
   // and assistant paths live in DIFFERENT child components, so React can
@@ -780,6 +793,7 @@ const RenderedMessage = memo(function RenderedMessage({
       streaming={streaming}
       timestamp={timestamp}
       compact={compact}
+      sessionId={sessionId}
     />
   );
 });
@@ -790,12 +804,14 @@ function AssistantMessageView({
   streaming,
   timestamp,
   compact,
+  sessionId,
 }: {
   message: UIMessage;
   onApproval: (id: string, approved: boolean) => void;
   streaming: boolean;
   timestamp?: number;
   compact?: boolean;
+  sessionId?: string;
 }) {
   const timeTitle = timestamp ? absoluteTime(timestamp) : undefined;
 
@@ -888,6 +904,7 @@ function AssistantMessageView({
                       part={g.part}
                       onApproval={onApproval}
                       compact={compact}
+                      sessionId={sessionId}
                       streaming={
                         streaming &&
                         (partType(g.part) === "text" ||
@@ -1403,12 +1420,14 @@ const RenderedPart = memo(function RenderedPart({
   streaming,
   approvalQueue,
   compact,
+  sessionId,
 }: {
   part: AnyPart;
   onApproval: (id: string, approved: boolean) => void;
   streaming: boolean;
   approvalQueue?: ApprovalQueueInfo | null;
   compact?: boolean;
+  sessionId?: string;
 }) {
   // SHOW/HIDE MODEL THINKING (Settings -> General -> Chat): when off,
   // reasoning parts and inline <thinking> pills are not rendered at all.
@@ -1502,6 +1521,7 @@ const RenderedPart = memo(function RenderedPart({
         onApproval={onApproval}
         approvalQueue={approvalQueue}
         compact={compact}
+        sessionId={sessionId}
       />
     );
   }
@@ -1514,11 +1534,14 @@ const RenderedTool = memo(function RenderedTool({
   onApproval,
   approvalQueue,
   compact,
+  sessionId,
 }: {
   part: AnyToolPart;
   onApproval: (id: string, approved: boolean) => void;
   approvalQueue?: ApprovalQueueInfo | null;
   compact?: boolean;
+  /** Owning session: the approval card must read ITS Ask/Allow mode. */
+  sessionId?: string;
 }) {
   const toolName =
     part.type === "dynamic-tool"
@@ -1544,6 +1567,7 @@ const RenderedTool = memo(function RenderedTool({
         toolName={toolName}
         onRespond={(approved) => onApproval(part.approval.id, approved)}
         queue={approvalQueue}
+        sessionId={sessionId}
       />
     );
   }

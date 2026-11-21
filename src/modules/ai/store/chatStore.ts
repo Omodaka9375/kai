@@ -1027,6 +1027,21 @@ export async function resolveBackgroundProjectSession(
         sessions: [...inMemory, ...snapshotOnly],
       });
     }
+    // RESTORE PERSISTED ALLOW MODES (2026-11-21 Workspaces stall): the
+    // session-scoped auto-approve map is memory-only and hydrateSessions
+    // seeds it ONLY for the project being visited. A background project
+    // resolved here therefore fell back to the map's "off" default no
+    // matter what the user had set - so a card for a project the user left
+    // on Allow showed a waiting approval card (and, read against the
+    // FOREGROUND project's Allow, the reverse mismatch painted a green
+    // "auto-approved" row over a call nobody would ever approve). Seed the
+    // SAME per-session modes hydration would, for every session on disk.
+    for (const s of loaded.sessions) {
+      if (s.autoApprove === "all" || s.autoApprove === "off") {
+        sessionAutoApprove.set(s.id, s.autoApprove);
+      }
+    }
+    bumpAutoApproveVersion();
     // NOTE: setProjectActiveSession is the registry's own setter.
     // SEED BEFORE BIND (2026-11-02 review, MUST): setProjectActiveSession
     // re-binds the background project's AgentRunBridge (useSyncExternalStore
