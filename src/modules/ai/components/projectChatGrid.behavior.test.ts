@@ -357,6 +357,22 @@ describe("Workspaces grid behavior (source pins)", () => {
     expect(rule).toContain("pointer-events: none");
   });
 
+  it("only ONE hamburger app menu is on screen per mode", () => {
+    // 2026-11-21 report: "there are now 2 hamburger file menus in the top
+    // bar - the one in the top left which is main, and another one between
+    // the sidebar toggle and the grid toggle". The rail already owns the
+    // trigger in normal mode; the header copy is the Workspaces-only
+    // fallback (the rail is w-0 + pointer-events-none there, so without it
+    // Settings would be unreachable).
+    expect(header).toContain("{chatGridOpen && fileMenuSlot}");
+    // The rail keeps its own mount.
+    const rail = readFileSync(
+      new URL("../../workspace/ProjectRail.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(rail).toContain("{fileMenuTrigger}");
+  });
+
   it("a group card names the group in its title bar", () => {
     // 2026-11-21 ask: when a project's group chat is the active surface the
     // card swaps from the AI chat to the GROUP transcript - the bar must say

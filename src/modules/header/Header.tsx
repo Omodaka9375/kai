@@ -61,7 +61,10 @@ type Props = {
   onToggleChatGrid: () => void;
   chatGridOpen: boolean;
   /** Hamburger app menu trigger node (App supplies it so it shares the
-   *  rail's FileMenu handlers); rendered right of the Workspaces toggle. */
+   *  rail's FileMenu handlers). Rendered ONLY while Workspaces is open:
+   *  the rail's own top-left hamburger is the normal path, and the rail is
+   *  collapsed (w-0, pointer-events-none) in grid mode - so this is the
+   *  fallback mount, not a second copy. */
   fileMenuSlot?: ReactNode;
   onSplit: (dir: "row" | "col") => void;
   onOpenShortcuts: () => void;
@@ -259,12 +262,13 @@ export function Header({
             <HugeiconsIcon icon={SidebarLeftIcon} size={18} strokeWidth={1.75} />
           </Button>
         )}
-        {/* Chrome order is CONSTANT across modes (2026-11-21): hamburger
-            app menu leads, Workspaces toggle follows - no mode-dependent
-            swap. App supplies the FileMenu-wrapped trigger (same handlers
-            as the rail's hamburger) - while Workspaces is open the rail is
-            collapsed, so this is the only reachable path to Settings. */}
-        {fileMenuSlot}
+        {/* ONE HAMBURGER (2026-11-21): the rail owns the app menu in normal
+            mode, so the header must NOT render a second copy of it - two
+            identical hamburgers sat side by side (rail's top-left one plus
+            this slot) and read as a bug. Workspaces collapses the rail, so
+            THIS is the only reachable menu path there: mount it only then.
+            Order stays sidebar toggle -> [menu] -> Workspaces toggle. */}
+        {chatGridOpen && fileMenuSlot}
         <Button
           onClick={onToggleChatGrid}
           title={chatGridOpen ? "Close Workspaces (Esc)" : "Workspaces — all project chats"}
