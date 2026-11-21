@@ -68,6 +68,11 @@ describe("wide blocks wrap or scroll instead of widening the card", () => {
 
   it("the transcript scroller itself carries min-w-0", () => {
     expect(aiChat).toContain('cn("min-w-0 gap-5 p-3 pb-6", contentClassName)');
-    expect(aiChat).toContain('<ConversationContent className="min-w-0"');
+    // ONE scroller for both states (2026-11-21): the empty transcript renders
+    // INSIDE it instead of an early return above the hooks, so there is no
+    // second ConversationContent to pin - but the empty state must still
+    // fill the scroller.
+    expect(aiChat).not.toContain('<ConversationContent className="min-w-0"');
+    expect(aiChat).toContain('className="flex-1"');
   });
 });

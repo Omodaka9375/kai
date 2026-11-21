@@ -566,12 +566,20 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
           if ((e.target as HTMLElement).closest("button")) return;
           switchProject(projectId);
         }}
-        title={`${name} — double-click to open, drag to reorder`}
+        title={
+          group
+            ? `${name} — group "${group.name}" — double-click to open, drag to reorder`
+            : `${name} — double-click to open, drag to reorder`
+        }
         style={{ background: projectIconFillCss(color, projectId, active) }}
         className="flex shrink-0 cursor-grab select-none items-center gap-1 border-b border-border/40 px-3 py-1.5 active:cursor-grabbing"
       >
+        {/* GROUP SURFACE IN THE TITLE (2026-11-21): a card swaps from the
+            project AI chat to its GROUP transcript when the group panel owns
+            the stack rail. Without the group name in the bar the two
+            surfaces look identical, so the title reads "project · group". */}
         <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-foreground">
-          {name}
+          {group ? `${name} · ${group.name}` : name}
         </span>
         {sessionId ? <SessionApprovePill sessionId={sessionId} /> : null}
       </div>

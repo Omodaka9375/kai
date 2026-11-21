@@ -157,7 +157,7 @@ describe("Workspaces grid behavior (source pins)", () => {
     // covers the drag-to-reorder grip + its comment (2026-11-20).
     const headerBlock = grid.slice(
       grid.indexOf("Slim header"),
-      grid.indexOf("Slim header") + 2200,
+      grid.indexOf("GroupCardBody group={group}"),
     );
     expect(headerBlock).toContain("<div");
     expect(headerBlock).toContain("<SessionApprovePill");
@@ -322,7 +322,7 @@ describe("Workspaces grid behavior (source pins)", () => {
     expect(grid).not.toContain("statusLabel");
     const headerBlock = grid.slice(
       grid.indexOf("Slim header"),
-      grid.indexOf("Slim header") + 2200,
+      grid.indexOf("GroupCardBody group={group}"),
     );
     expect(headerBlock).not.toContain("size-1.5");
     // Stylesheet: overlay ring geometry + animation + reduced-motion.
@@ -338,6 +338,34 @@ describe("Workspaces grid behavior (source pins)", () => {
     );
     expect(rule).toContain("position: absolute");
     expect(rule).toContain("pointer-events: none");
+  });
+
+  it("a group card names the group in its title bar", () => {
+    // 2026-11-21 ask: when a project's group chat is the active surface the
+    // card swaps from the AI chat to the GROUP transcript - the bar must say
+    // so, otherwise the two surfaces look identical.
+    expect(grid).toContain("{group ? `${name} · ${group.name}` : name}");
+    expect(grid).toContain('group "${group.name}"');
+  });
+
+  it("the empty transcript renders inside the conversation - never an early return", () => {
+    // 2026-11-21 bug: `if (messages.length === 0) return <Conversation>...>`
+    // sat ABOVE the scroll hooks. A card mounted on a brand-new session
+    // registered 3 fewer hooks than the render carrying the first message;
+    // React threw "Rendered more hooks than during the previous render",
+    // AiErrorBoundary swallowed it and returned null, and the card went
+    // BLANK the moment the user sent the first message.
+    const chat = readFileSync(
+      new URL("./AiChat.tsx", import.meta.url),
+      "utf8",
+    );
+    const body = chat.slice(
+      chat.indexOf("export function AiChatView("),
+      chat.indexOf("const CompactionNotice = memo"),
+    );
+    expect(body).not.toMatch(/if \(messages\.length === 0\) \{\s*return/);
+    expect(body).toContain("{messages.length === 0 && (");
+    expect(body).toContain("<ConversationEmptyState");
   });
 
   it("group card transcript rides the shared chat zoom (symmetric with AI cards)", () => {

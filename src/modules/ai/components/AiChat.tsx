@@ -337,18 +337,13 @@ export function AiChatView({
     [],
   );
 
-  if (messages.length === 0) {
-    return (
-      <Conversation>
-        <ConversationContent className="min-w-0" style={chatFontZoomStyle}>
-          <ConversationEmptyState
-            title="Ask anything"
-            description="Explain command output, fix errors, generate snippets, or run a task."
-          />
-        </ConversationContent>
-      </Conversation>
-    );
-  }
+  // HOOK ORDER (2026-11-21): the empty state renders INSIDE the transcript
+  // below - it must NEVER be an early return. It used to sit above the two
+  // scroll hooks, so a surface that mounted on an EMPTY session registered
+  // three fewer hooks than the render that carried the first message:
+  // React threw "Rendered more hooks than during the previous render",
+  // AiErrorBoundary swallowed the throw and returned null, and the
+  // Workspaces card went BLANK the moment its first message landed.
 
   // Auto-scroll to bottom when the user sends a new message.
   const prevMsgCount = useRef(messages.length);
@@ -392,6 +387,16 @@ export function AiChatView({
           className={cn("min-w-0 gap-5 p-3 pb-6", contentClassName)}
           style={chatFontZoomStyle}
         >
+        {messages.length === 0 && (
+          <ConversationEmptyState
+            // flex-1: shares the scroller with the notice rows, so the
+            // empty state keeps filling (and centering in) the transcript
+            // area the way the old early-return did.
+            className="flex-1"
+            title="Ask anything"
+            description="Explain command output, fix errors, generate snippets, or run a task."
+          />
+        )}
         {messages.map((m, idx) => {
           // Day separator: rendered whenever the calendar day changes
           // between consecutive timestamped messages. Messages without a
