@@ -4,6 +4,18 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [3.4.1]
+
+- Shell: new native sleep tool.
+- Shell: bash_logs long-polls. A new wait_secs argument blocks in Rust.
+- Workspaces: each card top bar gains a context usage ring and a sandbox icon next to the project title when a sandbox policy is active.
+- Workspaces: the Ask/Allow pill is a compact shield icon toggle placed next to the card's + button.
+- Workspaces: the top bar gets a left-aligned + launcher for New Project / Open Project while the tab strip is hidden in grid mode.
+- Rail: the project hover tooltip is a compact two-line pill aligned with the tile instead of a tall three-block card.
+- Perf: tool output stringification and per-card meta subscriptions are cached per session.
+
+---
+
 ## [3.4.0]
 
 - Radio: in Workspaces mode the header station picker opens below and left-aligned.
