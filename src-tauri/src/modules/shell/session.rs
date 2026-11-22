@@ -417,6 +417,7 @@ mod cancellation_tests {
             None,
             Duration::from_secs(15),
             Some("C:/definitely-missing-kai-sandbox"),
+            None,
         ).expect("fallback must execute through the host PowerShell");
         assert!(output.stdout.contains("fallback-ok"), "{output:?}");
         assert!(!output.stderr.contains("__KAI_rc"), "{output:?}");

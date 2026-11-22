@@ -157,6 +157,7 @@ impl Drop for BackgroundProc {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn spawn(
     command: String,
     cwd: Option<String>,
