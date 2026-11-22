@@ -15,6 +15,7 @@ import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 export type SandboxCache = { root: string; mode: SandboxMode; client?: unknown } | null;
 
 let cached: SandboxCache = null;
+const rootModesCache = new Map<string, { mode: SandboxMode; client?: unknown }>();
 
 /** The workspace root the sandbox confines tool IO to. Set by App.tsx from
  * the same live-context source tools resolve against. Null = no project →
@@ -277,10 +278,14 @@ export async function loadSandboxMode(
   client: Pick<typeof native, "sandboxLoadConfig"> = native,
 ): Promise<SandboxMode> {
   if (!root) return "off";
-  if (cached?.root === root && (cached.client === undefined || cached.client === client)) return cached.mode;
+  const norm = normPath(root);
+  if (cached?.root === norm && (cached.client === undefined || cached.client === client)) return cached.mode;
+  const hit = rootModesCache.get(norm);
+  if (hit && (hit.client === undefined || hit.client === client)) return hit.mode;
   try {
     const c = await client.sandboxLoadConfig(root);
-    cached = { root, mode: c.mode, client };
+    cached = { root: norm, mode: c.mode, client };
+    rootModesCache.set(norm, { mode: c.mode, client });
     return c.mode;
   } catch {
     return "off";
@@ -290,6 +295,7 @@ export async function loadSandboxMode(
 /** Drop the cache — after settings writes or workspace switches. */
 export function invalidateSandboxCache(): void {
   cached = null;
+  rootModesCache.clear();
 }
 
 // ── Cross-window invalidation ────────────────────────────────────────────
@@ -328,7 +334,10 @@ export function __setSandboxModeForTests(
   root: string | null,
   mode: SandboxMode,
 ): void {
-  cached = root ? { root: normPath(root), mode } : null;
+  const norm = root ? normPath(root) : null;
+  cached = norm ? { root: norm, mode } : null;
+  rootModesCache.clear();
+  if (norm) rootModesCache.set(norm, { mode });
 }
 
 export const SANDBOX_LABELS: Record<SandboxMode, string> = {

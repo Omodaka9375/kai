@@ -245,19 +245,23 @@ export function ProjectRail({
                 </TooltipTrigger>
                 <TooltipContent
                   side="right"
-                  sideOffset={8}
-                  className="w-96 flex-col items-start gap-2 px-3.5 py-2.5 text-left"
+                  align="center"
+                  sideOffset={6}
+                  className="max-w-64 flex-col items-start gap-0.5 rounded-lg px-2.5 py-1.5 text-left"
                 >
-                  <div className="font-medium leading-4">{project.name}</div>
-                  <div className="w-full break-all font-mono text-[10px] leading-4 text-background/70">
-                    {project.root}
+                  <div className="flex w-full items-center gap-1.5 leading-tight">
+                    <span className="truncate text-[11px] font-medium">{project.name}</span>
+                    <span className="shrink-0 text-[10px] text-background/70">
+                      {"· "}
+                      {STATUS_LABEL[project.status]}
+                      {project.hasNews ? (
+                        <span className="text-amber-400">{" · new"}</span>
+                      ) : null}
+                      <TerminalRunningText projectId={project.id} />
+                    </span>
                   </div>
-                  <div className="w-full whitespace-nowrap border-t border-background/15 pt-1.5 text-[10px] text-background/70">
-                    {STATUS_LABEL[project.status]}
-                    {project.hasNews ? (
-                      <span className="text-amber-400">{" • something new"}</span>
-                    ) : null}
-                    <TerminalRunningText projectId={project.id} />
+                  <div className="w-full truncate font-mono text-[9.5px] leading-tight text-background/60">
+                    {project.root}
                   </div>
                 </TooltipContent>
               </Tooltip>

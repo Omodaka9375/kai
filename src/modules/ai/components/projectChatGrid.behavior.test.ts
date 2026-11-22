@@ -477,4 +477,23 @@ describe("Workspaces grid behavior (source pins)", () => {
     expect(contextTokens).toContain("messageCharsCache = new WeakMap");
     expect(grid).toContain("getSessionMetaVersionFor(sessionId)");
   });
+
+  it("shows a circle-only context indicator per chat card and a sandbox icon to the left of the project title when active", () => {
+    const headerBlock = grid.slice(
+      grid.indexOf("Slim header"),
+      grid.indexOf("GroupCardBody group={group}"),
+    );
+    const sandboxIdx = headerBlock.indexOf("<CardSandboxIcon root={root} />");
+    const titleIdx = headerBlock.indexOf("{group ? `${name} · ${group.name}` : name}");
+    const modelPillIdx = headerBlock.indexOf("<CardModelPill");
+    const contextRingIdx = headerBlock.indexOf("<CardContextRing projectId={projectId} sessionId={sessionId} />");
+    const approveIdx = headerBlock.indexOf("<SessionApprovePill");
+    expect(sandboxIdx).toBeGreaterThan(-1);
+    expect(titleIdx).toBeGreaterThan(sandboxIdx);
+    expect(modelPillIdx).toBeGreaterThan(titleIdx);
+    expect(contextRingIdx).toBeGreaterThan(modelPillIdx);
+    expect(approveIdx).toBeGreaterThan(contextRingIdx);
+    expect(grid).toContain('if (mode === "off") return null;');
+    expect(grid).toContain("<ContextTrigger asChild>");
+  });
 });

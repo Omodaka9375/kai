@@ -28,7 +28,23 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { getModel, type ModelId } from "../config";
+import {
+  Context,
+  ContextContent,
+  ContextContentBody,
+  ContextContentFooter,
+  ContextContentHeader,
+  ContextTrigger,
+} from "@/components/ai-elements/context";
+import { estimateCost, getModel, getModelContextLimit, type ModelId } from "../config";
+import { effectiveContextLimit, SYSTEM_OVERHEAD_TOKENS } from "../lib/compact";
+import { estimateContextTokens } from "../lib/media/contextTokens";
+import type { SandboxMode } from "../lib/native";
+import {
+  loadSandboxMode,
+  SANDBOX_LABELS,
+  subscribeSandboxChanged,
+} from "../lib/sandbox";
 import { AiChatView } from "./AiChat";
 import { AiErrorBoundary } from "./AiErrorBoundary";
 import {
@@ -463,6 +479,7 @@ export function ProjectChatGrid({ items }: { items: ProjectSwitcherItem[] }) {
         <GridCell
           key={cell.id}
           projectId={cell.id}
+          root={cell.root}
           name={cell.name}
           status={statuses[cell.id] ?? "idle"}
           active={cell.active}
@@ -486,6 +503,7 @@ export function ProjectChatGrid({ items }: { items: ProjectSwitcherItem[] }) {
 
 type GridCellProps = {
   projectId: string;
+  root: string;
   name: string;
   status: CellStatus;
   active: boolean;
@@ -506,7 +524,7 @@ type GridCellProps = {
 };
 
 const GridCell = memo(function GridCell(props: GridCellProps) {
-  const { projectId, name, status, active, color, dragging } = props;
+  const { projectId, root, name, status, active, color, dragging } = props;
   const switchProject = useContext(SwitchProjectContext);
   // The project-LOCAL active session (background projects keep their own).
   const sessionId = useSyncExternalStore(
@@ -606,6 +624,7 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
         )}
       >
         <div className="flex min-w-0 flex-1 items-center gap-1">
+          <CardSandboxIcon root={root} />
           {/* GROUP SURFACE IN THE TITLE (2026-11-21): a card swaps from the
               project AI chat to its GROUP transcript when the group panel owns
               the stack rail. Without the group name in the bar the two
@@ -618,6 +637,9 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
           <CardModelPill projectId={projectId} sessionId={sessionId} />
         ) : null}
         <div className="flex min-w-0 flex-1 items-center justify-end gap-1">
+          {!group && sessionId ? (
+            <CardContextRing projectId={projectId} sessionId={sessionId} />
+          ) : null}
           {sessionId ? <SessionApprovePill sessionId={sessionId} /> : null}
           {!group ? (
             <button
@@ -649,6 +671,240 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
         </button>
       )}
     </div>
+  );
+});
+
+/** Sandbox indicator icon to the left of the project title when the
+ *  project's sandbox mode is active (readOnly or workspaceOnly). Hidden
+ *  when sandbox is off. */
+const CardSandboxIcon = memo(function CardSandboxIcon({
+  root,
+}: {
+  root: string;
+}) {
+  const [mode, setMode] = useState<SandboxMode>("off");
+  useEffect(() => {
+    let alive = true;
+    void loadSandboxMode(root).then((m) => {
+      if (alive) setMode(m);
+    });
+    let unlisten: (() => void) | null = null;
+    void subscribeSandboxChanged(() => {
+      void loadSandboxMode(root).then((m) => {
+        if (alive) setMode(m);
+      });
+    }).then((u) => {
+      if (alive) unlisten = u;
+      else u();
+    });
+    return () => {
+      alive = false;
+      unlisten?.();
+    };
+  }, [root]);
+
+  if (mode === "off") return null;
+
+  return (
+    <span
+      title={SANDBOX_LABELS[mode]}
+      aria-label={SANDBOX_LABELS[mode]}
+      className="inline-flex shrink-0 items-center text-primary"
+    >
+      <HugeiconsIcon icon={Shield01Icon} size={11} strokeWidth={1.9} />
+    </span>
+  );
+});
+
+function formatCardTokens(n: number): string {
+  if (n < 1000) return String(n);
+  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
+  return `${(n / 1_000_000).toFixed(2)}M`;
+}
+
+/** Circle-only context usage indicator for a Workspaces card's session
+ *  (no percentage number label; full breakdown hover card on hover). */
+const CardContextRing = memo(function CardContextRing({
+  projectId,
+  sessionId,
+}: {
+  projectId: string;
+  sessionId: string;
+}) {
+  useSyncExternalStore(
+    subscribeSessionAgentMeta,
+    () => getSessionMetaVersionFor(sessionId),
+  );
+  useSyncExternalStore(subscribeProjectModels, getProjectModelVersion);
+  useSyncExternalStore(
+    subscribeSessionPreferences,
+    () => getSessionPreferences(sessionId).modelId ?? "",
+  );
+  usePreferencesStore((s) => s.projectModelIds);
+  usePreferencesStore((s) => s.defaultModelId);
+
+  const modelId = getProjectEffectiveModelId(projectId, sessionId);
+  const meta = getSessionAgentMeta(sessionId);
+  const tokens = meta.tokens;
+  const lastInput = meta.lastInputTokens;
+  const lastCached = meta.lastCachedTokens;
+
+  const chat = useMemo(() => getOrCreateChat(sessionId), [sessionId]);
+  const [estimated, setEstimated] = useState(() =>
+    estimateContextTokens(chat.messages),
+  );
+  useEffect(() => {
+    setEstimated(estimateContextTokens(chat.messages));
+    const t = setInterval(() => {
+      setEstimated(estimateContextTokens(chat.messages));
+    }, 1000);
+    return () => clearInterval(t);
+  }, [chat]);
+
+  const used = lastInput > 0 ? Math.max(lastInput, estimated) : estimated;
+  const reported = tokens.inputTokens + tokens.outputTokens;
+  const max = effectiveContextLimit(getModelContextLimit(modelId));
+  const usedPercent = Math.min(1, Math.max(0, max > 0 ? used / max : 0));
+  const circumference = 2 * Math.PI * 10;
+  const dashOffset = circumference * (1 - usedPercent);
+
+  const modelLabel = useMemo(() => {
+    try {
+      return getModel(modelId).label;
+    } catch {
+      return modelId;
+    }
+  }, [modelId]);
+  const cost = estimateCost(modelId, tokens);
+  const cacheRate =
+    tokens.inputTokens > 0
+      ? Math.round((tokens.cachedInputTokens / tokens.inputTokens) * 100)
+      : 0;
+
+  return (
+    <Context usedTokens={used} maxTokens={max} modelId={modelId}>
+      <ContextTrigger asChild>
+        <button
+          type="button"
+          aria-label="Model context usage"
+          className="flex shrink-0 items-center justify-center rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+        >
+          <svg
+            aria-hidden
+            height="13"
+            width="13"
+            viewBox="0 0 24 24"
+            style={{ color: "currentcolor" }}
+          >
+            <circle
+              cx={12}
+              cy={12}
+              fill="none"
+              opacity="0.25"
+              r={10}
+              stroke="currentColor"
+              strokeWidth={2.2}
+            />
+            <circle
+              cx={12}
+              cy={12}
+              fill="none"
+              opacity="0.75"
+              r={10}
+              stroke="currentColor"
+              strokeDasharray={`${circumference} ${circumference}`}
+              strokeDashoffset={dashOffset}
+              strokeLinecap="round"
+              strokeWidth={2.2}
+              style={{ transform: "rotate(-90deg)", transformOrigin: "center" }}
+            />
+          </svg>
+        </button>
+      </ContextTrigger>
+      <ContextContent className="w-64 text-[11px]">
+        <ContextContentHeader />
+        <ContextContentBody>
+          <div className="flex items-center justify-between text-muted-foreground">
+            <span>Model</span>
+            <span className="font-mono text-foreground">{modelLabel}</span>
+          </div>
+          <div className="mt-1 flex items-center justify-between text-muted-foreground">
+            <span>
+              {used === lastInput && used > 0
+                ? "Last request"
+                : "Estimated context"}
+            </span>
+            <span className="font-mono text-foreground">
+              {formatCardTokens(used)}
+            </span>
+          </div>
+          {lastCached > 0 && (
+            <div className="flex items-center justify-between text-muted-foreground">
+              <span>Of which cached</span>
+              <span className="font-mono text-foreground">
+                {formatCardTokens(lastCached)}
+              </span>
+            </div>
+          )}
+          {reported > 0 && (
+            <>
+              <div className="mt-1.5 flex items-center justify-between text-muted-foreground">
+                <span>Session input</span>
+                <span className="font-mono text-foreground">
+                  {formatCardTokens(tokens.inputTokens)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-muted-foreground">
+                <span>Session output</span>
+                <span className="font-mono text-foreground">
+                  {formatCardTokens(tokens.outputTokens)}
+                </span>
+              </div>
+              {tokens.cachedInputTokens > 0 && (
+                <div className="flex items-center justify-between text-muted-foreground">
+                  <span>Cache hit</span>
+                  <span className="font-mono text-foreground">{cacheRate}%</span>
+                </div>
+              )}
+              {cost != null && (
+                <div className="flex items-center justify-between text-muted-foreground">
+                  <span>Session cost</span>
+                  <span className="font-mono text-foreground">
+                    ${cost.toFixed(cost < 0.01 ? 4 : cost < 1 ? 3 : 2)}
+                  </span>
+                </div>
+              )}
+            </>
+          )}
+          <div className="flex items-center justify-between text-muted-foreground">
+            <span>Window</span>
+            <span className="font-mono text-foreground">
+              {formatCardTokens(max)}
+            </span>
+          </div>
+          <div className="flex items-center justify-between text-muted-foreground">
+            <span>Model window</span>
+            <span className="font-mono text-foreground">
+              {formatCardTokens(getModelContextLimit(modelId))}
+            </span>
+          </div>
+          <div className="flex items-center justify-between text-muted-foreground">
+            <span>Reserved (system+tools)</span>
+            <span className="font-mono text-foreground">
+              {formatCardTokens(
+                Math.min(SYSTEM_OVERHEAD_TOKENS, getModelContextLimit(modelId)),
+              )}
+            </span>
+          </div>
+        </ContextContentBody>
+        <ContextContentFooter>
+          <span className="text-[10px] italic text-muted-foreground">
+            Ring shows pressure on the conversation budget (model window minus
+            system prompt + tool schemas); compaction starts at 40%.
+          </span>
+        </ContextContentFooter>
+      </ContextContent>
+    </Context>
   );
 });
 
