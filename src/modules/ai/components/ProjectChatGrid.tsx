@@ -16,6 +16,7 @@ import NextIcon from "@hugeicons/core-free-icons/NextIcon";
 import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 import Add01Icon from "@hugeicons/core-free-icons/Add01Icon";
 import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
+import Shield01Icon from "@hugeicons/core-free-icons/Shield01Icon";
 import StarIcon from "@hugeicons/core-free-icons/StarIcon";
 import Tick01Icon from "@hugeicons/core-free-icons/Tick01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -612,12 +613,12 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
           <span className="truncate text-[11px] font-medium text-foreground">
             {group ? `${name} · ${group.name}` : name}
           </span>
-          {sessionId ? <SessionApprovePill sessionId={sessionId} /> : null}
         </div>
         {!group ? (
           <CardModelPill projectId={projectId} sessionId={sessionId} />
         ) : null}
         <div className="flex min-w-0 flex-1 items-center justify-end gap-1">
+          {sessionId ? <SessionApprovePill sessionId={sessionId} /> : null}
           {!group ? (
             <button
               type="button"
@@ -671,23 +672,18 @@ const SessionApprovePill = memo(function SessionApprovePill({
     <button
       type="button"
       onClick={onClick}
+      aria-label={mode === "off" ? "Ask mode (click to switch to Allow)" : "Allow mode (click to switch to Ask)"}
       title={
         mode === "off"
-          ? "Ask before every approval-required tool call"
-          : "Allow every tool call without asking (elevation, screen capture, and signed commits still ask)"
+          ? "Ask mode: ask before every approval-required tool call (click to switch to Allow)"
+          : "Allow mode: allow tool calls without asking (click to switch to Ask)"
       }
       className={cn(
-        "flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-medium transition-colors hover:bg-accent/60",
+        "flex shrink-0 items-center justify-center rounded p-0.5 transition-colors hover:bg-accent/60",
         mode === "off" ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400",
       )}
     >
-      <span
-        className={cn(
-          "size-1.5 shrink-0 rounded-full",
-          mode === "off" ? "bg-amber-500" : "bg-emerald-500",
-        )}
-      />
-      {mode === "off" ? "Ask" : "Allow"}
+      <HugeiconsIcon icon={Shield01Icon} size={12} strokeWidth={2} />
     </button>
   );
 });

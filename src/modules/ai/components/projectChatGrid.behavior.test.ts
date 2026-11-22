@@ -153,10 +153,9 @@ describe("Workspaces grid behavior (source pins)", () => {
       "utf8",
     );
     expect(store).toContain("export function setSessionAutoApprove(");
-    // No button-in-button: the pill and new-session + button render in the
-    // header DIV. Ask/Allow sits on the left next to the project title;
-    // the + button is right-aligned to open a new session in place without
-    // entering the project.
+    // No button-in-button: the icon toggle and new-session + button render
+    // in the header DIV. Ask/Allow is a compact single icon immediately to
+    // the left of the right-aligned + button.
     const headerBlock = grid.slice(
       grid.indexOf("Slim header"),
       grid.indexOf("GroupCardBody group={group}"),
@@ -166,13 +165,14 @@ describe("Workspaces grid behavior (source pins)", () => {
     expect(headerBlock).toContain("newSessionForProject(projectId)");
     expect(headerBlock).toContain('title="New session"');
     const titleIdx = headerBlock.indexOf("{group ? `${name} · ${group.name}` : name}");
-    const pillIdx = headerBlock.indexOf("<SessionApprovePill");
     const modelPillIdx = headerBlock.indexOf("<CardModelPill");
+    const pillIdx = headerBlock.indexOf("<SessionApprovePill");
     const newBtnIdx = headerBlock.indexOf("newSessionForProject(projectId)");
     expect(titleIdx).toBeGreaterThan(-1);
-    expect(pillIdx).toBeGreaterThan(titleIdx);
-    expect(modelPillIdx).toBeGreaterThan(pillIdx);
-    expect(newBtnIdx).toBeGreaterThan(modelPillIdx);
+    expect(modelPillIdx).toBeGreaterThan(titleIdx);
+    expect(pillIdx).toBeGreaterThan(modelPillIdx);
+    expect(newBtnIdx).toBeGreaterThan(pillIdx);
+    expect(grid).toContain("icon={Shield01Icon}");
   });
 
   it("each card header centers a compact model pill with a favorites dropdown", () => {
