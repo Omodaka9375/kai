@@ -137,6 +137,32 @@ describe("assistant capability summary (prompt honesty)", () => {
   });
 });
 
+describe("stale endpoint override self-heal (2026-11-22)", () => {
+  // Regression: kai-assistant.json carried customModelId "Kai" from an old
+  // local server. The Settings panel deliberately has no rows for the
+  // override (pin above), so the stale value silently won over the global
+  // endpoint and EVERY Telegram turn died with "The model `Kai` does not
+  // exist." before any tool ran. The turn must retry once on the global
+  // endpoint and persist the heal by clearing the dead override.
+  it("the generate step retries the global endpoint when the own override fails pre-tool", async () => {
+    const idx = await (await import("node:fs")).readFileSync(
+      new URL("./index.ts", import.meta.url),
+      "utf8",
+    );
+    // Override detection exists and only applies to the custom endpoint.
+    expect(idx).toContain("const ownOverrideModel = prefs.customModelId?.trim() || null;");
+    expect(idx).toMatch(/const ownOverride =\s*\n?\s*m\.id === "openai-compatible-custom"/);
+    // Retry is gated on "nothing has executed yet" — a mid-run failure must
+    // never replay tools (double git commit / re-charged generation).
+    expect(idx).toMatch(/if \(stepsFinished > 0 \|\| !ownOverride\) throw primary;/);
+    expect(idx).toContain("retrying on the global endpoint");
+    // The heal persists: the dead override is cleared from prefs, but only
+    // when the stored value is still the one that failed.
+    expect(idx).toContain("fresh.customModelId?.trim() === ownOverrideModel");
+    expect(idx).toMatch(/\.\.\.fresh,\s*\n?\s*customModelId: null/);
+  });
+});
+
 describe("assistant tool catalog", () => {
   // The exclusion + allowlist logic moved to toolCatalog.ts (pure, so it is
   // imported directly rather than grep-asserted against index.ts).

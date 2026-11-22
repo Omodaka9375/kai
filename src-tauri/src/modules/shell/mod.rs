@@ -557,6 +557,7 @@ pub async fn shell_bg_spawn(
     cwd: Option<String>,
     workspace: Option<WorkspaceEnv>,
     owner: Option<String>,
+    project: Option<String>,
     label: Option<String>,
     sandbox_root: Option<String>,
     env: Option<HashMap<String, String>>,
@@ -584,6 +585,7 @@ pub async fn shell_bg_spawn(
         cwd,
         WorkspaceEnv::from_option(workspace),
         owner,
+        project,
         label,
         sandbox_root.filter(|s| !s.is_empty()),
         resolved_env,
@@ -604,16 +606,32 @@ pub async fn shell_bg_spawn(
     Ok(id)
 }
 
+/// True when `proc` may be touched by a caller scoped to `project`. A proc
+/// with no project (UI surfaces) is public; a project-scoped proc is private
+/// to its own project (2026-11-22 report: an agent's bash_list saw every
+/// project's dev servers and tried to reuse/kill the wrong one).
+fn visible_to(proc_project: &Option<String>, caller: &Option<String>) -> bool {
+    match (proc_project, caller) {
+        (None, _) => true,
+        (Some(_), None) => false,
+        (Some(p), Some(c)) => p == c,
+    }
+}
+
 #[tauri::command]
 pub fn shell_bg_logs(
     state: tauri::State<ShellState>,
     handle: u32,
     since_offset: Option<u64>,
+    project: Option<String>,
 ) -> Result<BackgroundLogResponse, String> {
     let proc = rwlock_read(&state.bg)
         .get(&handle)
         .cloned()
         .ok_or_else(|| "no background handle".to_string())?;
+    if !visible_to(&proc.project, &project) {
+        return Err("background handle belongs to another project".to_string());
+    }
     let mut resp = proc.read_logs(since_offset.unwrap_or(0));
     mask_bg_logs(&proc, &mut resp);
     Ok(resp)
@@ -637,8 +655,15 @@ pub(crate) fn mask_bg_logs(
 }
 
 #[tauri::command]
-pub fn shell_bg_kill(state: tauri::State<ShellState>, handle: u32) -> Result<(), String> {
+pub fn shell_bg_kill(
+    state: tauri::State<ShellState>,
+    handle: u32,
+    project: Option<String>,
+) -> Result<(), String> {
     if let Some(proc) = rwlock_read(&state.bg).get(&handle).cloned() {
+        if !visible_to(&proc.project, &project) {
+            return Err("background handle belongs to another project".to_string());
+        }
         proc.kill();
     }
     Ok(())
@@ -661,12 +686,16 @@ pub fn shell_bg_reap(state: tauri::State<ShellState>, owner: String) -> Result<u
 }
 
 #[tauri::command]
-pub fn shell_bg_list(state: tauri::State<ShellState>) -> Result<Vec<BackgroundProcInfo>, String> {
+pub fn shell_bg_list(
+    state: tauri::State<ShellState>,
+    project: Option<String>,
+) -> Result<Vec<BackgroundProcInfo>, String> {
     let map = rwlock_read(&state.bg);
-    let mut out = Vec::with_capacity(map.len());
-    for (id, p) in map.iter() {
-        out.push(p.info(*id));
-    }
+    let mut out: Vec<BackgroundProcInfo> = map
+        .iter()
+        .filter(|(_, p)| visible_to(&p.project, &project))
+        .map(|(id, p)| p.info(*id))
+        .collect();
     out.sort_by_key(|i| i.handle);
     Ok(out)
 }

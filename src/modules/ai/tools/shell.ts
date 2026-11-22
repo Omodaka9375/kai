@@ -525,6 +525,7 @@ export function buildShellTools(ctx: ToolContext) {
             label,
             await sandboxExecRoot(await sandboxOverrideForContext(ctx)),
             env,
+            ctx.projectId,
           );
           return { handle, command, cwd: effectiveCwd, ok: true };
         } catch (e) {
@@ -543,7 +544,7 @@ export function buildShellTools(ctx: ToolContext) {
       }),
       execute: async ({ handle, since_offset }) => {
         try {
-          const r = await native.shellBgLogs(handle, since_offset);
+          const r = await native.shellBgLogs(handle, since_offset, ctx.projectId);
           return {
             ...r,
             bytes: stripAnsi(r.bytes),
@@ -557,11 +558,11 @@ export function buildShellTools(ctx: ToolContext) {
     bash_list: tool({
       needsApproval: false,
       description:
-        "List all background processes spawned by `bash_background` in this app — running and exited. **Always call this BEFORE spawning a new long-running process** (especially dev servers like `pnpm dev`, `next dev`, `vite`) to avoid duplicates. If a matching process is already running, reuse it (call `open_preview` again instead of respawning). Auto-executes.",
+        "List background processes spawned by `bash_background` IN THIS PROJECT — running and exited. Other projects' processes are deliberately hidden so you never confuse them with yours. **Always call this BEFORE spawning a new long-running process** (especially dev servers like `pnpm dev`, `next dev`, `vite`) to avoid duplicates. If a matching process is already running, reuse it (call `open_preview` again instead of respawning). Auto-executes.",
       inputSchema: z.object({}),
       execute: async () => {
         try {
-          const list = await native.shellBgList();
+          const list = await native.shellBgList(ctx.projectId);
           return { processes: list };
         } catch (e) {
           return { error: String(e) };
@@ -576,7 +577,7 @@ export function buildShellTools(ctx: ToolContext) {
       inputSchema: z.object({ handle: z.number() }),
       execute: async ({ handle }) => {
         try {
-          await native.shellBgKill(handle);
+          await native.shellBgKill(handle, ctx.projectId);
           return { handle, ok: true };
         } catch (e) {
           return { error: String(e) };

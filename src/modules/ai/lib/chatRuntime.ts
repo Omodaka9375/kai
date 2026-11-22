@@ -180,6 +180,8 @@ export function makeChatSync(
   // tokens at ~4 chars/token; `sawUsageOutputTokens` switches off this fallback
   // once the provider reports real usage so API models keep their exact count.
   const chunkStreamStartedAtRef = { current: null as number | null };
+  /** Last wall-clock ms we patched outputTps (2Hz cap, see onTextDelta). */
+  const lastTpsPatchAtRef = { current: 0 };
   const chunkCharsRef = { current: 0 };
   const sawUsageOutputTokensRef = { current: false };
   // The "context compacted" notice fires on every agent turn once stale reads
@@ -414,7 +416,15 @@ export function makeChatSync(
         estTokens > 0 && elapsedMs > 0
           ? Math.round(estTokens / (elapsedMs / 1000))
           : 0;
-      deps.patchAgentMeta({ outputTps: tps });
+      // 2Hz CAP (2026-11-22 typing-lag report): a patch per chunk fans out as
+      // a sync-lane notification to EVERY session-meta subscriber — in
+      // Workspaces that is one CellBody per open project, ~20/s each, while
+      // the user is typing. The tok/s readout is decorative; two updates a
+      // second is indistinguishable and removes the cross-project churn.
+      if (now - lastTpsPatchAtRef.current >= 500) {
+        lastTpsPatchAtRef.current = now;
+        deps.patchAgentMeta({ outputTps: tps });
+      }
     },
     onCompact: (info: { droppedCount: number }) => {
       if (!isActive()) return;

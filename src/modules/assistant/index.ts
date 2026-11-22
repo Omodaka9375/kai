@@ -538,6 +538,22 @@ export async function runAssistantTurn(
   const model = await buildLanguageModel(m.provider, keys, ep.resolvedModelId, {
     openaiCompatibleBaseURL: ep.openaiCompatibleBaseURL,
   });
+  // OVERRIDE SELF-HEAL (2026-11-22 "The model `Kai` does not exist."): the
+  // assistant's customModelId/customBaseUrl isolation override lives ONLY in
+  // kai-assistant.json — the Settings panel deliberately has no rows for it
+  // (source pin) — so when the local server's model name changes the stored
+  // override goes stale, every Telegram turn dies on the first model call,
+  // and the owner has no UI to clear it. Detect an own override up front; the
+  // generate step below retries ONCE on the global Settings → Models endpoint
+  // (the same one the desktop chat uses) and persists the heal.
+  const ownOverrideModel = prefs.customModelId?.trim() || null;
+  const ownOverride = m.id === "openai-compatible-custom" && !!ownOverrideModel;
+  const buildGlobalModel = () => {
+    const g = usePreferencesStore.getState();
+    return buildLanguageModel(m.provider, keys, resolveAssistantEndpoint(m.id, {}, g).resolvedModelId, {
+      openaiCompatibleBaseURL: g.openaiCompatibleBaseURL,
+    });
+  };
 
   // Build the full toolset, filter to the assistant surface, add MCP.
   const all = buildTools(toolContext) as Record<string, unknown>;
@@ -773,18 +789,52 @@ export async function runAssistantTurn(
   // generation, …) AND the image clearly was not the blocker (the turn got
   // several steps in WITH it). So retry ONLY when nothing has run yet.
   let stepsFinished = 0;
+  const attempt = async (activeModel: Parameters<typeof generateText>[0]["model"]) => {
+    try {
+      return await runAssistantGenerate(activeModel, system, modelMessages, guardedTools, onNotice, () => {
+        stepsFinished++;
+      });
+    } catch (e) {
+      if (stepsFinished > 0 || !hasInlineImageParts(modelMessages)) throw e;
+      console.warn(
+        "[kai:assistant] image request rejected — retrying with image text-extracted:",
+        e,
+      );
+      const textOnly = await swapImagePartsToText(modelMessages);
+      return runAssistantGenerate(activeModel, system, textOnly, guardedTools, onNotice);
+    }
+  };
   try {
-    result = await runAssistantGenerate(model, system, modelMessages, guardedTools, onNotice, () => {
-      stepsFinished++;
-    });
-  } catch (e) {
-    if (stepsFinished > 0 || !hasInlineImageParts(modelMessages)) throw e;
+    result = await attempt(model);
+  } catch (primary) {
+    // Stale-override self-heal (see ownOverride above): retry once on the
+    // global endpoint, but ONLY when nothing has executed yet — a mid-run
+    // failure means tools already ran and replaying would double-execute.
+    if (stepsFinished > 0 || !ownOverride) throw primary;
     console.warn(
-      "[kai:assistant] image request rejected — retrying with image text-extracted:",
-      e,
+      "[kai:assistant] own endpoint override failed before any tool ran — retrying on the global endpoint:",
+      primary,
     );
-    const textOnly = await swapImagePartsToText(modelMessages);
-    result = await runAssistantGenerate(model, system, textOnly, guardedTools, onNotice);
+    try {
+      result = await attempt(await buildGlobalModel());
+    } catch (secondary) {
+      const msg = secondary instanceof Error ? secondary.message : String(secondary);
+      throw new Error(
+        `${msg} (assistant endpoint override "${ownOverrideModel}" also failed on the global endpoint)`,
+      );
+    }
+    // The override is dead — the endpoint does not serve it — so persist the
+    // heal and let future turns go straight to the global endpoint. Only
+    // clear it when the stored value is still the one that failed (a
+    // concurrent prefs write may have already replaced it).
+    try {
+      const fresh = await loadAssistantPrefs();
+      if (fresh.customModelId?.trim() === ownOverrideModel) {
+        await saveAssistantPrefs({ ...fresh, customModelId: null });
+      }
+    } catch {
+      // A failed prefs write must never mask the successful reply.
+    }
   }
 
   const reply = result.text?.trim() || "…";

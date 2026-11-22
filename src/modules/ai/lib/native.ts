@@ -454,27 +454,30 @@ export function createNative(getEnv: () => WorkspaceEnv) {
     label?: string,
     sandboxRoot?: string | null,
     envVars?: Record<string, string> | null,
+    project?: string | null,
   ) =>
     invoke<number>("shell_bg_spawn", {
       command,
       cwd: cwd ?? null,
       workspace: env(),
       owner: owner ?? null,
+      project: project ?? null,
       label: label ?? null,
       sandboxRoot: sandboxRoot ?? null,
       env: envVars ?? null,
     }),
-  shellBgLogs: (handle: number, sinceOffset?: number) =>
+  shellBgLogs: (handle: number, sinceOffset?: number, project?: string | null) =>
     invoke<{
       bytes: string;
       next_offset: number;
       dropped: number;
       exited: boolean;
       exit_code: number | null;
-    }>("shell_bg_logs", { handle, sinceOffset: sinceOffset ?? null }),
-  shellBgKill: (handle: number) => invoke<void>("shell_bg_kill", { handle }),
+    }>("shell_bg_logs", { handle, sinceOffset: sinceOffset ?? null, project: project ?? null }),
+  shellBgKill: (handle: number, project?: string | null) =>
+    invoke<void>("shell_bg_kill", { handle, project: project ?? null }),
   shellBgReap: (owner: string) => invoke<number>("shell_bg_reap", { owner }),
-  shellBgList: () =>
+  shellBgList: (project?: string | null) =>
     invoke<
       {
         handle: number;
@@ -484,7 +487,7 @@ export function createNative(getEnv: () => WorkspaceEnv) {
         exited: boolean;
         exit_code: number | null;
       }[]
-    >("shell_bg_list"),
+    >("shell_bg_list", { project: project ?? null }),
   gitResolveRepo: (cwd: string) =>
     invoke<GitRepoInfo | null>("git_resolve_repo", {
       cwd,

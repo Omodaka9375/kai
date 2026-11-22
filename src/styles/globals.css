@@ -150,7 +150,15 @@ html:not(.kai-keyboard) :is(a, button, [role="button"], [role="separator"], [tab
     }
   html {
     @apply font-sans;
-    }
+  }
+  /* Placeholders are decoration, not content (2026-11-22 report): dragging
+     across an empty AI input / Workspaces card input selected the placeholder
+     text itself. Real typed text stays selectable. */
+  input::placeholder,
+  textarea::placeholder {
+    user-select: none;
+    -webkit-user-select: none;
+  }
 }
 
 :root {

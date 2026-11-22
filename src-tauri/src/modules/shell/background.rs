@@ -26,6 +26,10 @@ pub struct BackgroundProc {
     /// Owning chat session ID — when the session closes, all owned processes
     /// are reaped so parallel agents don't cross-contaminate.
     pub owner: Option<String>,
+    /// Owning project ID (2026-11-22): a project-scoped caller (agent tools)
+    /// may only list/read/kill processes IT spawned. None = unscoped (UI
+    /// surfaces like the explorer preview) and is visible to every caller.
+    pub project: Option<String>,
     /// Human-readable label for listing / status display.
     pub label: Option<String>,
     /// VAULT ENV (2026-11-18): the RESOLVED values this process was spawned
@@ -69,6 +73,7 @@ pub struct BackgroundProcInfo {
     pub exited: bool,
     pub exit_code: Option<i32>,
     pub owner: Option<String>,
+    pub project: Option<String>,
     pub label: Option<String>,
 }
 
@@ -140,6 +145,7 @@ impl BackgroundProc {
             exited,
             exit_code,
             owner: self.owner.clone(),
+            project: self.project.clone(),
             label: self.label.clone(),
         }
     }
@@ -156,6 +162,7 @@ pub fn spawn(
     cwd: Option<String>,
     workspace: WorkspaceEnv,
     owner: Option<String>,
+    project: Option<String>,
     label: Option<String>,
     sandbox_root: Option<String>,
     vault_env: Option<std::collections::HashMap<String, String>>,
@@ -269,6 +276,7 @@ pub fn spawn(
         exit_code: AtomicI32::new(0),
         exit_unknown: AtomicBool::new(false),
         owner,
+        project,
         label,
         vault_env: std::sync::RwLock::new(vault_applied),
         #[cfg(windows)]

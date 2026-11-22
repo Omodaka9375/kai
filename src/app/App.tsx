@@ -562,6 +562,7 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
   const hasComposer = hasAnyKey(apiKeys) || hasLocalModel;
 
   const [keysLoaded, setKeysLoaded] = useState(false);
+  const keyRetryRef = useRef(0);
   useEffect(() => {
     let alive = true;
     const reload = () => {
@@ -569,10 +570,26 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
         if (!alive) return;
         setApiKeys(keys);
         setKeysLoaded(true);
+        // POWER-CUT KEYRING RECOVERY (2026-11-22 report): a hard power loss can
+        // leave the credential store briefly unavailable at boot — every read
+        // then returns null, model calls complain "No API key configured" for
+        // EVERY provider, and only the settings window (reading later) shows
+        // the Configured pills. A bounded background retry re-reads until the
+        // store answers or the cap is hit; a genuine all-null (no keys saved)
+        // just burns three cheap IPC calls. onKeysChanged re-arms the counter.
+        if (!hasAnyKey(keys) && keyRetryRef.current < 3) {
+          keyRetryRef.current += 1;
+          setTimeout(reload, 2000 * keyRetryRef.current);
+        } else {
+          keyRetryRef.current = 0;
+        }
       });
     };
     reload();
-    const unlistenP = onKeysChanged(reload);
+    const unlistenP = onKeysChanged(() => {
+      keyRetryRef.current = 0;
+      reload();
+    });
     return () => {
       alive = false;
       void unlistenP.then((fn) => fn());
