@@ -305,12 +305,17 @@ describe("Workspaces grid behavior (source pins)", () => {
     expect(store).toContain('[KEY_GRID_ORDER]: "gridOrder"');
   });
 
-  it("Workspaces mode hides the tab bar + launcher entirely", () => {
+  it("Workspaces mode hides the tab bar and replaces it with a left-aligned + project launcher", () => {
     // 2026-11-21 ask: Workspaces is a multi-CHAT surface, not file work -
-    // the whole tab strip (tabs AND the + launcher) is meaningless chrome
-    // in grid mode, so the Header conditionally renders TabBar away. The
-    // drag-region spacer fills the freed width.
+    // the file tab strip is hidden in grid mode, and a left-aligned +
+    // button (styled like the new-tab + button) opens New Project / Open
+    // Project while the rail is collapsed.
     expect(header).toContain("{!chatGridOpen && (\n          <TabBar");
+    expect(header).toContain("{chatGridOpen && projectsMenu && (");
+    expect(header).toContain("projectsMenu.newProject()");
+    expect(header).toContain("projectsMenu.addProject()");
+    expect(header).toContain('<span className="flex-1">New Project</span>');
+    expect(header).toContain('<span className="flex-1">Open Project</span>');
     // The earlier per-button hideNew prop is gone - hiding must happen at
     // the TabBar mount, not per control inside it.
     const tabBar = readFileSync(

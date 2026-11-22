@@ -1,4 +1,4 @@
-import Shield01Icon from "@hugeicons/core-free-icons/Shield01Icon";
+import ContainerIcon from "@hugeicons/core-free-icons/ContainerIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useState } from "react";
 import {
@@ -117,7 +117,7 @@ export function SandboxBadge() {
           }
         >
           <HugeiconsIcon
-            icon={Shield01Icon}
+            icon={ContainerIcon}
             // 11px (2026-11-18): matches the persona/expand/minimize icons in
             // the same mini-window header — 10px read visibly smaller/off.
             size={11}

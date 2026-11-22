@@ -19,10 +19,11 @@ describe("permission color language (source pins)", () => {
   );
   const strip = readFileSync(new URL("./TodoStrip.tsx", import.meta.url), "utf8");
 
-  it("Ask dot is amber, Allow dot stays emerald", () => {
-    expect(toggle).toContain('off: "bg-amber-500"');
-    expect(toggle).toContain('all: "bg-emerald-500"');
-    // The old gray dot is gone.
+  it("Ask icon is amber, Allow icon stays emerald (compact Shield01Icon toggle)", () => {
+    expect(toggle).toContain('off: "text-amber-600 dark:text-amber-400"');
+    expect(toggle).toContain('all: "text-emerald-600 dark:text-emerald-400"');
+    expect(toggle).toContain("icon={Shield01Icon}");
+    // The old gray dot and text label are gone.
     expect(toggle).not.toContain("bg-muted-foreground/50");
   });
 

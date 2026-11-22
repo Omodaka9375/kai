@@ -8,6 +8,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { WindowControls } from "@/components/WindowControls";
+import { useProjectsMenu } from "@/app/projectsMenu";
 import { cn } from "@/lib/utils";
 import { IS_MAC, KEY_SEP, USE_CUSTOM_WINDOW_CONTROLS } from "@/lib/platform";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
@@ -22,17 +23,20 @@ import type { Tab } from "@/modules/tabs";
 import { TabBar } from "@/modules/tabs";
 import AiScanIcon from "@hugeicons/core-free-icons/AiScanIcon";
 import FloppyDiskIcon from "@hugeicons/core-free-icons/FloppyDiskIcon";
+import FolderAddIcon from "@hugeicons/core-free-icons/FolderAddIcon";
 import GlobeIcon from "@hugeicons/core-free-icons/GlobeIcon";
 import InformationCircleIcon from "@hugeicons/core-free-icons/InformationCircleIcon";
 import KeyboardIcon from "@hugeicons/core-free-icons/KeyboardIcon";
 import LockKeyIcon from "@hugeicons/core-free-icons/LockKeyIcon";
 import Mic01Icon from "@hugeicons/core-free-icons/Mic01Icon";
+import PlusSignIcon from "@hugeicons/core-free-icons/PlusSignIcon";
 import PuzzleIcon from "@hugeicons/core-free-icons/PuzzleIcon";
 import Settings01Icon from "@hugeicons/core-free-icons/Settings01Icon";
 import Shield01Icon from "@hugeicons/core-free-icons/Shield01Icon";
 import SidebarLeftIcon from "@hugeicons/core-free-icons/SidebarLeftIcon";
 import DashboardSquare01Icon from "@hugeicons/core-free-icons/DashboardSquare01Icon";
 import SparklesIcon from "@hugeicons/core-free-icons/SparklesIcon";
+import Upload04Icon from "@hugeicons/core-free-icons/Upload04Icon";
 import UserGroupIcon from "@hugeicons/core-free-icons/UserGroupIcon";
 import UserMultiple02Icon from "@hugeicons/core-free-icons/UserMultiple02Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -216,6 +220,7 @@ export function Header({
   const [compact, setCompact] = useState(false);
   const userShortcuts = usePreferencesStore((s) => s.shortcuts);
   const radioEnabled = usePreferencesStore((s) => s.radioEnabled);
+  const projectsMenu = useProjectsMenu();
 
   const tokensFor = (id: ShortcutId): string => {
     const s = SHORTCUTS.find((s) => s.id === id);
@@ -303,8 +308,9 @@ export function Header({
       <div className="flex min-w-0 flex-1 items-center gap-2" data-tauri-drag-region>
         {/* FILE TABS HIDDEN IN WORKSPACES (2026-11-21): Workspaces is a
             multi-CHAT surface, not file work - the tab strip (and its +
-            launcher) is meaningless chrome there and the drag-region
-            spacer below fills the freed width. */}
+            launcher) is meaningless chrome there. In its place, render a
+            left-aligned + launcher (styled like the new-tab + button) for
+            New Project / Open Project since the project rail is collapsed. */}
         {!chatGridOpen && (
           <TabBar
             tabs={tabs}
@@ -323,6 +329,39 @@ export function Header({
             onSplitPane={onSplit}
             compact={compact}
           />
+        )}
+        {chatGridOpen && projectsMenu && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Add project"
+                title="Add project"
+                className="size-7 shrink-0 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+              >
+                <HugeiconsIcon icon={PlusSignIcon} size={14} strokeWidth={2} />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="min-w-44">
+              <DropdownMenuItem onSelect={() => void projectsMenu.newProject()}>
+                <HugeiconsIcon
+                  icon={FolderAddIcon}
+                  size={14}
+                  strokeWidth={1.75}
+                />
+                <span className="flex-1">New Project</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => void projectsMenu.addProject()}>
+                <HugeiconsIcon
+                  icon={Upload04Icon}
+                  size={14}
+                  strokeWidth={1.75}
+                />
+                <span className="flex-1">Open Project</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
         <div data-tauri-drag-region className="h-full min-w-2 flex-1" />
       </div>

@@ -16,6 +16,7 @@ import NextIcon from "@hugeicons/core-free-icons/NextIcon";
 import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 import Add01Icon from "@hugeicons/core-free-icons/Add01Icon";
 import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
+import ContainerIcon from "@hugeicons/core-free-icons/ContainerIcon";
 import Shield01Icon from "@hugeicons/core-free-icons/Shield01Icon";
 import StarIcon from "@hugeicons/core-free-icons/StarIcon";
 import Tick01Icon from "@hugeicons/core-free-icons/Tick01Icon";
@@ -711,7 +712,7 @@ const CardSandboxIcon = memo(function CardSandboxIcon({
       aria-label={SANDBOX_LABELS[mode]}
       className="inline-flex shrink-0 items-center text-primary"
     >
-      <HugeiconsIcon icon={Shield01Icon} size={11} strokeWidth={1.9} />
+      <HugeiconsIcon icon={ContainerIcon} size={11} strokeWidth={1.9} />
     </span>
   );
 });
