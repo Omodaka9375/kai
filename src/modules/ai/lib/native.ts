@@ -466,14 +466,26 @@ export function createNative(getEnv: () => WorkspaceEnv) {
       sandboxRoot: sandboxRoot ?? null,
       env: envVars ?? null,
     }),
-  shellBgLogs: (handle: number, sinceOffset?: number, project?: string | null) =>
+  shellBgLogs: (
+    handle: number,
+    sinceOffset?: number,
+    project?: string | null,
+    waitSecs?: number,
+  ) =>
     invoke<{
       bytes: string;
       next_offset: number;
       dropped: number;
       exited: boolean;
       exit_code: number | null;
-    }>("shell_bg_logs", { handle, sinceOffset: sinceOffset ?? null, project: project ?? null }),
+    }>("shell_bg_logs", {
+      handle,
+      sinceOffset: sinceOffset ?? null,
+      waitSecs: waitSecs ?? null,
+      project: project ?? null,
+    }),
+  shellSleep: (seconds: number) =>
+    invoke<number>("shell_sleep", { seconds }),
   shellBgKill: (handle: number, project?: string | null) =>
     invoke<void>("shell_bg_kill", { handle, project: project ?? null }),
   shellBgReap: (owner: string) => invoke<number>("shell_bg_reap", { owner }),

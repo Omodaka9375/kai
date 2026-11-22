@@ -292,6 +292,23 @@ const REGISTRY: Record<string, ToolPresentation> = {
     fence: false,
     remoteSurface: false,
   },
+  sleep: {
+    label: "Sleep",
+    status: (a) => {
+      const s = typeof a.seconds === "number" ? `${a.seconds}s` : "";
+      const r = str(a, "reason");
+      return `Waiting ${s}${r ? ` — ${ellipsize(r, 40)}` : ""}`.trim();
+    },
+    summary: (a) => {
+      const s = typeof a.seconds === "number" ? `${a.seconds}s` : null;
+      const r = str(a, "reason");
+      if (s && r) return `${s} — ${ellipsize(r, 50)}`;
+      return s ?? r;
+    },
+    effect: "NONE",
+    fence: false,
+    remoteSurface: false,
+  },
   shell_session_run: { effect: "COMMITTED", fence: true, remoteSurface: false },
   get_terminal_output: { effect: "NONE", fence: true, remoteSurface: false },
 

@@ -1,9 +1,9 @@
 use std::io::Read;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
-use std::time::SystemTime;
+use std::time::{Duration, Instant, SystemTime};
 
 use serde::Serialize;
 use shared_child::SharedChild;
@@ -13,6 +13,7 @@ use crate::modules::lock::mutex_lock;
 use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 
 const RING_CAP: usize = 4 * 1024 * 1024;
+const MAX_WAIT_SECS: u64 = 60;
 
 pub struct BackgroundProc {
     pub command: String,
@@ -20,6 +21,10 @@ pub struct BackgroundProc {
     pub started_at_ms: u64,
     pub child: Arc<SharedChild>,
     pub buffer: Mutex<BoundedRingBuffer>,
+    /// Notified whenever new bytes are pushed to `buffer` OR `exited` flips true,
+    /// so `read_logs(..., wait_secs)` wakes immediately on new output/exit
+    /// instead of making the agent spin in 1s polling loops.
+    pub notify: Condvar,
     pub exited: AtomicBool,
     pub exit_code: AtomicI32,
     pub exit_unknown: AtomicBool,
@@ -78,8 +83,32 @@ pub struct BackgroundProcInfo {
 }
 
 impl BackgroundProc {
-    pub fn read_logs(&self, since: u64) -> BackgroundLogResponse {
-        let (bytes, next_offset, dropped) = mutex_lock(&self.buffer).read_from(since);
+    pub fn read_logs(&self, since: u64, wait_secs: Option<u64>) -> BackgroundLogResponse {
+        let mut guard = mutex_lock(&self.buffer);
+        let (mut bytes, mut next_offset, mut dropped) = guard.read_from(since);
+        if bytes.is_empty() && !self.exited.load(Ordering::Acquire) {
+            if let Some(secs) = wait_secs.filter(|&s| s > 0) {
+                let deadline = Instant::now() + Duration::from_secs(secs.min(MAX_WAIT_SECS));
+                loop {
+                    let now = Instant::now();
+                    if now >= deadline {
+                        break;
+                    }
+                    guard = match self.notify.wait_timeout(guard, deadline - now) {
+                        Ok((g, _)) => g,
+                        Err(poisoned) => poisoned.into_inner().0,
+                    };
+                    let (b, n, d) = guard.read_from(since);
+                    bytes = b;
+                    next_offset = n;
+                    dropped = d;
+                    if !bytes.is_empty() || self.exited.load(Ordering::Acquire) {
+                        break;
+                    }
+                }
+            }
+        }
+        drop(guard);
         let exited = self.exited.load(Ordering::Acquire);
         let exit_code = if exited && !self.exit_unknown.load(Ordering::Acquire) {
             Some(self.exit_code.load(Ordering::Acquire))
@@ -273,6 +302,7 @@ pub fn spawn(
         started_at_ms,
         child,
         buffer: Mutex::new(BoundedRingBuffer::new(RING_CAP)),
+        notify: Condvar::new(),
         exited: AtomicBool::new(false),
         exit_code: AtomicI32::new(0),
         exit_unknown: AtomicBool::new(false),
@@ -294,7 +324,10 @@ pub fn spawn(
             loop {
                 match pipe.read(&mut buf) {
                     Ok(0) => break,
-                    Ok(n) => mutex_lock(&proc_ref.buffer).push(&buf[..n]),
+                    Ok(n) => {
+                        mutex_lock(&proc_ref.buffer).push(&buf[..n]);
+                        proc_ref.notify.notify_all();
+                    }
                     Err(_) => break,
                 }
             }
@@ -308,7 +341,10 @@ pub fn spawn(
             loop {
                 match pipe.read(&mut buf) {
                     Ok(0) => break,
-                    Ok(n) => mutex_lock(&proc_ref.buffer).push(&buf[..n]),
+                    Ok(n) => {
+                        mutex_lock(&proc_ref.buffer).push(&buf[..n]);
+                        proc_ref.notify.notify_all();
+                    }
                     Err(_) => break,
                 }
             }
@@ -326,6 +362,7 @@ pub fn spawn(
                 Err(_) => proc_ref.exit_unknown.store(true, Ordering::Release),
             }
             proc_ref.exited.store(true, Ordering::Release);
+            proc_ref.notify.notify_all();
         });
     }
 

@@ -165,6 +165,7 @@ export const TOOL_CATALOG: readonly ToolEntry[] = [
   },
   { name: "bash_list", tier: "execute", blurb: "List background processes." },
   { name: "bash_kill", tier: "execute", blurb: "Kill a background process." },
+  { name: "sleep", tier: "read", blurb: "Pause for a specified number of seconds." },
   {
     name: "watch_create",
     tier: "execute",

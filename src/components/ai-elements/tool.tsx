@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { USER_INTERRUPTED_ERROR_TEXT } from "@/modules/ai/store/approvalResponses";
 import ArrowRight01Icon from "@hugeicons/core-free-icons/ArrowRight01Icon";
 import CheckListIcon from "@hugeicons/core-free-icons/CheckListIcon";
+import Clock01Icon from "@hugeicons/core-free-icons/Clock01Icon";
 import EyeIcon from "@hugeicons/core-free-icons/EyeIcon";
 import File01Icon from "@hugeicons/core-free-icons/File01Icon";
 import FileEditIcon from "@hugeicons/core-free-icons/FileEditIcon";
@@ -51,6 +52,7 @@ const TOOL_ICON: Record<string, typeof File01Icon> = {
   bash_logs: TerminalIcon,
   bash_list: TerminalIcon,
   bash_kill: TerminalIcon,
+  sleep: Clock01Icon,
   grep: GlobalSearchIcon,
   glob: Folder01Icon,
   suggest_command: SparklesIcon,

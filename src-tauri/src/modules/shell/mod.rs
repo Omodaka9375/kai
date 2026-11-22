@@ -619,10 +619,11 @@ fn visible_to(proc_project: &Option<String>, caller: &Option<String>) -> bool {
 }
 
 #[tauri::command]
-pub fn shell_bg_logs(
-    state: tauri::State<ShellState>,
+pub async fn shell_bg_logs(
+    state: tauri::State<'_, ShellState>,
     handle: u32,
     since_offset: Option<u64>,
+    wait_secs: Option<u64>,
     project: Option<String>,
 ) -> Result<BackgroundLogResponse, String> {
     let proc = rwlock_read(&state.bg)
@@ -632,9 +633,38 @@ pub fn shell_bg_logs(
     if !visible_to(&proc.project, &project) {
         return Err("background handle belongs to another project".to_string());
     }
-    let mut resp = proc.read_logs(since_offset.unwrap_or(0));
+    let since = since_offset.unwrap_or(0);
+    if wait_secs.is_some_and(|s| s > 0) {
+        let (tx, rx) = mpsc::channel();
+        thread::spawn(move || {
+            let mut resp = proc.read_logs(since, wait_secs);
+            mask_bg_logs(&proc, &mut resp);
+            let _ = tx.send(resp);
+        });
+        return rx.recv().map_err(|e| e.to_string());
+    }
+    let mut resp = proc.read_logs(since, None);
     mask_bg_logs(&proc, &mut resp);
     Ok(resp)
+}
+
+/// Native non-shell sleep (seconds, capped at 300s) so agents can pause
+/// without spawning OS-specific sleep commands (`Start-Sleep`, `sleep`,
+/// `timeout /t`, `python -c "time.sleep(...)"`).
+#[tauri::command]
+pub async fn shell_sleep(seconds: f64) -> Result<u64, String> {
+    if !seconds.is_finite() || seconds < 0.0 {
+        return Err("seconds must be a non-negative number".to_string());
+    }
+    let clamped = seconds.clamp(0.1, 300.0);
+    let dur = Duration::from_secs_f64(clamped);
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let started = Instant::now();
+        thread::sleep(dur);
+        let _ = tx.send(started.elapsed().as_millis() as u64);
+    });
+    rx.recv().map_err(|e| e.to_string())
 }
 
 /// Mask vault values in background-proc log reads. The ring buffer keeps RAW

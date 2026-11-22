@@ -978,6 +978,7 @@ app.manage(Mutex::new(None::<fs::env_probe::EnvInventory>));
             shell::shell_bg_kill,
             shell::shell_bg_reap,
             shell::shell_bg_list,
+            shell::shell_sleep,
             workspace::wsl_list_distros,
             workspace::wsl_home,
             workspace::workspace_authorize,

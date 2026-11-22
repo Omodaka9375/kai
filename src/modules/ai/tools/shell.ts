@@ -537,17 +537,87 @@ export function buildShellTools(ctx: ToolContext) {
     bash_logs: tool({
       needsApproval: false,
       description:
-        "Read accumulated logs from a `bash_background` process. Pass `since_offset` from the previous response's `next_offset` to tail incrementally. `dropped` reports bytes evicted by the ring buffer.",
+        "Read accumulated logs from a `bash_background` process. Pass `since_offset` from the previous response's `next_offset` to tail incrementally. When waiting for new output or process exit, pass `wait_secs` (default 5s when `since_offset` is provided; up to 60s) — Rust long-polls on a Condvar and returns IMMEDIATELY as soon as new bytes arrive or the process exits, or after `wait_secs` if still quiet. This prevents 1-second polling loops. Pass `wait_secs: 0` only for an instant non-blocking peek.",
       inputSchema: z.object({
         handle: z.number(),
         since_offset: z.number().optional(),
+        wait_secs: z
+          .number()
+          .min(0)
+          .max(60)
+          .optional()
+          .describe(
+            "Max seconds to block waiting for new output or exit when the buffer has no new bytes at `since_offset` (default 5s when tailing; 0 = instant peek). Returns immediately as soon as new output arrives or the process exits.",
+          ),
       }),
-      execute: async ({ handle, since_offset }) => {
+      execute: async ({ handle, since_offset, wait_secs }) => {
         try {
-          const r = await native.shellBgLogs(handle, since_offset, ctx.projectId);
+          const effectiveWait =
+            wait_secs ?? (since_offset !== undefined && since_offset > 0 ? 5 : 0);
+          const r = await native.shellBgLogs(
+            handle,
+            since_offset,
+            ctx.projectId,
+            effectiveWait,
+          );
           return {
             ...r,
             bytes: stripAnsi(r.bytes),
+          };
+        } catch (e) {
+          return { error: String(e) };
+        }
+      },
+    }),
+
+    sleep: tool({
+      needsApproval: false,
+      description:
+        "Pause for `seconds` (0.1 to 300) natively in Rust without spawning a shell. Use this whenever you need a fixed delay (rate-limit backoff, waiting for an external service to settle) instead of `Start-Sleep`, `sleep`, `timeout /t`, or `python -c \"time.sleep(...)\"` in `bash_run`. Note: to wait for a `bash_background` process's output, prefer `bash_logs` with `wait_secs` (it wakes immediately when output arrives). Auto-executes.",
+      inputSchema: z.object({
+        seconds: z
+          .number()
+          .min(0.1)
+          .max(300)
+          .describe("Seconds to sleep (0.1 to 300)."),
+        reason: z
+          .string()
+          .optional()
+          .describe("Short note explaining what you are waiting for."),
+      }),
+      execute: async ({ seconds, reason }, options) => {
+        if (options?.abortSignal?.aborted) {
+          return { error: "Sleep cancelled — agent stopped.", cancelled: true };
+        }
+        try {
+          const clamped = Math.min(300, Math.max(0.1, seconds));
+          const abortPromise = new Promise<{ cancelled: true }>((resolve) => {
+            if (!options?.abortSignal) return;
+            if (options.abortSignal.aborted) {
+              resolve({ cancelled: true });
+              return;
+            }
+            options.abortSignal.addEventListener(
+              "abort",
+              () => resolve({ cancelled: true }),
+              { once: true },
+            );
+          });
+          const raced = await Promise.race([
+            native.shellSleep(clamped).then((slept_ms) => ({
+              cancelled: false as const,
+              slept_ms,
+            })),
+            abortPromise,
+          ]);
+          if (raced.cancelled) {
+            return { error: "Sleep cancelled by stop.", cancelled: true };
+          }
+          return {
+            ok: true,
+            slept_ms: raced.slept_ms,
+            seconds: clamped,
+            ...(reason ? { reason } : {}),
           };
         } catch (e) {
           return { error: String(e) };

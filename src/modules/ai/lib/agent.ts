@@ -925,6 +925,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
     "get_terminal_output", // read-only terminal tail; no-change = normal
     "bash_logs", // background-process log tail; no-change = normal
     "bash_list", // enumerate handles; stable output = normal
+    "sleep", // deliberate pause between checks; identical duration = normal
     "watch_list", // enumerate watches; stable output = normal
     "project_status", // group participant probe; stable output = normal
     "radio_now_playing", // track metadata; repeats between updates
