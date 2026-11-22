@@ -412,4 +412,21 @@ describe("Workspaces grid behavior (source pins)", () => {
       '<ConversationContent className="gap-3" style={chatFontZoomStyle}>',
     );
   });
+
+  it("hides active terminal panes when covered by Workspaces or expanded AI/group window", () => {
+    // 2026-11-22 report: "When AI window is expanded or in Workspaces I can
+    // see terminal text leaking from behind — only when terminal tabs are
+    // open". TerminalStack + TerminalPane set inline `visibility: visible`
+    // whenever `tabVisible` is true, and the expanded AI window / Workspaces
+    // grid sit inset by 8px (while TerminalStack starts at 4px), leaving a
+    // perimeter strip + card gaps where live terminal text bled through.
+    const terminalStack = readFileSync(
+      new URL("../../terminal/TerminalStack.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(terminalStack).toContain("useProjectChatGridStore((s) => s.open)");
+    expect(terminalStack).toContain("s.mini.open && s.mini.expanded");
+    expect(terminalStack).toContain("s.groupPanelExpanded");
+    expect(terminalStack).toContain("projectActive && !occludedByOverlay && t.id === activeId");
+  });
 });

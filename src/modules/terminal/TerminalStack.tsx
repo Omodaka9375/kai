@@ -2,6 +2,8 @@ import type { Tab } from "@/modules/tabs";
 import type { SearchAddon } from "@xterm/addon-search";
 import { useEffect, useMemo, useRef } from "react";
 import { useWorkspaceActive } from "@/modules/workspace";
+import { useChatStore } from "@/modules/ai/store/chatStore";
+import { useProjectChatGridStore } from "@/modules/ai/store/projectChatGrid";
 import { PaneTreeView } from "./PaneTreeView";
 import type { TerminalPaneHandle } from "./TerminalPane";
 import { leafIds } from "./lib/panes";
@@ -49,6 +51,32 @@ export function TerminalStack({
   // the whole workspace while still flipping the visibility classes.
   const workspaceActive = useWorkspaceActive();
   const projectActive = projectVisible ?? workspaceActive;
+
+  // FULL-WORKSPACE OVERLAY OCCLUSION (2026-11-22 report: "When AI window is
+  // expanded or I'm in Workspaces I can see terminal text leaking from
+  // behind — only when terminal tabs are open"):
+  //   1. Workspaces grid: covers the entire post-header area, but left the
+  //      foreground project's active terminal visibility:visible underneath,
+  //      so xterm text bled through the 8px outer margin, 8px card gaps,
+  //      translucent borders, and bg-background/95 card bodies.
+  //   2. Expanded AI window / expanded group panel: positioned at
+  //      left: calc(--kai-workspace-left + 8px), top: 2.85rem (45.6px) over a
+  //      40px header, right-2 — while TerminalStack starts at px-1 pt-1
+  //      (4px/4px). That leaves a 4px left strip, ~5.6px top strip, and 8px
+  //      right strip where the live terminal sits completely outside the
+  //      expanded window and its AiWindowBackdrop.
+  // Folding these three full-workspace overlay states into `tabVisible`
+  // flips the active terminal pane to visibility:hidden while fully covered
+  // (PTY keeps streaming via useTerminalSession; nothing is unmounted).
+  // Docked (non-expanded) mini window is unaffected — the terminal alongside
+  // it stays visible.
+  const gridOpen = useProjectChatGridStore((s) => s.open);
+  const aiOverlayExpanded = useChatStore((s) =>
+    s.stackRail.surface === "group"
+      ? s.groupPanelExpanded
+      : s.mini.open && s.mini.expanded,
+  );
+  const occludedByOverlay = gridOpen || aiOverlayExpanded;
 
   const terminals = useMemo(
     () => tabs.filter((t) => t.kind === "terminal"),
@@ -98,7 +126,8 @@ export function TerminalStack({
   return (
     <div className="relative h-full w-full">
       {terminals.map((t) => {
-        const tabVisible = projectActive && t.id === activeId;
+        const tabVisible =
+          projectActive && !occludedByOverlay && t.id === activeId;
         return (
           <div
             key={t.id}
