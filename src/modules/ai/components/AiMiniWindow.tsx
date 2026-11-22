@@ -490,20 +490,22 @@ function ContextIndicator({ messages }: { messages: UIMessage[] }) {
   const tokens = useChatStore((s) => s.agentMeta.tokens);
   const lastInput = useChatStore((s) => s.agentMeta.lastInputTokens);
   const lastCached = useChatStore((s) => s.agentMeta.lastCachedTokens);
-  // estimateTokens JSON.stringifies every tool input/output — up to 256 KB
-  // per shell result — so recomputing per streamed chunk (messages gets a new
-  // identity on every chunk) is O(history × chunks). Throttle to 1×/second
-  // while streaming; recompute exactly once when it settles.
+  // estimateTokens is WeakMap-cached per historical message, and this effect
+  // only recomputes immediately when the message COUNT changes (new turn /
+  // session switch) plus once per second while streaming — never on every
+  // 50ms token flush.
   const [estimated, setEstimated] = useState(() => estimateTokens(messages));
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
   useEffect(() => {
-    setEstimated(estimateTokens(messages));
+    setEstimated(estimateTokens(messagesRef.current));
+  }, [messages.length]);
+  useEffect(() => {
     const t = setInterval(() => {
       setEstimated(estimateTokens(messagesRef.current));
     }, 1000);
     return () => clearInterval(t);
-  }, [messages]);
+  }, []);
   // The provider reports the size of the request it actually received —
   // AFTER compaction elided/truncated tool results. A huge raw history can
   // trip compaction while `lastInput` stays small, which made the ring look

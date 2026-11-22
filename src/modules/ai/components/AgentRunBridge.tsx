@@ -123,6 +123,57 @@ function isGitCommitCommand(command: string | undefined): boolean {
   return /\bgit\s+commit(?:\s|$)/.test(command) && !/\bgit\s+commit-tree\b/.test(command);
 }
 
+/**
+ * Per-message bridge scan memo (freeze fix, 2026-11-22): AgentRunBridge
+ * runs 3 loops over `messages` on every 50ms token flush (approvalsPending,
+ * auto-approve, and fileMutationFingerprint), across every open project's
+ * bridge. On a 400-message chat with several workspaces mounted, that was
+ * thousands of message x part iterations 20x/sec. A settled historical
+ * message that has zero pending approvals and a fixed mutation fingerprint
+ * never changes — cache it in a WeakMap keyed on the UIMessage reference so
+ * each flush only inspects the live tail message (and any message still
+ * holding an unresolved approval).
+ */
+type CachedMessageScan = {
+  hasPendingApproval: boolean;
+  mutationFp: string;
+};
+const bridgeMessageScanCache = new WeakMap<object, CachedMessageScan>();
+
+function scanMessageForBridge(m: UIMessage, isTail: boolean): CachedMessageScan {
+  if (m.role !== "assistant") return { hasPendingApproval: false, mutationFp: "" };
+  if (!isTail) {
+    const hit = bridgeMessageScanCache.get(m);
+    if (hit !== undefined) return hit;
+  }
+  let hasPendingApproval = false;
+  let mutationFp = "";
+  for (const p of (m.parts ?? []) as AnyPart[]) {
+    const state = (p as { state?: string }).state ?? "";
+    if (state === "approval-requested") {
+      hasPendingApproval = true;
+    }
+    const t = (p as { type?: string }).type;
+    if (
+      t === "tool-write_file" ||
+      t === "tool-edit" ||
+      t === "tool-replace_exact" ||
+      t === "tool-multi_edit" ||
+      t === "tool-batch_edit"
+    ) {
+      const id = (p as { approval?: { id?: string } }).approval?.id ?? "";
+      mutationFp += `${id}:${state}|`;
+    }
+  }
+  const entry: CachedMessageScan = { hasPendingApproval, mutationFp };
+  // Only cache settled messages with no pending approvals — a message with
+  // a live approval may have its part state mutated when responded.
+  if (!isTail && !hasPendingApproval) {
+    bridgeMessageScanCache.set(m, entry);
+  }
+  return entry;
+}
+
 function Bridge({
   sessionId,
   openAiDiffTab,
@@ -323,8 +374,11 @@ function Bridge({
   const { approvalsPending, manualApprovalsPending } = useMemo(() => {
     let approvals = 0;
     let manual = 0;
-    for (const m of messages) {
+    const lastIdx = messages.length - 1;
+    for (let i = 0; i <= lastIdx; i++) {
+      const m = messages[i]!;
       if (m.role !== "assistant") continue;
+      if (!scanMessageForBridge(m, i === lastIdx).hasPendingApproval) continue;
       for (const p of m.parts as AnyPart[]) {
         if ((p as { state?: string }).state !== "approval-requested") continue;
         approvals++;
@@ -849,8 +903,11 @@ function Bridge({
   // consumes manualApprovalsPending.)
 
   useEffect(() => {
-    for (const m of messages) {
+    const lastIdx = messages.length - 1;
+    for (let i = 0; i <= lastIdx; i++) {
+      const m = messages[i]!;
       if (m.role !== "assistant") continue;
+      if (!scanMessageForBridge(m, i === lastIdx).hasPendingApproval) continue;
       for (const p of m.parts as AnyPart[]) {
         const state = (p as { state?: string }).state;
         if (state !== "approval-requested") continue;
@@ -982,23 +1039,11 @@ function Bridge({
   // only text/reasoning tokens have arrived (the common case).
   const fileMutationFingerprint = useMemo(() => {
     let fp = "";
-    for (const m of messages) {
+    const lastIdx = messages.length - 1;
+    for (let i = 0; i <= lastIdx; i++) {
+      const m = messages[i]!;
       if (m.role !== "assistant") continue;
-      for (const p of m.parts as AnyPart[]) {
-        const t = (p as { type?: string }).type;
-        if (
-          t === "tool-write_file" ||
-          t === "tool-edit" ||
-          t === "tool-replace_exact" ||
-          t === "tool-multi_edit" ||
-          t === "tool-batch_edit"
-        ) {
-          const state = (p as { state?: string }).state ?? "";
-          const id =
-            (p as { approval?: { id?: string } }).approval?.id ?? "";
-          fp += `${id}:${state}|`;
-        }
-      }
+      fp += scanMessageForBridge(m, i === lastIdx).mutationFp;
     }
     return fp;
   }, [messages]);

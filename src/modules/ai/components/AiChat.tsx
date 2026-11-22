@@ -247,6 +247,19 @@ type Props = {
   sessionId?: string;
 };
 
+/**
+ * TRANSCRIPT TAIL WINDOWING (freeze fix, 2026-11-22): a 1M-context session
+ * can accumulate hundreds of messages before summarization triggers, and
+ * rendering the entire list into the DOM (especially across 8 Workspaces
+ * cards at once) forces React + the browser layout engine to reconcile
+ * thousands of markdown/tool nodes on every 50ms token flush. Render the
+ * trailing window by default; the user can reveal earlier messages on
+ * demand in chunks.
+ */
+const TRANSCRIPT_WINDOW_FULL = 60;
+const TRANSCRIPT_WINDOW_COMPACT = 30;
+const TRANSCRIPT_WINDOW_STEP = 60;
+
 export function AiChatView({
   messages,
   status,
@@ -257,6 +270,14 @@ export function AiChatView({
   sessionId,
 }: Props) {
   const scrollCtx = useRef<StickToBottomContext | null>(null);
+  const baseWindow = compact ? TRANSCRIPT_WINDOW_COMPACT : TRANSCRIPT_WINDOW_FULL;
+  const [visibleLimit, setVisibleLimit] = useState(baseWindow);
+  useEffect(() => {
+    setVisibleLimit(compact ? TRANSCRIPT_WINDOW_COMPACT : TRANSCRIPT_WINDOW_FULL);
+  }, [sessionId, compact]);
+  const windowStart = Math.max(0, messages.length - visibleLimit);
+  const visibleMessages =
+    windowStart > 0 ? messages.slice(windowStart) : messages;
   // SYMMETRIC CHAT ZOOM (2026-11-18): zoom the TRANSCRIPT by one ratio so
   // prose, code blocks and labels scale together. The shortcuts install
   // here so Ctrl+scroll works inside the DOCKED/expanded AI panel too
@@ -406,7 +427,19 @@ export function AiChatView({
             description="Explain command output, fix errors, generate snippets, or run a task."
           />
         )}
-        {messages.map((m, idx) => {
+        {windowStart > 0 && (
+          <button
+            type="button"
+            onClick={() =>
+              setVisibleLimit((prev) => prev + TRANSCRIPT_WINDOW_STEP)
+            }
+            className="mx-auto my-1 rounded-md border border-border/50 bg-muted/30 px-2.5 py-1 text-[10.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            Show earlier messages ({windowStart} hidden)
+          </button>
+        )}
+        {visibleMessages.map((m, relIdx) => {
+          const idx = windowStart + relIdx;
           // Day separator: rendered whenever the calendar day changes
           // between consecutive timestamped messages. Messages without a
           // timestamp (legacy, pre-feature) never trigger a separator —

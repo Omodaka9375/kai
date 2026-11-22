@@ -43,9 +43,9 @@ function messageApproxBytes(m: ModelMessage): number {
       if (part.type === "text" && typeof part.text === "string")
         n += (part.text as string).length;
       else if (part.type === "tool-result")
-        n += JSON.stringify(part.output ?? "").length;
+        n += toolOutputToString(part.output ?? "").length;
       else if (part.type === "tool-call")
-        n += JSON.stringify(part.input ?? "").length;
+        n += toolOutputToString(part.input ?? "").length;
       else if (part.type === "file" && typeof part.data === "string")
         n += (part.data as string).length;
       else n += 64;
@@ -445,11 +445,35 @@ function stripScreenshotDataUrl(part: ToolPart): { changed: boolean; part: ToolP
   };
 }
 
+/**
+ * Per-OUTPUT stringify memo (freeze fix, 2026-11-22): truncateLargeToolResult
+ * runs on EVERY step of a run once context pressure crosses 0.6x, and its
+ * size probe used to JSON.stringify every tool output from scratch each
+ * time. A session with a handful of MB-scale bash/read outputs paid
+ * ~20MB of stringify per step, saturating the main thread between steps.
+ * Keyed on the output object identity — the SDK reuses history message
+ * objects (and their parts) across steps of one run, so each output is
+ * stringified exactly once (same contract as approxBytesCache above).
+ */
+const toolOutputStringifyCache = new WeakMap<object, string>();
+
+function toolOutputToString(output: unknown): string {
+  if (typeof output === "string") return output;
+  if (output != null && typeof output === "object") {
+    const cached = toolOutputStringifyCache.get(output);
+    if (cached !== undefined) return cached;
+    const str = JSON.stringify(output);
+    toolOutputStringifyCache.set(output, str);
+    return str;
+  }
+  return JSON.stringify(output);
+}
+
 function truncateLargeToolResult(part: ToolPart): { changed: boolean; part: ToolPart } {
   if (part.type !== "tool-result") return { changed: false, part };
   const output = part.output;
   if (output == null) return { changed: false, part };
-  const str = typeof output === "string" ? output : JSON.stringify(output);
+  const str = toolOutputToString(output);
   if (str.length <= TOOL_RESULT_TRUNCATE_CHARS) return { changed: false, part };
   return {
     changed: true,

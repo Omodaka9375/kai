@@ -108,6 +108,7 @@ export {
   getAllProjectRuntimes,
   getProjectActiveSession,
   getProjectModel,
+  getProjectModelVersion,
   isProjectOpen,
   registerProjectRuntime,
   setActiveProjectRuntime,
@@ -116,6 +117,7 @@ export {
   setProjectModel,
   subscribeActiveProject,
   subscribeProjectActiveSessions,
+  subscribeProjectModels,
 } from "./projectRegistry";
 
 type Live = {
@@ -811,6 +813,13 @@ function findApprovalOwner(approvalId: string): string | null {
 const sessionAgentMeta = new Map<string, AgentMeta>();
 const sessionMetaListeners = new Set<() => void>();
 let sessionMetaVersion = 0;
+/** Per-SESSION version counters (freeze fix, 2026-11-22): the global
+ *  sessionMetaVersion changes on every streaming patch of ANY session
+ *  (outputTps alone fires 2x/s), which re-rendered every Workspaces card
+ *  subscribed to the global counter. Per-session snapshots let each
+ *  subscriber re-read its own counter and skip the re-render when only
+ *  another session's meta moved. */
+const sessionMetaVersions = new Map<string, number>();
 export function subscribeSessionAgentMeta(listener: () => void): () => void {
   sessionMetaListeners.add(listener);
   return () => sessionMetaListeners.delete(listener);
@@ -821,6 +830,11 @@ export function subscribeSessionAgentMeta(listener: () => void): () => void {
  *  re-rendering for unrelated reasons. */
 export function getSessionMetaVersion(): number {
   return sessionMetaVersion;
+}
+/** Per-session snapshot for useSyncExternalStore: changes ONLY when this
+ *  session's meta was patched. */
+export function getSessionMetaVersionFor(sessionId: string): number {
+  return sessionMetaVersions.get(sessionId) ?? 0;
 }
 const sessionAutoApprove = new Map<string, "off" | "all">();
 /** Bumped on every setAutoApprove so subscribers (the bridge's auto-approve
@@ -897,6 +911,7 @@ export function patchSessionAgentMeta(sessionId: string, patch: Partial<AgentMet
   if (!changed) return;
   sessionAgentMeta.set(sessionId, next);
   sessionMetaVersion++;
+  sessionMetaVersions.set(sessionId, (sessionMetaVersions.get(sessionId) ?? 0) + 1);
   const ownerId = projectIdForSession(sessionId);
   if (ownerId) setProjectAgentStatus(ownerId, next.status);
   if (useChatStore.getState().activeSessionId === sessionId) {
@@ -1065,6 +1080,87 @@ export async function resolveBackgroundProjectSession(
     return await run;
   } finally {
     backgroundSessionResolutions.delete(projectId);
+  }
+}
+
+/**
+ * Create a new AI session scoped to a specific project (foreground OR
+ * background) without switching the active workspace (Workspaces card `+`
+ * button). Binds the project's active session in the registry so its card
+ * and AgentRunBridge immediately switch to the fresh chat; when the target
+ * project IS the foreground workspace, also updates the foreground store
+ * fields so the main composer / mini-window stay in sync.
+ */
+export function newSessionForProject(projectId: string): string | null {
+  const runtime = getProjectRuntime(projectId);
+  if (!runtime) return null;
+  const activeRt = getActiveProjectRuntime();
+  if (activeRt?.id === projectId) {
+    const id = useChatStore.getState().newSession();
+    setProjectActiveSession(projectId, id);
+    return id;
+  }
+  const id = newSessionId();
+  const meta: SessionMeta = {
+    id,
+    title: "New chat",
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    workspaceRoot: runtime.root,
+    workspaceEnv: runtime.env,
+  };
+  noteSessionRoot(id, runtime.root);
+  setSessionPreferences(id, { projectId: runtime.id });
+  useChatStore.setState({
+    sessions: [meta, ...useChatStore.getState().sessions],
+  });
+  setProjectActiveSession(projectId, id);
+  return id;
+}
+
+/**
+ * Resolve the effective model for a project card in Workspaces (foreground
+ * or background): session override -> project runtime capture -> persisted
+ * per-project preference -> global default.
+ */
+export function getProjectEffectiveModelId(
+  projectId: string,
+  sessionId?: string | null,
+): ModelId {
+  const sid = sessionId ?? getProjectActiveSession(projectId);
+  const sessionModel = sid ? getSessionPreferences(sid).modelId : undefined;
+  if (sessionModel) return sessionModel;
+  const runtime = getProjectRuntime(projectId);
+  const prefs = usePreferencesStore.getState();
+  const rootKey = runtime ? normalizeWorkspacePath(runtime.root) : null;
+  const savedForRoot = rootKey ? (prefs.projectModelIds[rootKey] as ModelId | undefined) : undefined;
+  const fallback = savedForRoot ?? (prefs.defaultModelId as ModelId | undefined) ?? DEFAULT_MODEL_ID;
+  return getProjectModel(projectId, fallback);
+}
+
+/**
+ * Set the active model for a specific project (foreground OR background)
+ * from a Workspaces card without cross-project bleed. When the target IS
+ * the foreground project, delegates to setSelectedModelId so the main
+ * composer / mini-window stay in sync.
+ */
+export function setProjectSelectedModelId(
+  projectId: string,
+  modelId: ModelId,
+): void {
+  const activeRt = getActiveProjectRuntime();
+  if (activeRt?.id === projectId) {
+    useChatStore.getState().setSelectedModelId(modelId);
+    return;
+  }
+  const sid = getProjectActiveSession(projectId);
+  if (sid) setSessionPreferences(sid, { modelId });
+  const persona = getProjectPersona(projectId) ?? useAgentsStore.getState().activeId;
+  setProjectModel(projectId, modelId, persona);
+  void pushRecentModel(modelId);
+  const runtime = getProjectRuntime(projectId);
+  if (runtime?.root) {
+    void persistProjectModel(modelId, runtime.root);
   }
 }
 

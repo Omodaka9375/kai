@@ -28,6 +28,8 @@ const projectRuntimes = new Map<string, import("@/modules/workspace").ProjectRun
 const projectLive = new Map<string, ChatRuntimeDeps["live"]>();
 const projectModels = new Map<string, ModelId>();
 const projectPersonas = new Map<string, string>();
+const projectModelListeners = new Set<() => void>();
+let projectModelVersion = 0;
 
 // Reactive signal for the ACTIVE PROJECT (see header comment).
 const activeProjectListeners = new Set<() => void>();
@@ -102,14 +104,27 @@ export function setProjectModel(
   model: ModelId,
   personaId: string,
 ): void {
+  const prevModel = projectModels.get(projectId);
+  const prevPersona = projectPersonas.get(projectId);
   projectModels.set(projectId, model);
   projectPersonas.set(projectId, personaId);
+  if (prevModel !== model || prevPersona !== personaId) {
+    projectModelVersion++;
+    for (const listener of projectModelListeners) listener();
+  }
 }
 export function getProjectModel(
   projectId: string,
   fallback: ModelId = DEFAULT_MODEL_ID,
 ): ModelId {
   return projectModels.get(projectId) ?? fallback;
+}
+export function subscribeProjectModels(listener: () => void): () => void {
+  projectModelListeners.add(listener);
+  return () => projectModelListeners.delete(listener);
+}
+export function getProjectModelVersion(): number {
+  return projectModelVersion;
 }
 export function getProjectPersona(projectId: string): string | undefined {
   return projectPersonas.get(projectId);

@@ -3,9 +3,17 @@ import { readFileSync } from "node:fs";
 import {
   getApprovalResponder,
   getSessionSteeringMessage,
+  newSessionForProject,
+  projectIdForSession,
   setSessionSteeringMessage,
   useChatStore,
 } from "./chatStore";
+import {
+  getProjectActiveSession,
+  registerProjectRuntime,
+  setActiveProjectRuntime,
+} from "./projectRegistry";
+import { createProjectRuntime } from "@/modules/workspace";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
@@ -29,6 +37,23 @@ describe("session-scoped approvals and steering", () => {
     expect(getSessionSteeringMessage("project-b-chat")).toBeNull();
     setSessionSteeringMessage("project-a-chat", null);
     expect(getSessionSteeringMessage("project-a-chat")).toBeNull();
+  });
+
+  it("newSessionForProject creates a project-scoped session for a background project without switching active project", () => {
+    const fg = createProjectRuntime("/tmp/fg-proj", { kind: "local" });
+    const bg = createProjectRuntime("/tmp/bg-proj", { kind: "local" });
+    setActiveProjectRuntime(fg);
+    registerProjectRuntime(bg);
+
+    const fgSession = useChatStore.getState().newSession();
+    expect(useChatStore.getState().activeSessionId).toBe(fgSession);
+
+    const bgSession = newSessionForProject(bg.id);
+    expect(bgSession).toBeTruthy();
+    expect(bgSession).not.toBe(fgSession);
+    expect(getProjectActiveSession(bg.id)).toBe(bgSession);
+    expect(useChatStore.getState().activeSessionId).toBe(fgSession);
+    expect(projectIdForSession(bgSession!)).toBe(bg.id);
   });
 });
 

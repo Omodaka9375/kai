@@ -1,11 +1,16 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
 import {
+  getProjectEffectiveModelId,
   getProjectModel,
   setActiveProjectRuntime,
   setProjectModel,
+  setProjectSelectedModelId,
   useChatStore,
 } from "./chatStore";
+import {
+  registerProjectRuntime,
+} from "./projectRegistry";
 import {
   createProjectRuntime,
 } from "@/modules/workspace/projectRuntime";
@@ -122,5 +127,22 @@ describe("per-project model isolation across project switches", () => {
     expect(announce).toContain("useChatStore.setState({ selectedModelId })");
     expect(announce).not.toContain("setSelectedModelId(selectedModelId)");
     expect(announce).toContain("MUST be a bare setState");
+  });
+
+  it("setProjectSelectedModelId updates a background project's model without touching the foreground project", () => {
+    const a = runtimeAt("D:/Code/project-a");
+    const b = runtimeAt("D:/Code/project-b");
+    registerProjectRuntime(a);
+    registerProjectRuntime(b);
+    setActiveProjectRuntime(a);
+    setProjectModel(a.id, "gpt-5.5", "p1");
+    setProjectModel(b.id, "claude-sonnet-5", "p1");
+    useChatStore.setState({ selectedModelId: "gpt-5.5" });
+
+    // Pick a model on B's card in Workspaces while A is the foreground project.
+    setProjectSelectedModelId(b.id, "gemini-2.5-pro");
+    expect(getProjectEffectiveModelId(b.id)).toBe("gemini-2.5-pro");
+    expect(getProjectEffectiveModelId(a.id)).toBe("gpt-5.5");
+    expect(useChatStore.getState().selectedModelId).toBe("gpt-5.5");
   });
 });

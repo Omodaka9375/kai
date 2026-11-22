@@ -14,9 +14,20 @@ import { useChat } from "@ai-sdk/react";
 import Mic01Icon from "@hugeicons/core-free-icons/Mic01Icon";
 import NextIcon from "@hugeicons/core-free-icons/NextIcon";
 import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
+import Add01Icon from "@hugeicons/core-free-icons/Add01Icon";
+import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
+import StarIcon from "@hugeicons/core-free-icons/StarIcon";
+import Tick01Icon from "@hugeicons/core-free-icons/Tick01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { getModel, type ModelId } from "../config";
 import { AiChatView } from "./AiChat";
 import { AiErrorBoundary } from "./AiErrorBoundary";
 import {
@@ -30,23 +41,29 @@ import {
   patchSessionAgentMeta,
   subscribeSessionAgentMeta,
   getSessionAgentMeta,
-  getSessionMetaVersion,
+  getSessionMetaVersionFor,
   setSessionSteeringMessage,
   stopSession,
   setSessionAutoApprove,
   getSessionAutoApprove,
   subscribeSessionAutoApprove,
   getSessionAutoApproveVersion,
+  getProjectEffectiveModelId,
+  setProjectSelectedModelId,
+  subscribeProjectModels,
+  getProjectModelVersion,
+  newSessionForProject,
+  resolveBackgroundProjectSession,
 } from "../store/chatStore";
 import {
   getSessionPreferences,
   setSessionPreferences,
+  subscribeSessionPreferences,
 } from "../store/sessionPreferences";
 import {
   getProjectActiveSession,
   subscribeProjectActiveSessions,
 } from "../store/projectRegistry";
-import { resolveBackgroundProjectSession } from "../store/chatStore";
 import { subscribeProjectAgentStatus, getProjectAgentStatus } from "../store/projectStatus";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { setGridOrder } from "@/modules/settings/store";
@@ -587,14 +604,34 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
           dragging ? "cursor-grabbing" : "cursor-pointer active:cursor-grabbing",
         )}
       >
-        {/* GROUP SURFACE IN THE TITLE (2026-11-21): a card swaps from the
-            project AI chat to its GROUP transcript when the group panel owns
-            the stack rail. Without the group name in the bar the two
-            surfaces look identical, so the title reads "project · group". */}
-        <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-foreground">
-          {group ? `${name} · ${group.name}` : name}
-        </span>
-        {sessionId ? <SessionApprovePill sessionId={sessionId} /> : null}
+        <div className="flex min-w-0 flex-1 items-center gap-1">
+          {/* GROUP SURFACE IN THE TITLE (2026-11-21): a card swaps from the
+              project AI chat to its GROUP transcript when the group panel owns
+              the stack rail. Without the group name in the bar the two
+              surfaces look identical, so the title reads "project · group". */}
+          <span className="truncate text-[11px] font-medium text-foreground">
+            {group ? `${name} · ${group.name}` : name}
+          </span>
+          {sessionId ? <SessionApprovePill sessionId={sessionId} /> : null}
+        </div>
+        {!group ? (
+          <CardModelPill projectId={projectId} sessionId={sessionId} />
+        ) : null}
+        <div className="flex min-w-0 flex-1 items-center justify-end gap-1">
+          {!group ? (
+            <button
+              type="button"
+              onClick={() => {
+                newSessionForProject(projectId);
+              }}
+              title="New session"
+              aria-label={`New session in ${name}`}
+              className="flex shrink-0 items-center justify-center rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+            >
+              <HugeiconsIcon icon={Add01Icon} size={12} strokeWidth={2} />
+            </button>
+          ) : null}
+        </div>
       </div>
 
       {group ? (
@@ -652,6 +689,128 @@ const SessionApprovePill = memo(function SessionApprovePill({
       />
       {mode === "off" ? "Ask" : "Allow"}
     </button>
+  );
+});
+
+/** Shorten a model display label so the compact card pill stays tiny. */
+export function shortenModelLabel(label: string): string {
+  const s = label
+    .replace(
+      /^(Anthropic|OpenAI|Google|DeepSeek|Mistral|Meta|Alibaba|Zhipu|Moonshot|xAI)\s*[:/·-]?\s*/i,
+      "",
+    )
+    .replace(/^Claude\s+/i, "")
+    .replace(/\s+\(Preview\)$/i, "")
+    .trim();
+  return s || label;
+}
+
+/** Compact model pill centered in a Workspaces card top bar: shows the
+ *  shortened active model name for THIS project/session and opens a small
+ *  dropdown of the user's favorite models on click. */
+const CardModelPill = memo(function CardModelPill({
+  projectId,
+  sessionId,
+}: {
+  projectId: string;
+  sessionId: string | null;
+}) {
+  useSyncExternalStore(subscribeProjectModels, getProjectModelVersion);
+  useSyncExternalStore(
+    subscribeSessionPreferences,
+    () => (sessionId ? getSessionPreferences(sessionId).modelId ?? "" : ""),
+  );
+  // Subscribe to persisted per-project and global default model changes too.
+  usePreferencesStore((s) => s.projectModelIds);
+  usePreferencesStore((s) => s.defaultModelId);
+  const favoriteIds = usePreferencesStore((s) => s.favoriteModelIds);
+  const compatModelId = usePreferencesStore((s) => s.openaiCompatibleModelId);
+
+  const selected = getProjectEffectiveModelId(projectId, sessionId);
+  const current = getModel(selected);
+  const fullLabel =
+    current.id === "openai-compatible-custom" && compatModelId.trim()
+      ? compatModelId.trim()
+      : current.label;
+  const shortLabel = shortenModelLabel(fullLabel);
+
+  const favoriteModels = useMemo(
+    () => favoriteIds.map((id) => getModel(id as ModelId)),
+    [favoriteIds],
+  );
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          title={`Model: ${fullLabel} — click for favorites`}
+          className="flex max-w-[100px] shrink-0 items-center gap-0.5 rounded bg-background/40 px-1.5 py-0.5 text-[9.5px] font-medium text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+        >
+          <span className="truncate">{shortLabel}</span>
+          <HugeiconsIcon
+            icon={ArrowDown01Icon}
+            size={9}
+            strokeWidth={2}
+            className="shrink-0 opacity-70"
+          />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="center"
+        className="max-h-56 w-48 overflow-y-auto p-1"
+      >
+        {favoriteModels.length === 0 ? (
+          <div className="flex items-center gap-1.5 px-2 py-2 text-[10.5px] text-muted-foreground/80">
+            <HugeiconsIcon
+              icon={StarIcon}
+              size={11}
+              strokeWidth={1.75}
+              className="shrink-0 text-amber-500/80"
+            />
+            <span>No favorite models starred yet.</span>
+          </div>
+        ) : (
+          favoriteModels.map((m) => {
+            const isSelected = m.id === selected;
+            const label =
+              m.id === "openai-compatible-custom" && compatModelId.trim()
+                ? compatModelId.trim()
+                : m.label;
+            return (
+              <DropdownMenuItem
+                key={m.id}
+                onSelect={() => {
+                  setProjectSelectedModelId(projectId, m.id as ModelId);
+                }}
+                className={cn(
+                  "flex cursor-pointer items-center gap-1.5 rounded px-2 py-1 text-[11px]",
+                  isSelected
+                    ? "bg-accent/60 font-medium text-foreground"
+                    : "text-foreground/85",
+                )}
+              >
+                <HugeiconsIcon
+                  icon={StarIcon}
+                  size={10}
+                  strokeWidth={2}
+                  className="shrink-0 fill-amber-500 text-amber-500"
+                />
+                <span className="min-w-0 flex-1 truncate">{label}</span>
+                {isSelected ? (
+                  <HugeiconsIcon
+                    icon={Tick01Icon}
+                    size={11}
+                    strokeWidth={2}
+                    className="shrink-0 text-foreground"
+                  />
+                ) : null}
+              </DropdownMenuItem>
+            );
+          })
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 });
 
@@ -779,7 +938,7 @@ const GroupCardBody = memo(function GroupCardBody(props: GridCellProps & { group
                   No messages yet
                 </div>
               ) : (
-                group.messages.map((m) =>
+                group.messages.slice(-40).map((m) =>
                   m.from === "system" ? (
                     <div
                       key={m.id}
@@ -864,9 +1023,15 @@ type CellBodyProps = GridCellProps & { sessionId: string; projectId: string };
 
 const CellBody = memo(function CellBody(props: CellBodyProps) {
   const { sessionId, micRecording, micTranscribing, micBusy, micTarget, voiceError, onMicDown, onMicStop } = props;
-  // Session-scoped busy signal (thinking/streaming/awaiting-approval),
-  // subscribed through the shared meta version counter.
-  useSyncExternalStore(subscribeSessionAgentMeta, getSessionMetaVersion);
+  // Session-scoped busy signal (thinking/streaming/awaiting-approval).
+  // PER-SESSION snapshot (freeze fix, 2026-11-22): the global meta version
+  // moves on every streaming patch of ANY session (outputTps alone fires
+  // 2x/s per streaming agent), which re-rendered all 8 cards at that rate.
+  // The per-session counter only moves when THIS session's meta changes.
+  useSyncExternalStore(
+    subscribeSessionAgentMeta,
+    () => getSessionMetaVersionFor(sessionId),
+  );
   const meta = getSessionAgentMeta(sessionId);
   const isBusy =
     meta.status === "thinking" ||
@@ -913,6 +1078,7 @@ const CellBody = memo(function CellBody(props: CellBodyProps) {
         </AiErrorBoundary>
       </TranscriptFrame>
       <CellInput
+        key={sessionId}
         sessionId={sessionId}
         chat={chat}
         busy={busy}

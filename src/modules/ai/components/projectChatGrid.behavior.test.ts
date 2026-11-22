@@ -153,14 +153,34 @@ describe("Workspaces grid behavior (source pins)", () => {
       "utf8",
     );
     expect(store).toContain("export function setSessionAutoApprove(");
-    // No button-in-button: the pill renders in the header DIV. Slice budget
-    // covers the drag-to-reorder grip + its comment (2026-11-20).
+    // No button-in-button: the pill and new-session + button render in the
+    // header DIV. Ask/Allow sits on the left next to the project title;
+    // the + button is right-aligned to open a new session in place without
+    // entering the project.
     const headerBlock = grid.slice(
       grid.indexOf("Slim header"),
       grid.indexOf("GroupCardBody group={group}"),
     );
     expect(headerBlock).toContain("<div");
     expect(headerBlock).toContain("<SessionApprovePill");
+    expect(headerBlock).toContain("newSessionForProject(projectId)");
+    expect(headerBlock).toContain('title="New session"');
+    const titleIdx = headerBlock.indexOf("{group ? `${name} · ${group.name}` : name}");
+    const pillIdx = headerBlock.indexOf("<SessionApprovePill");
+    const modelPillIdx = headerBlock.indexOf("<CardModelPill");
+    const newBtnIdx = headerBlock.indexOf("newSessionForProject(projectId)");
+    expect(titleIdx).toBeGreaterThan(-1);
+    expect(pillIdx).toBeGreaterThan(titleIdx);
+    expect(modelPillIdx).toBeGreaterThan(pillIdx);
+    expect(newBtnIdx).toBeGreaterThan(modelPillIdx);
+  });
+
+  it("each card header centers a compact model pill with a favorites dropdown", () => {
+    expect(grid).toContain("<CardModelPill projectId={projectId} sessionId={sessionId} />");
+    expect(grid).toContain("getProjectEffectiveModelId(projectId, sessionId)");
+    expect(grid).toContain("setProjectSelectedModelId(projectId, m.id as ModelId)");
+    expect(grid).toContain("shortenModelLabel(fullLabel)");
+    expect(grid).toContain("favoriteIds.map((id) => getModel(id as ModelId))");
   });
 
   it("the status bar hides in Workspaces mode", () => {
@@ -434,5 +454,27 @@ describe("Workspaces grid behavior (source pins)", () => {
     expect(terminalStack).toContain("s.mini.open && s.mini.expanded");
     expect(terminalStack).toContain("s.groupPanelExpanded");
     expect(terminalStack).toContain("projectActive && !occludedByOverlay && t.id === activeId");
+  });
+
+  it("bounds long-chat streaming cost via per-message WeakMap caches and transcript windowing", () => {
+    const chat = readFileSync(
+      new URL("./AiChat.tsx", import.meta.url),
+      "utf8",
+    );
+    const bridge = readFileSync(
+      new URL("./AgentRunBridge.tsx", import.meta.url),
+      "utf8",
+    );
+    const contextTokens = readFileSync(
+      new URL("../lib/media/contextTokens.ts", import.meta.url),
+      "utf8",
+    );
+    expect(chat).toContain("const TRANSCRIPT_WINDOW_FULL = 60;");
+    expect(chat).toContain("const TRANSCRIPT_WINDOW_COMPACT = 30;");
+    expect(chat).toContain("Show earlier messages");
+    expect(bridge).toContain("bridgeMessageScanCache = new WeakMap");
+    expect(bridge).toContain("scanMessageForBridge(m, i === lastIdx)");
+    expect(contextTokens).toContain("messageCharsCache = new WeakMap");
+    expect(grid).toContain("getSessionMetaVersionFor(sessionId)");
   });
 });
