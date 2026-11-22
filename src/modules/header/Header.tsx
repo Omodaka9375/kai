@@ -294,7 +294,7 @@ export function Header({
             so playback controls stay reachable in grid mode. */}
         {chatGridOpen && radioEnabled && (
           <span className="ml-2 flex min-w-0 items-center">
-            <RadioMarquee />
+            <RadioMarquee placement="header" />
           </span>
         )}
       </div>

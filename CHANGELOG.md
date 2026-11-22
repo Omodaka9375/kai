@@ -6,6 +6,7 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ## [3.4.0]
 
+- Radio: in Workspaces mode the header station picker opens below and left-aligned with the button instead of extending off to its left.
 - Terminal: terminal text no longer bleeds from behind an expanded AI/group window or the Workspaces grid when a terminal tab is open.
 - Assistant: a stale custom endpoint override no longer kills every Telegram turn. When the assistant's own saved model name fails on the first model call, the turn retries once on the global Settings → Models endpoint and clears the dead override.
 - Chat: typing no longer lags while several projects stream at once - the tokens/second readout updates twice a second instead of on every chunk, removing a per-chunk re-render storm across all open project cards.

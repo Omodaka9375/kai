@@ -169,7 +169,13 @@ describe("Workspaces grid behavior (source pins)", () => {
 
   it("the radio marquee re-homes into the header while the status bar is gone", () => {
     expect(header).toContain("chatGridOpen && radioEnabled");
-    expect(header).toContain("<RadioMarquee />");
+    expect(header).toContain('<RadioMarquee placement="header" />');
+    const radio = readFileSync(
+      new URL("../../radio/RadioMarquee.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(radio).toContain('align={placement === "header" ? "start" : "end"}');
+    expect(radio).toContain('side={placement === "header" ? "bottom" : "top"}');
   });
 
   it("cards are uniform - no selected outline in the universal view", () => {

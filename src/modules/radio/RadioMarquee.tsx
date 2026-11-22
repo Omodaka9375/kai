@@ -44,7 +44,15 @@ const NOW_PLAYING_POLL_MS = 20_000;
 /** Live radio metadata (current track) shown in the marquee while playing. */
 type NowPlaying = { artist: string | null; title: string | null } | null;
 
-export function RadioMarquee() {
+export function RadioMarquee({
+  placement = "statusbar",
+}: {
+  /** Where the marquee is mounted. Status bar sits at the bottom center (menu
+   *  opens up, right-aligned); in Workspaces the marquee re-homes to the
+   *  top-left header (menu opens down, left-aligned so it never hangs off the
+   *  left of the button). */
+  placement?: "statusbar" | "header";
+} = {}) {
   const player = useRadioPlayer();
   const [muted, setMuted] = useState(radioGetMuted());
   const [volume, setVolume] = useState(radioGetVolume());
@@ -228,8 +236,8 @@ export function RadioMarquee() {
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent
-          align="end"
-          side="top"
+          align={placement === "header" ? "start" : "end"}
+          side={placement === "header" ? "bottom" : "top"}
           className="max-h-[50vh] min-w-48 overflow-y-auto"
         >
           <div className="px-1.5 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
