@@ -403,6 +403,8 @@ describe("decideReflex", () => {
     // same guard that stopped the radio coding-prompt hijack.
     const cases: Array<[string, string]> = [
       ["start building the dynamic openai proxy", "stop_agent"],
+      ["stop the build", "stop_agent"],
+      ["cancel the docker container", "stop_agent"],
       ["refactor the auth module", "new_session"],
       ["explain the pty session spawn lock", "list_sessions"],
       ["fix the router bug", "get_time"],

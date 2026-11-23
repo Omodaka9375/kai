@@ -656,8 +656,14 @@ const DOMAIN_TRIGGERS: Record<string, string[]> = {
     "mik", "idő", "dátum", "nap", "hány", "ma",
   ],
   stop_agent: [
-    "stop", "cancel", "halt", "abort", "kill the", "interrupt",
-    "agent", "run", "generation", "reply", "reply",
+    // Require an agent/run subject (never bare "stop"/"cancel"): Run #5 live
+    // battery caught "stop the build" classifying as stop_agent at 0.78.
+    // Bare verbs would let coding commands ("stop the build", "cancel the
+    // docker container") fire locally; requiring the agent/run target blocks
+    // them while "stop the agent" / "cancel the current run" still fire.
+    "agent", "current run", "this run", "the run", "cancel run", "stop running",
+    "generation", "generating", "reply", "replying", "response", "responding",
+    "stream", "streaming", "assistant", "thinking", "stop working", "stop now",
   ],
   new_session: [
     "new chat", "new session", "fresh", "start over", "start a new",
