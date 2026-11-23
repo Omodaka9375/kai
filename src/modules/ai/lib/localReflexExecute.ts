@@ -16,10 +16,18 @@ import type { InferUIMessageChunk, UIMessage } from "ai";
 type ExecutableTool = {
   execute?: (input: unknown, options: unknown) => Promise<unknown>;
   needsApproval?: boolean | ((input: unknown, options: unknown) => boolean);
+  inputSchema?: {
+    safeParse?: (
+      input: unknown,
+    ) => { success: true; data: unknown } | { success: false };
+  };
 };
 
 export type ReflexExecResult = {
   ok: boolean;
+  /** True when at least one call already executed (partial mutation — caller
+   *  must report what ran instead of silently re-running the prompt in the LLM). */
+  partial?: boolean;
   /** One line per executed call, for the synthetic assistant message. */
   lines: string[];
 };
@@ -36,31 +44,90 @@ function isApprovalRequired(tool: ExecutableTool, input: unknown): boolean {
   return na === true;
 }
 
+function isSoftToolFailure(result: unknown): string | null {
+  if (!result || typeof result !== "object") return null;
+  const r = result as Record<string, unknown>;
+  if (typeof r.error === "string" && r.error.trim().length > 0) {
+    return r.error;
+  }
+  if (r.ok === false) {
+    return typeof r.note === "string" && r.note.trim().length > 0
+      ? r.note
+      : "action failed";
+  }
+  return null;
+}
+
 export async function executeReflexCalls(
   calls: CanonicalCall[],
   ctx: ToolContext,
 ): Promise<ReflexExecResult> {
-  const lines: string[] = [];
-  let tools: Record<string, ExecutableTool> | null = null;
+  if (calls.length === 0) return { ok: false, lines: [] };
+  const tools = buildCoreTools(ctx) as unknown as Record<string, ExecutableTool>;
+
+  // Pre-validate EVERY call (allowlist, tool lookup, Zod inputSchema,
+  // needsApproval) BEFORE mutating anything, so validation errors never
+  // cause partial multi-call execution.
+  const prepared: Array<{
+    call: CanonicalCall;
+    tool: ExecutableTool;
+    parsedInput: unknown;
+  }> = [];
 
   for (const call of calls) {
     if (!REFLEX_ALLOWED_CANONICAL_TOOLS.has(call.name)) {
-      return { ok: false, lines };
+      return { ok: false, lines: [] };
     }
-    if (!tools) tools = buildCoreTools(ctx) as unknown as Record<string, ExecutableTool>;
     const tool = tools[call.name];
     if (!tool || typeof tool.execute !== "function") {
-      return { ok: false, lines };
+      return { ok: false, lines: [] };
     }
-    if (isApprovalRequired(tool, call.arguments)) {
-      return { ok: false, lines };
+    let parsedInput: unknown = call.arguments;
+    if (typeof tool.inputSchema?.safeParse === "function") {
+      const parsed = tool.inputSchema.safeParse(call.arguments);
+      if (!parsed.success) {
+        return { ok: false, lines: [] };
+      }
+      parsedInput = parsed.data;
     }
+    if (isApprovalRequired(tool, parsedInput)) {
+      return { ok: false, lines: [] };
+    }
+    prepared.push({ call, tool, parsedInput });
+  }
+
+  const lines: string[] = [];
+  let succeededCount = 0;
+
+  for (const { call, tool, parsedInput } of prepared) {
     try {
-      const result = await tool.execute(call.arguments, {});
-      lines.push(describeCall(call.name, call.arguments, result));
+      const result = await tool.execute!(parsedInput, {});
+      const softErr = isSoftToolFailure(result);
+      if (softErr) {
+        if (succeededCount > 0) {
+          lines.push(`${call.name}: ${softErr}`);
+          return { ok: false, partial: true, lines };
+        }
+        // First call returned a soft error (e.g. unknown station/persona):
+        // nothing mutated yet, so fall through to the LLM cleanly.
+        return { ok: false, lines: [] };
+      }
+      succeededCount++;
+      lines.push(
+        describeCall(
+          call.name,
+          (parsedInput && typeof parsedInput === "object"
+            ? (parsedInput as Record<string, unknown>)
+            : call.arguments),
+          result,
+        ),
+      );
     } catch (e) {
-      lines.push(`${call.name}: failed (${String(e).slice(0, 120)})`);
-      return { ok: false, lines };
+      if (succeededCount > 0) {
+        lines.push(`${call.name}: failed (${String(e).slice(0, 120)})`);
+        return { ok: false, partial: true, lines };
+      }
+      return { ok: false, lines: [] };
     }
   }
 

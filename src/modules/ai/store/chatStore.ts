@@ -1222,13 +1222,8 @@ const runtimeDeps: ChatRuntimeDeps = {
   abortRunController,
   compactActiveSession: () =>
     useChatStore.getState().compactActiveSession(),
-  compactSession: (sessionId) => {
-    const previous = useChatStore.getState().activeSessionId;
-    if (previous !== sessionId) useChatStore.getState().switchSession(sessionId);
-    const result = useChatStore.getState().compactActiveSession();
-    if (previous !== sessionId && previous) useChatStore.getState().switchSession(previous);
-    return result;
-  },
+  compactSession: (sessionId) =>
+    useChatStore.getState().compactSessionById(sessionId),
 };
 
 /**

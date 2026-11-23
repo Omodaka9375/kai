@@ -287,17 +287,17 @@ describe("path-recovery wiring (source pins)", () => {
   const agent = readFileSync(new URL("../lib/agent.ts", import.meta.url), "utf8");
 
   it("edit falls back to content-verified recovery before erroring, and discloses it", () => {
-    expect(edit).toContain("recoverEditTargetPathByContent(ctx, old_string)");
-    const recoverIdx = edit.indexOf("recoverEditTargetPathByContent(ctx, old_string)");
+    expect(edit).toContain("recoverEditTargetPathByContent(");
+    const recoverIdx = edit.indexOf("recoverEditTargetPathByContent(\n            ctx,\n            old_string");
     const errIdx = edit.indexOf("path is required and could not be inferred");
     expect(recoverIdx).toBeGreaterThan(-1);
     expect(recoverIdx).toBeLessThan(errIdx);
     expect(edit).toContain("path field was missing from the call");
   });
 
-  it("batch_edit inherits content-verified or recency target for truncated entries", () => {
-    expect(batchEdit).toContain("recoverEditTargetPathByContent(ctx, edit.old_string)");
-    expect(batchEdit).toContain("recoverEditTargetPath(ctx)");
+  it("batch_edit inherits content-verified target for truncated entries (without undoing ambiguity refusal)", () => {
+    expect(batchEdit).toContain("recoverEditTargetPathByContent(ctx, edit.old_string");
+    expect(batchEdit).not.toContain("recoverEditTargetPath(ctx)");
   });
 
   it("agent.ts wires experimental_repairToolCall -> repairEditToolCallInput", () => {

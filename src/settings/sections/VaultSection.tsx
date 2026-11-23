@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Delete02Icon from "@hugeicons/core-free-icons/Delete02Icon";
 import LockKeyIcon from "@hugeicons/core-free-icons/LockKeyIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -36,38 +36,66 @@ function formatTime(ts: number): string {
   return sameDay ? time : `${d.toLocaleDateString()} ${time}`;
 }
 
+const VAULT_NAME_RE = /^[A-Za-z0-9_-]+$/;
+
 export function VaultSection() {
   const [entries, setEntries] = useState<VaultEntryInfo[] | null>(null);
   const [name, setName] = useState("");
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const aliveRef = useRef(true);
 
-  const refresh = useCallback(() => {
-    invoke<VaultEntryInfo[]>("vault_list")
-      .then(setEntries)
-      .catch((e) => {
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
+
+  const refresh = useCallback(async () => {
+    try {
+      const list = await invoke<VaultEntryInfo[]>("vault_list");
+      if (aliveRef.current) setEntries(list);
+    } catch (e) {
+      if (aliveRef.current) {
         setError(String(e));
         setEntries([]);
-      });
+      }
+    }
   }, []);
 
   useEffect(() => {
-    refresh();
+    void refresh();
   }, [refresh]);
 
-  const onAdd = async () => {
+  const trimmedName = name.trim();
+  const nameInvalid = trimmedName.length > 0 && !VAULT_NAME_RE.test(trimmedName);
+  const willOverwrite = Boolean(
+    trimmedName && entries?.some((e) => e.name === trimmedName),
+  );
+  const canAdd =
+    trimmedName.length > 0 &&
+    !nameInvalid &&
+    value.trim().length > 0 &&
+    !busy;
+
+  const onAdd = async (ev?: React.FormEvent) => {
+    ev?.preventDefault();
+    if (!canAdd) return;
     setBusy(true);
     setError(null);
     try {
-      await invoke("vault_set", { name: name.trim(), value });
-      setName("");
-      setValue("");
-      refresh();
+      await invoke("vault_set", { name: trimmedName, value });
+      if (aliveRef.current) {
+        setName("");
+        setValue("");
+      }
+      await refresh();
     } catch (e) {
-      setError(String(e));
+      if (aliveRef.current) setError(String(e));
     } finally {
-      setBusy(false);
+      if (aliveRef.current) setBusy(false);
     }
   };
 
@@ -76,15 +104,13 @@ export function VaultSection() {
     setError(null);
     try {
       await invoke("vault_delete", { name: entryName });
-      refresh();
+      await refresh();
     } catch (e) {
-      setError(String(e));
+      if (aliveRef.current) setError(String(e));
     } finally {
-      setBusy(false);
+      if (aliveRef.current) setBusy(false);
     }
   };
-
-  const canAdd = name.trim().length > 0 && value.length > 0 && !busy;
 
   return (
     <div className="flex flex-col gap-4">
@@ -157,9 +183,12 @@ export function VaultSection() {
         </div>
       )}
 
-      <div className="flex flex-col gap-1.5 rounded-2xl border border-border bg-card/50 p-3">
+      <form
+        onSubmit={(ev) => void onAdd(ev)}
+        className="flex flex-col gap-1.5 rounded-2xl border border-border bg-card/50 p-3"
+      >
         <div className="px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
-          Add a secret
+          {willOverwrite ? `Update "${trimmedName}"` : "Add a secret"}
         </div>
         <div className="flex gap-1.5">
           <Input
@@ -179,19 +208,28 @@ export function VaultSection() {
             autoComplete="off"
           />
           <Button
+            type="submit"
             size="sm"
             className="h-8"
-            onClick={() => void onAdd()}
             disabled={!canAdd}
           >
-            {busy ? "Saving…" : "Add"}
+            {busy ? "Saving…" : willOverwrite ? "Update" : "Add"}
           </Button>
         </div>
+        {nameInvalid ? (
+          <div className="px-1 text-[10.5px] text-destructive">
+            Use only letters, digits, underscores, or hyphens.
+          </div>
+        ) : willOverwrite ? (
+          <div className="px-1 text-[10.5px] text-amber-600 dark:text-amber-400">
+            An entry named <span className="font-mono">{trimmedName}</span> already exists and will be overwritten.
+          </div>
+        ) : null}
         <div className="px-1 text-[10.5px] leading-relaxed text-muted-foreground/70">
           The value is written to the OS keyring only. KAI never shows it back
           — not here, not in chat, not in tool output.
         </div>
-      </div>
+      </form>
     </div>
   );
 }

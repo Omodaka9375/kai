@@ -311,10 +311,19 @@ export function AiChatView({
     subscribeSessionAgentMeta,
     () => (sessionId ? getSessionMetaVersionFor(sessionId) : 0),
   );
+  // Subscribe to global agentMeta ONLY when sessionId is omitted (defensive:
+  // both AiMiniWindow and ProjectChatGrid pass sessionId, so this avoids
+  // extra renders there while keeping sessionless callers reactive).
+  const fallbackAgentMeta = useChatStore((s) =>
+    sessionId ? null : s.agentMeta,
+  );
   const ownedMeta = useMemo(
-    () => (sessionId ? getSessionAgentMeta(sessionId) : useChatStore.getState().agentMeta),
+    () =>
+      sessionId
+        ? getSessionAgentMeta(sessionId)
+        : (fallbackAgentMeta ?? useChatStore.getState().agentMeta),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [sessionId, ownedMetaVersion],
+    [sessionId, ownedMetaVersion, fallbackAgentMeta],
   );
   const hitStepCap = ownedMeta.hitStepCap;
   const finishReason = ownedMeta.finishReason;
@@ -322,6 +331,14 @@ export function AiChatView({
   const summarizing = ownedMeta.summarizing;
   const summaryNotice = ownedMeta.summaryNotice;
   const patchAgentMeta = useChatStore((s) => s.patchAgentMeta);
+  const activeSessionId = useChatStore((s) => s.activeSessionId);
+  const patchOwnedMeta = useCallback(
+    (patch: Partial<typeof ownedMeta>) => {
+      if (sessionId) patchSessionAgentMeta(sessionId, patch);
+      else patchAgentMeta(patch);
+    },
+    [sessionId, patchAgentMeta],
+  );
   const showContinue =
     !isBusy && hitStepCap && lastMessage?.role === "assistant";
   // Show "Done" when the agent finishes and the last visible part is a tool
@@ -502,7 +519,12 @@ export function AiChatView({
                 message={m}
                 onApproval={onApproval}
                 streaming={m.id === streamingMessageId}
-                forkable={!isBusy && m.role === "user" && idx > 0}
+                forkable={
+                  !isBusy &&
+                  m.role === "user" &&
+                  idx > 0 &&
+                  (!sessionId || sessionId === activeSessionId)
+                }
                 messageIndex={idx}
                 timestamp={ts}
                 compact={compact}
@@ -516,13 +538,13 @@ export function AiChatView({
         {compactionNotice && compactionNotice.droppedCount >= 3 && (
           <CompactionNotice
             droppedCount={compactionNotice.droppedCount}
-            onDismiss={() => patchAgentMeta({ compactionNotice: null })}
+            onDismiss={() => patchOwnedMeta({ compactionNotice: null })}
           />
         )}
         {summaryNotice && (
           <SummaryNotice
             text={summaryNotice.text}
-            onDismiss={() => patchAgentMeta({ summaryNotice: null })}
+            onDismiss={() => patchOwnedMeta({ summaryNotice: null })}
           />
         )}
         {summarizing && (

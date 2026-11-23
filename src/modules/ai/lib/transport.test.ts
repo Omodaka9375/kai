@@ -111,55 +111,103 @@ describe("summarizeMessagesNow", () => {
     expect(before).toBeGreaterThan(0);
   });
 
-  it("elides IMAGE file parts in the kept tail EXCEPT on the most recent user message (6-image 120% fix)", () => {
-    // 2026-11-23 report: uploading several images put the context ring at
-    // 200% and /compact could not bring it down — the base64 file parts ride
-    // user messages inside the verbatim-kept tail, so summarizing older
-    // history never touched them. Elide image parts in the tail to text
-    // pointers, keeping only the MOST RECENT user message's images (the
-    // upload the model may still be actively working with).
+  it("elides IMAGE file parts in the kept tail for answered turns and preserves trailing unanswered uploads", () => {
     const msgs = mkMsgs(10);
-    // Pair 14-area message (inside the 6-pair tail, but NOT the last user
-    // message): attach an image file part.
-    const earlierUser = msgs[14]; // "u-7" — inside the kept tail
-    (earlierUser.parts as never[]).push({
-      type: "file",
-      mediaType: "image/png",
-      url: "data:image/png;base64," + "A".repeat(200_000),
-      filename: "screenshot-1.png",
-    } as never);
-    // The LAST user message keeps its image verbatim.
-    const lastUser = msgs[msgs.length - 2]; // "u-9"
-    (lastUser.parts as never[]).push({
+    // Answered user message inside the kept tail, WITH a savedAt attachment block.
+    const earlierUser = msgs[14]; // "u-7"
+    (earlierUser.parts as never[]).push(
+      {
+        type: "text",
+        text: '<attachment name="screenshot-1.png" savedAt="/tmp/screenshot-1.png">saved</attachment>',
+      } as never,
+      {
+        type: "file",
+        mediaType: "image/png",
+        url: "data:image/png;base64," + "A".repeat(200_000),
+        filename: "screenshot-1.png",
+      } as never,
+    );
+    // Answered last pair ("u-9" followed by "a-9"): elided too on manual /compact.
+    const answeredLastUser = msgs[msgs.length - 2]; // "u-9"
+    (answeredLastUser.parts as never[]).push({
       type: "file",
       mediaType: "image/jpeg",
       url: "data:image/jpeg;base64," + "B".repeat(200_000),
-      filename: "photo-latest.jpg",
+      filename: "photo-answered.jpg",
     } as never);
+    // Trailing UNANSWERED user upload (no assistant message after it): kept verbatim.
+    msgs.push({
+      id: "u-live",
+      role: "user",
+      parts: [
+        { type: "text", text: "analyze this live upload" } as never,
+        {
+          type: "file",
+          mediaType: "image/jpeg",
+          url: "data:image/jpeg;base64," + "C".repeat(200_000),
+          filename: "photo-live.jpg",
+        } as never,
+      ],
+    } as UIMessage);
 
     const out = summarizeMessagesNow(msgs, [], "s1");
     expect(out).not.toBeNull();
     const keptEarlier = out!.find((m) => m.id === "u-7")!;
-    const keptLastUser = out!.find((m) => m.id === "u-9")!;
+    const keptAnswered = out!.find((m) => m.id === "u-9")!;
+    const keptLive = out!.find((m) => m.id === "u-live")!;
 
-    // The EARLIER image is replaced by a compact text pointer.
-    const earlierFile = keptEarlier.parts.find(
-      (p) => (p as { type?: string }).type === "file",
-    );
-    expect(earlierFile).toBeUndefined();
+    // Earlier image with savedAt is wrapped in <attachment> (hidden in UI) and notes savedAt.
+    expect(keptEarlier.parts.find((p) => (p as { type?: string }).type === "file")).toBeUndefined();
     const pointer = keptEarlier.parts.find(
       (p) =>
         (p as { type?: string }).type === "text" &&
         String((p as { text?: string }).text).includes("elided by /compact"),
     ) as unknown as { text?: string };
+    expect(pointer?.text).toContain('<attachment elided="true"');
     expect(pointer?.text).toContain("screenshot-1.png");
-    expect(pointer?.text).toContain("saved path");
+    expect(pointer?.text).toContain("savedAt");
 
-    // The most RECENT user message keeps its image file part verbatim.
-    const lastFile = keptLastUser.parts.find(
+    // Answered upload without savedAt is elided WITHOUT falsely claiming a savedAt path.
+    expect(keptAnswered.parts.find((p) => (p as { type?: string }).type === "file")).toBeUndefined();
+    const noPathPointer = keptAnswered.parts.find(
+      (p) =>
+        (p as { type?: string }).type === "text" &&
+        String((p as { text?: string }).text).includes("elided by /compact"),
+    ) as unknown as { text?: string };
+    expect(noPathPointer?.text).not.toContain("savedAt");
+
+    // Trailing unanswered upload keeps its image file part verbatim.
+    const liveFile = keptLive.parts.find(
       (p) => (p as { type?: string }).type === "file",
     );
-    expect(lastFile).toBeDefined();
-    expect(String((lastFile as { url?: string }).url)).toContain("base64");
+    expect(liveFile).toBeDefined();
+    expect(String((liveFile as { url?: string }).url)).toContain("base64");
+  });
+
+  it("compacts a short (<= 6 pairs) short-text chat when large base64 images blow the context", () => {
+    const shortWithImages: UIMessage[] = [
+      {
+        id: "u-0",
+        role: "user",
+        parts: [
+          { type: "text", text: "check these 6 screenshots" } as never,
+          {
+            type: "file",
+            mediaType: "image/png",
+            url: "data:image/png;base64," + "X".repeat(200_000),
+            filename: "s1.png",
+          } as never,
+        ],
+      } as UIMessage,
+      {
+        id: "a-0",
+        role: "assistant",
+        parts: [{ type: "text", text: "Looks good." }] as never,
+      } as UIMessage,
+    ];
+    const out = summarizeMessagesNow(shortWithImages, [], "s1");
+    expect(out).not.toBeNull();
+    expect(out!.length).toBe(2);
+    expect(out![0].parts.find((p) => (p as { type?: string }).type === "file")).toBeUndefined();
   });
 });

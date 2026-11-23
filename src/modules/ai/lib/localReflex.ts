@@ -23,9 +23,8 @@
  *    probe is cached for 60 s so an absent engine costs nothing per message.
  *
  * Engine: `cactus --model kai-desktop-v1-12L.cact --tools narrow_tools.json
- * --serve` (POST /complete {input}). Endpoint overridable via
- * localStorage["kai.localReflexEndpoint"]; disable entirely with
- * localStorage["kai.localReflex"] = "off".
+ * --serve` (managed by Rust in `src-tauri/src/modules/reflex.rs`, invoked
+ * via `native.reflexClassify`). Disable via localStorage["kai.localReflex"] = "off".
  */
 
 /** Confidence gate: below this the prompt falls through to the cloud LLM.
@@ -387,6 +386,7 @@ type EngineReply = {
 };
 
 let engineDownUntil = 0;
+let engineEnsured = false;
 
 export function reflexDisabled(): boolean {
   try {
@@ -398,17 +398,23 @@ export function reflexDisabled(): boolean {
 
 export function markEngineUnavailable(): void {
   engineDownUntil = Date.now() + 60_000;
+  engineEnsured = false;
 }
 
 export function engineRecentlyDown(): boolean {
   return Date.now() < engineDownUntil;
 }
 
+/** Reset cold-start / down cache (called by ReflexSection after setup/remove). */
+export function resetReflexAvailability(): void {
+  engineDownUntil = 0;
+  engineEnsured = false;
+}
+
 /** Ask the local Needle engine to classify the prompt. Returns null when the
  *  engine is disabled/unreachable/slow (any of which means "use the LLM").
- *  Before the FIRST probe after an engine-down window, ask the Rust bridge
- *  to ensure the downloaded engine is running (no-op when it already is).
- *  Latency is reported so the caller can journal it. */
+ *  On cold start (first prompt, or after a 60s backoff expires), asks the
+ *  Rust bridge to ensure the downloaded engine is running before classifying. */
 export async function classifyWithEngine(
   prompt: string,
 ): Promise<{
@@ -417,14 +423,16 @@ export async function classifyWithEngine(
   latencyMs: number;
 } | null> {
   const t0 = Date.now();
-  if (engineRecentlyDown()) {
-    // One ensure attempt per down-window: cheap when ready, idempotent when
-    // not installed, and it revives the path after an engine restart.
-    const { ensureReflexEngine } = await import("./reflexBridge");
-    if (!(await ensureReflexEngine())) return null;
-    engineDownUntil = 0; // bridge says the engine answers; retry below
-  }
+  // Check disabled FIRST so a disabled toggle never probes or spawns the engine.
   if (reflexDisabled() || engineRecentlyDown()) return null;
+  if (!engineEnsured) {
+    const { ensureReflexEngine } = await import("./reflexBridge");
+    if (!(await ensureReflexEngine())) {
+      markEngineUnavailable();
+      return null;
+    }
+    engineEnsured = true;
+  }
   // CORRECTNESS NOTE: the classification MUST go through the Rust command
   // (native.reflexClassify), NOT a webview fetch: the engine serves no
   // CORS headers, so the webview's fetch to 127.0.0.1:8941 is blocked by
@@ -559,9 +567,12 @@ const UNGROUNDABLE_ARGS = new Set(["dueAt", "repeat"]);
 
 /** "no persona" phrasings the engine maps to the `none` sentinel. */
 const PERSONA_NONE_SYNONYMS = new Set(["none", "__none__", "off", "no persona"]);
+const PERSONA_NONE_TRIGGERS = [
+  "persona", "role", "agent", "default", "reset", "clear", "none", "off", "deactivate", "disable", "remove", "normal",
+];
 
 function normalizeForGrounding(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return s.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
 }
 
 /** True when every key/value of the call is traceable to the prompt text. */
@@ -581,7 +592,8 @@ export function callGroundedInPrompt(prompt: string, call: CanonicalCall): boole
     if (v && norm.includes(v)) continue;
     if (
       call.name === "set_persona" &&
-      PERSONA_NONE_SYNONYMS.has(value.toLowerCase())
+      PERSONA_NONE_SYNONYMS.has(value.toLowerCase()) &&
+      PERSONA_NONE_TRIGGERS.some((t) => raw.includes(t))
     ) {
       continue;
     }

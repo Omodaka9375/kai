@@ -1,7 +1,13 @@
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { native, type ReflexSetupEvent, type ReflexStatus } from "@/modules/ai/lib/native";
-import { Channel } from "@tauri-apps/api/core";
+import {
+  reflexEngineStatus,
+  removeReflexEngine,
+  setupReflexEngine,
+  type ReflexSetupEvent,
+  type ReflexStatus,
+} from "@/modules/ai/lib/reflexBridge";
+import { resetReflexAvailability } from "@/modules/ai/lib/localReflex";
 import { useEffect, useState } from "react";
 import { SectionHeader } from "../components/SectionHeader";
 import { SettingRow } from "../components/SettingRow";
@@ -58,7 +64,7 @@ export function ReflexSection() {
   const [disabled, setDisabled] = useState(isReflexDisabled());
 
   const refreshStatus = () => {
-    void native.reflexStatus().then(setStatus).catch(() => setStatus(null));
+    void reflexEngineStatus().then(setStatus);
   };
   useEffect(() => {
     refreshStatus();
@@ -69,10 +75,9 @@ export function ReflexSection() {
     setBusy("setup");
     setError("");
     setProgress(null);
-    const onEvent = new Channel<ReflexSetupEvent>();
-    onEvent.onmessage = (e) => setProgress(e);
     try {
-      await native.reflexSetup(onEvent);
+      await setupReflexEngine((e) => setProgress(e));
+      resetReflexAvailability();
       refreshStatus();
     } catch (e) {
       setError(String(e));
@@ -86,7 +91,8 @@ export function ReflexSection() {
     setBusy("remove");
     setError("");
     try {
-      await native.reflexRemove();
+      await removeReflexEngine();
+      resetReflexAvailability();
       refreshStatus();
     } catch (e) {
       setError(String(e));
@@ -190,9 +196,13 @@ export function ReflexSection() {
       ) : null}
 
       {installed && status?.updateAvailable && status.latestVersion ? (
-        <div className="rounded-md border border-primary/40 bg-primary/5 px-3 py-2 text-[12px]">
-          A newer model version ({status.latestVersion}) is available. Re-download
-          to update the classifier.
+        <div className="flex items-center justify-between gap-3 rounded-md border border-primary/40 bg-primary/5 px-3 py-2 text-[12px]">
+          <span>
+            A newer model version ({status.latestVersion}) is available.
+          </span>
+          <Button size="sm" disabled={busy !== ""} onClick={onSetup}>
+            {busy === "setup" ? "Updating…" : "Update"}
+          </Button>
         </div>
       ) : null}
 

@@ -29,7 +29,6 @@ import {
   EDIT_MAX_RETRIES,
   ensureReadCache,
   getEditFailures,
-  recoverEditTargetPath,
   recoverEditTargetPathByContent,
 } from "./edit";
 import { newQueuedEditId, usePlanStore } from "../store/planStore";
@@ -74,15 +73,15 @@ export function buildBatchEditTools(ctx: ToolContext) {
         const override = await sandboxOverrideForContext(ctx);
         // PATH RECOVERY (defense-in-depth alongside repairEditToolCall):
         // infer any missing per-entry path via content-verified cache lookup
-        // (or recency fallback) instead of failing the batch.
-        const recoveredTarget = edits.some((e) => !e.path)
-          ? recoverEditTargetPath(ctx)
-          : null;
+        // (which handles 0-match recency fallback internally while refusing
+        // multi-file ambiguity).
         for (const edit of edits) {
           const editPath =
             edit.path ||
-            (await recoverEditTargetPathByContent(ctx, edit.old_string)) ||
-            recoveredTarget ||
+            (await recoverEditTargetPathByContent(ctx, edit.old_string, {
+              replace_all: edit.replace_all,
+              line_hint: edit.line_hint,
+            })) ||
             "";
           if (!editPath)
             return {

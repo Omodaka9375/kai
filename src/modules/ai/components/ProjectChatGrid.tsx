@@ -558,11 +558,17 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
     () => sessionOfCell(projectId),
   );
   // GROUP SURFACE (2026-11-19): when this project's group panel owns the
-  // stack rail, the card shows the GROUP, not the project AI chat. Both
-  // subscriptions re-render the card when the surface flips either way.
-  useSyncExternalStore(subscribeOpenGroupUi, () => openGroupUiId);
-  useSyncExternalStore(subscribeGroupChats, getGroupStoreVersion);
-  const group = useMemo(() => groupOfCell(projectId), [projectId, sessionId]);
+  // stack rail, the card shows the GROUP, not the project AI chat. Capture
+  // the snapshots so `useMemo` recomputes whenever group state or stack
+  // surface changes.
+  const openGroup = useSyncExternalStore(subscribeOpenGroupUi, () => openGroupUiId);
+  const groupVer = useSyncExternalStore(subscribeGroupChats, getGroupStoreVersion);
+  const stackSurface = useChatStore((s) => s.stackRail.surface);
+  const group = useMemo(
+    () => groupOfCell(projectId),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [projectId, sessionId, openGroup, groupVer, stackSurface],
+  );
   // CONTEXT MENU (2026-11-23): right-click a card -> Close Project, the
   // same projectsMenu.closeProject path the rail's X uses (confirmation
   // dialog included - AppShell arms its AlertDialog on this call).
@@ -1516,12 +1522,27 @@ const CellInput = memo(function CellInput({
   // re-reads the draft into the field.
   const draftTick = useChatStore((s) => s._tick);
   const draftRef = useRef<string | null>(null);
+  const lastSessionRef = useRef(sessionId);
   const [text, setText] = useState<string>(() => getSessionPreferences(sessionId).draft ?? "");
   const textRef = useRef(text);
   textRef.current = text;
   useEffect(() => {
     const persisted = getSessionPreferences(sessionId).draft ?? "";
-    if (draftRef.current !== null && draftRef.current !== persisted) {
+    const sessionChanged = lastSessionRef.current !== sessionId;
+    lastSessionRef.current = sessionId;
+    if (sessionChanged) {
+      draftRef.current = persisted;
+      setText(persisted);
+      return;
+    }
+    // Only pull an external draft write (e.g. mic transcript landing) when
+    // `persisted` actually moved away from what we last saw/wrote AND the
+    // user does not have unsaved local keystrokes pending in the debounce.
+    if (
+      draftRef.current !== null &&
+      draftRef.current !== persisted &&
+      textRef.current === draftRef.current
+    ) {
       setText(persisted);
     }
     draftRef.current = persisted;
@@ -1531,6 +1552,7 @@ const CellInput = memo(function CellInput({
   // Persist the field (debounced, same contract as the main composer).
   useEffect(() => {
     const timer = setTimeout(() => {
+      draftRef.current = text;
       setSessionPreferences(sessionId, { draft: text || undefined });
     }, 150);
     return () => clearTimeout(timer);
@@ -1555,7 +1577,7 @@ const CellInput = memo(function CellInput({
 
   useEffect(() => {
     setActiveIndex(0);
-  }, [pickerOpen]);
+  }, [pickerOpen, trigger?.query, trigger?.char]);
 
   const filteredItems = useMemo<PickerItem[]>(() => {
     if (!trigger) return [];
@@ -1589,28 +1611,31 @@ const CellInput = memo(function CellInput({
     setTrigger(detectSnippetTrigger(textRef.current, el.selectionStart ?? 0));
   }, []);
 
-  const onPickItem = (item: PickerItem) => {
-    if (!trigger) return;
-    const before = textRef.current.slice(0, trigger.start);
-    const after = textRef.current.slice(trigger.end).replace(/^\s+/, "");
-    // Insert the token the send path will expand: `#handle` for skills,
-    // the command name for commands — the card's send() runs
-    // expandSkillTokens / tryRunSlashCommand on submit just like the main
-    // composer's submit.
-    const token =
-      item.kind === "snippet"
-        ? `#${item.snippet.handle} `
-        : `/${item.command.name} `;
-    const next = `${before}${token}${after}`;
-    setText(next);
-    setTrigger(null);
-    requestAnimationFrame(() => {
-      const el = textareaRef.current;
-      if (!el) return;
-      el.focus();
-      el.setSelectionRange((before + token).length, (before + token).length);
-    });
-  };
+  const onPickItem = useCallback(
+    (item: PickerItem) => {
+      if (!trigger) return;
+      const before = textRef.current.slice(0, trigger.start);
+      const after = textRef.current.slice(trigger.end).replace(/^\s+/, "");
+      // Insert the token the send path will expand: `#handle` for skills,
+      // the command name for commands — the card's send() runs
+      // expandSkillTokens / tryRunSlashCommand on submit just like the main
+      // composer's submit.
+      const token =
+        item.kind === "snippet"
+          ? `#${item.snippet.handle} `
+          : `/${item.command.name} `;
+      const next = `${before}${token}${after}`;
+      setText(next);
+      setTrigger(null);
+      requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (!el) return;
+        el.focus();
+        el.setSelectionRange((before + token).length, (before + token).length);
+      });
+    },
+    [trigger],
+  );
 
   // CARD PASTE (2026-11-19): pending paste attachments (text chips + image
   // pills) for THIS card, cleared on send. Image path blocks persist at
@@ -1661,44 +1686,117 @@ const CellInput = memo(function CellInput({
     if (cmdToastTimer.current) clearTimeout(cmdToastTimer.current);
   }, []);
 
+  const sendingRef = useRef(false);
+
   const send = useCallback(() => {
+    if (sendingRef.current) return;
     const trimmed = textRef.current.trim();
     const files = pastedRef.current;
     if (!trimmed && files.length === 0) return;
+    sendingRef.current = true;
     // SLASH COMMAND INTERCEPT (2026-11-23): `/compact`, `/clean` and the
     // other commands run against THIS session (opts.sessionId), never the
     // foreground project's. Handled -> do not send a chat message;
     // send-prompt -> the command's prompt rides INSTEAD of the draft.
     void (async () => {
-      let outgoing = trimmed;
-      if (files.length === 0 && (trimmed.startsWith("/") || trimmed.startsWith("#"))) {
-        const outcome = await tryRunSlashCommand(trimmed, { sessionId });
-        if (outcome.kind === "handled") {
+      try {
+        let outgoing = trimmed;
+        if (files.length === 0 && (trimmed.startsWith("/") || trimmed.startsWith("#"))) {
+          const outcome = await tryRunSlashCommand(trimmed, { sessionId });
+          if (outcome.kind === "handled") {
+            setText("");
+            draftRef.current = "";
+            setSessionPreferences(sessionId, { draft: undefined });
+            if (outcome.toast) showCmdToast(outcome.toast);
+            return;
+          }
+          if (outcome.kind === "send-prompt") {
+            outgoing = wrapWithCommandMarker(outcome.prompt, outcome.commandName ?? "");
+          }
+        }
+        // SKILL / COMMAND EXPANSION (2026-11-23): `#handle` tokens expand
+        // into <skill> blocks against the CARD's project (not the
+        // foreground project). A send-prompt command rides as the body
+        // verbatim (it is not a skill token).
+        const { body: bodyAfterTokens, blocks: skillBlocks } = expandSkillTokens(
+          outgoing,
+          skillsForProject(root),
+        );
+        const sendText = [...skillBlocks, bodyAfterTokens].filter(Boolean).join("\n\n");
+        if (files.length === 0) {
+          // No attachments: the original pure-text path (steering keeps its
+          // exact wire shape).
+          if (busy) {
+            setSessionSteeringMessage(sessionId, [{ type: "text", text: sendText }]);
+          } else {
+            void chat.sendMessage({ role: "user", parts: [{ type: "text", text: sendText }] });
+            patchSessionAgentMeta(sessionId, {
+              hitStepCap: false,
+              finishReason: "",
+              compactionNotice: null,
+              summaryNotice: null,
+            });
+          }
           setText("");
+          draftRef.current = "";
           setSessionPreferences(sessionId, { draft: undefined });
-          if (outcome.toast) showCmdToast(outcome.toast);
           return;
         }
-        if (outcome.kind === "send-prompt") {
-          outgoing = wrapWithCommandMarker(outcome.prompt, outcome.commandName ?? "");
+        // With attachments: compose skill/path/text blocks first, then inline
+        // image file parts - the same wire shape the main composer produces.
+        const textBlocks = files
+          .filter((f) => f.kind === "text")
+          .map(
+            (f) =>
+              `<file name="${f.name}" mediaType="${f.mediaType}">\n${f.payload}\n</file>`,
+          );
+        const imageAtts = files.filter((f) => f.kind === "image");
+        const pathBlocks: string[] = [];
+        for (const f of imageAtts) {
+          const b64 = f.payload.split(",")[1] ?? "";
+          try {
+            const { persistUploadedMedia } = await import("../lib/media/persist");
+            const { native } = await import("../lib/native");
+            const path = await persistUploadedMedia(native, {
+              name: f.name,
+              mimeType: f.mediaType,
+              base64: b64,
+            });
+            if (path) {
+              pathBlocks.push(
+                `<attachment name="${f.name}" savedAt="${path}">The attached image ${f.name} is also saved at the file path above - pass that path to tools that need a file.</attachment>`,
+              );
+            }
+          } catch {
+            // Best-effort: the image still rides inline as a file part.
+          }
         }
-      }
-      // SKILL / COMMAND EXPANSION (2026-11-23): `#handle` tokens expand
-      // into <skill> blocks against the CARD's project (not the
-      // foreground project). A send-prompt command rides as the body
-      // verbatim (it is not a skill token).
-      const { body: bodyAfterTokens, blocks: skillBlocks } = expandSkillTokens(
-        outgoing,
-        skillsForProject(root),
-      );
-      const sendText = [...skillBlocks, bodyAfterTokens].filter(Boolean).join("\n\n");
-      if (files.length === 0) {
-        // No attachments: the original pure-text path (steering keeps its
-        // exact wire shape).
+        const composed = [...skillBlocks, ...pathBlocks, ...textBlocks, bodyAfterTokens]
+          .filter(Boolean)
+          .join("\n\n");
+        const parts: Array<
+          | { type: "text"; text: string }
+          | { type: "file"; mediaType: string; url: string; filename?: string }
+        > = [];
+        if (composed) parts.push({ type: "text", text: composed });
+        for (const f of imageAtts) {
+          parts.push({
+            type: "file",
+            mediaType: f.mediaType,
+            url: f.payload,
+            filename: f.name,
+          });
+        }
         if (busy) {
-          setSessionSteeringMessage(sessionId, [{ type: "text", text: sendText }]);
+          setSessionSteeringMessage(
+            sessionId,
+            parts as unknown as Array<{ type: "text"; text: string }>,
+          );
         } else {
-          void chat.sendMessage({ role: "user", parts: [{ type: "text", text: sendText }] });
+          void chat.sendMessage({
+            role: "user",
+            parts,
+          } as unknown as Parameters<typeof chat.sendMessage>[0]);
           patchSessionAgentMeta(sessionId, {
             hitStepCap: false,
             finishReason: "",
@@ -1707,75 +1805,12 @@ const CellInput = memo(function CellInput({
           });
         }
         setText("");
+        draftRef.current = "";
+        setPasted([]);
         setSessionPreferences(sessionId, { draft: undefined });
-        return;
+      } finally {
+        sendingRef.current = false;
       }
-      // With attachments: compose text blocks first, then inline image file
-      // parts - the same wire shape the main composer produces. Image path
-      // blocks resolve before the send (async persistence, best-effort).
-      const textBlocks = files
-        .filter((f) => f.kind === "text")
-        .map(
-          (f) =>
-            `<file name="${f.name}" mediaType="${f.mediaType}">\n${f.payload}\n</file>`,
-        );
-      const imageAtts = files.filter((f) => f.kind === "image");
-      const pathBlocks: string[] = [];
-      for (const f of imageAtts) {
-        const b64 = f.payload.split(",")[1] ?? "";
-        try {
-          const { persistUploadedMedia } = await import("../lib/media/persist");
-          const { native } = await import("../lib/native");
-          const path = await persistUploadedMedia(native, {
-            name: f.name,
-            mimeType: f.mediaType,
-            base64: b64,
-          });
-          if (path) {
-            pathBlocks.push(
-              `<attachment name="${f.name}" savedAt="${path}">The attached image ${f.name} is also saved at the file path above - pass that path to tools that need a file.</attachment>`,
-            );
-          }
-        } catch {
-          // Best-effort: the image still rides inline as a file part.
-        }
-      }
-      const composed = [...pathBlocks, ...textBlocks, outgoing]
-        .filter(Boolean)
-        .join("\n\n");
-      const parts: Array<
-        | { type: "text"; text: string }
-        | { type: "file"; mediaType: string; url: string; filename?: string }
-      > = [];
-      if (composed) parts.push({ type: "text", text: composed });
-      for (const f of imageAtts) {
-        parts.push({
-          type: "file",
-          mediaType: f.mediaType,
-          url: f.payload,
-          filename: f.name,
-        });
-      }
-      if (busy) {
-        setSessionSteeringMessage(
-          sessionId,
-          parts as unknown as Array<{ type: "text"; text: string }>,
-        );
-      } else {
-        void chat.sendMessage({
-          role: "user",
-          parts,
-        } as unknown as Parameters<typeof chat.sendMessage>[0]);
-        patchSessionAgentMeta(sessionId, {
-          hitStepCap: false,
-          finishReason: "",
-          compactionNotice: null,
-          summaryNotice: null,
-        });
-      }
-      setText("");
-      setPasted([]);
-      setSessionPreferences(sessionId, { draft: undefined });
     })();
   }, [busy, chat, sessionId, root, showCmdToast]);
 
@@ -1797,7 +1832,8 @@ const CellInput = memo(function CellInput({
           return;
         }
         if (e.key === "Tab" || (e.key === "Enter" && filteredItems.length > 0)) {
-          const it = filteredItems[activeIndex];
+          const safeIdx = Math.min(activeIndex, Math.max(0, filteredItems.length - 1));
+          const it = filteredItems[safeIdx];
           if (it) {
             e.preventDefault();
             onPickItem(it);
@@ -1815,7 +1851,7 @@ const CellInput = memo(function CellInput({
         send();
       }
     },
-    [send, pickerOpen, filteredItems, activeIndex],
+    [send, pickerOpen, filteredItems, activeIndex, onPickItem],
   );
 
   return (

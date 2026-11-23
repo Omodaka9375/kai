@@ -1,11 +1,10 @@
 /**
  * Reflex engine bridge (frontend side of src-tauri reflex.rs).
  *
- * The classifier in localReflex.ts previously talked straight to a
- * user-started `serve-engine.ps1` on a fixed port. With Option A (downloaded
- * engine), this bridge owns the lifecycle: it asks Rust to ensure the
- * artifacts exist and the serve process is running, derives the endpoint
- * from the response, and exposes status/setup/remove for the settings UI.
+ * The classifier in localReflex.ts talks to Rust via IPC (`reflex_classify`).
+ * This bridge owns the lifecycle: it asks Rust to ensure the artifacts exist
+ * and the serve process is running, and exposes status/setup/remove for the
+ * settings UI.
  *
  * Everything is fire-and-forget safe: any Rust error resolves to "engine
  * unavailable" and the send flow falls through to the cloud LLM untouched.
@@ -36,22 +35,14 @@ const ENSURE_TTL_MS = 10_000;
 
 /**
  * Ensure the engine is installed and running. Resolves true when the
- * /complete endpoint is expected to answer. Called (debounced) by
- * localReflex.ts before the first classify of a send; also safe to call
- * from a settings toggle.
+ * /complete endpoint is expected to answer.
  */
 export function ensureReflexEngine(): Promise<boolean> {
   if (cachedEnsure && Date.now() - cachedEnsure.at < ENSURE_TTL_MS) {
     return cachedEnsure.promise;
   }
   const promise = invoke<ReflexStatus>("reflex_ensure_running")
-    .then((status) => {
-      if (status.running) {
-        applyEndpointOverride(status.port);
-        return true;
-      }
-      return false;
-    })
+    .then((status) => status.running)
     .catch(() => false);
   cachedEnsure = { at: Date.now(), promise };
   return promise;
@@ -69,50 +60,19 @@ export async function reflexEngineStatus(): Promise<ReflexStatus | null> {
   }
 }
 
-/** Download the engine + weights (progress events land in onEvent). */
+/** Download the engine + weights (progress events land in onEvent) and warm it. */
 export async function setupReflexEngine(
   onEvent: (e: ReflexSetupEvent) => void,
 ): Promise<boolean> {
   invalidateReflexCache();
-  try {
-    const channel = new Channel<ReflexSetupEvent>();
-    channel.onmessage = onEvent;
-    await invoke("reflex_setup", { onEvent: channel });
-    // Warm the engine right after download so the first prompt is fast.
-    const ok = await ensureReflexEngine();
-    return ok;
-  } catch {
-    return false;
-  }
+  const channel = new Channel<ReflexSetupEvent>();
+  channel.onmessage = onEvent;
+  await invoke("reflex_setup", { onEvent: channel });
+  // Warm the engine right after download so the first prompt is fast.
+  return ensureReflexEngine();
 }
 
 export async function removeReflexEngine(): Promise<void> {
   invalidateReflexCache();
-  try {
-    await invoke("reflex_remove");
-  } catch {
-    // nothing to remove / already gone
-  }
-  clearEndpointOverride();
-}
-
-/** Keep the frontend classifier pointed at the Rust-managed port. */
-function applyEndpointOverride(port: number): void {
-  try {
-    const key = "kai.localReflexEndpoint";
-    const current = localStorage.getItem(key);
-    const wanted = `http://127.0.0.1:${port}`;
-    if (current !== wanted) localStorage.setItem(key, wanted);
-  } catch {
-    // localStorage unavailable (rare webview state) - the default port
-    // matches anyway.
-  }
-}
-
-function clearEndpointOverride(): void {
-  try {
-    localStorage.removeItem("kai.localReflexEndpoint");
-  } catch {
-    /* noop */
-  }
+  await invoke("reflex_remove");
 }

@@ -550,22 +550,58 @@ export function buildShellTools(ctx: ToolContext) {
             "Max seconds to block waiting for new output or exit when the buffer has no new bytes at `since_offset` (default 5s when tailing; 0 = instant peek). Returns immediately as soon as new output arrives or the process exits.",
           ),
       }),
-      execute: async ({ handle, since_offset, wait_secs }) => {
+      execute: async ({ handle, since_offset, wait_secs }, options) => {
+        if (options?.abortSignal?.aborted) {
+          return { error: "Log wait cancelled — agent stopped.", cancelled: true };
+        }
+        const safeSince =
+          since_offset !== undefined
+            ? Math.max(0, Math.floor(since_offset))
+            : undefined;
+        const rawWait =
+          wait_secs ?? (safeSince !== undefined && safeSince > 0 ? 5 : 0);
+        const effectiveWait = Math.min(60, Math.max(0, Math.round(rawWait)));
+        let onAbort: (() => void) | undefined;
         try {
-          const effectiveWait =
-            wait_secs ?? (since_offset !== undefined && since_offset > 0 ? 5 : 0);
-          const r = await native.shellBgLogs(
+          const logsPromise = native.shellBgLogs(
             handle,
-            since_offset,
+            safeSince,
             ctx.projectId,
             effectiveWait,
           );
+          if (effectiveWait > 0 && options?.abortSignal) {
+            const signal = options.abortSignal;
+            const abortPromise = new Promise<{ cancelled: true }>((resolve) => {
+              if (signal.aborted) {
+                resolve({ cancelled: true });
+                return;
+              }
+              onAbort = () => resolve({ cancelled: true });
+              signal.addEventListener("abort", onAbort, { once: true });
+            });
+            const raced = await Promise.race([
+              logsPromise.then((r) => ({ cancelled: false as const, r })),
+              abortPromise,
+            ]);
+            if (raced.cancelled) {
+              return { error: "Log wait cancelled by stop.", cancelled: true };
+            }
+            return {
+              ...raced.r,
+              bytes: stripAnsi(raced.r.bytes),
+            };
+          }
+          const r = await logsPromise;
           return {
             ...r,
             bytes: stripAnsi(r.bytes),
           };
         } catch (e) {
           return { error: String(e) };
+        } finally {
+          if (onAbort && options?.abortSignal) {
+            options.abortSignal.removeEventListener("abort", onAbort);
+          }
         }
       },
     }),
@@ -589,19 +625,18 @@ export function buildShellTools(ctx: ToolContext) {
         if (options?.abortSignal?.aborted) {
           return { error: "Sleep cancelled — agent stopped.", cancelled: true };
         }
+        let onAbort: (() => void) | undefined;
         try {
           const clamped = Math.min(300, Math.max(0.1, seconds));
           const abortPromise = new Promise<{ cancelled: true }>((resolve) => {
-            if (!options?.abortSignal) return;
-            if (options.abortSignal.aborted) {
+            const signal = options?.abortSignal;
+            if (!signal) return;
+            if (signal.aborted) {
               resolve({ cancelled: true });
               return;
             }
-            options.abortSignal.addEventListener(
-              "abort",
-              () => resolve({ cancelled: true }),
-              { once: true },
-            );
+            onAbort = () => resolve({ cancelled: true });
+            signal.addEventListener("abort", onAbort, { once: true });
           });
           const raced = await Promise.race([
             native.shellSleep(clamped).then((slept_ms) => ({
@@ -621,6 +656,10 @@ export function buildShellTools(ctx: ToolContext) {
           };
         } catch (e) {
           return { error: String(e) };
+        } finally {
+          if (onAbort && options?.abortSignal) {
+            options.abortSignal.removeEventListener("abort", onAbort);
+          }
         }
       },
     }),

@@ -80,23 +80,51 @@ export function recoverEditTargetPath(ctx: ToolContext): string | null {
  *  - ZERO files match (e.g. slightly stale anchor so the model needs the
  *    "Similar lines in file" diagnostic) -> fall back to `recoverEditTargetPath`.
  */
+const MAX_CONTENT_RECOVERY_PROBES = 12;
+
 export async function recoverEditTargetPathByContent(
   ctx: ToolContext,
   oldString?: string,
+  opts?: {
+    replace_all?: boolean;
+    line_hint?: number;
+    /** Set false when caller has a stronger fallback (e.g. sharedSiblingPath)
+     *  that should win over an unrelated recency guess on 0 matches. */
+    allowRecencyFallback?: boolean;
+  },
 ): Promise<string | null> {
   if (ctx.readCache.size === 0) return null;
   const needle = typeof oldString === "string" ? oldString : "";
   if (needle.trim().length > 0) {
     const client = nativeForContext(ctx);
+    const override = await sandboxOverrideForContext(ctx);
     const matches: string[] = [];
-    const probe = [{ old_string: needle, new_string: `${needle}_` }];
-    for (const candidatePath of ctx.readCache.keys()) {
+    const probe = [
+      {
+        old_string: needle,
+        new_string: `${needle}_`,
+        ...(opts?.replace_all !== undefined ? { replace_all: opts.replace_all } : {}),
+        ...(opts?.line_hint !== undefined ? { line_hint: opts.line_hint } : {}),
+      },
+    ];
+    // Probe newest-first, capped, and re-verify readability/sandbox per file
+    // so a TOCTOU symlink swap or tightened sandbox cannot be probed.
+    const candidates = [...ctx.readCache.entries()]
+      .sort((a, b) => (b[1].lastReadAt ?? 0) - (a[1].lastReadAt ?? 0))
+      .slice(0, MAX_CONTENT_RECOVERY_PROBES);
+    for (const [candidatePath] of candidates) {
       try {
-        const r = await client.readFile(candidatePath);
+        const readable = await checkReadableCanonical(
+          candidatePath,
+          client.canonicalize,
+          override,
+        );
+        if (!readable.ok) continue;
+        const r = await client.readFile(readable.canonical);
         if (r.kind !== "text") continue;
-        const test = await computeEdits(r.content, candidatePath, probe);
+        const test = await computeEdits(r.content, readable.canonical, probe);
         if (test.ok) {
-          matches.push(candidatePath);
+          matches.push(readable.canonical);
           if (matches.length > 1) break;
         }
       } catch {
@@ -106,6 +134,7 @@ export async function recoverEditTargetPathByContent(
     if (matches.length === 1) return matches[0]!;
     if (matches.length > 1) return null;
   }
+  if (opts?.allowRecencyFallback === false) return null;
   return recoverEditTargetPath(ctx);
 }
 
@@ -181,7 +210,11 @@ export async function repairEditToolCallInput(
     }
     let targetPath = typeof norm.path === "string" ? norm.path : "";
     if (!targetPath) {
-      targetPath = (await recoverEditTargetPathByContent(ctx, norm.old_string)) ?? "";
+      targetPath =
+        (await recoverEditTargetPathByContent(ctx, norm.old_string, {
+          replace_all: typeof norm.replace_all === "boolean" ? norm.replace_all : undefined,
+          line_hint: typeof norm.line_hint === "number" ? norm.line_hint : undefined,
+        })) ?? "";
     }
     if (!targetPath) return null;
     const canonical: Record<string, unknown> = {
@@ -255,9 +288,15 @@ export async function repairEditToolCallInput(
       itemPath = topLevelPath;
     }
     if (!itemPath) {
+      // If siblings in the same batch already agree on one file, disable
+      // unrelated recency fallback so chained edits targeting text created by
+      // an earlier edit in the same batch stay on `sharedSiblingPath`.
       itemPath =
-        (await recoverEditTargetPathByContent(ctx, it.old_string as string)) ??
-        sharedSiblingPath;
+        (await recoverEditTargetPathByContent(ctx, it.old_string as string, {
+          replace_all: typeof it.replace_all === "boolean" ? it.replace_all : undefined,
+          line_hint: typeof it.line_hint === "number" ? it.line_hint : undefined,
+          allowRecencyFallback: !sharedSiblingPath,
+        })) ?? sharedSiblingPath;
     }
     if (!itemPath) return null;
     const entry: Record<string, unknown> = {
@@ -1092,9 +1131,11 @@ export function buildEditTools(ctx: ToolContext) {
         let path = pathArg ?? "";
         let pathRecovered = false;
         if (!path) {
-          const recovered =
-            (await recoverEditTargetPathByContent(ctx, old_string)) ??
-            recoverEditTargetPath(ctx);
+          const recovered = await recoverEditTargetPathByContent(
+            ctx,
+            old_string,
+            { replace_all, line_hint },
+          );
           if (recovered) {
             path = recovered;
             pathRecovered = true;

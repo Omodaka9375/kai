@@ -316,7 +316,7 @@ fn settings_panel_key(tab: Option<&str>) -> String {
     };
     if matches!(
         key.as_str(),
-        "general" | "shortcuts" | "models" | "agents" | "snippets" | "mcp" | "sandbox" | "security" | "vault" | "staff" | "voice" | "reflex" | "social" | "assistant" | "external" | "about"
+        "general" | "shortcuts" | "models" | "agents" | "snippets" | "mcp" | "sandbox" | "security" | "vault" | "staff" | "voice" | "reflex" | "social" | "assistant" | "about"
     ) {
         key
     } else {
@@ -331,7 +331,7 @@ fn settings_panel_title(key: &str) -> String {
         "shortcuts" => "Shortcuts",
         "models" => "Models",
         "agents" => "Agents",
-        "snippets" => "Snippets",
+        "snippets" => "Skills",
         "mcp" => "MCP Servers",
         "sandbox" => "Sandbox",
         "security" => "Security",

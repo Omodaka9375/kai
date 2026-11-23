@@ -49,7 +49,8 @@ reqwest = { version = "0.12", default-features = false, features = [
 base64 = "0.22"
 bytes = "1"
 futures-util = "0.3"
-tokio = { version = "1", default-features = false, features = ["rt"] }
+sha2 = "0.10"
+tokio = { version = "1", default-features = false, features = ["rt", "sync", "time"] }
 
 # Document/binary extraction (ZIP listings, OOXML text, audio/image/video metadata)
 zip = { version = "2", default-features = false, features = ["deflate"] }

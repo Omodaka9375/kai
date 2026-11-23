@@ -58,23 +58,23 @@ function getStore(): LazyStore {
   return store;
 }
 
+/** Serialize read-modify-write appends so concurrent tool steps or sessions
+ *  cannot overwrite each other's log entries. */
+let writeQueue: Promise<void> = Promise.resolve();
+
 /** Fire-and-forget append; logging must never break the send flow. */
 export function recordReflexEntry(entry: ReflexEntry): void {
-  try {
-    const s = getStore();
-    void (async () => {
-      try {
-        const cur = (await s.get<ReflexEntry[]>(KEY_ENTRIES)) ?? [];
-        cur.push(entry);
-        if (cur.length > REFLEX_LOG_CAP) cur.splice(0, cur.length - REFLEX_LOG_CAP);
-        await s.set(KEY_ENTRIES, cur);
-      } catch (e) {
-        console.debug("[kai:reflex-log] append failed:", e);
-      }
-    })();
-  } catch (e) {
-    console.debug("[kai:reflex-log] store unavailable:", e);
-  }
+  writeQueue = writeQueue.then(async () => {
+    try {
+      const s = getStore();
+      const cur = (await s.get<ReflexEntry[]>(KEY_ENTRIES)) ?? [];
+      cur.push(entry);
+      if (cur.length > REFLEX_LOG_CAP) cur.splice(0, cur.length - REFLEX_LOG_CAP);
+      await s.set(KEY_ENTRIES, cur);
+    } catch (e) {
+      console.debug("[kai:reflex-log] append failed:", e);
+    }
+  });
 }
 
 export async function getReflexEntries(): Promise<ReflexEntry[]> {

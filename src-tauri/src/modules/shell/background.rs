@@ -361,8 +361,14 @@ pub fn spawn(
                 },
                 Err(_) => proc_ref.exit_unknown.store(true, Ordering::Release),
             }
-            proc_ref.exited.store(true, Ordering::Release);
-            proc_ref.notify.notify_all();
+            // Acquire `buffer` before storing `exited = true` and signaling
+            // so `read_logs` cannot miss the exit wakeup between checking
+            // `exited` under the lock and entering `wait_timeout`.
+            {
+                let _guard = mutex_lock(&proc_ref.buffer);
+                proc_ref.exited.store(true, Ordering::Release);
+                proc_ref.notify.notify_all();
+            }
         });
     }
 

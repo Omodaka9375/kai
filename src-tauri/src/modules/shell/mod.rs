@@ -635,13 +635,13 @@ pub async fn shell_bg_logs(
     }
     let since = since_offset.unwrap_or(0);
     if wait_secs.is_some_and(|s| s > 0) {
-        let (tx, rx) = mpsc::channel();
-        thread::spawn(move || {
+        return tauri::async_runtime::spawn_blocking(move || {
             let mut resp = proc.read_logs(since, wait_secs);
             mask_bg_logs(&proc, &mut resp);
-            let _ = tx.send(resp);
-        });
-        return rx.recv().map_err(|e| e.to_string());
+            resp
+        })
+        .await
+        .map_err(|e| e.to_string());
     }
     let mut resp = proc.read_logs(since, None);
     mask_bg_logs(&proc, &mut resp);
@@ -658,13 +658,9 @@ pub async fn shell_sleep(seconds: f64) -> Result<u64, String> {
     }
     let clamped = seconds.clamp(0.1, 300.0);
     let dur = Duration::from_secs_f64(clamped);
-    let (tx, rx) = mpsc::channel();
-    thread::spawn(move || {
-        let started = Instant::now();
-        thread::sleep(dur);
-        let _ = tx.send(started.elapsed().as_millis() as u64);
-    });
-    rx.recv().map_err(|e| e.to_string())
+    let started = Instant::now();
+    tokio::time::sleep(dur).await;
+    Ok(started.elapsed().as_millis() as u64)
 }
 
 /// Mask vault values in background-proc log reads. The ring buffer keeps RAW

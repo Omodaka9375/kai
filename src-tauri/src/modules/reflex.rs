@@ -18,40 +18,68 @@
 //! clean error; a missing engine can never block a send (the frontend falls
 //! through to the cloud LLM), and nothing here can hang the app.
 
+use std::collections::HashMap;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::Child;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use tauri::Manager;
 
 /// Versioned artifact source (Run #4 = bump both versions + hashes).
 /// Files are served from the KAI release assets (GitHub latest download) so
 /// no authenticated storage is involved.
-const MANIFEST_URL: &str = "https://github.com/Omodaka9375/kai/releases/latest/download/reflex-manifest.json";
+const MANIFEST_URL: &str =
+    "https://github.com/Omodaka9375/kai/releases/latest/download/reflex-manifest.json";
+
+/// Allowed download origin prefix for manifest URLs (defense-in-depth so a
+/// corrupted/redirected manifest cannot fetch arbitrary local/HTTP URLs).
+const ALLOWED_URL_PREFIX: &str = "https://github.com/Omodaka9375/kai/releases/";
 
 /// The shipped model depth (12L: bench-selected, see scripts/cactus/README.md).
 const MODEL_DEPTH: u32 = 12;
 const MODEL_NAME: &str = "kai-desktop-v1";
 
-/// PID of the spawned serve process, if we own one. A Mutex (not a static
-/// mut) keeps the shared-reference lint happy; None = not spawned by us.
-static SPAWN_RUNNING: AtomicBool = AtomicBool::new(false);
-static CHILD_PID: std::sync::Mutex<Option<u32>> = std::sync::Mutex::new(None);
+/// Guards concurrent `reflex_setup` downloads.
+static SETUP_RUNNING: AtomicBool = AtomicBool::new(false);
+
+/// Owned child handle so exit/remove can cleanly kill + wait without leaking
+/// handles, creating Unix zombies, or signaling a reused PID.
+static CHILD_PROC: std::sync::Mutex<Option<Child>> = std::sync::Mutex::new(None);
+
+/// Serializes `/complete` + `/reset` requests against the single-conversation
+/// cactus `--serve` process (both `reflex_classify` and `probe_health`), so
+/// concurrent turns or status probes never interleave and poison KV state.
+fn engine_io_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
+/// Serializes check-and-spawn in `reflex_ensure_running` so concurrent
+/// callers never spawn duplicate `cactus` processes.
+fn engine_spawn_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
 
 fn reflex_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
     Ok(dir.join("reflex"))
 }
 
-use std::path::Path;
+fn engine_filename() -> &'static str {
+    #[cfg(windows)]
+    return "cactus.exe";
+    #[cfg(not(windows))]
+    "cactus"
+}
 
 fn engine_path(dir: &Path) -> PathBuf {
-    #[cfg(windows)]
-    return dir.join("cactus.exe");
-    #[cfg(not(windows))]
-    dir.join("cactus")
+    dir.join(engine_filename())
 }
 
 fn model_path(dir: &Path) -> PathBuf {
@@ -66,9 +94,33 @@ fn manifest_path(dir: &Path) -> PathBuf {
     dir.join("manifest.json")
 }
 
-/// The port the serve process listens on. Fixed (not dynamic) so the
-/// frontend's localStorage override stays meaningful; a conflict surfaces
-/// as a failed health probe and a clean "engine unavailable" state.
+/// Platform key matching `scripts/cactus/publish_artifacts.py`.
+fn current_platform_key() -> &'static str {
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    return "windows-x86_64";
+    #[cfg(all(target_os = "windows", target_arch = "aarch64"))]
+    return "windows-arm64";
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    return "macos-arm64";
+    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+    return "macos-x86_64";
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    return "linux-x86_64";
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    return "linux-arm64";
+    #[cfg(not(any(
+        all(target_os = "windows", target_arch = "x86_64"),
+        all(target_os = "windows", target_arch = "aarch64"),
+        all(target_os = "macos", target_arch = "aarch64"),
+        all(target_os = "macos", target_arch = "x86_64"),
+        all(target_os = "linux", target_arch = "x86_64"),
+        all(target_os = "linux", target_arch = "aarch64"),
+    )))]
+    return "unsupported";
+}
+
+/// Fixed localhost serve port; a conflict surfaces as a failed health probe
+/// and a clean "engine unavailable" state.
 const SERVE_PORT: u16 = 8941;
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -86,7 +138,7 @@ pub struct ReflexStatus {
     pub latest_version: Option<String>,
     /// True when on-disk version != latest (an update is available).
     pub update_available: bool,
-    /// Downloaded/total bytes when a setup is in flight.
+    /// True while a setup download is in flight.
     pub installing: bool,
     model_depth: u32,
     port: u16,
@@ -104,15 +156,42 @@ pub struct ReflexSetupEvent {
 // ── Manifest handling ──────────────────────────────────────────────────────
 
 #[derive(serde::Deserialize, serde::Serialize, Clone)]
+pub struct EngineArtifact {
+    pub url: String,
+    pub sha256: String,
+    #[serde(default)]
+    pub bytes: u64,
+}
+
+/// Matches `scripts/cactus/publish_artifacts.py` (`engines` map per platform),
+/// while still accepting legacy flat `engine_url`/`engine_sha256` manifests.
+#[derive(serde::Deserialize, serde::Serialize, Clone)]
 pub struct ReflexManifest {
     pub version: String,
-    pub engine_url: String,
-    pub engine_sha256: String,
+    #[serde(default)]
+    pub engines: HashMap<String, EngineArtifact>,
+    #[serde(default)]
+    pub engine_url: Option<String>,
+    #[serde(default)]
+    pub engine_sha256: Option<String>,
     pub weights_url: String,
     pub weights_sha256: String,
     pub weights_bytes: u64,
     pub tools_url: String,
     pub tools_sha256: String,
+}
+
+impl ReflexManifest {
+    fn resolve_engine(&self) -> Result<(String, String), String> {
+        let plat = current_platform_key();
+        if let Some(art) = self.engines.get(plat) {
+            return Ok((art.url.clone(), art.sha256.clone()));
+        }
+        if let (Some(url), Some(sha)) = (&self.engine_url, &self.engine_sha256) {
+            return Ok((url.clone(), sha.clone()));
+        }
+        Err(format!("no reflex engine binary published for platform {plat}"))
+    }
 }
 
 fn read_manifest_disk(dir: &Path) -> Option<ReflexManifest> {
@@ -121,9 +200,11 @@ fn read_manifest_disk(dir: &Path) -> Option<ReflexManifest> {
     serde_json::from_str(&raw).ok()
 }
 
-async fn fetch_manifest() -> Result<ReflexManifest, String> {
+/// Fast timeout for passive status checks so offline/slow GitHub never stalls
+/// the Reflex settings panel for 20s; setup uses a longer budget.
+async fn fetch_manifest(timeout: Duration) -> Result<ReflexManifest, String> {
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(20))
+        .timeout(timeout)
         .build()
         .map_err(|e| e.to_string())?;
     let resp = client.get(MANIFEST_URL).send().await.map_err(|e| e.to_string())?;
@@ -133,9 +214,27 @@ async fn fetch_manifest() -> Result<ReflexManifest, String> {
     resp.json::<ReflexManifest>().await.map_err(|e| e.to_string())
 }
 
-// Integrity: length-based for now (the manifest records exact bytes, the
-// same guarantee voice.rs relies on); a hash upgrade can ride a later
-// release without changing the command surface.
+fn validate_manifest_url(url: &str) -> Result<(), String> {
+    if !url.starts_with(ALLOWED_URL_PREFIX) {
+        return Err(format!("refusing untrusted reflex download URL: {url}"));
+    }
+    Ok(())
+}
+
+fn sha256_file(path: &Path) -> Result<String, String> {
+    use std::io::Read;
+    let mut f = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = f.read(&mut buf).map_err(|e| e.to_string())?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
 
 // ── Commands ───────────────────────────────────────────────────────────────
 
@@ -147,18 +246,19 @@ pub async fn reflex_status(app: tauri::AppHandle) -> Result<ReflexStatus, String
         && tools_path(&dir).exists();
     let disk_manifest = read_manifest_disk(&dir);
     let disk_version = disk_manifest.as_ref().map(|m| m.version.clone());
-    let latest = fetch_manifest().await.ok();
+    // Short timeout on passive status refresh so offline launches stay snappy.
+    let latest = fetch_manifest(Duration::from_secs(3)).await.ok();
     let running = installed && probe_health().await;
     Ok(ReflexStatus {
         installed,
         running,
-        version: disk_version.clone(),
+        version: disk_version,
         latest_version: latest.as_ref().map(|m| m.version.clone()),
         update_available: match (&disk_manifest, &latest) {
             (Some(disk), Some(latest)) => disk.version != latest.version,
             _ => false,
         },
-        installing: SPAWN_RUNNING.load(Ordering::Acquire),
+        installing: SETUP_RUNNING.load(Ordering::Acquire),
         model_depth: MODEL_DEPTH,
         port: SERVE_PORT,
     })
@@ -171,11 +271,11 @@ pub async fn reflex_setup(
     app: tauri::AppHandle,
     on_event: tauri::ipc::Channel<ReflexSetupEvent>,
 ) -> Result<(), String> {
-    if SPAWN_RUNNING.swap(true, Ordering::AcqRel) {
+    if SETUP_RUNNING.swap(true, Ordering::AcqRel) {
         return Err("reflex setup already running".into());
     }
     let result = setup_inner(&app, &on_event).await;
-    SPAWN_RUNNING.store(false, Ordering::Release);
+    SETUP_RUNNING.store(false, Ordering::Release);
     result
 }
 
@@ -185,7 +285,17 @@ async fn setup_inner(
 ) -> Result<(), String> {
     let dir = reflex_dir(app)?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let manifest = fetch_manifest().await?;
+    let manifest = fetch_manifest(Duration::from_secs(20)).await?;
+    let (engine_url, engine_sha256) = manifest.resolve_engine()?;
+
+    validate_manifest_url(&manifest.weights_url)?;
+    validate_manifest_url(&manifest.tools_url)?;
+    validate_manifest_url(&engine_url)?;
+
+    // Stop any running engine BEFORE replacing artifacts so Windows does not
+    // hit a sharing violation renaming over a live cactus.exe.
+    stop_engine_sync();
+
     let emit = |phase: &str, downloaded: u64, total: u64, msg: Option<&str>| {
         let _ = on_event.send(ReflexSetupEvent {
             phase: phase.into(),
@@ -195,24 +305,50 @@ async fn setup_inner(
         });
     };
 
-    // Weights: skip when size matches (the biggest download).
+    // Weights: skip only when size AND sha256 match (the biggest download).
     let weights_dest = model_path(&dir);
-    let need_weights = !weights_dest.exists()
-        || std::fs::metadata(&weights_dest).map(|m| m.len()).unwrap_or(0) != manifest.weights_bytes;
-    if need_weights {
+    let weights_valid = weights_dest.exists()
+        && std::fs::metadata(&weights_dest).map(|m| m.len()).unwrap_or(0)
+            == manifest.weights_bytes
+        && sha256_file(&weights_dest)
+            .map(|h| h.eq_ignore_ascii_case(&manifest.weights_sha256))
+            .unwrap_or(false);
+    if !weights_valid {
         emit("weights", 0, manifest.weights_bytes, None);
-        download_to(&manifest.weights_url, &weights_dest, &emit).await?;
+        download_verified(
+            "weights",
+            &manifest.weights_url,
+            &manifest.weights_sha256,
+            &weights_dest,
+            &emit,
+        )
+        .await?;
     }
 
     // Tools schema (tiny).
     let tools_dest = tools_path(&dir);
     emit("tools", 0, 0, None);
-    download_to(&manifest.tools_url, &tools_dest, &emit).await?;
+    download_verified(
+        "tools",
+        &manifest.tools_url,
+        &manifest.tools_sha256,
+        &tools_dest,
+        &emit,
+    )
+    .await?;
 
-    // Engine binary (platform-specific, <1 MB).
+    // Engine binary (platform-specific; published as .zip or raw executable).
     let engine_dest = engine_path(&dir);
     emit("engine", 0, 0, None);
-    download_to(&manifest.engine_url, &engine_dest, &emit).await?;
+    if engine_url.ends_with(".zip") {
+        let zip_tmp = dir.join("cactus-engine.zip");
+        download_verified("engine", &engine_url, &engine_sha256, &zip_tmp, &emit).await?;
+        let extract_res = extract_engine_from_zip(&zip_tmp, &engine_dest);
+        let _ = std::fs::remove_file(&zip_tmp);
+        extract_res?;
+    } else {
+        download_verified("engine", &engine_url, &engine_sha256, &engine_dest, &emit).await?;
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -227,9 +363,57 @@ async fn setup_inner(
     Ok(())
 }
 
-async fn download_to(
+/// Extract the `cactus(.exe)` binary from a downloaded engine zip safely
+/// (matching basename only, rejecting path traversal, writing via `.part`).
+fn extract_engine_from_zip(zip_path: &Path, dest: &Path) -> Result<(), String> {
+    let file = std::fs::File::open(zip_path).map_err(|e| e.to_string())?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("invalid engine zip: {e}"))?;
+    let wanted = engine_filename();
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
+        if entry.is_dir() {
+            continue;
+        }
+        let Some(safe_path) = entry.enclosed_name() else {
+            continue;
+        };
+        let is_match = safe_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.eq_ignore_ascii_case(wanted));
+        if !is_match {
+            continue;
+        }
+        let part = dest.with_extension("part");
+        let mut out = std::fs::File::create(&part).map_err(|e| e.to_string())?;
+        if let Err(e) = std::io::copy(&mut entry, &mut out) {
+            drop(out);
+            let _ = std::fs::remove_file(&part);
+            return Err(e.to_string());
+        }
+        out.flush().ok();
+        drop(out);
+        replace_file(&part, dest)?;
+        return Ok(());
+    }
+    Err(format!("engine archive did not contain {wanted}"))
+}
+
+fn replace_file(src: &Path, dest: &Path) -> Result<(), String> {
+    if dest.exists() {
+        let _ = std::fs::remove_file(dest);
+    }
+    std::fs::rename(src, dest).map_err(|e| {
+        let _ = std::fs::remove_file(src);
+        e.to_string()
+    })
+}
+
+async fn download_verified(
+    phase: &str,
     url: &str,
-    dest: &PathBuf,
+    expected_sha256: &str,
+    dest: &Path,
     emit: &impl Fn(&str, u64, u64, Option<&str>),
 ) -> Result<(), String> {
     let client = reqwest::Client::builder()
@@ -244,18 +428,39 @@ async fn download_to(
     let part = dest.with_extension("part");
     use futures_util::StreamExt;
     let mut file = std::fs::File::create(&part).map_err(|e| e.to_string())?;
+    let mut hasher = Sha256::new();
     let mut downloaded: u64 = 0;
     let mut stream = resp.bytes_stream();
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| e.to_string())?;
-        file.write_all(&chunk).map_err(|e| e.to_string())?;
+        let chunk = match chunk {
+            Ok(c) => c,
+            Err(e) => {
+                drop(file);
+                let _ = std::fs::remove_file(&part);
+                return Err(e.to_string());
+            }
+        };
+        if let Err(e) = file.write_all(&chunk) {
+            drop(file);
+            let _ = std::fs::remove_file(&part);
+            return Err(e.to_string());
+        }
+        hasher.update(&chunk);
         downloaded += chunk.len() as u64;
-        emit("weights", downloaded, total, None);
+        emit(phase, downloaded, total, None);
     }
     file.flush().ok();
     drop(file);
-    std::fs::rename(&part, dest).map_err(|e| e.to_string())?;
-    Ok(())
+
+    let actual_sha = format!("{:x}", hasher.finalize());
+    if !expected_sha256.is_empty() && !actual_sha.eq_ignore_ascii_case(expected_sha256.trim()) {
+        let _ = std::fs::remove_file(&part);
+        return Err(format!(
+            "checksum mismatch for {phase}: expected {expected_sha256}, got {actual_sha}"
+        ));
+    }
+
+    replace_file(&part, dest)
 }
 
 /// Classify a prompt through the running engine. MUST be called from Rust,
@@ -265,6 +470,7 @@ async fn download_to(
 /// Returns the raw engine JSON reply for the frontend to parse.
 #[tauri::command]
 pub async fn reflex_classify(prompt: String) -> Result<serde_json::Value, String> {
+    let _io_guard = engine_io_lock().lock().await;
     let client = reqwest::Client::builder()
         .timeout(Duration::from_millis(2500))
         .build()
@@ -272,22 +478,24 @@ pub async fn reflex_classify(prompt: String) -> Result<serde_json::Value, String
     let resp = client
         .post(format!("http://127.0.0.1:{SERVE_PORT}/complete"))
         .header("Content-Type", "application/json")
-        .body(serde_json::to_string(&serde_json::json!({ "input": prompt }))
-            .map_err(|e| e.to_string())?)
+        .body(
+            serde_json::to_string(&serde_json::json!({ "input": prompt }))
+                .map_err(|e| e.to_string())?,
+        )
         .send()
         .await
         .map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
         return Err(format!("engine HTTP {}", resp.status()));
     }
-    // Stateless use: same contract as the frontend — reset the engine's
-    // conversation so turn N never leaks into turn N+1 (KV window drift).
+    let mut value = resp.json::<serde_json::Value>().await.map_err(|e| e.to_string())?;
+    // Stateless use: reset the engine's conversation under the same IO lock
+    // so turn N never leaks into turn N+1 (KV window drift).
     let reset = client
         .post(format!("http://127.0.0.1:{SERVE_PORT}/reset"))
         .send()
         .await;
     let reset_ok = reset.map(|r| r.status().is_success()).unwrap_or(false);
-    let mut value = resp.json::<serde_json::Value>().await.map_err(|e| e.to_string())?;
     // Surface reset failures so the frontend can log a distinguishable state.
     if let Some(obj) = value.as_object_mut() {
         obj.insert("resetOk".into(), serde_json::Value::Bool(reset_ok));
@@ -316,6 +524,7 @@ pub fn reflex_remove(app: tauri::AppHandle) -> Result<(), String> {
 // ── Engine lifecycle ───────────────────────────────────────────────────────
 
 async fn probe_health() -> bool {
+    let _io_guard = engine_io_lock().lock().await;
     let url = format!("http://127.0.0.1:{SERVE_PORT}/complete");
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_millis(800))
@@ -339,7 +548,7 @@ async fn probe_health() -> bool {
     // engine keeps ONE running conversation, and a leftover "ping" turn
     // made the next real prompt drift into the ping answer's tool (seen
     // live: "stop radio" classified as set_voice_settings). Reset after
-    // probing, same contract as reflex_classify.
+    // probing under the same IO lock.
     let _ = client
         .post(format!("http://127.0.0.1:{SERVE_PORT}/reset"))
         .send()
@@ -357,10 +566,9 @@ fn spawn_engine_sync(app: &tauri::AppHandle) -> Result<u32, String> {
             return Err(format!("missing artifact: {}", p.display()));
         }
     }
-    // Idempotence: if something already answers on the port (a previous
-    // instance of KAI left one running, or the user started serve-engine.ps1
-    // manually), adopt it instead of spawning a second.
-    // (The health probe in reflex_ensure_running covers this.)
+    // Reap any previous child before replacing the slot.
+    stop_engine_sync();
+
     let mut cmd = std::process::Command::new(&engine);
     #[cfg(windows)]
     {
@@ -369,56 +577,40 @@ fn spawn_engine_sync(app: &tauri::AppHandle) -> Result<u32, String> {
         // this a console window flashes on every spawn.
         cmd.creation_flags(0x0800_0000);
     }
-    cmd.arg("--model").arg(&model)
-        .arg("--tools").arg(&tools)
+    cmd.arg("--model")
+        .arg(&model)
+        .arg("--tools")
+        .arg(&tools)
         .arg("--serve")
-        .arg("--port").arg(SERVE_PORT.to_string())
+        .arg("--port")
+        .arg(SERVE_PORT.to_string())
         .current_dir(&dir)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
     let child = cmd.spawn().map_err(|e| e.to_string())?;
     let pid = child.id();
-    // Deliberately leak the child handle: we track by PID and kill via the
-    // platform killer on exit/remove. std::process::Child would kill on drop
-    // only via wait; leaking keeps the serve process independent of this
-    // struct's lifetime, and app-exit cleanup goes through stop_engine_sync.
-    std::mem::forget(child);
-    if let Ok(mut slot) = CHILD_PID.lock() {
-        *slot = Some(pid);
-    }
+    let mut slot = crate::modules::lock::mutex_lock(&CHILD_PROC);
+    *slot = Some(child);
     Ok(pid)
 }
 
-#[cfg(windows)]
-fn kill_pid(pid: u32) {
-    // taskkill /F /PID: reliable for a detached console-less child; Job
-    // Objects are overkill for a single leaf process with no descendants.
-    use std::os::windows::process::CommandExt;
-    let _ = std::process::Command::new("taskkill")
-        .args(["/F", "/PID", &pid.to_string()])
-        .creation_flags(0x0800_0000)
-        .output();
-}
-#[cfg(not(windows))]
-fn kill_pid(pid: u32) {
-    unsafe {
-        libc::kill(pid as i32, libc::SIGTERM);
-    }
-}
-
 fn stop_engine_sync() {
-    if let Ok(mut slot) = CHILD_PID.lock() {
-        if let Some(pid) = slot.take() {
-            kill_pid(pid);
+    let mut slot = crate::modules::lock::mutex_lock(&CHILD_PROC);
+    if let Some(mut child) = slot.take() {
+        // Only signal if still running (avoids touching an already-exited child).
+        if matches!(child.try_wait(), Ok(None)) {
+            let _ = child.kill();
         }
+        let _ = child.wait();
     }
 }
 
 /// Ensure the engine is downloaded (no-op when present) AND running (no-op
-/// when the port already answers). The frontend calls this before the first
-/// classify attempt of a session; it is cheap when everything is ready.
+/// when the port already answers). Serialized by `engine_spawn_lock` so
+/// concurrent callers never spawn duplicate processes.
 #[tauri::command]
 pub async fn reflex_ensure_running(app: tauri::AppHandle) -> Result<ReflexStatus, String> {
+    let _spawn_guard = engine_spawn_lock().lock().await;
     let dir = reflex_dir(&app)?;
     let installed = engine_path(&dir).exists()
         && model_path(&dir).exists()
@@ -430,22 +622,23 @@ pub async fn reflex_ensure_running(app: tauri::AppHandle) -> Result<ReflexStatus
             version: None,
             latest_version: None,
             update_available: false,
-            installing: false,
+            installing: SETUP_RUNNING.load(Ordering::Acquire),
             model_depth: MODEL_DEPTH,
             port: SERVE_PORT,
         });
     }
-    if !probe_health().await {
+    let mut running = probe_health().await;
+    if !running {
         spawn_engine_sync(&app)?;
         // Give the engine a moment to bind the port, then confirm.
         for _ in 0..10 {
             tokio::time::sleep(Duration::from_millis(300)).await;
             if probe_health().await {
+                running = true;
                 break;
             }
         }
     }
-    let running = probe_health().await;
     let version = read_manifest_disk(&dir).map(|m| m.version);
     Ok(ReflexStatus {
         installed: true,
@@ -453,7 +646,7 @@ pub async fn reflex_ensure_running(app: tauri::AppHandle) -> Result<ReflexStatus
         version: version.clone(),
         latest_version: version,
         update_available: false,
-        installing: false,
+        installing: SETUP_RUNNING.load(Ordering::Acquire),
         model_depth: MODEL_DEPTH,
         port: SERVE_PORT,
     })

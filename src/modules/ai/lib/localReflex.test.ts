@@ -280,11 +280,25 @@ describe("decideReflex", () => {
     expect(ok).toBe(true);
   });
 
-  it("persona 'none' and station values ground through synonyms", () => {
+  it("persona 'none' requires a persona trigger token and non-ASCII reminder values ground cleanly", () => {
     expect(
       callGroundedInPrompt("no persona for now", {
         name: "set_persona",
         arguments: { persona: "none" },
+      }),
+    ).toBe(true);
+    // Hallucinated set_persona("none") with no persona keyword must be rejected.
+    expect(
+      callGroundedInPrompt("check the weather in Budapest", {
+        name: "set_persona",
+        arguments: { persona: "none" },
+      }),
+    ).toBe(false);
+    // Unicode text grounds cleanly instead of collapsing to empty string.
+    expect(
+      callGroundedInPrompt("remind me in 5 min to meet at café", {
+        name: "reminder_create",
+        arguments: { message: "meet at café", dueAt: "2026-11-23T18:00:00.000Z" },
       }),
     ).toBe(true);
     expect(

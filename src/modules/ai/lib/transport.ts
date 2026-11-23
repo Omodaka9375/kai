@@ -30,45 +30,35 @@ import {
 } from "./localReflex";
 import { executeReflexCalls, reflexAssistantStream } from "./localReflexExecute";
 import { isReflexCapableTool, recordReflexEntry } from "./reflexLog";
-import { setAgentToolCallsMiner } from "./agent";
-
-/**
- * Reflex mining (2026-11-23): when the fast path ran (or was considered) for
- * this prompt, remember it. After runAgentStream finishes, any reflex-capable
- * tool the MAIN LLM executed is a REAL positive example (user intent ->
- * ground-truth calls) for the next fine-tune - the loop that actually moves
- * accuracy now that frozen-suite hard negatives have plateaued (Run #3).
- */
-const reflexMinedPromptRef: { current: { sessionId: string; prompt: string } | null } = {
-  current: null,
-};
 
 type AgentToolCall = { toolName: string; input: unknown };
 
 /**
- * Mine ONE agent step: for reflex-capable canonical tools the main LLM just
- * executed, append a "mined-llm-tool" entry pairing the reflex-eligible user
- * prompt with the tool's real arguments. Multi-step runs can produce several
- * entries per prompt (all correct positives). Records NEVER contain tool
- * output - only arguments.
+ * Create a per-run step miner closing over `{ sessionId, prompt }`.
+ * Bound to the individual `runAgentStream` call via `opts.onToolCalls` so it
+ * stays alive for the full stream and never collides across concurrent sessions.
  */
-function mineAgentToolCalls(calls: AgentToolCall[]): void {
-  const mined = reflexMinedPromptRef.current;
-  if (!mined) return;
-  for (const call of calls) {
-    if (!isReflexCapableTool(call.toolName)) continue;
-    const args =
-      call.input && typeof call.input === "object"
-        ? (call.input as Record<string, unknown>)
-        : {};
-    recordReflexEntry({
-      ts: Date.now(),
-      sessionId: mined.sessionId,
-      outcome: "mined-llm-tool",
-      prompt: mined.prompt.slice(0, 200),
-      calls: [{ name: call.toolName, arguments: args }],
-    });
-  }
+function createStepMiner(
+  sessionId: string,
+  prompt: string,
+): (calls: AgentToolCall[]) => void {
+  const truncated = prompt.slice(0, 200);
+  return (calls: AgentToolCall[]) => {
+    for (const call of calls) {
+      if (!isReflexCapableTool(call.toolName)) continue;
+      const args =
+        call.input && typeof call.input === "object"
+          ? (call.input as Record<string, unknown>)
+          : {};
+      recordReflexEntry({
+        ts: Date.now(),
+        sessionId,
+        outcome: "mined-llm-tool",
+        prompt: truncated,
+        calls: [{ name: call.toolName, arguments: args }],
+      });
+    }
+  };
 }
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { formatReplyStyleBlock } from "./replyStyle";
@@ -255,8 +245,12 @@ export function createContextAwareTransport(deps: Deps) {
     // tool, grounding failure) falls through to the full LLM run below.
     // Zero cloud prefill on the fast path; ~1.5 s worst-case probe on the
     // fall-through path when the engine is absent (failure cached 60 s).
+    let minedPrompt: { sessionId: string; prompt: string } | null = null;
     if ((options as { trigger?: string }).trigger !== "regenerate-message") {
-      const reflexText = extractLastUserText(options.messages);
+      const rawReflexText = extractLastUserText(options.messages);
+      const reflexText = rawReflexText
+        ? stripContextBlock(rawReflexText).trim()
+        : null;
       const reflexEligible =
         !!reflexText &&
         reflexText.length <= REFLEX_MAX_PROMPT_CHARS &&
@@ -264,52 +258,51 @@ export function createContextAwareTransport(deps: Deps) {
       if (reflexEligible && reflexText) {
         if (reflexDisabled()) {
           recordReflexEntry({
-            ts: Date.now(), sessionId, outcome: "fallthrough",
-            prompt: reflexText.slice(0, 200), reason: "disabled",
-          });
-        }
-        const reply = await classifyWithEngine(reflexText);
-        const decision = decideReflex(reflexText, reply);
-        if (decision.action === "execute") {
-          const exec = await executeReflexCalls(decision.calls, deps.toolContext);
-          recordReflexEntry({
-            ts: Date.now(),
-            sessionId,
-            outcome: "executed",
-            prompt: reflexText.slice(0, 200),
-            confidence: decision.confidence,
-            calls: decision.calls,
-            latencyMs: reply?.latencyMs,
-            execOk: exec.ok,
-          });
-          if (exec.ok) {
-            deps.onStep?.("local reflex");
-            // Compact execution summary + a small italic provenance label
-            // (markdown italic) — no "Handled locally (Needle, confidence…)"
-            // preamble; the confidence lives in the reflex log, not the chat.
-            const summary =
-              exec.lines.map((l) => `${l}`).join("\n") +
-              "\n\n*(local reflex)*";
-            return reflexAssistantStream(summary);
-          }
-          // Partial execution must not double-fire: the LLM turn explains.
-        } else {
-          recordReflexEntry({
             ts: Date.now(),
             sessionId,
             outcome: "fallthrough",
             prompt: reflexText.slice(0, 200),
-            reason: decision.reason,
-            confidence: reply?.confidence,
-            latencyMs: reply?.latencyMs,
+            reason: "disabled",
           });
+        } else {
+          const reply = await classifyWithEngine(reflexText);
+          const decision = decideReflex(reflexText, reply);
+          if (decision.action === "execute") {
+            const exec = await executeReflexCalls(decision.calls, deps.toolContext);
+            recordReflexEntry({
+              ts: Date.now(),
+              sessionId,
+              outcome: "executed",
+              prompt: reflexText.slice(0, 200),
+              confidence: decision.confidence,
+              calls: decision.calls,
+              latencyMs: reply?.latencyMs,
+              execOk: exec.ok,
+            });
+            if (exec.ok || exec.partial) {
+              deps.onStep?.("local reflex");
+              // Compact execution summary + a small italic provenance label.
+              // On partial multi-call execution, return what already ran + the
+              // error instead of falling through and double-firing call 1.
+              const summary =
+                exec.lines.map((l) => `${l}`).join("\n") +
+                "\n\n*(local reflex)*";
+              return reflexAssistantStream(summary);
+            }
+          } else {
+            recordReflexEntry({
+              ts: Date.now(),
+              sessionId,
+              outcome: "fallthrough",
+              prompt: reflexText.slice(0, 200),
+              reason: decision.reason,
+              confidence: reply?.confidence,
+              latencyMs: reply?.latencyMs,
+            });
+          }
         }
-        reflexMinedPromptRef.current = { sessionId, prompt: reflexText };
-      } else {
-        reflexMinedPromptRef.current = null;
+        minedPrompt = { sessionId, prompt: reflexText };
       }
-    } else {
-      reflexMinedPromptRef.current = null;
     }
 
     const live = deps.getLive();
@@ -404,18 +397,15 @@ export function createContextAwareTransport(deps: Deps) {
       (deps.getCustomInstructions() || "") +
       (replyStyleBlock ? `\n\n${replyStyleBlock}` : "");
 
-    // Mining: snapshot the reflex-eligible prompt for the post-run miner.
-    const minedPrompt = reflexMinedPromptRef.current;
-    // Wire the step-level miner for the duration of this run only (cleared
-    // right after runAgentStream resolves, see below).
-    setAgentToolCallsMiner(minedPrompt ? mineAgentToolCalls : null);
-
     const result = await runAgentStream({
       keys: deps.getKeys(),
       modelId: deps.getModelId(),
       customInstructions: effectiveCustomInstructions,
       agentPersona: deps.getAgentPersona(),
       toolContext: deps.toolContext,
+      onToolCalls: minedPrompt
+        ? createStepMiner(minedPrompt.sessionId, minedPrompt.prompt)
+        : undefined,
       onStep: (step) => {
         if (step !== null) extensionStepCount++;
         deps.onStep?.(step);
@@ -451,10 +441,6 @@ export function createContextAwareTransport(deps: Deps) {
       mcpSummary: mcpSummary.length > 0 ? mcpSummary : undefined,
       fenceState: getSessionFenceState(sessionId),
     });
-    // Mining is bound to THIS run only: the step hook is cleared as soon as
-    // runAgentStream resolves, so a later run for another session can never
-    // mine this session's prompt onto the wrong turn.
-    setAgentToolCallsMiner(null);
     // When summarization trimmed the history, pass the trimmed set as
     // originalMessages so the Chat instance adopts it. Otherwise the Chat
     // keeps the full pre-summary history, and every subsequent step
@@ -665,21 +651,36 @@ export function summarizeMessagesNow(
   fileSnapshot: FileSnapshot[],
   sessionId: string | null,
 ): UIMessage[] | null {
-  // Nothing to compact if the tail already covers the whole conversation.
   const cutoff = findUIMessageTailCutoff(messages, SUMMARY_KEEP_TAIL_PAIRS);
-  if (cutoff <= 0) return null;
 
-  // Trivially small conversations gain nothing — the snapshot block would
-  // cost nearly as much as the history it replaces. (The automatic path
-  // has its own token threshold; this is the manual floor.)
+  // Count ALL payload mass (text, uploaded file data-URLs, tool outputs),
+  // not just plain text — a chat with 6 base64 images and short text prompts
+  // can exceed 200% context while having < 2,000 text tokens.
   let chars = 0;
   for (const m of messages) {
     for (const p of m.parts) {
-      if (p.type === "text")
+      if (p.type === "text" || p.type === "reasoning") {
         chars += (p as { text?: string }).text?.length ?? 0;
+      } else if (p.type === "file") {
+        const fp = p as { url?: string; data?: string };
+        chars += (fp.url ?? fp.data ?? "").length;
+      } else if (typeof p.type === "string" && p.type.startsWith("tool-")) {
+        const tp = p as unknown as { output?: unknown };
+        if (tp.output != null && typeof tp.output === "object") {
+          chars += JSON.stringify(tp.output).length;
+        }
+      }
     }
   }
   if (chars / 4 < 2_000) return null;
+
+  // Even when the whole conversation fits inside the 6-pair tail (cutoff <= 0),
+  // still run tail image elision and tool-output trimming so a short chat with
+  // 6 large images or huge tool outputs can be compacted in place.
+  if (cutoff <= 0) {
+    const trimmed = elideTailImageParts(trimTailToolResults(messages));
+    return trimmed === messages ? null : trimmed;
+  }
 
   const stateBlock = buildSessionState({ messages, fileSnapshot, sessionId });
   const tail = elideTailImageParts(trimTailToolResults(messages.slice(cutoff)));
@@ -697,49 +698,70 @@ export function summarizeMessagesNow(
  * stayed at 120%" report): uploaded photos ride user messages as `file`
  * parts carrying FULL base64 data-URLs, and the kept tail preserves its
  * messages verbatim — so a multi-image upload inside the tail could never
- * be shrunk by /compact, no matter how many times it ran (only pairs
- * pushed past the 6-pair window ever left). Replace every IMAGE file part
- * in the tail EXCEPT those on the most recent user message (the upload
- * the model may still be actively working with) with a compact text
- * pointer. Safe: uploads persist to disk at attach time and the composer
- * appends a `<attachment savedAt="path">` text block to the same message,
- * so the durable path still rides the tail text and the model can re-read
- * any elided image from its saved path.
+ * be shrunk by /compact. Replace every payload-bearing image `file` part in
+ * the tail — EXCEPT those on a trailing, unanswered user message (a live
+ * upload the model hasn't seen yet) — with a `<attachment>` text pointer.
+ * Wrapping in `<attachment>` ensures `stripUserContextBlocks` hides the
+ * machine note from the user's chat bubble while the model still sees it.
  */
 function elideTailImageParts(tail: UIMessage[]): UIMessage[] {
-  // The LAST user message in the tail is the most recent upload — keep it.
-  let lastUserIdx = -1;
+  // Keep images ONLY on a trailing user message that has no assistant reply
+  // after it (i.e. the active prompt currently being sent to the model).
+  // Once an assistant message follows it, the model has already seen those
+  // images and manual /compact can safely elide them.
+  let keepUserIdx = -1;
   for (let i = tail.length - 1; i >= 0; i--) {
     if (tail[i].role === "user") {
-      lastUserIdx = i;
+      const hasAssistantAfter = tail
+        .slice(i + 1)
+        .some((m) => m.role === "assistant");
+      if (!hasAssistantAfter) keepUserIdx = i;
       break;
     }
   }
   let anyChanged = false;
   const out = tail.map((m, i) => {
-    if (i === lastUserIdx) return m;
-    if (!m.parts.some((p) => isImageFilePart(p))) return m;
+    if (i === keepUserIdx) return m;
+    if (!m.parts.some((p) => isPayloadImageFilePart(p))) return m;
     anyChanged = true;
+    const hasSavedPath = m.parts.some(
+      (p) =>
+        p.type === "text" &&
+        /<attachment\b[^>]*savedAt="/.test((p as { text?: string }).text ?? ""),
+    );
     return {
       ...m,
-      parts: m.parts.map((p) =>
-        isImageFilePart(p)
-          ? ({
-              type: "text",
-              text: `[image ${String((p as { filename?: string }).filename ?? "attachment")} elided by /compact to save context — the upload was saved to disk; re-read it from its saved path if you need it again]`,
-            } as typeof p)
-          : p,
-      ),
+      parts: m.parts.map((p) => {
+        if (!isPayloadImageFilePart(p)) return p;
+        const name = String((p as { filename?: string }).filename ?? "attachment");
+        const safeName = name.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+        const note = hasSavedPath
+          ? `[image ${name} elided by /compact to save context — re-read it from its savedAt path if needed]`
+          : `[image ${name} elided by /compact to save context]`;
+        return {
+          type: "text",
+          text: `<attachment elided="true" name="${safeName}">${note}</attachment>`,
+        } as typeof p;
+      }),
     };
   });
   return anyChanged ? out : tail;
 }
 
-/** True for an uploaded-image `file` part (base64 data-URL carrier). */
-function isImageFilePart(p: { type?: string }): boolean {
+/** True for an image `file` part that actually carries an inline payload
+ *  (skipping already-stripped post-restart stubs like `data:image/png;base64`). */
+function isPayloadImageFilePart(p: { type?: string }): boolean {
   if (p.type !== "file") return false;
-  const mt = (p as { mediaType?: string }).mediaType ?? "";
-  return mt.startsWith("image/");
+  const fp = p as { mediaType?: string; url?: string; data?: string };
+  const mt = fp.mediaType ?? "";
+  if (!mt.startsWith("image/")) return false;
+  const payload = fp.url ?? fp.data ?? "";
+  if (!payload) return false;
+  if (payload.startsWith("data:")) {
+    const comma = payload.indexOf(",");
+    return comma !== -1 && payload.length - comma - 1 > 0;
+  }
+  return payload.length > 0;
 }
 
 /**
