@@ -506,4 +506,33 @@ describe("Workspaces grid behavior (source pins)", () => {
     expect(grid).toContain('if (mode === "off") return null;');
     expect(grid).toContain("<ContextTrigger asChild>");
   });
+
+  it("scopes the Close Project right-click menu to the card top bar only, not the chat body", () => {
+    const headerBlock = grid.slice(
+      grid.indexOf("Slim header"),
+      grid.indexOf("GroupCardBody group={group}"),
+    );
+    const bodyBlock = grid.slice(
+      grid.indexOf("GroupCardBody group={group}"),
+      grid.indexOf("const CardSandboxIcon = memo"),
+    );
+    expect(headerBlock).toContain("<ContextMenu>");
+    expect(headerBlock).toContain("<ContextMenuTrigger asChild>");
+    expect(headerBlock).toContain("Close Project");
+    expect(headerBlock).toContain("</ContextMenu>");
+    expect(bodyBlock).not.toContain("ContextMenu");
+    expect(bodyBlock).not.toContain("Close Project");
+  });
+
+  it("reorders cards via CSS Grid order without moving DOM nodes (preserves transcript scroll position)", () => {
+    expect(grid).toContain("order: gridOrderIndex");
+    expect(grid).toContain("gridOrderIndex={orderMap.get(cell.id) ?? index}");
+    // cells must NOT be sorted on dragOrder/gridOrder, which would trigger
+    // DOM insertBefore and reset scrollTop = 0 on moved chat transcripts.
+    const cellsMemo = grid.slice(
+      grid.indexOf("const cells = useMemo("),
+      grid.indexOf("const orderMap = useMemo("),
+    );
+    expect(cellsMemo).not.toContain(".sort(");
+  });
 });

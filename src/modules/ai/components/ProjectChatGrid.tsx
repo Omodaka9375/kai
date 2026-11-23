@@ -414,19 +414,25 @@ export function ProjectChatGrid({ items }: { items: ProjectSwitcherItem[] }) {
     setDragOrder(null);
     setDragId(null);
   }, [dragOrder]);
-  const cells = useMemo(() => {
-    const visible = items.slice(0, GRID_ROWS * GRID_COLS);
-    // Live drag sequence wins over the persisted one so cards follow the
-    // pointer in real time; the store is updated once on dragend.
+  // STABLE DOM ORDER + CSS `order` (2026-11-23 scroll-reset fix):
+  // Reordering React children mutates DOM order via `insertBefore`, which
+  // resets `scrollTop = 0` on every scrollable descendant inside moved cards
+  // (Chromium/WebView2 spec behavior). Keep `cells` in the stable `items`
+  // array order so DOM nodes are NEVER moved on drag, and position each card
+  // visually using CSS Grid `order` derived from `dragOrder ?? gridOrder`.
+  const cells = useMemo(
+    () => items.slice(0, GRID_ROWS * GRID_COLS),
+    [items],
+  );
+  const orderMap = useMemo(() => {
     const order = dragOrder ?? gridOrder;
-    const pos = new Map(order.map((id, i) => [id, i]));
-    const UNRANKED = Number.MAX_SAFE_INTEGER;
-    return [...visible].sort((a, b) => {
-      const ai = pos.get(a.id) ?? UNRANKED;
-      const bi = pos.get(b.id) ?? UNRANKED;
-      return ai - bi;
-    });
-  }, [items, gridOrder, dragOrder]);
+    const visibleIds = cells.map((c) => c.id);
+    const eff = [
+      ...order.filter((id) => visibleIds.includes(id)),
+      ...visibleIds.filter((id) => !order.includes(id)),
+    ];
+    return new Map(eff.map((id, i) => [id, i]));
+  }, [cells, gridOrder, dragOrder]);
   const projectIds = useMemo(() => cells.map((cell) => cell.id), [cells]);
   const statuses = useProjectStatuses(projectIds);
 
@@ -501,7 +507,7 @@ export function ProjectChatGrid({ items }: { items: ProjectSwitcherItem[] }) {
         "inset-x-2 top-[2.85rem] bottom-2",
       )}
     >
-      {cells.map((cell) => (
+      {cells.map((cell, index) => (
         <GridCell
           key={cell.id}
           projectId={cell.id}
@@ -510,6 +516,7 @@ export function ProjectChatGrid({ items }: { items: ProjectSwitcherItem[] }) {
           status={statuses[cell.id] ?? "idle"}
           active={cell.active}
           color={cell.color}
+          gridOrderIndex={orderMap.get(cell.id) ?? index}
           micRecording={voice.recording && micTarget === sessionOfCell(cell.id)}
           micTranscribing={voice.transcribing && micTarget === sessionOfCell(cell.id)}
           micBusy={micBusy}
@@ -535,6 +542,9 @@ type GridCellProps = {
   active: boolean;
   /** Project icon color preset key ("auto"/undefined = hash hue). */
   color?: string;
+  /** CSS Grid `order` index so cards rearrange visually without moving DOM
+   *  nodes (moving DOM nodes via insertBefore resets descendant scrollTop). */
+  gridOrderIndex: number;
   micRecording: boolean;
   micTranscribing: boolean;
   micBusy: boolean;
@@ -550,7 +560,7 @@ type GridCellProps = {
 };
 
 const GridCell = memo(function GridCell(props: GridCellProps) {
-  const { projectId, root, name, status, active, color, dragging } = props;
+  const { projectId, root, name, status, active, color, gridOrderIndex, dragging } = props;
   const switchProject = useContext(SwitchProjectContext);
   // The project-LOCAL active session (background projects keep their own).
   const sessionId = useSyncExternalStore(
@@ -569,17 +579,17 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [projectId, sessionId, openGroup, groupVer, stackSurface],
   );
-  // CONTEXT MENU (2026-11-23): right-click a card -> Close Project, the
-  // same projectsMenu.closeProject path the rail's X uses (confirmation
-  // dialog included - AppShell arms its AlertDialog on this call).
+  // CONTEXT MENU (2026-11-23): right-click the card's TOP BAR (not the chat
+  // body or input) -> Close Project, the same projectsMenu.closeProject path
+  // the rail's X uses (confirmation dialog included - AppShell arms its
+  // AlertDialog on this call). Scoping the trigger to the header preserves
+  // text/transcript/input right-click menus inside the card body.
   const projectsMenu = useProjectsMenu();
   const closeThisProject = useCallback(() => {
     projectsMenu?.closeProject(projectId);
   }, [projectsMenu, projectId]);
 
   return (
-    <ContextMenu>
-    <ContextMenuTrigger asChild>
     <div
       onDragOver={(e) => {
         // preventDefault makes this card a valid drop target so the
@@ -589,11 +599,12 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
       }}
       onDrop={(e) => e.preventDefault()}
       style={
-        status !== "idle"
-          ? ({
-              "--kai-card-glow": CARD_GLOW_COLOR[status],
-            } as React.CSSProperties)
-          : undefined
+        {
+          order: gridOrderIndex,
+          ...(status !== "idle"
+            ? { "--kai-card-glow": CARD_GLOW_COLOR[status] }
+            : {}),
+        } as React.CSSProperties
       }
       className={cn(
         // UNIFORM CARDS (2026-11-19): no selected outline in Workspaces -
@@ -635,6 +646,8 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
           CURSOR (2026-11-21): hover shows the POINTER, not a grab hand -
           the bar's primary action is double-click-to-open. The grabbing
           hand appears only during a press (or while the card is carried). */}
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
       <div
         draggable
         onDragStart={(e) => {
@@ -710,6 +723,17 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
           ) : null}
         </div>
       </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent className="w-44 text-xs">
+          <ContextMenuItem
+            onSelect={closeThisProject}
+            className="gap-2 text-destructive focus:text-destructive"
+          >
+            <HugeiconsIcon icon={Cancel01Icon} size={13} strokeWidth={2} />
+            Close Project
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
 
       {group ? (
         <GroupCardBody group={group} {...props} projectId={projectId} />
@@ -725,17 +749,6 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
         </button>
       )}
     </div>
-    </ContextMenuTrigger>
-      <ContextMenuContent className="w-44 text-xs">
-        <ContextMenuItem
-          onSelect={closeThisProject}
-          className="gap-2 text-destructive focus:text-destructive"
-        >
-          <HugeiconsIcon icon={Cancel01Icon} size={13} strokeWidth={2} />
-          Close Project
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
   );
 });
 
