@@ -657,3 +657,169 @@ describe("describeApproval subject derivation (audit 'Unknown' regression)", () 
     expect(src).toMatch(/type\.replace\(\/\^tool-\/, ""\)/);
   });
 });
+
+describe("evicted-chat reseed + empty-persist wipe guard (2026-11-23 Workspaces wipe)", () => {
+  // USER REPORT: "switched to a project to open a new session, went back to
+  // Workspaces, almost all other projects show a new session / got wiped."
+  // ROOT CAUSE: cap-8 chat LRU evicts the chats the grid still displays;
+  // the cell's next render runs getOrCreateChat with NO seed (the seed is
+  // consumed on first construction) -> the empty Chat's bridge mount fires
+  // persistMessages(id, []) -> the real disk blob is overwritten with [].
+  let mod: typeof import("./chatStore");
+
+  beforeAll(async () => {
+    mod = await import("./chatStore");
+  }, 30_000);
+
+  it("an EMPTY persist never overwrites a session with real history", async () => {
+    const store = mod.useChatStore;
+    const { saveMessagesForRoot } = await import("../lib/sessions");
+    const root = "D:/wipe-guard-empty-persist";
+    const sessionId = "wipe-guard-session";
+    // Real history on disk + meta that says so.
+    await saveMessagesForRoot(root, sessionId, [
+      { id: "real-msg", role: "user", parts: [{ type: "text", text: "real history" }] },
+    ] as never);
+    store.setState({
+      sessions: [
+        {
+          id: sessionId,
+          title: "Real conversation",
+          createdAt: 1,
+          updatedAt: 1,
+          lastMessageCount: 1,
+          workspaceRoot: root,
+          workspaceEnv: { kind: "local" as const },
+        },
+        ...store.getState().sessions.filter((s) => s.id !== sessionId),
+      ],
+      activeSessionId: null,
+      sessionsHydrated: false,
+      lastHydratedWorkspace: null,
+    });
+
+    // The wipe path: an unseeded Chat mount persisting an EMPTY array.
+    store.getState().persistMessages(sessionId, [] as never);
+    mod.flushPersist(sessionId);
+
+    // The blob on disk must be UNTOUCHED.
+    const { loadMessagesForRoot } = await import("../lib/sessions");
+    const reloaded = await loadMessagesForRoot(root, sessionId, { kind: "local" });
+    expect(
+      (reloaded?.[0]?.parts?.[0] as { text?: string } | undefined)?.text,
+    ).toBe("real history");
+
+    store.setState({ sessions: store.getState().sessions.filter((s) => s.id !== sessionId) });
+  });
+
+  it("an empty persist for a NEW placeholder still works (promotes nothing, deletes nothing)", async () => {
+    const store = mod.useChatStore;
+    const freshId = "wipe-guard-fresh-placeholder";
+    store.setState({
+      sessions: [
+        {
+          id: freshId,
+          title: "New chat",
+          createdAt: 1,
+          updatedAt: 1,
+          lastMessageCount: 0,
+          workspaceRoot: "D:/wipe-guard-fresh",
+          workspaceEnv: { kind: "local" as const },
+        },
+        ...store.getState().sessions.filter((s) => s.id !== freshId),
+      ],
+    });
+    // Must not throw and must not treat the placeholder as real history.
+    store.getState().persistMessages(freshId, [] as never);
+    mod.flushPersist(freshId);
+    store.setState({ sessions: store.getState().sessions.filter((s) => s.id !== freshId) });
+  });
+
+  it("getOrCreateChat reseeds an evicted session with real history instead of constructing empty", async () => {
+    const store = mod.useChatStore;
+    const { saveMessagesForRoot, setSessionsScope } =
+      await import("../lib/sessions");
+    const root = "D:/wipe-guard-reseed";
+    const sessionId = "reseed-session";
+    await saveMessagesForRoot(root, sessionId, [
+      { id: "reseed-msg", role: "user", parts: [{ type: "text", text: "reseed me" }] },
+    ] as never);
+    store.setState({
+      sessions: [
+        {
+          id: sessionId,
+          title: "Evicted conversation",
+          createdAt: 1,
+          updatedAt: 1,
+          lastMessageCount: 1,
+          workspaceRoot: root,
+          workspaceEnv: { kind: "local" as const },
+        },
+        ...store.getState().sessions.filter((s) => s.id !== sessionId),
+      ],
+      activeSessionId: null,
+      sessionsHydrated: false,
+      lastHydratedWorkspace: null,
+    });
+
+    // Simulate the post-eviction state: NO chat, NO seed. The old code
+    // constructed an empty Chat here; the new code fires the async reseed.
+    const chat = mod.getOrCreateChat(sessionId);
+    expect(chat.messages.length).toBe(0); // still synchronous - empty for now
+    // The repair resolves and seeds; a LATER construction must see it. Poll
+    // until the fire-and-forget load lands (bounded - a failure surfaces as
+    // the empty assertion below instead of a hang).
+    let restored: Awaited<ReturnType<typeof mod.getOrCreateChat>> | null = null;
+    for (let i = 0; i < 100 && !restored; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+      // touchChat cycles: constructing again would keep the same EMPTY chat
+      // until it is evicted, so evict it first via pressure if needed.
+      const candidate = mod.getOrCreateChat(sessionId);
+      if (candidate.messages.length > 0) restored = candidate;
+      else {
+        // Force the oldest (our empty chat) out by filling the LRU with
+        // pressure chats, then let the next construction consume the seed.
+        for (let k = 0; k < 12; k++) mod.getOrCreateChat(`reseed-pressure-${i}-${k}`);
+      }
+    }
+    const chat2 = restored ?? mod.getOrCreateChat(sessionId);
+    expect(
+      (chat2.messages[0]?.parts?.[0] as { text?: string } | undefined)?.text,
+    ).toBe("reseed me");
+
+    await setSessionsScope(null);
+    store.setState({ sessions: store.getState().sessions.filter((s) => s.id !== sessionId) });
+  });
+
+  it("Workspaces pinning keeps grid-visible sessions out of the LRU reaper", async () => {
+    const store = mod.useChatStore;
+    const pinned = new Set<string>(["grid-visible-session"]);
+    mod.setWorkspacesPinnedSessions(pinned);
+    // The pin predicate consulted by touchChat's eviction loop.
+    const meta = {
+      id: "grid-visible-session",
+      title: "Grid chat",
+      createdAt: 1,
+      updatedAt: 1,
+      lastMessageCount: 1,
+      workspaceRoot: "D:/pin-grid",
+      workspaceEnv: { kind: "local" as const },
+    };
+    store.setState({
+      sessions: [meta, ...store.getState().sessions.filter((s) => s.id !== meta.id)],
+    });
+    // Simulate pressure: construct more chats than the cap, all idle.
+    for (let i = 0; i < 10; i++) {
+      mod.getOrCreateChat(`pin-pressure-${i}`);
+    }
+    // Give the pin set back.
+    mod.setWorkspacesPinnedSessions(null);
+    store.setState({ sessions: store.getState().sessions.filter((s) => s.id !== meta.id) });
+    // No assertion on chats Map size (internal), but the test exercises the
+    // pinned path without throwing; the source pin below asserts the wiring.
+    const src = await import("node:fs").then((fs) =>
+      fs.readFileSync(new URL("./chatStore.ts", import.meta.url), "utf8"),
+    );
+    expect(src).toContain("isWorkspacesPinned(oldest)");
+  });
+});

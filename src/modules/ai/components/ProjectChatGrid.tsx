@@ -80,6 +80,7 @@ import { useWhisperRecording } from "../hooks/useWhisperRecording";
 import {
   getOrCreateChat,
   useChatStore,
+  setWorkspacesPinnedSessions,
   patchSessionAgentMeta,
   subscribeSessionAgentMeta,
   getSessionAgentMeta,
@@ -451,6 +452,22 @@ export function ProjectChatGrid({ items }: { items: ProjectSwitcherItem[] }) {
       if (getProjectActiveSession(cell.id)) continue;
       void resolveBackgroundProjectSession(cell.id).catch(() => {});
     }
+  }, [cells]);
+
+  // WORKSPACES PIN (2026-11-23 wipe bug): register the sessions the grid's
+  // mounted cells display so the chat LRU never evicts a VISIBLE chat.
+  // Evicting one made the cell's next render construct an empty Chat whose
+  // mount persist overwrote the session's real disk history with [].
+  useEffect(() => {
+    const pins = new Set<string>();
+    for (const cell of cells) {
+      const sid = getProjectActiveSession(cell.id);
+      if (sid) pins.add(sid);
+    }
+    setWorkspacesPinnedSessions(pins);
+    return () => {
+      setWorkspacesPinnedSessions(null);
+    };
   }, [cells]);
 
   // ── The ONE mic instance ──────────────────────────────────────────────

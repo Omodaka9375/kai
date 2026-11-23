@@ -518,17 +518,45 @@ function touchChat(id: string, c: Chat<UIMessage>) {
     // pin their live participants so a mid-round delegation is never
     // evicted and rehydrated from a stale snapshot. Registered via
     // setChatPinner (chatStore cannot import the group store - cycle).
+    //
+    // WORKSPACES PIN (2026-11-23 "almost all other projects show a new
+    // session / got wiped"): every OPEN project keeps a live chat through
+    // its grid cell / mini-window body, so cap-8 eviction was cycling the
+    // exact chats the Workspaces grid displays. An evicted grid chat's
+    // next mount (cell re-render, project visit) ran getOrCreateChat with
+    // NO seed - constructing an EMPTY Chat whose mount persist then
+    // overwrote the session's real disk history with []. Eviction must
+    // never reap a chat a mounted surface still displays; if the pin set
+    // alone fills the cap, keep the newest and STOP (correctness over the
+    // memory budget).
     if (
       useChatStore.getState().activeSessionId === oldest ||
       chat?.status === "streaming" ||
       chat?.status === "submitted" ||
       (chat ? hasPendingApprovals(chat) : false) ||
-      chatPinner?.(oldest)
-    ) break;
+      chatPinner?.(oldest) ||
+      isWorkspacesPinned(oldest)
+    ) {
+      // Pinned: advance past it instead of breaking the whole loop - the
+      // NEXT-oldest idle chat can still be evicted safely.
+      continue;
+    }
     flushPersistEntry(oldest);
     void chat?.stop();
     chats.delete(oldest);
   }
+}
+
+/** Sessions that a MOUNTED surface still displays (Workspaces grid cell /
+ *  mini-window). Registered by ProjectChatGrid on mount/unmount of each
+ *  cell's live body; prevents the LRU from evicting visible chats.
+ *  Single-slot inversion, same pattern as chatPinner. */
+let workspacesPinnedSessions: Set<string> | null = null;
+export function setWorkspacesPinnedSessions(ids: Set<string> | null): void {
+  workspacesPinnedSessions = ids;
+}
+function isWorkspacesPinned(id: string): boolean {
+  return workspacesPinnedSessions?.has(id) ?? false;
 }
 
 /** Externally-registered LRU pin predicate (returns true = never evict).
@@ -2136,6 +2164,29 @@ export const useChatStore = create<StoreState>((set, get) => ({
   },
 
   persistMessages: (id, messages) => {
+    // EVICTED-SEED-KEEPS-DATA (2026-11-23 wipe bug): an EMPTY persist must
+    // never overwrite a session that HAS real history. The wipe path was:
+    // LRU evicts the Chat -> a mounted surface re-runs getOrCreateChat with
+    // no seed -> the empty Chat's AgentRunBridge mount fires
+    // persistMessages(id, []) -> this snapshot replaces the real disk blob
+    // with []. Two safe-empties exist and must keep working: a brand-new
+    // placeholder (never had content) and a deliberate user deletion.
+    // A meta with real content (title derived or lastMessageCount > 0) plus
+    // an empty in-memory array means the Chat was constructed unseeded - the
+    // reseed repair in getOrCreateChat will restore it; persisting now
+    // would destroy the data the repair is about to load. Skip the blob
+    // write (the meta update below is harmless either way).
+    if (messages.length === 0) {
+      const meta = get().sessions.find((s) => s.id === id);
+      const hasRealHistory =
+        !!meta &&
+        ((meta.lastMessageCount ?? 0) > 0 ||
+          (!!meta.title && meta.title !== "New chat"));
+      if (hasRealHistory) {
+        noteSessionRoot(id, meta!.workspaceRoot ?? null);
+        return;
+      }
+    }
     // Scope-ownership record. `saveMessages` writes into the CURRENTLY SCOPED
     // sessions file, which belongs to exactly one project. On a project
     // switch the outgoing Chat can still emit a (possibly empty/transient)
@@ -2493,11 +2544,49 @@ export function getOrCreateChat(sessionId: string): Chat<UIMessage> {
     touchChat(sessionId, existing);
     return existing;
   }
+  // EVICTED-CHAT RESEED GUARD (2026-11-23 wipe bug): constructing a Chat with
+  // NO seed (the seed is consumed on first construction; LRU eviction drops
+  // the Chat but not the session) builds an EMPTY Chat, and the bridge's
+  // mount persist then overwrites the session's real disk history with [].
+  // Only a placeholder "New chat" (never had content) may construct
+  // unseeded; anything with a real title/lastMessageCount must be
+  // rehydrated first (ensureChatHydrated / loadSessionHistory).
+  const meta = useChatStore.getState().sessions.find((s) => s.id === sessionId);
+  const hasRealHistory =
+    !!meta &&
+    ((meta.lastMessageCount ?? 0) > 0 ||
+      (!!meta.title && meta.title !== "New chat"));
+  if (hasRealHistory && !seedMessages.has(sessionId)) {
+    void loadSessionHistoryForMeta(sessionId, meta!).catch(() => {});
+  }
   // Create chat synchronously - stack detection happens asynchronously
   // in the background and will be passed to the agent when available
   const c = makeChatSync(sessionId);
   touchChat(sessionId, c);
   return c;
+}
+
+/** Rehydrate a session's persisted history into seedMessages from its OWN
+ *  project file (never the currently scoped one). Async repair for the
+ *  unseeded-Chat path above: the empty Chat constructed now will be
+ *  superseded once the seed lands (the caller's next getOrCreateChat finds
+ *  the seed and remounts with history - and the EVICTED-SEED-KEEPS-DATA
+ *  guard in persistMessages keeps the empty mount from destroying disk
+ *  history in the meantime). */
+async function loadSessionHistoryForMeta(
+  sessionId: string,
+  meta: { workspaceRoot?: string | null; workspaceEnv?: { kind: string } | null },
+): Promise<void> {
+  const loaded = meta.workspaceRoot
+    ? await loadMessagesForRoot(
+        meta.workspaceRoot,
+        sessionId,
+        (meta.workspaceEnv as never) ?? { kind: "local" },
+      ).catch(() => null)
+    : await loadMessages(sessionId).catch(() => null);
+  if (loaded && loaded.length > 0 && !chats.has(sessionId)) {
+    seedMessages.set(sessionId, stripIncompleteToolMessages(loaded));
+  }
 }
 
 /** Load persisted history BEFORE a background subsystem constructs its Chat.
