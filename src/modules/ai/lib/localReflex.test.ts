@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  callGroundedInPrompt,
   decideReflex,
   isClippedByGrammar,
+  isCodeShapedPrompt,
   mapNarrowCalls,
   REFLEX_ALLOWED_NARROW_TOOLS,
   REFLEX_MAX_PROMPT_CHARS,
@@ -210,5 +212,86 @@ describe("decideReflex", () => {
   it("falls through when the reply is null (engine unavailable)", () => {
     const d = decideReflex("stop the radio", null);
     expect(d.action === "fallthrough" && d.reason === "no-reply").toBe(true);
+  });
+
+  it("falls through on code-shaped prompts regardless of the engine reply (2026-11-23 live hijack)", () => {
+    // The live false positive: a python -c code-execution prompt classified
+    // as set_terminal_webgl at 0.77 and EXECUTED. Any code marker -> LLM.
+    const codeCall: NarrowCall[] = [
+      { name: "set_terminal_webgl", arguments: { enabled: false } },
+    ];
+    const prompts = [
+      'python -c "import sys, os; sys.stdout.reconfigure()"',
+      "run this: node -e \"console.log(1)\"",
+      "fix the import sys reconfigure line in the script",
+      "run scripts/run-tests.mjs and show me the output",
+      "here is the code ```print(1)``` run it",
+    ];
+    for (const p of prompts) {
+      expect(isCodeShapedPrompt(p), `expected code-shaped: ${p}`).toBe(true);
+      const d = decideReflex(p, { calls: codeCall, confidence: 0.99 });
+      expect(d.action === "fallthrough" && d.reason === "code-shaped", p).toBe(true);
+    }
+  });
+
+  it("code-shape guard does NOT fire on real desktop-control prompts", () => {
+    for (const p of [
+      "switch to dark mode",
+      "play groove salad",
+      "remind me in 15 minutes to stretch",
+      "open http://localhost:5173",
+      "set terminal font size to 14",
+      "zoom level 150 percent",
+    ]) {
+      expect(isCodeShapedPrompt(p), `must stay reflex-eligible: ${p}`).toBe(false);
+    }
+  });
+
+  it("falls through when a settings key has no trace in the prompt (ungrounded hijack)", () => {
+    // Same live hijack from the grounding side: "run a python script" carries
+    // no webgl/hardware token, so terminalWebglEnabled is unjustified.
+    const d = decideReflex(
+      "run the tests in that package",
+      { calls: [{ name: "set_terminal_webgl", arguments: { enabled: false } }], confidence: 0.99 },
+    );
+    expect(d.action === "fallthrough" && d.reason === "ungrounded").toBe(true);
+  });
+
+  it("grounds real settings calls by prompt tokens and value text", () => {
+    // Key token + value text both traceable -> executes.
+    const d = decideReflex(
+      "switch the theme to tokyo night",
+      { calls: [{ name: "set_ui_theme", arguments: { palette: "tokyo-night" } }], confidence: 0.9 },
+    );
+    expect(d.action).toBe("execute");
+    // Value absent from the prompt -> ungrounded, falls through.
+    const d2 = decideReflex(
+      "switch the theme please",
+      { calls: [{ name: "set_ui_theme", arguments: { palette: "tokyo-night" } }], confidence: 0.9 },
+    );
+    expect(d2.action === "fallthrough" && d2.reason === "ungrounded").toBe(true);
+  });
+
+  it("computed arguments (dueAt dates) are exempt from value grounding", () => {
+    const ok = callGroundedInPrompt("remind me in 15 minutes to stretch", {
+      name: "reminder_create",
+      arguments: { message: "stretch", dueAt: "2026-11-23T18:00:00.000Z" },
+    });
+    expect(ok).toBe(true);
+  });
+
+  it("persona 'none' and station values ground through synonyms", () => {
+    expect(
+      callGroundedInPrompt("no persona for now", {
+        name: "set_persona",
+        arguments: { persona: "none" },
+      }),
+    ).toBe(true);
+    expect(
+      callGroundedInPrompt("play groove salad", {
+        name: "play_radio",
+        arguments: { station: "groovesalad" },
+      }),
+    ).toBe(true);
   });
 });

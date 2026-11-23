@@ -496,6 +496,101 @@ export function isConversationalAck(prompt: string): boolean {
 }
 
 /**
+ * CODE-SHAPE guard (2026-11-23 live false positive: a `python -c "…"`
+ * code-execution prompt classified as set_terminal_webgl at 0.77 and
+ * EXECUTED a settings mutation — "run this script" is a coding task, and
+ * no desktop-control command carries code). Deterministic, prompt-side:
+ * any code marker means only the LLM can serve the turn. Markers:
+ *  - ``` fences
+ *  - interpreter eval flags (`python -c`, `node -e`, `pwsh -c`, …)
+ *  - import statements (`import sys, os`, `from x import y`)
+ *  - dotted module calls (`sys.stdout.reconfigure(`)
+ *  - slashy paths with extensions (`…/run-tests.mjs`)
+ * All are absent from real desktop-control prompts ("switch to dark mode",
+ * "play groove salad", "open http://localhost:5173" — the path regex needs
+ * a dot after a slash segment, which a bare host:port URL never has).
+ */
+const CODE_INTERPRETER_FLAGS = [
+  "python -c", "python3 -c", "node -e", "node -p", "perl -e", "ruby -e",
+  "pwsh -c", "powershell -command", "powershell -c", "bash -c", "sh -c",
+  "cmd /c",
+];
+
+export function isCodeShapedPrompt(prompt: string): boolean {
+  const p = prompt.toLowerCase();
+  if (p.includes("```")) return true;
+  if (CODE_INTERPRETER_FLAGS.some((f) => p.includes(f))) return true;
+  if (/\bimport\s+[a-z_]/.test(p)) return true;
+  if (/\bfrom\s+[a-z_.]+\s+import\b/.test(p)) return true;
+  if (/\b[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*\s*\(/.test(p)) return true;
+  if (/[\/\\][a-z0-9_-]+\.[a-z]{1,4}\b/.test(p)) return true;
+  return false;
+}
+
+/**
+ * SETTINGS-KEY GROUNDING (2026-11-23 live false positive above): the
+ * classifier can emit a settings key whose subject appears NOWHERE in the
+ * prompt — the webgl hijack set `terminalWebglEnabled` over a prompt about
+ * running a python script. Range validation cannot catch this (booleans
+ * have no range); shape validation cannot (the call is well-formed). The
+ * fix is a prompt-side floor: every settings key the model sets must be
+ * justified by a trigger token IN the prompt, and every string value must
+ * appear in the prompt (normalized: hyphens/spaces/punctuation collapse, so
+ * "tokyo night" grounds "tokyo-night" and "groove salad" grounds
+ * "groovesalad"). Computed values (dueAt dates, repeat units) are exempt;
+ * persona "none" carries a synonym set. Ungrounded -> the whole turn falls
+ * through to the LLM.
+ */
+const SETTINGS_KEY_GROUNDING: Record<string, string[]> = {
+  theme: ["theme", "mode", "dark", "light", "appearance"],
+  uiThemeId: ["theme", "palette"],
+  editorTheme: ["editor"],
+  vimMode: ["vim"],
+  editorWordWrap: ["wrap"],
+  showHidden: ["hidden"],
+  terminalWebglEnabled: ["webgl", "hardware", "acceler"],
+  terminalFontSize: ["font"],
+  terminalScrollback: ["scrollback", "scroll"],
+  zoomLevel: ["zoom"],
+};
+
+/** Argument keys whose values are COMPUTED (never appear in the prompt). */
+const UNGROUNDABLE_ARGS = new Set(["dueAt", "repeat"]);
+
+/** "no persona" phrasings the engine maps to the `none` sentinel. */
+const PERSONA_NONE_SYNONYMS = new Set(["none", "__none__", "off", "no persona"]);
+
+function normalizeForGrounding(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/** True when every key/value of the call is traceable to the prompt text. */
+export function callGroundedInPrompt(prompt: string, call: CanonicalCall): boolean {
+  const raw = prompt.toLowerCase();
+  const norm = normalizeForGrounding(prompt);
+  if (call.name === "settings_update") {
+    for (const key of Object.keys(call.arguments)) {
+      const tokens = SETTINGS_KEY_GROUNDING[key];
+      if (tokens && !tokens.some((t) => raw.includes(t))) return false;
+    }
+  }
+  for (const [key, value] of Object.entries(call.arguments)) {
+    if (UNGROUNDABLE_ARGS.has(key)) continue;
+    if (typeof value !== "string" || value.length === 0) continue;
+    const v = normalizeForGrounding(value);
+    if (v && norm.includes(v)) continue;
+    if (
+      call.name === "set_persona" &&
+      PERSONA_NONE_SYNONYMS.has(value.toLowerCase())
+    ) {
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
+/**
  * Pure decision: given the engine reply for a prompt, decide execute vs
  * fall-through. Enforces the confidence gate, the tool allowlist, and the
  * mapper's grounding rules (which return null on any ungrounded call).
@@ -511,6 +606,11 @@ export function decideReflex(
   if (isConversationalAck(prompt)) {
     return { action: "fallthrough", reason: "conversational" };
   }
+  if (isCodeShapedPrompt(prompt)) {
+    // A code marker in the prompt means the turn is a coding task; only the
+    // LLM can serve it, whatever the classifier says.
+    return { action: "fallthrough", reason: "code-shaped" };
+  }
   if (reply.confidence < REFLEX_CONFIDENCE_GATE) {
     return { action: "fallthrough", reason: "low-confidence" };
   }
@@ -522,6 +622,11 @@ export function decideReflex(
   if (!mapped) return { action: "fallthrough", reason: "unmapped" };
   if (mapped.some((c) => !REFLEX_ALLOWED_CANONICAL_TOOLS.has(c.name))) {
     return { action: "fallthrough", reason: "disallowed-tool" };
+  }
+  if (mapped.some((c) => !callGroundedInPrompt(prompt, c))) {
+    // The classifier picked a key/value with no trace in the prompt —
+    // a hallucinated settings mutation, not what the user asked for.
+    return { action: "fallthrough", reason: "ungrounded" };
   }
   return { action: "execute", calls: mapped, confidence: reply.confidence };
 }

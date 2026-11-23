@@ -40,7 +40,8 @@ export type ReflexEntry = {
   /** User prompt text, truncated to 200 chars. Never tool output. */
   prompt: string;
   /** fallthrough reason: disabled | engine-down | long-prompt | non-text |
-   *  no-reply | low-confidence | empty-calls | disallowed-tool | unmapped */
+   *  no-reply | low-confidence | empty-calls | disallowed-tool | unmapped |
+   *  conversational | code-shaped | ungrounded */
   reason?: string;
   confidence?: number;
   /** Canonical KAI calls (post-mapping) when known. */
