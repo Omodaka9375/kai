@@ -28,6 +28,7 @@ import { buildDomainTools } from "./domain";
 import { buildPersonaTools } from "./persona";
 import { buildSkillTools } from "./skills";
 import { buildVaultTools } from "./vault";
+import { buildReflexTools } from "./reflex";
 
 export { resolvePath, type ToolContext } from "./context";
 
@@ -57,6 +58,7 @@ export function buildCoreTools(ctx: import("./context").ToolContext) {
     ...buildSocialTools(ctx),
     ...buildSkillTools(ctx),
     ...buildVaultTools(ctx),
+    ...buildReflexTools(ctx),
   } as const;
 }
 

@@ -63,6 +63,14 @@ export const REFLEX_ALLOWED_NARROW_TOOLS = new Set([
   "reminder_cancel",
   "set_persona",
   "open_preview",
+  // Run #5 additions (2026-11-23): zero-argument, every-instance tools
+  // answered locally - time/date, stop the run, fresh session, list reads.
+  "get_time",
+  "stop_agent",
+  "new_session",
+  "list_skills",
+  "list_personas",
+  "list_sessions",
 ]);
 
 /** Canonical KAI tools the executor will run (post-mapping). */
@@ -79,6 +87,13 @@ export const REFLEX_ALLOWED_CANONICAL_TOOLS = new Set([
   "reminder_cancel",
   "set_persona",
   "open_preview",
+  // Run #5 additions - all needsApproval: false core tools (tools/reflex.ts).
+  "get_time",
+  "stop_agent",
+  "new_session",
+  "list_skills",
+  "list_personas",
+  "list_sessions",
 ]);
 
 /** Numeric bounds mirrored from the runtime narrow_tools schema. A Needle
@@ -374,6 +389,31 @@ export function mapNarrowCalls(
         out.push({ name: "open_preview", arguments: { url } });
         break;
       }
+      // ── Run #5 additions (2026-11-23) ────────────────────────────────
+      // All zero-argument: the engine's decode grammar can only emit these
+      // names with an empty argument object, so there is no slot to ground.
+      // The domain trigger floors in callGroundedInPrompt are the precision
+      // layer (each of these domains needs its vocabulary in the prompt).
+      case "get_time":
+      case "stop_agent":
+      case "new_session":
+      case "list_skills":
+      case "list_personas":
+      case "list_sessions": {
+        flushSettings();
+        // Refuse a non-empty argument object: the grammar clipped something
+        // into a tool that takes no parameters (the same rule the numeric
+        // bounds enforce for the slotted tools).
+        if (
+          args &&
+          typeof args === "object" &&
+          Object.keys(args).length > 0
+        ) {
+          return null;
+        }
+        out.push({ name, arguments: {} });
+        break;
+      }
       default:
         // Unknown tool name from the engine: never execute, never guess.
         return null;
@@ -478,6 +518,7 @@ const CONVERSATIONAL_PROMPTS = new Set([
   "proceed", "continue please", "keep going", "carry on", "stop", "wait",
   "hmm", "hm", "fine", "agreed", "good", "correct", "please do", "do it",
   "confirm", "confirmed", "abort", "skip", "next", "done", "thanks",
+  "cancel",
 ]);
 
 /**
@@ -593,6 +634,41 @@ const RADIO_PROMPT_TRIGGERS = [
   "volume", "quiet",
 ];
 
+/**
+ * RUN #5 DOMAIN TRIGGER FLOORS (2026-11-23): each new zero-argument domain
+ * gets the same prompt-side precision floor radio has. A call whose prompt
+ * carries NONE of its domain vocabulary is ungrounded regardless of the
+ * classifier's confidence - this is what stops a coding prompt from riding
+ * `stop_agent` ("stop the build" must escalate) while "stop the agent"
+ * fires locally.
+ */
+const DOMAIN_TRIGGERS: Record<string, string[]> = {
+  get_time: [
+    "time", "date", "day", "clock", "today", "tomorrow", "hour",
+    "mik", "idő", "dátum", "nap", "hány", "ma",
+  ],
+  stop_agent: [
+    "stop", "cancel", "halt", "abort", "kill the", "interrupt",
+    "agent", "run", "generation", "reply", "reply",
+  ],
+  new_session: [
+    "new chat", "new session", "fresh", "start over", "start a new",
+    "blank chat", "clean slate", "clear the chat",
+  ],
+  list_skills: ["skill", "skills", "capabilit", "snippet", "#"],
+  list_personas: ["persona", "personas", "agents", "roles", "list agent", "which agent", "what agent"],
+  list_sessions: [
+    // Multi-word triggers ONLY: bare "session"/"chat" appears constantly in
+    // coding prompts ("explain the pty session spawn lock"), so the floor
+    // must demand roster/listing context, not the noun alone.
+    "session list", "chat list", "conversation list", "my sessions",
+    "my chats", "my conversations", "which sessions", "which chats",
+    "what sessions", "what chats", "sessions are", "chats are",
+    "conversations are", "threads are", "list session", "list chat",
+    "show the sessions", "show the chats", "show my session", "show my chat",
+  ],
+};
+
 /** "no persona" phrasings the engine maps to the `none` sentinel. */
 const PERSONA_NONE_SYNONYMS = new Set(["none", "__none__", "off", "no persona"]);
 const PERSONA_NONE_TRIGGERS = [
@@ -610,6 +686,11 @@ export function callGroundedInPrompt(prompt: string, call: CanonicalCall): boole
   // Radio commands must carry radio vocabulary in the prompt (see
   // RADIO_DOMAIN_TOOLS above) — a coding prompt never does.
   if (RADIO_DOMAIN_TOOLS.has(call.name) && !RADIO_PROMPT_TRIGGERS.some((t) => raw.includes(t))) {
+    return false;
+  }
+  // Run #5 domains: same floor per domain (see DOMAIN_TRIGGERS above).
+  const triggers = DOMAIN_TRIGGERS[call.name];
+  if (triggers && !triggers.some((t) => raw.includes(t))) {
     return false;
   }
   if (call.name === "settings_update") {

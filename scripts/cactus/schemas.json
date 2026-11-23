@@ -32,7 +32,11 @@
           },
           "color_mode": {
             "type": "string",
-            "enum": ["light", "dark", "system"],
+            "enum": [
+              "light",
+              "dark",
+              "system"
+            ],
             "description": "light mode, dark mode, or system mode"
           },
           "editor_theme": {
@@ -96,7 +100,12 @@
         "properties": {
           "action": {
             "type": "string",
-            "enum": ["play", "stop", "list_stations", "now_playing"],
+            "enum": [
+              "play",
+              "stop",
+              "list_stations",
+              "now_playing"
+            ],
             "description": "radio action to perform"
           },
           "station": {
@@ -104,7 +113,9 @@
             "description": "station name or music genre when playing (e.g. 'groove salad', 'drone zone', 'def con radio', 'ambient')"
           }
         },
-        "required": ["action"]
+        "required": [
+          "action"
+        ]
       }
     },
     {
@@ -115,7 +126,11 @@
         "properties": {
           "action": {
             "type": "string",
-            "enum": ["create", "list", "cancel"],
+            "enum": [
+              "create",
+              "list",
+              "cancel"
+            ],
             "description": "create, list, or cancel a reminder"
           },
           "message": {
@@ -140,14 +155,19 @@
           },
           "repeat": {
             "type": "string",
-            "enum": ["weekly", "monthly"]
+            "enum": [
+              "weekly",
+              "monthly"
+            ]
           },
           "id": {
             "type": "string",
             "description": "reminder id such as rmd_7f3a91 when cancelling"
           }
         },
-        "required": ["action"]
+        "required": [
+          "action"
+        ]
       }
     },
     {
@@ -158,7 +178,12 @@
         "properties": {
           "mode": {
             "type": "string",
-            "enum": ["off", "api", "assemblyai", "local"],
+            "enum": [
+              "off",
+              "api",
+              "assemblyai",
+              "local"
+            ],
             "description": "TTS engine mode"
           },
           "voice": {
@@ -253,7 +278,9 @@
             "description": "app color palette id"
           }
         },
-        "required": ["palette"]
+        "required": [
+          "palette"
+        ]
       }
     },
     {
@@ -264,11 +291,17 @@
         "properties": {
           "mode": {
             "type": "string",
-            "enum": ["light", "dark", "system"],
+            "enum": [
+              "light",
+              "dark",
+              "system"
+            ],
             "description": "color appearance mode"
           }
         },
-        "required": ["mode"]
+        "required": [
+          "mode"
+        ]
       }
     },
     {
@@ -293,7 +326,9 @@
             "description": "code editor theme id"
           }
         },
-        "required": ["editor_theme"]
+        "required": [
+          "editor_theme"
+        ]
       }
     },
     {
@@ -302,9 +337,14 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "enabled": { "type": "boolean", "description": "true to enable vim mode, false to disable" }
+          "enabled": {
+            "type": "boolean",
+            "description": "true to enable vim mode, false to disable"
+          }
         },
-        "required": ["enabled"]
+        "required": [
+          "enabled"
+        ]
       }
     },
     {
@@ -313,9 +353,14 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "enabled": { "type": "boolean", "description": "true to wrap lines, false to disable" }
+          "enabled": {
+            "type": "boolean",
+            "description": "true to wrap lines, false to disable"
+          }
         },
-        "required": ["enabled"]
+        "required": [
+          "enabled"
+        ]
       }
     },
     {
@@ -324,9 +369,14 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "enabled": { "type": "boolean", "description": "true to show hidden files, false to hide" }
+          "enabled": {
+            "type": "boolean",
+            "description": "true to show hidden files, false to hide"
+          }
         },
-        "required": ["enabled"]
+        "required": [
+          "enabled"
+        ]
       }
     },
     {
@@ -335,9 +385,14 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "enabled": { "type": "boolean", "description": "true to enable WebGL, false to disable" }
+          "enabled": {
+            "type": "boolean",
+            "description": "true to enable WebGL, false to disable"
+          }
         },
-        "required": ["enabled"]
+        "required": [
+          "enabled"
+        ]
       }
     },
     {
@@ -353,7 +408,9 @@
             "description": "font size between 8 and 32"
           }
         },
-        "required": ["font_size"]
+        "required": [
+          "font_size"
+        ]
       }
     },
     {
@@ -369,7 +426,9 @@
             "description": "scrollback line count between 200 and 50000"
           }
         },
-        "required": ["lines"]
+        "required": [
+          "lines"
+        ]
       }
     },
     {
@@ -385,7 +444,9 @@
             "description": "zoom scale from 0.5 to 2.0"
           }
         },
-        "required": ["zoom"]
+        "required": [
+          "zoom"
+        ]
       }
     },
     {
@@ -399,7 +460,9 @@
             "description": "station name, id, or music genre"
           }
         },
-        "required": ["station"]
+        "required": [
+          "station"
+        ]
       }
     },
     {
@@ -437,7 +500,12 @@
         "properties": {
           "mode": {
             "type": "string",
-            "enum": ["off", "api", "assemblyai", "local"],
+            "enum": [
+              "off",
+              "api",
+              "assemblyai",
+              "local"
+            ],
             "description": "TTS engine mode"
           },
           "voice": {
@@ -484,11 +552,24 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "message": { "type": "string", "description": "what to remind about" },
-          "minutes": { "type": "integer", "minimum": 1, "maximum": 10080 },
-          "hours": { "type": "integer", "minimum": 1, "maximum": 168 }
+          "message": {
+            "type": "string",
+            "description": "what to remind about"
+          },
+          "minutes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10080
+          },
+          "hours": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 168
+          }
         },
-        "required": ["message"]
+        "required": [
+          "message"
+        ]
       }
     },
     {
@@ -497,17 +578,36 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "message": { "type": "string", "description": "what to remind about" },
-          "due_at": { "type": "string", "description": "ISO timestamp YYYY-MM-DDTHH:MM:SS" },
-          "repeat": { "type": "string", "enum": ["weekly", "monthly"] }
+          "message": {
+            "type": "string",
+            "description": "what to remind about"
+          },
+          "due_at": {
+            "type": "string",
+            "description": "ISO timestamp YYYY-MM-DDTHH:MM:SS"
+          },
+          "repeat": {
+            "type": "string",
+            "enum": [
+              "weekly",
+              "monthly"
+            ]
+          }
         },
-        "required": ["message", "due_at"]
+        "required": [
+          "message",
+          "due_at"
+        ]
       }
     },
     {
       "name": "reminder_list",
       "description": "List scheduled pending and past reminders.",
-      "parameters": { "type": "object", "properties": {}, "required": [] }
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "name": "reminder_cancel",
@@ -515,9 +615,15 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "id": { "type": "string", "pattern": "^rmd_[a-zA-Z0-9]+$", "description": "reminder id starting with rmd_" }
+          "id": {
+            "type": "string",
+            "pattern": "^rmd_[a-zA-Z0-9]+$",
+            "description": "reminder id starting with rmd_"
+          }
         },
-        "required": ["id"]
+        "required": [
+          "id"
+        ]
       }
     },
     {
@@ -543,7 +649,9 @@
             "description": "existing persona to activate, or 'none'"
           }
         },
-        "required": ["persona"]
+        "required": [
+          "persona"
+        ]
       }
     },
     {
@@ -557,7 +665,63 @@
             "description": "localhost URL, e.g. http://localhost:5173"
           }
         },
-        "required": ["url"]
+        "required": [
+          "url"
+        ]
+      }
+    },
+    {
+      "name": "get_time",
+      "description": "Get the current local date, time, and weekday (e.g. for what time is it, what date is it, what day is it).",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "stop_agent",
+      "description": "Stop the currently running agent run for this conversation (user said stop, cancel, or halt the current run). Safe no-op if nothing is running.",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "new_session",
+      "description": "Start a fresh chat session for this project (new chat, new conversation). The old transcript is kept in the session list.",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "list_skills",
+      "description": "List the available saved skills (reusable capabilities) with name, description, and handle. Metadata only.",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "list_personas",
+      "description": "List the available agent personas (built-in and custom) with name, description, and id. Metadata only.",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "list_sessions",
+      "description": "List this project chat sessions with title and last-updated time (which chats/sessions exist).",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
       }
     }
   ],
@@ -594,7 +758,14 @@
               "one-dark"
             ]
           },
-          "theme": { "type": "string", "enum": ["system", "light", "dark"] },
+          "theme": {
+            "type": "string",
+            "enum": [
+              "system",
+              "light",
+              "dark"
+            ]
+          },
           "editor_theme": {
             "type": "string",
             "enum": [
@@ -609,13 +780,33 @@
               "xcode-light"
             ]
           },
-          "vim_mode": { "type": "boolean" },
-          "editor_word_wrap": { "type": "boolean" },
-          "show_hidden": { "type": "boolean" },
-          "terminal_webgl_enabled": { "type": "boolean" },
-          "terminal_font_size": { "type": "integer", "minimum": 8, "maximum": 32 },
-          "terminal_scrollback": { "type": "integer", "minimum": 200, "maximum": 50000 },
-          "zoom_level": { "type": "number", "minimum": 0.5, "maximum": 2.0 }
+          "vim_mode": {
+            "type": "boolean"
+          },
+          "editor_word_wrap": {
+            "type": "boolean"
+          },
+          "show_hidden": {
+            "type": "boolean"
+          },
+          "terminal_webgl_enabled": {
+            "type": "boolean"
+          },
+          "terminal_font_size": {
+            "type": "integer",
+            "minimum": 8,
+            "maximum": 32
+          },
+          "terminal_scrollback": {
+            "type": "integer",
+            "minimum": 200,
+            "maximum": 50000
+          },
+          "zoom_level": {
+            "type": "number",
+            "minimum": 0.5,
+            "maximum": 2.0
+          }
         },
         "required": []
       }
@@ -625,26 +816,44 @@
       "description": "Play a SomaFM radio station in the status bar by station id, name, or genre.",
       "parameters": {
         "type": "object",
-        "properties": { "station": { "type": "string" } },
-        "required": ["station"]
+        "properties": {
+          "station": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "station"
+        ]
       }
     },
     {
       "name": "stop_radio",
       "description": "Stop the radio.",
-      "parameters": { "type": "object", "properties": {}, "required": [] }
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "name": "radio_list_stations",
       "description": "List available SomaFM radio stations.",
-      "parameters": { "type": "object", "properties": {}, "required": [] }
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "name": "radio_now_playing",
       "description": "Get the currently playing song on a SomaFM station.",
       "parameters": {
         "type": "object",
-        "properties": { "station": { "type": "string" } },
+        "properties": {
+          "station": {
+            "type": "string"
+          }
+        },
         "required": []
       }
     },
@@ -654,22 +863,47 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "mode": { "type": "string", "enum": ["off", "api", "assemblyai", "local"] },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "off",
+              "api",
+              "assemblyai",
+              "local"
+            ]
+          },
           "voice": {
             "type": "string",
             "enum": [
-              "alloy", "echo", "fable", "onyx", "nova", "shimmer",
-              "coral", "sage", "ash", "ballad", "verse"
+              "alloy",
+              "echo",
+              "fable",
+              "onyx",
+              "nova",
+              "shimmer",
+              "coral",
+              "sage",
+              "ash",
+              "ballad",
+              "verse"
             ]
           },
           "assembly_voice": {
             "type": "string",
             "enum": [
-              "aai-jane", "aai-audrey", "aai-sara", "aai-michael",
-              "aai-paul", "aai-charles", "aai-eve", "aai-george"
+              "aai-jane",
+              "aai-audrey",
+              "aai-sara",
+              "aai-michael",
+              "aai-paul",
+              "aai-charles",
+              "aai-eve",
+              "aai-george"
             ]
           },
-          "list": { "type": "boolean" }
+          "list": {
+            "type": "boolean"
+          }
         },
         "required": []
       }
@@ -680,25 +914,49 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "message": { "type": "string" },
-          "due_at": { "type": "string", "description": "ISO timestamp YYYY-MM-DDTHH:MM:SS" },
-          "repeat": { "type": "string", "enum": ["weekly", "monthly"] }
+          "message": {
+            "type": "string"
+          },
+          "due_at": {
+            "type": "string",
+            "description": "ISO timestamp YYYY-MM-DDTHH:MM:SS"
+          },
+          "repeat": {
+            "type": "string",
+            "enum": [
+              "weekly",
+              "monthly"
+            ]
+          }
         },
-        "required": ["message", "due_at"]
+        "required": [
+          "message",
+          "due_at"
+        ]
       }
     },
     {
       "name": "reminder_list",
       "description": "List reminders.",
-      "parameters": { "type": "object", "properties": {}, "required": [] }
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
     },
     {
       "name": "reminder_cancel",
       "description": "Cancel a reminder by id.",
       "parameters": {
         "type": "object",
-        "properties": { "id": { "type": "string" } },
-        "required": ["id"]
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ]
       }
     },
     {
@@ -706,8 +964,14 @@
       "description": "Switch active agent persona by name or id, or 'none'.",
       "parameters": {
         "type": "object",
-        "properties": { "persona": { "type": "string" } },
-        "required": ["persona"]
+        "properties": {
+          "persona": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "persona"
+        ]
       }
     },
     {
@@ -715,8 +979,14 @@
       "description": "Open in-app preview tab at a localhost URL.",
       "parameters": {
         "type": "object",
-        "properties": { "url": { "type": "string" } },
-        "required": ["url"]
+        "properties": {
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ]
       }
     }
   ]

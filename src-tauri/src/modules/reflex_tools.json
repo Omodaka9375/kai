@@ -424,5 +424,59 @@
         "url"
       ]
     }
+  },
+  {
+    "name": "get_time",
+    "description": "Get the current local date, time, and weekday (e.g. for what time is it, what date is it, what day is it).",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "stop_agent",
+    "description": "Stop the currently running agent run for this conversation (user said stop, cancel, or halt the current run). Safe no-op if nothing is running.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "new_session",
+    "description": "Start a fresh chat session for this project (new chat, new conversation). The old transcript is kept in the session list.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "list_skills",
+    "description": "List the available saved skills (reusable capabilities) with name, description, and handle. Metadata only.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "list_personas",
+    "description": "List the available agent personas (built-in and custom) with name, description, and id. Metadata only.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "list_sessions",
+    "description": "List this project chat sessions with title and last-updated time (which chats/sessions exist).",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
   }
 ]

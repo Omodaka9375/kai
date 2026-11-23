@@ -48,7 +48,7 @@ SYSTEM_FACTS = "date: 2026-11-22 Sun 14:00; os: windows; shell: pwsh"
 TARGET_TRAIN = 1400
 TARGET_VAL = 150
 TARGET_TEST = 150
-MAX_LINE_CHARS = 4600  # 18-tool minimal schema: worst line ~850 tokens, bucket 1,024
+MAX_LINE_CHARS = 5300  # 24-tool minimal schema (Run #5 +6 tools): worst line ~950 tokens, bucket 1,024
 
 STATION_NAMES = [
     "groove salad", "drone zone", "def con radio", "space station soma",
@@ -554,6 +554,103 @@ def make_examples() -> tuple[list[tuple], dict[str, int]]:
             tools_openai, p,
         ), "reminder_list")
 
+    # ── Run #5 domains (2026-11-23) ───────────────────────────────────
+    # Zero-argument, every-instance tools. Domain-specific hard negatives
+    # ride the shared negative lists below (stop-the-build must escalate,
+    # "what timezone is github in" is a web question, etc).
+
+    # get_time - date/time/weekday questions answered locally
+    for p in ("what time is it?", "what's the time?", "current time please",
+              "what date is it today?", "today's date", "what day is it?",
+              "what's today?", "tell me the current date and time",
+              "which day of the week is it?", "what day is today",
+              "give me the time", "date and time please", "the time?",
+              "what is the date", "show me the current time",
+              "milyen nap van ma?", "hány óra van?", "mennyi az idő?",
+              "mi a dátum ma?"):
+        add(*wraps(
+            "get_time", {},
+            reasoning_join(["date/time question -> get_time"]),
+            tools_openai, p,
+        ), "get_time")
+
+    # stop_agent - cancel the CURRENT run (bare 'stop' stays conversational)
+    for p in ("stop the agent", "stop the current run", "cancel the run",
+              "stop the agent please", "halt the generation",
+              "cancel the current generation", "stop generating",
+              "interrupt the running agent", "stop what you're doing",
+              "cancel this reply", "abort the current run",
+              "kill the running agent", "stop the agent run"):
+        add(*wraps(
+            "stop_agent", {},
+            reasoning_join([f"'{p}' -> stop_agent"]),
+            tools_openai, p,
+        ), "stop_agent")
+
+    # new_session - fresh chat, old transcript kept
+    for p in ("new session", "start a new session", "new chat",
+              "start a new chat", "let's start fresh",
+              "start a fresh conversation", "begin a new conversation",
+              "i want a blank chat", "clean slate, new chat",
+              "open a new session", "fresh session please"):
+        add(*wraps(
+            "new_session", {},
+            reasoning_join([f"'{p}' -> new_session"]),
+            tools_openai, p,
+        ), "new_session")
+
+    # list_skills - saved capabilities read
+    for p in ("what skills do i have?", "list my skills",
+              "show the available skills", "which skills are saved?",
+              "list skills", "what can you do with skills?",
+              "show saved capabilities", "my skills"):
+        add(*wraps(
+            "list_skills", {},
+            reasoning_join([f"'{p}' -> list_skills"]),
+            tools_openai, p,
+        ), "list_skills")
+
+    # list_personas - persona roster read
+    for p in ("what personas do i have?", "list my personas",
+              "which personas are available?", "list agents",
+              "show the personas", "what agents can i use?",
+              "my personas", "available personas"):
+        add(*wraps(
+            "list_personas", {},
+            reasoning_join([f"'{p}' -> list_personas"]),
+            tools_openai, p,
+        ), "list_personas")
+
+    # list_sessions - session roster read
+    for p in ("which sessions are open?", "list my sessions",
+              "show the sessions", "what chats do i have?",
+              "list the chats in this project", "my sessions",
+              "show my conversations", "which chats exist?"):
+        add(*wraps(
+            "list_sessions", {},
+            reasoning_join([f"'{p}' -> list_sessions"]),
+            tools_openai, p,
+        ), "list_sessions")
+
+    # Domain hard negatives for the Run #5 zero-argument domains: sound
+    # like a domain but must escalate (coding/workspace phrasings).
+    RUN5_NEGATIVES = [
+        ("stop the build", "build stop is a coding action, not the agent run -> no call"),
+        ("stop the dev server and commit", "coding request -> no desktop tool fits"),
+        ("cancel the deploy", "deploy cancellation is a workspace action -> no call"),
+        ("kill the vite process", "process management is a terminal action -> no call"),
+        ("what time is it in tokyo?", "timezone conversion needs the web/LLM, not local clock -> no call"),
+        ("what time does the github actions run finish?", "external service question -> no call"),
+        ("new session for the sparky project", "project-scoped request needs context -> no call"),
+        ("create a session store migration", "coding request -> no call"),
+        ("delete my old sessions", "destructive action, not a list read -> no call"),
+        ("list the session ids from chatStore.ts", "code inspection request -> no call"),
+        ("switch to the senior engineer persona", "persona SWITCH is set_persona's job, not a list -> no call"),
+        ("write a new persona for testing", "persona creation is a coding/LLM action -> no call"),
+        ("install the radio skill for me", "skill creation is human-gated -> no call"),
+        ("what's in the deploy-status skill?", "skill BODY read needs read_file -> no call"),
+    ]
+
     print("Skipped eval-suite collisions:", skipped)
 
     # ── persona ──────────────────────────────────────────────────────────
@@ -647,6 +744,9 @@ def make_examples() -> tuple[list[tuple], dict[str, int]]:
         negatives.append((p, "coding/workspace request, not a desktop control -> no desktop tool fits", "neg_code"))
     for p in CHAT_NEGATIVES:
         negatives.append((p, "general chat question -> no desktop tool fits", "neg_chat"))
+    # Run #5 domain hard negatives (defined with the Run #5 generators
+    # above; appended here where the negatives bucket is open).
+    negatives.extend((p, why, "neg_run5") for p, why in RUN5_NEGATIVES)
     for p, why, dom in negatives:
         if p in eval_prompts:
             skipped["eval_collision"] += 1

@@ -174,6 +174,31 @@ function describeCall(name: string, args: Record<string, unknown>, result: unkno
       return `Persona switched to ${String(args.persona)}.`;
     case "open_preview":
       return `Preview opened at ${String(args.url)}.`;
+    // ── Run #5 additions (2026-11-23) ────────────────────────────────
+    case "get_time": {
+      const date = typeof r.date === "string" ? r.date : null;
+      const time = typeof r.time === "string" ? r.time : null;
+      if (date && time) return `It's ${time} on ${date} (${String(r.weekday ?? "")}).`;
+      return "Checked the current date and time.";
+    }
+    case "stop_agent":
+      return r.stopped === true
+        ? "Stopped the current run. Transcript and memory are kept."
+        : "Nothing was running in this conversation.";
+    case "new_session":
+      return "Started a new session. The previous chat is kept in the session list.";
+    case "list_skills":
+      return typeof r.count === "number"
+        ? `You have ${r.count} skill${r.count === 1 ? "" : "s"} saved.`
+        : "Listed the available skills.";
+    case "list_personas":
+      return typeof r.count === "number"
+        ? `You have ${r.count} persona${r.count === 1 ? "" : "s"} available.`
+        : "Listed the available personas.";
+    case "list_sessions":
+      return typeof r.count === "number"
+        ? `You have ${r.count} session${r.count === 1 ? "" : "s"} in this project.`
+        : "Listed the project's sessions.";
     default:
       return `${name} done.`;
   }

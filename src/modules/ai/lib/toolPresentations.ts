@@ -421,6 +421,46 @@ const REGISTRY: Record<string, ToolPresentation> = {
     remoteSurface: false,
   },
 
+  // ── Run #5 reflex-safe tools (2026-11-23) ─────────────────────────────
+  // Zero-argument, every-instance reads + session lifecycle. All local
+  // data or this-session state: no fencing needed (nothing remote), and
+  // no side effects beyond stop/new session (both keep transcripts).
+  get_time: {
+    label: "Time",
+    status: () => "Reading the current date and time",
+    effect: "NONE",
+    fence: false,
+    remoteSurface: false,
+  },
+  stop_agent: {
+    label: "Stop",
+    status: () => "Stopping the current run",
+    effect: "NONE",
+    fence: false,
+    remoteSurface: false,
+  },
+  new_session: {
+    label: "New session",
+    status: () => "Starting a fresh session",
+    effect: "COMMITTED",
+    fence: false,
+    remoteSurface: false,
+  },
+  list_personas: {
+    label: "Personas",
+    status: () => "Listing personas",
+    effect: "NONE",
+    fence: false,
+    remoteSurface: false,
+  },
+  list_sessions: {
+    label: "Sessions",
+    status: () => "Listing sessions",
+    effect: "NONE",
+    fence: false,
+    remoteSurface: false,
+  },
+
   // ── Structure / delegation ────────────────────────────────────────────
   todo_write: {
     label: "Todos",

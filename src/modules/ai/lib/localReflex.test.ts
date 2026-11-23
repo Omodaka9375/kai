@@ -358,4 +358,71 @@ describe("decideReflex", () => {
       mapNarrowCalls([{ name: "play_radio", arguments: { station: "lush" } }], NOW2),
     ).toEqual([{ name: "play_radio", arguments: { station: "lush" } }]);
   });
+
+  // ── Run #5 zero-argument domains (2026-11-23) ──────────────────────
+  it("maps the Run #5 zero-argument tools and refuses non-empty arguments", () => {
+    for (const name of ["get_time", "stop_agent", "new_session", "list_skills", "list_personas", "list_sessions"]) {
+      expect(
+        mapNarrowCalls([{ name, arguments: {} }], NOW2),
+      ).toEqual([{ name, arguments: {} }]);
+      // A clipped slot into a no-arg tool poisons the turn.
+      expect(
+        mapNarrowCalls([{ name, arguments: { station: "lush" } }], NOW2),
+      ).toBeNull();
+    }
+  });
+
+  it("executes real Run #5 phrasings at high confidence", () => {
+    const cases: Array<[string, string]> = [
+      ["what time is it?", "get_time"],
+      ["what date is it today?", "get_time"],
+      ["hány óra van?", "get_time"],
+      ["stop the agent", "stop_agent"],
+      ["cancel the current run", "stop_agent"],
+      ["new session", "new_session"],
+      ["start a fresh conversation", "new_session"],
+      ["what skills do i have?", "list_skills"],
+      ["list my personas", "list_personas"],
+      ["which sessions are open?", "list_sessions"],
+    ];
+    for (const [prompt, tool] of cases) {
+      const d = decideReflex(prompt, {
+        calls: [{ name: tool, arguments: {} }],
+        confidence: 0.9,
+      });
+      expect(d.action === "execute" && d.calls?.[0]?.name === tool, prompt).toBe(true);
+    }
+  });
+
+  it("Run #5 domains fall through when the prompt lacks domain vocabulary (hijack floor)", () => {
+    // The classifier may emit a Run #5 tool at high confidence on a prompt
+    // with zero domain vocabulary - the trigger floor must refuse it, the
+    // same guard that stopped the radio coding-prompt hijack.
+    const cases: Array<[string, string]> = [
+      ["start building the dynamic openai proxy", "stop_agent"],
+      ["refactor the auth module", "new_session"],
+      ["explain the pty session spawn lock", "list_sessions"],
+      ["fix the router bug", "get_time"],
+    ];
+    for (const [prompt, tool] of cases) {
+      const d = decideReflex(prompt, {
+        calls: [{ name: tool, arguments: {} }],
+        confidence: 0.99,
+      });
+      expect(d.action === "fallthrough" && d.reason === "ungrounded", `${prompt} -> ${tool}`).toBe(true);
+    }
+  });
+
+  it("bare stop/cancel stay conversational acks (LLM context needed), but stop-the-agent is a real command", () => {
+    // Bare "stop" is ambiguous mid-conversation (STOP the run? stop
+    // asking? stop the radio?) - only the LLM has that context. The
+    // engine never sees these prompts.
+    for (const p of ["stop", "cancel", "abort"]) {
+      const d = decideReflex(p, {
+        calls: [{ name: "stop_agent", arguments: {} }],
+        confidence: 0.99,
+      });
+      expect(d.action === "fallthrough" && d.reason === "conversational", p).toBe(true);
+    }
+  });
 });
