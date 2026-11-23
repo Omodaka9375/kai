@@ -756,9 +756,11 @@ function saveMessagesRerouted(id: string, messages: UIMessage[]): void {
   }
   const targetFile = scopedPath(root, env);
   if (targetFile !== sessionsScopeFile()) {
-    console.warn(
-      `[saveMessages] re-routing cross-scope write for session ${id} to its own project file (scope moved on)`,
-    );
+    // Expected cross-scope write: any background Workspaces project's
+    // persist lands here while another project is foreground. NOT a warn
+    // condition - the re-route is the fix for the project-switch
+    // corruption bug. Kept silent; enable devtools breakpoints here when
+    // debugging persistence issues.
     void saveMessagesForRoot(root, id, messages, env);
     return;
   }

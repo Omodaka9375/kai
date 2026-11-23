@@ -36,7 +36,7 @@ import TerminalIcon from "@hugeicons/core-free-icons/TerminalIcon";
 import { SLASH_COMMANDS, Kai_CMD_RE } from "../lib/slashCommands";
 import { useChatFontSize, installChatZoomShortcuts } from "../lib/chatFont";
 import { Spinner } from "@/components/ui/spinner";
-import { useChatStore, sendMessage, respondToApprovalStandalone, resolveErrorDisplay, approvalContinuationPending, getMediaOverride } from "../store/chatStore";
+import { useChatStore, sendMessage, respondToApprovalStandalone, resolveErrorDisplay, approvalContinuationPending, getMediaOverride, getOrCreateChat, patchSessionAgentMeta, subscribeSessionAgentMeta, getSessionAgentMeta, getSessionMetaVersionFor } from "../store/chatStore";
 import type {
   ChatStatus,
   DynamicToolUIPart,
@@ -44,7 +44,7 @@ import type {
   UIMessage,
   UIMessagePart,
 } from "ai";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Fragment } from "react";
 import type { StickToBottomContext } from "use-stick-to-bottom";
 import { AiToolApproval } from "./AiToolApproval";
@@ -298,11 +298,29 @@ export function AiChatView({
     status === "streaming" && lastMessage?.role === "assistant"
       ? lastMessage.id
       : null;
-  const hitStepCap = useChatStore((s) => s.agentMeta.hitStepCap);
-  const finishReason = useChatStore((s) => s.agentMeta.finishReason);
-  const compactionNotice = useChatStore((s) => s.agentMeta.compactionNotice);
-  const summarizing = useChatStore((s) => s.agentMeta.summarizing);
-  const summaryNotice = useChatStore((s) => s.agentMeta.summaryNotice);
+  // ── OWNED agent meta (2026-11-23 cross-project retry bug) ──────────
+  // The step-cap / finish banners and the error card must reflect THIS
+  // surface's session, not the global agentMeta slice (which mirrors
+  // whichever session is currently ACTIVE). A background Workspaces card
+  // showing the global slice painted Project A's error/step-cap state on
+  // Project B's card, and pressing its Retry sent "Continue where you
+  // stopped" to the ACTIVE session — waking a different project's chat.
+  // When sessionId is absent (docked panel / mini window), the surface IS
+  // the active session and the global slice is correct.
+  const ownedMetaVersion = useSyncExternalStore(
+    subscribeSessionAgentMeta,
+    () => (sessionId ? getSessionMetaVersionFor(sessionId) : 0),
+  );
+  const ownedMeta = useMemo(
+    () => (sessionId ? getSessionAgentMeta(sessionId) : useChatStore.getState().agentMeta),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sessionId, ownedMetaVersion],
+  );
+  const hitStepCap = ownedMeta.hitStepCap;
+  const finishReason = ownedMeta.finishReason;
+  const compactionNotice = ownedMeta.compactionNotice;
+  const summarizing = ownedMeta.summarizing;
+  const summaryNotice = ownedMeta.summaryNotice;
   const patchAgentMeta = useChatStore((s) => s.patchAgentMeta);
   const showContinue =
     !isBusy && hitStepCap && lastMessage?.role === "assistant";
@@ -355,11 +373,22 @@ export function AiChatView({
           ? "text-destructive"
           : "text-muted-foreground";
   const onContinue = useCallback(() => {
-    patchAgentMeta({ hitStepCap: false, finishReason: "", summaryNotice: null });
-    void sendMessage(
-      "Continue from where you stopped. Don't recap — just keep going.",
-    );
-  }, [patchAgentMeta]);
+    // OWNED META (2026-11-23 cross-project retry bug): patch THIS session's
+    // meta (not the global slice) and send to THIS session's chat — the
+    // global sendMessage helper targets the ACTIVE session, which from a
+    // background Workspaces card is a DIFFERENT project.
+    if (sessionId) {
+      patchSessionAgentMeta(sessionId, { hitStepCap: false, finishReason: "", summaryNotice: null });
+      void getOrCreateChat(sessionId).sendMessage({
+        text: "Continue from where you stopped. Don't recap — just keep going.",
+      });
+    } else {
+      patchAgentMeta({ hitStepCap: false, finishReason: "", summaryNotice: null });
+      void sendMessage(
+        "Continue from where you stopped. Don't recap — just keep going.",
+      );
+    }
+  }, [patchAgentMeta, sessionId]);
 
   // Decode the raw error (minified React codes, bare network failures,)
   // into actionable text — same resolver as the agent's onError path.
