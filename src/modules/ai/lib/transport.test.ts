@@ -110,4 +110,56 @@ describe("summarizeMessagesNow", () => {
     const before = JSON.stringify(small).length;
     expect(before).toBeGreaterThan(0);
   });
+
+  it("elides IMAGE file parts in the kept tail EXCEPT on the most recent user message (6-image 120% fix)", () => {
+    // 2026-11-23 report: uploading several images put the context ring at
+    // 200% and /compact could not bring it down — the base64 file parts ride
+    // user messages inside the verbatim-kept tail, so summarizing older
+    // history never touched them. Elide image parts in the tail to text
+    // pointers, keeping only the MOST RECENT user message's images (the
+    // upload the model may still be actively working with).
+    const msgs = mkMsgs(10);
+    // Pair 14-area message (inside the 6-pair tail, but NOT the last user
+    // message): attach an image file part.
+    const earlierUser = msgs[14]; // "u-7" — inside the kept tail
+    (earlierUser.parts as never[]).push({
+      type: "file",
+      mediaType: "image/png",
+      url: "data:image/png;base64," + "A".repeat(200_000),
+      filename: "screenshot-1.png",
+    } as never);
+    // The LAST user message keeps its image verbatim.
+    const lastUser = msgs[msgs.length - 2]; // "u-9"
+    (lastUser.parts as never[]).push({
+      type: "file",
+      mediaType: "image/jpeg",
+      url: "data:image/jpeg;base64," + "B".repeat(200_000),
+      filename: "photo-latest.jpg",
+    } as never);
+
+    const out = summarizeMessagesNow(msgs, [], "s1");
+    expect(out).not.toBeNull();
+    const keptEarlier = out!.find((m) => m.id === "u-7")!;
+    const keptLastUser = out!.find((m) => m.id === "u-9")!;
+
+    // The EARLIER image is replaced by a compact text pointer.
+    const earlierFile = keptEarlier.parts.find(
+      (p) => (p as { type?: string }).type === "file",
+    );
+    expect(earlierFile).toBeUndefined();
+    const pointer = keptEarlier.parts.find(
+      (p) =>
+        (p as { type?: string }).type === "text" &&
+        String((p as { text?: string }).text).includes("elided by /compact"),
+    ) as unknown as { text?: string };
+    expect(pointer?.text).toContain("screenshot-1.png");
+    expect(pointer?.text).toContain("saved path");
+
+    // The most RECENT user message keeps its image file part verbatim.
+    const lastFile = keptLastUser.parts.find(
+      (p) => (p as { type?: string }).type === "file",
+    );
+    expect(lastFile).toBeDefined();
+    expect(String((lastFile as { url?: string }).url)).toContain("base64");
+  });
 });

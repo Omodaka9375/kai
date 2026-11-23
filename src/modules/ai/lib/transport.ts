@@ -682,7 +682,7 @@ export function summarizeMessagesNow(
   if (chars / 4 < 2_000) return null;
 
   const stateBlock = buildSessionState({ messages, fileSnapshot, sessionId });
-  const tail = trimTailToolResults(messages.slice(cutoff));
+  const tail = elideTailImageParts(trimTailToolResults(messages.slice(cutoff)));
 
   const summaryMessage: UIMessage = {
     id: `summary-${Date.now()}`,
@@ -690,6 +690,56 @@ export function summarizeMessagesNow(
     parts: [{ type: "text", text: stateBlock }],
   };
   return [summaryMessage, ...tail];
+}
+
+/**
+ * TAIL IMAGE ELISION (2026-11-23, "uploaded 6 images -> 200%, /compact
+ * stayed at 120%" report): uploaded photos ride user messages as `file`
+ * parts carrying FULL base64 data-URLs, and the kept tail preserves its
+ * messages verbatim — so a multi-image upload inside the tail could never
+ * be shrunk by /compact, no matter how many times it ran (only pairs
+ * pushed past the 6-pair window ever left). Replace every IMAGE file part
+ * in the tail EXCEPT those on the most recent user message (the upload
+ * the model may still be actively working with) with a compact text
+ * pointer. Safe: uploads persist to disk at attach time and the composer
+ * appends a `<attachment savedAt="path">` text block to the same message,
+ * so the durable path still rides the tail text and the model can re-read
+ * any elided image from its saved path.
+ */
+function elideTailImageParts(tail: UIMessage[]): UIMessage[] {
+  // The LAST user message in the tail is the most recent upload — keep it.
+  let lastUserIdx = -1;
+  for (let i = tail.length - 1; i >= 0; i--) {
+    if (tail[i].role === "user") {
+      lastUserIdx = i;
+      break;
+    }
+  }
+  let anyChanged = false;
+  const out = tail.map((m, i) => {
+    if (i === lastUserIdx) return m;
+    if (!m.parts.some((p) => isImageFilePart(p))) return m;
+    anyChanged = true;
+    return {
+      ...m,
+      parts: m.parts.map((p) =>
+        isImageFilePart(p)
+          ? ({
+              type: "text",
+              text: `[image ${String((p as { filename?: string }).filename ?? "attachment")} elided by /compact to save context — the upload was saved to disk; re-read it from its saved path if you need it again]`,
+            } as typeof p)
+          : p,
+      ),
+    };
+  });
+  return anyChanged ? out : tail;
+}
+
+/** True for an uploaded-image `file` part (base64 data-URL carrier). */
+function isImageFilePart(p: { type?: string }): boolean {
+  if (p.type !== "file") return false;
+  const mt = (p as { mediaType?: string }).mediaType ?? "";
+  return mt.startsWith("image/");
 }
 
 /**
