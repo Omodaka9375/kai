@@ -609,13 +609,13 @@ export function buildShellTools(ctx: ToolContext) {
     sleep: tool({
       needsApproval: false,
       description:
-        "Pause for `seconds` (0.1 to 300) natively in Rust without spawning a shell. Use this whenever you need a fixed delay (rate-limit backoff, waiting for an external service to settle) instead of `Start-Sleep`, `sleep`, `timeout /t`, or `python -c \"time.sleep(...)\"` in `bash_run`. Note: to wait for a `bash_background` process's output, prefer `bash_logs` with `wait_secs` (it wakes immediately when output arrives). Auto-executes.",
+        "Pause for `seconds` (0.1 to 600) natively in Rust without spawning a shell. Use this whenever you need a fixed delay (rate-limit backoff, waiting for an external service to settle, model weight loads) instead of `Start-Sleep`, `sleep`, `timeout /t`, or `python -c \"time.sleep(...)\"` in `bash_run`. Note: to wait for a `bash_background` process's output, prefer `bash_logs` with `wait_secs` (it wakes immediately when output arrives). Auto-executes.",
       inputSchema: z.object({
         seconds: z
           .number()
           .min(0.1)
-          .max(300)
-          .describe("Seconds to sleep (0.1 to 300)."),
+          .max(600)
+          .describe("Seconds to sleep (0.1 to 600)."),
         reason: z
           .string()
           .optional()
@@ -627,7 +627,7 @@ export function buildShellTools(ctx: ToolContext) {
         }
         let onAbort: (() => void) | undefined;
         try {
-          const clamped = Math.min(300, Math.max(0.1, seconds));
+          const clamped = Math.min(600, Math.max(0.1, seconds));
           const abortPromise = new Promise<{ cancelled: true }>((resolve) => {
             const signal = options?.abortSignal;
             if (!signal) return;
