@@ -579,6 +579,14 @@ export function isCodeShapedPrompt(prompt: string): boolean {
   if (/\bfrom\s+[a-z_.]+\s+import\b/.test(p)) return true;
   if (/\b[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*\s*\(/.test(p)) return true;
   if (/[\/\\][a-z0-9_-]+\.[a-z]{1,4}\b/.test(p)) return true;
+  // SHELL-COMMAND SHAPE (2026-11-23 live false positive: a chat message
+  // quoting a PowerShell line - "Set-Location ...; Get-Content ... | Select-Object"
+  // - was classified as reminder_list and EXECUTED). A prompt quoting a
+  // shell pipeline is a terminal/workspace command, never a desktop
+  // control. Cmdlet verbs are unmistakable: no real desktop-control
+  // prompt contains Get-Content, Select-Object, Set-Location, etc.
+  if (/\b(get|set|out|select|where|foreach|write|test|new|remove|stop|copy|move)-[a-z-]+/.test(p)) return true;
+  if (/\|\s*(select|where|foreach|out-|sort|group)/.test(p)) return true;
   return false;
 }
 
@@ -691,6 +699,18 @@ export function callGroundedInPrompt(prompt: string, call: CanonicalCall): boole
   // Run #5 domains: same floor per domain (see DOMAIN_TRIGGERS above).
   const triggers = DOMAIN_TRIGGERS[call.name];
   if (triggers && !triggers.some((t) => raw.includes(t))) {
+    return false;
+  }
+  // reminder_list floor (2026-11-23 false positive: a quoted PowerShell
+  // command was classified as reminder_list and executed; the call has
+  // zero arguments so value grounding is vacuous). Require reminder
+  // vocabulary in the prompt, whatever the classifier says.
+  if (
+    call.name === "reminder_list" &&
+    !["reminder", "reminders", "timer", "timers", "alarm", "scheduled", "ping me", "due"].some(
+      (t) => raw.includes(t),
+    )
+  ) {
     return false;
   }
   if (call.name === "settings_update") {

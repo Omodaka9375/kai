@@ -236,6 +236,9 @@ describe("decideReflex", () => {
       "fix the import sys reconfigure line in the script",
       "run scripts/run-tests.mjs and show me the output",
       "here is the code ```print(1)``` run it",
+      // 2026-11-23 live false positive: a quoted PowerShell pipeline
+      // classified as reminder_list and executed ("Listed reminders").
+      "Set-Location D:\\Code\\2026\\KAI; Get-Content scripts/cactus/build_dataset.py | Select-Object -Skip 80 -First 120",
     ];
     for (const p of prompts) {
       expect(isCodeShapedPrompt(p), `expected code-shaped: ${p}`).toBe(true);
@@ -410,6 +413,33 @@ describe("decideReflex", () => {
         confidence: 0.99,
       });
       expect(d.action === "fallthrough" && d.reason === "ungrounded", `${prompt} -> ${tool}`).toBe(true);
+    }
+  });
+
+  it("reminder_list requires reminder vocabulary in the prompt (2026-11-23 shell-command false positive)", () => {
+    // The engine classified a quoted PowerShell command as reminder_list;
+    // the zero-arg call passes value grounding vacuously, so the domain
+    // floor is the only guard. A prompt with no reminder vocabulary must
+    // fall through as ungrounded, whatever the classifier says.
+    const hijack = decideReflex(
+      "Get-Content scripts/cactus/build_dataset.py | Select-Object -Skip 80",
+      { calls: [{ name: "reminder_list", arguments: {} }], confidence: 0.99 },
+    );
+    expect(hijack.action === "fallthrough" && hijack.reason === "code-shaped").toBe(true);
+
+    const noVocab = decideReflex("show me the build_dataset file", {
+      calls: [{ name: "reminder_list", arguments: {} }],
+      confidence: 0.99,
+    });
+    expect(noVocab.action === "fallthrough" && noVocab.reason === "ungrounded").toBe(true);
+
+    // Real reminder_list prompts still execute.
+    for (const p of ["what reminders do i have?", "list my reminders", "show pending reminders"]) {
+      const d = decideReflex(p, {
+        calls: [{ name: "reminder_list", arguments: {} }],
+        confidence: 0.9,
+      });
+      expect(d.action === "execute", p).toBe(true);
     }
   });
 

@@ -229,13 +229,13 @@ export function createContextAwareTransport(deps: Deps) {
         if (decision.action === "execute") {
           const exec = await executeReflexCalls(decision.calls, deps.toolContext);
           if (exec.ok || exec.partial) {
-            deps.onStep?.("local reflex");
+            deps.onStep?.("local");
             // Compact execution summary + a small italic provenance label.
             // On partial multi-call execution, return what already ran + the
             // error instead of falling through and double-firing call 1.
             const summary =
               exec.lines.map((l) => `${l}`).join("\n") +
-              "\n\n*(local reflex)*";
+              "\n\n*(local)*";
             return reflexAssistantStream(summary);
           }
         }
