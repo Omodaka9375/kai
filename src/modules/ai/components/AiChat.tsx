@@ -245,6 +245,11 @@ type Props = {
    *  session was still asking about - parked forever. Absent = the
    *  surface shows the active session (AI panel / mini window). */
   sessionId?: string;
+  /** FORCE-HIDE thinking UI. Workspaces cards pass this so reasoning parts
+   *  and inline <thinking> pills are never rendered there, regardless of
+   *  the user's showModelThinking preference (that toggle is for the
+   *  project AI window only). */
+  hideThinking?: boolean;
 };
 
 /**
@@ -268,6 +273,7 @@ export function AiChatView({
   contentClassName,
   compact = false,
   sessionId,
+  hideThinking = false,
 }: Props) {
   const scrollCtx = useRef<StickToBottomContext | null>(null);
   const baseWindow = compact ? TRANSCRIPT_WINDOW_COMPACT : TRANSCRIPT_WINDOW_FULL;
@@ -472,6 +478,7 @@ export function AiChatView({
                 timestamp={ts}
                 compact={compact}
                 sessionId={sessionId}
+                hideThinking={hideThinking}
               />
               </div>
             </Fragment>
@@ -793,6 +800,7 @@ const RenderedMessage = memo(function RenderedMessage({
   timestamp,
   compact,
   sessionId,
+  hideThinking,
 }: {
   message: UIMessage;
   onApproval: (id: string, approved: boolean) => void;
@@ -804,6 +812,8 @@ const RenderedMessage = memo(function RenderedMessage({
   compact?: boolean;
   /** Session that OWNS this transcript (approval cards read its mode). */
   sessionId?: string;
+  /** Force-hide reasoning/thinking UI regardless of user preference. */
+  hideThinking?: boolean;
 }) {
   // RULES OF HOOKS: RenderedMessage is now a hook-free dispatcher. The user
   // and assistant paths live in DIFFERENT child components, so React can
@@ -827,6 +837,7 @@ const RenderedMessage = memo(function RenderedMessage({
       timestamp={timestamp}
       compact={compact}
       sessionId={sessionId}
+      hideThinking={hideThinking}
     />
   );
 });
@@ -838,6 +849,7 @@ function AssistantMessageView({
   timestamp,
   compact,
   sessionId,
+  hideThinking,
 }: {
   message: UIMessage;
   onApproval: (id: string, approved: boolean) => void;
@@ -845,6 +857,7 @@ function AssistantMessageView({
   timestamp?: number;
   compact?: boolean;
   sessionId?: string;
+  hideThinking?: boolean;
 }) {
   const timeTitle = timestamp ? absoluteTime(timestamp) : undefined;
 
@@ -938,6 +951,7 @@ function AssistantMessageView({
                       onApproval={onApproval}
                       compact={compact}
                       sessionId={sessionId}
+                      hideThinking={hideThinking}
                       streaming={
                         streaming &&
                         (partType(g.part) === "text" ||
@@ -1454,6 +1468,7 @@ const RenderedPart = memo(function RenderedPart({
   approvalQueue,
   compact,
   sessionId,
+  hideThinking,
 }: {
   part: AnyPart;
   onApproval: (id: string, approved: boolean) => void;
@@ -1461,10 +1476,14 @@ const RenderedPart = memo(function RenderedPart({
   approvalQueue?: ApprovalQueueInfo | null;
   compact?: boolean;
   sessionId?: string;
+  hideThinking?: boolean;
 }) {
   // SHOW/HIDE MODEL THINKING (Settings -> General -> Chat): when off,
   // reasoning parts and inline <thinking> pills are not rendered at all.
-  const showModelThinking = usePreferencesStore((s) => s.showModelThinking);
+  // hideThinking (Workspaces cards) forces the OFF state regardless of
+  // the preference - that toggle belongs to the project AI window only.
+  const prefShowModelThinking = usePreferencesStore((s) => s.showModelThinking);
+  const showModelThinking = prefShowModelThinking && !hideThinking;
   // Only text/reasoning parts stream. For them, throttle the visible text so
   // stripLeakedTokens + Streamdown run at most ~12 fps instead of per token.
   const rawText =

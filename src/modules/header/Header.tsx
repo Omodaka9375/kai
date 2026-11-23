@@ -175,6 +175,7 @@ export function FileMenu({
           <MenuTile icon={LockKeyIcon} label="Security" desc="Approvals & audit" onSelect={() => void openSettingsWindow("security")} />
           <MenuTile icon={UserGroupIcon} label="Staff" desc="Agents, skills & journals" onSelect={() => void openSettingsWindow("staff")} />
           <MenuTile icon={Mic01Icon} label="Voice" desc="Speech & TTS" onSelect={() => void openSettingsWindow("voice")} />
+          <MenuTile icon={AiScanIcon} label="Local Reflex" desc="On-device command classifier" onSelect={() => void openSettingsWindow("reflex")} />
           <MenuTile icon={UserMultiple02Icon} label="Social" desc="Gmail & X access" onSelect={() => void openSettingsWindow("social")} />
           <MenuTile icon={GlobeIcon} label="Assistant" desc="Telegram channels" onSelect={() => void openSettingsWindow("assistant")} />
         </div>

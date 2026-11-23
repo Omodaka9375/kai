@@ -316,7 +316,7 @@ fn settings_panel_key(tab: Option<&str>) -> String {
     };
     if matches!(
         key.as_str(),
-        "general" | "shortcuts" | "models" | "agents" | "snippets" | "mcp" | "sandbox" | "security" | "staff" | "voice" | "social" | "assistant" | "external" | "about"
+        "general" | "shortcuts" | "models" | "agents" | "snippets" | "mcp" | "sandbox" | "security" | "staff" | "voice" | "reflex" | "social" | "assistant" | "external" | "about"
     ) {
         key
     } else {
@@ -337,6 +337,7 @@ fn settings_panel_title(key: &str) -> String {
         "security" => "Security",
         "staff" => "Staff",
         "voice" => "Voice",
+        "reflex" => "Local Reflex",
         "social" => "Social",
         "external" => "Assistant",
         "assistant" => "Assistant",
@@ -597,6 +598,7 @@ pub fn run() {
                     "settings-security",
                     "settings-staff",
                     "settings-voice",
+                    "settings-reflex",
                     "settings-social",
                     "settings-assistant",
                     "settings-about",
@@ -1040,10 +1042,22 @@ app.manage(Mutex::new(None::<fs::env_probe::EnvInventory>));
             modules::voice::voice_remove_local,
             modules::voice::voice_transcribe,
             modules::voice::voice_tts,
+            modules::reflex::reflex_status,
+            modules::reflex::reflex_setup,
+            modules::reflex::reflex_remove,
+            modules::reflex::reflex_ensure_running,
+            modules::reflex::reflex_classify,
             screen::screen_list_monitors,            screen::screen_capture,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        // Reflex engine cleanup: kill the downloaded cactus serve child on
+        // any app-exit path so it never outlives KAI.
+        .run(|_app, event| {
+            if let tauri::RunEvent::Exit = event {
+                modules::reflex::reflex_shutdown();
+            }
+        });
 }
 
 #[cfg(test)]

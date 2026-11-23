@@ -621,6 +621,12 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
         // being carried (a native HTML5 drag can drop :active).
         className={cn(
           "flex shrink-0 select-none items-center gap-1 border-b border-border/40 px-3 py-1.5",
+          // VERTICAL CENTERING (2026-11-23): inline SVGs sit on the text
+          // baseline by default, which leaves a descender gap BELOW each
+          // icon and pushes everything visually 2-3px above the bar's
+          // center. Forcing svg display:block removes the baseline
+          // alignment so flexbox centering is exact.
+          "[&_svg]:block",
           dragging ? "cursor-grabbing" : "cursor-pointer active:cursor-grabbing",
         )}
       >
@@ -630,7 +636,7 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
               project AI chat to its GROUP transcript when the group panel owns
               the stack rail. Without the group name in the bar the two
               surfaces look identical, so the title reads "project · group". */}
-          <span className="truncate text-[11px] font-medium text-foreground">
+          <span className="truncate text-[11px] font-medium leading-none text-foreground">
             {group ? `${name} · ${group.name}` : name}
           </span>
         </div>
@@ -1320,6 +1326,10 @@ const CellBody = memo(function CellBody(props: CellBodyProps) {
             // CARD MODE: compact tool rows (trailing state dot, chip bg)
             // + consecutive same-tool calls collapse into one group row.
             compact
+            // THINKING UI: cards never show reasoning pills/thinking
+            // blocks - the showModelThinking toggle is for the project
+            // AI window only, and at 290px wide the pills are noise.
+            hideThinking
             // OWNING SESSION (2026-11-21): a card shows a NON-foreground
             // project's chat, so approval cards must read THIS session's
             // Ask/Allow mode - reading the foreground project's mode made

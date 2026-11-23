@@ -173,6 +173,24 @@ export type VoiceSetupEvent = {
   message: string | null;
 };
 
+export type ReflexStatus = {
+  installed: boolean;
+  running: boolean;
+  version: string | null;
+  latestVersion: string | null;
+  updateAvailable: boolean;
+  installing: boolean;
+  modelDepth: number;
+  port: number;
+};
+
+export type ReflexSetupEvent = {
+  phase: string;
+  downloaded: number;
+  total: number;
+  message: string | null;
+};
+
 export type ShadowInfo = {
   projectRoot: string;
   shadowRoot: string;
@@ -447,6 +465,18 @@ export function createNative(getEnv: () => WorkspaceEnv) {
     invoke<string>("voice_transcribe", { audioBase64 }),
   voiceTts: (text: string, voice?: string) =>
     invoke<string>("voice_tts", { text, voice: voice ?? null }),
+  // ── Local reflex engine (Option A: downloaded Needle classifier) ──
+  reflexStatus: () => invoke<ReflexStatus>("reflex_status"),
+  reflexSetup: (onEvent: unknown) =>
+    invoke<void>("reflex_setup", { onEvent }),
+  reflexRemove: () => invoke<void>("reflex_remove"),
+  reflexEnsureRunning: () => invoke<ReflexStatus>("reflex_ensure_running"),
+  reflexClassify: (prompt: string) =>
+    invoke<{
+      function_calls?: Array<{ name: string; arguments: Record<string, unknown> }>;
+      confidence?: number | null;
+      resetOk?: boolean;
+    }>("reflex_classify", { prompt }),
   shellBgSpawn: (
     command: string,
     cwd?: string | null,

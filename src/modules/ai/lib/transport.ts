@@ -22,6 +22,54 @@ import {
   useChatStore,
 } from "../store/chatStore";
 import { IS_WINDOWS, IS_MAC, IS_LINUX } from "@/lib/platform";
+import {
+  classifyWithEngine,
+  decideReflex,
+  reflexDisabled,
+  REFLEX_MAX_PROMPT_CHARS,
+} from "./localReflex";
+import { executeReflexCalls, reflexAssistantStream } from "./localReflexExecute";
+import { isReflexCapableTool, recordReflexEntry } from "./reflexLog";
+import { setAgentToolCallsMiner } from "./agent";
+
+/**
+ * Reflex mining (2026-11-23): when the fast path ran (or was considered) for
+ * this prompt, remember it. After runAgentStream finishes, any reflex-capable
+ * tool the MAIN LLM executed is a REAL positive example (user intent ->
+ * ground-truth calls) for the next fine-tune - the loop that actually moves
+ * accuracy now that frozen-suite hard negatives have plateaued (Run #3).
+ */
+const reflexMinedPromptRef: { current: { sessionId: string; prompt: string } | null } = {
+  current: null,
+};
+
+type AgentToolCall = { toolName: string; input: unknown };
+
+/**
+ * Mine ONE agent step: for reflex-capable canonical tools the main LLM just
+ * executed, append a "mined-llm-tool" entry pairing the reflex-eligible user
+ * prompt with the tool's real arguments. Multi-step runs can produce several
+ * entries per prompt (all correct positives). Records NEVER contain tool
+ * output - only arguments.
+ */
+function mineAgentToolCalls(calls: AgentToolCall[]): void {
+  const mined = reflexMinedPromptRef.current;
+  if (!mined) return;
+  for (const call of calls) {
+    if (!isReflexCapableTool(call.toolName)) continue;
+    const args =
+      call.input && typeof call.input === "object"
+        ? (call.input as Record<string, unknown>)
+        : {};
+    recordReflexEntry({
+      ts: Date.now(),
+      sessionId: mined.sessionId,
+      outcome: "mined-llm-tool",
+      prompt: mined.prompt.slice(0, 200),
+      calls: [{ name: call.toolName, arguments: args }],
+    });
+  }
+}
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { formatReplyStyleBlock } from "./replyStyle";
 
@@ -199,6 +247,68 @@ export function createContextAwareTransport(deps: Deps) {
 
     let extensionStepCount = 0;
 
+    // ── LOCAL REFLEX fast path (Needle 3, 2026-11-23) ────────────────
+    // Short desktop-control prompts ("switch to dark mode", "play groove
+    // salad") are classified by the local Needle engine before ANY cloud
+    // work. Execute + synthetic stream on a confident auto-approve-safe
+    // call; any other outcome (engine down, [], low confidence, disallowed
+    // tool, grounding failure) falls through to the full LLM run below.
+    // Zero cloud prefill on the fast path; ~1.5 s worst-case probe on the
+    // fall-through path when the engine is absent (failure cached 60 s).
+    if ((options as { trigger?: string }).trigger !== "regenerate-message") {
+      const reflexText = extractLastUserText(options.messages);
+      const reflexEligible =
+        !!reflexText &&
+        reflexText.length <= REFLEX_MAX_PROMPT_CHARS &&
+        lastUserMessageIsTextOnly(options.messages);
+      if (reflexEligible && reflexText) {
+        if (reflexDisabled()) {
+          recordReflexEntry({
+            ts: Date.now(), sessionId, outcome: "fallthrough",
+            prompt: reflexText.slice(0, 200), reason: "disabled",
+          });
+        }
+        const reply = await classifyWithEngine(reflexText);
+        const decision = decideReflex(reflexText, reply);
+        if (decision.action === "execute") {
+          const exec = await executeReflexCalls(decision.calls, deps.toolContext);
+          recordReflexEntry({
+            ts: Date.now(),
+            sessionId,
+            outcome: "executed",
+            prompt: reflexText.slice(0, 200),
+            confidence: decision.confidence,
+            calls: decision.calls,
+            latencyMs: reply?.latencyMs,
+            execOk: exec.ok,
+          });
+          if (exec.ok) {
+            deps.onStep?.("local reflex");
+            const summary =
+              `Handled locally (Needle, confidence ${decision.confidence.toFixed(2)}):\n` +
+              exec.lines.map((l) => `- ${l}`).join("\n");
+            return reflexAssistantStream(summary);
+          }
+          // Partial execution must not double-fire: the LLM turn explains.
+        } else {
+          recordReflexEntry({
+            ts: Date.now(),
+            sessionId,
+            outcome: "fallthrough",
+            prompt: reflexText.slice(0, 200),
+            reason: decision.reason,
+            confidence: reply?.confidence,
+            latencyMs: reply?.latencyMs,
+          });
+        }
+        reflexMinedPromptRef.current = { sessionId, prompt: reflexText };
+      } else {
+        reflexMinedPromptRef.current = null;
+      }
+    } else {
+      reflexMinedPromptRef.current = null;
+    }
+
     const live = deps.getLive();
     const projectNative = nativeForContext(deps.toolContext);
     const projectRules = await readProjectRules(
@@ -291,6 +401,12 @@ export function createContextAwareTransport(deps: Deps) {
       (deps.getCustomInstructions() || "") +
       (replyStyleBlock ? `\n\n${replyStyleBlock}` : "");
 
+    // Mining: snapshot the reflex-eligible prompt for the post-run miner.
+    const minedPrompt = reflexMinedPromptRef.current;
+    // Wire the step-level miner for the duration of this run only (cleared
+    // right after runAgentStream resolves, see below).
+    setAgentToolCallsMiner(minedPrompt ? mineAgentToolCalls : null);
+
     const result = await runAgentStream({
       keys: deps.getKeys(),
       modelId: deps.getModelId(),
@@ -332,6 +448,10 @@ export function createContextAwareTransport(deps: Deps) {
       mcpSummary: mcpSummary.length > 0 ? mcpSummary : undefined,
       fenceState: getSessionFenceState(sessionId),
     });
+    // Mining is bound to THIS run only: the step hook is cleared as soon as
+    // runAgentStream resolves, so a later run for another session can never
+    // mine this session's prompt onto the wrong turn.
+    setAgentToolCallsMiner(null);
     // When summarization trimmed the history, pass the trimmed set as
     // originalMessages so the Chat instance adopts it. Otherwise the Chat
     // keeps the full pre-summary history, and every subsequent step
@@ -409,6 +529,18 @@ function extractLastUserText(messages: UIMessage[]): string | null {
       .slice(0, 2000);
   }
   return null;
+}
+
+/** True when the last user message carries ONLY text parts - the reflex
+ *  must never hijack prompts with images, files, or data attachments. */
+function lastUserMessageIsTextOnly(messages: UIMessage[]): boolean {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== "user") continue;
+    const parts = m.parts as ReadonlyArray<{ type: string }>;
+    return parts.every((p) => p.type === "text");
+  }
+  return false;
 }
 
 function formatEnvBlock(live: LiveSnapshot): string | null {

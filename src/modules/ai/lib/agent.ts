@@ -62,6 +62,21 @@ import {
 const localProxyFetch = createProxyFetch({ allowPrivateNetwork: true });
 
 /**
+ * Reflex mining hook (2026-11-23): fired on every agent step that contains
+ * tool calls. The transport sets this before runAgentStream; the miner
+ * records reflex-capable tool executions as real-usage training positives
+ * (user intent -> ground-truth calls) for the next Cactus fine-tune. Kept as
+ * a module-level indirection so agent.ts does not import the miner (avoids a
+ * circular import: transport -> agent -> miner -> ...).
+ */
+let onAgentToolCalls: ((calls: { toolName: string; input: unknown }[]) => void) | null = null;
+export function setAgentToolCallsMiner(
+  fn: ((calls: { toolName: string; input: unknown }[]) => void) | null,
+): void {
+  onAgentToolCalls = fn;
+}
+
+/**
  * Hybrid fetch for cloud providers: tries native fetch first (handles large
  * bodies like image uploads efficiently), falls back to proxyFetch on CORS
  * or network errors. This avoids the IPC bottleneck of serializing multi-MB
@@ -1168,6 +1183,20 @@ export async function runAgentStream(opts: RunAgentOptions) {
           );
         } else if (step.text) {
           opts.onStep("Writing");
+        }
+      }
+      // Reflex mining: report this step's real tool calls to the transport's
+      // miner (real positive examples for the next Needle fine-tune).
+      if (onAgentToolCalls && step.toolCalls && step.toolCalls.length > 0) {
+        try {
+          onAgentToolCalls(
+            step.toolCalls.map((tc: { toolName: string; input: unknown }) => ({
+              toolName: tc.toolName,
+              input: tc.input,
+            })),
+          );
+        } catch {
+          // mining must never break the run
         }
       }
       if (opts.onUsage && step.usage) {

@@ -1,0 +1,428 @@
+[
+  {
+    "name": "get_settings",
+    "description": "Read current KAI theme, editor, terminal, and shell settings and available options.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "set_ui_theme",
+    "description": "Change KAI app color palette theme (Tokyo Night, Nord, Catppuccin, Dracula, Rose Pine, Emerald, Amber, Kanagawa, Gruvbox, Solarized, One Dark, or default).",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "palette": {
+          "type": "string",
+          "enum": [
+            "default",
+            "tokyo-night",
+            "nord",
+            "catppuccin",
+            "dracula",
+            "rose-pine",
+            "emerald",
+            "amber",
+            "kanagawa",
+            "gruvbox",
+            "solarized",
+            "one-dark"
+          ],
+          "description": "app color palette id"
+        }
+      },
+      "required": [
+        "palette"
+      ]
+    }
+  },
+  {
+    "name": "set_color_mode",
+    "description": "Switch KAI appearance between light mode, dark mode, or system mode.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "light",
+            "dark",
+            "system"
+          ],
+          "description": "color appearance mode"
+        }
+      },
+      "required": [
+        "mode"
+      ]
+    }
+  },
+  {
+    "name": "set_editor_theme",
+    "description": "Change the code editor syntax theme (Atom One, Aura, Copilot, GitHub Dark, GitHub Light, Nord, Tokyo Night, Xcode Dark, Xcode Light).",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "editor_theme": {
+          "type": "string",
+          "enum": [
+            "atomone",
+            "aura",
+            "copilot",
+            "github-dark",
+            "github-light",
+            "nord",
+            "tokyo-night",
+            "xcode-dark",
+            "xcode-light"
+          ],
+          "description": "code editor theme id"
+        }
+      },
+      "required": [
+        "editor_theme"
+      ]
+    }
+  },
+  {
+    "name": "set_vim_mode",
+    "description": "Enable or disable vim keybindings in the code editor.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "true to enable vim mode, false to disable"
+        }
+      },
+      "required": [
+        "enabled"
+      ]
+    }
+  },
+  {
+    "name": "set_word_wrap",
+    "description": "Enable or disable line word wrapping in the code editor.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "true to wrap lines, false to disable"
+        }
+      },
+      "required": [
+        "enabled"
+      ]
+    }
+  },
+  {
+    "name": "set_show_hidden_files",
+    "description": "Show or hide hidden dotfiles in the file explorer.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "true to show hidden files, false to hide"
+        }
+      },
+      "required": [
+        "enabled"
+      ]
+    }
+  },
+  {
+    "name": "set_terminal_webgl",
+    "description": "Enable or disable hardware-accelerated WebGL rendering in the terminal.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "true to enable WebGL, false to disable"
+        }
+      },
+      "required": [
+        "enabled"
+      ]
+    }
+  },
+  {
+    "name": "set_terminal_font_size",
+    "description": "Set the terminal font size in points between 8 and 32.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "font_size": {
+          "type": "integer",
+          "minimum": 8,
+          "maximum": 32,
+          "description": "font size between 8 and 32"
+        }
+      },
+      "required": [
+        "font_size"
+      ]
+    }
+  },
+  {
+    "name": "set_terminal_scrollback",
+    "description": "Set the terminal scrollback line limit between 200 and 50000.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "lines": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 50000,
+          "description": "scrollback line count between 200 and 50000"
+        }
+      },
+      "required": [
+        "lines"
+      ]
+    }
+  },
+  {
+    "name": "set_zoom_level",
+    "description": "Set the KAI application zoom scale between 0.5 and 2.0.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "zoom": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 2.0,
+          "description": "zoom scale from 0.5 to 2.0"
+        }
+      },
+      "required": [
+        "zoom"
+      ]
+    }
+  },
+  {
+    "name": "play_radio",
+    "description": "Play a SomaFM background music radio station by station name, id, or music genre (Groove Salad, DEF CON Radio, Drone Zone, Space Station Soma, Lush, Indie Pop Rocks, Secret Agent, Fluid, Sonic Universe, Bagel Radio, Boot Liquor, The Trip, ambient, jazz, chill).",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "station": {
+          "type": "string",
+          "description": "station name, id, or music genre"
+        }
+      },
+      "required": [
+        "station"
+      ]
+    }
+  },
+  {
+    "name": "stop_radio",
+    "description": "Stop or turn off the background music radio stream in the status bar.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "radio_list_stations",
+    "description": "List all available SomaFM radio stations and their music genres.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "radio_now_playing",
+    "description": "Check what song or track is currently playing on the radio.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "set_voice_settings",
+    "description": "Configure text-to-speech voice replies: turn voice off, switch TTS engine (api, assemblyai, local), choose a voice name, or list available voices.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "off",
+            "api",
+            "assemblyai",
+            "local"
+          ],
+          "description": "TTS engine mode"
+        },
+        "voice": {
+          "type": "string",
+          "enum": [
+            "alloy",
+            "echo",
+            "fable",
+            "onyx",
+            "nova",
+            "shimmer",
+            "coral",
+            "sage",
+            "ash",
+            "ballad",
+            "verse"
+          ],
+          "description": "OpenAI TTS voice name"
+        },
+        "assembly_voice": {
+          "type": "string",
+          "enum": [
+            "aai-jane",
+            "aai-audrey",
+            "aai-sara",
+            "aai-michael",
+            "aai-paul",
+            "aai-charles",
+            "aai-eve",
+            "aai-george"
+          ]
+        },
+        "list": {
+          "type": "boolean",
+          "description": "true when asking to list available TTS voices"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "set_timer_reminder",
+    "description": "Set a countdown timer reminder that fires after a number of minutes or hours from now.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string",
+          "description": "what to remind about"
+        },
+        "minutes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10080
+        },
+        "hours": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 168
+        }
+      },
+      "required": [
+        "message"
+      ]
+    }
+  },
+  {
+    "name": "schedule_reminder",
+    "description": "Schedule a reminder for a calendar date and time.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string",
+          "description": "what to remind about"
+        },
+        "due_at": {
+          "type": "string",
+          "description": "ISO timestamp YYYY-MM-DDTHH:MM:SS"
+        },
+        "repeat": {
+          "type": "string",
+          "enum": [
+            "weekly",
+            "monthly"
+          ]
+        }
+      },
+      "required": [
+        "message",
+        "due_at"
+      ]
+    }
+  },
+  {
+    "name": "reminder_list",
+    "description": "List scheduled pending and past reminders.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "reminder_cancel",
+    "description": "Cancel and delete a scheduled reminder by its id.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^rmd_[a-zA-Z0-9]+$",
+          "description": "reminder id starting with rmd_"
+        }
+      },
+      "required": [
+        "id"
+      ]
+    }
+  },
+  {
+    "name": "set_persona",
+    "description": "Switch the active AI agent persona for this conversation to an existing persona name (Coder, Architect, Code Reviewer, Security, Designer, Researcher, Assistant, or none).",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "persona": {
+          "type": "string",
+          "enum": [
+            "coder",
+            "architect",
+            "reviewer",
+            "security",
+            "designer",
+            "researcher",
+            "assistant",
+            "senior engineer",
+            "writer",
+            "none"
+          ],
+          "description": "existing persona to activate, or 'none'"
+        }
+      },
+      "required": [
+        "persona"
+      ]
+    }
+  },
+  {
+    "name": "open_preview",
+    "description": "Open an in-app preview browser tab at a localhost or 127.0.0.1 URL.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "localhost URL, e.g. http://localhost:5173"
+        }
+      },
+      "required": [
+        "url"
+      ]
+    }
+  }
+]

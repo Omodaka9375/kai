@@ -51,3 +51,14 @@ Desktop.ini
 
 # Commit message scratch file used by the agent's `git commit -F` flow
 .git-commit-msg.tmp
+
+# Local Cactus / Needle 3 cached weights and benchmark outputs
+scripts/cactus/.cache/
+scripts/cactus/out/
+scripts/cactus/models/
+scripts/cactus/__pycache__/
+# Regenerated deterministically by build_dataset.py (seed 0)
+scripts/cactus/data/
+*.cact
+# cactus finetune downloads the base checkpoint here
+checkpoints/

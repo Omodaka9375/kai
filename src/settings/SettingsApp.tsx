@@ -29,6 +29,7 @@ const SecuritySection = lazy(() => import("./sections/SecuritySection").then((m)
 const StaffSection = lazy(() => import("./sections/StaffSection").then((m) => ({ default: m.StaffSection })));
 const VoiceSection = lazy(() => import("./sections/VoiceSection").then((m) => ({ default: m.VoiceSection })));
 const SocialSection = lazy(() => import("./sections/SocialSection").then((m) => ({ default: m.SocialSection })));
+const ReflexSection = lazy(() => import("./sections/ReflexSection").then((m) => ({ default: m.ReflexSection })));
 const ExternalSection = lazy(() => import("./sections/ExternalSection").then((m) => ({ default: m.ExternalSection })));
 // "Assistant" panel — file kept as ExternalSection.tsx (renaming would churn
 // the denylist/window-state keys); id changed external → assistant.
@@ -48,6 +49,7 @@ const TABS: TabDef[] =
     { id: "security", label: "Security", icon: Shield01Icon, component: SecuritySection },
     { id: "staff", label: "Staff", icon: UserGroupIcon, component: StaffSection },
     { id: "voice", label: "Voice", icon: Mic01Icon, component: VoiceSection },
+    { id: "reflex", label: "Local Reflex", icon: AiScanIcon, component: ReflexSection },
     { id: "social", label: "Social", icon: UserMultiple02Icon, component: SocialSection },
     { id: "assistant", label: "Assistant", icon: GlobeIcon, component: ExternalSection },
     { id: "about", label: "About", icon: InformationCircleIcon, component: AboutSection },
@@ -64,6 +66,7 @@ const VALID_TABS: SettingsTab[] = [
   "security",
   "staff",
   "voice",
+  "reflex",
   "social",
   "assistant",
   "about",
