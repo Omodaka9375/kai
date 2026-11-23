@@ -4,15 +4,17 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
-## [3.4.1]
+## [3.5.0]
 
-- Shell: new native sleep tool.
-- Shell: bash_logs long-polls. A new wait_secs argument blocks in Rust.
-- Workspaces: each card top bar gains a context usage ring and a sandbox icon next to the project title when a sandbox policy is active.
-- Workspaces: the Ask/Allow pill is a compact shield icon toggle placed next to the card's + button.
-- Workspaces: the top bar gets a left-aligned + launcher for New Project / Open Project while the tab strip is hidden in grid mode.
-- Rail: the project hover tooltip is a compact two-line pill aligned with the tile instead of a tall three-block card.
-- Perf: tool output stringification and per-card meta subscriptions are cached per session.
+- Local fast path: optional on-device `kai-reflex-v1` (Needle 3 12L) classifier handles short desktop controls locally (theme, radio, voice, reminders, personas, preview, time, stop agent, new session, and list commands) with one-click setup in Settings and strict prompt-grounding guards.
+- Workspaces: each card top bar now includes a sandbox indicator, context usage ring, model picker, persona picker (showing the effective agent icon), session switcher toggle, compact Ask/Allow shield toggle, and + new session button.
+- Workspaces: fixed a chat LRU eviction bug that could reset or wipe visible project sessions when switching projects.
+- Workspaces: card transcript text is selectable with copy/quote right-click, clicking the Todos card expands the checklist, cards keep scroll position during drag-reorder, Close Project right-click is scoped to the card header, and phantom blank gaps between tool steps are removed.
+- Workspaces: the top bar gains a left-aligned + launcher for New Project / Open Project while the file tab strip is hidden in grid mode, and card inputs support `#` skills, `/` slash commands, and multi-line Shift+Enter input.
+- Settings: split the Credential Vault into its own Vault panel alongside Security.
+- Shell: added native `sleep` tool (up to 600s) and long-polling `bash_logs` (`wait_secs`) to replace shell sleep loops.
+- Chat: multi-line Shift+Enter input (up to 5 lines) across the main AI bar, Workspaces cards, and group chat; `/compact` now elides stale images; retry/Continue banners stay scoped to the owning session.
+- UI: larger cube sandbox badge in the AI window header, compact two-line hover tooltips on the project rail, and faster long-chat streaming.
 
 ---
 

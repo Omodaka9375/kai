@@ -41,17 +41,17 @@ const ALLOWED_URL_PREFIXES: &[&str] = &[
 /// Shipped model identity (`kai-reflex-v1` at 12L depth).
 const MODEL_NAME: &str = "kai-reflex-v1";
 const MODEL_DEPTH: u32 = 12;
-const DEFAULT_VERSION: &str = "1.0.0";
+const DEFAULT_VERSION: &str = "2026.11.23-r5";
 
 /// Pinned v1 weights fallback (served from KAI's latest GitHub release if
-/// `reflex-manifest.json` isn't fetched or for deterministic v1 defaults).
+/// `reflex-manifest.json` isn't fetched or for deterministic defaults).
 const DEFAULT_WEIGHTS_URL: &str =
     "https://github.com/Omodaka9375/kai/releases/latest/download/kai-reflex-v1-12L.cact";
 const DEFAULT_WEIGHTS_SHA256: &str =
-    "979db9355ce9783ea84d52ce2aa9a181c9fe1aec404107e3e983dbe1d36c12c1";
+    "1366ba974fcc9f39ef49791be0ee6c30f187df95d1055dbab51293f300e97db9";
 const DEFAULT_WEIGHTS_BYTES: u64 = 22_549_012;
 
-/// Embedded 22-tool runtime schema matching `localReflex.ts`.
+/// Embedded 28-tool runtime schema matching `localReflex.ts`.
 const EMBEDDED_NARROW_TOOLS: &str = include_str!("reflex_tools.json");
 
 /// Pinned Cactus 4.1.0 standalone engine binaries (exact revision + SHA-256
