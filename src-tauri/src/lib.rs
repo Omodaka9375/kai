@@ -316,7 +316,7 @@ fn settings_panel_key(tab: Option<&str>) -> String {
     };
     if matches!(
         key.as_str(),
-        "general" | "shortcuts" | "models" | "agents" | "snippets" | "mcp" | "sandbox" | "security" | "staff" | "voice" | "reflex" | "social" | "assistant" | "external" | "about"
+        "general" | "shortcuts" | "models" | "agents" | "snippets" | "mcp" | "sandbox" | "security" | "vault" | "staff" | "voice" | "reflex" | "social" | "assistant" | "external" | "about"
     ) {
         key
     } else {
@@ -335,12 +335,14 @@ fn settings_panel_title(key: &str) -> String {
         "mcp" => "MCP Servers",
         "sandbox" => "Sandbox",
         "security" => "Security",
+        "vault" => "Vault",
         "staff" => "Staff",
         "voice" => "Voice",
         "reflex" => "Local Reflex",
         "social" => "Social",
         "external" => "Assistant",
         "assistant" => "Assistant",
+        "about" => "About",
         _ => "About",
     };
     format!("KAI — {name}")

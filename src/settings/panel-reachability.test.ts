@@ -72,10 +72,26 @@ describe("Rust settings-window plumbing", () => {
   });
 
   it("panel key allowlist + title map cover every panel", () => {
-    // settings_panel_key() must accept the key…
-    expect(libRs).toMatch(/"[^"]*\bsandbox\b[^"]*"[^;]*\|\s*"security"/);
-    // …and settings_panel_title() must name it.
-    expect(libRs).toContain('"security" => "Security"');
+    // Regression (2026-11-23): the Vault panel shipped with a TABS entry,
+    // a SettingsTab union member, a menu item and a denylist line, but
+    // settings_panel_key() did not list "vault" in its canonical matches!()
+    // — every openSettingsWindow("vault") fell through to "general" and the
+    // GENERAL window opened instead. Iterate every panel id against the
+    // Rust allowlist and title map so a missing panel can never slip in
+    // again (the old test pinned only sandbox/security literally).
+    const allowList =
+      libRs.match(/matches!\(\s*key\.as_str\(\),\s*((?:"[a-z]+"(?:\s*\|\s*)?)+)/)?.[1] ?? "";
+    const allowEntries = Array.from(allowList.matchAll(/"([a-z]+)"/g), (m) => m[1]!);
+    for (const id of panelIds) {
+      expect(
+        allowEntries,
+        `lib.rs settings_panel_key allowlist is missing "${id}" — openSettingsWindow("${id}") would open General`,
+      ).toContain(id);
+      expect(
+        libRs,
+        `lib.rs settings_panel_title is missing "${id}"`,
+      ).toMatch(new RegExp(`"${id}" => "`));
+    }
   });
 });
 
