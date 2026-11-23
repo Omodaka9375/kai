@@ -165,14 +165,17 @@ describe("Workspaces grid behavior (source pins)", () => {
     expect(headerBlock).toContain("newSessionForProject(projectId)");
     expect(headerBlock).toContain('title="New session"');
     const titleIdx = headerBlock.indexOf("group ? `${name} · ${group.name}` : name");
-    const personaPillIdx = headerBlock.indexOf("<SessionPersonaPill");
+    const contextRingIdx = headerBlock.indexOf("<CardContextRing");
     const modelPillIdx = headerBlock.indexOf("<CardModelPill");
+    const personaPillIdx = headerBlock.indexOf("<SessionPersonaPill");
     const pillIdx = headerBlock.indexOf("<SessionApprovePill");
     const newBtnIdx = headerBlock.indexOf("newSessionForProject(projectId)");
     expect(titleIdx).toBeGreaterThan(-1);
-    expect(personaPillIdx).toBeGreaterThan(titleIdx);
-    expect(modelPillIdx).toBeGreaterThan(personaPillIdx);
-    expect(pillIdx).toBeGreaterThan(modelPillIdx);
+    // PILL ORDER (2026-11-23 ask): context ring, model pill, persona picker.
+    expect(contextRingIdx).toBeGreaterThan(titleIdx);
+    expect(modelPillIdx).toBeGreaterThan(contextRingIdx);
+    expect(personaPillIdx).toBeGreaterThan(modelPillIdx);
+    expect(pillIdx).toBeGreaterThan(personaPillIdx);
     expect(newBtnIdx).toBeGreaterThan(pillIdx);
     expect(grid).toContain("icon={Shield01Icon}");
   });
@@ -493,18 +496,37 @@ describe("Workspaces grid behavior (source pins)", () => {
     );
     const sandboxIdx = headerBlock.indexOf("<CardSandboxIcon root={root} />");
     const titleIdx = headerBlock.indexOf("group ? `${name} · ${group.name}` : name");
-    const personaPillIdx = headerBlock.indexOf("<SessionPersonaPill");
-    const modelPillIdx = headerBlock.indexOf("<CardModelPill");
     const contextRingIdx = headerBlock.indexOf("<CardContextRing projectId={projectId} sessionId={sessionId} />");
+    const modelPillIdx = headerBlock.indexOf("<CardModelPill");
+    const personaPillIdx = headerBlock.indexOf("<SessionPersonaPill");
     const approveIdx = headerBlock.indexOf("<SessionApprovePill");
     expect(sandboxIdx).toBeGreaterThan(-1);
     expect(titleIdx).toBeGreaterThan(sandboxIdx);
-    expect(personaPillIdx).toBeGreaterThan(titleIdx);
-    expect(modelPillIdx).toBeGreaterThan(personaPillIdx);
-    expect(contextRingIdx).toBeGreaterThan(modelPillIdx);
-    expect(approveIdx).toBeGreaterThan(contextRingIdx);
+    // PILL ORDER (2026-11-23 ask): context ring, model pill, persona picker.
+    expect(contextRingIdx).toBeGreaterThan(titleIdx);
+    expect(modelPillIdx).toBeGreaterThan(contextRingIdx);
+    expect(personaPillIdx).toBeGreaterThan(modelPillIdx);
+    expect(approveIdx).toBeGreaterThan(personaPillIdx);
     expect(grid).toContain('if (mode === "off") return null;');
     expect(grid).toContain("<ContextTrigger asChild>");
+  });
+
+  it("the persona pill resolves the same effective persona the runtime runs under", () => {
+    // 2026-11-23 ask: "make sure each selected agent shows the correct
+    // icon". The pill read ONLY the session preference; the runtime
+    // (chatStore.getAgentPersonaId + chatRuntime activeId fallback)
+    // resolves session pref ?? project persona ?? app default. The pill
+    // must follow the same chain and re-render on all three feeds.
+    expect(grid).toContain("<SessionPersonaPill projectId={projectId} sessionId={sessionId} />");
+    const pill = grid.slice(
+      grid.indexOf("const SessionPersonaPill = memo"),
+      grid.indexOf("const CardModelPill = memo"),
+    );
+    expect(pill).toContain("getSessionPreferences(sessionId).personaId ??");
+    expect(pill).toContain("getProjectPersona(projectId) ??");
+    expect(pill).toContain("agentsActiveId ??");
+    expect(pill).toContain("subscribeProjectModels");
+    expect(pill).toContain("useAgentsStore((s) => s.activeId)");
   });
 
   it("scopes the Close Project right-click menu to the card top bar only, not the chat body", () => {

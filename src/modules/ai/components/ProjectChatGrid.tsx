@@ -105,6 +105,7 @@ import {
 import {
   getProjectActiveSession,
   subscribeProjectActiveSessions,
+  getProjectPersona,
 } from "../store/projectRegistry";
 import { subscribeProjectAgentStatus, getProjectAgentStatus } from "../store/projectStatus";
 import { usePreferencesStore } from "@/modules/settings/preferences";
@@ -701,9 +702,13 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
         </div>
         {!group && sessionId ? (
           <div className="flex shrink-0 items-center gap-1">
-            <SessionPersonaPill sessionId={sessionId} />
-            <CardModelPill projectId={projectId} sessionId={sessionId} />
+            {/* PILL ORDER (2026-11-23 ask): context ring FIRST, then the
+                model pill, then the persona picker - the ring is a passive
+                status readout, the persona picker is the active control and
+                sits closest to the right-aligned action cluster. */}
             <CardContextRing projectId={projectId} sessionId={sessionId} />
+            <CardModelPill projectId={projectId} sessionId={sessionId} />
+            <SessionPersonaPill projectId={projectId} sessionId={sessionId} />
           </div>
         ) : null}
         <div className="flex min-w-0 flex-1 items-center justify-end gap-1">
@@ -1028,13 +1033,30 @@ const SessionApprovePill = memo(function SessionApprovePill({
  *  set_persona tool uses — never setActiveId, which would rewrite the
  *  FOREGROUND project's persona. */
 const SessionPersonaPill = memo(function SessionPersonaPill({
+  projectId,
   sessionId,
 }: {
+  projectId: string;
   sessionId: string;
 }) {
+  // Re-render on session preference, project persona, and app-default
+  // persona changes - all three feeds of the resolution below.
   useSyncExternalStore(subscribeSessionPreferences, () => getSessionPreferences(sessionId).personaId ?? "");
+  useSyncExternalStore(subscribeProjectModels, getProjectModelVersion);
+  const agentsActiveId = useAgentsStore((s) => s.activeId);
   const customAgents = useAgentsStore((s) => s.customAgents);
-  const personaId = getSessionPreferences(sessionId).personaId ?? "__none__";
+  // EFFECTIVE PERSONA (2026-11-23): the runtime resolves the session's
+  // persona as session pref ?? project persona ?? app default
+  // (chatStore.getAgentPersonaId + chatRuntime's activeId fallback). The
+  // pill read ONLY the session preference, so a card whose session had no
+  // explicit pin showed the generic "No persona" spark icon while its
+  // agent actually ran under e.g. Security - the visible "wrong icon".
+  // Resolve the same chain the runtime does.
+  const personaId =
+    getSessionPreferences(sessionId).personaId ??
+    getProjectPersona(projectId) ??
+    agentsActiveId ??
+    "__none__";
   const list = useMemo(() => {
     const byId = new Map<string, Agent>();
     for (const b of BUILTIN_AGENTS) byId.set(b.id, b);
