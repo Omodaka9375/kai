@@ -284,7 +284,7 @@ const TranscriptFrame = memo(function TranscriptFrame({
   return (
     <div
       ref={ref}
-      className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+      className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden select-text"
     >
       {children}
       <div
@@ -1354,6 +1354,7 @@ const GroupCardBody = memo(function GroupCardBody(props: GridCellProps & { group
                   ) : (
                     <div
                       key={m.id}
+                      data-msg-author={m.from === "user" ? "You" : nameFor(m.projectId)}
                       className={cn(
                         "flex flex-col gap-0.5",
                         m.from === "user" && "ml-auto max-w-[85%]",

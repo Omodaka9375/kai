@@ -2,6 +2,7 @@ import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { fmtShortcut, MOD_KEY, IS_MAC } from "@/lib/platform";
 import { motion } from "motion/react";
 import { useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { HugeiconsIcon } from "@hugeicons/react";
 import AiContentGenerator02Icon from "@hugeicons/core-free-icons/AiContentGenerator02Icon";
 import Copy01Icon from "@hugeicons/core-free-icons/Copy01Icon";
@@ -144,7 +145,7 @@ export function CustomContextMenu({
     </>
   );
 
-  return (
+  const menu = (
     <motion.div
       ref={menuRef}
       initial={{ opacity: 0, scale: 0.96 }}
@@ -312,4 +313,9 @@ export function CustomContextMenu({
       )}
     </motion.div>
   );
+
+  // Portal to document.body so the menu paints above AppShell-level overlays
+  // like Workspaces (ProjectChatGrid, z-40) instead of being trapped inside
+  // the ProjectWorkspace subtree.
+  return typeof document !== "undefined" ? createPortal(menu, document.body) : menu;
 }

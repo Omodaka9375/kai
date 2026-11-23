@@ -43,7 +43,7 @@ describe("Workspaces grid behavior (source pins)", () => {
     // instead of the block scrolling INSIDE the card.
     // The wrapper is now TranscriptFrame (clip fades + the bounded-flex
     // contract live together).
-    expect(grid).toContain('className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"');
+    expect(grid).toContain('className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden select-text"');
     expect(grid).toContain("function useTranscriptClips");
   });
 
@@ -534,5 +534,18 @@ describe("Workspaces grid behavior (source pins)", () => {
       grid.indexOf("const orderMap = useMemo("),
     );
     expect(cellsMemo).not.toContain(".sort(");
+  });
+
+  it("keeps card transcript text selectable and stamped for the copy/quote context menu", () => {
+    // 2026-11-23 report: "can't select/copy text in chat cards in Workspaces".
+    // TranscriptFrame opts back into text selection, and group-card messages
+    // carry data-msg-author so App.tsx's contextmenu handler offers Copy.
+    expect(grid).toContain(
+      "relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden select-text",
+    );
+    expect(grid).toContain('data-msg-author={m.from === "user" ? "You" : nameFor(m.projectId)}');
+    // The grid container carries the marker App.tsx uses to recognize
+    // Workspaces-card right-clicks.
+    expect(grid).toContain("data-project-chat-grid");
   });
 });

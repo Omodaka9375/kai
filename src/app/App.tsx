@@ -1102,7 +1102,20 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
 
   useEffect(() => {
     const handleContextMenu = (e: MouseEvent) => {
+      // Check foreground activation INSIDE the handler rather than bailing
+      // out at effect-registration time: background projects start with
+      // isActiveRef.current === false, and switching projects mutates the
+      // ref without re-running this effect — gating outside left later-
+      // activated projects with NO contextmenu listener at all.
+      if (!isActiveRef.current) return;
+
       const target = e.target as HTMLElement;
+      // Let Radix ContextMenu triggers (card top bars, rail tiles, tabs,
+      // file tree rows) own their own right-click menu.
+      if (target.closest('[data-slot="context-menu-trigger"]')) {
+        setContextMenu(null);
+        return;
+      }
       // Allow native context menu in input fields, textareas, and general contenteditables,
       // EXCEPT inside CodeMirror's editable area (where we want our custom selection actions).
       if (
@@ -1118,10 +1131,10 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
 
       const isTerminal = !!target.closest(".xterm-screen");
       const isEditor = !!target.closest(".cm-editor");
-      // Chat transcripts (AI mini window, group panel): selection quoting.
-      // The transcript author is stamped on the message wrapper via
-      // data-msg-author; the browser selection is captured NOW because it
-      // is cleared before the menu row's click handler runs.
+      // Chat transcripts (AI mini window, Workspaces cards, group panel):
+      // selection copy/quote. The transcript author is stamped on the message
+      // wrapper via data-msg-author; the browser selection is captured NOW
+      // because it is cleared before the menu row's click handler runs.
       const msgEl = target.closest("[data-msg-author]");
       const quoteTarget = msgEl as { getAttribute(k: string): string | null } | null;
       // Group panel quotes seed the GROUP composer - recover the open group
@@ -1130,6 +1143,7 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
       const groupQuoteId = groupPanelEl
         ? (groupPanelEl as { getAttribute(k: string): string | null }).getAttribute("data-group-id")
         : null;
+      const inWorkspacesCard = !!target.closest("[data-project-chat-grid]");
       const transcriptSelection = msgEl
         ? String(document.getSelection?.() ?? "").trim() || null
         : null;
@@ -1157,7 +1171,7 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
         isTerminal,
         editorPath: isEditor ? activeTabPathRef.current : null,
         quote:
-          quoteTarget && transcriptSelection
+          quoteTarget && transcriptSelection && !inWorkspacesCard
             ? {
                 author: quoteTarget.getAttribute("data-msg-author") || "You",
                 text: transcriptSelection,
@@ -1167,7 +1181,6 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
       });
     };
 
-    if (!isActiveRef.current) return;
     document.addEventListener("contextmenu", handleContextMenu);
     return () => {
       document.removeEventListener("contextmenu", handleContextMenu);
