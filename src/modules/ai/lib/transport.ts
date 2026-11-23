@@ -284,9 +284,12 @@ export function createContextAwareTransport(deps: Deps) {
           });
           if (exec.ok) {
             deps.onStep?.("local reflex");
+            // Compact execution summary + a small italic provenance label
+            // (markdown italic) — no "Handled locally (Needle, confidence…)"
+            // preamble; the confidence lives in the reflex log, not the chat.
             const summary =
-              `Handled locally (Needle, confidence ${decision.confidence.toFixed(2)}):\n` +
-              exec.lines.map((l) => `- ${l}`).join("\n");
+              exec.lines.map((l) => `${l}`).join("\n") +
+              "\n\n*(local reflex)*";
             return reflexAssistantStream(summary);
           }
           // Partial execution must not double-fire: the LLM turn explains.
