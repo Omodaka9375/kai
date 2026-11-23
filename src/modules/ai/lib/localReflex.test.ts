@@ -156,6 +156,7 @@ describe("mapNarrowCalls", () => {
 
 describe("decideReflex", () => {
   const good: NarrowCall[] = [{ name: "stop_radio", arguments: {} }];
+  const NOW2 = new Date("2026-11-23T10:00:00Z");
 
   it("executes a confident allowlisted call", () => {
     const d = decideReflex("stop the radio", { calls: good, confidence: 0.9 });
@@ -197,7 +198,10 @@ describe("decideReflex", () => {
     // "wait" alone is conversational, but "wait 5 seconds" is a real sleep command.
     const d = decideReflex("stop the radio", { calls: good, confidence: 0.99 });
     expect(d.action).toBe("execute");
-    const w = decideReflex("wait 5 seconds", { calls: good, confidence: 0.99 });
+    const w = decideReflex("wait 5 seconds then remind me to check the build", {
+      calls: [{ name: "set_timer_reminder", arguments: { minutes: 5, message: "check the build" } }],
+      confidence: 0.99,
+    });
     expect(w.action).toBe("execute");
   });
 
@@ -313,5 +317,45 @@ describe("decideReflex", () => {
         arguments: { station: "groovesalad" },
       }),
     ).toBe(true);
+  });
+
+  it("falls through when a coding prompt is classified as a radio command (2026-11-23 live hijack)", () => {
+    // Live false positive: "start building the dynamic OpenAI proxy"
+    // classified as play_radio and reported "Radio playing" — a coding
+    // prompt carries zero radio vocabulary, so the radio-domain trigger
+    // floor must refuse it regardless of confidence.
+    const radioCall: NarrowCall[] = [
+      { name: "play_radio", arguments: { station: "groovesalad" } },
+    ];
+    for (const p of [
+      "start building the dynamic OpenAI proxy",
+      "refactor the auth module",
+      "explain how the scheduler works",
+    ]) {
+      const d = decideReflex(p, { calls: radioCall, confidence: 0.99 });
+      expect(d.action === "fallthrough" && d.reason === "ungrounded", p).toBe(true);
+    }
+    // Real radio phrasings still execute.
+    const ok = decideReflex("play some ambient music on the radio", {
+      calls: [{ name: "play_radio", arguments: { station: "dronezone" } }],
+      confidence: 0.9,
+    });
+    expect(ok.action).toBe("execute");
+  });
+
+  it("refuses sub-3-char radio stations (garbage the loose genre match would resolve)", () => {
+    // A one/two-char "station" passes value grounding (any letter appears
+    // somewhere in the prompt) and would resolve through play_radio's loose
+    // substring/genre matching — refuse at the mapper instead.
+    expect(
+      mapNarrowCalls([{ name: "play_radio", arguments: { station: "ai" } }], NOW2),
+    ).toBeNull();
+    expect(
+      mapNarrowCalls([{ name: "play_radio", arguments: { station: "x" } }], NOW2),
+    ).toBeNull();
+    // Real shortest station id ("lush", 4 chars) still passes.
+    expect(
+      mapNarrowCalls([{ name: "play_radio", arguments: { station: "lush" } }], NOW2),
+    ).toEqual([{ name: "play_radio", arguments: { station: "lush" } }]);
   });
 });

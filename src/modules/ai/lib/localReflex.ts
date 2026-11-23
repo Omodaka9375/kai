@@ -287,6 +287,13 @@ export function mapNarrowCalls(
         const station = normStation(args.station);
         // Empty station = ungrounded free-text slot -> refuse the turn.
         if (!station) return null;
+        // Sub-3-char "stations" are model garbage, not real SomaFM ids
+        // (shortest real id is "lush", 4 chars). A one/two-char value can
+        // still pass value grounding (any letter appears somewhere in the
+        // prompt) and then resolve through play_radio's loose substring
+        // genre match — the 2026-11-23 "start building the dynamic OpenAI
+        // proxy -> Radio playing" hijack rode exactly this. Refuse.
+        if (station.length < 3) return null;
         out.push({ name: "play_radio", arguments: { station } });
         break;
       }
@@ -564,6 +571,28 @@ const SETTINGS_KEY_GROUNDING: Record<string, string[]> = {
 /** Argument keys whose values are COMPUTED (never appear in the prompt). */
 const UNGROUNDABLE_ARGS = new Set(["dueAt", "repeat"]);
 
+/**
+ * RADIO DOMAIN TRIGGERS (2026-11-23 live false positive: "start building
+ * the dynamic OpenAI proxy" classified as play_radio and EXECUTED — a
+ * coding prompt with zero radio vocabulary). Settings keys have a
+ * per-key trigger table; radio tools need the same prompt-side floor at
+ * the tool level: no radio/music/play vocabulary in the prompt means the
+ * turn cannot be a radio command, whatever the classifier says.
+ */
+const RADIO_DOMAIN_TOOLS = new Set([
+  "play_radio",
+  "stop_radio",
+  "radio_list_stations",
+  "radio_now_playing",
+]);
+const RADIO_PROMPT_TRIGGERS = [
+  "radio", "music", "song", "station", "soma", "listen", "playlist",
+  "tune", "genre", "play", "pause the music", "ambient", "groove",
+  "defcon", "drone", "lush", "indie", "bagel", "boot liquor",
+  "the trip", "fluid", "sonic", "secret agent", "space station",
+  "volume", "quiet",
+];
+
 /** "no persona" phrasings the engine maps to the `none` sentinel. */
 const PERSONA_NONE_SYNONYMS = new Set(["none", "__none__", "off", "no persona"]);
 const PERSONA_NONE_TRIGGERS = [
@@ -578,6 +607,11 @@ function normalizeForGrounding(s: string): string {
 export function callGroundedInPrompt(prompt: string, call: CanonicalCall): boolean {
   const raw = prompt.toLowerCase();
   const norm = normalizeForGrounding(prompt);
+  // Radio commands must carry radio vocabulary in the prompt (see
+  // RADIO_DOMAIN_TOOLS above) — a coding prompt never does.
+  if (RADIO_DOMAIN_TOOLS.has(call.name) && !RADIO_PROMPT_TRIGGERS.some((t) => raw.includes(t))) {
+    return false;
+  }
   if (call.name === "settings_update") {
     for (const key of Object.keys(call.arguments)) {
       const tokens = SETTINGS_KEY_GROUNDING[key];
@@ -589,6 +623,19 @@ export function callGroundedInPrompt(prompt: string, call: CanonicalCall): boole
     if (typeof value !== "string" || value.length === 0) continue;
     const v = normalizeForGrounding(value);
     if (v && norm.includes(v)) continue;
+    // Semantic-slot exemption: computed/normalized slot values that never
+    // appear verbatim in the prompt. Each is tightly scoped:
+    //  - radio `station`: the prompt's RADIO trigger vocabulary (or the
+    //    station alias itself, "groove salad" -> "groovesalad") justifies
+    //    the slot; the mapper's sub-3-char refusal blocks pure garbage.
+    //  - reminder `message`: a user-words paraphrase, not a quoted string.
+    if (
+      ((call.name === "play_radio" && key === "station") ||
+        (call.name === "reminder_create" && key === "message")) &&
+      v.length >= 3
+    ) {
+      continue;
+    }
     if (
       call.name === "set_persona" &&
       PERSONA_NONE_SYNONYMS.has(value.toLowerCase()) &&
