@@ -14,6 +14,7 @@ import { invoke, Channel } from "@tauri-apps/api/core";
 export type ReflexStatus = {
   installed: boolean;
   running: boolean;
+  modelName: string;
   version: string | null;
   latestVersion: string | null;
   updateAvailable: boolean;

@@ -38,6 +38,40 @@ RELEASE_BASE = "https://github.com/Omodaka9375/kai/releases/latest/download"
 PLATFORMS = ["windows-x86_64", "windows-arm64", "macos-arm64", "linux-x86_64", "linux-arm64"]
 
 
+MODEL_NAME = "kai-reflex-v1"
+CACTUS_ENGINE_BASE = (
+    "https://huggingface.co/Cactus-Compute/cactus/resolve/"
+    "4e822c9036be2eb0e47ef556df32a818bb1572ef/releases/4.1.0"
+)
+PINNED_ENGINES = {
+    "windows-x86_64": {
+        "url": f"{CACTUS_ENGINE_BASE}/windows-x86_64/cactus.exe",
+        "sha256": "3b913456f1abd8de91aad6058ed1467eb418af7d2806f82c3d0bd8d26677ca6f",
+        "bytes": 1622016,
+    },
+    "windows-arm64": {
+        "url": f"{CACTUS_ENGINE_BASE}/windows-arm64/cactus.exe",
+        "sha256": "06c001b2d0608cc79297db0d417f5eb83236f59105bf18e1befe7aef81ae8b84",
+        "bytes": 1399296,
+    },
+    "macos-arm64": {
+        "url": f"{CACTUS_ENGINE_BASE}/macos-arm64/cactus",
+        "sha256": "86c7bad785977c79d935a47604e14df0ef9640297b1b1280d93757a15a87f3f5",
+        "bytes": 1156280,
+    },
+    "linux-x86_64": {
+        "url": f"{CACTUS_ENGINE_BASE}/linux-x86_64/cactus",
+        "sha256": "d3fabf298fed9da8db319c90fbce62c898930699d87c0468b20262860b337098",
+        "bytes": 1604704,
+    },
+    "linux-arm64": {
+        "url": f"{CACTUS_ENGINE_BASE}/linux-arm64/cactus",
+        "sha256": "088137b428c1be5cacb022a78a56f82815e5d60767002874afcc2ca7cf446074",
+        "bytes": 1486560,
+    },
+}
+
+
 def sha256(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
@@ -48,28 +82,31 @@ def sha256(path: Path) -> str:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--version", required=True, help="e.g. 2026.11.23-r2")
+    ap.add_argument("--version", default="1.0.0", help="e.g. 1.0.0")
     ap.add_argument("--depth", type=int, default=12, choices=[8, 12, 20],
                     help="model depth to publish (default 12 = the ship pick)")
-    ap.add_argument("--platforms", default="windows-x86_64",
-                    help="comma-separated platform folders with built engines")
     args = ap.parse_args()
 
-    weights_src = MODELS_DIR / f"kai-desktop-v1-{args.depth}L.cact"
+    weights_src = MODELS_DIR / f"{MODEL_NAME}-{args.depth}L.cact"
+    if not weights_src.exists():
+        legacy = MODELS_DIR / f"kai-desktop-v1-{args.depth}L.cact"
+        if legacy.exists():
+            weights_src = legacy
     tools_src = HERE / "narrow_tools.json"
     if not weights_src.exists():
-        raise SystemExit(f"weights not found: {weights_src} (run platform_run.py download first)")
+        raise SystemExit(f"weights not found: {weights_src}")
     if not tools_src.exists():
         raise SystemExit(f"tools not found: {tools_src} (run build_runtime_assets.py)")
 
     PUBLISH_DIR.mkdir(parents=True, exist_ok=True)
-    weights_out = PUBLISH_DIR / f"kai-desktop-v1-{args.depth}L.cact"
+    weights_out = PUBLISH_DIR / f"{MODEL_NAME}-{args.depth}L.cact"
     tools_out = PUBLISH_DIR / "narrow_tools.json"
     shutil.copy2(weights_src, weights_out)
     shutil.copy2(tools_src, tools_out)
 
     manifest: dict = {
         "version": args.version,
+        "model": MODEL_NAME,
         "depth": args.depth,
         "weights_url": f"{RELEASE_BASE}/{weights_out.name}",
         "weights_sha256": sha256(weights_out),
@@ -77,22 +114,8 @@ def main() -> None:
         "tools_url": f"{RELEASE_BASE}/narrow_tools.json",
         "tools_sha256": sha256(tools_out),
         "tools_bytes": tools_out.stat().st_size,
-        "engines": {},
+        "engines": PINNED_ENGINES,
     }
-    for plat in [p.strip() for p in args.platforms.split(",") if p.strip()]:
-        if plat not in PLATFORMS:
-            raise SystemExit(f"unknown platform {plat}; choose from {PLATFORMS}")
-        archive = MODELS_DIR / f"cactus-engine-{plat}.zip"
-        if not archive.exists():
-            print(f"  (no engine archive for {plat} - skipped; build with cactus build --platform {plat})")
-            continue
-        out = PUBLISH_DIR / f"cactus-engine-{plat}.zip"
-        shutil.copy2(archive, out)
-        manifest["engines"][plat] = {
-            "url": f"{RELEASE_BASE}/{out.name}",
-            "sha256": sha256(out),
-            "bytes": out.stat().st_size,
-        }
 
     out_path = PUBLISH_DIR / "reflex-manifest.json"
     out_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")

@@ -1,9 +1,9 @@
 /**
- * Local Reflex - Needle 3 pre-LLM fast path (2026-11-23).
+ * Local Reflex - `kai-reflex-v1` pre-LLM fast path.
  *
  * Short desktop-control prompts ("switch to dark mode", "play groove salad",
- * "remind me in 15 minutes to stretch") are classified by the local Needle 3
- * engine (fine-tuned `kai-desktop-v1`, ~100 ms CPU) BEFORE any cloud request.
+ * "remind me in 15 minutes to stretch") are classified on-device by
+ * `kai-reflex-v1` (~100 ms CPU) BEFORE any cloud request.
  * A confident, auto-approve-safe call executes locally: zero cloud prefill,
  * zero tokens, works offline. Anything else (`[]`, low confidence, engine
  * unreachable, non-allowlisted tool) falls through to the normal LLM path
@@ -22,7 +22,7 @@
  *    returns null and the prompt goes to the cloud LLM as before. A failed
  *    probe is cached for 60 s so an absent engine costs nothing per message.
  *
- * Engine: `cactus --model kai-desktop-v1-12L.cact --tools narrow_tools.json
+ * Engine: `cactus --model kai-reflex-v1-12L.cact --tools narrow_tools.json
  * --serve` (managed by Rust in `src-tauri/src/modules/reflex.rs`, invoked
  * via `native.reflexClassify`). Disable via localStorage["kai.localReflex"] = "off".
  */
@@ -382,7 +382,6 @@ type EngineReply = {
   function_calls?: Array<{ name: string; arguments: Record<string, unknown> }>;
   confidence?: number | null;
   suppressed_calls?: unknown;
-  resetOk?: boolean;
 };
 
 let engineDownUntil = 0;

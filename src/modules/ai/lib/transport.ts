@@ -29,37 +29,6 @@ import {
   REFLEX_MAX_PROMPT_CHARS,
 } from "./localReflex";
 import { executeReflexCalls, reflexAssistantStream } from "./localReflexExecute";
-import { isReflexCapableTool, recordReflexEntry } from "./reflexLog";
-
-type AgentToolCall = { toolName: string; input: unknown };
-
-/**
- * Create a per-run step miner closing over `{ sessionId, prompt }`.
- * Bound to the individual `runAgentStream` call via `opts.onToolCalls` so it
- * stays alive for the full stream and never collides across concurrent sessions.
- */
-function createStepMiner(
-  sessionId: string,
-  prompt: string,
-): (calls: AgentToolCall[]) => void {
-  const truncated = prompt.slice(0, 200);
-  return (calls: AgentToolCall[]) => {
-    for (const call of calls) {
-      if (!isReflexCapableTool(call.toolName)) continue;
-      const args =
-        call.input && typeof call.input === "object"
-          ? (call.input as Record<string, unknown>)
-          : {};
-      recordReflexEntry({
-        ts: Date.now(),
-        sessionId,
-        outcome: "mined-llm-tool",
-        prompt: truncated,
-        calls: [{ name: call.toolName, arguments: args }],
-      });
-    }
-  };
-}
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { formatReplyStyleBlock } from "./replyStyle";
 
@@ -237,16 +206,15 @@ export function createContextAwareTransport(deps: Deps) {
 
     let extensionStepCount = 0;
 
-    // ── LOCAL REFLEX fast path (Needle 3, 2026-11-23) ────────────────
+    // ── LOCAL REFLEX fast path (`kai-reflex-v1`) ─────────────────────
     // Short desktop-control prompts ("switch to dark mode", "play groove
-    // salad") are classified by the local Needle engine before ANY cloud
-    // work. Execute + synthetic stream on a confident auto-approve-safe
-    // call; any other outcome (engine down, [], low confidence, disallowed
-    // tool, grounding failure) falls through to the full LLM run below.
-    // Zero cloud prefill on the fast path; ~1.5 s worst-case probe on the
-    // fall-through path when the engine is absent (failure cached 60 s).
-    let minedPrompt: { sessionId: string; prompt: string } | null = null;
-    if ((options as { trigger?: string }).trigger !== "regenerate-message") {
+    // salad") are classified on-device before any cloud request. Confident,
+    // grounded, auto-approve-safe calls execute locally; anything else falls
+    // through to the full LLM run untouched.
+    if (
+      !reflexDisabled() &&
+      (options as { trigger?: string }).trigger !== "regenerate-message"
+    ) {
       const rawReflexText = extractLastUserText(options.messages);
       const reflexText = rawReflexText
         ? stripContextBlock(rawReflexText).trim()
@@ -256,52 +224,21 @@ export function createContextAwareTransport(deps: Deps) {
         reflexText.length <= REFLEX_MAX_PROMPT_CHARS &&
         lastUserMessageIsTextOnly(options.messages);
       if (reflexEligible && reflexText) {
-        if (reflexDisabled()) {
-          recordReflexEntry({
-            ts: Date.now(),
-            sessionId,
-            outcome: "fallthrough",
-            prompt: reflexText.slice(0, 200),
-            reason: "disabled",
-          });
-        } else {
-          const reply = await classifyWithEngine(reflexText);
-          const decision = decideReflex(reflexText, reply);
-          if (decision.action === "execute") {
-            const exec = await executeReflexCalls(decision.calls, deps.toolContext);
-            recordReflexEntry({
-              ts: Date.now(),
-              sessionId,
-              outcome: "executed",
-              prompt: reflexText.slice(0, 200),
-              confidence: decision.confidence,
-              calls: decision.calls,
-              latencyMs: reply?.latencyMs,
-              execOk: exec.ok,
-            });
-            if (exec.ok || exec.partial) {
-              deps.onStep?.("local reflex");
-              // Compact execution summary + a small italic provenance label.
-              // On partial multi-call execution, return what already ran + the
-              // error instead of falling through and double-firing call 1.
-              const summary =
-                exec.lines.map((l) => `${l}`).join("\n") +
-                "\n\n*(local reflex)*";
-              return reflexAssistantStream(summary);
-            }
-          } else {
-            recordReflexEntry({
-              ts: Date.now(),
-              sessionId,
-              outcome: "fallthrough",
-              prompt: reflexText.slice(0, 200),
-              reason: decision.reason,
-              confidence: reply?.confidence,
-              latencyMs: reply?.latencyMs,
-            });
+        const reply = await classifyWithEngine(reflexText);
+        const decision = decideReflex(reflexText, reply);
+        if (decision.action === "execute") {
+          const exec = await executeReflexCalls(decision.calls, deps.toolContext);
+          if (exec.ok || exec.partial) {
+            deps.onStep?.("local reflex");
+            // Compact execution summary + a small italic provenance label.
+            // On partial multi-call execution, return what already ran + the
+            // error instead of falling through and double-firing call 1.
+            const summary =
+              exec.lines.map((l) => `${l}`).join("\n") +
+              "\n\n*(local reflex)*";
+            return reflexAssistantStream(summary);
           }
         }
-        minedPrompt = { sessionId, prompt: reflexText };
       }
     }
 
@@ -403,9 +340,6 @@ export function createContextAwareTransport(deps: Deps) {
       customInstructions: effectiveCustomInstructions,
       agentPersona: deps.getAgentPersona(),
       toolContext: deps.toolContext,
-      onToolCalls: minedPrompt
-        ? createStepMiner(minedPrompt.sessionId, minedPrompt.prompt)
-        : undefined,
       onStep: (step) => {
         if (step !== null) extensionStepCount++;
         deps.onStep?.(step);

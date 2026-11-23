@@ -354,9 +354,6 @@ export type RunAgentOptions = {
   onCompact?: (info: { droppedCount: number }) => void;
   onFinishMeta?: (info: { hitStepCap: boolean; finishReason: string }) => void;
   onLoopDetected?: (info: LoopDetectionResult) => void;
-  /** Per-run callback fired on each step's tool calls (used for reflex mining
-   *  so concurrent sessions never collide on module-level state). */
-  onToolCalls?: (calls: { toolName: string; input: unknown }[]) => void;
   openaiCompatibleBaseURL?: string;
   openaiCompatibleModelId?: string;
   /** User-set vision override for custom endpoints (Settings → Models).
@@ -1180,20 +1177,6 @@ export async function runAgentStream(opts: RunAgentOptions) {
           );
         } else if (step.text) {
           opts.onStep("Writing");
-        }
-      }
-      // Reflex mining: report this step's real tool calls to the per-run
-      // callback (real positive examples for the next Needle fine-tune).
-      if (opts.onToolCalls && step.toolCalls && step.toolCalls.length > 0) {
-        try {
-          opts.onToolCalls(
-            step.toolCalls.map((tc: { toolName: string; input: unknown }) => ({
-              toolName: tc.toolName,
-              input: tc.input,
-            })),
-          );
-        } catch {
-          // mining must never break the run
         }
       }
       if (opts.onUsage && step.usage) {

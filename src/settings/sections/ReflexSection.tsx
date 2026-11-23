@@ -13,10 +13,9 @@ import { SectionHeader } from "../components/SectionHeader";
 import { SettingRow } from "../components/SettingRow";
 
 /**
- * Local Reflex — the on-device classifier (Needle 3 fine-tune) that answers
- * short desktop-control prompts without a cloud round-trip. Option A: the
- * engine + weights are DOWNLOADED on demand (nothing ships in the installer)
- * and spawned as a localhost serve process managed by Rust.
+ * Local Reflex — the on-device `kai-reflex-v1` classifier that answers short
+ * desktop-control prompts without a cloud round-trip. Downloaded on demand
+ * into app local data and managed as a localhost serve process by Rust.
  */
 
 function formatBytes(n: number): string {
@@ -26,23 +25,35 @@ function formatBytes(n: number): string {
 }
 
 function Progress({ ev }: { ev: ReflexSetupEvent }) {
+  const phaseLabel =
+    ev.phase === "weights"
+      ? "Downloading kai-reflex-v1"
+      : ev.phase === "engine"
+        ? "Downloading runtime engine"
+        : ev.phase === "tools"
+          ? "Writing tool schema"
+          : ev.message ?? ev.phase;
   if (ev.total > 0) {
+    const pct = Math.min(100, Math.round((ev.downloaded / ev.total) * 100));
     return (
-      <div className="flex flex-col gap-1">
-        <div className="h-1 w-56 overflow-hidden rounded-full bg-border">
+      <div className="flex flex-col gap-1.5">
+        <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+          <span>{phaseLabel}</span>
+          <span className="font-mono">
+            {formatBytes(ev.downloaded)} / {formatBytes(ev.total)} ({pct}%)
+          </span>
+        </div>
+        <div className="h-1.5 w-full overflow-hidden rounded-full bg-border">
           <div
             className="h-full bg-primary transition-all"
-            style={{ width: `${Math.round((ev.downloaded / ev.total) * 100)}%` }}
+            style={{ width: `${pct}%` }}
           />
         </div>
-        <span className="font-mono text-[11px] text-muted-foreground">
-          {formatBytes(ev.downloaded)} / {formatBytes(ev.total)}
-        </span>
       </div>
     );
   }
   return (
-    <span className="text-[11.5px] text-muted-foreground">{ev.message ?? ev.phase}</span>
+    <span className="text-[11.5px] text-muted-foreground">{phaseLabel}</span>
   );
 }
 
@@ -114,12 +125,13 @@ export function ReflexSection() {
 
   const running = status?.running ?? false;
   const installed = status?.installed ?? false;
+  const modelName = status?.modelName ?? "kai-reflex-v1";
 
   return (
     <div className="flex flex-col gap-4">
       <SectionHeader
         title="Local Reflex"
-        description="A tiny on-device model (23 MB) answers short desktop commands — theme switches, radio, reminders, voice, personas — with zero cloud tokens. Anything it does not confidently understand goes to your configured AI provider as usual."
+        description="A compact on-device model (24 MB) handles short desktop commands — theme switches, radio, reminders, voice, and personas — with zero cloud tokens. Everything else goes to your configured AI provider as usual."
       />
 
       {error ? (
@@ -130,15 +142,11 @@ export function ReflexSection() {
 
       <SettingRow
         title="Enable local reflex"
-        description="Off sends every prompt to the cloud model. On lets the local model handle the commands it is sure about."
+        description="Off sends every prompt to your configured model. On lets kai-reflex-v1 handle confident desktop commands locally."
       >
         <Switch checked={!disabled} onCheckedChange={onToggle} />
       </SettingRow>
 
-      {/* ENGINE STATUS CARD (2026-11-23 polish): a compact status surface
-          instead of a SettingRow — the live state (installed/running/absent)
-          is the panel's primary fact, so it gets a tinted card with a
-          status dot + version line, not a generic settings row. */}
       <div className="rounded-2xl border border-border bg-card/50 p-4">
         <div className="flex items-center gap-2">
           <span
@@ -152,10 +160,10 @@ export function ReflexSection() {
           />
           <span className="text-sm font-medium">
             {!installed
-              ? "Engine not installed"
+              ? `${modelName} not installed`
               : running
-                ? "Engine running"
-                : "Engine installed — idle"}
+                ? `${modelName} running`
+                : `${modelName} installed — idle`}
           </span>
           <span className="flex-1" />
           {installed ? (
@@ -169,22 +177,22 @@ export function ReflexSection() {
             </Button>
           ) : (
             <Button size="sm" disabled={busy !== ""} onClick={onSetup}>
-              {busy === "setup" ? "Downloading…" : "Download"}
+              {busy === "setup" ? "Installing…" : "Install v1"}
             </Button>
           )}
         </div>
         <div className="mt-2 flex flex-col gap-0.5 text-[11px] leading-relaxed text-muted-foreground">
           <span className="font-mono">
             {installed
-              ? `kai-desktop-v1-${status?.modelDepth ?? 12}L · v${status?.version ?? "?"}`
-              : "kai-desktop-v1 · about 25 MB download"}
+              ? `${modelName} (${status?.modelDepth ?? 12}L) · v${status?.version ?? "1.0.0"}`
+              : `${modelName} (12L) · ~24 MB one-time download`}
           </span>
           <span>
             {!installed
-              ? "Download the engine to classify short desktop commands on-device."
+              ? "Install kai-reflex-v1 to run short desktop commands locally with zero cloud latency."
               : running
-                ? "The serve process is up; classifications resolve locally."
-                : "The engine is on disk but the serve process is not running — it starts on demand."}
+                ? "The local engine is running; eligible commands resolve on-device."
+                : "Installed on disk — starts automatically on demand when you send a command."}
           </span>
         </div>
       </div>

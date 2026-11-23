@@ -176,6 +176,7 @@ export type VoiceSetupEvent = {
 export type ReflexStatus = {
   installed: boolean;
   running: boolean;
+  modelName: string;
   version: string | null;
   latestVersion: string | null;
   updateAvailable: boolean;
@@ -465,7 +466,7 @@ export function createNative(getEnv: () => WorkspaceEnv) {
     invoke<string>("voice_transcribe", { audioBase64 }),
   voiceTts: (text: string, voice?: string) =>
     invoke<string>("voice_tts", { text, voice: voice ?? null }),
-  // ── Local reflex engine (Option A: downloaded Needle classifier) ──
+  // ── Local Reflex (`kai-reflex-v1` on-device command classifier) ──
   reflexStatus: () => invoke<ReflexStatus>("reflex_status"),
   reflexSetup: (onEvent: unknown) =>
     invoke<void>("reflex_setup", { onEvent }),
@@ -475,7 +476,6 @@ export function createNative(getEnv: () => WorkspaceEnv) {
     invoke<{
       function_calls?: Array<{ name: string; arguments: Record<string, unknown> }>;
       confidence?: number | null;
-      resetOk?: boolean;
     }>("reflex_classify", { prompt }),
   shellBgSpawn: (
     command: string,

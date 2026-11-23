@@ -15,19 +15,25 @@ import {
  *  narrow tool added to schemas.json without updating the allowlist must
  *  FAIL this test, not silently fall through at runtime. */
 describe("reflex allowlist coverage", () => {
-  it("covers every narrow tool in scripts/cactus/schemas.json", () => {
-    // Raw read so the test does not depend on tsconfig JSON imports.
+  it("covers every narrow tool in src-tauri/src/modules/reflex_tools.json and scripts/cactus/schemas.json", () => {
     const fs = require("node:fs") as typeof import("node:fs");
     const path = require("node:path") as typeof import("node:path");
-    // src/modules/ai/lib -> ../../../../scripts/cactus
     const schemaPath = path.resolve(
       __dirname,
       "../../../../scripts/cactus/schemas.json",
     );
+    const embeddedPath = path.resolve(
+      __dirname,
+      "../../../../src-tauri/src/modules/reflex_tools.json",
+    );
     const schemas = JSON.parse(fs.readFileSync(schemaPath, "utf-8")) as {
       narrow_tools: Array<{ name: string }>;
     };
+    const embedded = JSON.parse(fs.readFileSync(embeddedPath, "utf-8")) as Array<{
+      name: string;
+    }>;
     const names = schemas.narrow_tools.map((t) => t.name);
+    expect(embedded.map((t) => t.name)).toEqual(names);
     for (const n of names) {
       expect(
         REFLEX_ALLOWED_NARROW_TOOLS.has(n),

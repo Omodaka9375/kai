@@ -37,7 +37,7 @@ DATA_DIR = HERE / "data"
 DOWNLOAD_DIR = HERE / "models"
 API = "https://cactuscompute.com/v1"
 
-SUFFIX = "kai-desktop-v1"
+SUFFIX = "kai-reflex-v1"
 DEFAULT_DEPTHS = [20, 12, 8]
 
 
@@ -157,7 +157,7 @@ def cmd_download(args: argparse.Namespace) -> list[Path]:
         if not vid:
             print(f"  depth {depth}: no variant, skipping")
             continue
-        dest = DOWNLOAD_DIR / f"kai-desktop-v1-{depth}L.cact"
+        dest = DOWNLOAD_DIR / f"kai-reflex-v1-{depth}L.cact"
         print(f"  downloading depth {depth} -> {dest.name} ...")
         raw = call("GET", f"{API}/models/{vid}/content", expect_json=False, timeout=300)
         dest.write_bytes(raw)

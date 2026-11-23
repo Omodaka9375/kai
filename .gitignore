@@ -56,6 +56,7 @@ Desktop.ini
 scripts/cactus/.cache/
 scripts/cactus/out/
 scripts/cactus/models/
+scripts/cactus/publish/
 scripts/cactus/__pycache__/
 # Regenerated deterministically by build_dataset.py (seed 0)
 scripts/cactus/data/
