@@ -12,6 +12,7 @@ import {
 import type { Chat as SdkChat, UIMessage } from "@ai-sdk/react";
 import { useChat } from "@ai-sdk/react";
 import Mic01Icon from "@hugeicons/core-free-icons/Mic01Icon";
+import MessageMultiple01Icon from "@hugeicons/core-free-icons/MessageMultiple01Icon";
 import NextIcon from "@hugeicons/core-free-icons/NextIcon";
 import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 import Add01Icon from "@hugeicons/core-free-icons/Add01Icon";
@@ -96,7 +97,9 @@ import {
   subscribeProjectModels,
   getProjectModelVersion,
   newSessionForProject,
+  switchSessionForProject,
   resolveBackgroundProjectSession,
+  isGhostSession,
 } from "../store/chatStore";
 import {
   getSessionPreferences,
@@ -107,6 +110,7 @@ import {
   getProjectActiveSession,
   subscribeProjectActiveSessions,
   getProjectPersona,
+  getProjectRuntime,
 } from "../store/projectRegistry";
 import { subscribeProjectAgentStatus, getProjectAgentStatus } from "../store/projectStatus";
 import { usePreferencesStore } from "@/modules/settings/preferences";
@@ -729,6 +733,7 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
           </div>
         ) : null}
         <div className="flex min-w-0 flex-1 items-center justify-end gap-1">
+          {sessionId ? <CardSessionPicker projectId={projectId} sessionId={sessionId} /> : null}
           {sessionId ? <SessionApprovePill sessionId={sessionId} /> : null}
           {!group ? (
             <button
@@ -1005,6 +1010,73 @@ const CardContextRing = memo(function CardContextRing({
         </ContextContentFooter>
       </ContextContent>
     </Context>
+  );
+});
+
+/** Session picker toggle for a Workspaces card (2026-11-23 ask): lists the
+ *  PROJECT's own sessions (ghosts filtered) and switches the card's bound
+ *  session via switchSessionForProject - never the foreground switchSession,
+ *  which would yank the foreground project's chat. The button sits LEFT of
+ *  the Ask/Allow pill in the card's right-aligned action cluster. */
+const CardSessionPicker = memo(function CardSessionPicker({
+  projectId,
+  sessionId,
+}: {
+  projectId: string;
+  sessionId: string;
+}) {
+  // The GLOBAL sessions list is cross-project; the card's picker must only
+  // offer THIS project's sessions.
+  const sessions = useChatStore((s) => s.sessions);
+  const rt = getProjectRuntime(projectId);
+  const items = useMemo(() => {
+    if (!rt) return [];
+    const norm = (p: string) => p.replace(/\\/g, "/").toLowerCase();
+    return sessions.filter(
+      (s) =>
+        !isGhostSession(s) &&
+        (s.id === sessionId || (s.workspaceRoot && rt && norm(s.workspaceRoot) === norm(rt.root))),
+    );
+  }, [sessions, rt, sessionId]);
+  const switchTo = useCallback(
+    (id: string) => {
+      if (id !== sessionId) switchSessionForProject(projectId, id);
+    },
+[projectId, sessionId],
+  );
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          title="Switch session"
+          aria-label="Switch session"
+          className="flex shrink-0 items-center justify-center rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+        >
+          {/* MessageMultiple01Icon: stacked chat bubbles - reads as "sessions"
+              and is distinct from every other icon in the bar (shield, cube,
+              sparkles, plus). */}
+          <HugeiconsIcon icon={MessageMultiple01Icon} size={12} strokeWidth={2} />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="max-h-64 min-w-48 overflow-y-auto p-1">
+        {items.map((s) => (
+          <DropdownMenuItem
+            key={s.id}
+            onSelect={() => switchTo(s.id)}
+            className={cn(
+              "flex items-center gap-1.5 rounded px-2 py-1 text-[11px]",
+              s.id === sessionId && "bg-accent/40",
+            )}
+          >
+            <span className="truncate">{s.title || "New chat"}</span>
+          </DropdownMenuItem>
+        ))}
+        {items.length === 0 ? (
+          <div className="px-2 py-1 text-[10px] text-muted-foreground">No sessions</div>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 });
 

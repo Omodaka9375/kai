@@ -1119,6 +1119,40 @@ export async function resolveBackgroundProjectSession(
 }
 
 /**
+ * Switch a BACKGROUND (Workspaces card) project's active session without
+ * foregrounding the project. 2026-11-23 ask: the Workspaces card status
+ * bar gained a session picker toggle (session-picker icon left of the
+ * Ask/Allow pill); this is its write path. Binds via setProjectActiveSession
+ * so the card's CellBody and the project's AgentRunBridge follow
+ * immediately; mirrors switchSession's hydration contract: seed history
+ * BEFORE binding, or the bridge constructs an empty Chat that wipes the
+ * session's blob (the 2026-11-23 LRU-wipe class of bug).
+ */
+export function switchSessionForProject(
+  projectId: string,
+  sessionId: string,
+): void {
+  const runtime = getProjectRuntime(projectId);
+  if (!runtime) return;
+  const sessions = useChatStore.getState().sessions;
+  const meta = sessions.find((s) => s.id === sessionId);
+  if (!meta) return;
+  const bind = () => {
+    setProjectActiveSession(projectId, sessionId);
+  };
+  if (chats.has(sessionId) || seedMessages.has(sessionId)) {
+    bind();
+    return;
+  }
+  // SEED BEFORE BIND (same contract as resolveBackgroundProjectSession).
+  void loadSessionHistory(sessionId, () =>
+    meta.workspaceRoot
+      ? loadMessagesForRoot(meta.workspaceRoot, sessionId, meta.workspaceEnv ?? { kind: "local" })
+      : loadMessages(sessionId),
+  ).then(bind);
+}
+
+/**
  * Create a new AI session scoped to a specific project (foreground OR
  * background) without switching the active workspace (Workspaces card `+`
  * button). Binds the project's active session in the registry so its card

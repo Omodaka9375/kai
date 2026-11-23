@@ -107,20 +107,21 @@ export function SandboxBadge() {
         asChild
         disabled={saving}
         title={`${SANDBOX_LABELS[mode]} — click to change`}
-        className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium outline-none transition-colors data-[state=open]:bg-primary/15 focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60"
+        className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-[12px] font-medium outline-none transition-colors data-[state=open]:bg-primary/15 focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60"
       >
         <span
           className={
             mode === "off"
-              ? "inline-flex items-center gap-1 text-muted-foreground/80"
-              : "inline-flex items-center gap-1 text-primary"
+              ? "inline-flex items-center gap-1.5 text-muted-foreground/80"
+              : "inline-flex items-center gap-1.5 text-primary"
           }
         >
           <HugeiconsIcon
             icon={CubeIcon}
-            // 11px (2026-11-18): matches the persona/expand/minimize icons in
-            // the same mini-window header — 10px read visibly smaller/off.
-            size={11}
+            // 13px (2026-11-23 ask): slightly bigger so the sandbox pill and
+            // its label read at the same visual weight as the window's other
+            // header controls.
+            size={13}
             strokeWidth={1.75}
           />
           {SHORT[mode] ? (
