@@ -1515,13 +1515,16 @@ function Composer({ group }: { group: GroupChat }) {
             // main bar — the old min-h-8 + py-1.5 kept dead space INSIDE
             // the textarea box. Grows with content up to a practical cap
             // (max-h-24) so a long draft never eats the panel.
+            // Grows with content up to a practical cap (max-h-[124px] =
+            // 5 lines of 12.5px x 1.625 leading) so a long draft never
+            // eats the panel but Shift+Enter multi-line drafts stay visible.
             "flex-1 resize-none rounded-lg bg-transparent text-[12.5px] leading-relaxed outline-none",
             "overflow-x-hidden whitespace-pre-wrap break-words [overflow-wrap:anywhere]",
             // NO focus ring (2026-11-18 ask): the blinking cursor is enough
             // focus indication — the ring read as a boxed input while the
             // strip contract above says borderless/continuous.
             "placeholder:text-muted-foreground/60",
-            "max-h-24 overflow-y-auto",
+            "max-h-[124px] overflow-y-auto",
           )}
         />
         {voice.supported ? (

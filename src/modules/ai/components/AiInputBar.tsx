@@ -1085,8 +1085,8 @@ function extOf(name: string): string {
 function autoresize(el: HTMLTextAreaElement | null) {
   if (!el) return;
   el.style.height = "auto";
-  // ~2 visible lines (2 × line-height 1.625 × 13px ≈ 42px), scroll beyond
-  const maxH = 42;
+  // 5 visible lines (5 × line-height 1.625 × 13px ≈ 105px), scroll beyond
+  const maxH = 105;
   const next = Math.min(el.scrollHeight, maxH);
   el.style.height = `${next}px`;
   el.style.overflowY = el.scrollHeight > maxH ? "auto" : "hidden";

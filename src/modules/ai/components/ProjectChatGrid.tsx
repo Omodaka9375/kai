@@ -1346,7 +1346,7 @@ const GroupCardBody = memo(function GroupCardBody(props: GridCellProps & { group
           rows={1}
           disabled={ended}
           placeholder={ended ? "Group ended" : sendError ? sendError : "Message group."}
-          className="max-h-12 min-h-[20px] flex-1 resize-none bg-transparent text-[11px] leading-snug text-foreground outline-none placeholder:text-muted-foreground/50"
+          className="max-h-[79px] min-h-[20px] flex-1 resize-none bg-transparent text-[11px] leading-snug text-foreground outline-none placeholder:text-muted-foreground/50"
         />
         <button
           type="button"
@@ -1822,7 +1822,7 @@ const CellInput = memo(function CellInput({
               ? "Steer the running agent."
               : "Send a message"
         }
-        className="max-h-12 min-h-[20px] flex-1 resize-none bg-transparent text-[11px] leading-snug text-foreground outline-none placeholder:text-muted-foreground/50"
+        className="max-h-[79px] min-h-[20px] flex-1 resize-none bg-transparent text-[11px] leading-snug text-foreground outline-none placeholder:text-muted-foreground/50"
       />
       {busy ? (
         <button
