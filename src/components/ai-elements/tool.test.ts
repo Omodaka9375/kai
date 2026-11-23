@@ -27,9 +27,21 @@ describe("Tool card streaming-input freeze guard", () => {
     const m = src.match(/const HEAVY_CONTENT_TOOLS = new Set\(\[([\s\S]*?)\]\)/);
     expect(m).not.toBeNull();
     const setBody = m?.[1] ?? "";
-    for (const name of ["write_file", "edit", "batch_edit", "todo_write", "run_subagent"]) {
+    for (const name of ["write_file", "edit", "batch_edit", "run_subagent"]) {
       expect(setBody).toContain(`"${name}"`);
     }
+  });
+
+  it("todo_write is NOT heavy — the card must expand into the active checklist", () => {
+    // 2026-11-23 report: clicking the Todos card in Workspaces did nothing.
+    // todo_write was in HEAVY_CONTENT_TOOLS, so the trigger was disabled and
+    // the (raw-JSON) body never rendered. It must render a real checklist.
+    const m = src.match(/const HEAVY_CONTENT_TOOLS = new Set\(\[([\s\S]*?)\]\)/);
+    const setBody = m?.[1] ?? "";
+    expect(setBody).not.toContain('"todo_write"');
+    // Structured checklist renderer, not the JSON CodeBlockMini fallback.
+    const preview = src.split("function renderInputPreview")[1] ?? "";
+    expect(preview).toContain('toolName === "todo_write"');
   });
 
   it("the heavy-tools memo comparator never falls back to raw input compare", () => {

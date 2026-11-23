@@ -6,9 +6,12 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
+import { Spinner } from "@/components/ui/spinner";
 import { USER_INTERRUPTED_ERROR_TEXT } from "@/modules/ai/store/approvalResponses";
 import ArrowRight01Icon from "@hugeicons/core-free-icons/ArrowRight01Icon";
 import CheckListIcon from "@hugeicons/core-free-icons/CheckListIcon";
+import CheckmarkSquare02Icon from "@hugeicons/core-free-icons/CheckmarkSquare02Icon";
+import SquareIcon from "@hugeicons/core-free-icons/SquareIcon";
 import Clock01Icon from "@hugeicons/core-free-icons/Clock01Icon";
 import EyeIcon from "@hugeicons/core-free-icons/EyeIcon";
 import File01Icon from "@hugeicons/core-free-icons/File01Icon";
@@ -138,15 +141,18 @@ export type ToolProps = ComponentProps<typeof Collapsible> & {
 };
 
 // Tools whose `input` carries large/streaming content (file bodies, sub-
-// agent prompts, todo lists). The AI diff tab is the canonical place to
-// view file changes; for the rest, the header summary + final output is
-// enough. Re-rendering streamed input on every token both stalls the UI
+// agent prompts). The AI diff tab is the canonical place to view file
+// changes; for the rest, the header summary + final output is enough.
+// Re-rendering streamed input on every token both stalls the UI
 // and duplicates information.
+//
+// todo_write is deliberately NOT here (2026-11-23 report: clicking the
+// Todos card in Workspaces did nothing): its input is a small structured
+// list, and the card MUST expand to show the active checklist.
 const HEAVY_CONTENT_TOOLS = new Set([
   "write_file",
   "edit",
   "batch_edit",
-  "todo_write",
   // run_subagent prompts carry the whole task context (files, excerpts) —
   // rendering the live stream re-lays out a huge text node per token and
   // freezes the window until the run finishes. Skip the body while
@@ -418,6 +424,71 @@ function renderInputPreview(
   const str = (k: string) =>
     typeof i[k] === "string" ? (i[k] as string) : null;
 
+  if (toolName === "todo_write") {
+    // ACTIVE CHECKLIST (2026-11-23 report: clicking the Todos card in
+    // Workspaces did nothing - todo_write was in HEAVY_CONTENT_TOOLS and
+    // even the expanded body was raw JSON). Render the structured list as
+    // a readable checklist with status markers.
+    const items = Array.isArray(i.todos)
+      ? (i.todos as Array<Record<string, unknown>>)
+      : [];
+    if (items.length === 0) return null;
+    return (
+      <ul className="space-y-1">
+        {items.map((t, idx) => {
+          const status =
+            t.status === "completed"
+              ? "completed"
+              : t.status === "in_progress"
+                ? "in_progress"
+                : "pending";
+          const title =
+            typeof t.title === "string" && t.title.trim()
+              ? t.title
+              : `Item ${idx + 1}`;
+          return (
+            <li
+              key={typeof t.id === "string" ? t.id : `i-${idx}`}
+              className="flex items-start gap-2 text-[11px] leading-snug"
+            >
+              <span
+                className={cn(
+                  "mt-[2px] inline-flex size-3.5 shrink-0 items-center justify-center",
+                  status === "completed"
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : status === "in_progress"
+                      ? "text-primary"
+                      : "text-muted-foreground/50",
+                )}
+              >
+                {status === "in_progress" ? (
+                  <Spinner className="size-3" />
+                ) : (
+                  <HugeiconsIcon
+                    icon={status === "completed" ? CheckmarkSquare02Icon : SquareIcon}
+                    size={13}
+                    strokeWidth={1.75}
+                  />
+                )}
+              </span>
+              <span
+                className={cn(
+                  "min-w-0 flex-1",
+                  status === "completed"
+                    ? "text-muted-foreground/60 line-through"
+                    : status === "in_progress"
+                      ? "font-medium text-foreground"
+                      : "text-muted-foreground",
+                )}
+              >
+                {title}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    );
+  }
   if (toolName === "bash_run" || toolName === "bash_background") {
     const cmd = str("command");
     const cwd = str("cwd");
