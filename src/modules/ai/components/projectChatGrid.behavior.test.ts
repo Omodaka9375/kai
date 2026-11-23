@@ -570,4 +570,19 @@ describe("Workspaces grid behavior (source pins)", () => {
     // Workspaces-card right-clicks.
     expect(grid).toContain("data-project-chat-grid");
   });
+
+  it("strips invisible parts (step-start, hidden reasoning, blank text) before grouping so cards have no phantom gaps", () => {
+    // 2026-11-23 report: "In Workspaces chat cards, chat has a lot of spaces
+    // between some commands". Each step boundary emitted `step-start` +
+    // hidden `reasoning` parts that RenderedPart turned into `null` INSIDE
+    // `<PartAppear>` divs, creating empty flex children that multiplied
+    // `gap-3` into 24-36px blank voids between tool rows.
+    const chat = readFileSync(
+      new URL("./AiChat.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(chat).toContain("function isInvisiblePart(");
+    expect(chat).toContain("if (isInvisiblePart(p, showModelThinking)) return;");
+    expect(chat).toContain('compact ? "gap-1.5" : "gap-3"');
+  });
 });

@@ -912,9 +912,12 @@ function AssistantMessageView({
 }) {
   const timeTitle = timestamp ? absoluteTime(timestamp) : undefined;
 
+  const prefShowModelThinking = usePreferencesStore((s) => s.showModelThinking);
+  const showModelThinking = prefShowModelThinking && !hideThinking;
+
   const groups = useMemo(
-    () => buildPartGroups(message.parts as AnyPart[], compact),
-    [message.parts, compact],
+    () => buildPartGroups(message.parts as AnyPart[], compact, showModelThinking),
+    [message.parts, compact, showModelThinking],
   );
 
   // Sequential approval queue: when a step emits several approval-requested
@@ -959,7 +962,7 @@ function AssistantMessageView({
       <div className="flex items-start gap-3 w-full">
         <div className="flex-1 min-w-0">
           <MessageContent>
-            <div className="flex flex-col gap-3">
+            <div className={cn("flex flex-col", compact ? "gap-1.5" : "gap-3")}>
               {groups.map((g) => {
                 if (g.kind === "reads") {
                   return (
@@ -1087,7 +1090,59 @@ function partKey(p: AnyPart, idx: number): string {
   return `i-${idx}`;
 }
 
-function buildPartGroups(parts: AnyPart[], compact?: boolean): Group[] {
+/**
+ * True when a part renders NOTHING on screen (so wrapping it in a PartAppear
+ * div inside the flex-col message stack would leave a phantom empty flex item
+ * that multiplies `gap` between neighboring tool rows — e.g. step-start
+ * markers, hidden reasoning parts in Workspaces cards, or whitespace-only
+ * text parts). Skipping invisible parts BEFORE grouping ALSO lets consecutive
+ * same-tool calls across step boundaries collapse into a single group.
+ */
+function isInvisiblePart(p: AnyPart, showModelThinking: boolean): boolean {
+  const t = partType(p);
+  if (t === "step-start" || t === "source-url" || t === "source-document") {
+    return true;
+  }
+  if (t === "reasoning") {
+    if (!showModelThinking) return true;
+    const raw = (p as unknown as { text?: string }).text ?? "";
+    const cleaned = stripLeakedTokens(raw);
+    return !cleaned;
+  }
+  if (t === "text") {
+    const raw = (p as unknown as { text?: string }).text ?? "";
+    if (/<thinking>|<\|thinking\||<\/thinking>/i.test(raw)) {
+      const segments = splitThinkingBlocks(raw);
+      if (!showModelThinking) {
+        const visibleOnly = segments
+          .filter((s) => !s.thinking)
+          .map((s) => stripLeakedTokens(s.text))
+          .join("");
+        return !visibleOnly.trim() || isBlankMarkdown(visibleOnly);
+      }
+      const hasVisibleText = segments.some((s) => {
+        if (s.thinking) return false;
+        const cleaned = stripLeakedTokens(s.text);
+        return Boolean(cleaned.trim()) && !isBlankMarkdown(cleaned);
+      });
+      const hasThinking = segments.some((s) => s.thinking);
+      return !hasVisibleText && !hasThinking;
+    }
+    const cleaned = stripLeakedTokens(raw);
+    return !cleaned || isBlankMarkdown(cleaned);
+  }
+  if (t === "dynamic-tool" || t.startsWith("tool-")) {
+    return false;
+  }
+  // RenderedPart returns null for any other unknown part type.
+  return true;
+}
+
+export function buildPartGroups(
+  parts: AnyPart[],
+  compact?: boolean,
+  showModelThinking = true,
+): Group[] {
   const out: Group[] = [];
   let run: { parts: AnyPart[]; startIdx: number } | null = null;
   // Compact card mode: consecutive calls of the SAME tool collapse into a
@@ -1130,6 +1185,7 @@ function buildPartGroups(parts: AnyPart[], compact?: boolean): Group[] {
     run = null;
   };
   parts.forEach((p, i) => {
+    if (isInvisiblePart(p, showModelThinking)) return;
     if (isReadFilePart(p)) {
       flushCalls();
       if (!run) run = { parts: [], startIdx: i };
