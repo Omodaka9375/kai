@@ -16,7 +16,7 @@ import NextIcon from "@hugeicons/core-free-icons/NextIcon";
 import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 import Add01Icon from "@hugeicons/core-free-icons/Add01Icon";
 import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
-import ContainerIcon from "@hugeicons/core-free-icons/ContainerIcon";
+import CubeIcon from "@hugeicons/core-free-icons/CubeIcon";
 import Shield01Icon from "@hugeicons/core-free-icons/Shield01Icon";
 import StarIcon from "@hugeicons/core-free-icons/StarIcon";
 import SparklesIcon from "@hugeicons/core-free-icons/SparklesIcon";
@@ -61,7 +61,11 @@ import {
   detectSnippetTrigger,
   type SnippetTrigger,
 } from "../lib/inputTriggers";
-import { SLASH_COMMANDS } from "../lib/slashCommands";
+import {
+  SLASH_COMMANDS,
+  tryRunSlashCommand,
+  wrapWithCommandMarker,
+} from "../lib/slashCommands";
 import { expandSkillTokens } from "../lib/skills";
 import { skillsForProject, useSkillsStore } from "../store/skillsStore";
 import { BUILTIN_AGENTS, type Agent } from "../lib/agents";
@@ -766,7 +770,7 @@ const CardSandboxIcon = memo(function CardSandboxIcon({
       aria-label={SANDBOX_LABELS[mode]}
       className="inline-flex shrink-0 items-center text-primary"
     >
-      <HugeiconsIcon icon={ContainerIcon} size={11} strokeWidth={1.9} />
+      <HugeiconsIcon icon={CubeIcon} size={11} strokeWidth={1.9} />
     </span>
   );
 });
@@ -1643,43 +1647,72 @@ const CellInput = memo(function CellInput({
   const canSend =
     (text.trim().length > 0 || pasted.length > 0) && !micTranscribing;
 
+  // TRANSIENT COMMAND TOAST (e.g. "/compact" outcome), shown above the
+  // card input strip for a few seconds - the card has no transcript
+  // notice row of its own.
+  const [cmdToast, setCmdToast] = useState<string | null>(null);
+  const cmdToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showCmdToast = useCallback((text: string) => {
+    if (cmdToastTimer.current) clearTimeout(cmdToastTimer.current);
+    setCmdToast(text);
+    cmdToastTimer.current = setTimeout(() => setCmdToast(null), 4_000);
+  }, []);
+  useEffect(() => () => {
+    if (cmdToastTimer.current) clearTimeout(cmdToastTimer.current);
+  }, []);
+
   const send = useCallback(() => {
     const trimmed = textRef.current.trim();
     const files = pastedRef.current;
     if (!trimmed && files.length === 0) return;
-    // SKILL / COMMAND EXPANSION (2026-11-23): the card composer shares the
-    // main composer's contract — `#handle` tokens expand into <skill>
-    // blocks against the CARD's project (not the foreground project).
-    // Slash commands are NOT run here: their side effects (plan mode,
-    // compact) target the foreground session and make no sense from a
-    // background card — a "/"-leading draft just sends as plain text.
-    const { body: bodyAfterTokens, blocks: skillBlocks } = expandSkillTokens(
-      trimmed,
-      skillsForProject(root),
-    );
-    const sendText = [...skillBlocks, bodyAfterTokens].filter(Boolean).join("\n\n");
-    if (files.length === 0) {
-      // No attachments: the original pure-text path (steering keeps its
-      // exact wire shape).
-      if (busy) {
-        setSessionSteeringMessage(sessionId, [{ type: "text", text: sendText }]);
-      } else {
-        void chat.sendMessage({ role: "user", parts: [{ type: "text", text: sendText }] });
-        patchSessionAgentMeta(sessionId, {
-          hitStepCap: false,
-          finishReason: "",
-          compactionNotice: null,
-          summaryNotice: null,
-        });
-      }
-      setText("");
-      setSessionPreferences(sessionId, { draft: undefined });
-      return;
-    }
-    // With attachments: compose text blocks first, then inline image file
-    // parts - the same wire shape the main composer produces. Image path
-    // blocks resolve before the send (async persistence, best-effort).
+    // SLASH COMMAND INTERCEPT (2026-11-23): `/compact`, `/clean` and the
+    // other commands run against THIS session (opts.sessionId), never the
+    // foreground project's. Handled -> do not send a chat message;
+    // send-prompt -> the command's prompt rides INSTEAD of the draft.
     void (async () => {
+      let outgoing = trimmed;
+      if (files.length === 0 && (trimmed.startsWith("/") || trimmed.startsWith("#"))) {
+        const outcome = await tryRunSlashCommand(trimmed, { sessionId });
+        if (outcome.kind === "handled") {
+          setText("");
+          setSessionPreferences(sessionId, { draft: undefined });
+          if (outcome.toast) showCmdToast(outcome.toast);
+          return;
+        }
+        if (outcome.kind === "send-prompt") {
+          outgoing = wrapWithCommandMarker(outcome.prompt, outcome.commandName ?? "");
+        }
+      }
+      // SKILL / COMMAND EXPANSION (2026-11-23): `#handle` tokens expand
+      // into <skill> blocks against the CARD's project (not the
+      // foreground project). A send-prompt command rides as the body
+      // verbatim (it is not a skill token).
+      const { body: bodyAfterTokens, blocks: skillBlocks } = expandSkillTokens(
+        outgoing,
+        skillsForProject(root),
+      );
+      const sendText = [...skillBlocks, bodyAfterTokens].filter(Boolean).join("\n\n");
+      if (files.length === 0) {
+        // No attachments: the original pure-text path (steering keeps its
+        // exact wire shape).
+        if (busy) {
+          setSessionSteeringMessage(sessionId, [{ type: "text", text: sendText }]);
+        } else {
+          void chat.sendMessage({ role: "user", parts: [{ type: "text", text: sendText }] });
+          patchSessionAgentMeta(sessionId, {
+            hitStepCap: false,
+            finishReason: "",
+            compactionNotice: null,
+            summaryNotice: null,
+          });
+        }
+        setText("");
+        setSessionPreferences(sessionId, { draft: undefined });
+        return;
+      }
+      // With attachments: compose text blocks first, then inline image file
+      // parts - the same wire shape the main composer produces. Image path
+      // blocks resolve before the send (async persistence, best-effort).
       const textBlocks = files
         .filter((f) => f.kind === "text")
         .map(
@@ -1707,7 +1740,7 @@ const CellInput = memo(function CellInput({
           // Best-effort: the image still rides inline as a file part.
         }
       }
-      const composed = [...pathBlocks, ...textBlocks, trimmed]
+      const composed = [...pathBlocks, ...textBlocks, outgoing]
         .filter(Boolean)
         .join("\n\n");
       const parts: Array<
@@ -1740,11 +1773,11 @@ const CellInput = memo(function CellInput({
           summaryNotice: null,
         });
       }
+      setText("");
+      setPasted([]);
+      setSessionPreferences(sessionId, { draft: undefined });
     })();
-    setText("");
-    setPasted([]);
-    setSessionPreferences(sessionId, { draft: undefined });
-  }, [busy, chat, sessionId]);
+  }, [busy, chat, sessionId, root, showCmdToast]);
 
   const stop = useCallback(() => {
     stopSession(sessionId);
@@ -1788,6 +1821,11 @@ const CellInput = memo(function CellInput({
   return (
     <>
       <CardPastePills files={pasted} onRemove={removePasted} />
+      {cmdToast ? (
+        <div className="shrink-0 px-3 pb-1 pt-0.5 text-[10.5px] text-muted-foreground">
+          <span className="truncate">{cmdToast}</span>
+        </div>
+      ) : null}
       <div className="relative flex shrink-0 items-center gap-1.5 border-t border-border/40 bg-card/40 px-3 py-1.5">
         {pickerOpen && filteredItems.length > 0 ? (
           <div

@@ -596,6 +596,7 @@ pub fn run() {
                     "settings-mcp",
                     "settings-sandbox",
                     "settings-security",
+                    "settings-vault",
                     "settings-staff",
                     "settings-voice",
                     "settings-reflex",

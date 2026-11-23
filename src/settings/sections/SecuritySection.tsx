@@ -1,13 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
-import Delete02Icon from "@hugeicons/core-free-icons/Delete02Icon";
-import LockKeyIcon from "@hugeicons/core-free-icons/LockKeyIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { invoke } from "@tauri-apps/api/core";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
-import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import type { VaultEntryInfo } from "@/modules/ai/lib/native";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -284,7 +279,6 @@ export function SecuritySection() {
       )}
 
       <KeyStorageBlock />
-      <CredentialVaultBlock />
       <CommitSigningBlock />
 
       {/* ALWAYS-ALLOW GRANTS (2026-11-16): standing-authority tools the user
@@ -376,146 +370,8 @@ function KeyStorageBlock() {
   );
 }
 
-/** CREDENTIAL VAULT (2026-11-18): project-independent secrets (HF_TOKEN,
- *  passwords, keys) the agent can USE without ever seeing. Writes are
- *  UI-ONLY by design — there is no vault_set tool, so a secret can never
- *  transit the chat transcript. The agent discovers names via vault_list
- *  and injects them as env: { VAR: "vault:NAME" } on bash tools; Rust
- *  resolves the value into the child process and masks echoes. */
-function CredentialVaultBlock() {
-  const [entries, setEntries] = useState<VaultEntryInfo[] | null>(null);
-  const [name, setName] = useState("");
-  const [value, setValue] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const refresh = useCallback(() => {
-    invoke<VaultEntryInfo[]>("vault_list")
-      .then(setEntries)
-      .catch((e) => {
-        setError(String(e));
-        setEntries([]);
-      });
-  }, []);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  const onAdd = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await invoke("vault_set", { name: name.trim(), value });
-      setName("");
-      setValue("");
-      refresh();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const onDelete = async (entryName: string) => {
-    setBusy(true);
-    setError(null);
-    try {
-      await invoke("vault_delete", { name: entryName });
-      refresh();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const canAdd = name.trim().length > 0 && value.length > 0 && !busy;
-
-  return (
-    <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card/50 p-4">
-      <div className="flex items-center gap-2">
-        <HugeiconsIcon icon={LockKeyIcon} size={13} strokeWidth={1.75} className="text-muted-foreground" />
-        <div className="text-sm font-medium">Credential vault</div>
-      </div>
-      <div className="text-[10.5px] leading-relaxed text-muted-foreground">
-        Secrets stored in the OS keyring. The agent can use them in commands
-        but never sees the values - only you can add or change them, here.
-      </div>
-
-      {entries === null ? (
-        <div className="py-3 text-center text-[11px] text-muted-foreground">Loading…</div>
-      ) : entries.length === 0 ? (
-        <div className="py-3 text-center text-[11px] italic text-muted-foreground/70">
-          No vault entries yet.
-        </div>
-      ) : (
-        <div className="flex flex-col gap-1.5">
-          {entries.map((e) => (
-            <div
-              key={e.name}
-              className="flex items-center gap-2 rounded-lg border border-border/50 bg-card/50 px-3 py-1.5"
-            >
-              <HugeiconsIcon
-                icon={LockKeyIcon}
-                size={12}
-                strokeWidth={1.75}
-                className="shrink-0 text-muted-foreground"
-              />
-              <span className="min-w-0 flex-1 truncate font-mono text-[11.5px]">
-                {e.name}
-              </span>
-              <span className="shrink-0 text-[10px] text-muted-foreground/70">
-                updated {formatTime(e.updated_at)}
-              </span>
-              <button
-                type="button"
-                aria-label={`Delete ${e.name}`}
-                title="Delete entry"
-                disabled={busy}
-                onClick={() => void onDelete(e.name)}
-                className="text-muted-foreground/70 transition-colors hover:text-destructive disabled:opacity-50"
-              >
-                <HugeiconsIcon icon={Delete02Icon} size={11} strokeWidth={1.75} />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div className="flex flex-col gap-1.5">
-        <div className="flex gap-1.5">
-          <Input
-            value={name}
-            onChange={(ev) => setName(ev.target.value)}
-            placeholder="NAME (letters, digits, _ or -)"
-            className="h-8 w-44 font-mono text-[11.5px] placeholder:text-[10px]"
-            spellCheck={false}
-            autoComplete="off"
-          />
-          <Input
-            type="password"
-            value={value}
-            onChange={(ev) => setValue(ev.target.value)}
-            placeholder="Value — never shown after save"
-            className="h-8 flex-1 text-[11.5px] placeholder:text-[10px]"
-            autoComplete="off"
-          />
-          <Button
-            size="sm"
-            className="h-8"
-            onClick={() => void onAdd()}
-            disabled={!canAdd}
-          >
-            {busy ? "Saving…" : "Add"}
-          </Button>
-        </div>
-        {error ? <span className="text-[11px] text-destructive">{error}</span> : null}
-      </div>
-    </div>
-  );
-}
-
+/** CREDENTIAL VAULT moved to its own panel (2026-11-23): see
+ *  VaultSection.tsx — Settings → Vault. */
 function CommitSigningBlock() {
   const enabled = usePreferencesStore((s) => s.commitSigningEnabled);
   const mode = usePreferencesStore((s) => s.commitSigningMode);

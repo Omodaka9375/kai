@@ -100,7 +100,18 @@ export function wrapWithCommandMarker(prompt: string, name: string): string {
   return `<Kai-command name="${name}" />\n\n${prompt}`;
 }
 
-export async function tryRunSlashCommand(input: string): Promise<SlashOutcome> {
+/**
+ * Intercept a slash command from the composer.
+ *
+ * `opts.sessionId` scopes the SESSION-TARGETED commands (`/compact`, `/clean`)
+ * to a specific session: the Workspaces card composer passes the card's OWN
+ * session so the command acts THERE (never switching the foreground project).
+ * Absent = the ACTIVE session (the main composer / mini window behavior).
+ */
+export async function tryRunSlashCommand(
+  input: string,
+  opts?: { sessionId?: string },
+): Promise<SlashOutcome> {
   const trimmed = input.trim();
   const lead = trimmed[0];
   if (lead !== "/" && lead !== "#") return { kind: "none" };
@@ -134,7 +145,10 @@ export async function tryRunSlashCommand(input: string): Promise<SlashOutcome> {
       // <session_state> snapshot + recent tail instead of the full history.
       // Refuses while busy; the toast carries the outcome either way.
       const { useChatStore } = await import("../store/chatStore");
-      const result = useChatStore.getState().compactActiveSession();
+      const state = useChatStore.getState();
+      const result = opts?.sessionId
+        ? state.compactSessionById(opts.sessionId)
+        : state.compactActiveSession();
       return { kind: "handled", toast: result };
     }
     case "clean": {
@@ -149,7 +163,9 @@ export async function tryRunSlashCommand(input: string): Promise<SlashOutcome> {
       );
       const store = useChatStore.getState();
       const sessionId =
-        (store as { activeSessionId?: string | null }).activeSessionId ?? null;
+        opts?.sessionId ??
+        (store as { activeSessionId?: string | null }).activeSessionId ??
+        null;
       if (!sessionId) {
         return { kind: "handled", toast: "No active session" };
       }

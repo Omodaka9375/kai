@@ -9,6 +9,7 @@ export type SettingsTab =
   | "mcp"
   | "sandbox"
   | "security"
+  | "vault"
   | "staff"
   | "voice"
   | "reflex"

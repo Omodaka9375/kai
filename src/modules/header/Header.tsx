@@ -173,6 +173,7 @@ export function FileMenu({
           <MenuTile icon={PuzzleIcon} label="MCP Servers" desc="External tool servers" onSelect={() => void openSettingsWindow("mcp")} />
           <MenuTile icon={Shield01Icon} label="Sandbox" desc="Shadow mode" onSelect={() => void openSettingsWindow("sandbox")} />
           <MenuTile icon={LockKeyIcon} label="Security" desc="Approvals & audit" onSelect={() => void openSettingsWindow("security")} />
+          <MenuTile icon={LockKeyIcon} label="Vault" desc="Credential secrets" onSelect={() => void openSettingsWindow("vault")} />
           <MenuTile icon={UserGroupIcon} label="Staff" desc="Agents, skills & journals" onSelect={() => void openSettingsWindow("staff")} />
           <MenuTile icon={Mic01Icon} label="Voice" desc="Speech & TTS" onSelect={() => void openSettingsWindow("voice")} />
           <MenuTile icon={AiScanIcon} label="Local Reflex" desc="On-device command classifier" onSelect={() => void openSettingsWindow("reflex")} />

@@ -402,6 +402,11 @@ type StoreState = {
    *  in place — same chat, no new session. Returns a human-readable result
    *  for the toast. */
   compactActiveSession: () => string;
+  /** Session-scoped compaction for a BACKGROUND session (Workspaces card
+   *  /compact): identical contract to compactActiveSession but keyed off
+   *  the GIVEN session id — never switches the active session, and the
+   *  summaryNotice lands on THAT session's meta, not the foreground one. */
+  compactSessionById: (sessionId: string) => string;
   /** Inject a system-originated user message (e.g. watch result) without triggering a new agent run. */
   injectMessage: (id: string, text: string, shouldDeliver?: () => boolean) => Promise<void>;
   /** Fork the current session at a message index, creating a new branch. */
@@ -2086,6 +2091,46 @@ export const useChatStore = create<StoreState>((set, get) => ({
     // will re-report. Zero it so the context indicator doesn't show stale
     // pressure against the freshly trimmed history.
     get().patchAgentMeta({
+      lastInputTokens: 0,
+      summaryNotice: { at: Date.now(), text: "Context compacted by /compact." },
+    });
+    const n = next.length;
+    return `Context compacted — ${Math.max(0, dropped)} older message${
+      Math.max(0, dropped) === 1 ? "" : "s"
+    } summarized, kept the last ${n - 1}.`;
+  },
+
+  // Background-session /compact (2026-11-23 Workspaces report): the same
+  // guard/drop/replace pipeline as compactActiveSession, keyed off the
+  // GIVEN id. Never touches the active session's chat, and the notice goes
+  // to the compacted session's own meta so the CARD shows it.
+  compactSessionById: (sessionId: string) => {
+    const chat = chats.get(sessionId);
+    if (!chat) return "No chat to compact.";
+    const status = chat.status;
+    if (
+      status === "streaming" ||
+      status === "submitted" ||
+      hasPendingApprovals(chat)
+    ) {
+      return "Wait for the current run to finish before compacting.";
+    }
+    const toolContext = getSessionToolContext(sessionId);
+    const fileSnapshot = toolContext?.fileTracker.getSnapshot() ?? [];
+    const next = summarizeMessagesNow(chat.messages, fileSnapshot, sessionId);
+    if (!next) {
+      return "Context is already minimal — nothing worth compacting.";
+    }
+    const dropped = chat.messages.length - next.length;
+    appendSessionEvent(sessionId, {
+      kind: "summarize",
+      trigger: "manual",
+      fromCount: chat.messages.length,
+      toCount: next.length,
+    });
+    chat.messages = next;
+    set({ _tick: Date.now() });
+    patchSessionAgentMeta(sessionId, {
       lastInputTokens: 0,
       summaryNotice: { at: Date.now(), text: "Context compacted by /compact." },
     });

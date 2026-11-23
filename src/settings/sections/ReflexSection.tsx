@@ -129,15 +129,29 @@ export function ReflexSection() {
         <Switch checked={!disabled} onCheckedChange={onToggle} />
       </SettingRow>
 
-      <SettingRow
-        title="Engine"
-        description={
-          installed
-            ? `Model kai-desktop-v1 (${status?.modelDepth ?? 12}L) v${status?.version ?? "?"} — ${running ? "running" : "installed, not running"}`
-            : "Not installed (about 25 MB download)"
-        }
-      >
+      {/* ENGINE STATUS CARD (2026-11-23 polish): a compact status surface
+          instead of a SettingRow — the live state (installed/running/absent)
+          is the panel's primary fact, so it gets a tinted card with a
+          status dot + version line, not a generic settings row. */}
+      <div className="rounded-2xl border border-border bg-card/50 p-4">
         <div className="flex items-center gap-2">
+          <span
+            className={
+              installed && running
+                ? "size-2 shrink-0 animate-pulse rounded-full bg-emerald-500"
+                : installed
+                  ? "size-2 shrink-0 rounded-full bg-amber-500/80"
+                  : "size-2 shrink-0 rounded-full bg-muted-foreground/30"
+            }
+          />
+          <span className="text-sm font-medium">
+            {!installed
+              ? "Engine not installed"
+              : running
+                ? "Engine running"
+                : "Engine installed — idle"}
+          </span>
+          <span className="flex-1" />
           {installed ? (
             <Button
               variant="outline"
@@ -153,7 +167,21 @@ export function ReflexSection() {
             </Button>
           )}
         </div>
-      </SettingRow>
+        <div className="mt-2 flex flex-col gap-0.5 text-[11px] leading-relaxed text-muted-foreground">
+          <span className="font-mono">
+            {installed
+              ? `kai-desktop-v1-${status?.modelDepth ?? 12}L · v${status?.version ?? "?"}`
+              : "kai-desktop-v1 · about 25 MB download"}
+          </span>
+          <span>
+            {!installed
+              ? "Download the engine to classify short desktop commands on-device."
+              : running
+                ? "The serve process is up; classifications resolve locally."
+                : "The engine is on disk but the serve process is not running — it starts on demand."}
+          </span>
+        </div>
+      </div>
 
       {progress && busy === "setup" ? (
         <div className="rounded-lg border border-border/60 bg-card/60 px-3 py-2">
