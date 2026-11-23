@@ -19,6 +19,7 @@ import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
 import ContainerIcon from "@hugeicons/core-free-icons/ContainerIcon";
 import Shield01Icon from "@hugeicons/core-free-icons/Shield01Icon";
 import StarIcon from "@hugeicons/core-free-icons/StarIcon";
+import SparklesIcon from "@hugeicons/core-free-icons/SparklesIcon";
 import Tick01Icon from "@hugeicons/core-free-icons/Tick01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { motion } from "motion/react";
@@ -48,6 +49,19 @@ import {
 } from "../lib/sandbox";
 import { AiChatView } from "./AiChat";
 import { AiErrorBoundary } from "./AiErrorBoundary";
+// Card input #skill / /command popup: same detection and the same picker
+// body the main composer uses.
+import {
+  detectSnippetTrigger,
+  type SnippetTrigger,
+} from "../lib/inputTriggers";
+import { SLASH_COMMANDS } from "../lib/slashCommands";
+import { expandSkillTokens } from "../lib/skills";
+import { skillsForProject, useSkillsStore } from "../store/skillsStore";
+import { BUILTIN_AGENTS, type Agent } from "../lib/agents";
+import { useAgentsStore } from "../store/agentsStore";
+import { AGENT_ICONS } from "./AgentSwitcher";
+import type { PickerItem } from "./SnippetPicker";
 import {
   Conversation,
   ConversationContent,
@@ -640,13 +654,14 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
             {group ? `${name} · ${group.name}` : name}
           </span>
         </div>
-        {!group ? (
-          <CardModelPill projectId={projectId} sessionId={sessionId} />
+        {!group && sessionId ? (
+          <div className="flex shrink-0 items-center gap-1">
+            <CardModelPill projectId={projectId} sessionId={sessionId} />
+            <SessionPersonaPill sessionId={sessionId} />
+            <CardContextRing projectId={projectId} sessionId={sessionId} />
+          </div>
         ) : null}
         <div className="flex min-w-0 flex-1 items-center justify-end gap-1">
-          {!group && sessionId ? (
-            <CardContextRing projectId={projectId} sessionId={sessionId} />
-          ) : null}
           {sessionId ? <SessionApprovePill sessionId={sessionId} /> : null}
           {!group ? (
             <button
@@ -948,6 +963,81 @@ const SessionApprovePill = memo(function SessionApprovePill({
     >
       <HugeiconsIcon icon={Shield01Icon} size={12} strokeWidth={2} />
     </button>
+  );
+});
+
+/** Session-scoped persona picker for a Workspaces card: shows the current
+ *  persona's icon and switches THIS session's persona. Uses
+ *  setSessionPreferences(personaId) — the same session-scoped activation the
+ *  set_persona tool uses — never setActiveId, which would rewrite the
+ *  FOREGROUND project's persona. */
+const SessionPersonaPill = memo(function SessionPersonaPill({
+  sessionId,
+}: {
+  sessionId: string;
+}) {
+  useSyncExternalStore(subscribeSessionPreferences, () => getSessionPreferences(sessionId).personaId ?? "");
+  const customAgents = useAgentsStore((s) => s.customAgents);
+  const personaId = getSessionPreferences(sessionId).personaId ?? "__none__";
+  const list = useMemo(() => {
+    const byId = new Map<string, Agent>();
+    for (const b of BUILTIN_AGENTS) byId.set(b.id, b);
+    for (const c of customAgents) byId.set(c.id, c);
+    return [...byId.values()];
+  }, [customAgents]);
+  const active = personaId === "__none__" ? null : list.find((a) => a.id === personaId) ?? null;
+  const ActiveIcon = active ? (AGENT_ICONS[active.icon] ?? SparklesIcon) : SparklesIcon;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          title={active ? `Persona: ${active.name} (click to switch)` : "No persona (click to set one)"}
+          aria-label="Switch persona"
+          className="flex shrink-0 items-center justify-center rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+        >
+          <HugeiconsIcon icon={ActiveIcon} size={12} strokeWidth={1.75} className={active ? "text-primary" : undefined} />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="center" className="max-h-72 min-w-52 overflow-y-auto p-1">
+        <DropdownMenuItem
+          onSelect={() => setSessionPreferences(sessionId, { personaId: "__none__" })}
+          className={cn("flex items-center gap-1.5 rounded px-2 py-1 text-[11px]", personaId === "__none__" && "bg-accent/40")}
+        >
+          <span className="w-3 text-center text-[10px] text-muted-foreground/70">—</span>
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span>None</span>
+            <span className="line-clamp-1 text-[9.5px] text-muted-foreground">
+              No persona - base system prompt only
+            </span>
+          </span>
+        </DropdownMenuItem>
+        {list.map((a) => {
+          const Icon = AGENT_ICONS[a.icon] ?? SparklesIcon;
+          return (
+            <DropdownMenuItem
+              key={a.id}
+              onSelect={() => setSessionPreferences(sessionId, { personaId: a.id })}
+              className={cn(
+                "flex items-center gap-1.5 rounded px-2 py-1 text-[11px]",
+                a.id === personaId && "bg-accent/40",
+              )}
+            >
+              <HugeiconsIcon icon={Icon} size={12} strokeWidth={1.75} className="shrink-0 text-muted-foreground" />
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate">{a.name}</span>
+                {a.description ? (
+                  <span className="line-clamp-1 text-[9.5px] text-muted-foreground">{a.description}</span>
+                ) : null}
+              </span>
+              {a.id === personaId ? (
+                <HugeiconsIcon icon={Tick01Icon} size={11} strokeWidth={2} className="shrink-0 text-foreground" />
+              ) : null}
+            </DropdownMenuItem>
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 });
 
@@ -1281,7 +1371,7 @@ const GroupCardBody = memo(function GroupCardBody(props: GridCellProps & { group
 type CellBodyProps = GridCellProps & { sessionId: string; projectId: string };
 
 const CellBody = memo(function CellBody(props: CellBodyProps) {
-  const { sessionId, micRecording, micTranscribing, micBusy, micTarget, voiceError, onMicDown, onMicStop } = props;
+  const { sessionId, root, micRecording, micTranscribing, micBusy, micTarget, voiceError, onMicDown, onMicStop } = props;
   // Session-scoped busy signal (thinking/streaming/awaiting-approval).
   // PER-SESSION snapshot (freeze fix, 2026-11-22): the global meta version
   // moves on every streaming patch of ANY session (outputTps alone fires
@@ -1345,6 +1435,7 @@ const CellBody = memo(function CellBody(props: CellBodyProps) {
         sessionId={sessionId}
         chat={chat}
         busy={busy}
+        root={root}
         micRecording={micRecording}
         micTranscribing={micTranscribing}
         micBusy={micBusy}
@@ -1361,6 +1452,7 @@ const CellInput = memo(function CellInput({
   sessionId,
   chat,
   busy,
+  root,
   micRecording,
   micTranscribing,
   micBusy,
@@ -1372,6 +1464,8 @@ const CellInput = memo(function CellInput({
   sessionId: string;
   chat: SdkChat<UIMessage>;
   busy: boolean;
+  /** Project root for skillsForProject (project skills shadow globals). */
+  root: string;
   micRecording: boolean;
   micTranscribing: boolean;
   micBusy: boolean;
@@ -1404,6 +1498,82 @@ const CellInput = memo(function CellInput({
     }, 150);
     return () => clearTimeout(timer);
   }, [sessionId, text]);
+
+  // ── #skill / /command popup (2026-11-23) ─────────────────────────────
+  // Same detection and same picker body as the main composer (AiInputBar);
+  // the picker is an absolutely-positioned dropdown above the input strip
+  // (the group-chat mention-picker pattern — a Radix Popover needs an
+  // anchor and portals can escape the card's clip). Skills resolve against
+  // THIS project's root so project skills shadow globals.
+  const snippets = useSkillsStore((s) => s.globalSkills);
+  const mergedSkills = useMemo(
+    () => skillsForProject(root),
+    [snippets, root],
+  );
+  const slashCommands = useMemo(() => Object.values(SLASH_COMMANDS), []);
+  const [trigger, setTrigger] = useState<SnippetTrigger | null>(null);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const pickerOpen = trigger !== null;
+
+  useEffect(() => {
+    setActiveIndex(0);
+  }, [pickerOpen]);
+
+  const filteredItems = useMemo<PickerItem[]>(() => {
+    if (!trigger) return [];
+    const q = trigger.query;
+    const cmdItems: PickerItem[] = slashCommands
+      .filter((c) => !q || c.name.includes(q) || c.label.toLowerCase().includes(q))
+      .map((command) => ({ kind: "command", command }));
+    // `/` shows commands only; `#` shows commands + skills (main-composer
+    // contract: "/" is the canonical command prefix, skills live on "#").
+    const snipItems: PickerItem[] =
+      trigger.char === "/"
+        ? []
+        : mergedSkills
+            .filter(
+              (s) =>
+                !q ||
+                s.handle.includes(q) ||
+                s.name.toLowerCase().includes(q) ||
+                s.description.toLowerCase().includes(q),
+            )
+            .map((snippet) => ({ kind: "snippet", snippet }));
+    return [...cmdItems, ...snipItems];
+  }, [trigger, mergedSkills, slashCommands]);
+
+  const updateTrigger = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) {
+      setTrigger(null);
+      return;
+    }
+    setTrigger(detectSnippetTrigger(textRef.current, el.selectionStart ?? 0));
+  }, []);
+
+  const onPickItem = (item: PickerItem) => {
+    if (!trigger) return;
+    const before = textRef.current.slice(0, trigger.start);
+    const after = textRef.current.slice(trigger.end).replace(/^\s+/, "");
+    // Insert the token the send path will expand: `#handle` for skills,
+    // the command name for commands — the card's send() runs
+    // expandSkillTokens / tryRunSlashCommand on submit just like the main
+    // composer's submit.
+    const token =
+      item.kind === "snippet"
+        ? `#${item.snippet.handle} `
+        : `/${item.command.name} `;
+    const next = `${before}${token}${after}`;
+    setText(next);
+    setTrigger(null);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange((before + token).length, (before + token).length);
+    });
+  };
 
   // CARD PASTE (2026-11-19): pending paste attachments (text chips + image
   // pills) for THIS card, cleared on send. Image path blocks persist at
@@ -1444,13 +1614,24 @@ const CellInput = memo(function CellInput({
     const trimmed = textRef.current.trim();
     const files = pastedRef.current;
     if (!trimmed && files.length === 0) return;
+    // SKILL / COMMAND EXPANSION (2026-11-23): the card composer shares the
+    // main composer's contract — `#handle` tokens expand into <skill>
+    // blocks against the CARD's project (not the foreground project).
+    // Slash commands are NOT run here: their side effects (plan mode,
+    // compact) target the foreground session and make no sense from a
+    // background card — a "/"-leading draft just sends as plain text.
+    const { body: bodyAfterTokens, blocks: skillBlocks } = expandSkillTokens(
+      trimmed,
+      skillsForProject(root),
+    );
+    const sendText = [...skillBlocks, bodyAfterTokens].filter(Boolean).join("\n\n");
     if (files.length === 0) {
       // No attachments: the original pure-text path (steering keeps its
       // exact wire shape).
       if (busy) {
-        setSessionSteeringMessage(sessionId, [{ type: "text", text: trimmed }]);
+        setSessionSteeringMessage(sessionId, [{ type: "text", text: sendText }]);
       } else {
-        void chat.sendMessage({ role: "user", parts: [{ type: "text", text: trimmed }] });
+        void chat.sendMessage({ role: "user", parts: [{ type: "text", text: sendText }] });
         patchSessionAgentMeta(sessionId, {
           hitStepCap: false,
           finishReason: "",
@@ -1538,22 +1719,100 @@ const CellInput = memo(function CellInput({
 
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (pickerOpen) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setActiveIndex((i) => Math.min(i + 1, Math.max(0, filteredItems.length - 1)));
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setActiveIndex((i) => Math.max(0, i - 1));
+          return;
+        }
+        if (e.key === "Tab" || (e.key === "Enter" && filteredItems.length > 0)) {
+          const it = filteredItems[activeIndex];
+          if (it) {
+            e.preventDefault();
+            onPickItem(it);
+            return;
+          }
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setTrigger(null);
+          return;
+        }
+      }
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         send();
       }
     },
-    [send],
+    [send, pickerOpen, filteredItems, activeIndex],
   );
 
   return (
     <>
       <CardPastePills files={pasted} onRemove={removePasted} />
-      <div className="flex shrink-0 items-center gap-1.5 border-t border-border/40 bg-card/40 px-3 py-1.5">
+      <div className="relative flex shrink-0 items-center gap-1.5 border-t border-border/40 bg-card/40 px-3 py-1.5">
+        {pickerOpen && filteredItems.length > 0 ? (
+          <div
+            role="listbox"
+            aria-label="Skills and commands"
+            className="absolute bottom-full left-2 z-50 mb-1 w-64 overflow-hidden rounded-lg border border-border/70 bg-popover p-1 shadow-lg"
+          >
+            <div className="max-h-56 overflow-y-auto">
+              {filteredItems.map((it, i) => (
+                <button
+                  key={it.kind === "command" ? `cmd-${it.command.name}` : `sn-${it.snippet.name}`}
+                  type="button"
+                  role="option"
+                  aria-selected={i === activeIndex}
+                  onMouseDown={(e) => {
+                    // Prevent the textarea blur before the click lands.
+                    e.preventDefault();
+                    onPickItem(it);
+                  }}
+                  onMouseEnter={() => setActiveIndex(i)}
+                  className={cn(
+                    "flex w-full flex-col items-start gap-0.5 px-2 py-1.5 text-left text-[12px]",
+                    i === activeIndex ? "bg-accent" : "hover:bg-accent/60",
+                  )}
+                >
+                  {it.kind === "command" ? (
+                    <span className="flex items-center gap-1.5">
+                      <span className="font-mono text-muted-foreground">/{it.command.name}</span>
+                      <span className="font-medium">{it.command.label}</span>
+                    </span>
+                  ) : (
+                    <>
+                      <span className="flex w-full items-center gap-1.5">
+                        <span className="font-mono text-muted-foreground">#{it.snippet.handle}</span>
+                        <span className="font-medium">{it.snippet.name}</span>
+                      </span>
+                      {it.snippet.description ? (
+                        <span className="line-clamp-1 text-[10.5px] text-muted-foreground">
+                          {it.snippet.description}
+                        </span>
+                      ) : null}
+                    </>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
       <textarea
+        ref={textareaRef}
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          setText(e.target.value);
+          requestAnimationFrame(updateTrigger);
+        }}
         onKeyDown={onKeyDown}
+        onKeyUp={updateTrigger}
+        onClick={updateTrigger}
         onPaste={onPaste}
         rows={1}
         placeholder={
