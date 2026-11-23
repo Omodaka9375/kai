@@ -29,12 +29,12 @@ export function buildReplaceExactTools(ctx: ToolContext) {
   return {
     replace_exact: tool({
       description:
-        "RECOVERY-ONLY byte-for-byte replacement in an existing UTF-8 text file. Use ONLY after edit/batch_edit has failed or its failure latch is active — never as the default editor. old_string and new_string are literal UTF-8 bytes: NO whitespace/punctuation relaxation, EOL conversion, BOM removal, trailing-space stripping, or final-newline changes. expected_occurrences defaults to 1 and MUST exactly equal the non-overlapping exact-match count; zero or ambiguous matches write nothing and return match diagnostics. Keeps normal path security, locking, plan/diff review, approval, and checkpoint_undo protections. Successful replacement clears the file's edit-failure latch. No retries or fallback matching.",
+        "Recovery-only byte-exact replacement in an existing UTF-8 file. Use ONLY after `edit`/`batch_edit` fails or latches on whitespace, EOL, or encoding quirks. Preserves raw bytes without normalization; `expected_occurrences` (default 1) must match the exact non-overlapping count.",
       inputSchema: z
         .object({
-          path: z.string().min(1),
-          old_string: z.string().min(1),
-          new_string: z.string(),
+          path: z.string().min(1).describe("Target file path. Emit first."),
+          old_string: z.string().min(1).describe("Exact literal UTF-8 bytes to find."),
+          new_string: z.string().describe("Exact literal UTF-8 replacement bytes."),
           expected_occurrences: z
             .number()
             .int()

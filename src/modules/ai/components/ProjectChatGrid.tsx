@@ -31,6 +31,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
+import {
   Context,
   ContextContent,
   ContextContentBody,
@@ -102,6 +108,7 @@ import { setGridOrder } from "@/modules/settings/store";
 import { useChatFontSize } from "../lib/chatFont";
 import type { ProjectSwitcherItem } from "@/modules/workspace";
 import { projectIconFillCss } from "@/modules/workspace/projectIcons";
+import { useProjectsMenu } from "@/app/projectsMenu";
 import { GRID_COLS, GRID_ROWS } from "../store/projectChatGrid";
 import {
   type CardAttachment,
@@ -552,8 +559,17 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
   useSyncExternalStore(subscribeOpenGroupUi, () => openGroupUiId);
   useSyncExternalStore(subscribeGroupChats, getGroupStoreVersion);
   const group = useMemo(() => groupOfCell(projectId), [projectId, sessionId]);
+  // CONTEXT MENU (2026-11-23): right-click a card -> Close Project, the
+  // same projectsMenu.closeProject path the rail's X uses (confirmation
+  // dialog included - AppShell arms its AlertDialog on this call).
+  const projectsMenu = useProjectsMenu();
+  const closeThisProject = useCallback(() => {
+    projectsMenu?.closeProject(projectId);
+  }, [projectsMenu, projectId]);
 
   return (
+    <ContextMenu>
+    <ContextMenuTrigger asChild>
     <div
       onDragOver={(e) => {
         // preventDefault makes this card a valid drop target so the
@@ -649,15 +665,21 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
           {/* GROUP SURFACE IN THE TITLE (2026-11-21): a card swaps from the
               project AI chat to its GROUP transcript when the group panel owns
               the stack rail. Without the group name in the bar the two
-              surfaces look identical, so the title reads "project · group". */}
+              surfaces look identical, so the title reads "project · group".
+              CHARACTER CAP (2026-11-23): max 30 shown chars + ellipsis —
+              CSS truncate alone hides the tail at the container edge, but
+              a long name squeezes the flex row; a hard string cap keeps the
+              pill cluster's width stable regardless of project name. */}
           <span className="truncate text-[11px] font-medium leading-none text-foreground">
-            {group ? `${name} · ${group.name}` : name}
+            {(group ? `${name} · ${group.name}` : name).length > 30
+              ? `${(group ? `${name} · ${group.name}` : name).slice(0, 30)}…`
+              : group ? `${name} · ${group.name}` : name}
           </span>
         </div>
         {!group && sessionId ? (
           <div className="flex shrink-0 items-center gap-1">
-            <CardModelPill projectId={projectId} sessionId={sessionId} />
             <SessionPersonaPill sessionId={sessionId} />
+            <CardModelPill projectId={projectId} sessionId={sessionId} />
             <CardContextRing projectId={projectId} sessionId={sessionId} />
           </div>
         ) : null}
@@ -693,6 +715,17 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
         </button>
       )}
     </div>
+    </ContextMenuTrigger>
+      <ContextMenuContent className="w-44 text-xs">
+        <ContextMenuItem
+          onSelect={closeThisProject}
+          className="gap-2 text-destructive focus:text-destructive"
+        >
+          <HugeiconsIcon icon={Cancel01Icon} size={13} strokeWidth={2} />
+          Close Project
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 });
 

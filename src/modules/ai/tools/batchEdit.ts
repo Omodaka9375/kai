@@ -30,6 +30,7 @@ import {
   ensureReadCache,
   getEditFailures,
   recoverEditTargetPath,
+  recoverEditTargetPathByContent,
 } from "./edit";
 import { newQueuedEditId, usePlanStore } from "../store/planStore";
 
@@ -42,7 +43,7 @@ export function buildBatchEditTools(ctx: ToolContext) {
   return {
     batch_edit: tool({
       description:
-        "Apply edits to MULTIPLE files atomically — all edits succeed or all are rolled back. REQUIRED shape: {edits: [{path: \"src/app.ts\", old_string: \"...\", new_string: \"...\"}, ...]} — every edit carries its OWN path; use it for several files OR several changes to one file. Each old_string must match the current file exactly; widen it for uniqueness, or use replace_all / line_hint. If ANY edit fails, NOTHING is written and the error names the failing edit. Re-read the file and resubmit corrected edits instead of falling back to PowerShell or write_file. Asks for user approval — shows all diffs at once. Every write is auto-checkpointed — revert the whole batch with `checkpoint_undo`.",
+        "Apply multiple edits across one or more files atomically (all succeed or nothing is written). Shape: `{edits: [{path, old_string, new_string, replace_all?, line_hint?}]}` — every item MUST include `path` first. Same-file edits apply sequentially in array order.",
       inputSchema: z.object({
         edits: z
           .array(
@@ -51,14 +52,14 @@ export function buildBatchEditTools(ctx: ToolContext) {
                 path: z
                   .string()
                   .min(1)
-                  .describe("The file to edit, absolute or relative to the terminal cwd."),
-                old_string: z.string(),
-                new_string: z.string(),
-                replace_all: z.boolean().optional(),
+                  .describe("Target file path (absolute or relative to cwd). Emit first in every entry."),
+                old_string: z.string().describe("Exact text to find."),
+                new_string: z.string().describe("Replacement text."),
+                replace_all: z.boolean().optional().describe("Replace every occurrence."),
                 line_hint: z
                   .number()
                   .optional()
-                  .describe("Approximate 1-based line number for a repeated old_string."),
+                  .describe("Approximate 1-based line number when old_string repeats."),
               })
               .strict(),
           )
@@ -71,19 +72,23 @@ export function buildBatchEditTools(ctx: ToolContext) {
         // read-before-edit guard per file. Abs paths collected for locking.
         const absPaths: string[] = [];
         const override = await sandboxOverrideForContext(ctx);
-        // PATH RECOVERY (see recoverEditTargetPath in edit.ts): an edit
-        // entry whose path was stream-truncated targets the most recently
-        // read file instead of failing the whole batch.
+        // PATH RECOVERY (defense-in-depth alongside repairEditToolCall):
+        // infer any missing per-entry path via content-verified cache lookup
+        // (or recency fallback) instead of failing the batch.
         const recoveredTarget = edits.some((e) => !e.path)
           ? recoverEditTargetPath(ctx)
           : null;
         for (const edit of edits) {
-          const editPath = edit.path || recoveredTarget || "";
+          const editPath =
+            edit.path ||
+            (await recoverEditTargetPathByContent(ctx, edit.old_string)) ||
+            recoveredTarget ||
+            "";
           if (!editPath)
             return {
               ok: false,
               error:
-                'an edit entry is missing its path field and no target could be inferred (the tool-arguments stream may have been truncated). Re-send with the path field FIRST in each edit entry, before old_string/new_string.',
+                'an edit entry is missing its path field and no target could be inferred. Re-send with `path` first in every edit entry, before old_string/new_string.',
             };
           const reqPath = resolvePath(editPath, ctx.getCwd());
           const safety = await checkWritableCanonical(reqPath, native.canonicalize, override);

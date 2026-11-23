@@ -164,12 +164,14 @@ describe("Workspaces grid behavior (source pins)", () => {
     expect(headerBlock).toContain("<SessionApprovePill");
     expect(headerBlock).toContain("newSessionForProject(projectId)");
     expect(headerBlock).toContain('title="New session"');
-    const titleIdx = headerBlock.indexOf("{group ? `${name} · ${group.name}` : name}");
+    const titleIdx = headerBlock.indexOf("group ? `${name} · ${group.name}` : name");
+    const personaPillIdx = headerBlock.indexOf("<SessionPersonaPill");
     const modelPillIdx = headerBlock.indexOf("<CardModelPill");
     const pillIdx = headerBlock.indexOf("<SessionApprovePill");
     const newBtnIdx = headerBlock.indexOf("newSessionForProject(projectId)");
     expect(titleIdx).toBeGreaterThan(-1);
-    expect(modelPillIdx).toBeGreaterThan(titleIdx);
+    expect(personaPillIdx).toBeGreaterThan(titleIdx);
+    expect(modelPillIdx).toBeGreaterThan(personaPillIdx);
     expect(pillIdx).toBeGreaterThan(modelPillIdx);
     expect(newBtnIdx).toBeGreaterThan(pillIdx);
     expect(grid).toContain("icon={Shield01Icon}");
@@ -235,8 +237,8 @@ describe("Workspaces grid behavior (source pins)", () => {
     // runs into a ToolGroup chip and renders Tool rows without the leading
     // dot (trailing state dot instead).
     expect(grid).toContain("contentClassName=\"gap-4 px-3 pb-3\"\n            // CARD MODE");
-    // `compact` is followed by the owning-session prop now (2026-11-21).
-    expect(grid).toMatch(/compact\n[\s\S]{0,600}?sessionId=\{sessionId\}\n\s*\/>/);
+    // `compact` is followed by hideThinking + the owning-session prop.
+    expect(grid).toMatch(/compact\n[\s\S]{0,900}?sessionId=\{sessionId\}\n\s*\/>/);
     const chat = readFileSync(
       new URL("./AiChat.tsx", import.meta.url),
       "utf8",
@@ -409,7 +411,8 @@ describe("Workspaces grid behavior (source pins)", () => {
     // 2026-11-21 ask: when a project's group chat is the active surface the
     // card swaps from the AI chat to the GROUP transcript - the bar must say
     // so, otherwise the two surfaces look identical.
-    expect(grid).toContain("{group ? `${name} · ${group.name}` : name}");
+    expect(grid).toContain("group ? `${name} · ${group.name}` : name");
+    expect(grid).toContain(".slice(0, 30)");
     expect(grid).toContain('group "${group.name}"');
   });
 
@@ -489,13 +492,15 @@ describe("Workspaces grid behavior (source pins)", () => {
       grid.indexOf("GroupCardBody group={group}"),
     );
     const sandboxIdx = headerBlock.indexOf("<CardSandboxIcon root={root} />");
-    const titleIdx = headerBlock.indexOf("{group ? `${name} · ${group.name}` : name}");
+    const titleIdx = headerBlock.indexOf("group ? `${name} · ${group.name}` : name");
+    const personaPillIdx = headerBlock.indexOf("<SessionPersonaPill");
     const modelPillIdx = headerBlock.indexOf("<CardModelPill");
     const contextRingIdx = headerBlock.indexOf("<CardContextRing projectId={projectId} sessionId={sessionId} />");
     const approveIdx = headerBlock.indexOf("<SessionApprovePill");
     expect(sandboxIdx).toBeGreaterThan(-1);
     expect(titleIdx).toBeGreaterThan(sandboxIdx);
-    expect(modelPillIdx).toBeGreaterThan(titleIdx);
+    expect(personaPillIdx).toBeGreaterThan(titleIdx);
+    expect(modelPillIdx).toBeGreaterThan(personaPillIdx);
     expect(contextRingIdx).toBeGreaterThan(modelPillIdx);
     expect(approveIdx).toBeGreaterThan(contextRingIdx);
     expect(grid).toContain('if (mode === "off") return null;');

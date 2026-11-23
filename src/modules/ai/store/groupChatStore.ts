@@ -1342,6 +1342,7 @@ async function runPersonaReply(
       { role: "user", content: prompt },
     ];
     let reply = "";
+    const { repairEditToolCallInput } = await import("../tools/edit");
     for (;;) {
       const result = await generateText({
         model,
@@ -1349,6 +1350,14 @@ async function runPersonaReply(
         tools: tools as Parameters<typeof generateText>[0]["tools"],
         stopWhen: stepCountIs(PERSONA_MAX_STEPS),
         abortSignal: controller.signal,
+        experimental_repairToolCall: async ({ toolCall }) => {
+          const repaired = await repairEditToolCallInput(
+            toolContext,
+            toolCall.toolName,
+            toolCall.input,
+          );
+          return repaired ? { ...toolCall, input: repaired } : null;
+        },
       });
       reply = (result.text ?? "").trim() || reply;
       accumulated = [

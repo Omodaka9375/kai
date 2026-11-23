@@ -31,6 +31,7 @@ import { generateText, stepCountIs, tool, type ModelMessage } from "ai";
 import { z } from "zod";
 import { getModel, type ModelId } from "@/modules/ai/config";
 import { buildLanguageModel } from "@/modules/ai/lib/agent";
+import { repairEditToolCallInput } from "@/modules/ai/tools/edit";
 import {
   downscalePhotoJpeg,
   latestPhotoSourcePath,
@@ -791,7 +792,7 @@ export async function runAssistantTurn(
   let stepsFinished = 0;
   const attempt = async (activeModel: Parameters<typeof generateText>[0]["model"]) => {
     try {
-      return await runAssistantGenerate(activeModel, system, modelMessages, guardedTools, onNotice, () => {
+      return await runAssistantGenerate(activeModel, system, modelMessages, guardedTools, toolContext, onNotice, () => {
         stepsFinished++;
       });
     } catch (e) {
@@ -801,7 +802,7 @@ export async function runAssistantTurn(
         e,
       );
       const textOnly = await swapImagePartsToText(modelMessages);
-      return runAssistantGenerate(activeModel, system, textOnly, guardedTools, onNotice);
+      return runAssistantGenerate(activeModel, system, textOnly, guardedTools, toolContext, onNotice);
     }
   };
   try {
@@ -861,6 +862,7 @@ async function runAssistantGenerate(
   system: string,
   messages: ModelMessage[],
   guardedTools: Record<string, unknown>,
+  toolContext: import("@/modules/ai/tools/context").ToolContext,
   onNotice?: (msg: string) => void,
   onStepFinished?: () => void,
 ) {
@@ -870,6 +872,14 @@ async function runAssistantGenerate(
     messages,
     tools: guardedTools as Parameters<typeof generateText>[0]["tools"],
     stopWhen: stepCountIs(ASSISTANT_MAX_STEPS),
+    experimental_repairToolCall: async ({ toolCall }) => {
+      const repaired = await repairEditToolCallInput(
+        toolContext,
+        toolCall.toolName,
+        toolCall.input,
+      );
+      return repaired ? { ...toolCall, input: repaired } : null;
+    },
     onStepFinish: (step) => {
       // Counted BEFORE the notice so the retry guard sees "a step ran" even
       // if the model errored on the next call.

@@ -293,7 +293,7 @@ const REGISTRY: Record<string, ToolPresentation> = {
     remoteSurface: false,
   },
   sleep: {
-    label: "Sleep",
+    label: "Wait",
     status: (a) => {
       const s = typeof a.seconds === "number" ? `${a.seconds}s` : "";
       const r = str(a, "reason");

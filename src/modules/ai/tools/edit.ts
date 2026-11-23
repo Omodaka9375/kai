@@ -60,6 +60,219 @@ export function recoverEditTargetPath(ctx: ToolContext): string | null {
   return best.path;
 }
 
+/**
+ * Content-verified path recovery for dropped `path` arguments.
+ *
+ * Pure recency (`recoverEditTargetPath`) fails in two common cases:
+ *  1. Parallel/burst reads: reading 2+ files within 10s permanently ties the
+ *     timestamps until another read, even when `old_string` exists in ONLY one
+ *     of those files.
+ *  2. Quick side-reads: reading file A to edit it, then briefly reading file B
+ *     to check an exported type >10s later makes B the recency winner even
+ *     though `old_string` only matches A.
+ *
+ * When `old_string` is non-empty, probe the session's `readCache` files with
+ * `computeEdits`:
+ *  - Exactly ONE file matches -> return it (resolves burst ties AND prevents
+ *    targeting a side-read file that doesn't contain the anchor).
+ *  - MULTIPLE files match -> genuinely ambiguous anchor; return null rather
+ *    than guessing by timestamp.
+ *  - ZERO files match (e.g. slightly stale anchor so the model needs the
+ *    "Similar lines in file" diagnostic) -> fall back to `recoverEditTargetPath`.
+ */
+export async function recoverEditTargetPathByContent(
+  ctx: ToolContext,
+  oldString?: string,
+): Promise<string | null> {
+  if (ctx.readCache.size === 0) return null;
+  const needle = typeof oldString === "string" ? oldString : "";
+  if (needle.trim().length > 0) {
+    const client = nativeForContext(ctx);
+    const matches: string[] = [];
+    const probe = [{ old_string: needle, new_string: `${needle}_` }];
+    for (const candidatePath of ctx.readCache.keys()) {
+      try {
+        const r = await client.readFile(candidatePath);
+        if (r.kind !== "text") continue;
+        const test = await computeEdits(r.content, candidatePath, probe);
+        if (test.ok) {
+          matches.push(candidatePath);
+          if (matches.length > 1) break;
+        }
+      } catch {
+        // Ignore unreadable/deleted cache entries during probe.
+      }
+    }
+    if (matches.length === 1) return matches[0]!;
+    if (matches.length > 1) return null;
+  }
+  return recoverEditTargetPath(ctx);
+}
+
+/** Normalize common field aliases onto `{ path?, old_string, new_string, replace_all?, line_hint? }`. */
+function normalizeEditFields(raw: Record<string, unknown>): Record<string, unknown> {
+  const pathVal =
+    typeof raw.path === "string" && raw.path.trim().length > 0
+      ? raw.path.trim()
+      : typeof raw.file_path === "string" && raw.file_path.trim().length > 0
+        ? raw.file_path.trim()
+        : typeof raw.file === "string" && raw.file.trim().length > 0
+          ? raw.file.trim()
+          : undefined;
+  const oldVal =
+    typeof raw.old_string === "string"
+      ? raw.old_string
+      : typeof raw.old_str === "string"
+        ? raw.old_str
+        : undefined;
+  const newVal =
+    typeof raw.new_string === "string"
+      ? raw.new_string
+      : typeof raw.new_str === "string"
+        ? raw.new_str
+        : undefined;
+  const out: Record<string, unknown> = {};
+  if (pathVal !== undefined) out.path = pathVal;
+  if (oldVal !== undefined) out.old_string = oldVal;
+  if (newVal !== undefined) out.new_string = newVal;
+  if (typeof raw.replace_all === "boolean") out.replace_all = raw.replace_all;
+  if (typeof raw.line_hint === "number" && Number.isFinite(raw.line_hint)) {
+    out.line_hint = raw.line_hint;
+  }
+  return out;
+}
+
+/**
+ * Deterministic pre-schema repair for `edit` and `batch_edit` tool calls
+ * (`experimental_repairToolCall` hook in AI SDK).
+ *
+ * Keeping `path` strictly REQUIRED in the wire JSON Schema prevents models
+ * from treating it as optional, while repairing dropped `path` or drifted
+ * shapes (`file_path`, top-level `path` on `batch_edit`, single-edit object
+ * passed to `batch_edit`) BEFORE Zod validation means:
+ *  1. The call succeeds instead of failing with InvalidToolInputError.
+ *  2. The repaired `path` is written into `toolCall.input` (with `path` first),
+ *     so AI diff tabs, approval cards, `compact.ts` stale-read elision, AND
+ *     subsequent conversation turns all see a canonical `{ path, ... }` call
+ *     (eliminating the in-context imitation loop of path-less calls).
+ *
+ * Returns a repaired JSON input string, or `null` when repair is unsafe or
+ * not applicable.
+ */
+export async function repairEditToolCallInput(
+  ctx: ToolContext,
+  toolName: string,
+  rawInput: string,
+): Promise<string | null> {
+  if (toolName !== "edit" && toolName !== "batch_edit") return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawInput);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+
+  if (toolName === "edit") {
+    if (Array.isArray(parsed)) return null;
+    const norm = normalizeEditFields(parsed as Record<string, unknown>);
+    if (typeof norm.old_string !== "string" || typeof norm.new_string !== "string") {
+      return null;
+    }
+    let targetPath = typeof norm.path === "string" ? norm.path : "";
+    if (!targetPath) {
+      targetPath = (await recoverEditTargetPathByContent(ctx, norm.old_string)) ?? "";
+    }
+    if (!targetPath) return null;
+    const canonical: Record<string, unknown> = {
+      path: targetPath,
+      old_string: norm.old_string,
+      new_string: norm.new_string,
+    };
+    if (norm.replace_all !== undefined) canonical.replace_all = norm.replace_all;
+    if (norm.line_hint !== undefined) canonical.line_hint = norm.line_hint;
+    return JSON.stringify(canonical);
+  }
+
+  // batch_edit: accept `{ edits: [...] }`, top-level `{ path, edits: [...] }`,
+  // bare `[...]` array, or single `{ path?, old_string, new_string }` object.
+  let topLevelPath = "";
+  let rawItems: unknown[];
+  if (Array.isArray(parsed)) {
+    rawItems = parsed;
+  } else {
+    const obj = parsed as Record<string, unknown>;
+    if (typeof obj.path === "string" && obj.path.trim().length > 0) {
+      topLevelPath = obj.path.trim();
+    } else if (typeof obj.file_path === "string" && obj.file_path.trim().length > 0) {
+      topLevelPath = obj.file_path.trim();
+    } else if (typeof obj.file === "string" && obj.file.trim().length > 0) {
+      topLevelPath = obj.file.trim();
+    }
+    if (Array.isArray(obj.edits)) {
+      rawItems = obj.edits;
+    } else if (
+      typeof obj.old_string === "string" ||
+      typeof obj.old_str === "string"
+    ) {
+      rawItems = [obj];
+    } else {
+      return null;
+    }
+  }
+  if (rawItems.length === 0 || rawItems.length > 25) return null;
+
+  const normalizedItems = rawItems.map((item) =>
+    item && typeof item === "object" && !Array.isArray(item)
+      ? normalizeEditFields(item as Record<string, unknown>)
+      : null,
+  );
+  if (
+    normalizedItems.some(
+      (it) =>
+        !it ||
+        typeof it.old_string !== "string" ||
+        typeof it.new_string !== "string",
+    )
+  ) {
+    return null;
+  }
+
+  // Check if all explicit item paths in this batch agree on one single file
+  // (helps stream-truncated tail entries in a single-file batch_edit).
+  const explicitPaths = new Set(
+    normalizedItems
+      .map((it) => (typeof it?.path === "string" ? it.path : ""))
+      .filter(Boolean),
+  );
+  const sharedSiblingPath =
+    explicitPaths.size === 1 ? [...explicitPaths][0]! : "";
+
+  const repairedEdits: Record<string, unknown>[] = [];
+  for (const it of normalizedItems as Record<string, unknown>[]) {
+    let itemPath = typeof it.path === "string" ? it.path : "";
+    if (!itemPath && topLevelPath) {
+      itemPath = topLevelPath;
+    }
+    if (!itemPath) {
+      itemPath =
+        (await recoverEditTargetPathByContent(ctx, it.old_string as string)) ??
+        sharedSiblingPath;
+    }
+    if (!itemPath) return null;
+    const entry: Record<string, unknown> = {
+      path: itemPath,
+      old_string: it.old_string,
+      new_string: it.new_string,
+    };
+    if (it.replace_all !== undefined) entry.replace_all = it.replace_all;
+    if (it.line_hint !== undefined) entry.line_hint = it.line_hint;
+    repairedEdits.push(entry);
+  }
+
+  return JSON.stringify({ edits: repairedEdits });
+}
+
 /** Compute a batch of edits against IN-MEMORY content without touching
  *  disk — the consolidated batch_edit applies edits per file through this
  *  core so it inherits the hardened matcher (EOL normalize/restore,
@@ -748,234 +961,21 @@ export async function applyEdits(
     readCache.set(abs, readCacheEntry(original));
   }
 
-  // Normalize the entire file content to \n before applying edits, then
-  // restore the original line-ending style at the end. This avoids
-  // positional drift that occurs when mapping CRLF↔LF per edit in
-  // sequential batch_edit calls — each edit's position shift compounds.
-  const useCrlf = original.includes("\r\n");
-  let content = normEol(original);
-  let totalReplacements = 0;
-  let skippedIdentical = 0;
-
-  for (const [editIndex, rawEdit] of edits.entries()) {
-    const oldNorm = normEol(rawEdit.old_string);
-    // Strip trailing whitespace from new_string to prevent model-generated
-    // trailing spaces from dirtying the file.
-    const newNorm = stripTrailingWs(normEol(rawEdit.new_string), abs);
-
-    if (oldNorm === newNorm) {
-      // Identical old/new is a no-op. Poisoning the WHOLE batch with an
-      // error here (the old behavior) forced the caller into the slow
-      // per-edit retry path — one write per edit, the known corruption
-      // class. Skip the no-op instead; only error when the batch is
-      // ENTIRELY no-ops (nothing was asked for).
-      skippedIdentical++;
-      continue;
-    }
-    if (oldNorm.length === 0) {
-      return { ok: false, error: "old_string cannot be empty", path: abs, editIndex };
-    }
-    if (rawEdit.replace_all) {
-      let n = 0;
-      let searchFrom = 0;
-      while (searchFrom < content.length) {
-        const idx = content.indexOf(oldNorm, searchFrom);
-        if (idx === -1) break;
-        content =
-          content.slice(0, idx) +
-          newNorm +
-          content.slice(idx + oldNorm.length);
-        searchFrom = idx + newNorm.length;
-        n++;
-        if (n > 1000) break;
-      }
-      if (n === 0) {
-        // Exact pass found nothing — the relaxed levels get the same
-        // chance replace_all was asked for: duplicates are the point, so
-        // multi-hit is not ambiguity here. Replace back-to-front so earlier
-        // hit offsets stay valid.
-        const fz = fuzzyHits(content, oldNorm);
-        if (!fz) {
-          const ph = punctHits(content, oldNorm);
-          if (!ph) {
-            return {
-              ok: false,
-              error: `old_string not found: ${JSON.stringify(oldNorm.slice(0, 80))}.${getDidYouMeanHint(content, oldNorm)}`,
-              path: abs,
-              editIndex,
-            };
-          }
-          if (ph.length > MAX_FUZZY_HITS) {
-            return {
-              ok: false,
-              error: `old_string matched more than ${MAX_FUZZY_HITS} locations after punctuation relaxation — refusing to rewrite that broadly. Narrow old_string.`,
-              path: abs,
-              editIndex,
-            };
-          }
-          for (const h of [...ph].sort((a, b) => b.index - a.index)) {
-            content =
-              content.slice(0, h.index) +
-              applyPunctCarry(oldNorm, newNorm, h) +
-              content.slice(h.index + h.length);
-          }
-          n = ph.length;
-        } else if (fz.length > MAX_FUZZY_HITS) {
-          return {
-            ok: false,
-            error: `old_string matched more than ${MAX_FUZZY_HITS} locations after whitespace relaxation — refusing to rewrite that broadly. Narrow old_string.`,
-            path: abs,
-            editIndex,
-          };
-        } else {
-          for (const h of [...fz].sort((a, b) => b.index - a.index)) {
-            content =
-              content.slice(0, h.index) + newNorm + content.slice(h.index + h.length);
-          }
-          n = fz.length;
-        }
-      }
-      totalReplacements += n;
-    } else {
-      let idx = content.indexOf(oldNorm);
-      // Length of the region being replaced IN THE FILE. Equals oldNorm.length
-      // on an exact match; on a whitespace-relaxed match the file's region has
-      // a DIFFERENT length (that is the whole point of relaxing) — splicing
-      // with oldNorm.length corrupted the file around the edit.
-      let matchLen = oldNorm.length;
-      if (idx === -1) {
-        const fz = fuzzyHits(content, oldNorm);
-        if (!fz) {
-          // Third tier: punctuation-equivalence. See computeEdits for the
-          // policy (single hit applies; multi needs line_hint).
-          const ph = punctHits(content, oldNorm);
-          if (ph && ph.length === 1) {
-            const h = ph[0]!;
-            content =
-              content.slice(0, h.index) +
-              applyPunctCarry(oldNorm, newNorm, h) +
-              content.slice(h.index + h.length);
-            totalReplacements += 1;
-            continue;
-          }
-          if (ph && ph.length > 1) {
-            if (rawEdit.line_hint) {
-              const chosenP = ph.reduce((best, cur) =>
-                Math.abs(cur.line - rawEdit.line_hint!) <
-                Math.abs(best.line - rawEdit.line_hint!)
-                  ? cur
-                  : best,
-              );
-              content =
-                content.slice(0, chosenP.index) +
-                applyPunctCarry(oldNorm, newNorm, chosenP) +
-                content.slice(chosenP.index + chosenP.length);
-              totalReplacements += 1;
-              continue;
-            }
-            return {
-              ok: false,
-              error:
-                `old_string matched ${ph.length} locations (lines ${ph
-                  .slice(0, 8)
-                  .map((h) => h.line)
-                  .join(", ")}) only after punctuation relaxation — nothing was changed. Widen old_string or pass line_hint.`,
-              path: abs,
-              editIndex,
-            };
-          }
-          return {
-            ok: false,
-            error: `old_string not found: ${JSON.stringify(oldNorm.slice(0, 80))}.${getDidYouMeanHint(content, oldNorm)}`,
-            path: abs,
-            editIndex,
-          };
-        }
-        let chosen = fz[0];
-        if (fz.length > 1) {
-          // A relaxed match hitting several places is never a coin flip:
-          // the exact text isn't in the file, so guessing risks rewriting
-          // the wrong code. line_hint picks nearest; otherwise bounce with
-          // the locations so the model can widen context.
-          if (rawEdit.line_hint) {
-            chosen = fz.reduce((best, cur) =>
-              Math.abs(cur.line - rawEdit.line_hint!) <
-              Math.abs(best.line - rawEdit.line_hint!)
-                ? cur
-                : best,
-            );
-          } else {
-            return {
-              ok: false,
-              error:
-                `old_string matched ${fz.length} locations (lines ${fz
-                  .slice(0, 8)
-                  .map((h) => h.line)
-                  .join(", ")}) only after whitespace relaxation — nothing was changed. Copy the block verbatim from the file (tabs vs spaces included), widen it with surrounding context, or pass line_hint to pick one.`,
-              path: abs,
-              editIndex,
-            };
-          }
-        }
-        idx = chosen.index;
-        matchLen = chosen.length;
-      }
-      // Check uniqueness: search for a second occurrence AFTER the first
-      // match. Use exact matching only (not fuzzy whitespace) so indentation
-      // variants aren't falsely flagged as duplicates.
-      const secondIdx = content.indexOf(oldNorm, idx + matchLen);
-      if (secondIdx !== -1 && !rawEdit.line_hint) {
-        return {
-          ok: false,
-          error:
-            "old_string is not unique. Provide more surrounding context, set replace_all=true, or provide line_hint to disambiguate.",
-          path: abs,
-          editIndex,
-        };
-      }
-      // When line_hint is provided and there are multiple matches, pick
-      // the occurrence closest to the hinted line number.
-      let chosenIdx = idx;
-      if (secondIdx !== -1 && rawEdit.line_hint) {
-        const occurrences: number[] = [idx, secondIdx];
-        let next = secondIdx;
-        for (let i = 0; i < 50; i++) {
-          const nidx = content.indexOf(oldNorm, next + oldNorm.length);
-          if (nidx === -1) break;
-          occurrences.push(nidx);
-          next = nidx;
-        }
-        chosenIdx = occurrences.reduce((best, cur) => {
-          const cLine = content.slice(0, cur).split("\n").length;
-          const bLine = content.slice(0, best).split("\n").length;
-          return Math.abs(cLine - rawEdit.line_hint!) < Math.abs(bLine - rawEdit.line_hint!)
-            ? cur : best;
-        });
-      }
-      content =
-        content.slice(0, chosenIdx) +
-        newNorm +
-        content.slice(chosenIdx + matchLen);
-      totalReplacements += 1;
-    }
-  }
-
-  // The batch was ENTIRELY identical old/new no-ops — nothing was asked
-  // for. Report it as an error so the model notices, instead of silently
-  // writing an unchanged file (which would also refresh the read cache for
-  // no reason and trigger fs-changed noise).
-  if (totalReplacements === 0 && skippedIdentical > 0 && edits.length > 0) {
+  // Delegate in-memory matching (exact -> fuzzy whitespace -> punctuation
+  // equivalence, replace_all, line_hint, CRLF preservation) to the single
+  // shared computeEdits engine.
+  const computed = await computeEdits(original, abs, edits);
+  if (!computed.ok) {
     return {
       ok: false,
-      error: `all ${skippedIdentical} edit(s) are no-ops (old_string === new_string). Nothing to change — if you intended an edit, correct the strings.`,
+      error: computed.error,
       path: abs,
+      editIndex: computed.editIndex,
     };
   }
 
-  // Restore original line-ending style after all edits are applied.
-  if (useCrlf) {
-    content = content.replace(/\n/g, "\r\n");
-  }
+  const content = computed.content;
+  const totalReplacements = computed.replacements;
 
   if (usePlanStore.getState().active) {
     usePlanStore.getState().enqueue({
@@ -1065,28 +1065,36 @@ export function buildEditTools(ctx: ToolContext) {
   return {
     edit: tool({
       description:
-        "Replace text in an existing file. HOW IT WORKS: the tool searches the file for old_string and swaps it for new_string. RULES: (1) old_string must be copied EXACTLY from the file — every character, space, and indent; never invent or paraphrase it. (2) To INSERT without deleting, set old_string to the line before/after the spot and repeat that line inside new_string with your addition. (3) If old_string appears more than once, either widen it with surrounding lines to make it unique, or pass line_hint. (4) To create a NEW file use write_file instead. (5) If you need multiple changes — to one file or several — use batch_edit: each edit entry carries its own path; all edits apply atomically (any failure writes nothing). Never emit separate edit calls for the same file in one step (they race each other). Asks for user approval. The prior content is auto-checkpointed — revert a bad edit with `checkpoint_undo`.",
+        "Replace exact text in one existing file. Emit `path` first. Copy `old_string` verbatim from `read_file` (unique unless `replace_all` or `line_hint` is set). For multiple edits (to one file or several), use `batch_edit` instead of parallel `edit` calls.",
       inputSchema: z.object({
-        path: z.string().optional(),
+        path: z
+          .string()
+          .min(1)
+          .describe("Target file path (absolute or relative to cwd). Emit first."),
         old_string: z
           .string()
-          .describe("The exact text to find and replace. Must match the file content exactly. Must be unique unless replace_all or line_hint."),
-        new_string: z.string().describe("The replacement text."),
-        replace_all: z.boolean().optional(),
+          .describe("Exact text to find (unique unless replace_all or line_hint)."),
+        new_string: z.string().describe("Replacement text."),
+        replace_all: z
+          .boolean()
+          .optional()
+          .describe("Replace every occurrence."),
         line_hint: z
           .number()
           .optional()
-          .describe("Approximate 1-based line number where the edit should apply. Used to disambiguate when old_string appears more than once."),
+          .describe("Approximate 1-based line number when old_string repeats."),
       }),
       needsApproval: true,
       execute: async ({ path: pathArg, old_string, new_string, replace_all, line_hint }) => {
-        // PATH RECOVERY: local servers that alphabetize arguments can stream-
-        // truncate the trailing `path` field (see recoverEditTargetPath).
-        // Infer the target from the most recent read instead of bouncing.
+        // PATH RECOVERY (defense-in-depth alongside repairEditToolCall):
+        // infer missing `path` via content-verified cache lookup before
+        // bouncing.
         let path = pathArg ?? "";
         let pathRecovered = false;
         if (!path) {
-          const recovered = recoverEditTargetPath(ctx);
+          const recovered =
+            (await recoverEditTargetPathByContent(ctx, old_string)) ??
+            recoverEditTargetPath(ctx);
           if (recovered) {
             path = recovered;
             pathRecovered = true;
@@ -1095,7 +1103,7 @@ export function buildEditTools(ctx: ToolContext) {
         if (!path)
           return {
             error:
-              'path is required and could not be inferred - the tool-arguments stream may have been truncated. Re-send the call with the path field FIRST in the object (before old_string/new_string), or use batch_edit whose edits array carries {path, old_string, new_string} entries. If the file has not been read yet, read_file it first.',
+              'path is required and could not be inferred - put `path` first in the arguments (before old_string/new_string), or read_file the target first.',
           };
         const reqPath = resolvePath(path, ctx.getCwd());
         const safety = await checkWritableCanonical(reqPath, native.canonicalize, await sandboxOverrideForContext(ctx));
@@ -1111,7 +1119,7 @@ export function buildEditTools(ctx: ToolContext) {
               `edit failed ${MAX_EDIT_RETRIES} times on this file. ` +
               `write_file may be blocked by its partial-view guard for files over ${Math.round(READ_BYTE_CAP / 1024)}KB - ` +
               `if so, page read_file (offset/limit) until untruncated FIRST, or split the file. ` +
-              `Re-read the file (force: true) and retry edit with anchors copied VERBATIM before falling back.`,
+              `Re-read the file (force: true) and retry edit with anchors copied VERBATIM, or use replace_exact with byte-exact strings.`,
             path: abs,
           };
         }
@@ -1132,7 +1140,7 @@ export function buildEditTools(ctx: ToolContext) {
             ctx.fileTracker.markModified(abs);
             await commitCheckpointBatch(checkpoint);
             return pathRecovered
-              ? { ...result, note: `path field was missing from the call - applied to the most recently read file (${abs}). If this is the wrong file, checkpoint_undo and resend with an explicit path.` }
+              ? { ...result, note: `path field was missing from the call - applied to (${abs}). Always include path explicitly; if wrong, checkpoint_undo.` }
               : result;
           }
           // If old_string wasn't found, re-read the file (a prior concurrent
@@ -1143,20 +1151,22 @@ export function buildEditTools(ctx: ToolContext) {
             // Force cache refresh so applyEdits re-reads from disk.
             ctx.readCache.delete(abs);
             const retry = await applyEdits(abs, edits, "edit", ctx.readCache, native);
-            if ("ok" in retry) {
+            if (retry.ok) {
               getEditFailures(ctx).delete(abs);
               ctx.fileTracker.markModified(abs);
               await commitCheckpointBatch(checkpoint);
-              return retry;
+              return pathRecovered
+                ? { ...retry, note: `path field was missing from the call - applied to (${abs}). Always include path explicitly; if wrong, checkpoint_undo.` }
+                : retry;
             }
-            // Retry also failed — the target was consumed by a racing edit.
-            // Append a hint so the model recovers instead of giving up.
+            // Retry also failed — count the strike so the 3-strike latch and
+            // replace_exact recovery gate unlock properly.
             getEditFailures(ctx).set(abs, failures + 1);
             return {
               ...result,
               error:
                 result.error +
-                `\n\n(Still not found after re-read — attempt ${failures + 1}/${MAX_EDIT_RETRIES} on this file before the write_file fallback is suggested. This usually means another edit to the same file already consumed or displaced the target text. Re-read the file to get the current content, then resubmit. Better: use batch_edit for all same-file changes — it applies edits sequentially in one atomic operation instead of racing.)`,
+                `\n\n(Attempt ${failures + 1}/${MAX_EDIT_RETRIES} failed on ${abs}. Re-read with force: true and copy old_string verbatim, use batch_edit for sequential same-file edits, or use replace_exact for raw byte quirks.)`,
             };
           }
           getEditFailures(ctx).set(abs, failures + 1);
@@ -1167,7 +1177,7 @@ export function buildEditTools(ctx: ToolContext) {
 
     checkpoint_undo: tool({
       description:
-        "Revert the last AI-write batch (write_file / edit / batch_edit) to its pre-write snapshot — every one of those tools auto-checkpoints before mutating, so this is always available after a write. Call it when an edit produced an unexpected result, when the user says 'undo that' / 'revert', or when you need to abandon a partial change set and retry a different approach. Takes no arguments; reverts the most recent batch only.",
+        "Revert the most recent file-mutation batch (`write_file`, `edit`, `batch_edit`, `replace_exact`) to its automatic pre-write snapshot.",
       inputSchema: z.object({}),
       needsApproval: true,
       execute: async () => {

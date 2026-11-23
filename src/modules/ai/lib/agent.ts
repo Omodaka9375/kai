@@ -28,6 +28,7 @@ import {
   type ThinkingMode,
 } from "../config";
 import { buildTools, type ToolContext } from "../tools/tools";
+import { repairEditToolCallInput } from "../tools/edit";
 import { primeXBearerPresence, xBearerKnownAbsent } from "../tools/social";
 import { compactModelMessagesDetailed } from "./compact";
 import {
@@ -1031,6 +1032,14 @@ export async function runAgentStream(opts: RunAgentOptions) {
     // documented output-cap class; SDK-known models clamp it themselves
     // via isKnownModel, so this is safe across the registry.
     ...(provider === "anthropic" ? { maxOutputTokens: 64_000 } : {}),
+    experimental_repairToolCall: async ({ toolCall }) => {
+      const repaired = await repairEditToolCallInput(
+        opts.toolContext,
+        toolCall.toolName,
+        toolCall.input,
+      );
+      return repaired ? { ...toolCall, input: repaired } : null;
+    },
     // Inject a pending loop nudge into the immediate next request only.
     // Returning undefined leaves the step untouched (the common case).
     prepareStep: ({ messages: stepMessages }) => {

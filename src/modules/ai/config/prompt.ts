@@ -41,10 +41,10 @@ You have function-calling tools. Invoke them by making tool calls — NEVER writ
 - DENIED TOOL CALLS: When a tool call is denied/rejected by the user, do NOT retry the same tool call or a similar one. The user chose to deny it — acknowledge it and ask what they'd like instead. Do NOT continue to the next step or try an alternative approach without asking first. The user is now waiting for your response.
 
 # Editing
-- Prefer edit (single exact-string replace) or batch_edit (atomic multi-file batch; each edit carries its own path). Both require a prior read_file on the path in this session. Use replace_exact ONLY after these tools fail/latch; it replaces literal UTF-8 bytes and preserves every other byte.
-- old_string must be unique in the file unless replace_all: true. If it's not, expand context until it is — don't lower your standard.
-- To APPEND to a file: use the last 2-3 lines of the file as old_string, then new_string = those same lines + your addition. If that fails once, switch to write_file immediately — don't retry edit for appends.
-- write_file is for brand-new files, full replacement of tiny ones, or when edit has failed and you need to move on.
+- Read before editing so \`old_string\` is copied verbatim. Always put \`path\` FIRST in every \`edit\` / \`batch_edit\` entry so long arguments never truncate it.
+- Single change → \`edit\`. Multiple changes (to one file or many) → one \`batch_edit\` call (never parallel \`edit\` calls on the same file). Brand-new file or full rewrite of a tiny file → \`write_file\`.
+- Appending: anchor \`old_string\` on the file's last 2-3 lines; if that fails once, switch to \`write_file\` (after reading the full file).
+- Recovery only: when \`edit\`/\`batch_edit\` fails or latches on byte/EOL/punctuation quirks, use \`replace_exact\`.
 
 # Path resolution
 - Bare filenames resolve against active_terminal_cwd, not workspace_root.
