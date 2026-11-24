@@ -66,6 +66,8 @@ import {
   subscribeGroupChats,
 } from "../store/groupChatStore";
 import { Input } from "@/components/ui/input";
+import { useProjectRailItems } from "@/app/projectsMenu";
+import { projectIconFillCss } from "@/modules/workspace/projectIcons";
 import { usePlanStore } from "../store/planStore";
 import { AgentSwitcher } from "./AgentSwitcher";
 import { AiChatView, GameOfLifeSpinner } from "./AiChat";
@@ -430,8 +432,23 @@ function Header({
 }) {
   const expandLabel = expanded ? "Collapse to mini window" : "Expand to panel";
 
+  // PROJECT TINT (2026-11-24 ask): same family as the Workspaces card top
+  // bars and the rail tile - the active project's icon hue at low alpha,
+  // so the AI window reads as belonging to the project you are in. Derived
+  // from the rail items context (AppShell provides it above every
+  // workspace), keyed to the ACTIVE item; a missing entry (StartPage, no
+  // project) leaves the header untinted.
+  const items = useProjectRailItems();
+  const activeItem = items.find((i) => i.active);
+  const tint = activeItem
+    ? projectIconFillCss(activeItem.color, activeItem.id, true)
+    : undefined;
+
   return (
-    <div className="relative flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border/60 px-3">
+    <div
+      className="relative flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border/60 px-3"
+      style={tint ? { background: tint } : undefined}
+    >
       <div className="flex min-w-0 items-center gap-1.5">
         {/* Expand toggle LEFTMOST (2026-11-14 ask) - minimize stays at the
             far right. Same arrangement as the group panel's header. */}

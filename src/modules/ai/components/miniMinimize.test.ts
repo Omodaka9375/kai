@@ -68,4 +68,15 @@ describe("AI mini window minimize-to-pill (source pins)", () => {
     );
     expect(pill).toContain("subscribeSessionAgentMeta");
   });
+
+  it("the header bar is tinted with the active project's icon color (2026-11-24 ask)", () => {
+    // Same family as the Workspaces card top bars and the rail tile fill:
+    // projectIconFillCss(activeItem.color, activeItem.id, true) on the
+    // Header's root div, resolved from the ProjectRailItemsContext (the
+    // active item), untinted when no project is active.
+    expect(mini).toContain("useProjectRailItems()");
+    expect(mini).toContain("items.find((i) => i.active)");
+    expect(mini).toContain("projectIconFillCss(activeItem.color, activeItem.id, true)");
+    expect(mini).toContain("style={tint ? { background: tint } : undefined}");
+  });
 });
