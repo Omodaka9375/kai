@@ -457,4 +457,33 @@ describe("decideReflex", () => {
       expect(d.action === "fallthrough" && d.reason === "conversational", p).toBe(true);
     }
   });
+
+  it("get_settings requires settings vocabulary in the prompt (2026-11-24 live false positive)", () => {
+    // LIVE HIJACK: "how is it progressing" classified as get_settings at
+    // >=0.75 confidence and EXECUTED ("Read current settings..."). The
+    // canonical `settings` call is zero-argument so value grounding is
+    // vacuous, and get_settings was the ONE allowed tool with no domain
+    // trigger floor. Same guard shape as reminder_list / radio / Run #5
+    // domains: no settings vocabulary in the prompt -> ungrounded.
+    const hijack = decideReflex("how is it progressing", {
+      calls: [{ name: "get_settings", arguments: {} }],
+      confidence: 0.99,
+    });
+    expect(hijack.action === "fallthrough" && hijack.reason === "ungrounded").toBe(true);
+
+    // Real settings reads still execute.
+    for (const p of [
+      "show my current kai settings",
+      "read current settings",
+      "what are my preferences",
+      "open the config panel",
+      "mutasd a beállításokat",
+    ]) {
+      const d = decideReflex(p, {
+        calls: [{ name: "get_settings", arguments: {} }],
+        confidence: 0.9,
+      });
+      expect(d.action === "execute", p).toBe(true);
+    }
+  });
 });

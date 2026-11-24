@@ -651,6 +651,15 @@ const RADIO_PROMPT_TRIGGERS = [
  * fires locally.
  */
 const DOMAIN_TRIGGERS: Record<string, string[]> = {
+  // SETTINGS READ FLOOR (2026-11-24 live false positive: "how is it
+  // progressing" classified as get_settings at >=0.75 confidence and
+  // EXECUTED — the canonical `settings` call is zero-argument, so value
+  // grounding is vacuous and get_settings had NO domain floor). A settings
+  // read must carry settings vocabulary in the prompt, whatever the
+  // classifier says.
+  settings: [
+    "setting", "config", "preference", "beállít",
+  ],
   get_time: [
     "time", "date", "day", "clock", "today", "tomorrow", "hour",
     "mik", "idő", "dátum", "nap", "hány", "ma",
