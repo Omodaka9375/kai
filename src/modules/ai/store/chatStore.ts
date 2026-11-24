@@ -508,9 +508,19 @@ function abortRunController(sessionId: string): void {
 function touchChat(id: string, c: Chat<UIMessage>) {
   if (chats.has(id)) chats.delete(id);
   chats.set(id, c);
+  // FULL-PASS GUARD (2026-11-24 freeze): a pinned entry is skipped WITHOUT
+  // being deleted, so `chats.keys().next().value` returns the SAME head on
+  // the next iteration. When every chat at the head is pinned (Workspaces
+  // grid open pins every open project's chat; opening one more project
+  // pushed size past the cap), the old `continue` revisited the same pinned
+  // head FOREVER - a synchronous infinite loop that hard-froze the whole
+  // webview (blank window, dead input, no log lines). Bound the scan: mark
+  // each pinned entry once and STOP when a full pass evicts nothing.
+  const scannedPinned = new Set<string>();
   while (chats.size > CHATS_LRU_CAP) {
     const oldest = chats.keys().next().value;
     if (!oldest || oldest === id) break;
+    if (scannedPinned.has(oldest)) break; // full pass, everything pinned
     const chat = chats.get(oldest);
     // Never kill background work to satisfy an in-memory cache budget.
     // Busy/approval-paused chats stay pinned; idle ones may be evicted.
@@ -537,8 +547,9 @@ function touchChat(id: string, c: Chat<UIMessage>) {
       chatPinner?.(oldest) ||
       isWorkspacesPinned(oldest)
     ) {
-      // Pinned: advance past it instead of breaking the whole loop - the
-      // NEXT-oldest idle chat can still be evicted safely.
+      // Pinned: advance past it (once) - the NEXT-oldest idle chat can
+      // still be evicted safely; a full pinned pass breaks above.
+      scannedPinned.add(oldest);
       continue;
     }
     flushPersistEntry(oldest);

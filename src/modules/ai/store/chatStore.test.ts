@@ -822,4 +822,50 @@ describe("evicted-chat reseed + empty-persist wipe guard (2026-11-23 Workspaces 
     );
     expect(src).toContain("isWorkspacesPinned(oldest)");
   });
+
+  it("touchChat terminates when every LRU candidate is Workspaces-pinned (2026-11-24 open-project freeze)", async () => {
+    const store = mod.useChatStore;
+    // FREEZE REPORT (2026-11-24): "opened a project from context menu, it
+    // showed an empty blank window and froze; had to kill KAI". Workspaces
+    // pins every open project's chat; opening one more project pushed the
+    // chat count past cap 8 with the OLDEST entries all pinned. The eviction
+    // loop skipped a pinned head via `continue` WITHOUT deleting it, so
+    // `chats.keys().next().value` returned the same pinned head forever -
+    // a synchronous infinite loop that froze the whole webview main thread
+    // (blank window, dead input, term-debug.log goes silent mid-open).
+    const pinnedIds = ["pin-frozen-0", "pin-frozen-1", "pin-frozen-2"];
+    mod.setWorkspacesPinnedSessions(new Set(pinnedIds));
+    store.setState({
+      sessions: [
+        ...pinnedIds.map((id) => ({
+          id,
+          title: "New chat",
+          createdAt: 1,
+          updatedAt: 1,
+          workspaceRoot: "D:/pin-freeze",
+          workspaceEnv: { kind: "local" as const },
+        })),
+        ...store.getState().sessions.filter((s) => !pinnedIds.includes(s.id)),
+      ],
+      activeSessionId: null,
+    });
+    // Construct the PINNED chats FIRST so they sit at the LRU head (oldest).
+    for (const id of pinnedIds) mod.getOrCreateChat(id);
+    // Pressure: 6 more chats pushes size to 9 > cap 8. Old code: infinite
+    // loop here (this it() would never finish). New code: full-pass guard
+    // breaks out with every candidate pinned.
+    for (let i = 0; i < 6; i++) {
+      mod.getOrCreateChat(`pin-freeze-pressure-${i}`);
+    }
+    // If we got here, touchChat returned - the loop terminated.
+    const src = await import("node:fs").then((fs) =>
+      fs.readFileSync(new URL("./chatStore.ts", import.meta.url), "utf8"),
+    );
+    expect(src).toContain("scannedPinned.has(oldest)");
+    expect(src).toContain("if (!oldest || oldest === id) break;");
+    mod.setWorkspacesPinnedSessions(null);
+    store.setState({
+      sessions: store.getState().sessions.filter((s) => !pinnedIds.includes(s.id)),
+    });
+  });
 });
