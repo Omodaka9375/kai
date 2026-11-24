@@ -53,6 +53,14 @@ describe("Tool card streaming-input freeze guard", () => {
     expect(cmp).toMatch(/return deriveSummary[\s\S]*===[\s\S]*deriveSummary/);
   });
 
+  it("settled tool cards skip ref-identity re-renders and closed cards defer unfenceDeep", () => {
+    // 2026-11-24 perf fix: the SDK structuredClones the tail message on every
+    // 50ms flush, replacing object refs for earlier finished tool parts.
+    // Settled states short-circuit in memo, and unfenceDeep runs only while open.
+    expect(src).toContain("SETTLED_TOOL_STATES.has(a.state)");
+    expect(src).toMatch(/isOpen && showOutputBody\s*\?\s*unfenceDeep/);
+  });
+
   it("rendered run_subagent bodies are height-capped", () => {
     const prompt = src.split('if (toolName === "run_subagent")')[1] ?? "";
     // Input preview: prompt div.

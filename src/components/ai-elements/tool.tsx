@@ -36,7 +36,7 @@ import { stripInternalMeta } from "@/modules/ai/lib/toolFencing";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { DynamicToolUIPart, ToolUIPart } from "ai";
 import type { ComponentProps, ReactNode } from "react";
-import { isValidElement, memo, useMemo, useState } from "react";
+import { isValidElement, memo, useEffect, useMemo, useRef, useState } from "react";
 
 
 export type ToolPart = ToolUIPart | DynamicToolUIPart;
@@ -234,13 +234,28 @@ const ToolImpl = ({
   // body, which is huge and re-renders per token.
   const showInputBody = !isHeavy && Boolean(input);
   const showOutputBody = !isHeavy && output !== undefined;
-  // Fence markers are a model-facing prompt-injection defense — the UI shows
-  // clean output. This is display-only; the persisted message stays fenced.
-  // _effect/_outputWarning* are internal (kept on the part for the outcome
-  // badge + replay) so the body renderer strips them too.
-  const displayOutput = showOutputBody
-    ? unfenceDeep(stripInternalMeta(output))
-    : undefined;
+  const hasDetails =
+    showInputBody || showOutputBody || Boolean(errorText);
+  const [isOpen, setIsOpen] = useState(open);
+  // Mirror defaultOpen's behavior when a tool transitions into an error state
+  // after initial mount (defaultOpen === undefined && isError flips false->true).
+  const prevErrorRef = useRef(isError);
+  useEffect(() => {
+    if (defaultOpen === undefined && isError && !prevErrorRef.current) {
+      setIsOpen(true);
+    }
+    prevErrorRef.current = isError;
+  }, [defaultOpen, isError]);
+  // PERF (2026-11-24): only run unfenceDeep when the details body is actually
+  // expanded (closed cards never display displayOutput; header badges read
+  // `output` directly via getEffectStatus / extractRedactionNotices).
+  const displayOutput = useMemo(
+    () =>
+      isOpen && showOutputBody
+        ? unfenceDeep(stripInternalMeta(output))
+        : undefined,
+    [isOpen, showOutputBody, output],
+  );
   // Visible redaction: when the sanitizer stripped/forged-neutralized content,
   // a `[kai: …]` notice rides inside the fence. Surface it at the card HEADER
   // so the user sees the page tried something without expanding the body.
@@ -248,12 +263,11 @@ const ToolImpl = ({
     () => (showOutputBody ? extractRedactionNotices(output) : []),
     [showOutputBody, output],
   );
-  const hasDetails =
-    showInputBody || showOutputBody || Boolean(errorText);
 
   return (
     <Collapsible
-      defaultOpen={open}
+      open={isOpen}
+      onOpenChange={setIsOpen}
       className={cn("group/tool not-prose w-full", className)}
       {...props}
     >
@@ -373,6 +387,17 @@ const ToolImpl = ({
   );
 };
 
+// Settled tool states are immutable once reached: the AI SDK structuredClones
+// the tail message on every 50ms flush, giving already-finished tool parts new
+// object identities for `input` and `output` even though their data will never
+// change again. Skipping reference compares for settled parts stops every
+// earlier tool card in a long agentic turn from re-rendering at 20Hz.
+const SETTLED_TOOL_STATES: ReadonlySet<ToolPart["state"]> = new Set([
+  "output-available",
+  "output-error",
+  "output-denied",
+]);
+
 // For heavy tools, the only thing that should trigger a re-render is a
 // state transition or the path summary changing — NOT every input-content
 // token. We compare the cheap derived summary instead of the input ref.
@@ -380,8 +405,15 @@ export const Tool = memo(ToolImpl, (a, b) => {
   if (a.compact !== b.compact) return false;
   if (a.toolName !== b.toolName || a.state !== b.state) return false;
   if (a.errorText !== b.errorText) return false;
-  if (a.output !== b.output) return false;
   if (a.className !== b.className) return false;
+  if (
+    SETTLED_TOOL_STATES.has(a.state) &&
+    (a.output === undefined) === (b.output === undefined) &&
+    deriveSummary(a.toolName, a.input) === deriveSummary(b.toolName, b.input)
+  ) {
+    return true;
+  }
+  if (a.output !== b.output) return false;
   if (HEAVY_CONTENT_TOOLS.has(a.toolName)) {
     return deriveSummary(a.toolName, a.input) ===
       deriveSummary(b.toolName, b.input);

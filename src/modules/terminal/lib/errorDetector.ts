@@ -78,36 +78,54 @@ const IGNORE_PATTERNS: RegExp[] = [
 const DEBOUNCE_MS = 10_000;
 const BUFFER_MAX = 4000;
 
-let textBuffer = "";
-let lastErrorAt = 0;
-let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+type DetectorSlot = {
+  textBuffer: string;
+  lastErrorAt: number;
+  debounceTimer: ReturnType<typeof setTimeout> | null;
+};
 
-/** Feed decoded text from the PTY into the detector. */
-export function feedText(text: string): void {
-  textBuffer += text;
+// Per-leaf isolated buffers (2026-11-24 perf & isolation fix): previously one
+// global textBuffer mixed output across all open terminals so hidden build
+// streams polluted active terminals and dropped chunks. Key 0 = legacy default
+// caller when no leafId is supplied.
+const slots = new Map<number, DetectorSlot>();
+
+function getOrCreateSlot(leafId: number): DetectorSlot {
+  let slot = slots.get(leafId);
+  if (!slot) {
+    slot = { textBuffer: "", lastErrorAt: 0, debounceTimer: null };
+    slots.set(leafId, slot);
+  }
+  return slot;
+}
+
+/** Feed decoded text from the PTY into the detector for a specific terminal leaf. */
+export function feedText(text: string, leafId = 0): void {
+  const slot = getOrCreateSlot(leafId);
+  slot.textBuffer += text;
   // Keep buffer bounded — only care about recent output.
-  if (textBuffer.length > BUFFER_MAX) {
-    textBuffer = textBuffer.slice(-BUFFER_MAX);
+  if (slot.textBuffer.length > BUFFER_MAX) {
+    slot.textBuffer = slot.textBuffer.slice(-BUFFER_MAX);
   }
 
-  if (debounceTimer) return;
+  if (slot.debounceTimer) return;
 
-  debounceTimer = setTimeout(() => {
-    debounceTimer = null;
-    checkForErrors();
+  slot.debounceTimer = setTimeout(() => {
+    slot.debounceTimer = null;
+    checkForErrors(leafId, slot);
   }, 300);
 }
 
-function checkForErrors(): void {
+function checkForErrors(leafId: number, slot: DetectorSlot): void {
   const now = Date.now();
-  if (now - lastErrorAt < DEBOUNCE_MS) {
-    textBuffer = "";
+  if (now - slot.lastErrorAt < DEBOUNCE_MS) {
+    slot.textBuffer = "";
     return;
   }
 
   // Check the last chunk of text for error patterns.
-  const chunk = textBuffer;
-  textBuffer = "";
+  const chunk = slot.textBuffer;
+  slot.textBuffer = "";
 
   for (const ignore of IGNORE_PATTERNS) {
     if (ignore.test(chunk)) return;
@@ -116,7 +134,7 @@ function checkForErrors(): void {
   for (const pattern of ERROR_PATTERNS) {
     const match = pattern.exec(chunk);
     if (match) {
-      lastErrorAt = now;
+      slot.lastErrorAt = now;
       // Extract context: a few lines around the match.
       const lines = chunk.split("\n");
       const matchLine = chunk.slice(0, match.index).split("\n").length - 1;
@@ -126,7 +144,7 @@ function checkForErrors(): void {
 
       window.dispatchEvent(
         new CustomEvent("kai:terminal-error", {
-          detail: { context, pattern: match[0] },
+          detail: { context, pattern: match[0], leafId },
         }),
       );
       return;
@@ -134,12 +152,20 @@ function checkForErrors(): void {
   }
 }
 
-/** Reset detector state (e.g. on session switch). */
-export function resetDetector(): void {
-  textBuffer = "";
-  lastErrorAt = 0;
-  if (debounceTimer) {
-    clearTimeout(debounceTimer);
-    debounceTimer = null;
+/** Reset detector state for one terminal leaf, or all leaves when omitted. */
+export function resetDetector(leafId?: number): void {
+  if (leafId !== undefined) {
+    const slot = slots.get(leafId);
+    if (!slot) return;
+    if (slot.debounceTimer) {
+      clearTimeout(slot.debounceTimer);
+      slot.debounceTimer = null;
+    }
+    slots.delete(leafId);
+    return;
   }
+  for (const slot of slots.values()) {
+    if (slot.debounceTimer) clearTimeout(slot.debounceTimer);
+  }
+  slots.clear();
 }

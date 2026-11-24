@@ -103,6 +103,8 @@ type Session = {
   watchdogTimer: ReturnType<typeof setTimeout> | null;
   /** Renderer-bind watchdog attempts so far (capped). */
   watchdogAttempts: number;
+  /** Per-leaf streaming UTF-8 decoder so multi-byte sequences never bleed across terminals. */
+  textDecoder: TextDecoder;
 };
 
 const sessions = new Map<number, Session>();
@@ -203,6 +205,7 @@ function ensureSession(leafId: number, initialCwd?: string, env?: Session["env"]
     nudgeTimers: [],
     watchdogTimer: null,
     watchdogAttempts: 0,
+    textDecoder: new TextDecoder("utf-8", { fatal: false }),
   };
   sessions.set(leafId, session);
 
@@ -218,8 +221,6 @@ function ensureSession(leafId: number, initialCwd?: string, env?: Session["env"]
 
   return session;
 }
-
-const textDecoder = new TextDecoder("utf-8", { fatal: false });
 
 function deliverPtyBytes(leafId: number, bytes: Uint8Array): void {
   const s = sessions.get(leafId);
@@ -305,8 +306,12 @@ function deliverPtyBytes(leafId: number, bytes: Uint8Array): void {
   // helper flushes the replay first so live output is always last.
   if (slot) writeLiveToSlot(slot, bytes);
   else s.dormantRing.push(bytes);
-  // Feed to error detector (skip private terminals).
-  if (!s.disposed) feedErrorDetector(textDecoder.decode(bytes, { stream: true }));
+  // Feed to error detector only while this terminal is visible (and not
+  // disposed): hidden terminals in background tabs/projects should not burn
+  // UTF-8 decode + regex sweeps or trigger error events for unseen panes.
+  if (!s.disposed && s.visibleNow) {
+    feedErrorDetector(s.textDecoder.decode(bytes, { stream: true }), leafId);
+  }
 }
 
 /**
@@ -851,7 +856,7 @@ export function disposeSession(leafId: number): void {
     clearTimeout(s.watchdogTimer);
     s.watchdogTimer = null;
   }
-  resetDetector();
+  resetDetector(leafId);
   unbindLeafFromSlot(leafId, s);
   s.snapshot = null;
   s.pty?.close();
