@@ -813,10 +813,15 @@ function UserImageParts({
     <div className="flex flex-col gap-1.5 mb-2 max-w-sm">
       {parts.map((p, idx) =>
         // After a restart, persisted images are stripped to a bare
-        // After a restart, persisted images are stripped to a bare
-        // data-prefix (no payload) to keep the store compact — render a
+        // data-prefix (no payload) to keep the store compact - render a
         // placeholder chip instead of a broken zero-size image.
-        p.url.split(",").length < 2 ? (
+        // PAYLOAD check, not split-count: the stripped form is
+        // `data:image/png;base64,` WITH a trailing comma, so split(",")
+        // yields TWO elements (["data:...", ""]) and the old `.length < 2`
+        // test let it through, rendering a corrupted <img> instead of
+        // this placeholder (2026-11-24 report: images looked corrupted
+        // after the freeze-restart).
+        !(p.url.split(",")[1] ?? "").trim() ? (
           <div
             key={idx}
             className="flex h-12 items-center gap-2 rounded-lg border border-border/60 bg-muted/40 px-3 text-[11px] text-muted-foreground"

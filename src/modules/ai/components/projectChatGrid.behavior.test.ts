@@ -571,6 +571,22 @@ describe("Workspaces grid behavior (source pins)", () => {
     expect(grid).toContain("data-project-chat-grid");
   });
 
+  it("stripped persisted image URLs render the placeholder chip, never a corrupted <img>", () => {
+    // 2026-11-24 report: "images in Workspaces chat session got corrupted"
+    // after the freeze-restart. stripInlineImagesInPlace (sessions.ts)
+    // persists `data:image/png;base64,` WITH a trailing comma; the old
+    // `url.split(",").length < 2` test returned 2 elements and rendered
+    // <img src="data:image/png;base64,"> (broken image) instead of the
+    // placeholder. The check must test the PAYLOAD after the comma.
+    const chat = readFileSync(
+      new URL("./AiChat.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(chat).toContain('!(p.url.split(",")[1] ?? "").trim() ? (');
+    expect(chat).not.toContain('p.url.split(",").length < 2 ? (');
+    expect(chat).toContain("Image attachment (not stored across restarts)");
+  });
+
   it("strips invisible parts (step-start, hidden reasoning, blank text) before grouping so cards have no phantom gaps", () => {
     // 2026-11-23 report: "In Workspaces chat cards, chat has a lot of spaces
     // between some commands". Each step boundary emitted `step-start` +
