@@ -1095,6 +1095,8 @@ function partKey(p: AnyPart, idx: number): string {
   return `i-${idx}`;
 }
 
+const INLINE_THINKING_TAG_RE = /<thinking>|<\|thinking\||<\/thinking>/i;
+
 /**
  * True when a part renders NOTHING on screen (so wrapping it in a PartAppear
  * div inside the flex-col message stack would leave a phantom empty flex item
@@ -1110,13 +1112,19 @@ function isInvisiblePart(p: AnyPart, showModelThinking: boolean): boolean {
   }
   if (t === "reasoning") {
     if (!showModelThinking) return true;
+    const state = (p as { state?: string }).state;
+    // Live streaming reasoning parts are checked inside RenderedPart on the
+    // 80ms throttle — avoid rescanning the full growing buffer at 20Hz here.
+    if (state === "streaming") return false;
     const raw = (p as unknown as { text?: string }).text ?? "";
     const cleaned = stripLeakedTokens(raw);
     return !cleaned;
   }
   if (t === "text") {
+    const state = (p as { state?: string }).state;
+    if (state === "streaming") return false;
     const raw = (p as unknown as { text?: string }).text ?? "";
-    if (/<thinking>|<\|thinking\||<\/thinking>/i.test(raw)) {
+    if (INLINE_THINKING_TAG_RE.test(raw)) {
       const segments = splitThinkingBlocks(raw);
       if (!showModelThinking) {
         const visibleOnly = segments
@@ -1604,73 +1612,82 @@ const RenderedPart = memo(function RenderedPart({
       : "";
   const live = streaming && (part.type === "text" || part.type === "reasoning");
   const throttled = useThrottledStreamingText(rawText, live);
-  const cleanedText = useMemo(() => stripLeakedTokens(throttled), [throttled]);
+  // PERF (2026-11-24): inline `<thinking>` text MUST ride the same 80ms
+  // throttle + memo as plain text. Previously it read `part.text` raw and
+  // ran splitThinkingBlocks + stripLeakedTokens unmemoized on every 50ms
+  // flush, making long local-model thinking streams O(n²).
+  const textRender = useMemo(() => {
+    if (part.type !== "text") return null;
+    if (!INLINE_THINKING_TAG_RE.test(throttled)) {
+      const cleaned = stripLeakedTokens(throttled);
+      if (!cleaned || isBlankMarkdown(cleaned)) return { kind: "empty" as const };
+      return { kind: "plain" as const, text: cleaned };
+    }
+    const segments = splitThinkingBlocks(throttled);
+    if (!showModelThinking) {
+      const visibleOnly = segments
+        .filter((s) => !s.thinking)
+        .map((s) => stripLeakedTokens(s.text))
+        .join("");
+      if (!visibleOnly.trim() || isBlankMarkdown(visibleOnly)) {
+        return { kind: "empty" as const };
+      }
+      return { kind: "plain" as const, text: visibleOnly };
+    }
+    const prepared: Array<{ thinking: boolean; text: string }> = [];
+    for (const seg of segments) {
+      if (seg.thinking) {
+        prepared.push({ thinking: true, text: seg.text });
+        continue;
+      }
+      const cleaned = stripLeakedTokens(seg.text);
+      if (!cleaned.trim() || isBlankMarkdown(cleaned)) continue;
+      prepared.push({ thinking: false, text: cleaned });
+    }
+    if (prepared.length === 0) return { kind: "empty" as const };
+    return { kind: "segments" as const, segments: prepared };
+  }, [part.type, throttled, showModelThinking]);
+
+  const reasoningText = useMemo(() => {
+    if (part.type !== "reasoning" || !showModelThinking) return "";
+    return stripLeakedTokens(throttled);
+  }, [part.type, throttled, showModelThinking]);
 
   if (part.type === "text") {
-    const raw = (part as unknown as { text: string }).text;
-    // If the text contains <thinking>…</thinking> blocks (models that don't
-    // emit a separate reasoning part), split and render them as pills.
-    if (/<thinking>|<\|thinking\||<\/thinking>/i.test(raw)) {
-      const segments = splitThinkingBlocks(raw);
-      // Hidden thinking: strip the thinking segments and keep only the
-      // visible text (when any). No pills, no empty render.
-      if (!showModelThinking) {
-        const visibleOnly = segments
-          .filter((s) => !s.thinking)
-          .map((s) => stripLeakedTokens(s.text))
-          .join("");
-        if (!visibleOnly.trim() || isBlankMarkdown(visibleOnly)) return null;
-        return (
-          <MessageResponse streaming={streaming}>
-            {visibleOnly}
-          </MessageResponse>
-        );
-      }
-      // Check if there's any non-thinking visible text after stripping tokens
-      const hasVisibleText = segments.some((s) => {
-        if (s.thinking) return false;
-        const t = stripLeakedTokens(s.text);
-        return Boolean(t.trim()) && !isBlankMarkdown(t);
-      });
-      const hasThinking = segments.some((s) => s.thinking);
-      if (!hasVisibleText && !hasThinking) return null;
+    if (!textRender || textRender.kind === "empty") return null;
+    if (textRender.kind === "plain") {
       return (
-        <>
-          {segments.map((seg, i) => {
-            if (seg.thinking) {
-              return (
-                <Reasoning key={i}>
-                  <ReasoningTrigger />
-                  <ReasoningContent>{seg.text}</ReasoningContent>
-                </Reasoning>
-              );
-            }
-            const cleaned = stripLeakedTokens(seg.text);
-            if (!cleaned.trim() || isBlankMarkdown(cleaned)) return null;
-            return (
-              <MessageResponse key={i} streaming={streaming && i === segments.length - 1}>
-                {cleaned}
-              </MessageResponse>
-            );
-          })}
-        </>
+        <MessageResponse streaming={streaming}>
+          {textRender.text}
+        </MessageResponse>
       );
     }
-    if (!cleanedText || isBlankMarkdown(cleanedText)) return null;
+    const segs = textRender.segments;
     return (
-      <MessageResponse streaming={streaming}>
-        {cleanedText}
-      </MessageResponse>
+      <>
+        {segs.map((seg, i) =>
+          seg.thinking ? (
+            <Reasoning key={i}>
+              <ReasoningTrigger />
+              <ReasoningContent>{seg.text}</ReasoningContent>
+            </Reasoning>
+          ) : (
+            <MessageResponse key={i} streaming={streaming && i === segs.length - 1}>
+              {seg.text}
+            </MessageResponse>
+          ),
+        )}
+      </>
     );
   }
 
   if (part.type === "reasoning") {
     if (!showModelThinking) return null;
-    if (!cleanedText) return null;
+    if (!reasoningText) return null;
     return (
       <Reasoning>
         <ReasoningTrigger />
-        <ReasoningContent>{cleanedText}</ReasoningContent>
+        <ReasoningContent>{reasoningText}</ReasoningContent>
       </Reasoning>
     );
   }

@@ -601,4 +601,23 @@ describe("Workspaces grid behavior (source pins)", () => {
     expect(chat).toContain("if (isInvisiblePart(p, showModelThinking)) return;");
     expect(chat).toContain('compact ? "gap-1.5" : "gap-3"');
   });
+
+  it("keeps streaming hot paths throttled, observer-stable, and WeakMap-cached (2026-11-24 perf audit)", () => {
+    const chat = readFileSync(new URL("./AiChat.tsx", import.meta.url), "utf8");
+    const chatText = readFileSync(new URL("../lib/chatText.ts", import.meta.url), "utf8");
+    const groupApprovals = readFileSync(new URL("../lib/groupApprovals.ts", import.meta.url), "utf8");
+    const bridge = readFileSync(new URL("./AgentRunBridge.tsx", import.meta.url), "utf8");
+    // 1. Inline <thinking> path uses throttled text + module-level regex.
+    expect(chatText).toContain("const THINKING_SPLIT_RE = new RegExp(");
+    expect(chat).toContain("splitThinkingBlocks(throttled)");
+    expect(chat).not.toContain("splitThinkingBlocks(raw);\n      // Hidden thinking");
+    // 2. useTranscriptClips depends on [ref] (no per-render ResizeObserver churn)
+    //    and startCellVoice/stopCellVoice keep stable identity via voiceRef.
+    expect(grid).toContain("}, [ref]);");
+    expect(grid).toContain("const voiceRef = useRef(voice);");
+    // 3. Group approvals scan is WeakMap-cached for settled messages.
+    expect(groupApprovals).toContain("messageApprovalCache = new WeakMap");
+    // 4. Bridge file-mutation fingerprint caches the settled prefix.
+    expect(bridge).toContain("mutationPrefixRef");
+  });
 });

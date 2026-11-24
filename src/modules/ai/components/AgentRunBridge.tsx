@@ -1029,23 +1029,48 @@ function Bridge({
    *  re-scan pending mutations even when no part state changed. */
   const diffGateRef = useRef("");
   const wasActiveRef = useRef(isActive);
+  // PERF (2026-11-24): cache the settled prefix fingerprint (messages[0..n-2])
+  // keyed by (prefixLen, lastSettledMsgRef). On every 50ms token flush only
+  // the tail message mutates, so computing the full fingerprint stays O(1)
+  // instead of re-concatenating O(messages) strings 20x/s per streaming card.
+  const mutationPrefixRef = useRef<{
+    len: number;
+    lastSettled: UIMessage | undefined;
+    fp: string;
+  }>({ len: 0, lastSettled: undefined, fp: "" });
   useEffect(() => {
     openedRef.current = new Set();
     fileMutationFingerprintRef.current = "";
+    mutationPrefixRef.current = { len: 0, lastSettled: undefined, fp: "" };
   }, [sessionId]);
 
   // Cheap fingerprint of file-mutation tool parts only. The diff-tab effect
   // is the most expensive thing on the streaming path, so we skip it when
   // only text/reasoning tokens have arrived (the common case).
   const fileMutationFingerprint = useMemo(() => {
-    let fp = "";
     const lastIdx = messages.length - 1;
-    for (let i = 0; i <= lastIdx; i++) {
-      const m = messages[i]!;
-      if (m.role !== "assistant") continue;
-      fp += scanMessageForBridge(m, i === lastIdx).mutationFp;
+    if (lastIdx < 0) return "";
+    const prefixLen = lastIdx;
+    const lastSettled = prefixLen > 0 ? messages[prefixLen - 1] : undefined;
+    let prefixFp: string;
+    if (
+      mutationPrefixRef.current.len === prefixLen &&
+      mutationPrefixRef.current.lastSettled === lastSettled
+    ) {
+      prefixFp = mutationPrefixRef.current.fp;
+    } else {
+      prefixFp = "";
+      for (let i = 0; i < prefixLen; i++) {
+        const m = messages[i]!;
+        if (m.role !== "assistant") continue;
+        prefixFp += scanMessageForBridge(m, false).mutationFp;
+      }
+      mutationPrefixRef.current = { len: prefixLen, lastSettled, fp: prefixFp };
     }
-    return fp;
+    const tail = messages[lastIdx]!;
+    const tailFp =
+      tail.role === "assistant" ? scanMessageForBridge(tail, true).mutationFp : "";
+    return prefixFp + tailFp;
   }, [messages]);
 
   useEffect(() => {

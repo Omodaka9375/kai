@@ -2209,6 +2209,11 @@ export const useChatStore = create<StoreState>((set, get) => ({
   },
 
   persistMessages: (id, messages) => {
+    // Single lookup across the global session list (previously 3 separate
+    // .find() scans on every 50ms streaming flush).
+    const sessions = get().sessions;
+    const meta = sessions.find((s) => s.id === id);
+
     // EVICTED-SEED-KEEPS-DATA (2026-11-23 wipe bug): an EMPTY persist must
     // never overwrite a session that HAS real history. The wipe path was:
     // LRU evicts the Chat -> a mounted surface re-runs getOrCreateChat with
@@ -2222,7 +2227,6 @@ export const useChatStore = create<StoreState>((set, get) => ({
     // would destroy the data the repair is about to load. Skip the blob
     // write (the meta update below is harmless either way).
     if (messages.length === 0) {
-      const meta = get().sessions.find((s) => s.id === id);
       const hasRealHistory =
         !!meta &&
         ((meta.lastMessageCount ?? 0) > 0 ||
@@ -2240,16 +2244,19 @@ export const useChatStore = create<StoreState>((set, get) => ({
     // (the write path re-routes on scope mismatch — see saveMessagesRerouted).
     // `sessions` is intentionally GLOBAL across projects, so a membership
     // check would be useless; the session's own workspaceRoot is authoritative.
-    const sessionMeta = get().sessions.find((s) => s.id === id);
-    noteSessionRoot(id, sessionMeta?.workspaceRoot ?? null);
+    noteSessionRoot(id, meta?.workspaceRoot ?? null);
     // Stamp createdAt on NEW messages (metadata) so the transcript can render
     // day separators + hover times. Mutates the LIVE array's message objects —
     // deliberate: the same objects render in AiChat and persist via the
     // debounced save below. Legacy messages (pre-feature) are marked
     // `legacyNoTs` at hydration (loadMessages) and skipped — no fake times.
-    for (const m of messages) {
+    // Walk from the TAIL and stop at the first already-stamped message:
+    // messages only append at the end during streaming, turning a per-flush
+    // O(messages) walk into O(1).
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i]!;
       const mMeta = m.metadata as { createdAt?: number; legacyNoTs?: boolean } | undefined;
-      if (mMeta?.createdAt || mMeta?.legacyNoTs) continue;
+      if (mMeta?.createdAt || mMeta?.legacyNoTs) break;
       m.metadata = { ...(m.metadata as object | undefined), createdAt: Date.now() };
     }
     // Debounce the message-blob write so streaming doesn't pound the store.
@@ -2266,15 +2273,16 @@ export const useChatStore = create<StoreState>((set, get) => ({
     // Update zustand session list only when the derived title actually
     // changes — otherwise we'd rewrite the sessions array (and trigger
     // re-renders + a store write) on every token.
-    const sessions = get().sessions;
-    const meta = sessions.find((s) => s.id === id);
     if (!meta) return;
     // Bump updatedAt on real message growth (not per token) so recency
     // ordering in SessionPicker stays correct for already-titled sessions.
     const isUntitled = !meta.title || meta.title === "New chat";
     const count = messages.length;
     const countChanged = count !== (meta.lastMessageCount ?? -1);
-    const nextTitle = isUntitled ? deriveTitle(messages) : meta.title;
+    // Only re-run deriveTitle when a new message arrived (title comes from
+    // user messages, which never stream token-by-token) or on first real
+    // content. Skips full message + 7-regex walks on every streamed flush.
+    const nextTitle = isUntitled && countChanged ? deriveTitle(messages) : meta.title;
     if (!countChanged && nextTitle === meta.title) return;
     // Was this session a memory-only placeholder until this very persist?
     const wasGhost = isUntitled && (meta.lastMessageCount ?? 0) === 0;

@@ -128,6 +128,16 @@ function stripThinkingMarkers(text: string): string {
   return text.replace(THINKING_BOUNDARY_RE, "").trimStart();
 }
 
+// Module-level regex (2026-11-24 perf fix): previously recompiled with
+// `new RegExp(...)` on every call while streaming. Resetting `lastIndex = 0`
+// on entry keeps sharing one instance safe and avoids per-flush allocation.
+const THINKING_SPLIT_RE = new RegExp(
+  "<thinking>([\\s\\S]*?)<\\/thinking>" +
+    "|<\\|thinking\\|>([\\s\\S]*?)<\\|\\/thinking\\|>" +
+    "|\\n{2}</think>([\\s\\S]*?)\\n{2}",
+  "gi",
+);
+
 export function splitThinkingBlocks(
   text: string,
 ): { thinking: boolean; text: string }[] {
@@ -136,15 +146,10 @@ export function splitThinkingBlocks(
   // Unified regex that matches XML-style <thinking>...</thinking>,
   // pipe-delimited <|thinking|>...</|thinking|>, and AI SDK thought
   // protocol </think>... (Vercel AI SDK v6 format).
-  const re = new RegExp(
-    "<thinking>([\\s\\S]*?)<\\/thinking>" +
-      "|<\\|thinking\\|>([\\s\\S]*?)<\\|\\/thinking\\|>" +
-      "|\\n{2}</think>([\\s\\S]*?)\\n{2}",
-    "gi",
-  );
+  THINKING_SPLIT_RE.lastIndex = 0;
   let last = 0;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
+  while ((m = THINKING_SPLIT_RE.exec(text)) !== null) {
     if (m.index > last) out.push({ thinking: false, text: stripThinkingMarkers(text.slice(last, m.index)) });
     // Group 1 = XML, group 2 = pipe-delimited, group 3 = AI SDK protocol
     const inner = (m[1] ?? m[2] ?? m[3] ?? "").trim();

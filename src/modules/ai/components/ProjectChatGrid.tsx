@@ -248,35 +248,76 @@ const CardPastePills = memo(function CardPastePills({
  */
 function useTranscriptClips(ref: React.RefObject<HTMLDivElement | null>) {
   const [clips, setClips] = useState({ top: false, bottom: false });
-  // No dep list by design: re-acquires the scroll element whenever React
-  // swaps subtrees (empty-state <-> transcript), and update() bails on
-  // equal state so the re-run is inert. Re-observes the content node too -
-  // a scroll container's own box never changes while text streams.
+  // PERF (2026-11-24): attach listeners and ResizeObserver ONCE per log
+  // element rather than tearing down + recreating them on every render
+  // (every 50ms streaming flush). A lightweight MutationObserver on the
+  // frame root handles subtree swaps (empty-state <-> transcript) so we
+  // still re-bind automatically when `[role="log"]` mounts or changes.
   useEffect(() => {
     const root = ref.current;
     if (!root) return;
-    const el = root.querySelector<HTMLElement>('[role="log"]');
-    if (!el) return;
+    let boundEl: HTMLElement | null = null;
+    let boundContent: Element | null = null;
+    let ro: ResizeObserver | null = null;
+
     const update = () => {
+      if (!boundEl) return;
+      const el = boundEl;
       setClips((c) => {
         const top = el.scrollTop > 4;
-        const bottom =
-          el.scrollHeight - el.scrollTop - el.clientHeight > 4;
-        return c.top === top && c.bottom === bottom
-          ? c
-          : { top, bottom };
+        const bottom = el.scrollHeight - el.scrollTop - el.clientHeight > 4;
+        return c.top === top && c.bottom === bottom ? c : { top, bottom };
       });
     };
-    update();
-    el.addEventListener("scroll", update, { passive: true });
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    if (el.firstElementChild) ro.observe(el.firstElementChild);
-    return () => {
-      el.removeEventListener("scroll", update);
-      ro.disconnect();
+
+    const detach = () => {
+      if (boundEl) {
+        boundEl.removeEventListener("scroll", update);
+        boundEl = null;
+      }
+      boundContent = null;
+      ro?.disconnect();
+      ro = null;
     };
-  });
+
+    const bind = () => {
+      const el = root.querySelector<HTMLElement>('[role="log"]');
+      if (!el) {
+        if (boundEl) {
+          detach();
+          setClips((c) => (c.top || c.bottom ? { top: false, bottom: false } : c));
+        }
+        return;
+      }
+      if (el === boundEl) {
+        // Same scroll container; observe newly mounted content child if swapped.
+        const first = el.firstElementChild;
+        if (first && first !== boundContent && ro) {
+          if (boundContent) ro.unobserve(boundContent);
+          ro.observe(first);
+          boundContent = first;
+          update();
+        }
+        return;
+      }
+      detach();
+      boundEl = el;
+      boundContent = el.firstElementChild;
+      el.addEventListener("scroll", update, { passive: true });
+      ro = new ResizeObserver(update);
+      ro.observe(el);
+      if (boundContent) ro.observe(boundContent);
+      update();
+    };
+
+    bind();
+    const mo = new MutationObserver(bind);
+    mo.observe(root, { childList: true, subtree: true });
+    return () => {
+      mo.disconnect();
+      detach();
+    };
+  }, [ref]);
   return clips;
 }
 
@@ -489,19 +530,23 @@ export function ProjectChatGrid({ items }: { items: ProjectSwitcherItem[] }) {
       useChatStore.setState({ _tick: Date.now() });
     },
   });
-  const startCellVoice = useCallback(
-    (sessionId: string) => {
-      if (voice.recording || voice.transcribing) return;
-      if (voice.error) voice.clearError();
-      micTargetRef.current = sessionId;
-      setMicTarget(sessionId);
-      voice.start();
-    },
-    [voice],
-  );
+  const voiceRef = useRef(voice);
+  voiceRef.current = voice;
+  // PERF (2026-11-24): useWhisperRecording returns a fresh object each render;
+  // reading through voiceRef gives startCellVoice/stopCellVoice permanent
+  // stable identities so memo'd GridCell / CellBody / CellInput don't
+  // re-render all 8 cards on every grid status transition.
+  const startCellVoice = useCallback((sessionId: string) => {
+    const v = voiceRef.current;
+    if (v.recording || v.transcribing) return;
+    if (v.error) v.clearError();
+    micTargetRef.current = sessionId;
+    setMicTarget(sessionId);
+    v.start();
+  }, []);
   const stopCellVoice = useCallback(() => {
-    voice.stop();
-  }, [voice]);
+    voiceRef.current.stop();
+  }, []);
   const micBusy = voice.recording || voice.transcribing;
 
   return (

@@ -52,16 +52,31 @@ function isShellTool(name: string): boolean {
   return name === "bash_run" || name === "bash_background";
 }
 
-/** Enumerate approval-requested parts from one session's live chat. */
-function sessionApprovals(
-  sessionId: string,
-  requester: string,
-): UnifiedApproval[] {
-  const chat = getChat(sessionId);
-  if (!chat) return [];
-  const out: UnifiedApproval[] = [];
-  for (const m of chat.messages as UIMessage[]) {
-    if (m.role !== "assistant") continue;
+type RawApprovalMatch = {
+  id: string;
+  toolName: string;
+  input: Record<string, unknown> | null;
+  label: string;
+  at: number;
+};
+
+/**
+ * Per-message approval scan cache (2026-11-24 perf fix): mirrors
+ * AgentRunBridge's `bridgeMessageScanCache`. Settled messages keep object
+ * identity across stream flushes, so caching their extracted approval matches
+ * by message reference avoids walking full chat history × parts on every
+ * participant meta bump. The tail message is bypassed while live because its
+ * parts mutate in place.
+ */
+const messageApprovalCache = new WeakMap<UIMessage, RawApprovalMatch[]>();
+
+function scanMessageApprovals(m: UIMessage, isTail: boolean): RawApprovalMatch[] {
+  if (!isTail) {
+    const cached = messageApprovalCache.get(m);
+    if (cached) return cached;
+  }
+  const matches: RawApprovalMatch[] = [];
+  if (m.role === "assistant") {
     for (const p of m.parts as Array<Record<string, unknown>>) {
       if ((p.state as string | undefined) !== "approval-requested") continue;
       const approval = p.approval as { id?: string } | undefined;
@@ -69,15 +84,41 @@ function sessionApprovals(
       const type = String(p.type ?? "");
       const toolName = type.replace(/^tool-/, "");
       if (!toolName || toolName === "dynamic-tool") continue; // MCP: keep desktop card only
-      out.push({
+      matches.push({
         id: approval.id,
-        source: "group-session",
-        groupId: null,
-        requester,
         toolName,
         input: (p.input as Record<string, unknown> | undefined) ?? null,
         label: presentationFor(toolName).approvalLabel ?? toolName,
         at: (m.metadata as { createdAt?: number } | undefined)?.createdAt ?? 0,
+      });
+    }
+  }
+  if (!isTail) messageApprovalCache.set(m, matches);
+  return matches;
+}
+
+/** Enumerate approval-requested parts from one session's live chat. */
+function sessionApprovals(
+  sessionId: string,
+  requester: string,
+): UnifiedApproval[] {
+  const chat = getChat(sessionId);
+  if (!chat) return [];
+  const messages = chat.messages as UIMessage[];
+  const lastIdx = messages.length - 1;
+  const out: UnifiedApproval[] = [];
+  for (let i = 0; i <= lastIdx; i++) {
+    const matches = scanMessageApprovals(messages[i]!, i === lastIdx);
+    for (const hit of matches) {
+      out.push({
+        id: hit.id,
+        source: "group-session",
+        groupId: null,
+        requester,
+        toolName: hit.toolName,
+        input: hit.input,
+        label: hit.label,
+        at: hit.at,
       });
     }
   }

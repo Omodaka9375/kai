@@ -37,6 +37,7 @@ import {
   useChatStore,
   subscribeSessionAgentMeta,
   getSessionMetaVersion,
+  getSessionMetaVersionFor,
 } from "../store/chatStore";
 import { AiToolApproval } from "./AiToolApproval";
 import {
@@ -946,10 +947,20 @@ function GroupApprovals({ group }: { group: GroupChat }) {
     getGroupStoreVersion,
     getGroupStoreVersion,
   );
+  // PERF (2026-11-24): sum only THIS group's participant session versions
+  // rather than subscribing to the global counter, so unrelated projects
+  // streaming in other tabs/Workspaces cards never re-render GroupApprovals.
+  const getParticipantMetaSum = useCallback(() => {
+    let sum = 0;
+    for (const p of group.participants) {
+      if (p.sessionId) sum += getSessionMetaVersionFor(p.sessionId);
+    }
+    return sum;
+  }, [group.participants]);
   const metaVersion = useSyncExternalStore(
     subscribeSessionAgentMeta,
-    getSessionMetaVersion,
-    getSessionMetaVersion,
+    getParticipantMetaSum,
+    getParticipantMetaSum,
   );
   const foregroundSessionId = useChatStore((s) => s.activeSessionId);
   const pending = useMemo(
