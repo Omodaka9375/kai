@@ -660,6 +660,18 @@ const DOMAIN_TRIGGERS: Record<string, string[]> = {
   settings: [
     "setting", "config", "preference", "beállít",
   ],
+  // REMINDER-CREATE FLOOR (2026-11-24 live false positive: "its been 10
+  // mins check" - a conversational nudge - classified as set_timer_reminder
+  // and EXECUTED, creating a bogus 10-minute reminder). reminder_create's
+  // dueAt is COMPUTED (exempt from value grounding) and its `message` slot
+  // rides the loose paraphrase exemption, so the only reliable floor is
+  // intent vocabulary: a real reminder request always carries remind/timer/
+  // alarm words; "10 mins" alone is a duration, not an intent. Same guard
+  // shape as reminder_list's inline floor below.
+  reminder_create: [
+    "remind", "reminder", "timer", "alarm", "ping me", "wake me",
+    "nudge me", "emlékeztet", "időzít",
+  ],
   get_time: [
     "time", "date", "day", "clock", "today", "tomorrow", "hour",
     "mik", "idő", "dátum", "nap", "hány", "ma",

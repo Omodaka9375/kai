@@ -486,4 +486,42 @@ describe("decideReflex", () => {
       expect(d.action === "execute", p).toBe(true);
     }
   });
+
+  it("reminder_create requires reminder intent vocabulary in the prompt (2026-11-24 live false positive)", () => {
+    // LIVE HIJACK: "its been 10 mins check" - a conversational nudge -
+    // classified as set_timer_reminder and EXECUTED, creating a bogus
+    // 10-minute reminder. dueAt is COMPUTED (exempt from grounding) and
+    // the message slot rides a paraphrase exemption, so the only floor is
+    // intent vocabulary in the prompt.
+    const raw = decideReflex("its been 10 mins check", {
+      calls: [{ name: "set_timer_reminder", arguments: { message: "Check", minutes: 10 } }],
+      confidence: 0.99,
+    });
+    // Raw engine name - map first: narrow -> canonical via the mapper is
+    // invoked inside decideReflex; simulate the mapped reminder_create.
+    const mapped = decideReflex("its been 10 mins check", {
+      calls: [{ name: "set_timer_reminder", arguments: { message: "check", minutes: 10 } }],
+      confidence: 0.99,
+    });
+    expect(
+      raw.action === "fallthrough" && raw.reason === "ungrounded",
+      "conversational duration nudge must fall through",
+    ).toBe(true);
+    expect(mapped.action === "fallthrough").toBe(true);
+
+    // Real reminder requests still execute (message slot >=3 chars rides
+    // the paraphrase exemption).
+    for (const p of [
+      "remind me in 15 minutes to check the deploy",
+      "set a reminder in 2 hours to stretch",
+      "remind me tomorrow at 9am to pay bills",
+      "set a timer for 10 minutes",
+    ]) {
+      const d = decideReflex(p, {
+        calls: [{ name: "set_timer_reminder", arguments: { message: "check the deploy", minutes: 10 } }],
+        confidence: 0.9,
+      });
+      expect(d.action === "execute", p).toBe(true);
+    }
+  });
 });
