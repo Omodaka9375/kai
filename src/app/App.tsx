@@ -1915,7 +1915,7 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
           <div
             className={cn(
               "flex h-full shrink-0 transition-[width] duration-150",
-              chatGridOpen && "pointer-events-none !w-0 overflow-hidden",
+              chatGridOpen && "pointer-events-none w-0! overflow-hidden",
             )}
           >
             <ProjectRail

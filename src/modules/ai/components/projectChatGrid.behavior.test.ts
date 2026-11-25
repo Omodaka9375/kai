@@ -93,7 +93,7 @@ describe("Workspaces grid behavior (source pins)", () => {
       app.indexOf("<ProjectRail") - 400,
       app.indexOf("<ProjectRail"),
     );
-    expect(railWrap).toContain("pointer-events-none !w-0");
+    expect(railWrap).toContain("pointer-events-none w-0!");
     expect(header).toContain("{!chatGridOpen && (");
     expect(header).toContain("projectName && !compact && !chatGridOpen");
   });
