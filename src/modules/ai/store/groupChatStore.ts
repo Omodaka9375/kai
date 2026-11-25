@@ -705,6 +705,30 @@ export async function hydrateGroups(): Promise<void> {
           }
         }
       }
+
+      // ENDED-GROUP GC (2026-11-25 long-lived-window report): ended groups
+      // are kept for Resume, but nothing ever removed them - months of use
+      // piled dozens of dead transcripts into kai-groups.json (loaded,
+      // re-serialized, and scanned on every persist forever). Sweep at
+      // hydrate: ended groups older than the retention window are dropped;
+      // survivors get their transcripts trimmed to the tail cap so one
+      // huge old group cannot dominate the file either. LIVE groups are
+      // never touched here - their cap is enforced incrementally in
+      // appendGroupMessage.
+      const gcCutoff = Date.now() - ENDED_GROUP_RETENTION_MS;
+      let gcChanged = false;
+      for (const g of ordered) {
+        if (g.endedAt !== null && g.endedAt < gcCutoff) {
+          groups.delete(g.id);
+          gcChanged = true;
+          continue;
+        }
+        if (g.messages.length > GROUP_MESSAGE_CAP + GROUP_CAP_NOTE_SPAN) {
+          g.messages = g.messages.slice(-GROUP_MESSAGE_CAP);
+          gcChanged = true;
+        }
+      }
+      if (gcChanged) void persist().catch(() => undefined);
     }
     hydrated = true;
     notify();
@@ -854,6 +878,28 @@ export async function createGroupChat(
   return group;
 }
 
+/**
+ * TRANSCRIPT TAIL CAP (2026-11-25 long-lived-window report): a group's
+ * messages array is never read whole by the app - the persona prompt
+ * slices the last 40 (personaTranscriptSnippet) and the panel renders
+ * the list - but it was never TRIMMED either, so a months-old group
+ * kept every message in memory AND rewrote the full array on every
+ * debounced persist (each new message = O(total history) JSON). The
+ * cap keeps the most recent messages and records the drop with a
+ * system note; agents already work from the recent tail, so nothing
+ * behavioral changes except the file stops growing forever.
+ */
+const GROUP_MESSAGE_CAP = 400;
+/** How many messages the trimming system note mentions. */
+const GROUP_CAP_NOTE_SPAN = 50;
+
+/**
+ * ENDED-GROUP RETENTION (hydrate GC): ended groups stay resumable for
+ * this long; older ones are swept at startup. 30 days keeps the Resume
+ * picker useful while stopping the dead-transcript pile-up.
+ */
+const ENDED_GROUP_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
 /** Append a message to the group transcript (user line or mirrored agent reply). */
 export async function appendGroupMessage(
   groupId: string,
@@ -862,7 +908,24 @@ export async function appendGroupMessage(
   const g = groups.get(groupId);
   if (!g || g.endedAt !== null) return null;
   const m: GroupMessage = { id: newMessageId(), at: Date.now(), ...msg };
-  g.messages = [...g.messages, m];
+  let next = [...g.messages, m];
+  // TAIL CAP: trim from the HEAD once past the cap. The trimming note is
+  // itself a message, so the steady-state length is CAP + the note.
+  if (next.length > GROUP_MESSAGE_CAP + GROUP_CAP_NOTE_SPAN) {
+    const dropped = next.length - GROUP_MESSAGE_CAP;
+    next = [
+      {
+        id: newMessageId(),
+        at: m.at,
+        from: "system",
+        projectId: "",
+        sessionId: "",
+        text: `Older messages trimmed (${dropped} messages) - the group keeps its most recent ${GROUP_MESSAGE_CAP}.`,
+      },
+      ...next.slice(dropped),
+    ];
+  }
+  g.messages = next;
   schedulePersist();
   notify();
   return m;
