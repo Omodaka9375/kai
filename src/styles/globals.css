@@ -410,11 +410,11 @@ html *::-webkit-scrollbar {
   color: color-mix(in oklab, var(--foreground) 72%, transparent);
 }
 
-.kai-tinted-bar button:hover,
-.kai-tinted-bar [role="button"]:hover,
-.kai-tinted-bar button[data-state="open"],
-.kai-tinted-bar [role="button"][data-state="open"],
-.kai-tinted-bar button[aria-expanded="true"] {
+.kai-tinted-bar button:not(.kai-no-hover-bg):hover,
+.kai-tinted-bar [role="button"]:not(.kai-no-hover-bg):hover,
+.kai-tinted-bar button:not(.kai-no-hover-bg)[data-state="open"],
+.kai-tinted-bar [role="button"]:not(.kai-no-hover-bg)[data-state="open"],
+.kai-tinted-bar button:not(.kai-no-hover-bg)[aria-expanded="true"] {
   /* Foreground-alpha wash is hue-neutral: never fights the tint. */
   background: color-mix(in oklab, var(--foreground) 10%, transparent);
 }

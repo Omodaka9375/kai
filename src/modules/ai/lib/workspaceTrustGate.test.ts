@@ -26,10 +26,6 @@ const grid = readFileSync(
   new URL("../components/ProjectChatGrid.tsx", import.meta.url),
   "utf8",
 );
-const todoStrip = readFileSync(
-  new URL("../components/TodoStrip.tsx", import.meta.url),
-  "utf8",
-);
 const mini = readFileSync(
   new URL("../components/AiMiniWindow.tsx", import.meta.url),
   "utf8",
@@ -85,9 +81,8 @@ describe("workspace trust gate - enforcement surfaces", () => {
     expect(approvalCard).not.toContain("predictAutoApproval({\n      autoApprove: sessionAutoApprove,\n      toolName,\n      input,\n      signingApprovalRequired,\n      alwaysAllowedAuthorityTools: authorityGrants,\n    });\n  }\n  // ALWAYS-ALLOW GRANT (2026-11-16)");
   });
 
-  it("Workspaces pill and TodoStrip paint the effective mode", () => {
+  it("Workspaces pill paints the effective mode", () => {
     expect(grid).toContain("const mode = effectiveSessionAutoApprove(sessionId);");
-    expect(todoStrip).toContain('effectiveSessionAutoApprove(sessionId ?? "")');
   });
 });
 

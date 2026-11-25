@@ -12,14 +12,9 @@ import ArrowRight01Icon from "@hugeicons/core-free-icons/ArrowRight01Icon";
 import CheckmarkSquare02Icon from "@hugeicons/core-free-icons/CheckmarkSquare02Icon";
 import SquareIcon from "@hugeicons/core-free-icons/SquareIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useState } from "react";
 import type { Todo } from "../lib/todos";
 import { useTodosStore } from "../store/todoStore";
-import {
-  effectiveSessionAutoApprove,
-  getSessionAutoApproveVersion,
-  subscribeSessionAutoApprove,
-} from "../store/chatStore";
 
 type Props = {
   sessionId: string | null;
@@ -27,27 +22,16 @@ type Props = {
   onStop?: () => void;
 };
 
-/** The stop-agent control: a small BLINKING SQUARE (2026-11-04 user
- *  report: "stop agent button is a circle and doesn't look like anything is
- *  working"). The old muted StopCircleIcon glyph read as nothing at 4px; a
- *  blinking square says "recording/running - press to stop" at a
- *  glance, the same convention recorders use.
- *
- *  COLOR (2026-11-06 ask): the square matches the permission indicator's
- *  CURRENT color - the same emerald/amber the Allow/Ask toggle dot shows.
- *  Green = the agent runs under auto-allow, yellow = it runs in Ask mode;
- *  one color language across the whole agent-control cluster (toggle dot,
- *  this square). */
+/** The stop-agent control: a small pulsing RED SQUARE (size-2, matching
+ *  the old dot footprint). Red square is the universal stop/recording
+ *  control — distinct from the Allow/Ask permission toggle color. */
 function StopSquare({
   onClick,
   stopPropagation,
-  mode,
 }: {
   onClick: () => void;
   stopPropagation?: boolean;
-  mode: "off" | "all";
 }) {
-  const allowMode = mode === "all";
   return (
     <button
       type="button"
@@ -55,12 +39,7 @@ function StopSquare({
         if (stopPropagation) e.stopPropagation();
         onClick();
       }}
-      className={cn(
-        "size-2 shrink-0 cursor-pointer rounded-full animate-pulse transition-transform hover:scale-125 hover:animate-none",
-        allowMode
-          ? "bg-emerald-500 shadow-[0_0_0_2px] shadow-emerald-500/20"
-          : "bg-amber-500 shadow-[0_0_0_2px] shadow-amber-500/20",
-      )}
+      className="size-2 shrink-0 cursor-pointer rounded-[2px] bg-red-500 shadow-[0_0_0_2px] shadow-red-500/20 animate-pulse transition-transform hover:scale-125 hover:animate-none"
       title="Stop agent"
       aria-label="Stop agent"
     />
@@ -75,20 +54,6 @@ export function TodoStrip({ sessionId, isBusy, onStop }: Props) {
     useTodosStore((s) => (sessionId ? s.bySession[sessionId] : undefined)) ??
     EMPTY_TODOS;
   const [expanded, setExpanded] = useState(true);
-  // Session-scoped auto-approve mode for the Stop square's color (see
-  // StopSquare). Same reactive pattern as the bridge: the Map read is not
-  // reactive, so subscribe to the version counter bumped on every toggle.
-  const autoApproveVersion = useSyncExternalStore(
-    subscribeSessionAutoApprove,
-    getSessionAutoApproveVersion,
-    getSessionAutoApproveVersion,
-  );
-  // TRUST GATE: the stop square reflects the EFFECTIVE mode (untrusted
-  // project = Ask amber), matching what the bridge actually enforces.
-  const approveMode = useMemo(
-    () => effectiveSessionAutoApprove(sessionId ?? ""),
-    [sessionId, autoApproveVersion],
-  );
 
   // Auto-collapse when list grows past 5 items
   const count = todos.length;
@@ -120,7 +85,7 @@ export function TodoStrip({ sessionId, isBusy, onStop }: Props) {
           <Spinner className="size-3" />
           <span>Agent running…</span>
         </span>
-        <StopSquare onClick={() => onStop?.()} mode={approveMode} />
+        <StopSquare onClick={() => onStop?.()} />
       </div>
     );
   }
@@ -159,9 +124,7 @@ export function TodoStrip({ sessionId, isBusy, onStop }: Props) {
         <span className="text-[11px] tabular-nums font-mono text-muted-foreground">
           {completed}/{todos.length}
         </span>
-        {isBusy && (
-          <StopSquare onClick={() => onStop?.()} stopPropagation mode={approveMode} />
-        )}
+        {isBusy && <StopSquare onClick={() => onStop?.()} stopPropagation />}
       </button>
       {expanded && (
         <ul className="flex flex-col gap-0.5">

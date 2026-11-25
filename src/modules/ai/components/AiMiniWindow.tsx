@@ -564,7 +564,7 @@ function ContextIndicator({ messages }: { messages: UIMessage[] }) {
 
   return (
     <Context usedTokens={used} maxTokens={max} modelId={modelId}>
-      <ContextTrigger className="h-6 gap-1 px-0 text-[10.5px]" />
+      <ContextTrigger className="kai-no-hover-bg h-6 gap-1.5 px-2 text-[10.5px] hover:bg-transparent dark:hover:bg-transparent" />
       <ContextContent className="w-64 text-[11px]">
         <ContextContentHeader />
         <ContextContentBody>

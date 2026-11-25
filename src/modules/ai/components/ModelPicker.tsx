@@ -178,8 +178,9 @@ function ModelDropdown() {
     );
   }, []);
   const current = getModel(selected);
-  // For custom endpoints, show the actual model ID instead of generic label.
+  // For custom/proxy endpoints, show the actual model ID instead of generic label.
   const compatModelId = usePreferencesStore((s) => s.openaiCompatibleModelId);
+  const proxyModelId = usePreferencesStore((s) => s.proxyModelId);
 
   // Auto-sync OpenRouter models so the dropdown stays current.
   const orModels = useOpenRouterModelsStore((s) => s.models);
@@ -191,7 +192,9 @@ function ModelDropdown() {
   const displayLabel =
     current.id === "openai-compatible-custom" && compatModelId.trim()
       ? compatModelId.trim()
-      : current.label;
+      : current.id === "proxy-custom" && proxyModelId.trim()
+        ? proxyModelId.trim()
+        : current.label;
   const [search, setSearch] = useState("");
   const [activeProvider, setActiveProvider] = useState<ProviderId | null>(null);
   const [tab, setTab] = useState<Tab>("all");

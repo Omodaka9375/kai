@@ -1360,13 +1360,16 @@ const CardModelPill = memo(function CardModelPill({
   usePreferencesStore((s) => s.defaultModelId);
   const favoriteIds = usePreferencesStore((s) => s.favoriteModelIds);
   const compatModelId = usePreferencesStore((s) => s.openaiCompatibleModelId);
+  const proxyModelId = usePreferencesStore((s) => s.proxyModelId);
 
   const selected = getProjectEffectiveModelId(projectId, sessionId);
   const current = getModel(selected);
   const fullLabel =
     current.id === "openai-compatible-custom" && compatModelId.trim()
       ? compatModelId.trim()
-      : current.label;
+      : current.id === "proxy-custom" && proxyModelId.trim()
+        ? proxyModelId.trim()
+        : current.label;
   const shortLabel = shortenModelLabel(fullLabel);
 
   const favoriteModels = useMemo(
@@ -1414,7 +1417,9 @@ const CardModelPill = memo(function CardModelPill({
             const label =
               m.id === "openai-compatible-custom" && compatModelId.trim()
                 ? compatModelId.trim()
-                : m.label;
+                : m.id === "proxy-custom" && proxyModelId.trim()
+                  ? proxyModelId.trim()
+                  : m.label;
             return (
               <DropdownMenuItem
                 key={m.id}
@@ -2219,10 +2224,11 @@ const CellInput = memo(function CellInput({
         <button
           type="button"
           title="Stop agent"
+          aria-label="Stop agent"
           onClick={stop}
-          className="shrink-0 rounded p-1 text-destructive/80 transition-colors hover:bg-accent hover:text-destructive"
+          className="flex shrink-0 cursor-pointer items-center justify-center rounded p-1.5"
         >
-          <HugeiconsIcon icon={Cancel01Icon} size={12} strokeWidth={2} />
+          <span className="size-2 rounded-[2px] bg-red-500 shadow-[0_0_0_2px] shadow-red-500/20 animate-pulse transition-transform hover:scale-125 hover:animate-none" />
         </button>
       ) : (
         <button
