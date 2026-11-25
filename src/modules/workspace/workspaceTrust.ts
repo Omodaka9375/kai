@@ -77,8 +77,17 @@ export function hydrateWorkspaceTrust(openProjectIds: string[]): Promise<void> {
       hydrated = true;
       notify();
     } catch {
-      // Storage unavailable (tests, plain web): fail CLOSED by staying
-      // un-hydrated; isWorkspaceTrustHydrated() lets UI defer the banner.
+      // STORAGE-FAILURE FAIL-OPEN (2026-11-25 "don't break existing
+      // projects" review): if the trust store cannot be read, the
+      // alternative is EVERY project reading untrusted -> Allow users
+      // silently stuck in Ask with no banner (the banner defers on
+      // isWorkspaceTrustHydrated, which would stay false forever). Degrade
+      // to trusting the CURRENTLY OPEN projects (memory-only, nothing
+      // persisted) and mark hydrated so the UI works. A retry happens on
+      // the next app launch.
+      for (const id of openProjectIds) trusted.add(id);
+      hydrated = true;
+      notify();
     }
   })();
   return hydration;

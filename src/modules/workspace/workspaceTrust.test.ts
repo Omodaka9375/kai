@@ -101,4 +101,32 @@ describe("workspace trust registry", () => {
     await m.hydrateWorkspaceTrust([PID_A]);
     expect(m.isWorkspaceTrustHydrated()).toBe(true);
   });
+
+  it("storage failure degrades to trusting the open projects (no blanket Ask)", async () => {
+    // "Don't break existing projects": if the store cannot be read, every
+    // project must NOT read untrusted (Allow users silently stuck in Ask
+    // with no banner). The open projects are trusted in-memory and the
+    // registry marks itself hydrated so the UI functions.
+    vi.resetModules();
+    storeMap.clear();
+    vi.doMock("@tauri-apps/plugin-store", () => ({
+      LazyStore: vi.fn().mockImplementation(() => ({
+        get: vi.fn(async () => {
+          throw new Error("disk wedged");
+        }),
+        set: vi.fn(async () => {
+          throw new Error("disk wedged");
+        }),
+        save: vi.fn(),
+      })),
+    }));
+    const broken = await import("./workspaceTrust");
+    await broken.hydrateWorkspaceTrust([PID_A, PID_B]);
+    expect(broken.isWorkspaceTrustHydrated()).toBe(true);
+    expect(broken.isWorkspaceTrusted(PID_A)).toBe(true);
+    expect(broken.isWorkspaceTrusted(PID_B)).toBe(true);
+    // A project NOT in the open set still reads untrusted.
+    expect(broken.isWorkspaceTrusted("local:x:/elsewhere")).toBe(false);
+    vi.doUnmock("@tauri-apps/plugin-store");
+  });
 });
