@@ -2656,9 +2656,27 @@ async function loadSessionHistoryForMeta(
         (meta.workspaceEnv as never) ?? { kind: "local" },
       ).catch(() => null)
     : await loadMessages(sessionId).catch(() => null);
-  if (loaded && loaded.length > 0 && !chats.has(sessionId)) {
-    seedMessages.set(sessionId, stripIncompleteToolMessages(loaded));
+  if (!loaded || loaded.length === 0) return;
+  const cleaned = stripIncompleteToolMessages(loaded);
+  const existing = chats.get(sessionId);
+  if (existing) {
+    // REFILL (2026-11-25 Workspaces "no session history" report): the
+    // unseeded-Chat path constructs the Chat FIRST and loads history in
+    // the background - but a mounted surface (grid CellBody, bridge)
+    // MEMOIZES the Chat instance by sessionId and never re-runs
+    // getOrCreateChat, so the seed map was written for a consumer that
+    // never comes and the card sat empty forever. If the LIVE chat is
+    // still empty, swap its messages array in place; useChat subscribers
+    // fire and the surface repaints with real history. Non-empty chats
+    // are left alone (a real stream already rebuilt state we must not
+    // clobber); their disk blob was protected by the persist guard.
+    if (existing.messages.length === 0) {
+      existing.messages = cleaned;
+      useChatStore.setState({ _tick: Date.now() });
+    }
+    return;
   }
+  seedMessages.set(sessionId, cleaned);
 }
 
 /** Load persisted history BEFORE a background subsystem constructs its Chat.

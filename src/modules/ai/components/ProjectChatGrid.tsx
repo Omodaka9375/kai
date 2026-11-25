@@ -110,6 +110,7 @@ import {
 import {
   getProjectActiveSession,
   subscribeProjectActiveSessions,
+  getProjectActiveSessionVersion,
   getProjectPersona,
   getProjectRuntime,
 } from "../store/projectRegistry";
@@ -505,17 +506,42 @@ export function ProjectChatGrid({ items }: { items: ProjectSwitcherItem[] }) {
   // mounted cells display so the chat LRU never evicts a VISIBLE chat.
   // Evicting one made the cell's next render construct an empty Chat whose
   // mount persist overwrote the session's real disk history with [].
-  useEffect(() => {
+  //
+  // RENDER-TIME REGISTRATION (2026-11-25 "cards show new session / no
+  // history" report): the pin used to be a useEffect, which runs AFTER the
+  // children mounted. On grid OPEN that meant the first render pass
+  // constructed every card's Chat with pins still null - and a full grid
+  // (8 projects + a fresh session elsewhere) exceeded the LRU cap DURING
+  // that pass, evicting a card's chat before the pin ever landed. The
+  // evicted card then re-rendered into an empty unseeded Chat that stayed
+  // empty (its surface memoizes the Chat by id). Registering during
+  // render, synchronously before the cells mount, makes the pin set
+  // effective for exactly the render that constructs the chats. The effect
+  // below keeps the set refreshed on rebinds and clears it on unmount.
+  const pinnedVersion = useSyncExternalStore(
+    subscribeProjectActiveSessions,
+    getProjectActiveSessionVersion,
+  );
+  const pinnedIds = useMemo(() => {
+    // subscribeProjectActiveSessions guarantees this re-runs on every
+    // rebind; version dep keeps it fresh when cells change without a
+    // session rebind (project added/removed while the grid is open).
+    void pinnedVersion;
     const pins = new Set<string>();
     for (const cell of cells) {
       const sid = getProjectActiveSession(cell.id);
       if (sid) pins.add(sid);
     }
-    setWorkspacesPinnedSessions(pins);
+    return pins;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cells, pinnedVersion]);
+  setWorkspacesPinnedSessions(pinnedIds);
+  useEffect(() => {
+    setWorkspacesPinnedSessions(pinnedIds);
     return () => {
       setWorkspacesPinnedSessions(null);
     };
-  }, [cells]);
+  }, [pinnedIds]);
 
   // ── The ONE mic instance ──────────────────────────────────────────────
   const micTargetRef = useRef<string | null>(null);

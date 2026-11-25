@@ -154,11 +154,19 @@ export function subscribeProjectActiveSessions(
 export function getProjectActiveSession(projectId: string): string | null {
   return projectActiveSessions.get(projectId) ?? null;
 }
+/** Monotonic version of the active-session map (bumped on every rebind).
+ *  Lets batch surfaces (the Workspaces grid's LRU pin set) re-render once
+ *  on ANY rebind via useSyncExternalStore instead of polling per-project. */
+let projectActiveSessionVersion = 0;
+export function getProjectActiveSessionVersion(): number {
+  return projectActiveSessionVersion;
+}
 export function setProjectActiveSession(
   projectId: string,
   sessionId: string | null,
 ): void {
   if (projectActiveSessions.get(projectId) === sessionId) return;
   projectActiveSessions.set(projectId, sessionId);
+  projectActiveSessionVersion++;
   for (const listener of projectActiveSessionListeners) listener();
 }

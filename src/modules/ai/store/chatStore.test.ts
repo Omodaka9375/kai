@@ -791,6 +791,52 @@ describe("evicted-chat reseed + empty-persist wipe guard (2026-11-23 Workspaces 
     store.setState({ sessions: store.getState().sessions.filter((s) => s.id !== sessionId) });
   });
 
+  it("the reseed repair REFILLS the live empty Chat a mounted surface keeps (2026-11-25 no-history report)", async () => {
+    const store = mod.useChatStore;
+    const { saveMessagesForRoot } = await import("../lib/sessions");
+    const root = "D:/refill-live-chat";
+    const sessionId = "refill-live-session";
+    await saveMessagesForRoot(root, sessionId, [
+      { id: "refill-msg", role: "user", parts: [{ type: "text", text: "refill me" }] },
+    ] as never);
+    store.setState({
+      sessions: [
+        {
+          id: sessionId,
+          title: "Refill conversation",
+          createdAt: 1,
+          updatedAt: 1,
+          lastMessageCount: 1,
+          workspaceRoot: root,
+          workspaceEnv: { kind: "local" as const },
+        },
+        ...store.getState().sessions.filter((s) => s.id !== sessionId),
+      ],
+      activeSessionId: null,
+      sessionsHydrated: false,
+      lastHydratedWorkspace: null,
+    });
+
+    // The exact Workspaces failure: an unseeded EMPTY Chat exists AND a
+    // mounted surface (grid CellBody) memoizes THIS instance by id - it
+    // never re-runs getOrCreateChat, so a seed-map-only repair would land
+    // for a consumer that never comes and the card stays empty forever.
+    const chat = mod.getOrCreateChat(sessionId);
+    expect(chat.messages.length).toBe(0);
+
+    // Wait for the fire-and-forget history load (bounded poll).
+    for (let i = 0; i < 100 && chat.messages.length === 0; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    // THE assertion: the SAME live instance got its history back in place.
+    expect(chat.messages.length).toBeGreaterThan(0);
+    expect(
+      (chat.messages[0]?.parts?.[0] as { text?: string } | undefined)?.text,
+    ).toBe("refill me");
+
+    store.setState({ sessions: store.getState().sessions.filter((s) => s.id !== sessionId) });
+  });
+
   it("Workspaces pinning keeps grid-visible sessions out of the LRU reaper", async () => {
     const store = mod.useChatStore;
     const pinned = new Set<string>(["grid-visible-session"]);
