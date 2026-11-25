@@ -37,6 +37,12 @@ jobs:
       - name: Test
         run: pnpm test
 
+      # EOL hygiene (the same script KAI's own agent session runs after
+      # every task): CRLF sneaking into any text file breaks the eol:check
+      # gate locally, but nothing stopped it in CI until this step.
+      - name: EOL check
+        run: pnpm eol:check
+
       - name: Build frontend
         run: pnpm build
         env:
@@ -106,3 +112,11 @@ jobs:
       - name: cargo clippy
         working-directory: src-tauri
         run: cargo clippy --all-targets --locked -- -D warnings
+
+      # The Rust-side unit tests (12 modules with #[test], plus the
+      # screen_smoke integration test) never ran in CI - check + clippy
+      # catch type/lint breaks, but a failing #[test] slipped through
+      # until someone happened to run cargo test locally.
+      - name: cargo test
+        working-directory: src-tauri
+        run: cargo test --locked
