@@ -322,7 +322,6 @@ export function AiChatView({
       sessionId
         ? getSessionAgentMeta(sessionId)
         : (fallbackAgentMeta ?? useChatStore.getState().agentMeta),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [sessionId, ownedMetaVersion, fallbackAgentMeta],
   );
   const hitStepCap = ownedMeta.hitStepCap;

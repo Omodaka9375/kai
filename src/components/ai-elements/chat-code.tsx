@@ -166,10 +166,8 @@ const HighlightedPre = memo(function HighlightedPre({
     <pre className="m-0 px-3 py-2.5 font-mono text-[11.5px] leading-relaxed text-foreground">
       {nodes.map((node, i) =>
         node.kind === "break" ? (
-          // eslint-disable-next-line react/no-array-index-key
           <span key={i}>{"\n"}</span>
         ) : (
-          // eslint-disable-next-line react/no-array-index-key
           <span key={i} className={node.cls || undefined}>
             {node.value}
           </span>
@@ -201,7 +199,6 @@ function CommandCard({ code, lang }: { code: string; lang: string }) {
           )}
         >
           {code.split("\n").map((line, i) => (
-            // eslint-disable-next-line react/no-array-index-key
             <span key={i} className="flex">
               <span className="mr-2 select-none text-muted-foreground/70">
                 {prompt}

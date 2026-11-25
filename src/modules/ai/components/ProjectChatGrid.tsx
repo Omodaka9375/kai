@@ -533,7 +533,6 @@ export function ProjectChatGrid({ items }: { items: ProjectSwitcherItem[] }) {
       if (sid) pins.add(sid);
     }
     return pins;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cells, pinnedVersion]);
   setWorkspacesPinnedSessions(pinnedIds);
   useEffect(() => {
@@ -671,7 +670,6 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
   const stackSurface = useChatStore((s) => s.stackRail.surface);
   const group = useMemo(
     () => groupOfCell(projectId),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [projectId, sessionId, openGroup, groupVer, stackSurface],
   );
   // CONTEXT MENU (2026-11-23): right-click the card's TOP BAR (not the chat
@@ -1768,7 +1766,6 @@ const CellInput = memo(function CellInput({
       setText(persisted);
     }
     draftRef.current = persisted;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, draftTick]);
 
   // Persist the field (debounced, same contract as the main composer).

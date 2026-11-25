@@ -34,7 +34,6 @@ const RESERVED = new Set([
 const MAX_STEM = 60;
 
 /** Characters invalid in a Windows filename, plus path separators. */
-// eslint-disable-next-line no-control-regex
 const INVALID = /[<>:"/\\|?*\u0000-\u001f]/g;
 
 /**
