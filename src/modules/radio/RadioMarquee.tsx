@@ -37,6 +37,12 @@ import { setRadioStationId } from "./radioPrefs";
  */
 
 const MARQUEE_MAX_WIDTH = "max-w-[420px]";
+/**
+ * Header (Workspaces) cap: the marquee shares the top bar with the + launcher
+ * and the tab strip - cap it tighter there so a long track title can never
+ * eat meaningful tab space (2026-11-25 ask: keep it left-aligned, just capped).
+ */
+const HEADER_MARQUEE_MAX_WIDTH = "max-w-[240px]";
 
 /** How often the now-playing metadata is refreshed while a station plays. */
 const NOW_PLAYING_POLL_MS = 20_000;
@@ -204,7 +210,7 @@ export function RadioMarquee({
     <div
       className={cn(
         "flex min-w-0 items-center gap-1 overflow-hidden",
-        MARQUEE_MAX_WIDTH,
+        placement === "header" ? HEADER_MARQUEE_MAX_WIDTH : MARQUEE_MAX_WIDTH,
       )}
     >
       <DropdownMenu>

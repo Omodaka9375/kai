@@ -243,6 +243,12 @@ describe("Workspaces grid behavior (source pins)", () => {
     );
     expect(radio).toContain('align={placement === "header" ? "start" : "end"}');
     expect(radio).toContain('side={placement === "header" ? "bottom" : "top"}');
+    // WIDTH CAP (2026-11-25): header placement caps the marquee tighter so a
+    // long track title can never eat tab-strip space.
+    expect(radio).toContain("HEADER_MARQUEE_MAX_WIDTH");
+    expect(radio).toContain(
+      'placement === "header" ? HEADER_MARQUEE_MAX_WIDTH : MARQUEE_MAX_WIDTH',
+    );
   });
 
   it("cards are uniform - no selected outline in the universal view", () => {
