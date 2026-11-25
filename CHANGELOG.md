@@ -4,6 +4,16 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [3.5.2]
+
+- Security: every new (untrusted) project starts in a read-only sandbox by default - reads anywhere, writes confined to the project - seeded in memory until the user picks a mode; an explicit `.kai/sandbox.json` (including an explicit `off`) always wins.
+- Security: Allow mode stays effective for untrusted projects while a sandbox (read-only or workspace-only) is active - the sandbox is the safety net the trust gate forces Ask for; only sandbox `off` forces Ask until the project is trusted.
+- Security: all sandbox surfaces (badge, Workspaces card icon, fs/shell gates, Settings) read one trust-aware resolution, and Trust/Untrust flips now drop the caches so no surface shows a stale mode.
+- Workspaces: the radio marquee is centered in the top bar (same optical position as the bottom status bar); the station dropdown opens downward, start-aligned.
+- AI: the agent is anchored to its own project root - cross-project searches and path resolutions no longer leak into other open workspaces.
+
+---
+
 ## [3.5.1]
 
 - Reflex: two live false positives fixed - "how is it progressing" no longer executes a settings read, and "its been 10 mins check" no longer creates a bogus reminder. Both tool classes now require their domain vocabulary in the prompt (domain trigger floors), whatever the classifier's confidence.
