@@ -137,6 +137,8 @@ export type SandboxMode = "off" | "readOnly" | "workspaceOnly";
 
 export type SandboxConfig = {
   mode: SandboxMode;
+  /** True when a config FILE was read (missing/malformed file = false). */
+  explicit: boolean;
 };
 
 export type SandboxStatus = {

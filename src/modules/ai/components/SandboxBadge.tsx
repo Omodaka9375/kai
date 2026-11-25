@@ -12,12 +12,22 @@ import { useChatStore } from "../store/chatStore";
 import { auditAppend, AUDIT_KINDS } from "../lib/audit";
 import { native } from "../lib/native";
 import type { SandboxMode } from "../lib/native";
+import { LOCAL_WORKSPACE } from "@/modules/workspace/env";
+import { projectIdFor } from "@/modules/workspace/projectRuntime";
+import { isWorkspaceTrusted } from "@/modules/workspace/workspaceTrust";
 import {
   loadSandboxMode,
+  loadSandboxModeForProject,
   notifySandboxConfigChanged,
   SANDBOX_LABELS,
   subscribeSandboxChanged,
 } from "../lib/sandbox";
+
+/** Canonical project id for a workspace root (local env — the badge shows
+ *  the desktop project; the ambient env follows the active workspace). */
+function activeProjectIdForRoot(root: string): string {
+  return projectIdFor(root, LOCAL_WORKSPACE);
+}
 
 /** Same order/wording as Settings → Sandbox, so both surfaces read as one
  *  control. Descriptions are one line each — the pill is compact, not a
@@ -49,19 +59,27 @@ export function SandboxBadge() {
   const [mode, setMode] = useState<SandboxMode>("off");
   const [saving, setSaving] = useState(false);
 
+  // TRUST-AWARE RESOLUTION (2026-11-25): an untrusted new project with no
+  // explicit config shows its seeded read-only default, so the badge and
+  // the gates agree on ONE mode.
+  const projectId = root ? activeProjectIdForRoot(root) : null;
+
   useEffect(() => {
     let alive = true;
-    void loadSandboxMode(root).then((m) => {
-      if (alive) setMode(m);
-    });
+    const resolve = () => {
+      void loadSandboxModeForProject(root, {
+        trusted: isWorkspaceTrusted(projectId),
+      }).then((m) => {
+        if (alive) setMode(m);
+      });
+    };
+    resolve();
     // Settings → Sandbox lives in a separate webview; subscribe to its
     // change event so the badge re-reads (post-invalidation) live. The
     // old effect keyed on [root] only — a mode change never re-ran it.
     let unlisten: (() => void) | null = null;
     void subscribeSandboxChanged(() => {
-      void loadSandboxMode(root).then((m) => {
-        if (alive) setMode(m);
-      });
+      resolve();
     }).then((u) => {
       if (alive) unlisten = u;
       else u();
@@ -70,7 +88,7 @@ export function SandboxBadge() {
       alive = false;
       unlisten?.();
     };
-  }, [root]);
+  }, [root, projectId]);
 
   // No project open — sandboxing is a no-op without a root; nothing to
   // show or change.

@@ -11,6 +11,9 @@ import type { SandboxMode } from "./native";
 import { native } from "./native";
 import { IS_WINDOWS } from "@/lib/platform";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
+// Deep import (NOT the workspace barrel): workspaceTrust pulls no React and
+// is safe here; the barrel would drag ProjectRail into every tool module.
+import { isWorkspaceTrusted } from "@/modules/workspace/workspaceTrust";
 
 export type SandboxCache = { root: string; mode: SandboxMode; client?: unknown } | null;
 
@@ -21,12 +24,23 @@ const rootModesCache = new Map<string, { mode: SandboxMode; client?: unknown }>(
  * the same live-context source tools resolve against. Null = no project →
  * sandboxing is a no-op. */
 let currentRoot: string | null = null;
+/** The owning PROJECT ID (projectIdFor) for currentRoot — set alongside it
+ * so the no-config NEW-PROJECT default (read-only sandbox for untrusted
+ * projects) can consult the trust registry. Null = rootless session. */
+let currentProjectId: string | null = null;
 
 /** Set the confinement root (App.tsx live-context effect). */
 export function setSandboxRoot(root: string | null): void {
   const norm = root ? normPath(root) : null;
   if (norm === currentRoot) return;
   currentRoot = norm;
+  currentProjectId = null;
+}
+
+/** Pair the root with its owning project id (App.tsx passes the active
+ *  runtime's id; call right after setSandboxRoot with the same lifetime). */
+export function setSandboxProjectId(projectId: string | null): void {
+  currentProjectId = projectId;
 }
 
 function normPath(p: string): string {
@@ -64,7 +78,14 @@ export type SandboxDecision = { ok: true } | { ok: false; reason: string };
 export type SandboxOverride = { root: string; mode: SandboxMode };
 
 /** Resolve (root, mode) for a check: an explicit override wins, else the
- *  global root + its per-project mode. `null` root = confinement is a no-op. */
+ *  global root + its per-project mode. `null` root = confinement is a no-op.
+ *
+ *  TRUST-AWARE (2026-11-25 "new projects start read-only" ask): the
+ *  desktop path resolves through loadSandboxModeForProject, which applies
+ *  the new-project default - an UNTRUSTED project with no explicit config
+ *  file runs read-only (reads anywhere, writes confined). Explicit configs
+ *  (including an explicit `off`) always win. Overrides (assistant scratch)
+ *  are untouched. */
 async function effectiveSandbox(
   override?: SandboxOverride | null,
 ): Promise<{ root: string | null; mode: SandboxMode }> {
@@ -75,7 +96,12 @@ async function effectiveSandbox(
     return { root, mode: override.mode === "off" ? await loadSandboxMode(root) : override.mode };
   }
   if (!currentRoot) return { root: null, mode: "off" };
-  return { root: currentRoot, mode: await loadSandboxMode(currentRoot) };
+  return {
+    root: currentRoot,
+    mode: await loadSandboxModeForProject(currentRoot, {
+      trusted: isWorkspaceTrusted(currentProjectId),
+    }),
+  };
 }
 
 /**
@@ -292,10 +318,111 @@ export async function loadSandboxMode(
   }
 }
 
+/**
+ * SANDBOX DEFAULT FOR NEW PROJECTS (2026-11-25 ask): a project the user
+ * has NOT trusted gets a read-only sandbox by default when no config
+ * file exists yet - reads anywhere, writes confined to the project.
+ * An explicit config (including an explicit `off`) always wins; trusted
+ * projects keep the old no-config = off behavior. Never throws - the
+ * sandbox is a safety net, not a gate that can fail the boot.
+ */
+export const DEFAULT_UNTRUSTED_SANDBOX_MODE: SandboxMode = "readOnly";
+
+/** Cache the resolved mode without a config file (per-root). */
+const seededModes = new Map<string, SandboxMode>();
+
+/**
+ * Resolve the SANDBOX MODE FOR A SESSION'S PROJECT with the new-project
+ * default applied: untrusted project + no explicit config file ->
+ * DEFAULT_UNTRUSTED_SANDBOX_MODE (in-memory, nothing written to the
+ * user's repo until they set a mode themselves). Everything else reads
+ * the stored config unchanged.
+ *
+ * CACHE DISCIPLINE: the seeded default lives ONLY in `seededModes`
+ * (consulted solely by this untrusted path) — NEVER in rootModesCache,
+ * which the TRUSTED path (loadSandboxMode) shares. Seeding rootModesCache
+ * would poison it: after the user clicks Trust, the trusted path would
+ * keep reading the stale seeded "readOnly" instead of the real
+ * (missing-file) "off". seededModes is cleared by invalidateSandboxCache
+ * (every Settings write broadcasts it), so a Settings mode change
+ * re-probes correctly.
+ */
+export async function loadSandboxModeForProject(
+  root: string | null | undefined,
+  opts?: {
+    trusted?: boolean;
+    client?: Pick<typeof native, "sandboxLoadConfig">;
+  },
+): Promise<SandboxMode> {
+  if (!root) return "off";
+  const norm = normPath(root);
+  const client = opts?.client ?? native;
+  // TRUSTED (or caller said so): the stored config is the whole answer.
+  if (opts?.trusted ?? true) return loadSandboxMode(root, client);
+  // UNTRUSTED: one probe per invalidation cycle, cached in seededModes.
+  const cachedSeed = seededModes.get(norm);
+  if (cachedSeed) return cachedSeed;
+  try {
+    const c = await client.sandboxLoadConfig(root);
+    if (c.explicit) {
+      // Explicit config (including an explicit off): cache in seededModes
+      // for this cycle; Settings writes invalidate and re-probe.
+      seededModes.set(norm, c.mode);
+      return c.mode;
+    }
+  } catch {
+    // Probe failed (non-Tauri test context): fall through to the default.
+  }
+  seededModes.set(norm, DEFAULT_UNTRUSTED_SANDBOX_MODE);
+  return DEFAULT_UNTRUSTED_SANDBOX_MODE;
+}
+
+/** Drop a seeded default (Settings write or trust change re-reads fresh). */
+export function clearSeededSandboxDefaults(): void {
+  seededModes.clear();
+}
+
+/**
+ * Effective SANDBOX mode snapshot for a project (sync, cached) — the
+ * chatStore Allow gate reads this to decide whether an UNTRUSTED project
+ * may keep Allow mode: read-only/workspace-only sandboxes are the safety
+ * net that make Allow safe (writes stay confined to the project), so
+ * "off" is the only mode that forces Ask. The cache refreshes on
+ * subscribeSandboxChanged broadcasts and setSandboxRoot switches; the
+ * first read after a change may be one tick stale, which only ever
+ * delays Allow by one resolution - it can never wrongly GRANT Allow
+ * (the cache starts unset and is only filled by a real resolution).
+ */
+const effectiveModeCache = new Map<string, SandboxMode>();
+
+/** Sync effective-sandbox read for the Allow gate (see doc above). */
+export function getCachedEffectiveSandboxMode(
+  root: string | null | undefined,
+): SandboxMode {
+  if (!root) return "off";
+  return effectiveModeCache.get(normPath(root)) ?? "off";
+}
+
+/** Refresh the snapshot for a root (called by the same paths that
+ *  invalidate the cache: root switch, sandbox-change broadcast). */
+export async function refreshEffectiveSandboxCache(
+  root: string | null | undefined,
+  opts?: { trusted?: boolean },
+): Promise<void> {
+  if (!root) return;
+  const norm = normPath(root);
+  const mode = await loadSandboxModeForProject(root, {
+    trusted: opts?.trusted ?? isWorkspaceTrusted(currentProjectId),
+  });
+  effectiveModeCache.set(norm, mode);
+}
+
 /** Drop the cache — after settings writes or workspace switches. */
 export function invalidateSandboxCache(): void {
   cached = null;
   rootModesCache.clear();
+  seededModes.clear();
+  effectiveModeCache.clear();
 }
 
 // ── Cross-window invalidation ────────────────────────────────────────────

@@ -51,10 +51,11 @@ import { effectiveContextLimit, SYSTEM_OVERHEAD_TOKENS } from "../lib/compact";
 import { estimateContextTokens } from "../lib/media/contextTokens";
 import type { SandboxMode } from "../lib/native";
 import {
-  loadSandboxMode,
+  loadSandboxModeForProject,
   SANDBOX_LABELS,
   subscribeSandboxChanged,
 } from "../lib/sandbox";
+import { isWorkspaceTrusted } from "@/modules/workspace/workspaceTrust";
 import { AiChatView } from "./AiChat";
 import { AiErrorBoundary } from "./AiErrorBoundary";
 // Card input #skill / /command popup: same detection and the same picker
@@ -782,7 +783,7 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
         )}
       >
         <div className="flex min-w-0 flex-1 items-center gap-1">
-          <CardSandboxIcon root={root} />
+          <CardSandboxIcon root={root} projectId={projectId} />
           {/* GROUP SURFACE IN THE TITLE (2026-11-21): a card swaps from the
               project AI chat to its GROUP transcript when the group panel owns
               the stack rail. Without the group name in the bar the two
@@ -853,23 +854,29 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
 
 /** Sandbox indicator icon to the left of the project title when the
  *  project's sandbox mode is active (readOnly or workspaceOnly). Hidden
- *  when sandbox is off. */
+ *  when sandbox is off. Resolves through loadSandboxModeForProject so an
+ *  untrusted new project shows its seeded read-only default (2026-11-25). */
 const CardSandboxIcon = memo(function CardSandboxIcon({
   root,
+  projectId,
 }: {
   root: string;
+  projectId: string;
 }) {
   const [mode, setMode] = useState<SandboxMode>("off");
   useEffect(() => {
     let alive = true;
-    void loadSandboxMode(root).then((m) => {
-      if (alive) setMode(m);
-    });
-    let unlisten: (() => void) | null = null;
-    void subscribeSandboxChanged(() => {
-      void loadSandboxMode(root).then((m) => {
+    const resolve = () => {
+      void loadSandboxModeForProject(root, {
+        trusted: isWorkspaceTrusted(projectId),
+      }).then((m) => {
         if (alive) setMode(m);
       });
+    };
+    resolve();
+    let unlisten: (() => void) | null = null;
+    void subscribeSandboxChanged(() => {
+      resolve();
     }).then((u) => {
       if (alive) unlisten = u;
       else u();
@@ -878,7 +885,7 @@ const CardSandboxIcon = memo(function CardSandboxIcon({
       alive = false;
       unlisten?.();
     };
-  }, [root]);
+  }, [root, projectId]);
 
   if (mode === "off") return null;
 

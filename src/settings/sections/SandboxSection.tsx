@@ -1,12 +1,15 @@
 import { Button } from "@/components/ui/button";
 import { native, type SandboxMode, type SandboxSetupEvent, type SandboxStatus } from "@/modules/ai/lib/native";
-import { notifySandboxConfigChanged } from "@/modules/ai/lib/sandbox";
+import { notifySandboxConfigChanged, loadSandboxModeForProject } from "@/modules/ai/lib/sandbox";
 import { auditAppend, AUDIT_KINDS } from "@/modules/ai/lib/audit";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { IS_WINDOWS } from "@/lib/platform";
 import { Channel } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { SectionHeader } from "../components/SectionHeader";
+import { LOCAL_WORKSPACE } from "@/modules/workspace/env";
+import { projectIdFor } from "@/modules/workspace/projectRuntime";
+import { isWorkspaceTrusted } from "@/modules/workspace/workspaceTrust";
 
 const MODES: { id: SandboxMode; label: string; description: string }[] = [
   {
@@ -89,9 +92,14 @@ export function SandboxSection() {
   useEffect(() => {
     let alive = true;
     if (!root) return;
-    void native.sandboxLoadConfig(root).then((c) => {
-      if (alive) setMode(c.mode);
-    }).catch(() => undefined);
+    // EFFECTIVE mode (2026-11-25): untrusted new project with no config file
+    // shows its seeded read-only default, so this page agrees with the badge
+    // and the gates instead of "off" until the first write.
+    void loadSandboxModeForProject(root, {
+      trusted: isWorkspaceTrusted(projectIdFor(root, LOCAL_WORKSPACE)),
+    }).then((m) => {
+      if (alive) setMode(m);
+    });
     return () => {
       alive = false;
     };

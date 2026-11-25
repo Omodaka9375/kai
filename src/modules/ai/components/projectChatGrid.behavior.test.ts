@@ -536,7 +536,11 @@ describe("Workspaces grid behavior (source pins)", () => {
       grid.indexOf("Slim header"),
       grid.indexOf("GroupCardBody group={group}"),
     );
-    const sandboxIdx = headerBlock.indexOf("<CardSandboxIcon root={root} />");
+    // 2026-11-25: the icon resolves trust-aware (loadSandboxModeForProject)
+    // so untrusted new projects show their seeded read-only default.
+    const sandboxIdx = headerBlock.indexOf(
+      "<CardSandboxIcon root={root} projectId={projectId} />",
+    );
     const titleIdx = headerBlock.indexOf("group ? `${name} · ${group.name}` : name");
     const contextRingIdx = headerBlock.indexOf("<CardContextRing projectId={projectId} sessionId={sessionId} />");
     const modelPillIdx = headerBlock.indexOf("<CardModelPill");

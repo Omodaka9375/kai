@@ -34,7 +34,8 @@ import { useProjectChatGridStore } from "@/modules/ai/store/projectChatGrid";
 import { registerChatFileOpen } from "@/modules/ai/components/ChatFileLink";
 import { AiErrorBoundary } from "@/modules/ai/components/AiErrorBoundary";
 import { redactSensitive } from "@/modules/ai/lib/redact";
-import { setSandboxRoot } from "@/modules/ai/lib/sandbox";
+import { setSandboxRoot, setSandboxProjectId, refreshEffectiveSandboxCache } from "@/modules/ai/lib/sandbox";
+import { isWorkspaceTrusted } from "@/modules/workspace/workspaceTrust";
 import { registerProjectRuntime, setProjectLive, setProjectActiveSession, projectIdForSession, stopSession } from "@/modules/ai/store/chatStore";
 import { setSessionPreferences } from "@/modules/ai/store/sessionPreferences";
 import { native } from "@/modules/ai/lib/native";
@@ -1617,8 +1618,17 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
   // body's freshest closures via setLiveRef.
   const onActivateLive = useCallback(() => {
     setSandboxRoot(explorerRoot ?? launchCwd ?? home ?? null);
+    // Pair the confinement root with its owning project so the NEW-PROJECT
+    // read-only sandbox default can consult the trust registry
+    // (effectiveSandbox -> loadSandboxModeForProject), and warm the
+    // effective-mode snapshot the Allow gate reads (safe harbor).
+    setSandboxProjectId(projectRuntime.id);
+    void refreshEffectiveSandboxCache(
+      explorerRoot ?? launchCwd ?? home ?? null,
+      { trusted: isWorkspaceTrusted(projectRuntime.id) },
+    );
     setLiveRef.current?.();
-  }, [explorerRoot, launchCwd, home]);
+  }, [explorerRoot, launchCwd, home, projectRuntime]);
   useEffect(() => {
     registerProjectRuntime(projectRuntime);    const findCwd = () => {
       const active = tabs.find((x) => x.id === activeId);
@@ -1636,8 +1646,16 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
 
     // Keep the project sandbox confinement root in sync with the same root
     // tools resolve against — checkSandbox (security.ts) reads it on every
-    // fs tool call.
-    if (isActiveRef.current) setSandboxRoot(explorerRoot ?? launchCwd ?? home ?? null);
+    // fs tool call. Pair with the owning project id (new-project read-only
+    // default consults trust) and warm the Allow-gate snapshot.
+    if (isActiveRef.current) {
+      setSandboxRoot(explorerRoot ?? launchCwd ?? home ?? null);
+      setSandboxProjectId(projectRuntime.id);
+      void refreshEffectiveSandboxCache(
+        explorerRoot ?? launchCwd ?? home ?? null,
+        { trusted: isWorkspaceTrusted(projectRuntime.id) },
+      );
+    }
 
     // Track the most recently active terminal tab for the fallback path in
     // injectIntoActivePty above.

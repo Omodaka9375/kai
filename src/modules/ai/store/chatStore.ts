@@ -51,6 +51,7 @@ import {
 import { pushRecentModel, persistProjectModel } from "../lib/modelPrefs";
 import { normalizeWorkspacePath } from "../lib/workspacePath";
 import { isWorkspaceTrusted } from "@/modules/workspace/workspaceTrust";
+import { getCachedEffectiveSandboxMode } from "../lib/sandbox";
 import { cancelAllShellSessions } from "../tools/shell";
 import { cancelMediaTasksForSession } from "../lib/media/task";
 import { clearFenceState, summarizeMessagesNow } from "../lib/transport";
@@ -1265,11 +1266,35 @@ export function projectIdForSession(sessionId: string): string | null {
  * and Allow mode would let prompt-injected instructions execute with zero
  * approval cards. Trusted projects and rootless sessions (no project = no
  * repo-sourced prompt content) pass the stored mode through unchanged.
+ *
+ * SANDBOX SAFE-HARBOR (2026-11-25 "new projects start read-only" ask): an
+ * untrusted project that runs a SANDBOX (read-only or workspace-only — the
+ * new-project default) keeps Allow mode effective. The sandbox IS the
+ * safety net the trust gate was forcing Ask for: writes are confined to
+ * the project by checkSandbox/checkShellSandbox before any tool runs, so
+ * prompt-injected instructions cannot exfiltrate or mutate outside the
+ * project. Sandbox "off" (explicit config) still forces Ask until the user
+ * trusts the project. The snapshot read starts unset and is only filled by
+ * a real resolution — it can never wrongly GRANT Allow, only briefly
+ * delay it.
  */
 export function effectiveSessionAutoApprove(sessionId: string): "off" | "all" {
   const mode = sessionAutoApprove.get(sessionId) ?? "off";
   if (mode !== "all") return "off";
-  return isWorkspaceTrusted(projectIdForSession(sessionId)) ? "all" : "off";
+  const projectId = projectIdForSession(sessionId);
+  if (isWorkspaceTrusted(projectId)) return "all";
+  // Untrusted: only an ACTIVE sandbox keeps Allow effective.
+  const root = sessionWorkspaceRoot(sessionId);
+  const sandboxMode = getCachedEffectiveSandboxMode(root);
+  return sandboxMode !== "off" ? "all" : "off";
+}
+
+/** Recorded workspace root for a session id (meta lookup; null = rootless). */
+function sessionWorkspaceRoot(sessionId: string): string | null {
+  const meta = useChatStore
+    .getState()
+    .sessions.find((s) => s.id === sessionId);
+  return meta?.workspaceRoot ?? null;
 }
 
 // setActiveProjectRuntime / getActiveProjectRuntime / registerProjectRuntime

@@ -6,6 +6,7 @@ import {
   checkSandbox,
   checkShellSandbox,
   invalidateSandboxCache,
+  loadSandboxModeForProject,
   sandboxExecRoot,
   setSandboxRoot,
   splitShellArgs,
@@ -355,5 +356,70 @@ describe("sandbox config change propagation (source pins)", () => {
     // Dropdown over the same three modes as Settings.
     expect(badgeSrc).toContain("DropdownMenuRadioGroup");
     expect(badgeSrc).toMatch(/id: "off"[\s\S]*id: "readOnly"[\s\S]*id: "workspaceOnly"/);
+  });
+});
+
+// NEW-PROJECT READ-ONLY DEFAULT (2026-11-25 ask): every new (untrusted)
+// project starts in a read-only sandbox together with the trust banner
+// and Allow mode — the sandbox is the safety net that makes Allow safe.
+describe("loadSandboxModeForProject - new-project read-only default", () => {
+  const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
+  const libSrc = read("./sandbox.ts");
+
+  const probe = (
+    explicit: boolean,
+    mode: "off" | "readOnly" | "workspaceOnly" = "off",
+  ) => ({
+    sandboxLoadConfig: async () => ({ mode, explicit }),
+  });
+
+  it("untrusted project + no config file = seeded read-only default", async () => {
+    const m = await loadSandboxModeForProject("/proj/x", {
+      trusted: false,
+      client: probe(false),
+    });
+    expect(m).toBe("readOnly");
+  });
+
+  it("untrusted project + EXPLICIT config (even off) wins over the default", async () => {
+    expect(
+      await loadSandboxModeForProject("/proj/explicit-off", {
+        trusted: false,
+        client: probe(true, "off"),
+      }),
+    ).toBe("off");
+    expect(
+      await loadSandboxModeForProject("/proj/explicit-ws", {
+        trusted: false,
+        client: probe(true, "workspaceOnly"),
+      }),
+    ).toBe("workspaceOnly");
+  });
+
+  it("trusted project with no config stays off (old behavior)", async () => {
+    expect(
+      await loadSandboxModeForProject("/proj/x", {
+        trusted: true,
+        client: probe(false),
+      }),
+    ).toBe("off");
+  });
+
+  it("null root = off", async () => {
+    expect(await loadSandboxModeForProject(null, { trusted: false })).toBe("off");
+  });
+
+  it("the seeded default is only used by the UNTRUSTED path (cache discipline)", () => {
+    // The seeded default must never land in rootModesCache — the trusted
+    // path (loadSandboxMode) shares that cache and would read the stale
+    // seeded "readOnly" after the user clicks Trust.
+    expect(libSrc).not.toMatch(
+      /loadSandboxModeForProject[\s\S]*rootModesCache\.set\(norm, \{ mode: seeded/,
+    );
+    // seededModes is cleared by invalidateSandboxCache so a Settings
+    // write re-probes fresh.
+    expect(libSrc).toMatch(
+      /export function invalidateSandboxCache\(\): void \{\s*cached = null;\s*rootModesCache\.clear\(\);\s*seededModes\.clear\(\);/,
+    );
   });
 });

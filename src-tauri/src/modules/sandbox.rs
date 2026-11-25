@@ -59,6 +59,12 @@ impl SandboxMode {
 #[serde(rename_all = "camelCase")]
 pub struct SandboxConfig {
     pub mode: SandboxMode,
+    /// True when a config FILE was read and parsed — false for the
+    /// missing-file default (and malformed files). The frontend uses this
+    /// to distinguish "user never configured this project" (new project →
+    /// seed the readOnly default) from an explicit `off` (2026-11-25:
+    /// "new projects start in read-only sandbox" ask).
+    pub explicit: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -174,14 +180,16 @@ fn config_path(root: &str, workspace: &WorkspaceEnv) -> PathBuf {
     )
 }
 
-/// Load the project sandbox config. Missing file = Off. Malformed file = Off
-/// plus a logged warning (never fail the boot over a bad config).
+/// Load the project sandbox config. Missing file = Off (not explicit).
+/// Malformed file = Off (not explicit) plus a logged warning — never fail
+/// the boot over a bad config.
 #[tauri::command]
 pub fn sandbox_load_config(root: String, workspace: WorkspaceEnv) -> SandboxConfig {
     let path = config_path(&root, &workspace);
     let Ok(raw) = std::fs::read_to_string(&path) else {
         return SandboxConfig {
             mode: SandboxMode::Off,
+            explicit: false,
         };
     };
     #[derive(Deserialize)]
@@ -190,18 +198,20 @@ pub fn sandbox_load_config(root: String, workspace: WorkspaceEnv) -> SandboxConf
     }
     match serde_json::from_str::<Raw>(&raw) {
         Ok(r) => match SandboxMode::parse(&r.mode) {
-            Some(mode) => SandboxConfig { mode },
+            Some(mode) => SandboxConfig { mode, explicit: true },
             None => {
                 log::warn!("sandbox: unknown mode {:?} in {}", r.mode, path.display());
                 SandboxConfig {
                     mode: SandboxMode::Off,
+                    explicit: false,
                 }
             }
         },
         Err(e) => {
-            log::warn!("sandbox: malformed {} — {e}", path.display());
+            log::warn!("sandbox: malformed {} - {e}", path.display());
             SandboxConfig {
                 mode: SandboxMode::Off,
+                explicit: false,
             }
         }
     }

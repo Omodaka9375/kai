@@ -51,7 +51,15 @@ describe("workspace trust gate - enforcement surfaces", () => {
   it("chatStore exposes effectiveSessionAutoApprove gated on workspace trust", () => {
     expect(chatStore).toContain("export function effectiveSessionAutoApprove(");
     // The gate consults the trust registry.
-    expect(chatStore).toContain("isWorkspaceTrusted(projectIdForSession(sessionId))");
+    expect(chatStore).toMatch(
+      /isWorkspaceTrusted\(\s*projectId,?\s*\)|isWorkspaceTrusted\(projectId\)/,
+    );
+    // SANDBOX SAFE HARBOR (2026-11-25): an untrusted project that runs a
+    // sandbox (read-only default for new projects) keeps Allow effective —
+    // the sandbox is the safety net the gate was forcing Ask for. Only
+    // sandbox "off" forces Ask until the user trusts the project.
+    expect(chatStore).toContain("getCachedEffectiveSandboxMode(root)");
+    expect(chatStore).toMatch(/sandboxMode !== "off" \? "all" : "off"/);
   });
 
   it("the bridge auto-approve effect gates on the EFFECTIVE mode (both schedule and fire time)", () => {
