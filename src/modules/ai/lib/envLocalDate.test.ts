@@ -45,4 +45,22 @@ describe("env-block injection contract", () => {
     // It must be described as authoritative, or the model keeps guessing.
     expect(prompt).toMatch(/local_date is the authoritative current date/);
   });
+
+  it("workspace_root is labeled as THIS session's project root (2026-11-25 project-anchoring report)", () => {
+    // Symptom: agents "didn't know which project they were in" and searched
+    // every open project's folders. The env line must say the root is the
+    // deployment root and that other open projects are NOT to be searched.
+    expect(src).toContain("THIS chat session's project root");
+    expect(src).toContain("not from other open projects");
+    const prompt = readFileSync(
+      new URL("../config/prompt.ts", import.meta.url),
+      "utf8",
+    );
+    expect(prompt).toContain(
+      "workspace_root is THE project you are deployed in",
+    );
+    expect(prompt).toMatch(
+      /do not go scanning other projects' folders/,
+    );
+  });
 });

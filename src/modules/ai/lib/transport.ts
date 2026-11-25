@@ -570,7 +570,18 @@ function formatEnvBlockInner(live: LiveSnapshot): string | null {
       );
     }
   }
-  if (live.workspaceRoot) lines.push(`workspace_root: ${live.workspaceRoot}`);
+  // PROJECT ANCHOR (2026-11-25 report: agents "didn't know which project they
+  // were in" and searched every open project's folders): workspace_root is
+  // THIS session's owning project root - the agent toolContext is bound to
+  // it and every fs/shell tool resolves against it, NOT against whatever
+  // other projects happen to be open. Spell out what the root means so a
+  // model that sees sibling projects mentioned in the transcript (group
+  // chat rosters, Workspaces cards) does not go probing them to find "the
+  // project".
+  if (live.workspaceRoot)
+    lines.push(
+      `workspace_root: ${live.workspaceRoot} (THIS chat session's project root - the agent is deployed HERE; resolve paths and search from this root, not from other open projects)`,
+    );
   if (live.cwd) lines.push(`active_terminal_cwd: ${live.cwd}`);
   if (live.activeFile) lines.push(`active_file: ${live.activeFile}`);
   if (live.terminalPrivate) lines.push("active_terminal_mode: private");
