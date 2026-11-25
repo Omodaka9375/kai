@@ -36,19 +36,22 @@ describe("allow/ask mid-run toggle (source pins)", () => {
   it("the deferred auto-approve re-checks the CURRENT mode at fire time", () => {
     // The fire-time gate: a timer scheduled under Allow dies if the user
     // has since switched the session to Ask. Must read the session-scoped
-    // map (getSessionAutoApprove), not the presentation-only store field.
+    // map, not the presentation-only store field.
     // 2026-11-16 fix: the gate is grant-aware — an ALWAYS-ALLOW grant
     // survives the mode toggle (the user's decision is per-tool, not
     // per-mode) but is re-read from the LIVE prefs at fire time, so a
     // Settings revocation landing between schedule and fire cancels it.
+    // 2026-11-25 TRUST GATE: the read is effectiveSessionAutoApprove - an
+    // untrusted project forces Ask at fire time too, so trusting/untrusting
+    // mid-step takes effect on the next timer just like a mode toggle.
     expect(bridge).toContain(
-      'if (getSessionAutoApprove(sessionId) !== "all" && !stillGranted) {',
+      'if (effectiveSessionAutoApprove(sessionId) !== "all" && !stillGranted) {',
     );
     // And the gate sits INSIDE the setTimeout callback (fire time), not
     // before it (schedule time).
     const timerIdx = bridge.indexOf("setTimeout(() => {");
     const gateIdx = bridge.indexOf(
-      'if (getSessionAutoApprove(sessionId) !== "all" && !stillGranted) {',
+      'if (effectiveSessionAutoApprove(sessionId) !== "all" && !stillGranted) {',
     );
     expect(timerIdx).toBeGreaterThan(-1);
     expect(gateIdx).toBeGreaterThan(timerIdx);
@@ -77,7 +80,9 @@ describe("allow/ask mid-run toggle (source pins)", () => {
     // version, the prediction re-read the same wrong session... and only
     // the second flip landed on "all" for the right session.
     expect(card).toContain("const ownerSessionId = sessionId ?? activeSessionId ?? \"\";");
-    expect(card).toContain("getSessionAutoApprove(ownerSessionId)");
+    // 2026-11-25 TRUST GATE: the prediction reads the trust-gated effective
+    // mode so an untrusted project never paints the flat auto-approved row.
+    expect(card).toContain("effectiveSessionAutoApprove(ownerSessionId)");
     expect(card).not.toContain('getSessionAutoApprove(s.activeSessionId ?? "")');
     // Surfaces that show a non-foreground session must pass it down.
     const grid = readFileSync(

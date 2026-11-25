@@ -4,6 +4,7 @@ import { startTransition, useCallback, useEffect, useMemo, useRef, useState } fr
 import { getLaunchDir } from "@/lib/launchDir";
 import { cn } from "@/lib/utils";
 import { hydrateSessionPreferences } from "@/modules/ai/store/sessionPreferences";
+import { hydrateWorkspaceTrust } from "@/modules/workspace/workspaceTrust";
 import {
   getProjectAgentStatus,
   getProjectHasNews,
@@ -188,6 +189,16 @@ export default function App() {
           : saved?.activeId && initial.some((p) => p.id === saved.activeId)
             ? saved.activeId
             : initial[0]!.id,
+      );
+      // WORKSPACE TRUST (2026-11-25): hydrate/seed the trust registry with
+      // the restored projects. First run seeds them all TRUSTED; later
+      // boots only read (projects opened after the marker stay untrusted
+      // until the user clicks Trust).
+      setBootStep("loading project trust");
+      await bootAwait(
+        hydrateWorkspaceTrust(initial.map((p) => p.id)),
+        () => undefined,
+        "hydrateWorkspaceTrust",
       );
       setReady(true);
     })();

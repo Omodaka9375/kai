@@ -89,6 +89,8 @@ const RUNTIME_STORE_ALLOW = new Set([
   // runtime under ~/.kai/skills/<name>/ and <project>/.kai/skills/<name>/ —
   // never at the repo root. It is a format reference, not a repo path claim.
   "SKILL.md",
+  // Workspace trust registry (2026-11-25): runtime app-data store.
+  "kai-workspace-trust.json",
 ]);
 
 const CODE_EXT = /\.(ts|tsx|js|jsx|rs|json|md|css|scss|html|bash|zsh|ps1|plist|toml|ya?ml|lock)$/;

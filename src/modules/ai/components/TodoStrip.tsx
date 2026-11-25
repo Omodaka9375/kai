@@ -16,7 +16,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { Todo } from "../lib/todos";
 import { useTodosStore } from "../store/todoStore";
 import {
-  getSessionAutoApprove,
+  effectiveSessionAutoApprove,
   getSessionAutoApproveVersion,
   subscribeSessionAutoApprove,
 } from "../store/chatStore";
@@ -83,8 +83,10 @@ export function TodoStrip({ sessionId, isBusy, onStop }: Props) {
     getSessionAutoApproveVersion,
     getSessionAutoApproveVersion,
   );
+  // TRUST GATE: the stop square reflects the EFFECTIVE mode (untrusted
+  // project = Ask amber), matching what the bridge actually enforces.
   const approveMode = useMemo(
-    () => getSessionAutoApprove(sessionId ?? ""),
+    () => effectiveSessionAutoApprove(sessionId ?? ""),
     [sessionId, autoApproveVersion],
   );
 

@@ -37,6 +37,8 @@ describe("permission color language (source pins)", () => {
     expect(strip).toContain("subscribeSessionAutoApprove");
     expect(strip).toContain("getSessionAutoApproveVersion");
     // And the mode is read session-scoped, not the presentation field.
-    expect(strip).toContain("getSessionAutoApprove(sessionId ?? \"\")");
+    // 2026-11-25 TRUST GATE: trust-gated, so an untrusted project's square
+    // paints amber (Ask) even when the stored mode is Allow.
+    expect(strip).toContain("effectiveSessionAutoApprove(sessionId ?? \"\")");
   });
 });

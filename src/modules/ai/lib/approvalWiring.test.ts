@@ -32,7 +32,10 @@ describe("approval responses flow through the denial latch", () => {
     );
     expect(toggle).toContain("get().setAutoApprove(next)");
     expect(toggle).not.toContain("set({ autoApprove: next })");
-    expect(store).toContain("autoApprove: nextActiveId ? getSessionAutoApprove(nextActiveId) : \"off\"");
+    // 2026-11-25 TRUST GATE: the presentation field routes through the
+    // effective (trust-gated) mode so the shield toggle paints Ask on an
+    // untrusted project even when the stored mode is Allow.
+    expect(store).toContain("autoApprove: nextActiveId ? effectiveSessionAutoApprove(nextActiveId) : \"off\"");
   });
 
   it("AgentRunBridge imports the latch", () => {

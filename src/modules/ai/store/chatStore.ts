@@ -50,6 +50,7 @@ import {
 } from "../lib/sessions";
 import { pushRecentModel, persistProjectModel } from "../lib/modelPrefs";
 import { normalizeWorkspacePath } from "../lib/workspacePath";
+import { isWorkspaceTrusted } from "@/modules/workspace/workspaceTrust";
 import { cancelAllShellSessions } from "../tools/shell";
 import { cancelMediaTasksForSession } from "../lib/media/task";
 import { clearFenceState, summarizeMessagesNow } from "../lib/transport";
@@ -1256,6 +1257,21 @@ export function projectIdForSession(sessionId: string): string | null {
   return getSessionPreferences(sessionId).projectId ?? null;
 }
 
+/**
+ * WORKSPACE TRUST GATE (2026-11-25): the EFFECTIVE Ask/Allow mode for a
+ * session. An UNTRUSTED project (newly opened/cloned, not yet trusted via
+ * the TrustStrip banner) forces Ask regardless of the session's stored
+ * mode: a cloned repo ships KAI.md/.kai rules that ride the system prompt,
+ * and Allow mode would let prompt-injected instructions execute with zero
+ * approval cards. Trusted projects and rootless sessions (no project = no
+ * repo-sourced prompt content) pass the stored mode through unchanged.
+ */
+export function effectiveSessionAutoApprove(sessionId: string): "off" | "all" {
+  const mode = sessionAutoApprove.get(sessionId) ?? "off";
+  if (mode !== "all") return "off";
+  return isWorkspaceTrusted(projectIdForSession(sessionId)) ? "all" : "off";
+}
+
 // setActiveProjectRuntime / getActiveProjectRuntime / registerProjectRuntime
 // / getAllProjectRuntimes / setProjectLive / setProjectModel / getProjectModel
 // / activeProjectId / subscribeActiveProject / getActiveProjectVersion — all
@@ -1936,7 +1952,10 @@ export const useChatStore = create<StoreState>((set, get) => ({
       sessions: nextSessions,
       activeSessionId: nextActiveId,
       agentMeta: nextActiveId ? getSessionAgentMeta(nextActiveId) : IDLE_META,
-      autoApprove: nextActiveId ? getSessionAutoApprove(nextActiveId) : "off",
+      // TRUST GATE: the presentation field also honors the gate so the
+      // shield toggle paints Ask (amber) on an untrusted project even if
+      // the stored mode is Allow.
+      autoApprove: nextActiveId ? effectiveSessionAutoApprove(nextActiveId) : "off",
       sessionsHydrated: true,
       lastHydratedWorkspace: root,
     });
@@ -1992,7 +2011,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
       set({
         activeSessionId: id,
         agentMeta: getSessionAgentMeta(id),
-        autoApprove: getSessionAutoApprove(id),
+        autoApprove: effectiveSessionAutoApprove(id),
         selectedModelId: prefs.modelId ?? get().selectedModelId,
       });
       const rt = getActiveProjectRuntime();

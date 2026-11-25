@@ -16,9 +16,11 @@ import Folder01Icon from "@hugeicons/core-free-icons/Folder01Icon";
 import FolderAddIcon from "@hugeicons/core-free-icons/FolderAddIcon";
 import PencilEdit01Icon from "@hugeicons/core-free-icons/PencilEdit01Icon";
 import RefreshIcon from "@hugeicons/core-free-icons/RefreshIcon";
+import Shield01Icon from "@hugeicons/core-free-icons/Shield01Icon";
+import AlertCircleIcon from "@hugeicons/core-free-icons/AlertCircleIcon";
 import Upload04Icon from "@hugeicons/core-free-icons/Upload04Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { useFileMenuTrigger } from "@/app/fileMenu";
 import { useProjectsMenu, useProjectRailItems } from "@/app/projectsMenu";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu";
@@ -26,6 +28,13 @@ import { SIDEBAR_RAIL_HEIGHT } from "@/modules/sidebar";
 import { useProjectRunningTerminals } from "@/modules/terminal/lib/terminalActivity";
 import { ProjectIconPicker } from "./ProjectIconPicker";
 import { projectIconCss, projectIconFillCss, useProjectIcon } from "./projectIcons";
+import {
+  getWorkspaceTrustVersion,
+  isWorkspaceTrusted,
+  subscribeWorkspaceTrust,
+  trustWorkspace,
+  untrustWorkspace,
+} from "./workspaceTrust";
 
 export type ProjectSwitcherItem = {
   id: string;
@@ -151,7 +160,11 @@ export function ProjectRail({
   onClose: (id: string) => void;
 }) {
   const fileMenuTrigger = useFileMenuTrigger();
-  // Live items (2026-11-02): the rail subscribes itself — status
+  // WORKSPACE TRUST (2026-11-25): trust/untrust from the rail tile menu.
+  // Subscribing here re-renders the rail on trust flips, which is fine -
+  // the rail already re-renders on status transitions.
+  useSyncExternalStore(subscribeWorkspaceTrust, getWorkspaceTrustVersion);
+  // Live items (2026-11-02): the rail subscribes itself - status
   // transitions re-render THIS component only, never the memoized
   // workspaces (previously the items rode the menu context every
   // workspace consumed, so every status bump re-rendered everything).
@@ -289,6 +302,17 @@ export function ProjectRail({
                     Reset to default
                   </ContextMenuItem>
                 ) : null}
+                {isWorkspaceTrusted(project.id) ? (
+                  <ContextMenuItem onSelect={() => untrustWorkspace(project.id)}>
+                    <HugeiconsIcon icon={AlertCircleIcon} size={14} strokeWidth={1.75} className="shrink-0 text-amber-500" />
+                    Untrust project
+                  </ContextMenuItem>
+                ) : (
+                  <ContextMenuItem onSelect={() => trustWorkspace(project.id)}>
+                    <HugeiconsIcon icon={Shield01Icon} size={14} strokeWidth={1.75} className="shrink-0 text-emerald-500" />
+                    Trust project
+                  </ContextMenuItem>
+                )}
               </ContextMenuContent>
             </ContextMenu>
           ))}

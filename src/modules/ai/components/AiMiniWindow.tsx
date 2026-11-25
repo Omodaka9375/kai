@@ -45,6 +45,7 @@ import {
 } from "react";
 import { SandboxBadge } from "./SandboxBadge";
 import { ShadowStrip, ShadowSessionMenuItem } from "./ShadowStrip";
+import { TrustStrip } from "./TrustStrip";
 import { TelegramMonitorMenuItem } from "./TelegramMonitorMenuItem";
 import { estimateCost, getModel, getModelContextLimit } from "../config";
 import { effectiveContextLimit, SYSTEM_OVERHEAD_TOKENS } from "../lib/compact";
@@ -330,6 +331,7 @@ function Body({
       />
 
       <PlanModeStrip />
+      <TrustStrip />
 
       <div className="flex min-h-0 flex-1 flex-col">
         {helpers.messages.length === 0 ? (

@@ -17,7 +17,7 @@ import { memo, useCallback, useMemo, useState, useSyncExternalStore } from "reac
 import { useChatStore } from "../store/chatStore";
 import {
   abortSession,
-  getSessionAutoApprove,
+  effectiveSessionAutoApprove,
   getSessionAutoApproveVersion,
   subscribeSessionAutoApprove,
 } from "../store/chatStore";
@@ -104,8 +104,10 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue, proxy, sessionId
     getSessionAutoApproveVersion,
     getSessionAutoApproveVersion,
   );
+  // TRUST GATE: untrusted project -> prediction says Ask so the full card
+  // stays up (no flat-row blink for a call the bridge will never approve).
   const sessionAutoApprove = useMemo(
-    () => getSessionAutoApprove(ownerSessionId),
+    () => effectiveSessionAutoApprove(ownerSessionId),
     [ownerSessionId, autoApproveVersion],
   );
   const signingApprovalRequired = usePreferencesStore(

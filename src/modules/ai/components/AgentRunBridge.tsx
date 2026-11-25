@@ -11,7 +11,7 @@ import {
   subscribeProjectActiveSessions,
   subscribeSessionAutoApprove,
   useChatStore,
-  getSessionAutoApprove,
+  effectiveSessionAutoApprove,
   getSessionAutoApproveVersion,
   patchSessionAgentMeta,
   type AgentMeta,
@@ -323,8 +323,11 @@ function Bridge({
   // Version-derived memo: the Map read is not reactive by itself. Without
   // this subscription, toggling Allow/Ask on an idle approval-pinned session
   // never re-ran the auto-approve effect and the toggle looked inert.
+  // TRUST GATE (2026-11-25): an untrusted project forces Ask here, so the
+  // effect below never auto-approves its sessions - cloned repos can't ride
+  // Allow mode via prompt-injected KAI.md instructions.
   const autoApprove = useMemo(
-    () => getSessionAutoApprove(sessionId),
+    () => effectiveSessionAutoApprove(sessionId),
     [sessionId, autoApproveVersion],
   );
   const markAutoApproved = useChatStore((s) => s.markAutoApproved);
@@ -999,7 +1002,7 @@ function Bridge({
             toolName,
             usePreferencesStore.getState().standingAuthorityAlwaysAllowed,
           );
-          if (getSessionAutoApprove(sessionId) !== "all" && !stillGranted) {
+          if (effectiveSessionAutoApprove(sessionId) !== "all" && !stillGranted) {
             return;
           }
           // Latch ONLY on an applied response (2026-11-20 card-stall fix):

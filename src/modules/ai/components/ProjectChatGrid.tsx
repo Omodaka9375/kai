@@ -89,7 +89,7 @@ import {
   setSessionSteeringMessage,
   stopSession,
   setSessionAutoApprove,
-  getSessionAutoApprove,
+  effectiveSessionAutoApprove,
   subscribeSessionAutoApprove,
   getSessionAutoApproveVersion,
   getProjectEffectiveModelId,
@@ -1137,7 +1137,10 @@ const SessionApprovePill = memo(function SessionApprovePill({
   sessionId: string;
 }) {
   useSyncExternalStore(subscribeSessionAutoApprove, getSessionAutoApproveVersion);
-  const mode = getSessionAutoApprove(sessionId);
+  // TRUST GATE: the pill paints the EFFECTIVE mode (untrusted project =
+  // amber Ask) and its tooltip says so; clicking still writes the user's
+  // stored preference, which resumes effect once the project is trusted.
+  const mode = effectiveSessionAutoApprove(sessionId);
   const onClick = useCallback(() => {
     setSessionAutoApprove(sessionId, mode === "off" ? "all" : "off");
   }, [sessionId, mode]);

@@ -145,7 +145,8 @@ describe("Workspaces grid behavior (source pins)", () => {
     // foreground session). Not nested inside the open-project button.
     expect(grid).toContain("<SessionApprovePill sessionId={sessionId} />");
     expect(grid).toContain("setSessionAutoApprove(sessionId, mode === \"off\" ? \"all\" : \"off\")");
-    expect(grid).toContain("getSessionAutoApprove(sessionId)");
+    // 2026-11-25 TRUST GATE: the pill paints the trust-gated effective mode.
+    expect(grid).toContain("effectiveSessionAutoApprove(sessionId)");
     expect(grid).toContain("subscribeSessionAutoApprove");
     // The session-targeted setter exists in the store.
     const store = readFileSync(
