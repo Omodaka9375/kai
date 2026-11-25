@@ -9,8 +9,13 @@
 //!
 //! Elevation strategy per platform:
 //!   - **Windows**: `ShellExecuteW` with the `runas` verb (UAC consent), the
-//!     command wrapped in a temp PowerShell/batch script that redirects
-//!     stdout/stderr to temp files (ShellExecute cannot give us pipes).
+//!     command passed INLINE on the elevated process's command line
+//!     (`-EncodedCommand` base64 for PowerShell, an inline `/C` tail for
+//!     cmd) with stdout/stderr redirected to temp files (ShellExecute
+//!     cannot give us pipes). Never a script FILE: a file written to a
+//!     user-writable dir before the UAC popup can be swapped by any
+//!     same-user process while the prompt is up (TOCTOU, 2026-11-25
+//!     hardening) — see the SCRIPT-SWAP TOCTOU FIX note in `platform::run`.
 //!   - **macOS**: `osascript -e 'do shell script … with administrator
 //!     privileges'` (native auth dialog). Limitation: `do shell script` only
 //!     returns stdout; command stderr is folded into the error string on
@@ -166,6 +171,8 @@ mod platform {
     use std::os::windows::ffi::OsStrExt;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    use base64::Engine as _;
+
     use windows_sys::Win32::Foundation::{CloseHandle, WAIT_TIMEOUT};
     use windows_sys::Win32::System::Threading::{
         GetExitCodeProcess, GetProcessId, TerminateProcess, WaitForSingleObject,
@@ -237,11 +244,47 @@ mod platform {
         }
     }
 
+    /// Base64 of UTF-16LE — the encoding `pwsh -EncodedCommand` accepts.
+    /// No BOM: -EncodedCommand decodes straight to a UTF-16LE string (the
+    /// BOM is only needed when PowerShell parses raw bytes from a FILE).
+    fn encoded_command(script: &str) -> String {
+        let mut utf16le = Vec::with_capacity(script.len() * 2);
+        for unit in script.encode_utf16() {
+            utf16le.extend_from_slice(&unit.to_le_bytes());
+        }
+        base64::engine::general_purpose::STANDARD.encode(utf16le)
+    }
+
+    /// Command-line budget for the elevated shell. CreateProcess caps a
+    /// command line at 32,767 UTF-16 chars; stay well under it. A command
+    /// that does not fit inline is REJECTED, never written to a file: the
+    /// file path is exactly the swap-while-prompted hole this module no
+    /// longer has (see the TOCTOU note in `run`).
+    const MAX_PARAMS_CHARS: usize = 30_000;
+
     pub fn run(
         command: String,
         cwd: Option<PathBuf>,
         dur: Duration,
     ) -> Result<CommandOutput, String> {
+        // SCRIPT-SWAP TOCTOU FIX (2026-11-25): the command used to be
+        // written to `run.ps1`/`run.cmd` in a user-writable cache dir and
+        // executed by path AFTER the UAC consent. Between our write and
+        // the elevated shell's read sat the entire UAC popup - often many
+        // seconds - during which ANY process running as this user could
+        // replace the script, turning the user's "Yes" on the popup into
+        // admin execution of different code than the approval card showed.
+        //
+        // The command text now rides INSIDE the elevated process's own
+        // command line (-EncodedCommand base64 for PowerShell, an inline
+        // /C tail for cmd). A command line lives in our process memory
+        // until the OS hands it to the child; there is no file for a
+        // same-user process to swap. What the user approves on the popup
+        // is byte-identical to what the approval card displayed.
+        //
+        // The temp dir below now holds ONLY the stdout/stderr capture
+        // files. Those carry command OUTPUT (not code), and the elevated
+        // process overwrites them by truncation on first write.
         let base = dirs::cache_dir()
             .unwrap_or_else(std::env::temp_dir)
             .join("kai")
@@ -260,30 +303,35 @@ mod platform {
 
         let out_file = dir.join("stdout.txt");
         let err_file = dir.join("stderr.txt");
-        let script_file = dir.join(if is_cmd { "run.cmd" } else { "run.ps1" });
 
         let out_s = out_file.to_string_lossy().replace('/', "\\");
         let err_s = err_file.to_string_lossy().replace('/', "\\");
 
-        let script = if is_cmd {
-            format!(
-                "@echo off\r\n{command} > \"{out_s}\" 2> \"{err_s}\"\r\nexit /b %errorlevel%\r\n"
-            )
-        } else {
-            // UTF-8 BOM so PowerShell 5.1 (which otherwise assumes the ANSI
-            // codepage) reads non-ASCII bytes correctly.
-            format!(
-                "\u{FEFF}& {{\r\n{command}\r\n}} 1> '{out_s}' 2> '{err_s}'\r\n$__KAI_rc = if ($null -ne $LASTEXITCODE) {{ $LASTEXITCODE }} elseif ($?) {{ 0 }} else {{ 1 }}\r\nexit $__KAI_rc\r\n"
-            )
-        };
-        std::fs::write(&script_file, script).map_err(|e| e.to_string())?;
-
-        let script_arg = format!("\"{}\"", script_file.to_string_lossy().replace('/', "\\"));
+        // The full command text the elevated shell will parse, built from
+        // the EXACT string that was shown on the approval card. Inline for
+        // both shells — no script file anywhere on disk.
         let params = if is_cmd {
-            format!("/D /S /C {script_arg}")
+            // cmd /C: the remainder of the command line is the command,
+            // parsed exactly as if typed. cmd's own exit code is the last
+            // command's ERRORLEVEL, so no exit shim is needed.
+            format!("/D /S /C {command} 1> \"{out_s}\" 2> \"{err_s}\"")
         } else {
-            format!("-NoProfile -ExecutionPolicy Bypass -File {script_arg}")
+            let script = format!(
+                "& {{\r\n{command}\r\n}} 1> '{out_s}' 2> '{err_s}'\r\n$__KAI_rc = if ($null -ne $LASTEXITCODE) {{ $LASTEXITCODE }} elseif ($?) {{ 0 }} else {{ 1 }}\r\nexit $__KAI_rc\r\n"
+            );
+            format!(
+                "-NoProfile -ExecutionPolicy Bypass -EncodedCommand {}",
+                encoded_command(&script)
+            )
         };
+        if params.len() > MAX_PARAMS_CHARS {
+            return Err(format!(
+                "elevated command is too long to pass securely inline ({} chars, limit {}). \
+                 Split the work, or place it in a script you control and elevate a short command that runs it.",
+                params.len(),
+                MAX_PARAMS_CHARS,
+            ));
+        }
 
         let verb = to_wide("runas");
         let file = to_wide(&shell.to_string_lossy());
