@@ -36,14 +36,18 @@ import {
   setOpenaiCompatibleModelId,
   setOpenaiCompatibleThinkingMode,
   setOpenaiCompatibleVision,
+  setProxyBaseURL,
+  setProxyModelId,
 } from "@/modules/settings/store";
 import { invoke } from "@tauri-apps/api/core";
+import { useOpenRouterModelsStore } from "@/modules/ai/store/openrouterModelsStore";
+import type { ModelInfo } from "@/modules/ai/config";
 import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
 import CheckmarkCircle02Icon from "@hugeicons/core-free-icons/CheckmarkCircle02Icon";
 import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 import TestTubeIcon from "@hugeicons/core-free-icons/TestTubeIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ProviderIcon } from "../components/ProviderIcon";
 import { ProviderKeyCard } from "../components/ProviderKeyCard";
 import { SectionHeader } from "../components/SectionHeader";
@@ -123,6 +127,12 @@ export function ModelsSection() {
         compatKey={keys["openai-compatible"]}
         onSaveKey={(v) => onSave("openai-compatible", v)}
         onClearKey={() => onClear("openai-compatible")}
+      />
+
+      <ProxyBlock
+        proxyKey={keys["proxy"] ?? null}
+        onSaveKey={(v) => onSave("proxy" as ProviderId, v)}
+        onClearKey={() => onClear("proxy" as ProviderId)}
       />
 
       <FitCheckDialog
@@ -365,6 +375,190 @@ function ModelIdWithFetch({
   );
 }
 
+/** Proxy backend-model picker — the SAME merged model list the bottom-right
+ *  status-bar picker shows (hardcoded registry + auto-synced OpenRouter
+ *  catalog), so picking the backend a MemoChain-class proxy fronts is a
+ *  browsable dropdown, not free-text guessing. Free text stays available
+ *  (the proxy may serve renamed/passthrough ids the catalog doesn't know),
+ *  plus a "Fetch" button listing what the PROXY itself serves (lm_list_models
+ *  against the proxy URL) for passthrough proxies. */
+function ProxyModelIdField({
+  value,
+  onChange,
+  onCommit,
+  baseUrl,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onCommit: (v: string) => void;
+  baseUrl: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [proxyModels, setProxyModels] = useState<string[]>([]);
+  const [fetching, setFetching] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [proxyListOpen, setProxyListOpen] = useState(false);
+
+  // The merged catalog (registry + OpenRouter), grouped by provider. Same
+  // store the status-bar picker reads; the fetch is TTL/dedup-guarded.
+  const orModels = useOpenRouterModelsStore((s) => s.models);
+  const orFetch = useOpenRouterModelsStore((s) => s.fetch);
+  useEffect(() => {
+    if (open) void orFetch();
+  }, [open, orFetch]);
+
+  // Placeholder slots (custom/proxy endpoint entries) are config surfaces,
+  // not backend models a proxy would front — exclude them from the list.
+  const PLACEHOLDER_IDS = new Set(["openai-compatible-custom", "proxy-custom"]);
+
+  const grouped = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    const byProvider = new Map<ProviderId, ModelInfo[]>();
+    for (const m of orModels) {
+      if (PLACEHOLDER_IDS.has(m.id)) continue;
+      if (needle) {
+        const hay = `${m.id} ${m.label} ${m.hint} ${m.description ?? ""}`.toLowerCase();
+        if (!hay.includes(needle)) continue;
+      }
+      const list = byProvider.get(m.provider);
+      if (list) list.push(m);
+      else byProvider.set(m.provider, [m]);
+    }
+    return PROVIDERS.filter((p) => byProvider.has(p.id)).map((p) => ({
+      provider: p,
+      models: byProvider.get(p.id) as ModelInfo[],
+    }));
+  }, [orModels, search]);
+
+  const fetchProxyModels = async () => {
+    if (!baseUrl.trim()) return;
+    setFetching(true);
+    setFetchError(null);
+    try {
+      const list = await invoke<string[]>("lm_list_models", {
+        baseUrl: baseUrl.trim(),
+      });
+      setProxyModels(list);
+      if (list.length > 0) setProxyListOpen(true);
+      else setFetchError("Proxy returned no models.");
+    } catch (e) {
+      setProxyModels([]);
+      setFetchError(String(e));
+    }
+    setFetching(false);
+  };
+
+  return (
+    <div className="flex flex-1 gap-1.5">
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <Input
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onBlur={() => onCommit(value.trim())}
+            placeholder="Pick a backend model (or type any id)"
+            spellCheck={false}
+            className="h-8 flex-1 font-mono text-[11.5px]"
+          />
+        </PopoverTrigger>
+        <PopoverContent align="start" sideOffset={6} className="w-96 p-0">
+          <Command>
+            <CommandInput
+              placeholder="Search backend models…"
+              value={search}
+              onValueChange={setSearch}
+            />
+            <CommandList>
+              <CommandEmpty>No models found.</CommandEmpty>
+              {grouped.map(({ provider: p, models }) => (
+                <CommandGroup key={p.id} heading={p.label}>
+                  {models.map((m) => (
+                    <CommandItem
+                      key={m.id}
+                      value={m.id}
+                      keywords={[m.label, m.hint, m.description ?? "", p.label]}
+                      data-checked={m.id === value ? true : undefined}
+                      onSelect={() => {
+                        onChange(m.id);
+                        onCommit(m.id);
+                        setOpen(false);
+                      }}
+                      className={cn(
+                        "flex items-start gap-2 text-[12px]",
+                        m.id === value && "bg-accent/50",
+                      )}
+                    >
+                      <ProviderIcon provider={p.id} size={14} />
+                      <span className="flex min-w-0 flex-1 flex-col">
+                        <span className="truncate">{m.label}</span>
+                        <span className="truncate font-mono text-[10px] text-muted-foreground">
+                          {m.id}
+                        </span>
+                      </span>
+                      <span className="shrink-0 pt-0.5 text-[9.5px] text-muted-foreground">
+                        {m.hint}
+                      </span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              ))}
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
+      <DropdownMenu open={proxyListOpen} onOpenChange={setProxyListOpen}>
+        <DropdownMenuTrigger asChild onPointerDown={(e) => e.preventDefault()}>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={(e) => {
+              e.preventDefault();
+              void fetchProxyModels();
+            }}
+            disabled={!baseUrl.trim() || fetching}
+            title="List the model ids the proxy itself serves"
+            className="h-8 px-2.5 text-[11px]"
+          >
+            {fetching ? "…" : "Fetch"}
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="end"
+          side="bottom"
+          sideOffset={4}
+          className="max-h-[200px] min-w-[240px] overflow-y-auto p-1"
+        >
+          {proxyModels.length === 0 ? (
+            <div className="px-2 py-1.5 text-[11px] text-muted-foreground">
+              No models found
+            </div>
+          ) : (
+            proxyModels.map((m) => (
+              <DropdownMenuItem
+                key={m}
+                onClick={() => {
+                  onChange(m);
+                  onCommit(m);
+                  setProxyListOpen(false);
+                }}
+                className="font-mono text-[11px]"
+              >
+                {m}
+              </DropdownMenuItem>
+            ))
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {fetchError && (
+        <p className="mt-1 text-[10.5px] text-red-500 dark:text-red-400">
+          {fetchError}
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** One-click base URLs for common local/LAN OpenAI-compatible servers.
  *  Presets are just quick-fill — the field itself accepts any URL, LAN or
  *  remote, http or https. 127.0.0.1 forms (not localhost) so the Rust ping
@@ -568,6 +762,160 @@ function OpenAICompatibleBlock({
           value={usePreferencesStore((s) => s.openaiCompatibleVision)}
           onChange={(v) => void setOpenaiCompatibleVision(v)}
         />
+
+        <StatusLine status={testStatus} />
+      </div>
+    </div>
+  );
+}
+
+/** Proxy endpoint (MemoChain-class memory proxy). Separate from the local
+ *  OpenAI-compatible endpoint: this fronts a REAL backend (OpenRouter /
+ *  Anthropic / OpenAI), keys its durable memory capsule by x-session-id, and
+ *  the model id is whatever the proxy serves for the chosen backend (often an
+ *  OpenRouter-style id). BYOK: the key (optional) rides Authorization as-is. */
+function ProxyBlock({
+  proxyKey,
+  onSaveKey,
+  onClearKey,
+}: {
+  proxyKey: string | null;
+  onSaveKey: (v: string) => Promise<void>;
+  onClearKey: () => Promise<void>;
+}) {
+  const baseURL = usePreferencesStore((s) => s.proxyBaseURL);
+  const modelId = usePreferencesStore((s) => s.proxyModelId);
+  const [urlDraft, setUrlDraft] = useState(baseURL);
+  const [modelDraft, setModelDraft] = useState(modelId);
+  const [keyDraft, setKeyDraft] = useState("");
+  const [testStatus, setTestStatus] = useState<
+    "idle" | "testing" | "ok" | "fail"
+  >("idle");
+
+  useEffect(() => setUrlDraft(baseURL), [baseURL]);
+  useEffect(() => setModelDraft(modelId), [modelId]);
+
+  const dirty =
+    urlDraft.trim() !== baseURL || modelDraft.trim() !== modelId;
+
+  const save = async () => {
+    const u = urlDraft.trim();
+    const m = modelDraft.trim();
+    if (u !== baseURL) await setProxyBaseURL(u);
+    if (m !== modelId) await setProxyModelId(m);
+  };
+
+  const test = async () => {
+    setTestStatus("testing");
+    try {
+      const status = await invoke<number>("lm_ping", { baseUrl: urlDraft });
+      setTestStatus(status > 0 ? "ok" : "fail");
+    } catch {
+      setTestStatus("fail");
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-0.5">
+        <Label>Proxy endpoint — memory proxy (MemoChain)</Label>
+        <span className="text-[10.5px] text-muted-foreground">
+          An OpenAI-compatible memory proxy fronting any backend. Requests
+          carry x-session-id so the proxy keys one durable memory capsule per
+          chat session — and the proxy owns context memory, so no local
+          compaction happens for sessions it serves.
+        </span>
+      </div>
+
+      <div className="flex flex-col gap-2.5 rounded-lg border border-border/60 bg-card/60 px-3 py-2.5">
+        <FieldRow label="Base URL">
+          <div className="flex flex-1 gap-1.5">
+            <Input
+              value={urlDraft}
+              onChange={(e) => setUrlDraft(e.target.value)}
+              onBlur={() => {
+                const v = urlDraft.trim();
+                if (v !== baseURL) void setProxyBaseURL(v);
+              }}
+              placeholder="http://host:9001/v1"
+              spellCheck={false}
+              className="h-8 min-w-0 flex-1 font-mono text-[11.5px]"
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void test()}
+              disabled={!urlDraft.trim()}
+              className="h-8 px-3 text-[11px]"
+            >
+              Test
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => void save()}
+              disabled={!dirty}
+              className="h-8 px-3 text-[11px]"
+            >
+              Save
+            </Button>
+          </div>
+        </FieldRow>
+
+        <FieldRow label="Model ID">
+          <ProxyModelIdField
+            value={modelDraft}
+            onChange={setModelDraft}
+            onCommit={(v) => { if (v !== modelId) void setProxyModelId(v); }}
+            baseUrl={urlDraft}
+          />
+        </FieldRow>
+
+        <FieldRow label="API key">
+          {proxyKey ? (
+            <div className="flex flex-1 items-center gap-1.5">
+              <code className="flex-1 truncate rounded bg-muted/40 px-2 py-1 font-mono text-[11px] text-muted-foreground">
+                {`${proxyKey.slice(0, 4)}${"•".repeat(8)}${proxyKey.slice(-4)}`}
+              </code>
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={() => void onClearKey()}
+                title="Remove"
+                className="size-7 text-muted-foreground hover:text-destructive"
+              >
+                <HugeiconsIcon
+                  icon={Cancel01Icon}
+                  size={12}
+                  strokeWidth={1.75}
+                />
+              </Button>
+            </div>
+          ) : (
+            <div className="flex flex-1 gap-1.5">
+              <Input
+                type="password"
+                value={keyDraft}
+                onChange={(e) => setKeyDraft(e.target.value)}
+                placeholder="Optional BYOK — forwarded as Authorization to the proxy"
+                spellCheck={false}
+                className="h-8 flex-1 font-mono text-[11.5px]"
+              />
+              <Button
+                size="sm"
+                onClick={async () => {
+                  const v = keyDraft.trim();
+                  if (!v) return;
+                  await onSaveKey(v);
+                  setKeyDraft("");
+                }}
+                disabled={!keyDraft.trim()}
+                className="h-8 px-3 text-[11px]"
+              >
+                Save
+              </Button>
+            </div>
+          )}
+        </FieldRow>
 
         <StatusLine status={testStatus} />
       </div>

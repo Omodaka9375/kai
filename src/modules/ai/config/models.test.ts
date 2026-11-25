@@ -14,8 +14,13 @@ import { getModelPricing, MODELS } from "./models";
 
 /** Placeholder entry for user-run OpenAI-compatible endpoints (LM Studio,
  *  Ollama, vLLM). The real model is whatever the user points at, so a price
- *  can never be known here. Permanently exempt. */
-const UNPRICED_PLACEHOLDERS: readonly string[] = ["openai-compatible-custom"];
+ *  can never be known here. Permanently exempt. Same for the proxy endpoint
+ *  (MemoChain memory proxy): the backend model behind the proxy is
+ *  user-chosen, the proxy may meter differently, so no static price. */
+const UNPRICED_PLACEHOLDERS: readonly string[] = [
+  "openai-compatible-custom",
+  "proxy-custom",
+];
 
 /** Real models still missing a MODEL_PRICING entry. Every entry here is a
  *  known gap. This list must only ever get SHORTER — see the second test. */

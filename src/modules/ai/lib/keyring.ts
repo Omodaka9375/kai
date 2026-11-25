@@ -23,6 +23,7 @@ export const EMPTY_PROVIDER_KEYS: ProviderKeys = {
   mistral: null,
   openrouter: null,
   "openai-compatible": null,
+  proxy: null,
   zai: null,
   assemblyai: null,
   brave: null,

@@ -41,6 +41,12 @@ export function modelTextOnly(
 ): boolean {
   const m = getModel(modelId as never);
   if (m.tags?.includes("vision")) return false;
+  // Proxy endpoint (proxy-custom): same heuristic family as the custom
+  // endpoint — the backend model behind the proxy decides, guessed from the
+  // runtime name (an OpenRouter/Anthropic/OpenAI id), no user override.
+  if (m.id === "proxy-custom") {
+    return !looksLikeVisionModel(runtimeModelName);
+  }
   if (m.id === "openai-compatible-custom") {
     // Explicit user override beats both the registry and the name guess.
     if (visionOverride === "on") return false;

@@ -1273,6 +1273,8 @@ async function runPersonaReply(
       prefs.openaiCompatibleModelId?.trim()
     ) {
       resolved = prefs.openaiCompatibleModelId.trim();
+    } else if (m.id === "proxy-custom" && prefs.proxyModelId?.trim()) {
+      resolved = prefs.proxyModelId.trim();
     }
     // Dynamic imports: lib/agent + tools/tools pull the whole registry and
     // would cycle back into this module statically (the group tool imports
@@ -1285,6 +1287,11 @@ async function runPersonaReply(
       ]);
     const model = await buildLanguageModel(m.provider, keys, resolved, {
       openaiCompatibleBaseURL: prefs.openaiCompatibleBaseURL,
+      proxyBaseURL: m.provider === "proxy" ? prefs.proxyBaseURL : undefined,
+      // x-session-id (MemoChain 2026-11-25): the persona's group session —
+      // stable across the group's turns so a memory proxy keys one capsule
+      // per persona+group, not per request.
+      sessionId: p.sessionId,
     });
     // The transcript contains OTHER agents' output - fence it so a malicious
     // repo reply can't hijack the persona run (same trust rule as the bridge).

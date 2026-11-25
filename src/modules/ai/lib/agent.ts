@@ -87,6 +87,15 @@ const cloudFetch: typeof fetch = async (input, init) => {
 export type BuildModelOptions = {
   modelIdOverride?: string;
   openaiCompatibleBaseURL?: string;
+  /** Stable per-session id sent as `x-session-id` on every openai-compatible
+   *  request (MemoChain-class memory proxies key their memory capsules by
+   *  it — a fresh id per request would create a new memory every turn).
+   *  Cached per session (part of the model cache key), so the header stays
+   *  byte-stable for the life of the chat session. */
+  sessionId?: string | null;
+  /** Proxy endpoint base URL (Settings → Models → Proxy endpoint). Set for
+   *  the `proxy` provider only; ignored elsewhere. */
+  proxyBaseURL?: string;
 };
 
 const MODEL_CACHE_CAP = 8;
@@ -115,7 +124,7 @@ export async function buildLanguageModel(
   }
   const key = keys[provider] ?? "";
   const compatURL = options.openaiCompatibleBaseURL ?? "";
-  const cacheKey = `${provider} ${key} ${resolvedModelId} ${compatURL}`;
+  const cacheKey = `${provider} ${key} ${resolvedModelId} ${compatURL} ${options.proxyBaseURL ?? ""} ${options.sessionId ?? ""}`;
   const hit = modelCache.get(cacheKey);
   if (hit) return hit;
 
@@ -207,11 +216,48 @@ export async function buildLanguageModel(
       }
       const { createOpenAICompatible } =
         await import("@ai-sdk/openai-compatible");
+      // x-session-id (MemoChain 2026-11-25): memory proxies key their
+      // session capsule by this header, so it must be the CHAT session id,
+      // stable across every request of the session. Only set when the caller
+      // knows its session — keyless one-shot calls (fit-check, probe) send
+      // nothing rather than a garbage value.
+      const sessionHeaders = options.sessionId
+        ? { "x-session-id": options.sessionId }
+        : undefined;
       built = createOpenAICompatible({
         name: "openai-compatible",
         baseURL: compatURL,
         apiKey: key || undefined,
+        headers: sessionHeaders,
         fetch: localProxyFetch,
+      })(resolvedModelId);
+      break;
+    }
+    case "proxy": {
+      // Proxy endpoint (MemoChain 2026-11-25): same OpenAI-compatible wire,
+      // but the endpoint is a MEMORY PROXY fronting a real backend —
+      // x-session-id is REQUIRED here (the proxy keys its memory capsule by
+      // it), never optional like above. BYOK: the key passes through as the
+      // standard Authorization header for the proxy to forward (or ignore
+      // on unauthenticated LAN proxies).
+      if (!options.proxyBaseURL) {
+        throw new Error(
+          "Proxy endpoint has no base URL. Set it in Settings → Models.",
+        );
+      }
+      if (!options.sessionId) {
+        throw new Error(
+          "Proxy endpoint requires a chat session (x-session-id). One-shot keyless calls cannot use it.",
+        );
+      }
+      const { createOpenAICompatible } =
+        await import("@ai-sdk/openai-compatible");
+      built = createOpenAICompatible({
+        name: "proxy",
+        baseURL: options.proxyBaseURL,
+        apiKey: key || undefined,
+        headers: { "x-session-id": options.sessionId },
+        fetch: cloudFetch,
       })(resolvedModelId);
       break;
     }
@@ -249,6 +295,8 @@ export function buildConfiguredLanguageModel(
   keys: ProviderKeys,
   openaiCompatibleBaseURL?: string,
   openaiCompatibleModelId?: string,
+  sessionId?: string | null,
+  proxy?: { baseURL?: string; modelId?: string },
 ): Promise<LanguageModel> {
   const m = getModel(modelId);
   let resolvedId: string = m.id;
@@ -260,8 +308,23 @@ export function buildConfiguredLanguageModel(
     }
     resolvedId = openaiCompatibleModelId.trim();
   }
+  if (m.id === "proxy-custom") {
+    if (!proxy?.baseURL?.trim()) {
+      throw new Error(
+        "Proxy endpoint: no base URL set. Open Settings → Models.",
+      );
+    }
+    if (!proxy.modelId?.trim()) {
+      throw new Error(
+        "Proxy endpoint: no model id set. Open Settings → Models.",
+      );
+    }
+    resolvedId = proxy.modelId.trim();
+  }
   return buildLanguageModel(m.provider, keys, resolvedId, {
     openaiCompatibleBaseURL,
+    sessionId,
+    proxyBaseURL: m.provider === "proxy" ? proxy?.baseURL : undefined,
   });
 }
 
@@ -374,6 +437,11 @@ export type RunAgentOptions = {
   /** Current auto-approve setting ("off"|"all"), journaled with the turn so
    *  "did the agent run unattended?" is answerable from the event log. */
   autoApprove?: string;
+  /** Owning chat session id — rides every openai-compatible request as
+   *  `x-session-id` (memory-proxy capsule key). Null/absent = one-shot call. */
+  sessionId?: string | null;
+  /** Proxy endpoint config (Settings → Models): base URL + backend model name. */
+  proxy?: { baseURL?: string; modelId?: string } | null;
 };
 
 /**
@@ -675,6 +743,8 @@ export async function runAgentStream(opts: RunAgentOptions) {
     opts.keys,
     opts.openaiCompatibleBaseURL,
     opts.openaiCompatibleModelId,
+    opts.sessionId ?? null,
+    opts.proxy ?? undefined,
   );
   const provider = getModel(modelId).provider;
 
@@ -706,7 +776,9 @@ export async function runAgentStream(opts: RunAgentOptions) {
   const runtimeModelName =
     modelId === "openai-compatible-custom"
       ? opts.openaiCompatibleModelId
-      : null;
+      : modelId === "proxy-custom"
+        ? opts.proxy?.modelId ?? null
+        : null;
   const canSee = modelCanSee(
     modelId,
     runtimeModelName,

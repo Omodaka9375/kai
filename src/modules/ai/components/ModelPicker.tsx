@@ -12,6 +12,7 @@ import AiVoiceIcon from "@hugeicons/core-free-icons/AiVoiceIcon";
 import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
 import BrainIcon from "@hugeicons/core-free-icons/BrainIcon";
 import ChatGptIcon from "@hugeicons/core-free-icons/ChatGptIcon";
+import CloudServerIcon from "@hugeicons/core-free-icons/CloudServerIcon";
 import ClaudeIcon from "@hugeicons/core-free-icons/ClaudeIcon";
 import Clock01Icon from "@hugeicons/core-free-icons/Clock01Icon";
 import CoinsDollarIcon from "@hugeicons/core-free-icons/CoinsDollarIcon";
@@ -64,6 +65,7 @@ const PROVIDER_ICON = {
   mistral: Hexagon01Icon,
   openrouter: GlobeIcon,
   "openai-compatible": PlugIcon,
+  proxy: CloudServerIcon,
   zai: CpuIcon,
   // Voice provider - never appears in a model list, but the Record must be
   // exhaustive so a future ProviderId can't compile without an icon.

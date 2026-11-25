@@ -93,6 +93,9 @@ export async function runSubagent({
     resolvedModelId,
     { openaiCompatibleBaseURL },
   );
+  // No x-session-id here (deliberate): subagents are one-shot read-only
+  // investigations; a per-run memory capsule from a proxy would be useless
+  // noise. Header only rides session-scoped callers.
 
   const effectiveMaxSteps = maxSteps ?? SUBAGENT_MAX_STEPS_DEFAULT;
   const start = Date.now();
