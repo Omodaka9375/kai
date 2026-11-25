@@ -768,7 +768,11 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
         // during a press, plus the explicit flag while this card is the one
         // being carried (a native HTML5 drag can drop :active).
         className={cn(
-          "flex shrink-0 select-none items-center gap-1 border-b border-border/40 px-3 py-1.5",
+          // kai-tinted-bar (2026-11-25): this bar is ALWAYS tinted with the
+          // project's hue (projectIconFillCss above); the class re-inks muted
+          // grays and hue-neutralizes the pills' hover washes via globals.css
+          // - the flat-card styles they shipped with fought the tint.
+          "kai-tinted-bar flex shrink-0 select-none items-center gap-1 border-b border-border/40 px-3 py-1.5",
           // VERTICAL CENTERING (2026-11-23): inline SVGs sit on the text
           // baseline by default, which leaves a descender gap BELOW each
           // icon and pushes everything visually 2-3px above the bar's
@@ -961,7 +965,7 @@ const CardContextRing = memo(function CardContextRing({
         <button
           type="button"
           aria-label="Model context usage"
-          className="flex shrink-0 items-center justify-center rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+          className="flex shrink-0 items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
         >
           <svg
             aria-hidden
@@ -1125,7 +1129,7 @@ const CardSessionPicker = memo(function CardSessionPicker({
           type="button"
           title="Switch session"
           aria-label="Switch session"
-          className="flex shrink-0 items-center justify-center rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+          className="flex shrink-0 items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
         >
           {/* MessageMultiple01Icon: stacked chat bubbles - reads as "sessions"
               and is distinct from every other icon in the bar (shield, cube,
@@ -1194,7 +1198,10 @@ const SessionApprovePill = memo(function SessionApprovePill({
           : "Allow mode: allow tool calls without asking (click to switch to Ask)"
       }
       className={cn(
-        "flex shrink-0 items-center justify-center rounded p-0.5 transition-colors hover:bg-accent/60",
+        // p-1 (2026-11-25): the tinted bar made the old p-0.5 hit area read
+        // as an unpadded colored square on hover; hover wash is hue-neutral
+        // (hover:bg-foreground/10) so it never fights the project tint.
+        "flex shrink-0 items-center justify-center rounded p-1 transition-colors hover:bg-foreground/10",
         mode === "off" ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400",
       )}
     >
@@ -1248,7 +1255,7 @@ const SessionPersonaPill = memo(function SessionPersonaPill({
           type="button"
           title={active ? `Persona: ${active.name} (click to switch)` : "No persona (click to set one)"}
           aria-label="Switch persona"
-          className="flex shrink-0 items-center justify-center rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+          className="flex shrink-0 items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
         >
           <HugeiconsIcon icon={ActiveIcon} size={12} strokeWidth={1.75} className={active ? "text-primary" : undefined} />
         </button>
@@ -1348,7 +1355,10 @@ const CardModelPill = memo(function CardModelPill({
         <button
           type="button"
           title={`Model: ${fullLabel} — click for favorites`}
-          className="flex max-w-[100px] shrink-0 items-center gap-0.5 rounded bg-background/40 px-1.5 py-0.5 text-[9.5px] font-medium text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+          // kai-tint-chip (2026-11-25): the old bg-background/40 painted a
+          // flat gray rectangle on the tinted bar; the chip class gives a
+          // translucent tinted surface + hairline border via globals.css.
+          className="kai-tint-chip flex max-w-[100px] shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-[9.5px] font-medium text-muted-foreground transition-colors hover:text-foreground"
         >
           <span className="truncate">{shortLabel}</span>
           <HugeiconsIcon

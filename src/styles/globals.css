@@ -379,3 +379,65 @@ html *::-webkit-scrollbar {
     animation: none;
   }
 }
+
+/* ── TINTED HEADER BARS ─────────────────────────────────────────────────
+   (2026-11-25) The Workspaces card top bars and the AI window header are
+   tinted with the project's icon hue (projectIconFillCss, ~16-26% alpha).
+   The pills sitting on them were styled for the FLAT card background:
+   gray text (text-muted-foreground) sank into the tint, hover washes
+   (bg-accent, bg-muted, bg-accent/60) fought the hue, and the outline
+   AgentSwitcher's bg-card chip rendered as an opaque blob.
+
+   These rules apply ONLY inside .kai-tinted-bar (unlayered author CSS
+   beats Tailwind's layered utilities, no !important needed):
+
+   1. Muted grays are re-inked to foreground-alpha so they read on ANY
+      hue; deliberately-colored pills (amber shield, primary sandbox
+      cube, persona icon) are untouched.
+   2. Hover/open washes become foreground-alpha (hue-neutral) instead
+      of opaque accent/muted grays.
+   3. Bordered outline chips get a translucent fill so the tint carries
+      through the chip. */
+
+.kai-tinted-bar .text-muted-foreground,
+.kai-tinted-bar .text-muted-foreground\/70,
+.kai-tinted-bar .text-muted-foreground\/80 {
+  /* Foreground at alpha keeps contrast against every low-alpha tint. */
+  color: color-mix(in oklab, var(--foreground) 72%, transparent);
+}
+
+.kai-tinted-bar button:hover,
+.kai-tinted-bar [role="button"]:hover,
+.kai-tinted-bar button[data-state="open"],
+.kai-tinted-bar [role="button"][data-state="open"],
+.kai-tinted-bar button[aria-expanded="true"] {
+  /* Foreground-alpha wash is hue-neutral: never fights the tint. */
+  background: color-mix(in oklab, var(--foreground) 10%, transparent);
+}
+
+.kai-tinted-bar button[data-variant="outline"],
+.kai-tinted-bar [role="button"][data-variant="outline"] {
+  /* Outline chips (AgentSwitcher etc.): translucent fill instead of
+     the opaque bg-card that painted a hard rectangle on the tint. */
+  background: color-mix(in oklab, var(--card) 45%, transparent);
+  border-color: color-mix(in oklab, var(--foreground) 14%, transparent);
+}
+
+.kai-tinted-bar button[data-variant="outline"]:hover,
+.kai-tinted-bar [role="button"][data-variant="outline"]:hover,
+.kai-tinted-bar button[data-variant="outline"][data-state="open"],
+.kai-tinted-bar [role="button"][data-variant="outline"][data-state="open"] {
+  background: color-mix(in oklab, var(--foreground) 12%, transparent);
+}
+
+/* Chips that paint their own background (the card model pill): a
+   translucent surface with a hairline border, so the pill reads as a
+   deliberate chip on the tint instead of a flat gray rectangle. */
+.kai-tinted-bar .kai-tint-chip {
+  background: color-mix(in oklab, var(--foreground) 6%, transparent);
+  border: 1px solid color-mix(in oklab, var(--foreground) 14%, transparent);
+}
+.kai-tinted-bar .kai-tint-chip:hover,
+.kai-tinted-bar .kai-tint-chip[data-state="open"] {
+  background: color-mix(in oklab, var(--foreground) 14%, transparent);
+}

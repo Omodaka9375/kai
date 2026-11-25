@@ -448,7 +448,13 @@ function Header({
 
   return (
     <div
-      className="relative flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border/60 px-3"
+      // kai-tinted-bar (2026-11-25): ONLY applied when the header actually
+      // has a tint (activeItem) - on StartPage/no-project the bar stays flat
+      // and the pills keep their stock flat-bar styles.
+      className={cn(
+        "relative flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border/60 px-3",
+        tint && "kai-tinted-bar",
+      )}
       style={tint ? { background: tint } : undefined}
     >
       <div className="flex min-w-0 items-center gap-1.5">
@@ -686,9 +692,9 @@ function SessionPicker() {
         <button
           type="button"
           className={cn(
-            "flex min-w-0 max-w-32 items-center gap-1 rounded-md px-1.5 py-1",
+            "kai-tint-chip flex min-w-0 max-w-32 items-center gap-1 rounded-md px-1.5 py-1",
             "text-[11px] text-muted-foreground transition-colors",
-            "hover:bg-accent hover:text-foreground",
+            "hover:text-foreground",
           )}
           title="Switch session"
         >
