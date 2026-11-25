@@ -55,7 +55,10 @@ import {
   SANDBOX_LABELS,
   subscribeSandboxChanged,
 } from "../lib/sandbox";
-import { isWorkspaceTrusted } from "@/modules/workspace/workspaceTrust";
+import {
+  isWorkspaceTrusted,
+  subscribeWorkspaceTrust,
+} from "@/modules/workspace/workspaceTrust";
 import { AiChatView } from "./AiChat";
 import { AiErrorBoundary } from "./AiErrorBoundary";
 // Card input #skill / /command popup: same detection and the same picker
@@ -881,9 +884,15 @@ const CardSandboxIcon = memo(function CardSandboxIcon({
       if (alive) unlisten = u;
       else u();
     });
+    // TRUST CHANGES re-resolve (2026-11-25 review): Trust/Untrust flips the
+    // seeded-default decision - the card icon follows without a remount.
+    const untrust = subscribeWorkspaceTrust(() => {
+      resolve();
+    });
     return () => {
       alive = false;
       unlisten?.();
+      untrust();
     };
   }, [root, projectId]);
 

@@ -12,9 +12,12 @@ import { useChatStore } from "../store/chatStore";
 import { auditAppend, AUDIT_KINDS } from "../lib/audit";
 import { native } from "../lib/native";
 import type { SandboxMode } from "../lib/native";
-import { LOCAL_WORKSPACE } from "@/modules/workspace/env";
+import { currentWorkspaceEnv } from "@/modules/workspace/env";
 import { projectIdFor } from "@/modules/workspace/projectRuntime";
-import { isWorkspaceTrusted } from "@/modules/workspace/workspaceTrust";
+import {
+  isWorkspaceTrusted,
+  subscribeWorkspaceTrust,
+} from "@/modules/workspace/workspaceTrust";
 import {
   loadSandboxMode,
   loadSandboxModeForProject,
@@ -23,10 +26,12 @@ import {
   subscribeSandboxChanged,
 } from "../lib/sandbox";
 
-/** Canonical project id for a workspace root (local env — the badge shows
- *  the desktop project; the ambient env follows the active workspace). */
+/** Canonical project id for a workspace root. Uses the AMBIENT workspace env
+ *  (same source native.ts reads at invoke time), NOT hardcoded LOCAL - a
+ *  hardcoded local scope computes the wrong id for a WSL project root and
+ *  the badge would misread its trust entry. */
 function activeProjectIdForRoot(root: string): string {
-  return projectIdFor(root, LOCAL_WORKSPACE);
+  return projectIdFor(root, currentWorkspaceEnv());
 }
 
 /** Same order/wording as Settings → Sandbox, so both surfaces read as one
@@ -84,9 +89,17 @@ export function SandboxBadge() {
       if (alive) unlisten = u;
       else u();
     });
+    // TRUST CHANGES re-resolve too (2026-11-25 review): Trust/Untrust flips
+    // which mode loadSandboxModeForProject returns (seeded readOnly vs the
+    // stored config) - without this the badge keeps the stale mode until a
+    // project switch.
+    const untrust = subscribeWorkspaceTrust(() => {
+      resolve();
+    });
     return () => {
       alive = false;
       unlisten?.();
+      untrust();
     };
   }, [root, projectId]);
 

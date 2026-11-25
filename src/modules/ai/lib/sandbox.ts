@@ -456,6 +456,43 @@ export function subscribeSandboxChanged(cb: () => void): Promise<UnlistenFn> {
   }).catch(() => () => {});
 }
 
+// ── Trust-change cache drop ─────────────────────────────────────────────
+//
+// TRUST <-> SANDBOX COHERENCE (2026-11-25 review, 3.5.2): the new-project
+// read-only default keys off TRUST, so a trust FLIP must drop the sandbox
+// caches too - otherwise the badge/grid icon keep the seeded "readOnly"
+// after Trust (real mode: off) and stay "off" after Untrust (should re-seed
+// readOnly). workspaceTrust has no import back into this module (it fires
+// a plain listener on every trustWorkspace/untrustWorkspace), so this
+// subscription keeps both directions coherent in EVERY window with zero
+// per-consumer wiring. The in-window broadcast from notifySandboxConfigChanged
+// does NOT reach this path (it is a different event), so an explicit drop
+// here is required.
+
+let trustDropWired = false;
+/** Wire the trust->cache-drop subscription once per JS context (idempotent;
+ *  outside Tauri - tests - subscribeWorkspaceTrust degrades to a no-op). */
+function wireTrustCacheDrop(): void {
+  if (trustDropWired) return;
+  trustDropWired = true;
+  // Dynamic import: keeps workspaceTrust out of the module-load graph of
+  // every tool module in non-Tauri contexts (it is already statically
+  // imported above for isWorkspaceTrusted - but the subscription must not
+  // run at import time in tests).
+  void Promise.resolve(
+    (async () => {
+      const { subscribeWorkspaceTrust } = await import(
+        "@/modules/workspace/workspaceTrust"
+      );
+      subscribeWorkspaceTrust(() => {
+        invalidateSandboxCache();
+      });
+    })(),
+  ).catch(() => {});
+}
+
+wireTrustCacheDrop();
+
 /** Test seam: pin the mode resolved for `loadSandboxMode`, bypassing IPC. */
 export function __setSandboxModeForTests(
   root: string | null,
