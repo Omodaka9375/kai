@@ -350,13 +350,17 @@ html *::-webkit-scrollbar {
   z-index: 20;
   pointer-events: none;
   border-radius: inherit;
-  /* Two rings, both on the card's own layer: a solid inset edge that
-     reads at any gap size, plus a soft inner halo for the "breathing"
-     feel. 0%/100% keeps a clearly visible baseline - a busy card must
-     never look idle between pulses. */
+  /* Two rings, both on the card's own layer: a thin inset edge that
+     reads at any gap size, plus a wide soft inner halo for the
+     "breathing" feel. DIFFUSED (2026-11-25 ask): the old 2px@75% ring
+     + 18px@30% halo read as a hard neon border; the halo is now wider
+     but much dimmer and the edge thinner/more transparent, so the
+     busy state reads as a soft ambient wash. 0%/100% keeps a clearly
+     visible baseline - a busy card must never look idle between
+     pulses. */
   box-shadow:
-    inset 0 0 0 2px color-mix(in srgb, var(--kai-card-glow) 75%, transparent),
-    inset 0 0 18px color-mix(in srgb, var(--kai-card-glow) 30%, transparent);
+    inset 0 0 0 1.5px color-mix(in srgb, var(--kai-card-glow) 45%, transparent),
+    inset 0 0 28px color-mix(in srgb, var(--kai-card-glow) 16%, transparent);
   animation: kai-card-glow 1.5s ease-in-out infinite;
 }
 
@@ -364,13 +368,13 @@ html *::-webkit-scrollbar {
   0%,
   100% {
     box-shadow:
-      inset 0 0 0 2px color-mix(in srgb, var(--kai-card-glow) 75%, transparent),
-      inset 0 0 18px color-mix(in srgb, var(--kai-card-glow) 30%, transparent);
+      inset 0 0 0 1.5px color-mix(in srgb, var(--kai-card-glow) 45%, transparent),
+      inset 0 0 28px color-mix(in srgb, var(--kai-card-glow) 16%, transparent);
   }
   50% {
     box-shadow:
-      inset 0 0 0 3px color-mix(in srgb, var(--kai-card-glow) 100%, transparent),
-      inset 0 0 40px color-mix(in srgb, var(--kai-card-glow) 55%, transparent);
+      inset 0 0 0 2px color-mix(in srgb, var(--kai-card-glow) 65%, transparent),
+      inset 0 0 52px color-mix(in srgb, var(--kai-card-glow) 28%, transparent);
   }
 }
 
