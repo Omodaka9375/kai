@@ -91,6 +91,15 @@ const RUNTIME_STORE_ALLOW = new Set([
   "SKILL.md",
   // Workspace trust registry (2026-11-25): runtime app-data store.
   "kai-workspace-trust.json",
+  // Per-project sandbox config (2026-11-25 CI bite): lives in the OPEN
+  // project's .kai/ dir at runtime, never in-repo. The walk() dot-dir skip
+  // does not save it — isPathClaim's CODE_EXT check fires before the
+  // top-dir filter, and existsSync() probes the LIVE repo root, so the
+  // claim only "resolves" on a dev machine whose own KAI checkout happens
+  // to have a sandbox.json (the exact local-passes/CI-fails lie this gate
+  // exists to prevent). Exempt: it is a runtime file reference, not a
+  // repo path claim.
+  ".kai/sandbox.json",
 ]);
 
 const CODE_EXT = /\.(ts|tsx|js|jsx|rs|json|md|css|scss|html|bash|zsh|ps1|plist|toml|ya?ml|lock)$/;
