@@ -357,16 +357,19 @@ export function Header({
             </DropdownMenuContent>
           </DropdownMenu>
         )}
-        {/* RADIO RE-HOME (2026-11-19): the marquee normally lives in the
-            status bar's center column; Workspaces hides that bar, so it
-            surfaces here (after the + launcher) so playback controls stay
-            reachable in grid mode. Deliberately NOT centered (2026-11-25):
-            centering needed two flex-1 spacers inside this tab-strip div,
-            which squeezes the TabBar when Workspaces closes again - keep it
-            left-aligned and cap its width so it never eats tab space.
-            Dropdown opens DOWN/START-aligned (placement="header"). */}
+        {/* RADIO RE-HOME, CENTERED (2026-11-19 re-home, 2026-11-25 centering):
+            the marquee normally lives in the status bar's center column;
+            Workspaces hides that bar, so it surfaces here. Centered via two
+            equal flex-1 spacers - the same visual position it has at the
+            bottom. Tabs are NOT rendered in Workspaces ({!chatGridOpen &&
+            <TabBar/>}), so the spacers only ever split the empty drag
+            region; they cannot squeeze anything. Dropdown opens
+            DOWN/START-aligned (placement="header"). */}
         {chatGridOpen && radioEnabled && (
-          <span className="ml-2 flex min-w-0 items-center">
+          <div data-tauri-drag-region className="h-full min-w-2 flex-1" />
+        )}
+        {chatGridOpen && radioEnabled && (
+          <span className="flex min-w-0 items-center">
             <RadioMarquee placement="header" />
           </span>
         )}

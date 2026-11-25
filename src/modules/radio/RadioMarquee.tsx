@@ -38,11 +38,13 @@ import { setRadioStationId } from "./radioPrefs";
 
 const MARQUEE_MAX_WIDTH = "max-w-[420px]";
 /**
- * Header (Workspaces) cap: the marquee shares the top bar with the + launcher
- * and the tab strip - cap it tighter there so a long track title can never
- * eat meaningful tab space (2026-11-25 ask: keep it left-aligned, just capped).
+ * Header (Workspaces) cap: the marquee is centered in the top bar - a tighter
+ * cap keeps the optical center stable while a track scrolls. 2026-11-25: the
+ * pre-centering 240px "don't eat tab space" cap is obsolete (tabs are not
+ * rendered in Workspaces at all); 360px keeps long titles readable without
+ * pushing the right-side controls on narrow windows.
  */
-const HEADER_MARQUEE_MAX_WIDTH = "max-w-[240px]";
+const HEADER_MARQUEE_MAX_WIDTH = "max-w-[360px]";
 
 /** How often the now-playing metadata is refreshed while a station plays. */
 const NOW_PLAYING_POLL_MS = 20_000;

@@ -237,14 +237,22 @@ describe("Workspaces grid behavior (source pins)", () => {
   it("the radio marquee re-homes into the header while the status bar is gone", () => {
     expect(header).toContain("chatGridOpen && radioEnabled");
     expect(header).toContain('<RadioMarquee placement="header" />');
+    // CENTERED (2026-11-25): in Workspaces the marquee sits in the MIDDLE
+    // of the top bar - a leading flex-1 spacer mounts only in grid mode,
+    // the trailing one always exists. Tabs are NOT rendered in Workspaces
+    // ({!chatGridOpen && <TabBar/>}), so the spacers only split the empty
+    // drag region and cannot squeeze anything.
+    expect(header).toMatch(
+      /chatGridOpen && radioEnabled && \(\s*<div data-tauri-drag-region className="h-full min-w-2 flex-1" \/>\s*\)/,
+    );
     const radio = readFileSync(
       new URL("../../radio/RadioMarquee.tsx", import.meta.url),
       "utf8",
     );
     expect(radio).toContain('align={placement === "header" ? "start" : "end"}');
     expect(radio).toContain('side={placement === "header" ? "bottom" : "top"}');
-    // WIDTH CAP (2026-11-25): header placement caps the marquee tighter so a
-    // long track title can never eat tab-strip space.
+    // Header placement keeps its own (slightly tighter) width cap so the
+    // optical center stays stable while a track scrolls.
     expect(radio).toContain("HEADER_MARQUEE_MAX_WIDTH");
     expect(radio).toContain(
       'placement === "header" ? HEADER_MARQUEE_MAX_WIDTH : MARQUEE_MAX_WIDTH',
