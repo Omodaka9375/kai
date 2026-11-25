@@ -4,6 +4,17 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [3.5.3]
+
+- Proxy endpoint: added a first-class Proxy endpoint (MemoChain) model slot in Settings -> Models, separate from the local/LAN OpenAI-compatible slot, with Base URL test/save, a searchable backend Model ID picker (plus free-text and live Fetch), and an optional BYOK API key.
+- Proxy sessions: every chat, group persona, and assistant request sends a stable per-session `x-session-id` header across restarts and model switches so memory proxies key durable capsules per session.
+- Proxy memory: sessions routed through the Proxy endpoint disable KAI's local compaction, automatic summarization, and `/compact` so the proxy owns context memory; both context-ring hover cards explain this when active.
+- UI: replaced the green/amber Stop Agent dot in the AI window and the X stop button in Workspaces chat cards with a pulsing red square.
+- UI: Workspaces card model pills and the main model picker now show the configured proxy model name when the Proxy endpoint is selected, matching local models.
+- UI: added horizontal padding to the AI window context pill and stopped its background from changing color on hover.
+
+---
+
 ## [3.5.2]
 
 - Security: every new (untrusted) project starts in a read-only sandbox by default - reads anywhere, writes confined to the project - seeded in memory until the user picks a mode; an explicit `.kai/sandbox.json` (including an explicit `off`) always wins.
