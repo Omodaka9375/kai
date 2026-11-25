@@ -122,6 +122,7 @@ import type { ProjectSwitcherItem } from "@/modules/workspace";
 import { projectIconFillCss } from "@/modules/workspace/projectIcons";
 import { CardTrustStrip } from "./TrustStrip";
 import { useProjectsMenu } from "@/app/projectsMenu";
+import { ACCEPTED_FILES } from "./composer";
 import { GRID_COLS, GRID_ROWS } from "../store/projectChatGrid";
 import {
   type CardAttachment,
@@ -1867,6 +1868,44 @@ const CellInput = memo(function CellInput({
     [],
   );
 
+  // FILE UPLOAD (2026-11-25 ask): hidden input + the + button RIGHT of the
+  // mic. Routed through the SAME card-attachment pipeline as paste: images
+  // become image pills (cardImageAttachment), anything readable-as-text
+  // becomes a name chip carrying the file's content - so the + needs no new
+  // send-path shape, the pills/composition below already handle both kinds.
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const onPickFiles = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(e.target.files ?? []);
+      e.target.value = ""; // allow re-picking the same file
+      if (files.length === 0) return;
+      void (async () => {
+        const next: CardAttachment[] = [];
+        for (const f of files) {
+          if (f.type.startsWith("image/")) {
+            next.push(await cardImageAttachment(f));
+          } else {
+            // Text-ish file: chip carrying the file's content (paste-chip
+            // shape). Unreadable picks degrade to a note instead of poison.
+            const text = await f.text().catch(() => null);
+            next.push({
+              id: `${f.name}-${f.size}-${f.lastModified}`,
+              name: f.name,
+              kind: "text",
+              mediaType: f.type || "text/plain",
+              payload:
+                text != null
+                  ? text
+                  : `[file "${f.name}" could not be read as text]`,
+            });
+          }
+        }
+        setPasted((prev) => [...prev, ...next]);
+      })();
+    },
+    [],
+  );
+
   const onPaste = useCallback(
     (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
       const images = imageFilesFromClipboard(e.clipboardData);
@@ -2212,6 +2251,26 @@ const CellInput = memo(function CellInput({
           <HugeiconsIcon icon={Mic01Icon} size={13} strokeWidth={1.75} />
         </button>
       )}
+      {/* FILE UPLOAD + (2026-11-25 ask): opens the OS picker for THIS
+           card's input. Sits RIGHT of the mic, mirroring the main
+           composer's attach affordance; picked files land in the same
+           attachment strip paste uses. */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept={ACCEPTED_FILES}
+        className="hidden"
+        onChange={onPickFiles}
+      />
+      <button
+        type="button"
+        title="Attach file or image"
+        onClick={() => fileInputRef.current?.click()}
+        className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+      >
+        <HugeiconsIcon icon={Add01Icon} size={12} strokeWidth={2} />
+      </button>
       </div>
     </>
   );

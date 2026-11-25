@@ -202,6 +202,26 @@ describe("Workspaces grid behavior (source pins)", () => {
     expect(picker).toContain("switchSessionForProject(projectId, id)");
   });
 
+  it("each card input has a + file-upload button right of the mic (2026-11-25 ask)", () => {
+    // The + opens a hidden accept= picker and routes picked files into
+    // the SAME attachment pipeline paste uses (image pills via
+    // cardImageAttachment, text files as content chips) - no separate
+    // send-path shape.
+    const inputStart = grid.indexOf("const CellInput = memo");
+    const inputSrc = grid.slice(inputStart);
+    expect(inputStart).toBeGreaterThan(-1);
+    expect(inputSrc).toContain('type="file"');
+    expect(inputSrc).toContain("accept={ACCEPTED_FILES}");
+    expect(inputSrc).toContain("onPickFiles");
+    expect(inputSrc).toContain("cardImageAttachment(f)");
+    // Position: the + button comes AFTER the mic block in the input strip
+    // (mic icon/button first, then the attach affordance).
+    const micBtn = inputSrc.indexOf("icon={Mic01Icon} size={13} strokeWidth={1.75}");
+    const attachBtn = inputSrc.indexOf('title="Attach file or image"');
+    expect(micBtn).toBeGreaterThan(-1);
+    expect(attachBtn).toBeGreaterThan(micBtn);
+  });
+
   it("each card header centers a compact model pill with a favorites dropdown", () => {
     expect(grid).toContain("<CardModelPill projectId={projectId} sessionId={sessionId} />");
     expect(grid).toContain("getProjectEffectiveModelId(projectId, sessionId)");
