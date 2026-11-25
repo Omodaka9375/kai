@@ -151,8 +151,18 @@ export type Preferences = {
   replyStyle: ReplyStyle;
   /** Standing-authority tools the user explicitly granted via the approval
    *  card's "Always Allow" button — these stop asking for approval in BOTH
-   *  Ask and Allow modes. Managed/revoked in Settings → Security. */
+   *  Ask and Allow modes. Managed/revoked in Settings → Security.
+   *  LEGACY shape (pre-2026-11-25): a global flat list covering EVERY
+   *  project. Kept as the migration source and a fallback for projects
+   *  with no per-project entry (trusted projects only - new grants go to
+   *  standingAuthorityGrantProjects). */
   standingAuthorityAlwaysAllowed: string[];
+  /** PER-PROJECT "Always Allow" grants (2026-11-25 security hardening):
+   *  canonical project id -> authority tools granted there. A "yes"
+   *  clicked in one project must NOT count in a different (possibly
+   *  untrusted, freshly cloned) project. This map wins over the legacy
+   *  flat list wherever an entry exists for the project. */
+  standingAuthorityGrantProjects: Record<string, string[]>;
   /** Workspaces grid card order - project ids in display order. Ids absent
    *  from the array sort after it (natural order). Sanitized on load/write:
    *  strings only, deduped, capped. */
@@ -215,6 +225,7 @@ const KEY_VOICE_TTS_LOCAL_VOICE = "voiceTtsLocalVoice";
 const KEY_VOICE_TTS_ASSEMBLY_VOICE = "voiceTtsAssemblyVoice";
 const KEY_NETWORK_POLICY = "networkPolicy";
 const KEY_STANDING_AUTHORITY_ALWAYS_ALLOWED = "standingAuthorityAlwaysAllowed";
+const KEY_STANDING_AUTHORITY_GRANT_PROJECTS = "standingAuthorityGrantProjects";
 const KEY_REPLY_STYLE = "replyStyle";
 const KEY_GRID_ORDER = "gridOrder";
 
@@ -316,6 +327,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   networkPolicy: "full",
   replyStyle: DEFAULT_REPLY_STYLE,
   standingAuthorityAlwaysAllowed: [],
+  standingAuthorityGrantProjects: {},
 };
 
 const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
@@ -476,6 +488,9 @@ export async function loadPreferences(): Promise<Preferences> {
         ?.filter((n) => typeof n === "string")
         .filter((n) => STANDING_AUTHORITY_TOOL_IDS.has(n)) ??
       DEFAULT_PREFERENCES.standingAuthorityAlwaysAllowed,
+    standingAuthorityGrantProjects: sanitizeGrantProjects(
+      get<unknown>(KEY_STANDING_AUTHORITY_GRANT_PROJECTS),
+    ),
   };
 }
 
@@ -555,6 +570,46 @@ export async function setStandingAuthorityAlwaysAllowed(
     new Set(value.filter((n) => STANDING_AUTHORITY_TOOL_IDS.has(n))),
   );
   await writePref(KEY_STANDING_AUTHORITY_ALWAYS_ALLOWED, clean);
+}
+
+/** Sanitize the per-project grant map: project ids are non-empty strings,
+ *  tool names must be in the authority set, lists deduped, project count
+ *  capped (a runaway map would grow the prefs file with every grant). */
+const GRANT_PROJECTS_MAX = 512;
+
+function sanitizeGrantProjects(value: unknown): Record<string, string[]> {
+  if (value == null || typeof value !== "object" || Array.isArray(value))
+    return {};
+  const out: Record<string, string[]> = {};
+  let count = 0;
+  for (const [projectId, tools] of Object.entries(
+    value as Record<string, unknown>,
+  )) {
+    if (count >= GRANT_PROJECTS_MAX) break;
+    if (typeof projectId !== "string" || projectId.trim() === "") continue;
+    if (!Array.isArray(tools)) continue;
+    const clean = Array.from(
+      new Set(
+        tools.filter(
+          (n): n is string =>
+            typeof n === "string" && STANDING_AUTHORITY_TOOL_IDS.has(n),
+        ),
+      ),
+    );
+    if (clean.length === 0) continue;
+    out[projectId] = clean;
+    count++;
+  }
+  return out;
+}
+
+export async function setStandingAuthorityGrantProjects(
+  value: Record<string, string[]>,
+): Promise<void> {
+  await writePref(
+    KEY_STANDING_AUTHORITY_GRANT_PROJECTS,
+    sanitizeGrantProjects(value),
+  );
 }
 
 export async function setDefaultModel(value: ModelId): Promise<void> {
@@ -908,6 +963,7 @@ export async function onPreferencesChange(
     [KEY_REPLY_STYLE]: "replyStyle",
     [KEY_GRID_ORDER]: "gridOrder",
     [KEY_STANDING_AUTHORITY_ALWAYS_ALLOWED]: "standingAuthorityAlwaysAllowed",
+    [KEY_STANDING_AUTHORITY_GRANT_PROJECTS]: "standingAuthorityGrantProjects",
   };
   // Same-process writes still fire onChange immediately; cross-window writes
   // arrive via the Tauri event emitted by writePref().

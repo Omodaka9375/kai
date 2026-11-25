@@ -343,16 +343,24 @@ describe("lockstep with AgentRunBridge (the real gate)", () => {
     // The card renders the button ONLY for authority tools in non-proxy
     // mode, and it approves the current call in the same click.
     expect(card).toContain("isAuthorityTool && !proxy");
-    expect(card).toContain("grantStandingAuthorityAlwaysAllow(toolName)");
-    expect(card).toMatch(/grantStandingAuthorityAlwaysAllow\(toolName\)[\s\S]{0,400}?onRespond\(true\)/);
-    // The bridge passes the grants to the predictor AND skips the manual
-    // count for granted tools (no rubber-stamp cards in Ask mode).
+    // PER-PROJECT (2026-11-25): the grant is written for the OWNING
+    // project - a "yes" on one project's card never covers another.
+    expect(card).toMatch(
+      /grantStandingAuthorityAlwaysAllow\(\s*toolName,\s*projectIdForSession\(ownerSessionId\),/,
+    );
+    expect(card).toMatch(
+      /grantStandingAuthorityAlwaysAllow\(\s*toolName,\s*projectIdForSession\(ownerSessionId\),[\s\S]{0,500}?onRespond\(true\)/,
+    );
+    // The bridge passes the PROJECT-SCOPED grants to the predictor AND
+    // skips the manual count for granted tools (no rubber-stamp cards in
+    // Ask mode).
     expect(bridge).toMatch(/predictAutoApproval\(\{[\s\S]{0,300}alwaysAllowedAuthorityTools,/);
     expect(card).toContain("alwaysAllowedAuthorityTools: authorityGrants");
+    expect(card).toContain("effectiveAuthorityGrants(projectIdForSession(ownerSessionId), {");
     expect(bridge).toContain("isAlwaysAllowedAuthorityTool(");
     // The card's memo comparator re-renders on grant changes (a card frozen
     // pre-grant must collapse when the grant lands).
-    expect(card).toContain("grantsA.length === grantsB.length");
+    expect(card).toContain("JSON.stringify(grantsA) === JSON.stringify(grantsB)");
     // SecuritySection is the revocation surface.
     const security = readFileSync(
       new URL("../../../settings/sections/SecuritySection.tsx", import.meta.url),
@@ -382,16 +390,18 @@ describe("lockstep with AgentRunBridge (the real gate)", () => {
     expect(effect).toContain("if (autoApprove !== \"all\") {\n          if (!granted) continue;");
     expect(effect).toContain("else if (STANDING_AUTHORITY_TOOLS.has(toolName) && !granted)");
     // 3. Fire time: the grant is RE-READ from the live store (a Settings
-    //    revocation landing between schedule and fire cancels the approval).
+    //    revocation landing between schedule and fire cancels the
+    //    approval). PER-PROJECT (2026-11-25): the re-read resolves THIS
+    //    project's grants - never the global list.
     expect(effect).toMatch(
-      /stillGranted = isAlwaysAllowedAuthorityTool\(\s*toolName,\s*usePreferencesStore\.getState\(\)\.standingAuthorityAlwaysAllowed,/,
+      /stillGranted = isAlwaysAllowedAuthorityTool\(\s*toolName,\s*effectiveAuthorityGrants\(grantsProjectId\),/,
     );
   });
 
   it("the persona gate passes the same grant list (one gate, one grant source)", () => {
-    // groupChatStore's persona auto-allow consults the SAME preferences
-    // field — a grant the user clicked on a desktop card silences the
-    // persona card too.
+    // groupChatStore's persona auto-allow consults the LEGACY flat list
+    // only (PER-PROJECT 2026-11-25): personas have no project of their
+    // own, so a project-scoped grant must never cover them.
     const store = readFileSync(
       new URL("../store/groupChatStore.ts", import.meta.url),
       "utf8",

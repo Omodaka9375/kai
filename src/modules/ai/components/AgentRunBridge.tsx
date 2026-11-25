@@ -36,6 +36,7 @@ import {
   isAlwaysAllowedAuthorityTool,
   STANDING_AUTHORITY_TOOLS,
 } from "../lib/autoApprovePrediction";
+import { effectiveAuthorityGrants } from "../lib/standingAuthorityGrants";
 import { activeProjectId, projectIdForSession } from "../store/chatStore";
 import { isApprovalDenied, noteApprovalDenied } from "../lib/approvalLatch";
 import { applyApprovalResponseToChat } from "../store/chatStore";
@@ -345,8 +346,17 @@ function Bridge({
   // ALWAYS-ALLOW GRANTS (2026-11-16): per-tool standing-authority grants the
   // user clicked on the approval card; revocable in Settings → Security. A
   // granted tool auto-approves in BOTH modes — the user already decided.
+  // PER-PROJECT SCOPING (2026-11-25): the raw list was GLOBAL - a grant
+  // clicked in one project silenced cards everywhere, untrusted projects
+  // included. The effective list is resolved for THIS bridge's project
+  // (the workspace runtime when mounted in one, else the session's owner).
+  const grantsProjectId =
+    runtime?.id ?? projectIdForSession(sessionId);
   const alwaysAllowedAuthorityTools = usePreferencesStore(
-    (s) => s.standingAuthorityAlwaysAllowed,
+    (s) => effectiveAuthorityGrants(grantsProjectId, {
+      standingAuthorityAlwaysAllowed: s.standingAuthorityAlwaysAllowed,
+      standingAuthorityGrantProjects: s.standingAuthorityGrantProjects,
+    }),
   );
 
   // ---- Manual-attention count -------------------------------------------
@@ -997,10 +1007,12 @@ function Bridge({
           // A GRANT survives the mode toggle (the user's decision is
           // per-tool, not per-mode) but is re-read from the live prefs at
           // fire time, so a Settings revocation landing between schedule
-          // and fire cancels the approval.
+          // and fire cancels the approval. PER-PROJECT (2026-11-25): the
+          // fire-time re-read resolves THIS project's grants - a grant in
+          // another project never rubber-stamps this call.
           const stillGranted = isAlwaysAllowedAuthorityTool(
             toolName,
-            usePreferencesStore.getState().standingAuthorityAlwaysAllowed,
+            effectiveAuthorityGrants(grantsProjectId),
           );
           if (effectiveSessionAutoApprove(sessionId) !== "all" && !stillGranted) {
             return;

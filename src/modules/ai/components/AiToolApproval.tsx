@@ -19,6 +19,7 @@ import {
   abortSession,
   effectiveSessionAutoApprove,
   getSessionAutoApproveVersion,
+  projectIdForSession,
   subscribeSessionAutoApprove,
 } from "../store/chatStore";
 import { setEditedToolInput } from "../lib/toolInputOverrides";
@@ -27,6 +28,7 @@ import {
   STANDING_AUTHORITY_TOOLS,
 } from "../lib/autoApprovePrediction";
 import {
+  effectiveAuthorityGrants,
   grantStandingAuthorityAlwaysAllow,
   hasStandingAuthorityGrant,
 } from "../lib/standingAuthorityGrants";
@@ -114,7 +116,10 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue, proxy, sessionId
     (s) => s.commitSigningEnabled && s.commitSigningMode === "approval",
   );
   const authorityGrants = usePreferencesStore(
-    (s) => s.standingAuthorityAlwaysAllowed,
+    (s) => effectiveAuthorityGrants(projectIdForSession(ownerSessionId), {
+      standingAuthorityAlwaysAllowed: s.standingAuthorityAlwaysAllowed,
+      standingAuthorityGrantProjects: s.standingAuthorityGrantProjects,
+    }),
   );
   const willBeAutoApproved =
     !proxy &&
@@ -130,7 +135,14 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue, proxy, sessionId
   // The button below (authority tools only) writes the grant; this early
   // render makes the CURRENT card collapse too, not just future ones.
   const hasGrant =
-    !proxy && hasStandingAuthorityGrant(toolName, { standingAuthorityAlwaysAllowed: authorityGrants });
+    !proxy && hasStandingAuthorityGrant(
+      toolName,
+      {
+        standingAuthorityAlwaysAllowed: usePreferencesStore.getState().standingAuthorityAlwaysAllowed,
+        standingAuthorityGrantProjects: usePreferencesStore.getState().standingAuthorityGrantProjects,
+      },
+      projectIdForSession(ownerSessionId),
+    );
   const isAuthorityTool = STANDING_AUTHORITY_TOOLS.has(toolName);
 
   const isShell = toolName === "bash_run" || toolName === "bash_background";
@@ -457,18 +469,24 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue, proxy, sessionId
                 size="sm"
                 variant="outline"
                 onClick={() => {
-                  void grantStandingAuthorityAlwaysAllow(toolName).catch(
+                  // PER-PROJECT (2026-11-25): the grant is written for THIS
+                  // card's owning project - a "yes" here must not silence
+                  // the same tool's cards in any other project.
+                  void grantStandingAuthorityAlwaysAllow(
+                    toolName,
+                    projectIdForSession(ownerSessionId),
+                  ).catch(
                     console.error,
                   );
                   auditAppend(
                     AUDIT_KINDS.approvalApprove,
                     toolName,
-                    `approval card: always-allow granted (this tool no longer asks)`,
+                    `approval card: always-allow granted (this tool no longer asks in this project)`,
                     String(input.path ?? input.name ?? input.skillName ?? ""),
                   );
                   onRespond(true);
                 }}
-                title="Approve this call and stop asking for this tool in every mode. Revoke in Settings → Security."
+                title="Approve this call and stop asking for this tool in this project (both modes). Revoke in Settings → Security."
                 className="h-7 gap-1.5 text-[11px]"
               >
                 <HugeiconsIcon icon={Tick02Icon} size={12} strokeWidth={2} />
@@ -501,9 +519,11 @@ export const AiToolApproval = memo(AiToolApprovalImpl, (a, b) => {
   const modeVersionA = getSessionAutoApproveVersion();
   const modeVersionB = getSessionAutoApproveVersion();
   // GRANTS ARE A COMPARATOR INPUT too: clicking "Always Allow" on one card
-  // grants the tool session-wide — every OTHER pending card for the same
-  // tool must re-render (to the flat granted row / away from it on revoke).
-  const grantsA = usePreferencesStore.getState().standingAuthorityAlwaysAllowed;
+  // grants the tool project-wide — every OTHER pending card for the same
+  // tool IN THE SAME PROJECT must re-render (to the flat granted row / away
+  // from it on revoke). PER-PROJECT (2026-11-25): compare the PROJECT-SCOPED
+  // lists so a grant in another project never re-renders this one.
+  const grantsA = usePreferencesStore.getState().standingAuthorityGrantProjects;
   const grantsB = grantsA;
   return (
     a.toolName === b.toolName &&
@@ -515,8 +535,7 @@ export const AiToolApproval = memo(AiToolApprovalImpl, (a, b) => {
     // counter); genuine mode reactivity comes from the impl's own
     // useSyncExternalStore subscription below.
     modeVersionA === modeVersionB &&
-    grantsA.length === grantsB.length &&
-    grantsA.join("\u0000") === grantsB.join("\u0000") &&
+    JSON.stringify(grantsA) === JSON.stringify(grantsB) &&
     a.queue?.queued === b.queue?.queued &&
     a.queue?.position === b.queue?.position &&
     a.queue?.total === b.queue?.total

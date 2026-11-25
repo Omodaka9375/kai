@@ -1432,8 +1432,11 @@ async function runPersonaReply(
                 input,
                 signingApprovalRequired,
                 // User-clicked "Always Allow" grants apply to personas too:
-                // one gate, one grant list (the desktop bridge passes the
-                // same store field).
+                // one gate, one grant list. PER-PROJECT (2026-11-25): only
+                // the LEGACY flat list applies here - personas have no
+                // project of their own (scratch workspace), so a grant
+                // scoped to a project never covers them; the flat list is
+                // the app-level surface personas have always read.
                 alwaysAllowedAuthorityTools:
                   usePreferencesStore.getState()
                     .standingAuthorityAlwaysAllowed,
