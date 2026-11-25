@@ -553,7 +553,7 @@ export function AiChatView({
           </div>
         )}
         {showSpinner && (
-          <div className="flex text-xs text-muted-foreground">
+          <div className="flex justify-center text-xs text-muted-foreground">
             <GameOfLifeSpinner />
           </div>
         )}
