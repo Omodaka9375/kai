@@ -53,3 +53,41 @@ export function TrustStrip() {
     </div>
   );
 }
+
+/**
+ * Per-card variant for the Workspaces grid (2026-11-25): the grid shows
+ * MANY projects at once, so the ACTIVE-project strip above cannot cover it
+ * - each untrusted card carries its own compact banner with its own Trust
+ * button. Same vocabulary ("Trust"), same subscribe/defer semantics as
+ * TrustStrip: nothing renders until the registry hydrates, trusted
+ * projects show nothing.
+ */
+export function CardTrustStrip({ projectId }: { projectId: string }) {
+  useSyncExternalStore(subscribeWorkspaceTrust, getWorkspaceTrustVersion);
+  const hydrated = isWorkspaceTrustHydrated();
+  if (!hydrated) return null;
+  if (isWorkspaceTrusted(projectId)) return null;
+  return (
+    <div className="flex shrink-0 items-center gap-1.5 border-b border-amber-500/30 bg-amber-500/10 px-2 py-1">
+      <HugeiconsIcon
+        icon={AlertCircleIcon}
+        size={11}
+        strokeWidth={1.75}
+        className="shrink-0 text-amber-600 dark:text-amber-400"
+      />
+      <span className="shrink-0 text-[10px] font-medium leading-none text-amber-700 dark:text-amber-300">
+        Untrusted
+      </span>
+      <span className="min-w-0 flex-1 truncate text-[9.5px] leading-none text-muted-foreground">
+        Ask mode is enforced
+      </span>
+      <button
+        type="button"
+        onClick={() => trustWorkspace(projectId)}
+        className="shrink-0 rounded border border-amber-500/50 bg-amber-500/15 px-1.5 py-px text-[10px] font-medium leading-tight text-amber-700 transition-colors hover:bg-amber-500/25 dark:text-amber-300"
+      >
+        Trust
+      </button>
+    </div>
+  );
+}

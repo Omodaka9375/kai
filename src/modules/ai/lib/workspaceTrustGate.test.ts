@@ -95,6 +95,19 @@ describe("workspace trust gate - user surfaces", () => {
     expect(mini).toContain("<TrustStrip />");
   });
 
+  it("Workspaces cards carry their own per-project trust banner", () => {
+    // The grid shows many projects at once - the active-project strip
+    // cannot cover untrusted BACKGROUND projects. Each card must mount
+    // the per-card variant with its own Trust button.
+    expect(grid).toContain("<CardTrustStrip projectId={projectId} />");
+    const strip = readFileSync(
+      new URL("../components/TrustStrip.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(strip).toContain("export function CardTrustStrip({ projectId }: { projectId: string })");
+    expect(strip).toContain("trustWorkspace(projectId)");
+  });
+
   it("the rail tile context menu can trust and untrust", () => {
     expect(rail).toContain("Trust project");
     expect(rail).toContain("Untrust project");

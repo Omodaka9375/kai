@@ -118,6 +118,7 @@ import { setGridOrder } from "@/modules/settings/store";
 import { useChatFontSize } from "../lib/chatFont";
 import type { ProjectSwitcherItem } from "@/modules/workspace";
 import { projectIconFillCss } from "@/modules/workspace/projectIcons";
+import { CardTrustStrip } from "./TrustStrip";
 import { useProjectsMenu } from "@/app/projectsMenu";
 import { GRID_COLS, GRID_ROWS } from "../store/projectChatGrid";
 import {
@@ -806,6 +807,15 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
           </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
+
+      {/* WORKSPACES TRUST BANNER (2026-11-25): the grid shows MANY
+          projects at once, so the active-project TrustStrip in the AI
+          window cannot cover it - each untrusted project's card carries
+          its own compact strip with a one-click Trust button. Renders
+          nothing once trusted (same defer-until-hydrated semantics as
+          TrustStrip, so trusted projects never flash). Placed between the
+          tinted header and the body so the transcript scrolls below it. */}
+      <CardTrustStrip projectId={projectId} />
 
       {group ? (
         <GroupCardBody group={group} {...props} projectId={projectId} />
