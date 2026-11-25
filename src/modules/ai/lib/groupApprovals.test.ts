@@ -164,24 +164,31 @@ describe("respondUnifiedApproval routing", () => {
     expect(respondMock).toHaveBeenCalledWith("ap-1", true);
   });
 
-  it("persona approvals route through respondPersonaApproval", async () => {
-    const mod = await import("../store/groupChatStore");
-    const spy = vi.spyOn(mod, "respondPersonaApproval");
-    const a: UnifiedApproval = {
-      id: "tc-persona",
-      source: "group-persona",
-      groupId: "g1",
-      requester: "Code Reviewer",
-      toolName: "write_file",
-      input: {},
-      label: "Edit file",
-      at: 2,
-    };
-    respondUnifiedApproval(a, false);
-    await new Promise((r) => setTimeout(r, 0));
-    expect(spy).toHaveBeenCalledWith("tc-persona", false);
-    spy.mockRestore();
-  });
+  it(
+    "persona approvals route through respondPersonaApproval",
+    { timeout: 30_000 },
+    async () => {
+      // Cold dynamic import of groupChatStore's full module graph can exceed
+      // vitest's default 5s test timeout under whole-suite parallel CPU
+      // contention (deterministic on a loaded CI runner; 2026-11-25).
+      const mod = await import("../store/groupChatStore");
+      const spy = vi.spyOn(mod, "respondPersonaApproval");
+      const a: UnifiedApproval = {
+        id: "tc-persona",
+        source: "group-persona",
+        groupId: "g1",
+        requester: "Code Reviewer",
+        toolName: "write_file",
+        input: {},
+        label: "Edit file",
+        at: 2,
+      };
+      respondUnifiedApproval(a, false);
+      await new Promise((r) => setTimeout(r, 0));
+      expect(spy).toHaveBeenCalledWith("tc-persona", false);
+      spy.mockRestore();
+    },
+  );
 });
 
 describe("source pins - unified surface wiring", () => {

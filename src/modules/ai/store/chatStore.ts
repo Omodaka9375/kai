@@ -1,4 +1,21 @@
 import { Chat, type UIMessage } from "@ai-sdk/react";
+// ── Pinned-chat inversion seam ────────────────────────────────────────
+//
+// Hoisted ABOVE ALL IMPORTS with `var` DELIBERATELY (CI 2026-11-25 fix):
+// groupChatStore registers its LRU pinner through setChatPinner from module
+// init. Under vite's SSR transform module bodies evaluate ASYNC (every
+// import is an await point), so a queueMicrotask registration can fire in an
+// import-await gap while THIS module is still mid-evaluation — a `let` here
+// stayed in TDZ and crashed the CI boot ("Cannot access 'chatPinner' before
+// initialization", 10 test files). `var` has no TDZ, and its `= null`
+// initializer runs before the first import can be awaited, so it can never
+// clobber a registration either. setChatPinner stays beside it: function
+// declarations hoist, so the seam is callable from the first tick.
+var chatPinner: ((id: string) => boolean) | null = null;
+export function setChatPinner(fn: ((id: string) => boolean) | null): void {
+  chatPinner = fn;
+}
+
 import type { UIMessagePart } from "ai";
 import { create } from "zustand";
 
@@ -575,11 +592,9 @@ function isWorkspacesPinned(id: string): boolean {
 /** Externally-registered LRU pin predicate (returns true = never evict).
  *  Used by the group-chat store to pin live-group participant/coordinator
  *  chats. Single-slot inversion: chatStore cannot import the group store
- *  (module cycle); the group store registers at module init. */
-let chatPinner: ((id: string) => boolean) | null = null;
-export function setChatPinner(fn: ((id: string) => boolean) | null): void {
-  chatPinner = fn;
-}
+ *  (module cycle); the group store registers at module init. The STATE and
+ *  the setter live at the TOP of this file (hoisted `var`) — see the seam
+ *  comment there for why. */
 
 // Initial messages for a session, populated at hydration time and consumed
 // when the matching Chat is constructed.
