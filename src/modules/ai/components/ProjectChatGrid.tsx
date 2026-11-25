@@ -29,6 +29,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -781,19 +782,6 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
         <div className="flex min-w-0 flex-1 items-center justify-end gap-1">
           {sessionId ? <CardSessionPicker projectId={projectId} sessionId={sessionId} /> : null}
           {sessionId ? <SessionApprovePill sessionId={sessionId} /> : null}
-          {!group ? (
-            <button
-              type="button"
-              onClick={() => {
-                newSessionForProject(projectId);
-              }}
-              title="New session"
-              aria-label={`New session in ${name}`}
-              className="flex shrink-0 items-center justify-center rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
-            >
-              <HugeiconsIcon icon={Add01Icon} size={12} strokeWidth={2} />
-            </button>
-          ) : null}
         </div>
       </div>
         </ContextMenuTrigger>
@@ -1072,7 +1060,12 @@ const CardContextRing = memo(function CardContextRing({
  *  PROJECT's own sessions (ghosts filtered) and switches the card's bound
  *  session via switchSessionForProject - never the foreground switchSession,
  *  which would yank the foreground project's chat. The button sits LEFT of
- *  the Ask/Allow pill in the card's right-aligned action cluster. */
+ *  the Ask/Allow pill in the card's right-aligned action cluster.
+ *
+ *  NEW SESSION IN THE DROPDOWN (2026-11-25 declutter): the old standalone
+ *  + button in the header was redundant with this picker - "New session"
+ *  now lives at the BOTTOM of the list, separated, so one control owns all
+ *  session switching AND creation. */
 const CardSessionPicker = memo(function CardSessionPicker({
   projectId,
   sessionId,
@@ -1130,6 +1123,16 @@ const CardSessionPicker = memo(function CardSessionPicker({
         {items.length === 0 ? (
           <div className="px-2 py-1 text-[10px] text-muted-foreground">No sessions</div>
         ) : null}
+        <DropdownMenuSeparator className="my-1" />
+        <DropdownMenuItem
+          onSelect={() => {
+            newSessionForProject(projectId);
+          }}
+          className="flex items-center gap-1.5 rounded px-2 py-1 text-[11px]"
+        >
+          <HugeiconsIcon icon={Add01Icon} size={12} strokeWidth={2} />
+          <span>New session</span>
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );

@@ -154,31 +154,52 @@ describe("Workspaces grid behavior (source pins)", () => {
       "utf8",
     );
     expect(store).toContain("export function setSessionAutoApprove(");
-    // No button-in-button: the icon toggle and new-session + button render
-    // in the header DIV. Ask/Allow is a compact single icon immediately to
-    // the left of the right-aligned + button.
+    // No button-in-button: the icon toggle renders in the header DIV.
+    // Ask/Allow is a compact single icon immediately to the left of the
+    // session picker.
     const headerBlock = grid.slice(
       grid.indexOf("Slim header"),
       grid.indexOf("GroupCardBody group={group}"),
     );
     expect(headerBlock).toContain("<div");
     expect(headerBlock).toContain("<SessionApprovePill");
-    expect(headerBlock).toContain("newSessionForProject(projectId)");
-    expect(headerBlock).toContain('title="New session"');
+    // 2026-11-25 DECLUTTER: the standalone + button is GONE from the
+    // header - "New session" lives inside the CardSessionPicker dropdown
+    // (separated at the bottom), so the header keeps exactly two icons:
+    // session picker + Ask/Allow pill.
+    expect(headerBlock).toContain("<CardSessionPicker");
+    expect(headerBlock).not.toContain('title="New session"');
     const titleIdx = headerBlock.indexOf("group ? `${name} · ${group.name}` : name");
     const contextRingIdx = headerBlock.indexOf("<CardContextRing");
     const modelPillIdx = headerBlock.indexOf("<CardModelPill");
     const personaPillIdx = headerBlock.indexOf("<SessionPersonaPill");
     const pillIdx = headerBlock.indexOf("<SessionApprovePill");
-    const newBtnIdx = headerBlock.indexOf("newSessionForProject(projectId)");
+    const pickerIdx = headerBlock.indexOf("<CardSessionPicker");
     expect(titleIdx).toBeGreaterThan(-1);
     // PILL ORDER (2026-11-23 ask): context ring, model pill, persona picker.
     expect(contextRingIdx).toBeGreaterThan(titleIdx);
     expect(modelPillIdx).toBeGreaterThan(contextRingIdx);
     expect(personaPillIdx).toBeGreaterThan(modelPillIdx);
     expect(pillIdx).toBeGreaterThan(personaPillIdx);
-    expect(newBtnIdx).toBeGreaterThan(pillIdx);
+    // The session picker sits LEFT of the Ask/Allow pill in the header's
+    // right-aligned action cluster.
+    expect(pickerIdx).toBeLessThan(pillIdx);
     expect(grid).toContain("icon={Shield01Icon}");
+  });
+
+  it("the card session picker owns session creation (New session at the dropdown bottom)", () => {
+    // 2026-11-25 declutter: the picker lists the project's sessions and
+    // ends with a separated "New session" item calling the same
+    // project-scoped newSessionForProject - never the foreground newChat.
+    const pickerStart = grid.indexOf("const CardSessionPicker");
+    const pickerEnd = grid.indexOf("SessionApprovePill = memo");
+    expect(pickerStart).toBeGreaterThan(-1);
+    const picker = grid.slice(pickerStart, pickerEnd);
+    expect(picker).toContain("<DropdownMenuSeparator");
+    expect(picker).toContain("newSessionForProject(projectId)");
+    expect(picker).toContain("<span>New session</span>");
+    // The picker still switches via the project-scoped setter.
+    expect(picker).toContain("switchSessionForProject(projectId, id)");
   });
 
   it("each card header centers a compact model pill with a favorites dropdown", () => {
