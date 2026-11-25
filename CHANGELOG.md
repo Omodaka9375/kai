@@ -4,6 +4,21 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [3.5.1]
+
+- Reflex: two live false positives fixed - "how is it progressing" no longer executes a settings read, and "its been 10 mins check" no longer creates a bogus reminder. Both tool classes now require their domain vocabulary in the prompt (domain trigger floors), whatever the classifier's confidence.
+- Workspaces: fixed an infinite loop in the chat LRU when every eviction candidate was pinned by the Workspaces grid.
+- Chat: images persisted across restarts render a placeholder chip instead of a corrupted <img> when inline storage was stripped.
+- AI window: the header is tinted with the active project's icon color.
+- Streaming: inline <thinking> text now rides the same 80ms render throttle as normal text, eliminating a quadratic slowdown on long local-model thinking streams.
+- Streaming: settled tool cards no longer re-render at 20Hz during token streaming, and the expensive output unfencing runs only while a card is expanded.
+- Workspaces: per-card scroll listeners and ResizeObservers bind once per transcript element instead of being recreated on every stream flush.
+- Group chat: pending approvals are enumerated from cached message scans scoped to the group's own sessions instead of rescanning full chat histories on every tick.
+- Chat: session preferences (drafts, per-session model/persona) persist only the changed session's entry on a debounce instead of rewriting the whole cross-project map.
+- Terminal: error detection is isolated per terminal (buffers no longer mix across panes) and hidden terminals skip decoding and scanning entirely.
+
+---
+
 ## [3.5.0]
 
 - Local fast path: optional on-device `kai-reflex-v1` (Needle 3 12L) classifier handles short desktop controls locally (theme, radio, voice, reminders, personas, preview, time, stop agent, new session, and list commands) with one-click setup in Settings and strict prompt-grounding guards.
