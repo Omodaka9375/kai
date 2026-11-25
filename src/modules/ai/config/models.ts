@@ -841,6 +841,16 @@ export function setCustomContextLimit(modelId: string, size: number): void {
   else delete customContextOverrides[modelId];
 }
 
+/** True when the model routes through the Proxy endpoint (MemoChain-class
+ *  memory proxy). The PROXY owns context memory management for these chats:
+ *  it caps the prompt at a hot window + compact memory and verifies state
+ *  with a receipt chain — so KAI's own context machinery (summarization,
+ *  history compaction, /compact) must stand down, or it would fight the
+ *  proxy's memory and mangle the very state the proxy is tracking. */
+export function isProxyManagedModel(modelId: string | null | undefined): boolean {
+  return modelId === "proxy-custom";
+}
+
 export function getModelContextLimit(modelId: string | undefined): number {
   if (!modelId) return 128_000;
   const override = customContextOverrides[modelId];

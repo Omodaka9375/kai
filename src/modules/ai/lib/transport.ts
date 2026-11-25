@@ -1,7 +1,7 @@
 import type { UIMessage } from "@ai-sdk/react";
 import { convertToModelMessages } from "ai";
 import { invoke } from "@tauri-apps/api/core";
-import { getModel, getModelContextLimit, type ModelId } from "../config";
+import { getModel, getModelContextLimit, isProxyManagedModel, type ModelId } from "../config";
 import {
   runAgentStream,
   PLAN_MODE_PROMPT,
@@ -786,6 +786,13 @@ async function maybeSummarize(
   _abortSignal?: AbortSignal,
 ): Promise<UIMessage[]> {
   const modelId = deps.getModelId();
+  // PROXY-MANAGED MEMORY (MemoChain 2026-11-25): when the session routes
+  // through the Proxy endpoint, the PROXY owns context memory — it caps the
+  // prompt at a hot window + compact memory and verifies state with a
+  // receipt chain. KAI's summarizer must NOT rewrite the history it sees,
+  // or the proxy's tracked state diverges from what the model is told.
+  // Stand down entirely: send the full history, let the proxy do its thing.
+  if (isProxyManagedModel(modelId)) return messages;
   const contextLimit = getModelContextLimit(getModel(modelId).id);
 
   // Run the fast compaction check on the model-message form to see if we

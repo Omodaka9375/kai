@@ -46,7 +46,13 @@ import {
   ContextContentHeader,
   ContextTrigger,
 } from "@/components/ai-elements/context";
-import { estimateCost, getModel, getModelContextLimit, type ModelId } from "../config";
+import {
+  estimateCost,
+  getModel,
+  getModelContextLimit,
+  isProxyManagedModel,
+  type ModelId,
+} from "../config";
 import { effectiveContextLimit, SYSTEM_OVERHEAD_TOKENS } from "../lib/compact";
 import { estimateContextTokens } from "../lib/media/contextTokens";
 import type { SandboxMode } from "../lib/native";
@@ -957,6 +963,9 @@ const CardContextRing = memo(function CardContextRing({
   const used = lastInput > 0 ? Math.max(lastInput, estimated) : estimated;
   const reported = tokens.inputTokens + tokens.outputTokens;
   const max = effectiveContextLimit(getModelContextLimit(modelId));
+  // PROXY-MANAGED MEMORY (MemoChain): footer swaps its explanation when this
+  // card's session routes through the proxy endpoint (see AiMiniWindow twin).
+  const proxyManaged = isProxyManagedModel(modelId);
   const usedPercent = Math.min(1, Math.max(0, max > 0 ? used / max : 0));
   const circumference = 2 * Math.PI * 10;
   const dashOffset = circumference * (1 - usedPercent);
@@ -1092,8 +1101,9 @@ const CardContextRing = memo(function CardContextRing({
         </ContextContentBody>
         <ContextContentFooter>
           <span className="text-[10px] italic text-muted-foreground">
-            Ring shows pressure on the conversation budget (model window minus
-            system prompt + tool schemas); compaction starts at 40%.
+            {proxyManaged
+              ? "Proxy-managed session (MemoChain): the proxy owns context memory — it caps the prompt at a hot window + compact memory and verifies state with a receipt chain. Local compaction and /compact are off."
+              : "Ring shows pressure on the conversation budget (model window minus system prompt + tool schemas); compaction starts at 40%."}
           </span>
         </ContextContentFooter>
       </ContextContent>

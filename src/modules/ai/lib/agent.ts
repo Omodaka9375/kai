@@ -27,6 +27,7 @@ import {
   type ProviderId,
   type ThinkingMode,
 } from "../config";
+import { isProxyManagedModel } from "../config";
 import { buildTools, type ToolContext } from "../tools/tools";
 import { repairEditToolCallInput } from "../tools/edit";
 import { primeXBearerPresence, xBearerKnownAbsent } from "../tools/social";
@@ -831,7 +832,14 @@ export async function runAgentStream(opts: RunAgentOptions) {
     }
   }
   const contextLimit = getModelContextLimit(getModel(modelId).id);
-  const compact = compactModelMessagesDetailed(history, contextLimit);
+  // PROXY-MANAGED MEMORY (MemoChain 2026-11-25): a proxy-routed session sends
+  // the FULL history verbatim — no local elision, no truncation, no tool-output
+  // trimming. The proxy owns prompt capping + memory compression; local
+  // compaction would fight it (the proxy's receipt chain would diverge from
+  // what the model actually saw). Skip the elider entirely.
+  const compact = isProxyManagedModel(modelId)
+    ? { messages: history, compacted: false, droppedCount: 0 } as const
+    : compactModelMessagesDetailed(history, contextLimit);
   const compactedHistory = compact.messages;
   if (compact.compacted) {
     opts.onCompact?.({ droppedCount: compact.droppedCount });
@@ -1112,7 +1120,11 @@ export async function runAgentStream(opts: RunAgentOptions) {
       // transcript keeps the full text (the turn's "compact" journal entry
       // already records the pre-run elision; this logs its own event).
       let messages = stepMessages;
-      const stepCompact = compactModelMessagesDetailed(messages, contextLimit);
+      // PROXY-MANAGED MEMORY: same gate as the pre-run elision above —
+      // a proxy-routed session never re-elides mid-run either.
+      const stepCompact = isProxyManagedModel(modelId)
+        ? { messages, compacted: false, droppedCount: 0 } as const
+        : compactModelMessagesDetailed(messages, contextLimit);
       if (stepCompact.compacted) {
         messages = stepCompact.messages;
         opts.onCompact?.({ droppedCount: stepCompact.droppedCount });
