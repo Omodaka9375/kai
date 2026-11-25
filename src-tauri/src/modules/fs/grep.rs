@@ -184,7 +184,9 @@ pub struct GlobResponse {
 }
 
 #[tauri::command]
-pub fn fs_glob(
+// Async: like fs_grep, the glob walks the whole tree (uncapped when the
+// pattern is rare). Sync would pin that walk on the main thread.
+pub async fn fs_glob(
     pattern: String,
     root: String,
     max_results: Option<usize>,

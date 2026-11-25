@@ -670,7 +670,11 @@ fn file_url(p: &std::path::Path) -> String {
 /// the caller can fall back to the jsPDF renderer instead of reporting a
 /// success that produced no file.
 #[tauri::command]
-pub fn fs_render_html_to_pdf(
+// Async: the headless browser render polls for up to 60 seconds. As a
+// sync command it ran on the MAIN thread and froze the entire UI for the
+// whole render (the classic "PDF conversion froze the app" report);
+// async commands run on the runtime's worker pool.
+pub async fn fs_render_html_to_pdf(
     html_content: String,
     target_path: String,
     workspace: Option<WorkspaceEnv>,
@@ -860,7 +864,9 @@ fn sheet_to_struct(name: String, range: &calamine::Range<calamine::Data>) -> Spr
 /// Parse a spreadsheet (xlsx/xlsm/xlsb/xls/ods) into plain cell strings.
 /// Used by the editor preview and the AI read_file tool. Read-only.
 #[tauri::command]
-pub fn fs_parse_spreadsheet(
+// Async: workbook decode can take seconds on large files. Sync would
+// block the main thread for that whole span.
+pub async fn fs_parse_spreadsheet(
     path: String,
     workspace: Option<WorkspaceEnv>,
 ) -> Result<SpreadsheetData, String> {
@@ -897,7 +903,8 @@ pub fn fs_parse_spreadsheet(
 /// Bytes-in variant for attachments (the composer only has a File, no path).
 /// Parses from an in-memory cursor — no temp file, no fs write.
 #[tauri::command]
-pub fn fs_parse_spreadsheet_bytes(bytes: Vec<u8>) -> Result<SpreadsheetData, String> {
+// Async: same multi-second workbook decode as the path variant.
+pub async fn fs_parse_spreadsheet_bytes(bytes: Vec<u8>) -> Result<SpreadsheetData, String> {
     if bytes.len() as u64 > MAX_READ_BYTES {
         return Err(format!(
             "file too large ({} bytes, limit {})",
@@ -1127,7 +1134,10 @@ fn convert_image_bytes(
 /// [ops] → encode → write; overwriting the source is safe (input is fully
 /// in memory first).
 #[tauri::command]
-pub fn fs_convert_image(
+// Async: decode + resize + re-encode of large images can take seconds. As a
+// sync command it ran on the MAIN thread and froze the entire UI for the
+// whole pipeline; async commands run on the runtime's worker pool.
+pub async fn fs_convert_image(
     src: String,
     dst: String,
     quality: Option<u8>,
