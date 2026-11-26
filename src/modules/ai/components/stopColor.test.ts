@@ -13,6 +13,10 @@ describe("permission color language and stop square (source pins)", () => {
     new URL("./AutoApproveToggle.tsx", import.meta.url),
     "utf8",
   );
+  // 2026-11-26: the stop square moved from TodoStrip into the MAIN AI input
+  // bar (AiInputBar carries it left of the textarea when busy); TodoStrip
+  // keeps only the todos list. Pin the bar + the Workspaces card.
+  const bar = readFileSync(new URL("./AiInputBar.tsx", import.meta.url), "utf8");
   const strip = readFileSync(new URL("./TodoStrip.tsx", import.meta.url), "utf8");
   const grid = readFileSync(new URL("./ProjectChatGrid.tsx", import.meta.url), "utf8");
 
@@ -24,9 +28,13 @@ describe("permission color language and stop square (source pins)", () => {
     expect(toggle).not.toContain("bg-muted-foreground/50");
   });
 
-  it("the Stop control is a pulsing red square in both AI window and Workspaces cards", () => {
-    expect(strip).toContain("size-2 shrink-0 cursor-pointer rounded-[2px] bg-red-500");
-    expect(strip).toContain("animate-pulse");
+  it("the Stop control is a pulsing red square in the input bar and Workspaces cards", () => {
+    expect(bar).toContain("size-2 rounded-[2px] bg-red-500");
+    expect(bar).toContain("animate-pulse");
     expect(grid).toContain("size-2 rounded-[2px] bg-red-500");
+    // TodoStrip no longer paints a stop control (single control per window).
+    expect(strip).not.toContain("StopSquare");
+    // The busy-only strip is gone: TodoStrip renders ONLY with todos.
+    expect(strip).toMatch(/if \(!sessionId \|\| todos\.length === 0\) return null;/);
   });
 });

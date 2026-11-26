@@ -18,37 +18,15 @@ import { useTodosStore } from "../store/todoStore";
 
 type Props = {
   sessionId: string | null;
+  /** Kept for call-site compatibility; the busy-only strip and the stop
+   *  square moved to the main AI input bar (2026-11-26). */
   isBusy?: boolean;
   onStop?: () => void;
 };
 
-/** The stop-agent control: a small pulsing RED SQUARE (size-2, matching
- *  the old dot footprint). Red square is the universal stop/recording
- *  control — distinct from the Allow/Ask permission toggle color. */
-function StopSquare({
-  onClick,
-  stopPropagation,
-}: {
-  onClick: () => void;
-  stopPropagation?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={(e) => {
-        if (stopPropagation) e.stopPropagation();
-        onClick();
-      }}
-      className="size-2 shrink-0 cursor-pointer rounded-[2px] bg-red-500 shadow-[0_0_0_2px] shadow-red-500/20 animate-pulse transition-transform hover:scale-125 hover:animate-none"
-      title="Stop agent"
-      aria-label="Stop agent"
-    />
-  );
-}
-
 const EMPTY_TODOS: Todo[] = [];
 
-export function TodoStrip({ sessionId, isBusy, onStop }: Props) {
+export function TodoStrip({ sessionId }: Props) {
   const hydrate = useTodosStore((s) => s.hydrate);
   const todos =
     useTodosStore((s) => (sessionId ? s.bySession[sessionId] : undefined)) ??
@@ -76,19 +54,12 @@ export function TodoStrip({ sessionId, isBusy, onStop }: Props) {
     }
   }, [todos, sessionId, clearSession]);
 
-  if (!sessionId || (todos.length === 0 && !isBusy)) return null;
-
-  if (todos.length === 0) {
-    return (
-      <div className="flex shrink-0 items-center justify-between border-t border-border/80 bg-muted/20 px-3 py-1.5 h-8">
-        <span className="text-[11px] text-muted-foreground flex items-center gap-1.5">
-          <Spinner className="size-3" />
-          <span>Agent running…</span>
-        </span>
-        <StopSquare onClick={() => onStop?.()} />
-      </div>
-    );
-  }
+  // BUSY-ONLY STRIP HIDDEN (2026-11-26 ask): the stop-agent square moved
+  // into the main AI input bar (left of the textarea, right of the Allow
+  // pill), so the busy strip here painted a duplicate stop control and
+  // stole vertical space. The strip renders ONLY when there are todos to
+  // show; an empty list with a running agent renders nothing here.
+  if (!sessionId || todos.length === 0) return null;
 
   const completed = todos.filter((t) => t.status === "completed").length;
   const pct = Math.round((completed / todos.length) * 100);
@@ -124,7 +95,8 @@ export function TodoStrip({ sessionId, isBusy, onStop }: Props) {
         <span className="text-[11px] tabular-nums font-mono text-muted-foreground">
           {completed}/{todos.length}
         </span>
-        {isBusy && <StopSquare onClick={() => onStop?.()} stopPropagation />}
+        {/* Stop square removed (2026-11-26): the input bar carries the one
+            stop-agent control now; a second one here duplicated it. */}
       </button>
       {expanded && (
         <ul className="flex flex-col gap-0.5">

@@ -397,155 +397,38 @@ export function AiInputBar() {
                   e.target.value = "";
                 }}
               />
-
-              {ttsPlaying && !c.voice.recording ? (
-                <div className="flex shrink-0 items-center">
-                  {/* Pacing controls (2026-11-01, research pass): pause/
-                      resume, skip-chunk, rate -, rate label, rate + —
-                      Safari Listen-to-Page parity for a narrator of agent
-                      prose. Stop (discard the rest) stays the loudest. */}
-                  <button
-                    type="button"
-                    title="Pause voice response"
-                    onClick={() => ttsPause()}
-                    className="size-6 flex items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-                  >
-                    <HugeiconsIcon
-                      icon={PauseIcon}
-                      size={14}
-                      strokeWidth={1.75}
-                    />
-                  </button>
-                  <button
-                    type="button"
-                    title="Skip to next part"
-                    onClick={() => ttsSkip()}
-                    className="size-6 flex items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-                  >
-                    <HugeiconsIcon
-                      icon={NextIcon}
-                      size={14}
-                      strokeWidth={1.75}
-                    />
-                  </button>
-                  <button
-                    type="button"
-                    title="Slower narration"
-                    onClick={() => adjustRate(-0.25)}
-                    className="size-6 flex items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-                  >
-                    <HugeiconsIcon
-                      icon={Timer01Icon}
-                      size={14}
-                      strokeWidth={1.75}
-                      className="rotate-180"
-                    />
-                  </button>
-                  <span
-                    className="w-8 text-center text-[10px] tabular-nums text-muted-foreground"
-                    title="Narration speed"
-                  >
-                    {ttsRate.toFixed(2).replace(/0$/, "")}×
-                  </span>
-                  <button
-                    type="button"
-                    title="Faster narration"
-                    onClick={() => adjustRate(0.25)}
-                    className="size-6 flex items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-                  >
-                    <HugeiconsIcon
-                      icon={Timer01Icon}
-                      size={14}
-                      strokeWidth={1.75}
-                    />
-                  </button>
-                  <button
-                    type="button"
-                    title="Stop voice response"
-                    onClick={() => ttsStop()}
-                    className="size-6 flex items-center justify-center rounded-md bg-amber-500/15 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 hover:text-amber-600 dark:hover:text-amber-400 transition-colors"
-                  >
-                    <HugeiconsIcon
-                      icon={VolumeHighIcon}
-                      size={14}
-                      strokeWidth={1.75}
-                    />
-                  </button>
-                </div>
-              ) : ttsPaused() && !c.voice.recording ? (
+              {/* ALLOW LEFT (2026-11-26 ask): the Ask/Allow pill sits alone
+                  on the LEFT, then the stop-agent square, then the textarea;
+                  mic and + are on the RIGHT - the same arrangement as the
+                  Workspaces card inputs. In group mode the send button takes
+                  the Allow slot's place (the group Allow lives in the panel
+                  header). */}
+              {c.groupMode ? (
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  className="size-7 shrink-0 rounded-lg"
+                  aria-label="Send to group"
+                  disabled={!c.canSend}
+                  onClick={() => c.submit()}
+                >
+                  <HugeiconsIcon icon={SentIcon} size={14} strokeWidth={1.75} />
+                </Button>
+              ) : (
+                <AutoApproveToggle />
+              )}
+              {c.isBusy && !c.groupMode ? (
                 <button
                   type="button"
-                  title="Resume voice response"
-                  onClick={() => ttsResume()}
-                  className="shrink-0 size-6 flex items-center justify-center rounded-md bg-amber-500/15 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 hover:text-amber-600 dark:hover:text-amber-400 transition-colors"
+                  title="Stop agent"
+                  aria-label="Stop agent"
+                  onClick={c.stop}
+                  className="flex shrink-0 cursor-pointer items-center justify-center rounded p-1.5"
                 >
-                  <HugeiconsIcon
-                    icon={PlayCircleIcon}
-                    size={14}
-                    strokeWidth={1.75}
-                  />
-                </button>
-              ) : c.voice.supported ? (
-                <button
-                  type="button"
-                  title={
-                    c.voice.recording
-                      ? "Stop & transcribe"
-                      : c.voice.transcribing
-                        ? "Transcribing…"
-                        : c.voice.error
-                          ? c.voice.error
-                          : "Voice input"
-                  }
-                  onClick={() => {
-                    if (c.voice.recording) {
-                      c.voice.stop();
-                    } else {
-                      if (c.voice.error) c.voice.clearError();
-                      // startVoiceCapture snapshots the capture session —
-                      // the cross-project paste guard (2026-11-02).
-                      c.startVoiceCapture();
-                    }
-                  }}
-                  disabled={c.voice.transcribing}
-                  className={cn(
-                    "shrink-0 size-6 flex items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50",
-                    c.voice.recording &&
-                      "bg-destructive/15 text-destructive hover:bg-destructive/20 hover:text-destructive animate-pulse",
-                    c.voice.error && "text-amber-600 dark:text-amber-400",
-                  )}
-                >
-                  {c.voice.recording ? (
-                    <span className="size-1.5 rounded-full bg-destructive" />
-                  ) : c.voice.transcribing ? (
-                    <Spinner className="size-3" />
-                  ) : c.voice.error ? (
-                    <HugeiconsIcon
-                      icon={UserWarning01Icon}
-                      size={14}
-                      strokeWidth={1.75}
-                    />
-                  ) : (
-                    <HugeiconsIcon
-                      icon={Mic01Icon}
-                      size={14}
-                      strokeWidth={1.75}
-                    />
-                  )}
+                  <span className="size-2 rounded-[2px] bg-red-500 shadow-[0_0_0_2px] shadow-red-500/20 animate-pulse transition-transform hover:scale-125 hover:animate-none" />
                 </button>
               ) : null}
-
-              {!c.groupMode && (
-                <button
-                  type="button"
-                  title="Attach file or image"
-                  disabled={c.isBusy}
-                  onClick={() => fileInputRef.current?.click()}
-                  className="shrink-0 size-6 flex items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50"
-                >
-                  <HugeiconsIcon icon={Add01Icon} size={14} strokeWidth={2} />
-                </button>
-              )}
 
               <textarea
                 ref={c.textareaRef}
@@ -660,20 +543,157 @@ export function AiInputBar() {
                   c.groupMode && c.groupEnded && "opacity-60",
                 )}
               />
-              {c.groupMode ? (
-                <Button
+              {/* MIC + ATTACH on the RIGHT (2026-11-26 ask): mirrors the
+                  Workspaces card input arrangement. TTS pacing controls
+                  ride the same right side while narration plays. */}
+              {ttsPlaying && !c.voice.recording ? (
+                <div className="flex shrink-0 items-center">
+                  {/* Pacing controls (2026-11-01, research pass): pause/
+                      resume, skip-chunk, rate -, rate label, rate + —
+                      Safari Listen-to-Page parity for a narrator of agent
+                      prose. Stop (discard the rest) stays the loudest. */}
+                  <button
+                    type="button"
+                    title="Pause voice response"
+                    onClick={() => ttsPause()}
+                    className="size-6 flex items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                  >
+                    <HugeiconsIcon
+                      icon={PauseIcon}
+                      size={14}
+                      strokeWidth={1.75}
+                    />
+                  </button>
+                  <button
+                    type="button"
+                    title="Skip to next part"
+                    onClick={() => ttsSkip()}
+                    className="size-6 flex items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                  >
+                    <HugeiconsIcon
+                      icon={NextIcon}
+                      size={14}
+                      strokeWidth={1.75}
+                    />
+                  </button>
+                  <button
+                    type="button"
+                    title="Slower narration"
+                    onClick={() => adjustRate(-0.25)}
+                    className="size-6 flex items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                  >
+                    <HugeiconsIcon
+                      icon={Timer01Icon}
+                      size={14}
+                      strokeWidth={1.75}
+                      className="rotate-180"
+                    />
+                  </button>
+                  <span
+                    className="w-8 text-center text-[10px] tabular-nums text-muted-foreground"
+                    title="Narration speed"
+                  >
+                    {ttsRate.toFixed(2).replace(/0$/, "")}×
+                  </span>
+                  <button
+                    type="button"
+                    title="Faster narration"
+                    onClick={() => adjustRate(0.25)}
+                    className="size-6 flex items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                  >
+                    <HugeiconsIcon
+                      icon={Timer01Icon}
+                      size={14}
+                      strokeWidth={1.75}
+                    />
+                  </button>
+                  <button
+                    type="button"
+                    title="Stop voice response"
+                    onClick={() => ttsStop()}
+                    className="size-6 flex items-center justify-center rounded-md bg-amber-500/15 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 hover:text-amber-600 dark:hover:text-amber-400 transition-colors"
+                  >
+                    <HugeiconsIcon
+                      icon={VolumeHighIcon}
+                      size={14}
+                      strokeWidth={1.75}
+                    />
+                  </button>
+                </div>
+              ) : ttsPaused() && !c.voice.recording ? (
+                <button
                   type="button"
-                  size="icon"
-                  variant="ghost"
-                  className="size-7 shrink-0 rounded-lg"
-                  aria-label="Send to group"
-                  disabled={!c.canSend}
-                  onClick={() => c.submit()}
+                  title="Resume voice response"
+                  onClick={() => ttsResume()}
+                  className="shrink-0 size-6 flex items-center justify-center rounded-md bg-amber-500/15 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 hover:text-amber-600 dark:hover:text-amber-400 transition-colors"
                 >
-                  <HugeiconsIcon icon={SentIcon} size={14} strokeWidth={1.75} />
-                </Button>
-              ) : (
-                <AutoApproveToggle />
+                  <HugeiconsIcon
+                    icon={PlayCircleIcon}
+                    size={14}
+                    strokeWidth={1.75}
+                  />
+                </button>
+              ) : null}
+              {c.voice.supported ? (
+                <button
+                  type="button"
+                  title={
+                    c.voice.recording
+                      ? "Stop & transcribe"
+                      : c.voice.transcribing
+                        ? "Transcribing…"
+                        : c.voice.error
+                          ? c.voice.error
+                          : "Voice input"
+                  }
+                  onClick={() => {
+                    if (c.voice.recording) {
+                      c.voice.stop();
+                    } else {
+                      if (c.voice.error) c.voice.clearError();
+                      // startVoiceCapture snapshots the capture session —
+                      // the cross-project paste guard (2026-11-02).
+                      c.startVoiceCapture();
+                    }
+                  }}
+                  disabled={c.voice.transcribing}
+                  className={cn(
+                    "shrink-0 size-6 flex items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50",
+                    c.voice.recording &&
+                      "bg-destructive/15 text-destructive hover:bg-destructive/20 hover:text-destructive animate-pulse",
+                    c.voice.error && "text-amber-600 dark:text-amber-400",
+                  )}
+                >
+                  {c.voice.recording ? (
+                    <span className="size-1.5 rounded-full bg-destructive" />
+                  ) : c.voice.transcribing ? (
+                    <Spinner className="size-3" />
+                  ) : c.voice.error ? (
+                    <HugeiconsIcon
+                      icon={UserWarning01Icon}
+                      size={14}
+                      strokeWidth={1.75}
+                    />
+                  ) : (
+                    <HugeiconsIcon
+                      icon={Mic01Icon}
+                      size={14}
+                      strokeWidth={1.75}
+                    />
+                  )}
+                </button>
+              ) : null}
+
+              {!c.groupMode && (
+                <button
+                  type="button"
+                  title="Attach file or image"
+                  disabled={c.isBusy}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="shrink-0 size-6 flex items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50"
+                >
+                  <HugeiconsIcon icon={Add01Icon} size={14} strokeWidth={2} />
+                </button>
               )}
             </div>
           </PopoverAnchor>

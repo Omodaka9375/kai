@@ -7,12 +7,14 @@ import {
   coordinatorGroupForSession,
   createGroupChat,
   delegateCoordination,
+  endGroupChat,
   getGroup,
   isPersonaParticipantId,
   lastGroupRefusal,
   liveGroupForProject,
   participantActivity,
   sendFromCoordinator,
+  stopGroupParticipants,
 } from "../store/groupChatStore";
 import { getProjectAgentStatus } from "../store/projectStatus";
 import { useAgentsStore } from "../store/agentsStore";
@@ -189,6 +191,46 @@ export function buildGroupTools(ctx: ToolContext) {
           : getProjectAgentStatus(project);
         const name = target?.name ?? project;
         return { project, name, status };
+      },
+    }),
+
+    // STOP + CLOSE (2026-11-26 ask: "Agent need tools to stop and close
+    // groups when user asks"). stop_participants aborts every running
+    // participant WITHOUT ending the group (the group stays live and can
+    // resume); close_group soft-stops everyone AND ends the group (the
+    // panel's End button semantics). Both are approval-gated - they halt
+    // other agents' work, the same class as endGroupChat from the pill.
+    stop_participants: tool({
+      description:
+        `Stop every running participant agent in the cross-project group chat WITHOUT ending the group (you are the coordinator). Running runs abort immediately; the group stays live and can keep chatting. Use when the user asks you to stop the agents / halt the group's work. Participants: ${participantNames}.`,
+      inputSchema: z.object({}),
+      needsApproval: true,
+      execute: async () => {
+        const live = getGroup(group.id);
+        if (!live || live.endedAt !== null)
+          return { ok: false, note: "the group has ended - there is nothing to stop" };
+        await stopGroupParticipants(group.id);
+        return {
+          ok: true,
+          note: "All running participants were asked to stop. The group remains open - messages can still be sent.",
+        };
+      },
+    }),
+
+    close_group: tool({
+      description:
+        `End AND close the cross-project group chat (you are the coordinator). Every running participant is stopped, the group is marked ended (participants keep their sessions), and the group no longer accepts messages. Use when the user asks you to close/end/shut down the group. This cannot be undone from your side - the user can resume it from the group panel if needed.`,
+      inputSchema: z.object({}),
+      needsApproval: true,
+      execute: async () => {
+        const live = getGroup(group.id);
+        if (!live || live.endedAt !== null)
+          return { ok: false, note: "the group has already ended" };
+        await endGroupChat(group.id);
+        return {
+          ok: true,
+          note: "The group has ended: participants were stopped and the group is closed. Acknowledge to the user; do not send more group messages.",
+        };
       },
     }),
   };

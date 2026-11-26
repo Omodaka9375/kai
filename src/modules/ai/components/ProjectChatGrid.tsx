@@ -2268,6 +2268,15 @@ const CellInput = memo(function CellInput({
         onChange={(e) => {
           setText(e.target.value);
           requestAnimationFrame(updateTrigger);
+          // MULTI-LINE (2026-11-26 ask): Shift+Enter inserts newlines; grow
+          // the field with content up to 3 visible lines, then scroll
+          // inside. Without this the rows={1} textarea cropped every
+          // multi-line draft to one 20px row.
+          const el = e.target;
+          el.style.height = "auto";
+          const maxH = 63; // 3 lines x 11px x ~1.9 leading
+          el.style.height = `${Math.min(el.scrollHeight, maxH)}px`;
+          el.style.overflowY = el.scrollHeight > maxH ? "auto" : "hidden";
         }}
         onKeyDown={onKeyDown}
         onKeyUp={updateTrigger}
@@ -2281,7 +2290,7 @@ const CellInput = memo(function CellInput({
               ? "Steer the running agent."
               : "Send a message"
         }
-        className="max-h-[79px] min-h-[20px] flex-1 resize-none bg-transparent text-[11px] leading-snug text-foreground outline-none placeholder:text-muted-foreground/50"
+        className="max-h-[63px] min-h-[20px] flex-1 resize-none bg-transparent text-[11px] leading-snug whitespace-pre-wrap break-words text-foreground outline-none placeholder:text-muted-foreground/50"
       />
       {busy ? (
         <button
