@@ -2508,7 +2508,12 @@ export async function sendFromCoordinator(
   }
   await appendGroupMessage(groupId, {
     from: "agent",
-    projectId: targetProjectId,
+    // AUTHOR, not recipient: the panel renders authors by nameFor(m.projectId)
+    // — stamping the TARGET here made the coordinator's own opening post
+    // display as the RECIPIENT ("KAI wrote as mina", 2026-11-26). The
+    // coordinator's project authored this message; the target is already
+    // recorded by the delivery itself.
+    projectId: coord.projectId,
     sessionId: coord.sessionId,
     text: clean,
   });

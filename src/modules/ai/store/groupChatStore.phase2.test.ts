@@ -111,6 +111,21 @@ describe("send_to_project engine (fire-and-forget)", () => {
     expect(injectMessageMock.mock.calls[0]![0]).toBe("active-beta");
   });
 
+  it("the coordinator's transcript line is authored BY the coordinator, not the recipient", async () => {
+    // 2026-11-26 report: KAI's opening post to mina rendered as "mina
+    // replied". The panel resolves authors by nameFor(m.projectId), and
+    // sendFromCoordinator stamped the TARGET's projectId on the message.
+    // The author must be the coordinator's own project (alpha here).
+    const g = await fixture();
+    await sendFromCoordinator(g.id, "beta", "what's the User type?");
+    const live = getGroup(g.id)!;
+    const agentMsg = live.messages.find((m) => m.from === "agent");
+    expect(agentMsg).toBeDefined();
+    expect(agentMsg!.projectId).toBe("alpha");
+    expect(agentMsg!.sessionId).toBe("active-alpha");
+    expect(agentMsg!.text).toBe("what's the User type?");
+  });
+
   it("refuses unknown projects and self-sends with actionable text", async () => {
     const g = await fixture();
     expect(await sendFromCoordinator(g.id, "nope", "x")).toContain("unknown project");
