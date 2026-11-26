@@ -30,12 +30,27 @@
  * from receipts.jsonl without any trust in the writer.
  */
 
-import { createHash } from "node:crypto";
 import type { ModelMessage } from "ai";
 import type { UIMessage } from "ai";
 import { native, type MemoChainFoldEntry, type MemoChainRecalledChunk } from "./native";
 import type { FenceState } from "./fence";
 import { fence } from "./fence";
+
+/** SHA-256 hex digest via Web Crypto. Deliberately NOT node:crypto — this
+ *  module ships in the browser bundle, where `node:crypto` externalizes to
+ *  an empty stub and the named import fails the vite build (same reason
+ *  mcpOAuth.ts uses subtle.digest). `subtle` is available both in the
+ *  renderer and in Node ≥19 (webcrypto global), so tests run the same code
+ *  path as production. */
+async function sha256Hex(input: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(input),
+  );
+  let hex = "";
+  for (const b of new Uint8Array(digest)) hex += b.toString(16).padStart(2, "0");
+  return hex;
+}
 
 /** Hot-window budget in ~4-char tokens (matches the standalone proxy default). */
 export const MEMOCHAIN_HOT_LIMIT = 80_000;
@@ -54,7 +69,7 @@ export function estimateTokens(text: string): number {
 /** Stable content hash of one message (role, text, tool ids) — SHA-256 of the
  *  same JSON payload Python `message_hash` builds, so a message hashed in KAI
  *  lands in the same bucket as one hashed by the standalone proxy. */
-export function messageHash(msg: ModelMessage): string {
+export async function messageHash(msg: ModelMessage): Promise<string> {
   const payload = JSON.stringify(
     {
       role: msg.role,
@@ -67,7 +82,10 @@ export function messageHash(msg: ModelMessage): string {
     // default=str mirrors the Python json.dumps(default=str) fallback.
     (_k, v) => (v === undefined ? undefined : v),
   );
-  return createHash("sha256").update(payload, "utf8").digest("hex");
+  // Same digest the standalone Python tooling computes with
+  // hashlib.sha256(...).hexdigest() — parity is what makes capsules folded
+  // here verifiable by the original toolchain.
+  return sha256Hex(payload);
 }
 
 /** Comparable text of one ModelMessage (mirrors Python `message_text`). */
@@ -139,14 +157,14 @@ export async function foldMessages(
     const t = messageText(m).trim();
     if (!t) continue;
     entries.push({
-      msgHash: messageHash(m),
+      msgHash: await messageHash(m),
       role: m.role,
       text: t.slice(0, MEMOCHAIN_MAX_DOC_CHARS),
     });
   }
   if (entries.length === 0) {
     entries.push({
-      msgHash: createHash("sha256").update("(empty tool exchange)").digest("hex"),
+      msgHash: await sha256Hex("(empty tool exchange)"),
       role: "user",
       text: "(empty tool exchange)",
     });

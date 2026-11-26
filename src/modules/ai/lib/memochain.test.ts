@@ -42,16 +42,16 @@ describe("estimateTokens", () => {
 });
 
 describe("messageHash", () => {
-  it("is stable and role-sensitive", () => {
-    const a = messageHash(user("hello"));
-    const b = messageHash(user("hello"));
-    const c = messageHash({ role: "assistant", content: "hello" } as ModelMessage);
+  it("is stable and role-sensitive", async () => {
+    const a = await messageHash(user("hello"));
+    const b = await messageHash(user("hello"));
+    const c = await messageHash({ role: "assistant", content: "hello" } as ModelMessage);
     expect(a).toBe(b);
     expect(a).not.toBe(c);
     expect(a).toMatch(/^[0-9a-f]{64}$/);
   });
 
-  it("matches a manual sha256 of the same JSON payload", () => {
+  it("matches a manual sha256 of the same JSON payload (node:crypto parity oracle)", async () => {
     const m: ModelMessage = { role: "user", content: "x" } as ModelMessage;
     const payload = JSON.stringify({
       role: m.role,
@@ -60,8 +60,11 @@ describe("messageHash", () => {
       tool_call_id: undefined,
       name: undefined,
     });
+    // node:crypto is the ORACLE here (test runs in Node), pinning that the
+    // browser-subtle implementation in memochain.ts produces the same digest
+    // as the Python tooling's hashlib.sha256(...).hexdigest().
     const manual = createHash("sha256").update(payload, "utf8").digest("hex");
-    expect(messageHash(m)).toBe(manual);
+    expect(await messageHash(m)).toBe(manual);
   });
 });
 

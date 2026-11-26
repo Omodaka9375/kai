@@ -41,10 +41,11 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
 import CheckmarkCircle02Icon from "@hugeicons/core-free-icons/CheckmarkCircle02Icon";
+import Search01Icon from "@hugeicons/core-free-icons/Search01Icon";
 import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 import TestTubeIcon from "@hugeicons/core-free-icons/TestTubeIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ProviderIcon } from "../components/ProviderIcon";
 import { ProviderKeyCard } from "../components/ProviderKeyCard";
 import { SectionHeader } from "../components/SectionHeader";
@@ -732,6 +733,151 @@ function Label({ children }: { children: React.ReactNode }) {
  *  embedded verifiable-memory fold (bundled weights, 22,606-byte capsule,
  *  SHA-256 receipt chain) instead of KAI's local summarization/compaction.
  *  Replaces the removed Proxy endpoint block. */
+
+/** Search + chip picker for the per-model MemoChain toggle. Replaces the
+ *  original flat checkbox list (too long to scan) — chips show the current
+ *  selection and a search field filters the full catalog. The catalog is the
+ *  hardcoded MODELS registry (same list the app's default-model picker uses,
+ *  minus openai-compatible-custom), grouped by provider. */
+function MemoChainModelPicker({
+  enabled,
+  onToggle,
+}: {
+  enabled: string[];
+  onToggle: (id: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const all = useMemo(
+    () => MODELS.filter((m) => m.id !== "openai-compatible-custom"),
+    [],
+  );
+  const q = query.trim().toLowerCase();
+  const filtered = useMemo(() => {
+    if (!q) return all;
+    return all.filter(
+      (m) =>
+        m.id.toLowerCase().includes(q) ||
+        m.label.toLowerCase().includes(q) ||
+        m.hint.toLowerCase().includes(q) ||
+        m.provider.toLowerCase().includes(q),
+    );
+  }, [all, q]);
+  const byProvider = useMemo(() => {
+    const map = new Map<ProviderId, typeof filtered>();
+    for (const m of filtered) {
+      const list = map.get(m.provider);
+      if (list) list.push(m);
+      else map.set(m.provider, [m]);
+    }
+    return Array.from(map.entries());
+  }, [filtered]);
+
+  const enabledModels = all.filter((m) => enabled.includes(m.id));
+
+  return (
+    <div className="flex flex-1 flex-col gap-2">
+      <div className="relative">
+        <HugeiconsIcon
+          icon={Search01Icon}
+          size={12}
+          strokeWidth={2}
+          className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/70"
+        />
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search models…"
+          className="h-7 pl-7 text-[11.5px]"
+        />
+      </div>
+      {enabledModels.length > 0 ? (
+        <div className="flex flex-wrap gap-1">
+          {enabledModels.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => onToggle(m.id)}
+              className="group flex items-center gap-1 rounded-md border border-border/70 bg-accent/40 px-1.5 py-0.5 text-[10.5px] font-medium text-foreground transition-colors hover:bg-accent/60"
+              title="Click to remove"
+            >
+              <HugeiconsIcon
+                icon={CheckmarkCircle02Icon}
+                size={11}
+                strokeWidth={2}
+                className="text-emerald-500"
+              />
+              <span>{m.label}</span>
+              <span className="text-muted-foreground/70 opacity-0 transition-opacity group-hover:opacity-100">
+                ×
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <span className="text-[10.5px] italic text-muted-foreground/70">
+          No durable-memory models selected — pick one or more below.
+        </span>
+      )}
+      <div className="max-h-48 overflow-y-auto rounded-md border border-border/50 bg-background/40">
+        {byProvider.length === 0 ? (
+          <div className="px-3 py-3 text-[11px] text-muted-foreground">
+            No models match “{query}”.
+          </div>
+        ) : (
+          byProvider.map(([provider, models]) => {
+            const p = PROVIDERS.find((x) => x.id === provider);
+            return (
+              <div key={provider}>
+                <div className="flex items-center gap-1.5 border-b border-border/40 bg-muted/30 px-2.5 py-1 text-[9.5px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  <ProviderIcon provider={provider} size={10} />
+                  <span>{p?.label ?? provider}</span>
+                </div>
+                {models.map((m) => {
+                  const on = enabled.includes(m.id);
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => onToggle(m.id)}
+                      aria-pressed={on}
+                      className={cn(
+                        "flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[11.5px] transition-colors",
+                        on ? "bg-accent/40" : "hover:bg-accent/20",
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          "flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border",
+                          on
+                            ? "border-emerald-500 bg-emerald-500 text-white"
+                            : "border-muted-foreground/40",
+                        )}
+                      >
+                        {on ? (
+                          <HugeiconsIcon
+                            icon={CheckmarkCircle02Icon}
+                            size={10}
+                            strokeWidth={2.5}
+                          />
+                        ) : null}
+                      </span>
+                      <span className="flex min-w-0 flex-1 flex-col">
+                        <span className="truncate text-foreground">{m.label}</span>
+                        <span className="truncate text-[9.5px] text-muted-foreground">
+                          {m.id} · {m.hint}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
 function MemoChainBlock() {
   const enabled = usePreferencesStore((s) => s.memoChainModelIds);
   const [status, setStatus] = useState<string | null>(null);
@@ -771,21 +917,7 @@ function MemoChainBlock() {
           </span>
         </FieldRow>
         <FieldRow label="Models">
-          <div className="flex flex-1 flex-col gap-1">
-            {MODELS.filter((m) => m.id !== "openai-compatible-custom").map((m) => (
-              <label
-                key={m.id}
-                className="flex cursor-pointer items-center gap-2 text-[11.5px]"
-              >
-                <input
-                  type="checkbox"
-                  checked={enabled.includes(m.id)}
-                  onChange={() => toggleModel(m.id)}
-                />
-                <span className="truncate font-mono">{m.id}</span>
-              </label>
-            ))}
-          </div>
+          <MemoChainModelPicker enabled={enabled} onToggle={toggleModel} />
         </FieldRow>
       </div>
     </div>
