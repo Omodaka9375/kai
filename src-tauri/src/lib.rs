@@ -721,6 +721,17 @@ pub fn run() {
             let window = WebviewWindowBuilder::from_config(&handle, &main_config)
                 .and_then(|b| {
                     let b = b.data_directory(data_dir);
+                    // Force the overlay title bar explicitly on macOS. The
+                    // config-side `titleBarStyle: "Overlay"` alone does not
+                    // reliably produce the overlay in every build - the
+                    // native title strip renders as a light row above the
+                    // app content and the traffic lights float in their own
+                    // strip instead of overlaying the header. Mirror the
+                    // settings-window pattern (same builder, same attrs).
+                    #[cfg(target_os = "macos")]
+                    let b = b
+                        .title_bar_style(tauri::TitleBarStyle::Overlay)
+                        .hidden_title(true);
                     // WebView2 Runtime 153+ routes the Web Speech API through
                     // the "Ceto" STT service (api.msedgeservices.com), which
                     // 403s inside WebView2 — the recognizer dies with a JS
