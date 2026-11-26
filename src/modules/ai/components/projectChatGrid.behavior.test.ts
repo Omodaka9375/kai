@@ -169,16 +169,26 @@ describe("Workspaces grid behavior (source pins)", () => {
     expect(headerBlock).toContain("<CardSessionPicker");
     expect(headerBlock).not.toContain('title="New session"');
     const titleIdx = headerBlock.indexOf("group ? `${name} · ${group.name}` : name");
-    const contextRingIdx = headerBlock.indexOf("<CardContextRing");
     const modelPillIdx = headerBlock.indexOf("<CardModelPill");
     const personaPillIdx = headerBlock.indexOf("<SessionPersonaPill");
     const pickerIdx = headerBlock.indexOf("<CardSessionPicker");
     expect(titleIdx).toBeGreaterThan(-1);
-    // PILL ORDER (2026-11-23 ask): context ring, model pill, persona picker.
-    expect(contextRingIdx).toBeGreaterThan(titleIdx);
-    expect(modelPillIdx).toBeGreaterThan(contextRingIdx);
+    // PILL ORDER (2026-11-26 ask): the context ring lives INSIDE the model
+    // pill, left of the model name; the header no longer renders a
+    // standalone ring. Then the persona picker, then the session picker.
+    expect(headerBlock).not.toContain("<CardContextRing");
+    expect(modelPillIdx).toBeGreaterThan(titleIdx);
     expect(personaPillIdx).toBeGreaterThan(modelPillIdx);
     expect(pickerIdx).toBeGreaterThan(personaPillIdx);
+    // The ring renders inside the model pill's trigger, BEFORE the label.
+    const pillStart = grid.indexOf("const CardModelPill = memo");
+    const pillSrc = grid.slice(pillStart);
+    const ringInPill = pillSrc.indexOf("<CardContextRing");
+    const labelInPill = pillSrc.indexOf(
+      '<span className="truncate">{shortLabel}</span>',
+    );
+    expect(ringInPill).toBeGreaterThan(-1);
+    expect(labelInPill).toBeGreaterThan(ringInPill);
     // 2026-11-26 ask: Ask/Allow pill sits on the LEFT of the card input bar
     // (before the textarea).
     const inputStart = grid.indexOf("const CellInput = memo");
@@ -562,19 +572,28 @@ describe("Workspaces grid behavior (source pins)", () => {
       "<CardSandboxIcon root={root} projectId={projectId} />",
     );
     const titleIdx = headerBlock.indexOf("group ? `${name} · ${group.name}` : name");
-    const contextRingIdx = headerBlock.indexOf("<CardContextRing projectId={projectId} sessionId={sessionId} />");
     const modelPillIdx = headerBlock.indexOf("<CardModelPill");
     const personaPillIdx = headerBlock.indexOf("<SessionPersonaPill");
     const pickerIdx = headerBlock.indexOf("<CardSessionPicker");
     expect(sandboxIdx).toBeGreaterThan(-1);
     expect(titleIdx).toBeGreaterThan(sandboxIdx);
-    // PILL ORDER (2026-11-23 ask): context ring, model pill, persona picker.
-    expect(contextRingIdx).toBeGreaterThan(titleIdx);
-    expect(modelPillIdx).toBeGreaterThan(contextRingIdx);
+    // PILL ORDER (2026-11-26 ask): the context ring is INSIDE the model pill
+    // (left of the model name) - no standalone ring in the header anymore.
+    expect(headerBlock).not.toContain("<CardContextRing");
+    expect(modelPillIdx).toBeGreaterThan(titleIdx);
     expect(personaPillIdx).toBeGreaterThan(modelPillIdx);
     expect(pickerIdx).toBeGreaterThan(personaPillIdx);
     expect(grid).toContain('if (mode === "off") return null;');
     expect(grid).toContain("<ContextTrigger asChild>");
+    // The ring's trigger is a SPAN now (it nests inside the model pill's
+    // dropdown-trigger button - nested buttons would break clicks).
+    expect(grid).toContain('aria-label="Model context usage"');
+    const ringSrc = grid.slice(
+      grid.indexOf("const CardContextRing = memo"),
+      grid.indexOf("const CardSessionPicker = memo"),
+    );
+    expect(ringSrc).toContain("<ContextTrigger asChild>");
+    expect(ringSrc).not.toContain("<button");
   });
 
   it("the persona pill resolves the same effective persona the runtime runs under", () => {
@@ -595,7 +614,7 @@ describe("Workspaces grid behavior (source pins)", () => {
     expect(pill).toContain("useAgentsStore((s) => s.activeId)");
   });
 
-  it("scopes the Close Project right-click menu to the card top bar only, not the chat body", () => {
+  it("scopes the header right-click menu to the card top bar only, not the chat body", () => {
     const headerBlock = grid.slice(
       grid.indexOf("Slim header"),
       grid.indexOf("GroupCardBody group={group}"),
@@ -606,7 +625,14 @@ describe("Workspaces grid behavior (source pins)", () => {
     );
     expect(headerBlock).toContain("<ContextMenu>");
     expect(headerBlock).toContain("<ContextMenuTrigger asChild>");
-    expect(headerBlock).toContain("Close Project");
+    // 2026-11-26 rework: close moved to a dedicated X button right of the
+    // session picker; the header menu mirrors the rail tile's menu.
+    expect(headerBlock).toContain("Change icon...");
+    expect(headerBlock).toContain("Reset to default");
+    expect(headerBlock).toContain("Untrust project");
+    expect(headerBlock).toContain("Trust project");
+    expect(headerBlock).not.toContain("Close Project");
+    expect(headerBlock).toContain("onClick={closeThisProject}");
     expect(headerBlock).toContain("</ContextMenu>");
     expect(bodyBlock).not.toContain("ContextMenu");
     expect(bodyBlock).not.toContain("Close Project");

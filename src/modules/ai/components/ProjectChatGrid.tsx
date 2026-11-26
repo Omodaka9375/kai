@@ -19,6 +19,9 @@ import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 import Add01Icon from "@hugeicons/core-free-icons/Add01Icon";
 import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
 import CubeIcon from "@hugeicons/core-free-icons/CubeIcon";
+import PencilEdit01Icon from "@hugeicons/core-free-icons/PencilEdit01Icon";
+import RefreshIcon from "@hugeicons/core-free-icons/RefreshIcon";
+import AlertCircleIcon from "@hugeicons/core-free-icons/AlertCircleIcon";
 import Shield01Icon from "@hugeicons/core-free-icons/Shield01Icon";
 import StarIcon from "@hugeicons/core-free-icons/StarIcon";
 import SparklesIcon from "@hugeicons/core-free-icons/SparklesIcon";
@@ -66,9 +69,13 @@ import {
   subscribeSandboxChanged,
 } from "../lib/sandbox";
 import {
+  getWorkspaceTrustVersion,
   isWorkspaceTrusted,
   subscribeWorkspaceTrust,
+  trustWorkspace,
+  untrustWorkspace,
 } from "@/modules/workspace/workspaceTrust";
+import { ProjectIconPicker } from "@/modules/workspace/ProjectIconPicker";
 import { AiChatView } from "./AiChat";
 import { AiErrorBoundary } from "./AiErrorBoundary";
 // Card input #skill / /command popup: same detection and the same picker
@@ -696,6 +703,7 @@ export function ProjectChatGrid({ items }: { items: ProjectSwitcherItem[] }) {
           status={statuses[cell.id] ?? "idle"}
           active={cell.active}
           color={cell.color}
+          icon={cell.icon}
           gridOrderIndex={orderMap.get(cell.id) ?? index}
           micRecording={voice.recording && micTarget === sessionOfCell(cell.id)}
           micTranscribing={voice.transcribing && micTarget === sessionOfCell(cell.id)}
@@ -739,6 +747,9 @@ type GridCellProps = {
   active: boolean;
   /** Project icon color preset key ("auto"/undefined = hash hue). */
   color?: string;
+  /** Custom tile glyph (hugeicons export name), for the header menu's
+   *  "Reset to default" affordance parity with the rail tile. */
+  icon?: string;
   /** CSS Grid `order` index so cards rearrange visually without moving DOM
    *  nodes (moving DOM nodes via insertBefore resets descendant scrollTop). */
   gridOrderIndex: number;
@@ -757,7 +768,7 @@ type GridCellProps = {
 };
 
 const GridCell = memo(function GridCell(props: GridCellProps) {
-  const { projectId, root, name, status, active, color, gridOrderIndex, dragging } = props;
+  const { projectId, root, name, status, active, color, icon, gridOrderIndex, dragging } = props;
   const switchProject = useContext(SwitchProjectContext);
   // The project-LOCAL active session (background projects keep their own).
   const sessionId = useSyncExternalStore(
@@ -775,15 +786,25 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
     () => groupOfCell(projectId),
     [projectId, sessionId, openGroup, groupVer, stackSurface],
   );
-  // CONTEXT MENU (2026-11-23): right-click the card's TOP BAR (not the chat
-  // body or input) -> Close Project, the same projectsMenu.closeProject path
-  // the rail's X uses (confirmation dialog included - AppShell arms its
-  // AlertDialog on this call). Scoping the trigger to the header preserves
-  // text/transcript/input right-click menus inside the card body.
+  // CONTEXT MENU + CLOSE X (2026-11-23, reworked 2026-11-26): the header's
+  // right cluster ends with a dedicated X that CLOSES the project through the
+  // same projectsMenu.closeProject path the rail's X uses (confirmation
+  // dialog included - AppShell arms its AlertDialog on this call). Right-
+  // clicking the TOP BAR (not the chat body or input) opens the SAME menu
+  // the rail tile's right-click shows (Change icon / Reset to default /
+  // Trust-Untrust), so both surfaces stay in parity. Scoping the trigger to
+  // the header preserves text/transcript/input right-click menus inside the
+  // card body.
   const projectsMenu = useProjectsMenu();
   const closeThisProject = useCallback(() => {
     projectsMenu?.closeProject(projectId);
   }, [projectsMenu, projectId]);
+  // Icon picker for the header's Change-icon right-click item (same dialog
+  // the rail tile opens). Null = closed.
+  const [iconPickerOpen, setIconPickerOpen] = useState(false);
+  // Trust flips must re-render this card: the menu reads isWorkspaceTrusted
+  // at render time (same subscription the rail tile uses).
+  useSyncExternalStore(subscribeWorkspaceTrust, getWorkspaceTrustVersion);
 
   return (
     <div
@@ -901,30 +922,75 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
         </div>
         {!group && sessionId ? (
           <div className="flex shrink-0 items-center gap-1">
-            {/* PILL ORDER (2026-11-23 ask): context ring FIRST, then the
-                model pill, then the persona picker - the ring is a passive
-                status readout, the persona picker is the active control and
-                sits closest to the right-aligned action cluster. */}
-            <CardContextRing projectId={projectId} sessionId={sessionId} />
+            {/* PILL ORDER (2026-11-26 ask): the context ring lives INSIDE
+                the model pill, left of the model name (one chip = model +
+                its live context usage), then the persona picker. */}
             <CardModelPill projectId={projectId} sessionId={sessionId} />
             <SessionPersonaPill projectId={projectId} sessionId={sessionId} />
           </div>
         ) : null}
         <div className="flex min-w-0 flex-1 items-center justify-end gap-1">
           {sessionId ? <CardSessionPicker projectId={projectId} sessionId={sessionId} /> : null}
+          {/* CLOSE X (2026-11-26 ask): right of the session picker, same
+              projectsMenu.closeProject path the rail's X takes. The header's
+              onDoubleClick guard skips real controls (closest("button")), so
+              a fast double-click on the X never opens the project. */}
+          <button
+            type="button"
+            aria-label={`Close ${name}`}
+            title={`Close ${name}`}
+            onClick={closeThisProject}
+            className="flex size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground/70 transition-colors hover:bg-accent hover:text-destructive"
+          >
+            <HugeiconsIcon icon={Cancel01Icon} size={12} strokeWidth={2} />
+          </button>
         </div>
       </div>
         </ContextMenuTrigger>
-        <ContextMenuContent className="w-44 text-xs">
-          <ContextMenuItem
-            onSelect={closeThisProject}
-            className="gap-2 text-destructive focus:text-destructive"
-          >
-            <HugeiconsIcon icon={Cancel01Icon} size={13} strokeWidth={2} />
-            Close Project
+        <ContextMenuContent className="w-48 text-xs">
+          {/* SAME menu the rail tile's right-click shows (2026-11-26 ask):
+              the dedicated X owns close, so the header menu mirrors the
+              tile's icon/trust items instead of duplicating Close. */}
+          <ContextMenuItem onSelect={() => setIconPickerOpen(true)}>
+            <HugeiconsIcon icon={PencilEdit01Icon} size={14} strokeWidth={1.75} className="shrink-0 text-muted-foreground" />
+            Change icon...
           </ContextMenuItem>
+          {icon || color ? (
+            <ContextMenuItem onSelect={() => projectsMenu?.changeProjectIcon(projectId, null, null)}>
+              <HugeiconsIcon icon={RefreshIcon} size={14} strokeWidth={1.75} className="shrink-0 text-muted-foreground" />
+              Reset to default
+            </ContextMenuItem>
+          ) : null}
+          {isWorkspaceTrusted(projectId) ? (
+            <ContextMenuItem onSelect={() => untrustWorkspace(projectId)}>
+              <HugeiconsIcon icon={AlertCircleIcon} size={14} strokeWidth={1.75} className="shrink-0 text-amber-500" />
+              Untrust project
+            </ContextMenuItem>
+          ) : (
+            <ContextMenuItem onSelect={() => trustWorkspace(projectId)}>
+              <HugeiconsIcon icon={Shield01Icon} size={14} strokeWidth={1.75} className="shrink-0 text-emerald-500" />
+              Trust project
+            </ContextMenuItem>
+          )}
         </ContextMenuContent>
       </ContextMenu>
+      {/* Icon picker dialog for the header's "Change icon..." item - the
+          same component the rail tile uses, fed a ProjectSwitcherItem view
+          of this card's props (it only reads id/icon/color/name for the
+          preview). Radix portals it, so placement is layout-neutral. */}
+      <ProjectIconPicker
+        project={
+          iconPickerOpen
+            ? { id: projectId, root, name, status, active, icon, color }
+            : null
+        }
+        onOpenChange={(open) => {
+          if (!open) setIconPickerOpen(false);
+        }}
+        onChange={(nextIcon, nextColor) => {
+          projectsMenu?.changeProjectIcon(projectId, nextIcon, nextColor);
+        }}
+      />
 
       {/* WORKSPACES TRUST BANNER (2026-11-25): the grid shows MANY
           projects at once, so the active-project TrustStrip in the AI
@@ -1076,11 +1142,14 @@ const CardContextRing = memo(function CardContextRing({
 
   return (
     <Context usedTokens={used} maxTokens={max} modelId={modelId}>
+      {/* SPAN, not a button (2026-11-26): the ring renders INSIDE the model
+          pill's dropdown-trigger button, and nested interactive elements
+          break click handling. The HoverCard still opens on hover; a click
+          on the ring bubbles to the pill and toggles the model dropdown. */}
       <ContextTrigger asChild>
-        <button
-          type="button"
+        <span
           aria-label="Model context usage"
-          className="flex shrink-0 items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
+          className="flex shrink-0 items-center justify-center text-muted-foreground"
         >
           {proxyManaged ? (
             <MemoChainBadge
@@ -1120,7 +1189,7 @@ const CardContextRing = memo(function CardContextRing({
             />
           </svg>
           )}
-        </button>
+        </span>
       </ContextTrigger>
       <ContextContent className="w-56 text-[11px]">
         {!proxyManaged ? <ContextContentHeader /> : null}
@@ -1454,8 +1523,15 @@ const CardModelPill = memo(function CardModelPill({
           // kai-tint-chip (2026-11-25): the old bg-background/40 painted a
           // flat gray rectangle on the tinted bar; the chip class gives a
           // translucent tinted surface + hairline border via globals.css.
-          className="kai-tint-chip flex max-w-[100px] shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-[9.5px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+          className="kai-tint-chip flex max-w-[120px] shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-[9.5px] font-medium text-muted-foreground transition-colors hover:text-foreground"
         >
+          {/* RING INSIDE THE PILL (2026-11-26 ask): the context-usage ring
+              sits LEFT of the model name inside the same chip. Its trigger is
+              a span (see CardContextRing) so no interactive element nests
+              here; hovering the ring still opens the usage HoverCard. */}
+          {sessionId ? (
+            <CardContextRing projectId={projectId} sessionId={sessionId} />
+          ) : null}
           <span className="truncate">{shortLabel}</span>
           <HugeiconsIcon
             icon={ArrowDown01Icon}
