@@ -22,6 +22,7 @@ import {
   getModel,
   providerNeedsKey,
   type ModelId,
+  type ModelInfo,
   type ProviderId,
   type ThinkingMode,
   type VisionOverride,
@@ -737,8 +738,11 @@ function Label({ children }: { children: React.ReactNode }) {
 /** Search + chip picker for the per-model MemoChain toggle. Replaces the
  *  original flat checkbox list (too long to scan) — chips show the current
  *  selection and a search field filters the full catalog. The catalog is the
- *  hardcoded MODELS registry (same list the app's default-model picker uses,
- *  minus openai-compatible-custom), grouped by provider. */
+ *  hardcoded MODELS registry (same list the app's default-model picker uses)
+ *  grouped by provider. 2026-11-26: openai-compatible-custom is INCLUDED
+ *  (local endpoint toggle ask) - the fold budgets scale to the endpoint's
+ *  configured context size (foldLimitsFor), so local models fold at their
+ *  own limit instead of the 80k cloud default. */
 function MemoChainModelPicker({
   enabled,
   onToggle,
@@ -747,10 +751,7 @@ function MemoChainModelPicker({
   onToggle: (id: string) => void;
 }) {
   const [query, setQuery] = useState("");
-  const all = useMemo(
-    () => MODELS.filter((m) => m.id !== "openai-compatible-custom"),
-    [],
-  );
+  const all = useMemo(() => MODELS, []);
   const q = query.trim().toLowerCase();
   const filtered = useMemo(() => {
     if (!q) return all;
@@ -763,7 +764,7 @@ function MemoChainModelPicker({
     );
   }, [all, q]);
   const byProvider = useMemo(() => {
-    const map = new Map<ProviderId, typeof filtered>();
+    const map = new Map<ProviderId, ModelInfo[]>();
     for (const m of filtered) {
       const list = map.get(m.provider);
       if (list) list.push(m);

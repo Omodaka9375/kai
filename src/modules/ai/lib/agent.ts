@@ -794,7 +794,10 @@ export async function runAgentStream(opts: RunAgentOptions) {
   const memoChain = isProxyManagedModel(modelId);
   const memoSessionId = opts.sessionId ?? null;
   if (memoChain && memoSessionId) {
-    const folded = await memoChainFoldPrefix(memoSessionId, history);
+    // contextLimit carries the custom-endpoint context-size override, so a
+    // toggled local model with a small window folds at ITS limit, not the
+    // 80k cloud default (foldLimitsFor).
+    const folded = await memoChainFoldPrefix(memoSessionId, history, contextLimit);
     if (folded) {
       appendSessionEvent(memoSessionId, {
         kind: "compact",
@@ -1119,7 +1122,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
       // push THIS step's request over the hot limit. Same decision logic,
       // same fail-open contract — errors leave the step's messages untouched.
       if (memoChain && memoSessionId) {
-        const stepFold = await memoChainFoldPrefix(memoSessionId, messages);
+        const stepFold = await memoChainFoldPrefix(memoSessionId, messages, contextLimit);
         if (stepFold) {
           appendSessionEvent(memoSessionId, {
             kind: "compact",

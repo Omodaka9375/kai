@@ -121,6 +121,22 @@ describe("memoChain sessions disable local context handling (source pins)", () =
     }
   });
 
+  it("the custom local endpoint is toggleable (2026-11-26 local-model ask)", () => {
+    // The Settings picker must INCLUDE openai-compatible-custom (it was the
+    // one entry filtered out). Pin the picker's catalog + the fold scaling.
+    const section = read("settings/sections/ModelsSection.tsx");
+    const picker = section.split("function MemoChainModelPicker")[1]?.split("function MemoChainBlock")[0] ?? "";
+    expect(picker).not.toContain('m.id !== "openai-compatible-custom"');
+    expect(picker).toContain("const all = useMemo(() => MODELS, []);");
+    // The fold budgets scale to the model's context limit, so a small local
+    // window folds at ITS limit, not the 80k cloud default.
+    const memo = read("modules/ai/lib/memochain.ts");
+    expect(memo).toContain("export function foldLimitsFor");
+    const agent = read("modules/ai/lib/agent.ts");
+    expect(agent).toContain("memoChainFoldPrefix(memoSessionId, history, contextLimit)");
+    expect(agent).toContain("memoChainFoldPrefix(memoSessionId, messages, contextLimit)");
+  });
+
   it("the proxy endpoint slot is fully removed", () => {
     // No provider, no model entry, no build path.
     const providers = read("modules/ai/config/providers.ts");

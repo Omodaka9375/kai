@@ -56,6 +56,28 @@ async function sha256Hex(input: string): Promise<string> {
 export const MEMOCHAIN_HOT_LIMIT = 80_000;
 /** Never fold below this many tokens even when the window overflows. */
 export const MEMOCHAIN_KEEP_MIN = 40_000;
+
+/** Fold budgets derived from the model's CONTEXT LIMIT (2026-11-26 local-
+ *  endpoint toggle): the fixed 80k/40k defaults only make sense for cloud
+ *  models; a local Ollama/LM Studio model with an 8k-32k window would never
+ *  reach 80k before the REQUEST overflows the real window - the fold would
+ *  be dead weight for exactly the models the toggle exists for. Scale the
+ *  proxy defaults to the model: hot = 80% of the limit, keep-floor = 50%.
+ *  A missing/zero limit keeps the proxy defaults (cloud registry models). */
+export function foldLimitsFor(contextLimit?: number): {
+  hotLimit: number;
+  keepMin: number;
+} {
+  if (!contextLimit || contextLimit <= 0) {
+    return { hotLimit: MEMOCHAIN_HOT_LIMIT, keepMin: MEMOCHAIN_KEEP_MIN };
+  }
+  const hotLimit = Math.max(1_000, Math.floor(contextLimit * 0.8));
+  const keepMin = Math.max(500, Math.floor(contextLimit * 0.5));
+  // keepMin can never exceed hotLimit (decideFold clamps too, but the
+  // derived values should already be sane).
+  return { hotLimit, keepMin: Math.min(keepMin, hotLimit) };
+}
+
 /** Per-document clip before embedding (matches Python `max_doc_chars`). */
 export const MEMOCHAIN_MAX_DOC_CHARS = 2000;
 /** Verbatim chunk recall depth (top-K hybrid search results injected). */
@@ -329,13 +351,17 @@ export function lastUserQuery(history: ModelMessage[]): string {
  *  fold into the session capsule and fold it. Returns null when nothing
  *  overflowed (the common short-session case). Errors are swallowed into
  *  the returned null — a fold failure must NEVER abort the run; the hot
- *  window just stays full and the model trims on its own. */
+ *  window just stays full and the model trims on its own. `contextLimit`
+ *  (from getModelContextLimit, includes the custom-endpoint override)
+ *  scales the hot/keep budgets to the model - see foldLimitsFor. */
 export async function memoChainFoldPrefix(
   sessionId: string,
   messages: ModelMessage[],
+  contextLimit?: number,
 ): Promise<FoldPrefixResult | null> {
   try {
-    const decision = decideFold(messages);
+    const { hotLimit, keepMin } = foldLimitsFor(contextLimit);
+    const decision = decideFold(messages, hotLimit, keepMin);
     if (!decision.overflow || decision.foldEnd === 0) return null;
     const stats = await foldMessages(sessionId, messages.slice(0, decision.foldEnd));
     return {

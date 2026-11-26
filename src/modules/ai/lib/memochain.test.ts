@@ -24,6 +24,7 @@ import {
   decideFold,
   estimateTokens,
   evictionGroups,
+  foldLimitsFor,
   messageHash,
   messageText,
 } from "./memochain";
@@ -146,5 +147,46 @@ describe("constants parity with the Rust module", () => {
     expect(MEMOCHAIN_KEEP_MIN).toBe(40_000);
     expect(MEMOCHAIN_MAX_DOC_CHARS).toBe(2000);
     expect(MEMOCHAIN_RECALL_TOP_K).toBe(4);
+  });
+});
+
+describe("foldLimitsFor (custom-endpoint context scaling, 2026-11-26)", () => {
+  it("missing or zero limit keeps the proxy defaults (cloud registry models)", () => {
+    expect(foldLimitsFor(undefined)).toEqual({
+      hotLimit: MEMOCHAIN_HOT_LIMIT,
+      keepMin: MEMOCHAIN_KEEP_MIN,
+    });
+    expect(foldLimitsFor(0)).toEqual({
+      hotLimit: MEMOCHAIN_HOT_LIMIT,
+      keepMin: MEMOCHAIN_KEEP_MIN,
+    });
+  });
+
+  it("scales hot to 80% and keep to 50% of a small local window", () => {
+    // 8k local model: folds start at 6.4k, keep floor 4k.
+    expect(foldLimitsFor(8_000)).toEqual({ hotLimit: 6_400, keepMin: 4_000 });
+    // 32k local model: folds at 25.6k, keeps 16k.
+    expect(foldLimitsFor(32_000)).toEqual({ hotLimit: 25_600, keepMin: 16_000 });
+  });
+
+  it("keepMin never exceeds hotLimit and floors protect degenerate windows", () => {
+    // 1k window: hot floors at the 1k minimum, keep at 500.
+    expect(foldLimitsFor(1_000)).toEqual({ hotLimit: 1_000, keepMin: 500 });
+    // keepMin (50%) can only exceed hot (80%) if the floors cross - it can't
+    // for sane inputs, but the min() guard is pinned for tampered values.
+    const l = foldLimitsFor(2_000);
+    expect(l.keepMin).toBeLessThanOrEqual(l.hotLimit);
+  });
+
+  it("decideFold fires under a scaled hot limit (small-window fold works)", () => {
+    // 30k-token history against an 8k window: with the DEFAULT 80k limit this
+    // never folds; with foldLimitsFor it must evict down to the keep floor.
+    const { hotLimit, keepMin } = foldLimitsFor(8_000);
+    const big = "x".repeat(120); // 30 tokens per message
+    const msgs = Array.from({ length: 1000 }, (_, i) => user(`${i} ${big}`));
+    const d = decideFold(msgs, hotLimit, keepMin);
+    expect(d.overflow).toBe(true);
+    expect(d.foldEnd).toBeGreaterThan(0);
+    expect(d.hotTokens).toBeGreaterThanOrEqual(Math.min(keepMin, hotLimit) - 200);
   });
 });
