@@ -35,10 +35,15 @@ import { compactModelMessagesDetailed } from "./compact";
 import {
   estimateHotWindowTokens,
   injectRecalledBeforeLastUser,
+  memoChainCacheHitRatio,
+  memoChainCachePassthrough,
   memoChainFactSheet,
   memoChainFoldPrefix,
   memoChainMemorySections,
+  estimateTokens,
   noteHotWindowTokens,
+  noteMemoChainCacheHitRatio,
+  noteMemoChainSavings,
 } from "./memochain";
 import {
   modelCanSee,
@@ -805,7 +810,16 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // prefix now). The persisted Chat history is untouched - the trim is
   // per-request only, same contract as local compaction.
   let historyForRun = history;
-  if (memoChain && memoSessionId) {
+  // CACHE-AWARE PASSTHROUGH (mina parity, 2026-11-26): when the backend's
+  // own prompt caching has been hitting at/above threshold for the streak
+  // length, skip the fold AND the memory injection — the cached prefix
+  // already covers the hot window at cache-read price. Mirrors the proxy's
+  // `_is_passthrough` short-circuit; the streak is fed by onUsage below.
+  const memoPassthrough =
+    memoChain && memoSessionId
+      ? memoChainCachePassthrough(memoSessionId)
+      : false;
+  if (memoChain && memoSessionId && !memoPassthrough) {
     // contextLimit carries the custom-endpoint context-size override, so a
     // toggled local model with a small window folds at ITS limit, not the
     // 80k cloud default (foldLimitsFor).
@@ -870,7 +884,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // Recalled chunks are fenced like tool output (untrusted-at-rest data).
   let memoMemoryBlock: string | null = null;
   let memoRecalledBlock: string | null = null;
-  if (memoChain && memoSessionId) {
+  if (memoChain && memoSessionId && !memoPassthrough) {
     const sections = await memoChainMemorySections(
       memoSessionId,
       history,
@@ -878,6 +892,19 @@ export async function runAgentStream(opts: RunAgentOptions) {
     );
     memoMemoryBlock = sections?.summaryBlock ?? null;
     memoRecalledBlock = sections?.recalledBlock ?? null;
+  }
+  // CUMULATIVE SAVINGS (2026-11-26 ask): the net tokens THIS request avoided
+  // — (full history) − (what it actually sends: trimmed window + the memory
+  // blocks the fold adds). Passthrough requests note 0 (nothing was skipped,
+  // nothing was added); the counter only grows on genuinely avoided input.
+  if (memoChain && memoSessionId) {
+    noteMemoChainSavings(
+      memoSessionId,
+      estimateHotWindowTokens(history) -
+        (estimateHotWindowTokens(historyForRun) +
+          (memoMemoryBlock ? estimateTokens(memoMemoryBlock) : 0) +
+          (memoRecalledBlock ? estimateTokens(memoRecalledBlock) : 0)),
+    );
   }
   const systemFinal = memoMemoryBlock
     ? `${systemWithNotices}\n\n${memoMemoryBlock}`
@@ -1159,7 +1186,8 @@ export async function runAgentStream(opts: RunAgentOptions) {
       // step's model-bound window (same hot-window contract as the pre-run
       // fold; the Chat history keeps everything). Same fail-open contract -
       // errors leave the step's messages untouched.
-      if (memoChain && memoSessionId) {
+      if (memoChain && memoSessionId && !memoPassthrough) {
+        const stepTokensBefore = estimateHotWindowTokens(messages);
         const stepFold = await memoChainFoldPrefix(memoSessionId, messages, contextLimit);
         if (stepFold) {
           messages = stepFold.trimmedMessages;
@@ -1178,6 +1206,12 @@ export async function runAgentStream(opts: RunAgentOptions) {
         noteHotWindowTokens(
           memoSessionId,
           estimateHotWindowTokens(messages),
+        );
+        // Mid-run savings: the delta THIS step's request avoided (fresh tool
+        // results folded back down before the request went out).
+        noteMemoChainSavings(
+          memoSessionId,
+          stepTokensBefore - estimateHotWindowTokens(messages),
         );
       }
       // USER-MESSAGE IMAGE HANDOFF: vision model on a compat wire — splice
@@ -1313,6 +1347,14 @@ export async function runAgentStream(opts: RunAgentOptions) {
         const u = step.usage;
         const stepInput = u.inputTokens ?? 0;
         const stepCached = u.inputTokenDetails?.cacheReadTokens ?? 0;
+        // FEED THE PASSTHROUGH STREAK: the session's cache-hit ratio drives
+        // the cache-aware passthrough above (mina parity).
+        if (memoChain && memoSessionId && stepInput > 0) {
+          noteMemoChainCacheHitRatio(
+            memoSessionId,
+            memoChainCacheHitRatio(stepInput, stepCached),
+          );
+        }
         opts.onUsage({
           inputTokens: stepInput,
           outputTokens: u.outputTokens ?? 0,

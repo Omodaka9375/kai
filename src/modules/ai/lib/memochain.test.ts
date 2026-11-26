@@ -529,3 +529,88 @@ describe("regression guards (2026-11-26 audit fixes)", () => {
     expect(injected[3]).toBe(history[2]);
   });
 });
+
+describe("cache-aware passthrough (mina parity, 2026-11-26)", () => {
+  it("reaches passthrough only after the streak of high-hit responses", async () => {
+    const { memoChainCachePassthrough, noteMemoChainCacheHitRatio, resetMemoChainPassthrough } =
+      await import("./memochain");
+    const sid = "s-pass";
+    resetMemoChainPassthrough(sid);
+    // No history yet: no passthrough.
+    expect(memoChainCachePassthrough(sid)).toBe(false);
+    // 70% hit (>= 0.5): streak 1 — not enough.
+    expect(noteMemoChainCacheHitRatio(sid, 0.7)).toBe(false);
+    expect(memoChainCachePassthrough(sid)).toBe(false);
+    // Second consecutive high hit: streak 2 — passthrough NOW.
+    expect(noteMemoChainCacheHitRatio(sid, 0.7)).toBe(true);
+    expect(memoChainCachePassthrough(sid)).toBe(true);
+  });
+
+  it("resets the streak on a below-threshold response", async () => {
+    const { memoChainCachePassthrough, noteMemoChainCacheHitRatio, resetMemoChainPassthrough } =
+      await import("./memochain");
+    const sid = "s-reset";
+    resetMemoChainPassthrough(sid);
+    expect(noteMemoChainCacheHitRatio(sid, 0.9)).toBe(false);
+    expect(noteMemoChainCacheHitRatio(sid, 0.4)).toBe(false); // resets
+    expect(memoChainCachePassthrough(sid)).toBe(false);
+    // Streak restarts from zero: one high hit is not enough.
+    expect(noteMemoChainCacheHitRatio(sid, 0.9)).toBe(false);
+    expect(noteMemoChainCacheHitRatio(sid, 0.9)).toBe(true);
+  });
+
+  it("null ratio (no usage reported) resets the streak, like the proxy default 0.0", async () => {
+    const { memoChainCachePassthrough, noteMemoChainCacheHitRatio, resetMemoChainPassthrough } =
+      await import("./memochain");
+    const sid = "s-null";
+    resetMemoChainPassthrough(sid);
+    expect(noteMemoChainCacheHitRatio(sid, 0.8)).toBe(false);
+    expect(noteMemoChainCacheHitRatio(sid, null)).toBe(false); // provider silent: reset
+    expect(memoChainCachePassthrough(sid)).toBe(false);
+  });
+
+  it("memoChainCacheHitRatio clamps to 1 and returns null on zero input", async () => {
+    const { memoChainCacheHitRatio } = await import("./memochain");
+    expect(memoChainCacheHitRatio(100, 70)).toBe(0.7);
+    expect(memoChainCacheHitRatio(100, 500)).toBe(1); // clamped
+    expect(memoChainCacheHitRatio(0, 0)).toBeNull();
+  });
+
+  it("is per-session: another session's streak does not leak", async () => {
+    const { memoChainCachePassthrough, noteMemoChainCacheHitRatio, resetMemoChainPassthrough } =
+      await import("./memochain");
+    const a = "s-a";
+    const b = "s-b";
+    resetMemoChainPassthrough(a);
+    resetMemoChainPassthrough(b);
+    noteMemoChainCacheHitRatio(a, 0.9);
+    noteMemoChainCacheHitRatio(a, 0.9);
+    expect(memoChainCachePassthrough(a)).toBe(true);
+    expect(memoChainCachePassthrough(b)).toBe(false);
+  });
+});
+
+describe("cumulative savings accumulator (context dropdown Saved row)", () => {
+  it("accumulates net avoided tokens across fold passes and floors negatives", async () => {
+    const { getMemoChainSavings, noteMemoChainSavings, resetMemoChainSavings } = await import(
+      "./memochain"
+    );
+    const sid = "s-savings";
+    resetMemoChainSavings(sid);
+    expect(getMemoChainSavings(sid)).toBe(0);
+    // No-fold / passthrough request: 0, no growth.
+    noteMemoChainSavings(sid, 0);
+    expect(getMemoChainSavings(sid)).toBe(0);
+    // A fold avoiding 12k net tokens.
+    noteMemoChainSavings(sid, 12_000);
+    expect(getMemoChainSavings(sid)).toBe(12_000);
+    // Memory blocks cost more than the fold saved this request: floored, never negative.
+    noteMemoChainSavings(sid, -500);
+    expect(getMemoChainSavings(sid)).toBe(12_000);
+    // Second fold accumulates.
+    noteMemoChainSavings(sid, 3_000);
+    expect(getMemoChainSavings(sid)).toBe(15_000);
+    // Null session reads 0.
+    expect(getMemoChainSavings(null)).toBe(0);
+  });
+});

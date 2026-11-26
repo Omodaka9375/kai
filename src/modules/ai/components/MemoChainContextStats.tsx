@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { foldLimitsFor, getHotWindowTokens } from "../lib/memochain";
+import { foldLimitsFor, getHotWindowTokens, getMemoChainSavings } from "../lib/memochain";
 import { native, type MemoChainSessionInfo } from "../lib/native";
-import { getModelContextLimit } from "../config";
+import { getModelContextLimit, getModelPricing } from "../config";
 
 /**
  * MemoChain context-dropdown stats (2026-11-26 ask): when a session's model
@@ -84,6 +84,15 @@ export function MemoChainContextRows({
   // first fold. Falls back to the estimate only before the first request on
   // a toggled model.
   const usedWindow = getHotWindowTokens(sessionId) ?? used;
+  // SAVED (2026-11-26 ask): cumulative estimated input tokens this session
+  // did NOT pay for because the fold sent the trimmed window + a memory
+  // block instead of the full history. Priced when KAI knows the model's
+  // price; local/custom endpoints (no pricing) show the tokens-only row —
+  // "free" would be a lie (local inference costs electricity and VRAM), so
+  // no dollar figure is invented for them.
+  const saved = getMemoChainSavings(sessionId);
+  const savedPrice = getModelPricing(modelId)?.input ?? null;
+  const savedUsd = savedPrice !== null ? (saved * savedPrice) / 1_000_000 : null;
   return (
     <>
       <div className="mt-1 flex items-center justify-between text-muted-foreground">
@@ -92,6 +101,13 @@ export function MemoChainContextRows({
           {fmtTokens(usedWindow)} / {fmtTokens(hot)}
         </span>
       </div>
+      {saved > 0 && (
+        <Row label="Saved">
+          {savedUsd !== null
+            ? `${fmtTokens(saved)} · $${savedUsd < 0.01 ? savedUsd.toFixed(4) : savedUsd < 1 ? savedUsd.toFixed(3) : savedUsd.toFixed(2)}`
+            : `${fmtTokens(saved)} tokens`}
+        </Row>
+      )}
       <Row label="Folded">
         {exists ? `${folded} msgs (${step} ${step === 1 ? "step" : "steps"})` : "none yet"}
       </Row>

@@ -114,6 +114,87 @@ export function estimateHotWindowTokens(messages: ModelMessage[]): number {
   );
 }
 
+/** CACHE-AWARE PASSTHROUGH (2026-11-26, parity with the mina proxy's
+ *  cache-aware passthrough): when the backend's own prompt caching is
+ *  hitting well, folding and injecting memory is wasteful — the cached
+ *  prefix already covers the hot window at cache-read price. The proxy
+ *  watches the reported cache-hit ratio; KAI's embedded handler sees the
+ *  same usage numbers through onUsage, so we track the streak in-process.
+ *
+ *  Same defaults as the proxy: threshold 0.5, streak 2, enabled.
+ */
+export const MEMOCHAIN_CACHE_PASSTHROUGH_THRESHOLD = 0.5;
+export const MEMOCHAIN_CACHE_PASSTHROUGH_STREAK = 2;
+
+/** Per-session passthrough streaks (mirror of the proxy's session_state
+ *  "passthrough_streak"). In-memory only, never persisted — same as the
+ *  proxy. Not reactive: memoChainCachePassthrough reads it per request. */
+const passthroughStreaks = new Map<string, number>();
+
+/** In-process equivalent of the proxy's `_is_passthrough()`: feed the
+ *  session's cache-hit ratio after each response; returns true once the
+ *  high-hit streak reaches MEMOCHAIN_CACHE_PASSTHROUGH_STREAK, meaning the
+ *  NEXT request should skip fold + memory injection entirely. */
+export function noteMemoChainCacheHitRatio(
+  sessionId: string,
+  hitRatio: number | null,
+): boolean {
+  const prev = passthroughStreaks.get(sessionId) ?? 0;
+  const next = hitRatio !== null && hitRatio >= MEMOCHAIN_CACHE_PASSTHROUGH_THRESHOLD
+    ? prev + 1
+    : 0;
+  passthroughStreaks.set(sessionId, next);
+  return next >= MEMOCHAIN_CACHE_PASSTHROUGH_STREAK;
+}
+
+/** Cache-hit ratio from an AI SDK usage object (in-process equivalent of the
+ *  proxy's `_cache_hit_ratio(payload)`): cached / input, clamped to 1, or
+ *  null when the provider reports no usage. */
+export function memoChainCacheHitRatio(
+  inputTokens: number,
+  cachedInputTokens: number,
+): number | null {
+  if (inputTokens <= 0) return null;
+  return Math.min(1, cachedInputTokens / inputTokens);
+}
+
+/** Whether the next request for this session should be a pure passthrough
+ *  (no fold, no recall, no memory block). */
+export function memoChainCachePassthrough(sessionId: string): boolean {
+  return (passthroughStreaks.get(sessionId) ?? 0) >= MEMOCHAIN_CACHE_PASSTHROUGH_STREAK;
+}
+
+/** Drop passthrough state for a session (test isolation / session clear). */
+export function resetMemoChainPassthrough(sessionId: string): void {
+  passthroughStreaks.delete(sessionId);
+}
+
+/** Per-session CUMULATIVE estimated input tokens avoided by folding (the
+ *  context dropdown's "Saved" row). Each request notes the NET delta:
+ *  tokens the request did NOT send (folded-away prefix) minus the memory
+ *  blocks the fold ADDS (fact sheet + recall), floored at 0 — so a
+ *  passthrough or no-fold request notes 0 and the counter only grows by
+ *  genuinely avoided input. In-memory only; priced at display time via
+ *  getModelPricing (local endpoints have no price -> tokens-only row). */
+const memoChainSavedTokens = new Map<string, number>();
+
+export function noteMemoChainSavings(sessionId: string, savedTokens: number): void {
+  if (savedTokens <= 0) return;
+  memoChainSavedTokens.set(
+    sessionId,
+    (memoChainSavedTokens.get(sessionId) ?? 0) + Math.max(0, savedTokens),
+  );
+}
+
+export function getMemoChainSavings(sessionId: string | null): number {
+  return sessionId ? memoChainSavedTokens.get(sessionId) ?? 0 : 0;
+}
+
+/** Test isolation / session clear. */
+export function resetMemoChainSavings(sessionId: string): void {
+  memoChainSavedTokens.delete(sessionId);
+}
+
 /** Per-document clip before embedding (matches Python `max_doc_chars`). */
 export const MEMOCHAIN_MAX_DOC_CHARS = 2000;
 /** Verbatim chunk recall depth (top-K hybrid search results injected). */
