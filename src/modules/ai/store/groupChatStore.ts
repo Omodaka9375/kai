@@ -236,6 +236,59 @@ export function isGroupDeliveryText(text: string): boolean {
   );
 }
 
+/** GROUP-DELIVERY PILL PREVIEW (2026-11-26 report: "after stopping group
+ *  chats, texts are visible in main user chat and not only in group").
+ *  Group deliveries are injected into the participant's own project chat
+ *  (the agent answers them there), but they used to render as WATCH pills
+ *  or raw user bubbles - reading as watch fires or leaked chatter. The chat
+ *  renders them as a collapsed group-branded pill instead; this helper
+ *  extracts the pill label + one-line excerpt, unfenced (agent-authored
+ *  deliveries ride fence markers). Returns null when the text is not a
+ *  group delivery. Marker chars live HERE, in lockstep with the injection
+ *  templates above. */
+export function groupDeliveryPreview(
+  text: string,
+): { label: string; excerpt: string } | null {
+  if (!isGroupDeliveryText(text)) return null;
+  const cap = (s: string): string => {
+    // Skip fence scaffolding lines ([source: ...] riders) - unfence strips
+    // the markers themselves, but an agent-authored delivery keeps its
+    // provenance line first, which is noise for a preview.
+    const first =
+      s
+        .split("\n")
+        .find((l) => l.trim().length > 0 && !/^\[source:.*\]$/.test(l.trim())) ??
+      "";
+    const t = first.trim();
+    return t ? (t.length > 100 ? `${t.slice(0, 100)}…` : t) : "group message";
+  };
+  // Shape 1: participant delivery (user send, mention, coordinator send).
+  const delivery = /^\[([^\n]*?) · cross-project group\] /.exec(text);
+  if (delivery) {
+    return {
+      label: delivery[1] || "group chat",
+      excerpt: cap(unfence(text.slice(delivery[0].length))),
+    };
+  }
+  // Shape 2: coordinator delegation prompt.
+  const prompt = /^\[group: (.*?)\] /.exec(text);
+  if (prompt) {
+    return {
+      label: prompt[1] || "group chat",
+      excerpt: cap(unfence(text.slice(prompt[0].length))),
+    };
+  }
+  // Shape 3: coalesced coordinator wake ("[group] X replied:\n...").
+  const wake = /^\[group\] (.+?) replied:\n/.exec(text);
+  if (wake) {
+    return {
+      label: `${wake[1]} replied in the group`,
+      excerpt: cap(unfence(text.slice(wake[0].length))),
+    };
+  }
+  return { label: "group chat", excerpt: cap(unfence(text)) };
+}
+
 function personaKey(groupId: string, sessionId: string): string {
   return `${groupId}::${sessionId}`;
 }

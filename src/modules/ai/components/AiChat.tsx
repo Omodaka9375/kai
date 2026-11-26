@@ -49,6 +49,8 @@ import { Fragment } from "react";
 import type { StickToBottomContext } from "use-stick-to-bottom";
 import { AiToolApproval } from "./AiToolApproval";
 import { MediaMessage, isMediaOutput, isGeneratingMedia } from "./MediaMessage";
+import UserMultiple02Icon from "@hugeicons/core-free-icons/UserMultiple02Icon";
+import { groupDeliveryPreview, isGroupDeliveryText } from "../store/groupChatStore";
 import {
   isBlankMarkdown,
   splitThinkingBlocks,
@@ -643,6 +645,61 @@ const CompactionNotice = memo(function CompactionNotice({
  * Default-collapsed state is per-message, not persisted — fresh fires also
  * start collapsed, which is the desired anti-scroll behavior.
  */
+/** GROUP-DELIVERY PILL (2026-11-26 report: "after stopping group chats,
+ *  texts are visible in main user chat and not only in group"): group
+ *  deliveries are injected into the participant's own project chat (the
+ *  agent answers them there) but they rendered as WATCH pills or raw user
+ *  bubbles - reading as watch fires or leaked chatter, and they lingered
+ *  after the group ended. Recognized by the delivery TEXT (the markers are
+ *  stable), so the pill survives metadata loss; collapse + expand keeps the
+ *  chat readable while the agent still sees the full text in history. */
+const GroupDeliveryMessage = memo(function GroupDeliveryMessage({
+  text,
+}: {
+  text: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const preview = useMemo(() => groupDeliveryPreview(text), [text]);
+  const label = preview?.label ?? "group chat";
+  const excerpt = preview?.excerpt ?? "group message";
+  return (
+    <Message from="user">
+      <MessageContent>
+        <Collapsible open={open} onOpenChange={setOpen}>
+          <CollapsibleTrigger
+            className={cn(
+              "flex w-full items-center gap-1.5 rounded-lg border border-border/50 bg-muted/40 px-2.5 py-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground",
+            )}
+          >
+            <HugeiconsIcon
+              icon={UserMultiple02Icon}
+              size={12}
+              strokeWidth={1.8}
+              className="shrink-0 text-primary/70"
+            />
+            <span className="shrink-0 font-medium">{label}</span>
+            <span className="min-w-0 flex-1 truncate text-left opacity-80">
+              {excerpt}
+            </span>
+            <HugeiconsIcon
+              icon={ArrowRight01Icon}
+              size={12}
+              strokeWidth={1.8}
+              className={cn(
+                "shrink-0 text-muted-foreground/60 transition-transform",
+                open && "rotate-90",
+              )}
+            />
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <MessageResponse>{text}</MessageResponse>
+          </CollapsibleContent>
+        </Collapsible>
+      </MessageContent>
+    </Message>
+  );
+});
+
 const WatchFireMessage = memo(function WatchFireMessage({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
   // Header line: `**Watch fired**: `label` (exit: 0, poll #N)` — strip the
@@ -755,6 +812,13 @@ function UserMessageView({
   const isWatchMessage =
     ((message as { metadata?: { kind?: string } }).metadata?.kind ?? "") ===
     "watch";
+  // GROUP deliveries ride the same injectMessage machinery (kind "watch"),
+  // but they are NOT watch fires - the group pill must win so the delivery
+  // reads as group chatter (label + excerpt), not "Watch fired". Detected by
+  // text (stable markers), so a metadata loss still renders correctly.
+  if (isGroupDeliveryText(rawText)) {
+    return <GroupDeliveryMessage text={rawText} />;
+  }
   if (isWatchMessage) {
     return <WatchFireMessage text={rawText} />;
   }

@@ -68,6 +68,7 @@ import {
   deliverAgentMentions,
   endGroupChat,
   getGroup,
+  groupDeliveryPreview,
   isGroupDeliveryText,
   matchParticipantByToken,
   participantActivity,
@@ -268,5 +269,47 @@ describe("N10: isGroupDeliveryText anchors the cross-project marker", () => {
         "as the alpha agent said in [x · cross-project group] yesterday, we should",
       ),
     ).toBe(false);
+  });
+});
+
+describe("N11: groupDeliveryPreview (main-chat group pill)", () => {
+  // 2026-11-26 report: group texts rendered as watch pills / raw bubbles in
+  // the participant's own chat. The pill derives its label + excerpt from
+  // the delivery text itself, so it survives any metadata loss.
+  it("extracts the group name and excerpt from a participant delivery", () => {
+    const p = groupDeliveryPreview(
+      "[My Group · cross-project group] hello team, let's ship it",
+    );
+    expect(p).toEqual({
+      label: "My Group",
+      excerpt: "hello team, let's ship it",
+    });
+  });
+
+  it("strips fence markers from the excerpt (agent-authored deliveries)", () => {
+    const p = groupDeliveryPreview(
+      "[My Group · cross-project group] [start tool_abc123]\n[source: cross-project group chat]\nactual content here\n[end tool_abc123]",
+    );
+    expect(p!.excerpt).toContain("actual content here");
+    expect(p!.excerpt).not.toContain("tool_abc123");
+  });
+
+  it("labels a coalesced coordinator wake by the replier", () => {
+    const p = groupDeliveryPreview(
+      "[group] beta replied:\nthe build passed on my side",
+    );
+    expect(p!.label).toBe("beta replied in the group");
+    expect(p!.excerpt).toBe("the build passed on my side");
+  });
+
+  it("labels a coordinator delegation prompt", () => {
+    const p = groupDeliveryPreview(
+      "[group: My Group] You are now the COORDINATOR.",
+    );
+    expect(p!.label).toBe("My Group");
+  });
+
+  it("returns null for non-group text (plain user bubbles unaffected)", () => {
+    expect(groupDeliveryPreview("just a normal message")).toBeNull();
   });
 });
