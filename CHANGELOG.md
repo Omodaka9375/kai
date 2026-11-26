@@ -4,6 +4,16 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [3.5.6]
+
+- Approvals: stuck "approving…" cards fixed — a predicted auto-approval that the bridge fails to resolve now escalates to the full interactive card after a 3s grace window, and the bridge retries a failed auto-approve respond up to 4 times with backoff (latch-safe), so Allow-mode cards can no longer dead-end while the model sits parked.
+- Approvals: a latched-dropped human Approve logs a visible warning instead of silently no-oping.
+- MemoChain: the Settings picker lists the SAME catalog as the status-bar model dropdown (OpenRouter-synced merged list), so every selectable model can be toggled for durable memory.
+- MemoChain: the context-dropdown "Hot window" row resets to the actual post-fold trimmed window after each fold instead of showing the ever-growing full-history estimate ("84k/80k" forever).
+- MemoChain: the in-chat "Durable memory - folded" banner is removed; fold status stays visible in the context dropdown (hot window / folded / capsule rows).
+
+---
+
 ## [3.5.5]
 
 - MemoChain: the fold now counts tool call inputs, tool result outputs, approval blocks, reasoning and string content, so tool-heavy sessions actually reach the hot limit (previously they silently never folded).
