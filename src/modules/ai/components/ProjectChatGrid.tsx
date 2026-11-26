@@ -569,6 +569,54 @@ export function ProjectChatGrid({ items }: { items: ProjectSwitcherItem[] }) {
       });
       useChatStore.setState({ _tick: Date.now() });
     },
+    // HANDS-FREE VOICE PARITY (2026-11-26 report: "in Workspaces even with
+    // allow green the transcription was not auto submitted like it does in
+    // the normal AI window"): the main composer auto-submits a finished
+    // transcript when the session is in Allow mode; the grid's mic never
+    // wired this, so every capture waited for a manual Enter. Gated on the
+    // CAPTURED session's effective mode (the card's owning-session rule -
+    // never the foreground project's, which a non-foreground card must not
+    // read). micTarget state re-renders this instance before any transcript
+    // can land, so the hook's autoSubmitRef is fresh for the target.
+    autoSubmit:
+      !!micTarget &&
+      micTargetRef.current === micTarget &&
+      effectiveSessionAutoApprove(micTarget) !== "off",
+    onAutoSubmit: () => {
+      const target = micTargetRef.current;
+      if (!target) return;
+      // onResult already merged the transcript into the draft; read the
+      // merged draft so pre-typed text rides along (composer parity).
+      const merged = (getSessionPreferences(target).draft ?? "").trim();
+      if (!merged) return;
+      // Slash/skill tokens need the card's full send pipeline (picker,
+      // expansion) - leave those in the draft for a manual Enter instead
+      // of half-processing them here.
+      if (merged.startsWith("/") || merged.startsWith("#")) return;
+      const meta = getSessionAgentMeta(target);
+      const busy =
+        meta.status === "thinking" ||
+        meta.status === "streaming" ||
+        meta.status === "awaiting-approval";
+      if (busy) {
+        setSessionSteeringMessage(target, [{ type: "text", text: merged }]);
+      } else {
+        void getOrCreateChat(target).sendMessage({
+          role: "user",
+          parts: [{ type: "text", text: merged }],
+        });
+        patchSessionAgentMeta(target, {
+          hitStepCap: false,
+          finishReason: "",
+          compactionNotice: null,
+          summaryNotice: null,
+        });
+      }
+      // Clear the draft + tick so the cell's field empties (same cleanup
+      // the card's own send() performs after a manual Enter).
+      setSessionPreferences(target, { draft: undefined });
+      useChatStore.setState({ _tick: Date.now() });
+    },
   });
   const voiceRef = useRef(voice);
   voiceRef.current = voice;
