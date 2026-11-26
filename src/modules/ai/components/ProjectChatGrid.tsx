@@ -25,6 +25,7 @@ import Tick01Icon from "@hugeicons/core-free-icons/Tick01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
+import { MemoChainBadge } from "./MemoChainBadge";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -50,6 +51,7 @@ import {
   estimateCost,
   getModel,
   getModelContextLimit,
+  isKnownModelId,
   isProxyManagedModel,
   type ModelId,
 } from "../config";
@@ -991,6 +993,13 @@ const CardContextRing = memo(function CardContextRing({
           aria-label="Model context usage"
           className="flex shrink-0 items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
         >
+          {proxyManaged ? (
+            <MemoChainBadge
+              modelId={modelId}
+              size={13}
+              className="text-primary"
+            />
+          ) : (
           <svg
             aria-hidden
             height="13"
@@ -1021,6 +1030,7 @@ const CardContextRing = memo(function CardContextRing({
               style={{ transform: "rotate(-90deg)", transformOrigin: "center" }}
             />
           </svg>
+          )}
         </button>
       </ContextTrigger>
       <ContextContent className="w-64 text-[11px]">
@@ -1369,8 +1379,15 @@ const CardModelPill = memo(function CardModelPill({
       : current.label;
   const shortLabel = shortenModelLabel(fullLabel);
 
+  // Filter stale ids (removed models like the 3.5.4 "proxy-custom" slot)
+  // through the catalog - otherwise getModel() synthesizes an "Unknown"
+  // entry and the dropdown offers a dead model that would brick the
+  // project's model selection when clicked.
   const favoriteModels = useMemo(
-    () => favoriteIds.map((id) => getModel(id as ModelId)),
+    () =>
+      favoriteIds
+        .filter((id) => isKnownModelId(id))
+        .map((id) => getModel(id as ModelId)),
     [favoriteIds],
   );
 

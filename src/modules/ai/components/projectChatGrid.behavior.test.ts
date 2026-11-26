@@ -227,7 +227,10 @@ describe("Workspaces grid behavior (source pins)", () => {
     expect(grid).toContain("getProjectEffectiveModelId(projectId, sessionId)");
     expect(grid).toContain("setProjectSelectedModelId(projectId, m.id as ModelId)");
     expect(grid).toContain("shortenModelLabel(fullLabel)");
-    expect(grid).toContain("favoriteIds.map((id) => getModel(id as ModelId))");
+    // Stale favorites (e.g. the removed "proxy-custom" slot) must be
+    // filtered through the catalog before getModel, so the dropdown never
+    // offers a dead model id.
+    expect(grid).toContain("favoriteIds\n        .filter((id) => isKnownModelId(id))\n        .map((id) => getModel(id as ModelId))");
   });
 
   it("the status bar hides in Workspaces mode", () => {

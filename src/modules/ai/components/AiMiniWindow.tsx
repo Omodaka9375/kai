@@ -44,6 +44,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { SandboxBadge } from "./SandboxBadge";
+import { MemoChainBadge } from "./MemoChainBadge";
 import { ShadowStrip, ShadowSessionMenuItem } from "./ShadowStrip";
 import { TrustStrip } from "./TrustStrip";
 import { TelegramMonitorMenuItem } from "./TelegramMonitorMenuItem";
@@ -565,7 +566,24 @@ function ContextIndicator({ messages }: { messages: UIMessage[] }) {
 
   return (
     <Context usedTokens={used} maxTokens={max} modelId={modelId}>
-      <ContextTrigger className="kai-no-hover-bg h-6 gap-1.5 px-2 text-[10.5px] hover:bg-transparent dark:hover:bg-transparent" />
+      {/* MEMOCHAIN (2026-11-26 ask): when the session's model routes through
+          the embedded durable-memory handler, the context ring is replaced
+          by the brain badge — the ring's compaction-pressure meaning doesn't
+          apply (the handler owns context; the ring is informational only),
+          and the badge makes the toggle visible at a glance. */}
+      {proxyManaged ? (
+        <ContextTrigger asChild>
+          <button
+            type="button"
+            aria-label="Durable memory (MemoChain) — context usage"
+            className="kai-no-hover-bg flex h-6 shrink-0 items-center gap-1.5 rounded px-2 text-[10.5px] text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <MemoChainBadge modelId={modelId} size={13} className="text-primary" />
+          </button>
+        </ContextTrigger>
+      ) : (
+        <ContextTrigger className="kai-no-hover-bg h-6 gap-1.5 px-2 text-[10.5px] hover:bg-transparent dark:hover:bg-transparent" />
+      )}
       <ContextContent className="w-64 text-[11px]">
         <ContextContentHeader />
         <ContextContentBody>
