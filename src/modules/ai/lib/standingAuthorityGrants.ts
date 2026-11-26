@@ -56,6 +56,14 @@ function readSnapshot(): AuthorityGrantSnapshot {
   };
 }
 
+/** Shared stable empty array so Zustand v5 / useSyncExternalStore selectors
+ *  calling effectiveAuthorityGrants(...) for untrusted or rootless projects
+ *  return the SAME reference across renders. Returning a fresh `[]` literal
+ *  violated uSES snapshot stability (`Object.is([], []) === false`) and
+ *  crashed the whole app with Minified React error #185 the instant an
+ *  untrusted new project mounted its AgentRunBridge. */
+const EMPTY_AUTHORITY_GRANTS: readonly string[] = Object.freeze([]);
+
 /**
  * The effective grant list for a project: what predictAutoApproval /
  * isAlwaysAllowedAuthorityTool should be fed when gating a call that
@@ -74,16 +82,16 @@ function readSnapshot(): AuthorityGrantSnapshot {
 export function effectiveAuthorityGrants(
   projectId: string | null | undefined,
   prefs: AuthorityGrantSnapshot = readSnapshot(),
-): string[] {
+): readonly string[] {
   const perProject = projectId
     ? prefs.standingAuthorityGrantProjects[projectId]
     : undefined;
   if (perProject) return perProject;
-  if (!projectId) return [];
+  if (!projectId) return EMPTY_AUTHORITY_GRANTS;
   // Legacy fallback: trusted projects only. isWorkspaceTrusted returns
   // true for no-project sessions (fail-open for the rootless surface, same
   // contract as the trust gate).
-  if (!isWorkspaceTrusted(projectId)) return [];
+  if (!isWorkspaceTrusted(projectId)) return EMPTY_AUTHORITY_GRANTS;
   return prefs.standingAuthorityAlwaysAllowed;
 }
 

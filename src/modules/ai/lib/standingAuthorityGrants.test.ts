@@ -96,6 +96,26 @@ describe("per-project authority grants - resolution", () => {
     ).toEqual([]);
   });
 
+  it("returns the SAME reference across repeated calls for untrusted/null projects (Zustand v5 #185 guard)", async () => {
+    // AgentRunBridge and AiToolApproval call effectiveAuthorityGrants inside
+    // usePreferencesStore(...) selectors. Zustand v5 feeds selectors straight
+    // into useSyncExternalStore, which requires Object.is(snap1, snap2) when
+    // state has not changed. Returning a fresh `[]` literal on every call
+    // triggered an infinite re-render cascade (Minified React error #185) the
+    // instant an untrusted newly-opened project mounted its bridge.
+    const m = await import("./standingAuthorityGrants");
+    const prefs = {
+      standingAuthorityAlwaysAllowed: ["save_memory"],
+      standingAuthorityGrantProjects: {},
+    };
+    const u1 = m.effectiveAuthorityGrants("local:d:/shady/clone", prefs);
+    const u2 = m.effectiveAuthorityGrants("local:d:/shady/clone", prefs);
+    expect(Object.is(u1, u2)).toBe(true);
+    const n1 = m.effectiveAuthorityGrants(null, prefs);
+    const n2 = m.effectiveAuthorityGrants(null, prefs);
+    expect(Object.is(n1, n2)).toBe(true);
+  });
+
   it("hasStandingAuthorityGrant checks the project's effective list", async () => {
     const m = await import("./standingAuthorityGrants");
     const snapshot = {
