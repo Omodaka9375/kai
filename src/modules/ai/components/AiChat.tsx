@@ -539,6 +539,7 @@ export function AiChatView({
         {compactionNotice && compactionNotice.droppedCount >= 3 && (
           <CompactionNotice
             droppedCount={compactionNotice.droppedCount}
+            kind={compactionNotice.kind}
             onDismiss={() => patchOwnedMeta({ compactionNotice: null })}
           />
         )}
@@ -612,17 +613,22 @@ export function AiChatView({
 
 const CompactionNotice = memo(function CompactionNotice({
   droppedCount,
+  kind,
   onDismiss,
 }: {
   droppedCount: number;
+  /** "memo-fold": durable-memory fold (retrievable, NOT elided);
+   *  "elide"/undefined: the local compactor's drop. */
+  kind?: "elide" | "memo-fold";
   onDismiss: () => void;
 }) {
   return (
     <div className="flex items-center gap-2 rounded-md border border-border/40 bg-muted/30 px-2.5 py-1.5 text-[11px] text-muted-foreground">
       <span className="size-1.5 shrink-0 rounded-full bg-amber-500/80" />
       <span className="flex-1 truncate">
-        Context compacted — {droppedCount} older tool result
-        {droppedCount === 1 ? "" : "s"} elided to save tokens.
+        {kind === "memo-fold"
+          ? `Durable memory - ${droppedCount} older message${droppedCount === 1 ? "" : "s"} folded into the memory capsule; the agent can recall them verbatim.`
+          : `Context compacted - ${droppedCount} older tool result${droppedCount === 1 ? "" : "s"} elided to save tokens.`}
       </span>
       <button
         type="button"

@@ -906,9 +906,9 @@ function MemoChainBlock() {
         <Label>Durable memory (MemoChain)</Label>
         <span className="text-[10.5px] text-muted-foreground">
           Toggle per model: sessions on a listed model fold overflowing history
-          into a verifiable in-app memory capsule (hot window + summary +
-          recalled verbatim turns) instead of local summarization. Works
-          offline — weights are bundled with the app.
+          into a verifiable in-app memory capsule (hot window + locally-derived
+          fact sheet + recalled verbatim turns) instead of local summarization.
+          Works offline - weights are bundled with the app.
         </span>
       </div>
       <div className="flex flex-col gap-2.5 rounded-lg border border-border/60 bg-card/60 px-3 py-2.5">

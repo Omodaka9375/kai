@@ -32,7 +32,7 @@ import { buildTools, type ToolContext } from "../tools/tools";
 import { repairEditToolCallInput } from "../tools/edit";
 import { primeXBearerPresence, xBearerKnownAbsent } from "../tools/social";
 import { compactModelMessagesDetailed } from "./compact";
-import { memoChainFoldPrefix, memoChainMemoryBlock } from "./memochain";
+import { memoChainFactSheet, memoChainFoldPrefix, memoChainMemoryBlock } from "./memochain";
 import {
   modelCanSee,
   swapImagePartsToText,
@@ -370,7 +370,7 @@ export type RunAgentOptions = {
    *  when the provider does not report `usage` (LM Studio, Ollama,
    *  openai-compatible) — those emit text chunks but zero output tokens. */
   onTextDelta?: (text: string) => void;
-  onCompact?: (info: { droppedCount: number }) => void;
+  onCompact?: (info: { droppedCount: number; kind?: "elide" | "memo-fold" }) => void;
   onFinishMeta?: (info: { hitStepCap: boolean; finishReason: string }) => void;
   onLoopDetected?: (info: LoopDetectionResult) => void;
   openaiCompatibleBaseURL?: string;
@@ -810,6 +810,17 @@ export async function runAgentStream(opts: RunAgentOptions) {
         droppedCount: folded.foldedMessages,
         contextLimit,
       });
+      // MEMO-FOLD NOTICE (2026-11-26 honesty pass): the fold moves the
+      // prefix into the durable-memory capsule - it is NOT the local
+      // elider. Surface it with its own kind so the UI never tells the
+      // user these messages were "elided to save tokens" (they are
+      // retrievable verbatim via the chunk store).
+      opts.onCompact?.({ droppedCount: folded.foldedMessages, kind: "memo-fold" });
+      // FACT SHEET (honesty pass): locally-derived digest of the folded
+      // prefix (user asks, touched files, tools) - the honest replacement
+      // for the never-implemented proxy-era LLM "rolling summary".
+      // Fire-and-forget; fail-open inside.
+      void memoChainFactSheet(memoSessionId, history.slice(0, history.length - folded.trimmedMessages.length));
     }
   }
   const compact = memoChain
@@ -1138,6 +1149,9 @@ export async function runAgentStream(opts: RunAgentOptions) {
             droppedCount: stepFold.foldedMessages,
             contextLimit,
           });
+          opts.onCompact?.({ droppedCount: stepFold.foldedMessages, kind: "memo-fold" });
+          const stepFoldedCount = stepMessages.length - stepFold.trimmedMessages.length;
+          void memoChainFactSheet(memoSessionId, stepMessages.slice(0, stepFoldedCount));
         }
       }
       // USER-MESSAGE IMAGE HANDOFF: vision model on a compat wire — splice

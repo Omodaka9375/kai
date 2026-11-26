@@ -13,6 +13,7 @@ vi.mock("./native", () => ({
     memochainFold: vi.fn(),
     memochainRecall: vi.fn(),
     memochainSetSummary: vi.fn(),
+    memochainSessionInfo: vi.fn(),
   },
 }));
 
@@ -319,5 +320,49 @@ describe("memoChainFoldPrefix hot-window trim (2026-11-26 specialist review)", (
   it("no fold under the limit returns null (no trim, full history)", async () => {
     const result = await memoChainFoldPrefix("s-test2", [user("hi"), user("there")]);
     expect(result).toBeNull();
+  });
+});
+
+describe("memoChainFactSheet (honesty pass: locally-derived summary, 2026-11-26)", () => {
+  it("derives asks/files/tools from the folded prefix and persists via set_summary", async () => {
+    const { native } = await import("./native");
+    vi.mocked(native.memochainSessionInfo).mockResolvedValue({
+      exists: true,
+      step: 3,
+      stateDigest: "d",
+      accumulator: "a",
+      summary: "PREVIOUS SHEET",
+      foldedHashes: ["h1"],
+      weightsDigest: null,
+      tampered: false,
+    });
+    vi.mocked(native.memochainSetSummary).mockResolvedValue(true);
+    const folded = [
+      user("Fix the login bug please"),
+      {
+        role: "assistant",
+        content: [
+          { type: "tool-call", toolCallId: "c1", toolName: "read_file", input: { path: "src/login.ts" } },
+          { type: "tool-call", toolCallId: "c2", toolName: "edit", input: { path: "src/login.ts" } },
+        ],
+      } as unknown as ModelMessage,
+    ];
+    const { memoChainFactSheet } = await import("./memochain");
+    await memoChainFactSheet("s-sheet", folded);
+    const arg = vi.mocked(native.memochainSetSummary).mock.calls[0]?.[1] ?? "";
+    // Merged with the existing sheet (older context kept).
+    expect(arg).toContain("PREVIOUS SHEET");
+    // Observables present, honestly labeled.
+    expect(arg).toContain("Fix the login bug please");
+    expect(arg).toContain("src/login.ts");
+    expect(arg).toContain("read_file");
+  });
+
+  it("empty prefix is a no-op (no summary write)", async () => {
+    const { native } = await import("./native");
+    vi.mocked(native.memochainSetSummary).mockClear();
+    const { memoChainFactSheet } = await import("./memochain");
+    await memoChainFactSheet("s-sheet2", []);
+    expect(native.memochainSetSummary).not.toHaveBeenCalled();
   });
 });

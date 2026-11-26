@@ -97,7 +97,7 @@ export type AgentMeta = {
   hitStepCap: boolean;
   /** Raw finish reason from the provider (stop, length, tool-calls, etc.). */
   finishReason: string;
-  compactionNotice: { droppedCount: number; at: number } | null;
+  compactionNotice: { droppedCount: number; at: number; kind?: "elide" | "memo-fold" } | null;
   /** True while the model is generating a context summary. */
   summarizing: boolean;
   /** Shown after summarization completes. `text` overrides the default
@@ -430,14 +430,18 @@ export function makeChatSync(
         deps.patchAgentMeta({ outputTps: tps });
       }
     },
-    onCompact: (info: { droppedCount: number }) => {
+    onCompact: (info: { droppedCount: number; kind?: "elide" | "memo-fold" }) => {
       if (!isActive()) return;
-      // Show once per session — elision recurs every turn once the history is
+      // Show once per session - elision recurs every turn once the history is
       // large enough, and repeating the notice is just noise.
       if (compactionNoticeShown.current) return;
       compactionNoticeShown.current = true;
       deps.patchAgentMeta({
-        compactionNotice: { droppedCount: info.droppedCount, at: Date.now() },
+        compactionNotice: {
+          droppedCount: info.droppedCount,
+          at: Date.now(),
+          kind: info.kind,
+        },
       });
     },
     onLoopDetected: (info: LoopDetectionResult) => {

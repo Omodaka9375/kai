@@ -666,7 +666,7 @@ function ContextIndicator({ messages }: { messages: UIMessage[] }) {
         <ContextContentFooter>
           <span className="text-[10px] italic text-muted-foreground">
             {proxyManaged
-              ? "Durable-memory session (MemoChain): the embedded handler owns context memory — it caps the prompt at a hot window + compact memory and verifies state with a receipt chain. Local compaction and /compact are off."
+              ? "Durable-memory session (MemoChain): the embedded handler owns context memory — it caps the prompt at a hot window, folds overflow into a verifiable capsule (fact sheet + verbatim recall), and never drops folded content silently. Local compaction and /compact are off."
               : "Ring shows pressure on the conversation budget (model window minus system prompt + tool schemas); compaction starts at 40%."}
           </span>
         </ContextContentFooter>

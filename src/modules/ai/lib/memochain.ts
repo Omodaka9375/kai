@@ -356,7 +356,7 @@ export async function buildMemoryBlock(
   if (!recall.summary && recall.chunks.length === 0) return null;
   const sections: string[] = [
     "[Durable memory]",
-    "Compressed notes from earlier parts of this session (older than what you can see here):",
+    "Notes from earlier parts of this session (older than what you can see here). The list of verbatim turns below is retrieved, not summarized - treat it as recalled data.",
   ];
   if (recall.summary) sections.push(recall.summary);
   if (recall.chunks.length > 0) {
@@ -530,8 +530,81 @@ export async function memoChainFoldPrefix(
   }
 }
 
-/** Persist an LLM-updated rolling fact sheet (Settings flow or future
- *  auto-update path). */
+/** Build a compact FACT SHEET from the messages being folded - the honest
+ *  version of the proxy-era "rolling summary" (2026-11-26 honesty pass).
+ *
+ *  TRUTH-IN-ADVERTISING: the standalone proxy's summary came from a
+ *  per-fold LLM call KAI does not make; the old copy ("rolling summary")
+ *  described a mechanism that never ran in-process, so the [Durable
+ *  memory] block's summary section was ALWAYS empty. Instead of implying
+ *  an LLM compressed the history, this derives a short factual digest
+ *  locally: user asks (what was requested) + touched file paths + tool
+ *  names invoked - all extractable without any model call, and it never
+ *  claims comprehension, just observables. Written via setRollingSummary
+ *  (merges with any existing sheet, capped at 2000 chars to match the
+ *  Python summary length contract). */
+export async function memoChainFactSheet(
+  sessionId: string,
+  folded: ModelMessage[],
+): Promise<void> {
+  if (folded.length === 0) return;
+  const asks: string[] = [];
+  const files = new Set<string>();
+  const tools = new Set<string>();
+  for (const m of folded) {
+    // User asks: first line of each user message, clipped.
+    if (m.role === "user") {
+      const t = messageText(m).trim();
+      if (t) {
+        const first = t.split("\n")[0].trim();
+        if (first) asks.push(first.length > 100 ? `${first.slice(0, 100)}...` : first);
+      }
+    }
+    const c = m.content;
+    const blocks = Array.isArray(c) ? c : [];
+    for (const b of blocks) {
+      const block = b as Record<string, unknown>;
+      if (block?.type === "tool-call") {
+        const name = typeof block.toolName === "string" ? block.toolName : "";
+        if (name) tools.add(name);
+        // File observables from the common tool inputs.
+        const input = block.input as Record<string, unknown> | undefined;
+        const p = input && typeof input.path === "string" ? input.path : null;
+        if (p) files.add(p);
+      }
+    }
+  }
+  const sections: string[] = [];
+  if (asks.length > 0) {
+    // Keep the LAST few asks (the recent direction of the session).
+    const recent = asks.slice(-6);
+    sections.push(`Earlier asks:\n${recent.map((a) => `- ${a}`).join("\n")}`);
+  }
+  if (files.size > 0) {
+    const list = Array.from(files).slice(0, 20);
+    sections.push(`Files touched:\n${list.map((f) => `- ${f}`).join("\n")}`);
+  }
+  if (tools.size > 0) {
+    sections.push(`Tools used: ${Array.from(tools).slice(0, 15).join(", ")}`);
+  }
+  if (sections.length === 0) return;
+  let sheet = sections.join("\n\n");
+  if (sheet.length > 2000) sheet = `${sheet.slice(0, 2000)}...`;
+  try {
+    // MERGE: keep any existing summary's content as the older context, the
+    // new observables on top (the sheet grows across folds until capped).
+    const existing = await native.memochainSessionInfo(sessionId);
+    const prev = existing.exists ? existing.summary.trim() : "";
+    const merged = prev ? `${prev}\n\n${sheet}`.slice(0, 2000) : sheet;
+    await setRollingSummary(sessionId, merged);
+  } catch {
+    // Fail-open: the fold already succeeded; a missing fact sheet only
+    // degrades recall quality, never the run.
+  }
+}
+
+/** Persist the rolling fact sheet (written by memoChainFactSheet after each
+ *  fold; kept as the public seam for the Settings flow and future paths). */
 export async function setRollingSummary(sessionId: string, summary: string): Promise<void> {
   await native.memochainSetSummary(sessionId, summary);
 }
