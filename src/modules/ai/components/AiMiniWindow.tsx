@@ -51,7 +51,7 @@ import { ShadowStrip, ShadowSessionMenuItem } from "./ShadowStrip";
 import { TrustStrip } from "./TrustStrip";
 import { TelegramMonitorMenuItem } from "./TelegramMonitorMenuItem";
 import { estimateCost, getModel, getModelContextLimit, isProxyManagedModel } from "../config";
-import { effectiveContextLimit, SYSTEM_OVERHEAD_TOKENS } from "../lib/compact";
+import { effectiveContextLimit } from "../lib/compact";
 import { type SessionMeta } from "../lib/sessions";
 import { estimateContextTokens } from "../lib/media/contextTokens";
 import { absoluteTime, relativeTime } from "../lib/relativeTime";
@@ -518,7 +518,6 @@ function ContextIndicator({ messages }: { messages: UIMessage[] }) {
   const sessionId = useChatStore((s) => s.activeSessionId);
   const tokens = useChatStore((s) => s.agentMeta.tokens);
   const lastInput = useChatStore((s) => s.agentMeta.lastInputTokens);
-  const lastCached = useChatStore((s) => s.agentMeta.lastCachedTokens);
   // MEMOCHAIN-MANAGED MEMORY: when this session's model is toggled for
   // durable memory (MemoChain), the footer swaps its explanation — the
   // embedded handler owns context memory (hot window + compact memory +
@@ -589,74 +588,12 @@ function ContextIndicator({ messages }: { messages: UIMessage[] }) {
       ) : (
         <ContextTrigger className="kai-no-hover-bg h-6 gap-1.5 px-2 text-[10.5px] hover:bg-transparent dark:hover:bg-transparent" />
       )}
-      <ContextContent className="w-64 text-[11px]">
-        <ContextContentHeader />
-        <ContextContentBody>
-          <div className="flex items-center justify-between text-muted-foreground">
+      <ContextContent className="w-56 text-[11px]">
+        {!proxyManaged ? <ContextContentHeader /> : null}
+        <ContextContentBody className="space-y-1">
+          <div className="flex items-center justify-between gap-2 text-muted-foreground">
             <span>Model</span>
-            <span className="font-mono text-foreground">{modelLabel}</span>
-          </div>
-          <div className="mt-1 flex items-center justify-between text-muted-foreground">
-            <span>{used === lastInput && used > 0 ? "Last request" : "Estimated context"}</span>
-            <span className="font-mono text-foreground">
-              {formatTokens(used)}
-            </span>
-          </div>
-          {lastCached > 0 && (
-            <div className="flex items-center justify-between text-muted-foreground">
-              <span>Of which cached</span>
-              <span className="font-mono text-foreground">
-                {formatTokens(lastCached)}
-              </span>
-            </div>
-          )}
-          {reported > 0 && (
-            <>
-              <div className="mt-1.5 flex items-center justify-between text-muted-foreground">
-                <span>Session input</span>
-                <span className="font-mono text-foreground">
-                  {formatTokens(tokens.inputTokens)}
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-muted-foreground">
-                <span>Session output</span>
-                <span className="font-mono text-foreground">
-                  {formatTokens(tokens.outputTokens)}
-                </span>
-              </div>
-              {tokens.cachedInputTokens > 0 && (
-                <div className="flex items-center justify-between text-muted-foreground">
-                  <span>Cache hit</span>
-                  <span className="font-mono text-foreground">{cacheRate}%</span>
-                </div>
-              )}
-              {cost != null && (
-                <div className="flex items-center justify-between text-muted-foreground">
-                  <span>Session cost</span>
-                  <span className="font-mono text-foreground">
-                    ${cost.toFixed(cost < 0.01 ? 4 : cost < 1 ? 3 : 2)}
-                  </span>
-                </div>
-              )}
-            </>
-          )}
-          <div className="flex items-center justify-between text-muted-foreground">
-            <span>Window</span>
-            <span className="font-mono text-foreground">
-              {formatTokens(max)}
-            </span>
-          </div>
-          <div className="flex items-center justify-between text-muted-foreground">
-            <span>Model window</span>
-            <span className="font-mono text-foreground">
-              {formatTokens(getModelContextLimit(modelId))}
-            </span>
-          </div>
-          <div className="flex items-center justify-between text-muted-foreground">
-            <span>Reserved (system+tools)</span>
-            <span className="font-mono text-foreground">
-              {formatTokens(Math.min(SYSTEM_OVERHEAD_TOKENS, getModelContextLimit(modelId)))}
-            </span>
+            <span className="truncate font-mono text-foreground">{modelLabel}</span>
           </div>
           {proxyManaged ? (
             <MemoChainContextRows
@@ -664,13 +601,42 @@ function ContextIndicator({ messages }: { messages: UIMessage[] }) {
               modelId={modelId}
               used={used}
             />
-          ) : null}
+          ) : (
+            <div className="flex items-center justify-between text-muted-foreground">
+              <span>{used === lastInput && used > 0 ? "Context" : "Estimated"}</span>
+              <span className="font-mono text-foreground">
+                {formatTokens(used)} / {formatTokens(max)}
+              </span>
+            </div>
+          )}
+          {reported > 0 && (
+            <div className="flex items-center justify-between text-muted-foreground">
+              <span>Session</span>
+              <span className="font-mono text-foreground">
+                {formatTokens(tokens.inputTokens)} in / {formatTokens(tokens.outputTokens)} out
+              </span>
+            </div>
+          )}
+          {tokens.cachedInputTokens > 0 && (
+            <div className="flex items-center justify-between text-muted-foreground">
+              <span>Cache hit</span>
+              <span className="font-mono text-foreground">{cacheRate}%</span>
+            </div>
+          )}
+          {cost != null && reported > 0 && (
+            <div className="flex items-center justify-between text-muted-foreground">
+              <span>Cost</span>
+              <span className="font-mono text-foreground">
+                ${cost.toFixed(cost < 0.01 ? 4 : cost < 1 ? 3 : 2)}
+              </span>
+            </div>
+          )}
         </ContextContentBody>
-        <ContextContentFooter>
-          <span className="text-[10px] italic text-muted-foreground">
+        <ContextContentFooter className="py-2">
+          <span className="text-[10px] text-muted-foreground">
             {proxyManaged
-              ? "Durable-memory session (MemoChain): the embedded handler owns context memory — it caps the prompt at a hot window, folds overflow into a verifiable capsule (fact sheet + verbatim recall), and never drops folded content silently. Local compaction and /compact are off."
-              : "Ring shows pressure on the conversation budget (model window minus system prompt + tool schemas); compaction starts at 40%."}
+              ? "Durable-memory session (MemoChain): folds overflow into capsule; /compact off."
+              : "Auto-compacts above 40% of conversation budget."}
           </span>
         </ContextContentFooter>
       </ContextContent>

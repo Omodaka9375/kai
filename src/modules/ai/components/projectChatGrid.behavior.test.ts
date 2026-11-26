@@ -140,11 +140,12 @@ describe("Workspaces grid behavior (source pins)", () => {
     expect(panel).toContain("mirrorOpenGroupId(stackSurface === \"group\" ? openGroupId : null)");
   });
 
-  it("each card header carries an Ask/Allow pill bound to its own session", () => {
+  it("each card input carries an Ask/Allow pill on the left bound to its own session", () => {
     // Same state as the project chat's AutoApproveToggle: the session-
     // scoped map via the version counter, written through the session-
     // targeted setter (NOT the legacy presentation field that follows the
-    // foreground session). Not nested inside the open-project button.
+    // foreground session). Sits on the left of the card input bar, matching
+    // the main AI input bar layout.
     expect(grid).toContain("<SessionApprovePill sessionId={sessionId} />");
     expect(grid).toContain("setSessionAutoApprove(sessionId, mode === \"off\" ? \"all\" : \"off\")");
     // 2026-11-25 TRUST GATE: the pill paints the trust-gated effective mode.
@@ -156,36 +157,36 @@ describe("Workspaces grid behavior (source pins)", () => {
       "utf8",
     );
     expect(store).toContain("export function setSessionAutoApprove(");
-    // No button-in-button: the icon toggle renders in the header DIV.
-    // Ask/Allow is a compact single icon immediately to the left of the
-    // session picker.
     const headerBlock = grid.slice(
       grid.indexOf("Slim header"),
       grid.indexOf("GroupCardBody group={group}"),
     );
     expect(headerBlock).toContain("<div");
-    expect(headerBlock).toContain("<SessionApprovePill");
+    expect(headerBlock).not.toContain("<SessionApprovePill");
     // 2026-11-25 DECLUTTER: the standalone + button is GONE from the
     // header - "New session" lives inside the CardSessionPicker dropdown
-    // (separated at the bottom), so the header keeps exactly two icons:
-    // session picker + Ask/Allow pill.
+    // (separated at the bottom), so the right cluster keeps the session picker.
     expect(headerBlock).toContain("<CardSessionPicker");
     expect(headerBlock).not.toContain('title="New session"');
     const titleIdx = headerBlock.indexOf("group ? `${name} · ${group.name}` : name");
     const contextRingIdx = headerBlock.indexOf("<CardContextRing");
     const modelPillIdx = headerBlock.indexOf("<CardModelPill");
     const personaPillIdx = headerBlock.indexOf("<SessionPersonaPill");
-    const pillIdx = headerBlock.indexOf("<SessionApprovePill");
     const pickerIdx = headerBlock.indexOf("<CardSessionPicker");
     expect(titleIdx).toBeGreaterThan(-1);
     // PILL ORDER (2026-11-23 ask): context ring, model pill, persona picker.
     expect(contextRingIdx).toBeGreaterThan(titleIdx);
     expect(modelPillIdx).toBeGreaterThan(contextRingIdx);
     expect(personaPillIdx).toBeGreaterThan(modelPillIdx);
-    expect(pillIdx).toBeGreaterThan(personaPillIdx);
-    // The session picker sits LEFT of the Ask/Allow pill in the header's
-    // right-aligned action cluster.
-    expect(pickerIdx).toBeLessThan(pillIdx);
+    expect(pickerIdx).toBeGreaterThan(personaPillIdx);
+    // 2026-11-26 ask: Ask/Allow pill sits on the LEFT of the card input bar
+    // (before the textarea).
+    const inputStart = grid.indexOf("const CellInput = memo");
+    const inputSrc = grid.slice(inputStart);
+    const inputApproveIdx = inputSrc.indexOf("<SessionApprovePill sessionId={sessionId} />");
+    const textareaIdx = inputSrc.indexOf("<textarea");
+    expect(inputApproveIdx).toBeGreaterThan(-1);
+    expect(inputApproveIdx).toBeLessThan(textareaIdx);
     expect(grid).toContain("icon={Shield01Icon}");
   });
 
@@ -564,14 +565,14 @@ describe("Workspaces grid behavior (source pins)", () => {
     const contextRingIdx = headerBlock.indexOf("<CardContextRing projectId={projectId} sessionId={sessionId} />");
     const modelPillIdx = headerBlock.indexOf("<CardModelPill");
     const personaPillIdx = headerBlock.indexOf("<SessionPersonaPill");
-    const approveIdx = headerBlock.indexOf("<SessionApprovePill");
+    const pickerIdx = headerBlock.indexOf("<CardSessionPicker");
     expect(sandboxIdx).toBeGreaterThan(-1);
     expect(titleIdx).toBeGreaterThan(sandboxIdx);
     // PILL ORDER (2026-11-23 ask): context ring, model pill, persona picker.
     expect(contextRingIdx).toBeGreaterThan(titleIdx);
     expect(modelPillIdx).toBeGreaterThan(contextRingIdx);
     expect(personaPillIdx).toBeGreaterThan(modelPillIdx);
-    expect(approveIdx).toBeGreaterThan(personaPillIdx);
+    expect(pickerIdx).toBeGreaterThan(personaPillIdx);
     expect(grid).toContain('if (mode === "off") return null;');
     expect(grid).toContain("<ContextTrigger asChild>");
   });

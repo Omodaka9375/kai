@@ -4,6 +4,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -56,7 +57,7 @@ import {
   isProxyManagedModel,
   type ModelId,
 } from "../config";
-import { effectiveContextLimit, SYSTEM_OVERHEAD_TOKENS } from "../lib/compact";
+import { effectiveContextLimit } from "../lib/compact";
 import { estimateContextTokens } from "../lib/media/contextTokens";
 import type { SandboxMode } from "../lib/native";
 import {
@@ -192,6 +193,28 @@ import {
  * bound to the global Kai:ai-voice-toggle — that shortcut belongs to the
  * main composer; one shortcut must not start two recordings).
  */
+
+/** Auto-size a card textarea from 1 line up to 3 visible lines (54px),
+ *  collapsing cleanly back to a single 18px line whenever text is cleared
+ *  or edited back down (including programmatic resets on send, draft load,
+ *  mic dictation, or session switch). Setting height = "0px" before measuring
+ *  scrollHeight prevents Chromium/WebView2 from locking onto the previous
+ *  expanded height when lines are deleted. */
+const CARD_INPUT_LINE_H = 18;
+const CARD_INPUT_MAX_H = CARD_INPUT_LINE_H * 3; // 54px = 3 visible lines
+function resizeCardTextarea(el: HTMLTextAreaElement | null, value: string): void {
+  if (!el) return;
+  if (!value) {
+    el.style.height = `${CARD_INPUT_LINE_H}px`;
+    el.style.overflowY = "hidden";
+    el.scrollTop = 0;
+    return;
+  }
+  el.style.height = "0px";
+  const next = Math.max(CARD_INPUT_LINE_H, Math.min(el.scrollHeight, CARD_INPUT_MAX_H));
+  el.style.height = `${next}px`;
+  el.style.overflowY = el.scrollHeight > CARD_INPUT_MAX_H ? "auto" : "hidden";
+}
 
 type CellStatus = ProjectSwitcherItem["status"];
 
@@ -866,7 +889,6 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
         ) : null}
         <div className="flex min-w-0 flex-1 items-center justify-end gap-1">
           {sessionId ? <CardSessionPicker projectId={projectId} sessionId={sessionId} /> : null}
-          {sessionId ? <SessionApprovePill sessionId={sessionId} /> : null}
         </div>
       </div>
         </ContextMenuTrigger>
@@ -993,7 +1015,6 @@ const CardContextRing = memo(function CardContextRing({
   const meta = getSessionAgentMeta(sessionId);
   const tokens = meta.tokens;
   const lastInput = meta.lastInputTokens;
-  const lastCached = meta.lastCachedTokens;
 
   const chat = useMemo(() => getOrCreateChat(sessionId), [sessionId]);
   const [estimated, setEstimated] = useState(() =>
@@ -1078,80 +1099,12 @@ const CardContextRing = memo(function CardContextRing({
           )}
         </button>
       </ContextTrigger>
-      <ContextContent className="w-64 text-[11px]">
-        <ContextContentHeader />
-        <ContextContentBody>
-          <div className="flex items-center justify-between text-muted-foreground">
+      <ContextContent className="w-56 text-[11px]">
+        {!proxyManaged ? <ContextContentHeader /> : null}
+        <ContextContentBody className="space-y-1">
+          <div className="flex items-center justify-between gap-2 text-muted-foreground">
             <span>Model</span>
-            <span className="font-mono text-foreground">{modelLabel}</span>
-          </div>
-          <div className="mt-1 flex items-center justify-between text-muted-foreground">
-            <span>
-              {used === lastInput && used > 0
-                ? "Last request"
-                : "Estimated context"}
-            </span>
-            <span className="font-mono text-foreground">
-              {formatCardTokens(used)}
-            </span>
-          </div>
-          {lastCached > 0 && (
-            <div className="flex items-center justify-between text-muted-foreground">
-              <span>Of which cached</span>
-              <span className="font-mono text-foreground">
-                {formatCardTokens(lastCached)}
-              </span>
-            </div>
-          )}
-          {reported > 0 && (
-            <>
-              <div className="mt-1.5 flex items-center justify-between text-muted-foreground">
-                <span>Session input</span>
-                <span className="font-mono text-foreground">
-                  {formatCardTokens(tokens.inputTokens)}
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-muted-foreground">
-                <span>Session output</span>
-                <span className="font-mono text-foreground">
-                  {formatCardTokens(tokens.outputTokens)}
-                </span>
-              </div>
-              {tokens.cachedInputTokens > 0 && (
-                <div className="flex items-center justify-between text-muted-foreground">
-                  <span>Cache hit</span>
-                  <span className="font-mono text-foreground">{cacheRate}%</span>
-                </div>
-              )}
-              {cost != null && (
-                <div className="flex items-center justify-between text-muted-foreground">
-                  <span>Session cost</span>
-                  <span className="font-mono text-foreground">
-                    ${cost.toFixed(cost < 0.01 ? 4 : cost < 1 ? 3 : 2)}
-                  </span>
-                </div>
-              )}
-            </>
-          )}
-          <div className="flex items-center justify-between text-muted-foreground">
-            <span>Window</span>
-            <span className="font-mono text-foreground">
-              {formatCardTokens(max)}
-            </span>
-          </div>
-          <div className="flex items-center justify-between text-muted-foreground">
-            <span>Model window</span>
-            <span className="font-mono text-foreground">
-              {formatCardTokens(getModelContextLimit(modelId))}
-            </span>
-          </div>
-          <div className="flex items-center justify-between text-muted-foreground">
-            <span>Reserved (system+tools)</span>
-            <span className="font-mono text-foreground">
-              {formatCardTokens(
-                Math.min(SYSTEM_OVERHEAD_TOKENS, getModelContextLimit(modelId)),
-              )}
-            </span>
+            <span className="truncate font-mono text-foreground">{modelLabel}</span>
           </div>
           {proxyManaged ? (
             <MemoChainContextRows
@@ -1159,13 +1112,42 @@ const CardContextRing = memo(function CardContextRing({
               modelId={modelId}
               used={used}
             />
-          ) : null}
+          ) : (
+            <div className="flex items-center justify-between text-muted-foreground">
+              <span>{used === lastInput && used > 0 ? "Context" : "Estimated"}</span>
+              <span className="font-mono text-foreground">
+                {formatCardTokens(used)} / {formatCardTokens(max)}
+              </span>
+            </div>
+          )}
+          {reported > 0 && (
+            <div className="flex items-center justify-between text-muted-foreground">
+              <span>Session</span>
+              <span className="font-mono text-foreground">
+                {formatCardTokens(tokens.inputTokens)} in / {formatCardTokens(tokens.outputTokens)} out
+              </span>
+            </div>
+          )}
+          {tokens.cachedInputTokens > 0 && (
+            <div className="flex items-center justify-between text-muted-foreground">
+              <span>Cache hit</span>
+              <span className="font-mono text-foreground">{cacheRate}%</span>
+            </div>
+          )}
+          {cost != null && reported > 0 && (
+            <div className="flex items-center justify-between text-muted-foreground">
+              <span>Cost</span>
+              <span className="font-mono text-foreground">
+                ${cost.toFixed(cost < 0.01 ? 4 : cost < 1 ? 3 : 2)}
+              </span>
+            </div>
+          )}
         </ContextContentBody>
-        <ContextContentFooter>
-          <span className="text-[10px] italic text-muted-foreground">
+        <ContextContentFooter className="py-2">
+          <span className="text-[10px] text-muted-foreground">
             {proxyManaged
-              ? "Durable-memory session (MemoChain): the embedded handler owns context memory — it caps the prompt at a hot window, folds overflow into a verifiable capsule (fact sheet + verbatim recall), and never drops folded content silently. Local compaction and /compact are off."
-              : "Ring shows pressure on the conversation budget (model window minus system prompt + tool schemas); compaction starts at 40%."}
+              ? "Durable-memory session (MemoChain): folds overflow into capsule; /compact off."
+              : "Auto-compacts above 40% of conversation budget."}
           </span>
         </ContextContentFooter>
       </ContextContent>
@@ -1285,14 +1267,11 @@ const SessionApprovePill = memo(function SessionApprovePill({
           : "Allow mode: allow tool calls without asking (click to switch to Ask)"
       }
       className={cn(
-        // p-1 (2026-11-25): the tinted bar made the old p-0.5 hit area read
-        // as an unpadded colored square on hover; hover wash is hue-neutral
-        // (hover:bg-foreground/10) so it never fights the project tint.
-        "flex shrink-0 items-center justify-center rounded p-1 transition-colors hover:bg-foreground/10",
+        "flex shrink-0 items-center justify-center rounded p-1 transition-colors hover:bg-accent",
         mode === "off" ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400",
       )}
     >
-      <HugeiconsIcon icon={Shield01Icon} size={12} strokeWidth={2} />
+      <HugeiconsIcon icon={Shield01Icon} size={13} strokeWidth={2} />
     </button>
   );
 });
@@ -1532,6 +1511,10 @@ const GroupCardBody = memo(function GroupCardBody(props: GridCellProps & { group
   const [text, setText] = useState("");
   const textRef = useRef(text);
   textRef.current = text;
+  const groupTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  useLayoutEffect(() => {
+    resizeCardTextarea(groupTextareaRef.current, text);
+  }, [text]);
   const [sendError, setSendError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   // SYMMETRIC CHAT ZOOM (2026-11-20): the group transcript rides the SAME
@@ -1693,6 +1676,7 @@ const GroupCardBody = memo(function GroupCardBody(props: GridCellProps & { group
       <CardPastePills files={pasted} onRemove={removePasted} />
       <div className="flex shrink-0 items-center gap-1.5 border-t border-border/40 bg-card/40 px-3 py-1.5">
         <textarea
+          ref={groupTextareaRef}
           value={text}
           onChange={(e) => setText(e.target.value)}
           onPaste={onPaste}
@@ -1705,7 +1689,7 @@ const GroupCardBody = memo(function GroupCardBody(props: GridCellProps & { group
           rows={1}
           disabled={ended}
           placeholder={ended ? "Group ended" : sendError ? sendError : "Message group."}
-          className="max-h-[79px] min-h-[20px] flex-1 resize-none bg-transparent text-[11px] leading-snug text-foreground outline-none placeholder:text-muted-foreground/50"
+          className="h-[18px] max-h-[54px] flex-1 resize-none overflow-y-hidden bg-transparent p-0 text-[11px] leading-[18px] whitespace-pre-wrap break-words text-foreground outline-none placeholder:text-muted-foreground/50"
         />
         <button
           type="button"
@@ -1889,6 +1873,12 @@ const CellInput = memo(function CellInput({
   const [activeIndex, setActiveIndex] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const pickerOpen = trigger !== null;
+
+  // Keep textarea height synced to `text` on every change (user typing,
+  // deleting lines, send reset, draft load, voice dictation, session switch).
+  useLayoutEffect(() => {
+    resizeCardTextarea(textareaRef.current, text);
+  }, [text, sessionId]);
 
   useEffect(() => {
     setActiveIndex(0);
@@ -2263,21 +2253,15 @@ const CellInput = memo(function CellInput({
             </div>
           </div>
         ) : null}
+      {/* ALLOW LEFT (2026-11-26 ask): Ask/Allow shield sits on the LEFT of
+          the card input bar, matching the main AI input bar layout. */}
+      <SessionApprovePill sessionId={sessionId} />
       <textarea
         ref={textareaRef}
         value={text}
         onChange={(e) => {
           setText(e.target.value);
           requestAnimationFrame(updateTrigger);
-          // MULTI-LINE (2026-11-26 ask): Shift+Enter inserts newlines; grow
-          // the field with content up to 3 visible lines, then scroll
-          // inside. Without this the rows={1} textarea cropped every
-          // multi-line draft to one 20px row.
-          const el = e.target;
-          el.style.height = "auto";
-          const maxH = 63; // 3 lines x 11px x ~1.9 leading
-          el.style.height = `${Math.min(el.scrollHeight, maxH)}px`;
-          el.style.overflowY = el.scrollHeight > maxH ? "auto" : "hidden";
         }}
         onKeyDown={onKeyDown}
         onKeyUp={updateTrigger}
@@ -2291,7 +2275,7 @@ const CellInput = memo(function CellInput({
               ? "Steer the running agent."
               : "Send a message"
         }
-        className="max-h-[63px] min-h-[20px] flex-1 resize-none bg-transparent text-[11px] leading-snug whitespace-pre-wrap break-words text-foreground outline-none placeholder:text-muted-foreground/50"
+        className="h-[18px] max-h-[54px] flex-1 resize-none overflow-y-hidden bg-transparent p-0 text-[11px] leading-[18px] whitespace-pre-wrap break-words text-foreground outline-none placeholder:text-muted-foreground/50"
       />
       {busy ? (
         <button

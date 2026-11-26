@@ -398,11 +398,10 @@ export function AiInputBar() {
                 }}
               />
               {/* ALLOW LEFT (2026-11-26 ask): the Ask/Allow pill sits alone
-                  on the LEFT, then the stop-agent square, then the textarea;
-                  mic and + are on the RIGHT - the same arrangement as the
-                  Workspaces card inputs. In group mode the send button takes
-                  the Allow slot's place (the group Allow lives in the panel
-                  header). */}
+                  on the LEFT, then the textarea; stop-agent, mic, and + sit
+                  on the RIGHT - matching the Workspaces card input layout.
+                  In group mode the send button takes the Allow slot's place
+                  (the group Allow lives in the panel header). */}
               {c.groupMode ? (
                 <Button
                   type="button"
@@ -418,17 +417,6 @@ export function AiInputBar() {
               ) : (
                 <AutoApproveToggle />
               )}
-              {c.isBusy && !c.groupMode ? (
-                <button
-                  type="button"
-                  title="Stop agent"
-                  aria-label="Stop agent"
-                  onClick={c.stop}
-                  className="flex shrink-0 cursor-pointer items-center justify-center rounded p-1.5"
-                >
-                  <span className="size-2 rounded-[2px] bg-red-500 shadow-[0_0_0_2px] shadow-red-500/20 animate-pulse transition-transform hover:scale-125 hover:animate-none" />
-                </button>
-              ) : null}
 
               <textarea
                 ref={c.textareaRef}
@@ -632,6 +620,17 @@ export function AiInputBar() {
                     size={14}
                     strokeWidth={1.75}
                   />
+                </button>
+              ) : null}
+              {c.isBusy && !c.groupMode ? (
+                <button
+                  type="button"
+                  title="Stop agent"
+                  aria-label="Stop agent"
+                  onClick={c.stop}
+                  className="flex shrink-0 cursor-pointer items-center justify-center rounded p-1.5"
+                >
+                  <span className="size-2 rounded-[2px] bg-red-500 shadow-[0_0_0_2px] shadow-red-500/20 animate-pulse transition-transform hover:scale-125 hover:animate-none" />
                 </button>
               ) : null}
               {c.voice.supported ? (

@@ -72,6 +72,19 @@ const PROVIDER_ICON = {
   brave: AiBookIcon,
 } as const satisfies Record<ProviderId, typeof ChatGptIcon>;
 
+/** Non-chat providers (voice/search keys only) have no models and should not
+ *  appear in the chat model picker's provider filter bar. */
+const NON_CHAT_PROVIDERS: ReadonlySet<ProviderId> = new Set([
+  "assemblyai",
+  "brave",
+]);
+
+/** Compact chip labels for the horizontal provider filter bar. */
+const PROVIDER_SHORT_LABEL: Partial<Record<ProviderId, string>> = {
+  "openai-compatible": "Local",
+  zai: "Z.ai",
+};
+
 type Tab = "all" | "favorites" | "recent";
 
 const THINKING_CYCLE: ThinkingMode[] = ["off", "low", "medium", "high"];
@@ -192,6 +205,7 @@ function ModelDropdown() {
       : current.label;
   const [search, setSearch] = useState("");
   const [activeProvider, setActiveProvider] = useState<ProviderId | null>(null);
+  const [showUnconfigured, setShowUnconfigured] = useState(false);
   const [tab, setTab] = useState<Tab>("all");
   const inputRef = useRef<HTMLInputElement>(null);
   const currentProviderHasKey = providerNeedsKey(current.provider)
@@ -205,6 +219,7 @@ function ModelDropdown() {
     const configured: (typeof PROVIDERS)[number][] = [];
     const unconfigured: (typeof PROVIDERS)[number][] = [];
     for (const p of PROVIDERS) {
+      if (NON_CHAT_PROVIDERS.has(p.id)) continue;
       (hasKeyFor(p.id) ? configured : unconfigured).push(p);
     }
     return { configured, unconfigured };
@@ -236,7 +251,11 @@ function ModelDropdown() {
       );
     }
     return pool;
-  }, [activeProvider, favoriteIds, recentIds, search, tab]);
+  }, [activeProvider, favoriteIds, orModels, recentIds, search, tab]);
+
+  const visibleProviders = showUnconfigured
+    ? [...sortedProviders.configured, ...sortedProviders.unconfigured]
+    : sortedProviders.configured;
 
   return (
     <DropdownMenu>
@@ -292,11 +311,11 @@ function ModelDropdown() {
           }}
         />
 
-        {/* Search */}
-        <div className="flex items-center gap-2.5 border-b border-border/70 px-3 py-2.5">
+        {/* Search + inline view tabs (single compact header row) */}
+        <div className="flex items-center gap-2 border-b border-border/70 px-2.5 py-2">
           <HugeiconsIcon
             icon={Search01Icon}
-            size={16}
+            size={14}
             strokeWidth={1.75}
             className="shrink-0 text-muted-foreground/70"
           />
@@ -305,115 +324,119 @@ function ModelDropdown() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             onKeyDown={(e) => e.stopPropagation()}
-            placeholder="Search models, providers, capabilities…"
-            className="w-full bg-transparent text-xs outline-none placeholder:text-muted-foreground/60"
+            placeholder="Search models…"
+            className="min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground/60"
           />
-        </div>
-
-        {/* Tabs */}
-        <div className="flex items-center gap-0.5 border-b border-border/70 px-2 py-1.5">
-          <TabButton
-            label="All"
-            icon={AiBookIcon}
-            active={tab === "all"}
-            onClick={() => setTab("all")}
-          />
-          <TabButton
-            label="Favorites"
-            icon={FavouriteIcon}
-            active={tab === "favorites"}
-            onClick={() => setTab("favorites")}
-            count={favoriteIds.length || undefined}
-          />
-          <TabButton
-            label="Recent"
-            icon={Clock01Icon}
-            active={tab === "recent"}
-            onClick={() => setTab("recent")}
-            count={recentIds.length || undefined}
-          />
-        </div>
-
-        <div className="flex">
-          {/* Provider sidebar — configured first, unconfigured muted, no dividers. */}
-          <div className="flex w-11 flex-col gap-0.5 border-r border-border/70 bg-muted/20 py-1.5">
-            <ProviderPill
+          <div className="flex shrink-0 items-center gap-0.5 rounded-md bg-muted/40 p-0.5">
+            <TabButton
+              label="All"
               icon={AiBookIcon}
-              title="All providers"
-              active={activeProvider === null}
-              onClick={() => setActiveProvider(null)}
+              active={tab === "all"}
+              onClick={() => setTab("all")}
             />
-            {[...sortedProviders.configured, ...sortedProviders.unconfigured].map(
-              (p) => (
-                <ProviderPill
-                  key={p.id}
-                  icon={PROVIDER_ICON[p.id]}
-                  title={
-                    hasKeyFor(p.id)
-                      ? p.label
-                      : `${p.label} — not configured`
-                  }
-                  active={activeProvider === p.id}
-                  muted={!hasKeyFor(p.id)}
-                  onClick={() => setActiveProvider(p.id)}
-                />
-              ),
-            )}
+            <TabButton
+              label="Fav"
+              icon={FavouriteIcon}
+              active={tab === "favorites"}
+              onClick={() => setTab("favorites")}
+              count={favoriteIds.length || undefined}
+            />
+            <TabButton
+              label="Recent"
+              icon={Clock01Icon}
+              active={tab === "recent"}
+              onClick={() => setTab("recent")}
+            />
           </div>
+        </div>
 
-          {/* Models list */}
-          <div className="min-w-0 flex-1 overflow-y-auto py-1 max-h-[26rem]">
-            {activeProvider !== null ? (
-              <ProviderHeader providerId={activeProvider} />
-            ) : null}
-            {activeProvider !== null && !hasKeyFor(activeProvider) ? (
-              <ProviderConfigureCTA providerId={activeProvider} />
-            ) : null}
-            {filtered.length === 0 ? (
-              <div className="flex items-center justify-center px-4 py-10 text-xs text-muted-foreground/70">
-                {tab === "favorites"
-                  ? "No favorites yet — star a model to pin it here."
-                  : tab === "recent"
-                    ? "No recently-used models."
-                    : "No models match."}
-              </div>
-            ) : (
-              filtered.map((m) => (
-                <ModelRow
-                  key={m.id}
-                  model={m}
-                  selected={m.id === selected}
-                  hasKey={hasKeyFor(m.provider)}
-                  favorite={favoriteIds.includes(m.id)}
-                  showProviderIcon={activeProvider === null}
-                  showDescription={pickerWidth >= MODEL_PICKER_DESCRIPTION_MIN}
-                  thinkingMode={thinkingMode}
-                  modelThinkingModes={modelThinkingModes}
-                  compatThinkingMode={compatThinkingMode}
-                  onPick={() => {
-                    if (!hasKeyFor(m.provider)) {
-                      void openSettingsWindow("models");
-                      return;
-                    }
-                    setSelected(m.id as ModelId);
-                  }}
-                  onToggleFavorite={() => void toggleFavoriteModel(m.id)}
-                  onToggleThinking={(modelId) => {
-                    const next = cycleThinkingMode(
-                      modelId === "openai-compatible-custom"
-                        ? compatThinkingMode
-                        : (modelThinkingModes[modelId] ?? thinkingMode),
-                    );
-                    if (modelId === "openai-compatible-custom") {
-                      void setOpenaiCompatibleThinkingMode(next);
-                    } else {
-                      void setModelThinkingMode(modelId, next);
-                    }
-                  }}
-                />
-              ))
-            )}
-          </div>
+        {/* Compact horizontal provider chips — no vertical rail forcing height */}
+        <div className="flex flex-wrap items-center gap-1 border-b border-border/60 bg-muted/15 px-2.5 py-1.5">
+          <ProviderChip
+            label="All"
+            active={activeProvider === null}
+            onClick={() => setActiveProvider(null)}
+          />
+          {visibleProviders.map((p) => (
+            <ProviderChip
+              key={p.id}
+              icon={PROVIDER_ICON[p.id]}
+              label={PROVIDER_SHORT_LABEL[p.id] ?? p.label}
+              title={hasKeyFor(p.id) ? p.label : `${p.label} — not configured`}
+              active={activeProvider === p.id}
+              muted={!hasKeyFor(p.id)}
+              onClick={() =>
+                setActiveProvider((cur) => (cur === p.id ? null : p.id))
+              }
+            />
+          ))}
+          {sortedProviders.unconfigured.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => setShowUnconfigured((v) => !v)}
+              className="rounded-md px-1.5 py-0.5 text-[10.5px] text-muted-foreground/70 transition-colors hover:bg-accent/40 hover:text-foreground"
+              title={
+                showUnconfigured
+                  ? "Hide unconfigured providers"
+                  : "Show unconfigured providers"
+              }
+            >
+              {showUnconfigured
+                ? "Less"
+                : `+${sortedProviders.unconfigured.length}`}
+            </button>
+          ) : null}
+        </div>
+
+        {/* Models list — shrinks cleanly to short lists, caps at 20rem */}
+        <div className="min-w-0 overflow-y-auto py-1 max-h-[20rem]">
+          {activeProvider !== null && !hasKeyFor(activeProvider) ? (
+            <ProviderConfigureCTA providerId={activeProvider} />
+          ) : null}
+          {filtered.length === 0 ? (
+            <div className="flex items-center justify-center px-4 py-7 text-xs text-muted-foreground/70">
+              {tab === "favorites"
+                ? "No favorites yet — star a model to pin it here."
+                : tab === "recent"
+                  ? "No recently-used models."
+                  : "No models match."}
+            </div>
+          ) : (
+            filtered.map((m) => (
+              <ModelRow
+                key={m.id}
+                model={m}
+                selected={m.id === selected}
+                hasKey={hasKeyFor(m.provider)}
+                favorite={favoriteIds.includes(m.id)}
+                showProviderIcon={activeProvider === null}
+                showDescription={pickerWidth >= MODEL_PICKER_DESCRIPTION_MIN}
+                thinkingMode={thinkingMode}
+                modelThinkingModes={modelThinkingModes}
+                compatThinkingMode={compatThinkingMode}
+                onPick={() => {
+                  if (!hasKeyFor(m.provider)) {
+                    void openSettingsWindow("models");
+                    return;
+                  }
+                  setSelected(m.id as ModelId);
+                }}
+                onToggleFavorite={() => void toggleFavoriteModel(m.id)}
+                onToggleThinking={(modelId) => {
+                  const next = cycleThinkingMode(
+                    modelId === "openai-compatible-custom"
+                      ? compatThinkingMode
+                      : (modelThinkingModes[modelId] ?? thinkingMode),
+                  );
+                  if (modelId === "openai-compatible-custom") {
+                    void setOpenaiCompatibleThinkingMode(next);
+                  } else {
+                    void setModelThinkingMode(modelId, next);
+                  }
+                }}
+              />
+            ))
+          )}
         </div>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -438,16 +461,16 @@ function TabButton({
       type="button"
       onClick={onClick}
       className={cn(
-        "flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-colors",
+        "flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] transition-colors",
         active
-          ? "bg-accent text-foreground"
-          : "text-muted-foreground hover:bg-accent/40 hover:text-foreground",
+          ? "bg-background text-foreground shadow-2xs"
+          : "text-muted-foreground hover:text-foreground",
       )}
     >
-      <HugeiconsIcon icon={icon} size={12} strokeWidth={1.75} />
-      {label}
+      <HugeiconsIcon icon={icon} size={11} strokeWidth={1.75} />
+      <span>{label}</span>
       {count != null ? (
-        <span className="rounded-full bg-muted/60 px-1.5 text-[9.5px] tabular-nums text-muted-foreground">
+        <span className="text-[9.5px] tabular-nums text-muted-foreground/80">
           {count}
         </span>
       ) : null}
@@ -455,15 +478,17 @@ function TabButton({
   );
 }
 
-function ProviderPill({
+function ProviderChip({
   icon,
+  label,
   title,
   active,
   muted,
   onClick,
 }: {
-  icon: typeof AiBookIcon;
-  title: string;
+  icon?: typeof AiBookIcon;
+  label: string;
+  title?: string;
   active: boolean;
   muted?: boolean;
   onClick: () => void;
@@ -471,34 +496,20 @@ function ProviderPill({
   return (
     <button
       type="button"
-      title={title}
+      title={title ?? label}
       onClick={onClick}
       className={cn(
-        "relative mx-auto flex size-8 items-center justify-center rounded-md transition-colors",
+        "flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] transition-colors",
         active
-          ? "bg-accent text-foreground after:absolute after:right-0 after:top-1.5 after:bottom-1.5 after:w-[2px] after:rounded-full after:bg-primary after:content-['']"
+          ? "bg-accent font-medium text-foreground"
           : muted
             ? "text-muted-foreground/50 hover:bg-accent/40 hover:text-foreground"
             : "text-muted-foreground hover:bg-accent/40 hover:text-foreground",
       )}
     >
-      <HugeiconsIcon icon={icon} size={16} strokeWidth={1.5} />
+      {icon ? <HugeiconsIcon icon={icon} size={11} strokeWidth={1.6} /> : null}
+      <span>{label}</span>
     </button>
-  );
-}
-
-function ProviderHeader({ providerId }: { providerId: ProviderId }) {
-  const p = PROVIDERS.find((x) => x.id === providerId);
-  if (!p) return null;
-  return (
-    <div className="flex items-center gap-1.5 px-3 pt-1 pb-1.5 text-[11px] font-medium tracking-tight text-muted-foreground/90">
-      <HugeiconsIcon
-        icon={PROVIDER_ICON[p.id]}
-        size={13}
-        strokeWidth={1.75}
-      />
-      <span>{p.label}</span>
-    </div>
   );
 }
 

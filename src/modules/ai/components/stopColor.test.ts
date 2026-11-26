@@ -28,10 +28,18 @@ describe("permission color language and stop square (source pins)", () => {
     expect(toggle).not.toContain("bg-muted-foreground/50");
   });
 
-  it("the Stop control is a pulsing red square in the input bar and Workspaces cards", () => {
+  it("the Stop control is a pulsing red square to the left of the mic in both input bars", () => {
     expect(bar).toContain("size-2 rounded-[2px] bg-red-500");
     expect(bar).toContain("animate-pulse");
     expect(grid).toContain("size-2 rounded-[2px] bg-red-500");
+    // Position: in AiInputBar the stop button sits AFTER the textarea and
+    // immediately BEFORE the mic button (right side, left of mic).
+    const textareaIdx = bar.indexOf("<textarea");
+    const stopIdx = bar.indexOf('title="Stop agent"');
+    const micIdx = bar.indexOf("icon={Mic01Icon}");
+    expect(textareaIdx).toBeGreaterThan(-1);
+    expect(stopIdx).toBeGreaterThan(textareaIdx);
+    expect(stopIdx).toBeLessThan(micIdx);
     // TodoStrip no longer paints a stop control (single control per window).
     expect(strip).not.toContain("StopSquare");
     // The busy-only strip is gone: TodoStrip renders ONLY with todos.

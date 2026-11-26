@@ -43,4 +43,12 @@ describe("resizable model picker", () => {
     // rides the OpenAI-compatible endpoint. It must not reappear.
     expect(src).not.toContain('model.id === "lmstudio-local"');
   });
+
+  it("excludes non-chat providers and uses a compact horizontal provider chip bar", () => {
+    expect(src).toContain("NON_CHAT_PROVIDERS");
+    expect(src).toContain('"assemblyai"');
+    expect(src).toContain('"brave"');
+    expect(src).toContain("function ProviderChip");
+    expect(src).not.toContain("function ProviderPill");
+  });
 });

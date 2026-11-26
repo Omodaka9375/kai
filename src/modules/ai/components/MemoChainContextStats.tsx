@@ -59,10 +59,9 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
-/** The fold/memory rows replacing the Window / Model window / Reserved block
- *  on a durable-memory session. `used` is the caller's context estimate -
- *  shown against the handler's hot-window budget (the point at which the
- *  next fold fires), not the compaction thresholds. */
+/** Compact fold/memory rows for a durable-memory (MemoChain) session.
+ *  Replaces the regular window rows in both AiMiniWindow and Workspaces
+ *  CardContextRing so the popover stays scannable at a glance. */
 export function MemoChainContextRows({
   sessionId,
   modelId,
@@ -86,30 +85,21 @@ export function MemoChainContextRows({
           {fmtTokens(used)} / {fmtTokens(hot)}
         </span>
       </div>
-      <Row label="Fold steps">
-        {exists ? step : "-"}
+      <Row label="Folded">
+        {exists ? `${folded} msgs (${step} ${step === 1 ? "step" : "steps"})` : "none yet"}
       </Row>
-      <Row label="Folded messages">
-        {exists ? folded : "-"}
-      </Row>
-      <Row label="Memory state">
-        {!exists
-          ? "no capsule yet"
-          : tampered
-            ? "INTEGRITY CHECK FAILED"
-            : "verified"}
-      </Row>
-      {exists && info?.stateDigest ? (
-        <div
-          className="flex items-center justify-between gap-2 text-muted-foreground"
-          title={info.stateDigest}
+      <Row label="Capsule">
+        <span
+          title={exists && info?.stateDigest ? info.stateDigest : undefined}
+          className={tampered ? "text-destructive" : undefined}
         >
-          <span>State digest</span>
-          <span className="font-mono text-foreground">
-            {info.stateDigest.slice(0, 10)}
-          </span>
-        </div>
-      ) : null}
+          {!exists
+            ? "not folded"
+            : tampered
+              ? "integrity failed"
+              : "verified"}
+        </span>
+      </Row>
     </>
   );
 }
