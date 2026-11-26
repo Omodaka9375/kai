@@ -780,6 +780,14 @@ export async function memoChainFactSheet(
     // User asks: first line of each user message, clipped.
     if (m.role === "user") {
       const t = messageText(m).trim();
+      // MEMORY-OF-MEMORY GUARD (2026-11-27, live data from the 3.5.6 dev
+      // build): the recalled-turns block is injected as a SYNTHETIC user
+      // message right before the latest user turn (injectRecalledBeforeLastUser).
+      // Once it rides the history long enough to be folded, its header text
+      // leaked into "Earlier asks" and the fact sheet summarized its own
+      // memory injections (found verbatim in meta.json summaries). Skip the
+      // handler's own injections: they are derived data, not user asks.
+      if (t.startsWith("[Durable memory")) continue;
       if (t) {
         const first = t.split("\n")[0].trim();
         if (first) asks.push(first.length > 100 ? `${first.slice(0, 100)}...` : first);

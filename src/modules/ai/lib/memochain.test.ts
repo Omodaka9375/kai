@@ -401,6 +401,37 @@ describe("memoChainFactSheet (honesty pass: locally-derived summary, 2026-11-26)
     expect(written).toContain("BRAND_NEW_ASK_MARKER");
     expect(written).not.toContain("OLD_SENTINEL_");
   });
+
+  it("skips its own injected memory blocks (memory-of-memory guard, 2026-11-27)", async () => {
+    // LIVE DEFECT (3.5.6 dev build, session s-mwsdl9r0-2oqy2q): the recalled-
+    // turns block is injected as a synthetic USER message before the latest
+    // user turn; once folded, its header text landed verbatim in meta.json's
+    // summary ("Earlier asks: [Durable memory - recalled turns]"). The fact
+    // sheet must not summarize its own injections.
+    const { native } = await import("./native");
+    vi.mocked(native.memochainSetSummary).mockClear();
+    vi.mocked(native.memochainSessionInfo).mockResolvedValue({
+      exists: false,
+      step: 0,
+      stateDigest: "",
+      accumulator: "",
+      summary: "",
+      foldedHashes: [],
+      weightsDigest: null,
+      tampered: false,
+    });
+    vi.mocked(native.memochainSetSummary).mockResolvedValue(true);
+    const { memoChainFactSheet } = await import("./memochain");
+    const syntheticRecall =
+      "[Durable memory - recalled turns]\nRelevant verbatim turns recalled for the current question:\n[user] (score 0.91) use port 8080";
+    await memoChainFactSheet("s-guard", [
+      user(syntheticRecall),
+      user("what port is the server on?"),
+    ]);
+    const written = vi.mocked(native.memochainSetSummary).mock.calls[0]?.[1] ?? "";
+    expect(written).toContain("what port is the server on?");
+    expect(written).not.toContain("[Durable memory");
+  });
 });
 
 describe("regression guards (2026-11-26 audit fixes)", () => {
