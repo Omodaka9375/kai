@@ -200,10 +200,11 @@ describe("Workspaces grid behavior (source pins)", () => {
     expect(grid).toContain("icon={Shield01Icon}");
   });
 
-  it("the card session picker owns session creation (New session at the dropdown bottom)", () => {
-    // 2026-11-25 declutter: the picker lists the project's sessions and
-    // ends with a separated "New session" item calling the same
-    // project-scoped newSessionForProject - never the foreground newChat.
+  it("the card session picker owns session creation (New session leads the dropdown, 2026-11-27 ask)", () => {
+    // The picker lists a separated "New session" item FIRST (same position
+    // the mini-window SessionPicker uses) calling the same project-scoped
+    // newSessionForProject - never the foreground newChat - then the
+    // project's sessions.
     const pickerStart = grid.indexOf("const CardSessionPicker");
     const pickerEnd = grid.indexOf("SessionApprovePill = memo");
     expect(pickerStart).toBeGreaterThan(-1);
@@ -211,6 +212,13 @@ describe("Workspaces grid behavior (source pins)", () => {
     expect(picker).toContain("<DropdownMenuSeparator");
     expect(picker).toContain("newSessionForProject(projectId)");
     expect(picker).toContain("<span>New session</span>");
+    // New session sits ABOVE the separator, the session list below it.
+    const newIdx = picker.indexOf('<span>New session</span>');
+    const sepIdx = picker.indexOf("<DropdownMenuSeparator");
+    const listIdx = picker.indexOf("items.map((s)");
+    expect(newIdx).toBeGreaterThan(-1);
+    expect(sepIdx).toBeGreaterThan(newIdx);
+    expect(listIdx).toBeGreaterThan(sepIdx);
     // The picker still switches via the project-scoped setter.
     expect(picker).toContain("switchSessionForProject(projectId, id)");
   });

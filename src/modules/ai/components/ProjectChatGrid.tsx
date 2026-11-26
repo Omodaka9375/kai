@@ -1299,6 +1299,19 @@ const CardSessionPicker = memo(function CardSessionPicker({
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="max-h-64 min-w-48 overflow-y-auto p-1">
+        {/* NEW SESSION ON TOP (2026-11-27 ask): the item leads the dropdown -
+            same position the mini-window SessionPicker uses - so creating a
+            session never means scrolling past the whole session list. */}
+        <DropdownMenuItem
+          onSelect={() => {
+            newSessionForProject(projectId);
+          }}
+          className="flex items-center gap-1.5 rounded px-2 py-1 text-[11px]"
+        >
+          <HugeiconsIcon icon={Add01Icon} size={12} strokeWidth={2} />
+          <span>New session</span>
+        </DropdownMenuItem>
+        <DropdownMenuSeparator className="my-1" />
         {items.map((s) => (
           <DropdownMenuItem
             key={s.id}
@@ -1314,16 +1327,6 @@ const CardSessionPicker = memo(function CardSessionPicker({
         {items.length === 0 ? (
           <div className="px-2 py-1 text-[10px] text-muted-foreground">No sessions</div>
         ) : null}
-        <DropdownMenuSeparator className="my-1" />
-        <DropdownMenuItem
-          onSelect={() => {
-            newSessionForProject(projectId);
-          }}
-          className="flex items-center gap-1.5 rounded px-2 py-1 text-[11px]"
-        >
-          <HugeiconsIcon icon={Add01Icon} size={12} strokeWidth={2} />
-          <span>New session</span>
-        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
