@@ -194,6 +194,68 @@ export type ReflexSetupEvent = {
   message: string | null;
 };
 
+// ── MemoChain (embedded verifiable memory handler, 2026-11-26) ──────────────
+
+export type MemoChainStatus = {
+  available: boolean;
+  error: string | null;
+  weightsDigest: string | null;
+  storeRoot: string | null;
+  sessionCount: number;
+};
+
+export type MemoChainSessionInfo = {
+  exists: boolean;
+  step: number;
+  stateDigest: string;
+  accumulator: string;
+  summary: string;
+  foldedHashes: string[];
+  weightsDigest: string | null;
+  tampered: boolean;
+};
+
+export type MemoChainFoldEntry = {
+  msgHash: string;
+  role: string;
+  text: string;
+};
+
+export type MemoChainFoldResult = {
+  step: number;
+  stateDigest: string;
+  weightsDigest: string;
+  receiptRows: number;
+  chunkCount: number;
+  docsFolded: number;
+};
+
+export type MemoChainRecalledChunk = {
+  score: number;
+  step: number;
+  role: string;
+  text: string;
+};
+
+export type MemoChainRecallResult = {
+  summary: string;
+  step: number;
+  stateDigest: string;
+  chunks: MemoChainRecalledChunk[];
+};
+
+export type MemoChainVerifyResult = {
+  ok: boolean;
+  error: string | null;
+  step: number;
+  receiptRows: number;
+  stateMatchesMeta: boolean;
+  headMatchesMeta: boolean;
+  receiptChainOk: boolean;
+  receiptHeadMatches: boolean;
+  capsuleBytes: number;
+};
+
 export type ShadowInfo = {
   projectRoot: string;
   shadowRoot: string;
@@ -479,6 +541,25 @@ export function createNative(getEnv: () => WorkspaceEnv) {
       function_calls?: Array<{ name: string; arguments: Record<string, unknown> }>;
       confidence?: number | null;
     }>("reflex_classify", { prompt }),
+  // ── MemoChain (embedded verifiable memory handler, 2026-11-26) ──
+  memochainStatus: () => invoke<MemoChainStatus>("memochain_status"),
+  memochainSessionInfo: (sessionId: string) =>
+    invoke<MemoChainSessionInfo>("memochain_session_info", { sessionId }),
+  memochainFold: (sessionId: string, entries: MemoChainFoldEntry[]) =>
+    invoke<MemoChainFoldResult>("memochain_fold", { sessionId, entries }),
+  memochainSetSummary: (sessionId: string, summary: string) =>
+    invoke<boolean>("memochain_set_summary", { sessionId, summary }),
+  memochainRecall: (sessionId: string, queryText: string, topK: number) =>
+    invoke<MemoChainRecallResult>("memochain_recall", {
+      sessionId,
+      queryText,
+      topK,
+    }),
+  memochainVerify: (sessionId: string) =>
+    invoke<MemoChainVerifyResult>("memochain_verify", { sessionId }),
+  memochainDelete: (sessionId: string) =>
+    invoke<boolean>("memochain_delete", { sessionId }),
+  memochainClearAll: () => invoke<number>("memochain_clear_all"),
   shellBgSpawn: (
     command: string,
     cwd?: string | null,

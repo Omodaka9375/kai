@@ -963,8 +963,8 @@ const CardContextRing = memo(function CardContextRing({
   const used = lastInput > 0 ? Math.max(lastInput, estimated) : estimated;
   const reported = tokens.inputTokens + tokens.outputTokens;
   const max = effectiveContextLimit(getModelContextLimit(modelId));
-  // PROXY-MANAGED MEMORY (MemoChain): footer swaps its explanation when this
-  // card's session routes through the proxy endpoint (see AiMiniWindow twin).
+  // MEMOCHAIN-MANAGED MEMORY: footer swaps its explanation when this
+  // card's session model is toggled for durable memory (see AiMiniWindow twin).
   const proxyManaged = isProxyManagedModel(modelId);
   const usedPercent = Math.min(1, Math.max(0, max > 0 ? used / max : 0));
   const circumference = 2 * Math.PI * 10;
@@ -1102,7 +1102,7 @@ const CardContextRing = memo(function CardContextRing({
         <ContextContentFooter>
           <span className="text-[10px] italic text-muted-foreground">
             {proxyManaged
-              ? "Proxy-managed session (MemoChain): the proxy owns context memory — it caps the prompt at a hot window + compact memory and verifies state with a receipt chain. Local compaction and /compact are off."
+              ? "Durable-memory session (MemoChain): the embedded handler owns context memory — it caps the prompt at a hot window + compact memory and verifies state with a receipt chain. Local compaction and /compact are off."
               : "Ring shows pressure on the conversation budget (model window minus system prompt + tool schemas); compaction starts at 40%."}
           </span>
         </ContextContentFooter>
@@ -1360,16 +1360,13 @@ const CardModelPill = memo(function CardModelPill({
   usePreferencesStore((s) => s.defaultModelId);
   const favoriteIds = usePreferencesStore((s) => s.favoriteModelIds);
   const compatModelId = usePreferencesStore((s) => s.openaiCompatibleModelId);
-  const proxyModelId = usePreferencesStore((s) => s.proxyModelId);
 
   const selected = getProjectEffectiveModelId(projectId, sessionId);
   const current = getModel(selected);
   const fullLabel =
     current.id === "openai-compatible-custom" && compatModelId.trim()
       ? compatModelId.trim()
-      : current.id === "proxy-custom" && proxyModelId.trim()
-        ? proxyModelId.trim()
-        : current.label;
+      : current.label;
   const shortLabel = shortenModelLabel(fullLabel);
 
   const favoriteModels = useMemo(
@@ -1417,9 +1414,7 @@ const CardModelPill = memo(function CardModelPill({
             const label =
               m.id === "openai-compatible-custom" && compatModelId.trim()
                 ? compatModelId.trim()
-                : m.id === "proxy-custom" && proxyModelId.trim()
-                  ? proxyModelId.trim()
-                  : m.label;
+                : m.label;
             return (
               <DropdownMenuItem
                 key={m.id}

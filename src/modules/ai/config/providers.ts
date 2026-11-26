@@ -11,7 +11,6 @@ export type ProviderId =
   | "mistral"
   | "openrouter"
   | "openai-compatible"
-  | "proxy"
   | "zai"
   | "assemblyai"
   | "brave";
@@ -99,21 +98,6 @@ export const PROVIDERS: readonly ProviderInfo[] = [
     keyOptional: true,
   },
   {
-    // PROXY endpoint (MemoChain 2026-11-25): an OpenAI-compatible memory
-    // proxy that fronts a REAL backend (OpenRouter / Anthropic / OpenAI / …).
-    // Distinct from openai-compatible (the local/LAN endpoint): this slot is
-    // for a proxy that injects durable session memory via x-session-id, and
-    // the model NAME is whatever the proxy serves for the chosen backend
-    // (e.g. an OpenRouter model id). Key OPTIONAL: BYOK — the client's key
-    // passes through Authorization as-is when the proxy requires it.
-    id: "proxy",
-    label: "Proxy",
-    keyringAccount: "proxy-api-key",
-    keyPrefix: null,
-    consoleUrl: "https://github.com/Omodaka9375/memochain",
-    keyOptional: true,
-  },
-  {
     id: "zai",
     label: "Z.ai (GLM)",
     keyringAccount: "zai-api-key",
@@ -158,7 +142,6 @@ export function getProvider(id: ProviderId): ProviderInfo {
 /** Providers that do not require an API key (local servers, key-optional). */
 export const KEYLESS_PROVIDERS: readonly ProviderId[] = [
   "openai-compatible",
-  "proxy",
 ] as const;
 
 export function providerNeedsKey(id: ProviderId): boolean {

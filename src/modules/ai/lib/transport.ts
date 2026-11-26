@@ -394,10 +394,6 @@ export function createContextAwareTransport(deps: Deps) {
       mcpSummary: mcpSummary.length > 0 ? mcpSummary : undefined,
       fenceState: getSessionFenceState(sessionId),
       sessionId: sessionId !== "unknown" ? sessionId : null,
-      proxy: (() => {
-        const p = usePreferencesStore.getState();
-        return { baseURL: p.proxyBaseURL, modelId: p.proxyModelId };
-      })(),
     });
     // When summarization trimmed the history, pass the trimmed set as
     // originalMessages so the Chat instance adopts it. Otherwise the Chat

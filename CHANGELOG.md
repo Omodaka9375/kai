@@ -4,9 +4,16 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [3.5.4]
+
+- MemoChain durable memory is now EMBEDDED (2026-11-26): the Proxy endpoint model slot (3.5.3) is REMOVED and replaced by a per-model "Durable memory (MemoChain)" toggle in Settings -> Models. No external proxy process, no base URL/model id configuration - the memory fold runs in-process against weights bundled with the app (3.6 MB distilled student model, SHA-256-verified on load).
+- MemoChain handler: a toggled session folds its overflowing history into a verifiable memory capsule under app-data (`memochain/<session>/` - capsule.bin 22,606 bytes, meta.json, receipts.jsonl, chunks.bin; byte-compatible with the standalone MemoChain tooling). Overflowing prefixes fold into the capsule pre-run AND mid-run; the model receives a [Durable memory] system block with a rolling summary plus top-K recalled verbatim turns (fenced like tool output). Fold failures fail-open (the run proceeds with the full window).
+- MemoChain gates: toggled sessions keep the full history verbatim - local compaction, automatic summarization, and /compact stand down (both context-ring hover cards explain this when active). Rust commands: memochain_status / session_info / fold / set_summary / recall / verify / delete / clear_all.
+- x-session-id: still sent on every openai-compatible request for keyless local endpoints that want it (the header contract is unchanged); chat sessions keep the same stable id across restarts.
+
 ## [3.5.3]
 
-- Proxy endpoint: added a first-class Proxy endpoint (MemoChain) model slot in Settings -> Models, separate from the local/LAN OpenAI-compatible slot, with Base URL test/save, a searchable backend Model ID picker (plus free-text and live Fetch), and an optional BYOK API key.
+- Proxy endpoint: added a first-class Proxy endpoint (MemoChain) model slot in Settings -> Models, separate from the local/LAN OpenAI-compatible slot, with Base URL test/save, a searchable backend Model ID picker (plus free-text and live Fetch), and an optional BYOK API key. (REMOVED in 3.5.4 - superseded by the embedded per-model MemoChain toggle.)
 - Proxy sessions: every chat, group persona, and assistant request sends a stable per-session `x-session-id` header across restarts and model switches so memory proxies key durable capsules per session.
 - Proxy memory: sessions routed through the Proxy endpoint disable KAI's local compaction, automatic summarization, and `/compact` so the proxy owns context memory; both context-ring hover cards explain this when active.
 - UI: replaced the green/amber Stop Agent dot in the AI window and the X stop button in Workspaces chat cards with a pulsing red square.

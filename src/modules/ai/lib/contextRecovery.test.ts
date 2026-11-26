@@ -28,8 +28,9 @@ describe("mid-run re-elision (agent.ts prepareStep)", () => {
   const agent = read("./agent.ts");
 
   it("prepareStep re-runs the compaction on the step messages", () => {
+    // prepareStep is async since the MemoChain mid-run fold (2026-11-26).
     expect(agent).toMatch(
-      /prepareStep: \(\{ messages: stepMessages \}\) => \{[\s\S]*?compactModelMessagesDetailed\(messages, contextLimit\)/,
+      /prepareStep: async \(\{ messages: stepMessages \}\) => \{[\s\S]*?compactModelMessagesDetailed\(messages, contextLimit\)/,
     );
   });
 

@@ -515,10 +515,11 @@ function ContextIndicator({ messages }: { messages: UIMessage[] }) {
   const tokens = useChatStore((s) => s.agentMeta.tokens);
   const lastInput = useChatStore((s) => s.agentMeta.lastInputTokens);
   const lastCached = useChatStore((s) => s.agentMeta.lastCachedTokens);
-  // PROXY-MANAGED MEMORY (MemoChain): when this session routes through the
-  // proxy endpoint, the footer swaps its explanation — the proxy owns context
-  // memory (hot window + compact memory + receipt chain), KAI's own
-  // summarization/compaction is off, and the ring is informational only.
+  // MEMOCHAIN-MANAGED MEMORY: when this session's model is toggled for
+  // durable memory (MemoChain), the footer swaps its explanation — the
+  // embedded handler owns context memory (hot window + compact memory +
+  // receipt chain), KAI's own summarization/compaction is off, and the
+  // ring is informational only.
   const proxyManaged = isProxyManagedModel(modelId);
   // estimateTokens is WeakMap-cached per historical message, and this effect
   // only recomputes immediately when the message COUNT changes (new turn /
@@ -638,7 +639,7 @@ function ContextIndicator({ messages }: { messages: UIMessage[] }) {
         <ContextContentFooter>
           <span className="text-[10px] italic text-muted-foreground">
             {proxyManaged
-              ? "Proxy-managed session (MemoChain): the proxy owns context memory — it caps the prompt at a hot window + compact memory and verifies state with a receipt chain. Local compaction and /compact are off."
+              ? "Durable-memory session (MemoChain): the embedded handler owns context memory — it caps the prompt at a hot window + compact memory and verifies state with a receipt chain. Local compaction and /compact are off."
               : "Ring shows pressure on the conversation budget (model window minus system prompt + tool schemas); compaction starts at 40%."}
           </span>
         </ContextContentFooter>

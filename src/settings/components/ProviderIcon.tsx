@@ -9,7 +9,6 @@ import CpuIcon from "@hugeicons/core-free-icons/CpuIcon";
 import DeepseekIcon from "@hugeicons/core-free-icons/DeepseekIcon";
 import GlobeIcon from "@hugeicons/core-free-icons/GlobeIcon";
 import Hexagon01Icon from "@hugeicons/core-free-icons/Hexagon01Icon";
-import CloudServerIcon from "@hugeicons/core-free-icons/CloudServerIcon";
 import PlugIcon from "@hugeicons/core-free-icons/Plug01Icon";
 import Search01Icon from "@hugeicons/core-free-icons/Search01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -25,7 +24,6 @@ const ICON_BY_PROVIDER = {
   mistral: Hexagon01Icon,
   openrouter: GlobeIcon,
   "openai-compatible": PlugIcon,
-  proxy: CloudServerIcon,
   zai: CpuIcon,
   // Voice provider (STT/TTS) - a voice glyph distinguishes it from the
   // chat-model providers in the key grid.

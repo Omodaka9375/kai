@@ -477,22 +477,17 @@ export function resolveAssistantEndpoint(
   global: {
     openaiCompatibleModelId?: string;
     openaiCompatibleBaseURL: string;
-    proxyModelId?: string;
-    proxyBaseURL?: string;
   },
-): { resolvedModelId: string; openaiCompatibleBaseURL: string; proxyBaseURL?: string } {
+): { resolvedModelId: string; openaiCompatibleBaseURL: string } {
   const ownModel = prefs.customModelId?.trim() || null;
   const ownUrl = prefs.customBaseUrl?.trim() || null;
-  const out: { resolvedModelId: string; openaiCompatibleBaseURL: string; proxyBaseURL?: string } = {
+  const out: { resolvedModelId: string; openaiCompatibleBaseURL: string } = {
     resolvedModelId: modelId,
     openaiCompatibleBaseURL: global.openaiCompatibleBaseURL,
   };
   if (modelId === "openai-compatible-custom") {
     out.resolvedModelId = ownModel || global.openaiCompatibleModelId?.trim() || modelId;
     if (ownUrl) out.openaiCompatibleBaseURL = ownUrl;
-  } else if (modelId === "proxy-custom") {
-    out.resolvedModelId = global.proxyModelId?.trim() || modelId;
-    out.proxyBaseURL = global.proxyBaseURL;
   }
   return out;
 }
@@ -543,10 +538,8 @@ export async function runAssistantTurn(
   const ep = resolveAssistantEndpoint(m.id, prefs, usePreferencesStore.getState());
   const model = await buildLanguageModel(m.provider, keys, ep.resolvedModelId, {
     openaiCompatibleBaseURL: ep.openaiCompatibleBaseURL,
-    proxyBaseURL: m.provider === "proxy" ? ep.proxyBaseURL : undefined,
-    // x-session-id (MemoChain 2026-11-25): the assistant's (or group's)
-    // session id — stable across turns so a memory proxy keys one capsule
-    // per session, not per request.
+    // x-session-id: the assistant's (or group's) session id — stable across
+    // turns so a memory-keyed endpoint keys one capsule per session.
     sessionId,
   });
   // OVERRIDE SELF-HEAL (2026-11-22 "The model `Kai` does not exist."): the
@@ -564,7 +557,6 @@ export async function runAssistantTurn(
     const gep = resolveAssistantEndpoint(m.id, {}, g);
     return buildLanguageModel(m.provider, keys, gep.resolvedModelId, {
       openaiCompatibleBaseURL: g.openaiCompatibleBaseURL,
-      proxyBaseURL: m.provider === "proxy" ? gep.proxyBaseURL : undefined,
       sessionId,
     });
   };

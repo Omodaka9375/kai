@@ -68,9 +68,6 @@ export function SearchableModelPicker({ value, onChange, disabled }: Props) {
   const openaiCompatibleModelId = usePreferencesStore(
     (s) => s.openaiCompatibleModelId,
   );
-  // Proxy endpoint (MemoChain): available only when fully configured.
-  const proxyBaseURL = usePreferencesStore((s) => s.proxyBaseURL);
-  const proxyModelId = usePreferencesStore((s) => s.proxyModelId);
   const orModels = useOpenRouterModelsStore((s) => s.models);
   const orFetch = useOpenRouterModelsStore((s) => s.fetch);
 
@@ -101,8 +98,6 @@ export function SearchableModelPicker({ value, onChange, disabled }: Props) {
   const isAvailable = (id: string, provider: ProviderId): boolean => {
     if (id === "openai-compatible-custom")
       return !!openaiCompatibleModelId.trim();
-    if (id === "proxy-custom")
-      return !!proxyBaseURL.trim() && !!proxyModelId.trim();
     if (!providerNeedsKey(provider)) return true;
     // Keys still loading → don't flash everything disabled.
     return keys == null || !!keys[provider];

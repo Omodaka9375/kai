@@ -639,16 +639,6 @@ export const MODELS = [
     capabilities: { intelligence: 3, speed: 3, cost: 3 },
   },
 
-  // ── Proxy endpoint (MemoChain-class memory proxy) ─────────────────────────
-  {
-    id: "proxy-custom",
-    provider: "proxy",
-    label: "Proxy endpoint",
-    hint: "Configurable",
-    description: "A memory proxy (MemoChain) fronting any OpenAI-compatible backend — durable, verifiable session memory. Configure in Settings → Models.",
-    capabilities: { intelligence: 3, speed: 3, cost: 3 },
-  },
-
   // ── Z.ai (GLM) ─────────────────────────────────────────────────────────────
   {
     id: "glm-5.3",
@@ -819,7 +809,6 @@ export const MODEL_CONTEXT_LIMITS: Record<string, number> = {
   "glm-5.1": 205_000,
   "glm-4.7": 128_000,
   "openai-compatible-custom": 128_000,
-  "proxy-custom": 128_000,
   "mistral-large-latest": 131_072,
   "mistral-medium-latest": 32_768,
   "codestral-latest": 256_000,
@@ -841,14 +830,35 @@ export function setCustomContextLimit(modelId: string, size: number): void {
   else delete customContextOverrides[modelId];
 }
 
-/** True when the model routes through the Proxy endpoint (MemoChain-class
- *  memory proxy). The PROXY owns context memory management for these chats:
- *  it caps the prompt at a hot window + compact memory and verifies state
- *  with a receipt chain — so KAI's own context machinery (summarization,
- *  history compaction, /compact) must stand down, or it would fight the
- *  proxy's memory and mangle the very state the proxy is tracking. */
+/** Per-model MemoChain memory toggles (2026-11-26), pushed from the
+ *  preferences store by preferences.ts syncMemoChainModels. Replaces the
+ *  removed Proxy endpoint slot: instead of routing a session through the
+ *  external MemoChain proxy endpoint, ANY model id can now be toggled to
+ *  route its sessions through the embedded MemoChain memory handler
+ *  (src/modules/ai/lib/memochain.ts + src-tauri/src/modules/memochain/).
+ *  A toggled session sends its FULL history verbatim — the handler owns
+ *  prompt capping + memory compression (hot window + 22,606-byte verifiable
+ *  capsule), so KAI's own context machinery (summarization, history
+ *  compaction, /compact) must stand down or it would fight the handler and
+ *  mangle the very state the capsule's receipt chain is tracking. */
+const memoChainModels = new Set<string>();
+
+/** Push the persisted per-model MemoChain toggle list into the config. */
+export function setMemoChainModels(modelIds: readonly string[]): void {
+  memoChainModels.clear();
+  for (const id of modelIds) {
+    if (typeof id === "string" && id.trim()) memoChainModels.add(id.trim());
+  }
+}
+
+/** True when the model routes through the MemoChain memory handler (per-model
+ *  toggle, Settings → Models). The HANDLER owns context memory management for
+ *  these chats: it caps the prompt at a hot window + compact memory and
+ *  verifies state with a receipt chain — so KAI's local context machinery
+ *  (summarization, history compaction, /compact) must stand down. */
 export function isProxyManagedModel(modelId: string | null | undefined): boolean {
-  return modelId === "proxy-custom";
+  if (!modelId) return false;
+  return memoChainModels.has(modelId);
 }
 
 export function getModelContextLimit(modelId: string | undefined): number {

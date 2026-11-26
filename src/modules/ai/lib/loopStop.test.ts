@@ -82,10 +82,11 @@ describe("loop-detector false-positive gates (agent.ts)", () => {
     // never persisted; cleared on read so it can't repeat every step.
     const prepIdx = src.indexOf("prepareStep:");
     expect(prepIdx).toBeGreaterThan(-1);
-    // 2400-char window: the user-message image handoff splice (2026-11-16)
-    // sits between prepareStep and the nudge consumer — it must run FIRST so
-    // a nudge return can't drop a queued screenshot. The window covers both.
-    const block = src.slice(prepIdx, prepIdx + 2400);
+    // 3000-char window: the user-message image handoff splice (2026-11-16)
+    // and the MemoChain mid-run fold (2026-11-26) sit between prepareStep
+    // and the nudge consumer — the splice must run FIRST so a nudge return
+    // can't drop a queued screenshot. The window covers all three.
+    const block = src.slice(prepIdx, prepIdx + 3000);
     expect(block).toContain("loopNudgeMessage");
     expect(block).toMatch(/loopNudgeMessage = null;/);
     expect(block).toContain('role: "user"');

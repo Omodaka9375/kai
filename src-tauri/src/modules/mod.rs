@@ -8,6 +8,7 @@ pub mod heartbeat;
 pub mod lock;
 pub mod mcp;
 pub mod mcp_oauth;
+pub mod memochain;
 pub mod net;
 pub mod pty;
 pub mod radio_proxy;

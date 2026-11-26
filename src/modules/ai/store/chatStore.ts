@@ -2197,15 +2197,15 @@ export const useChatStore = create<StoreState>((set, get) => ({
     ) {
       return "Wait for the current run to finish before compacting.";
     }
-    // PROXY-MANAGED MEMORY (MemoChain 2026-11-25): a proxy-routed session
-    // refuses /compact — the proxy owns context memory (hot window + compact
-    // memory + receipt chain) and local history replacement would diverge
-    // from the state it is verifying.
+    // MEMOCHAIN-MANAGED MEMORY (2026-11-26): a MemoChain-toggled session
+    // refuses /compact — the embedded handler owns context memory (hot
+    // window + compact memory + receipt chain) and local history replacement
+    // would diverge from the state the capsule is verifying.
     const ownerProject = projectIdForSession(id);
     if (isProxyManagedModel(
       ownerProject ? getProjectEffectiveModelId(ownerProject, id) : get().selectedModelId,
     )) {
-      return "This session is managed by the proxy endpoint (MemoChain) — the proxy handles context memory, so /compact is disabled here.";
+      return "This session uses durable memory (MemoChain) — the memory handler owns context memory, so /compact is disabled here.";
     }
     const toolContext = getSessionToolContext(id);
     const fileSnapshot = toolContext?.fileTracker.getSnapshot() ?? [];
@@ -2253,12 +2253,12 @@ export const useChatStore = create<StoreState>((set, get) => ({
     ) {
       return "Wait for the current run to finish before compacting.";
     }
-    // PROXY-MANAGED MEMORY: same refusal as the active-session /compact above.
+    // MEMOCHAIN-MANAGED MEMORY: same refusal as the active-session /compact above.
     const ownerProject = projectIdForSession(sessionId);
     if (isProxyManagedModel(
       ownerProject ? getProjectEffectiveModelId(ownerProject, sessionId) : get().selectedModelId,
     )) {
-      return "This session is managed by the proxy endpoint (MemoChain) — the proxy handles context memory, so /compact is disabled here.";
+      return "This session uses durable memory (MemoChain) — the memory handler owns context memory, so /compact is disabled here.";
     }
     const toolContext = getSessionToolContext(sessionId);
     const fileSnapshot = toolContext?.fileTracker.getSnapshot() ?? [];

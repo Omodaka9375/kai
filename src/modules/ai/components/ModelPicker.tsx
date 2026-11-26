@@ -12,7 +12,6 @@ import AiVoiceIcon from "@hugeicons/core-free-icons/AiVoiceIcon";
 import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon";
 import BrainIcon from "@hugeicons/core-free-icons/BrainIcon";
 import ChatGptIcon from "@hugeicons/core-free-icons/ChatGptIcon";
-import CloudServerIcon from "@hugeicons/core-free-icons/CloudServerIcon";
 import ClaudeIcon from "@hugeicons/core-free-icons/ClaudeIcon";
 import Clock01Icon from "@hugeicons/core-free-icons/Clock01Icon";
 import CoinsDollarIcon from "@hugeicons/core-free-icons/CoinsDollarIcon";
@@ -65,7 +64,6 @@ const PROVIDER_ICON = {
   mistral: Hexagon01Icon,
   openrouter: GlobeIcon,
   "openai-compatible": PlugIcon,
-  proxy: CloudServerIcon,
   zai: CpuIcon,
   // Voice provider - never appears in a model list, but the Record must be
   // exhaustive so a future ProviderId can't compile without an icon.
@@ -178,9 +176,8 @@ function ModelDropdown() {
     );
   }, []);
   const current = getModel(selected);
-  // For custom/proxy endpoints, show the actual model ID instead of generic label.
+  // For the custom endpoint, show the actual model ID instead of generic label.
   const compatModelId = usePreferencesStore((s) => s.openaiCompatibleModelId);
-  const proxyModelId = usePreferencesStore((s) => s.proxyModelId);
 
   // Auto-sync OpenRouter models so the dropdown stays current.
   const orModels = useOpenRouterModelsStore((s) => s.models);
@@ -192,9 +189,7 @@ function ModelDropdown() {
   const displayLabel =
     current.id === "openai-compatible-custom" && compatModelId.trim()
       ? compatModelId.trim()
-      : current.id === "proxy-custom" && proxyModelId.trim()
-        ? proxyModelId.trim()
-        : current.label;
+      : current.label;
   const [search, setSearch] = useState("");
   const [activeProvider, setActiveProvider] = useState<ProviderId | null>(null);
   const [tab, setTab] = useState<Tab>("all");

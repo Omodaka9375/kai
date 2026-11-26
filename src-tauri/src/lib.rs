@@ -1050,6 +1050,14 @@ app.manage(Mutex::new(None::<fs::env_probe::EnvInventory>));
             modules::reflex::reflex_remove,
             modules::reflex::reflex_ensure_running,
             modules::reflex::reflex_classify,
+            modules::memochain::memochain_status,
+            modules::memochain::memochain_session_info,
+            modules::memochain::memochain_fold,
+            modules::memochain::memochain_set_summary,
+            modules::memochain::memochain_recall,
+            modules::memochain::memochain_verify,
+            modules::memochain::memochain_delete,
+            modules::memochain::memochain_clear_all,
             screen::screen_list_monitors,            screen::screen_capture,
         ])
         .build(tauri::generate_context!())

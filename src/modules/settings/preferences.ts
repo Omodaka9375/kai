@@ -1,4 +1,4 @@
-import { setCustomContextLimit } from "@/modules/ai/config";
+import { setCustomContextLimit, setMemoChainModels } from "@/modules/ai/config";
 import { create } from "zustand";
 import {
   DEFAULT_PREFERENCES,
@@ -15,6 +15,12 @@ type State = Preferences & {
 
 function syncContextOverrides(prefs: Preferences) {
   setCustomContextLimit("openai-compatible-custom", prefs.openaiCompatibleContextSize ?? 0);
+}
+
+/** Push the per-model MemoChain toggles into the config module so
+ *  isProxyManagedModel answers for the CURRENT preference state. */
+function syncMemoChainModels(prefs: Preferences) {
+  setMemoChainModels(prefs.memoChainModelIds ?? []);
 }
 
 /** Push the user's group-name pool into the group store (empty = defaults).
@@ -45,6 +51,8 @@ export const usePreferencesStore = create<State>((set) => ({
     set({ ...prefs, hydrated: true });
     // Push custom context sizes into the config module.
     syncContextOverrides(prefs);
+    // Push the per-model MemoChain toggles into the config module.
+    syncMemoChainModels(prefs);
     if (prefs.groupNamePool) syncGroupNamePool(prefs.groupNamePool);
     void onPreferencesChange((key, value) => {
       set({ [key]: value } as Partial<State>);
@@ -52,6 +60,12 @@ export const usePreferencesStore = create<State>((set) => ({
         syncContextOverrides({
           ...usePreferencesStore.getState(),
           [key]: value as number,
+        });
+      }
+      if (key === "memoChainModelIds") {
+        syncMemoChainModels({
+          ...usePreferencesStore.getState(),
+          memoChainModelIds: Array.isArray(value) ? (value as string[]) : [],
         });
       }
       if (key === "groupNamePool") syncGroupNamePool(String(value ?? ""));

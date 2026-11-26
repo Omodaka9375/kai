@@ -32,6 +32,7 @@ import { buildTools, type ToolContext } from "../tools/tools";
 import { repairEditToolCallInput } from "../tools/edit";
 import { primeXBearerPresence, xBearerKnownAbsent } from "../tools/social";
 import { compactModelMessagesDetailed } from "./compact";
+import { memoChainFoldPrefix, memoChainMemoryBlock } from "./memochain";
 import {
   modelCanSee,
   swapImagePartsToText,
@@ -94,9 +95,6 @@ export type BuildModelOptions = {
    *  Cached per session (part of the model cache key), so the header stays
    *  byte-stable for the life of the chat session. */
   sessionId?: string | null;
-  /** Proxy endpoint base URL (Settings → Models → Proxy endpoint). Set for
-   *  the `proxy` provider only; ignored elsewhere. */
-  proxyBaseURL?: string;
 };
 
 const MODEL_CACHE_CAP = 8;
@@ -125,7 +123,7 @@ export async function buildLanguageModel(
   }
   const key = keys[provider] ?? "";
   const compatURL = options.openaiCompatibleBaseURL ?? "";
-  const cacheKey = `${provider} ${key} ${resolvedModelId} ${compatURL} ${options.proxyBaseURL ?? ""} ${options.sessionId ?? ""}`;
+  const cacheKey = `${provider} ${key} ${resolvedModelId} ${compatURL} ${options.sessionId ?? ""}`;
   const hit = modelCache.get(cacheKey);
   if (hit) return hit;
 
@@ -234,34 +232,6 @@ export async function buildLanguageModel(
       })(resolvedModelId);
       break;
     }
-    case "proxy": {
-      // Proxy endpoint (MemoChain 2026-11-25): same OpenAI-compatible wire,
-      // but the endpoint is a MEMORY PROXY fronting a real backend —
-      // x-session-id is REQUIRED here (the proxy keys its memory capsule by
-      // it), never optional like above. BYOK: the key passes through as the
-      // standard Authorization header for the proxy to forward (or ignore
-      // on unauthenticated LAN proxies).
-      if (!options.proxyBaseURL) {
-        throw new Error(
-          "Proxy endpoint has no base URL. Set it in Settings → Models.",
-        );
-      }
-      if (!options.sessionId) {
-        throw new Error(
-          "Proxy endpoint requires a chat session (x-session-id). One-shot keyless calls cannot use it.",
-        );
-      }
-      const { createOpenAICompatible } =
-        await import("@ai-sdk/openai-compatible");
-      built = createOpenAICompatible({
-        name: "proxy",
-        baseURL: options.proxyBaseURL,
-        apiKey: key || undefined,
-        headers: { "x-session-id": options.sessionId },
-        fetch: cloudFetch,
-      })(resolvedModelId);
-      break;
-    }
     case "assemblyai": {
       // Voice provider (STT/TTS in Settings > Voice) - deliberately has NO
       // chat-model path. Reaching here means a model was registered with a
@@ -297,7 +267,6 @@ export function buildConfiguredLanguageModel(
   openaiCompatibleBaseURL?: string,
   openaiCompatibleModelId?: string,
   sessionId?: string | null,
-  proxy?: { baseURL?: string; modelId?: string },
 ): Promise<LanguageModel> {
   const m = getModel(modelId);
   let resolvedId: string = m.id;
@@ -309,23 +278,9 @@ export function buildConfiguredLanguageModel(
     }
     resolvedId = openaiCompatibleModelId.trim();
   }
-  if (m.id === "proxy-custom") {
-    if (!proxy?.baseURL?.trim()) {
-      throw new Error(
-        "Proxy endpoint: no base URL set. Open Settings → Models.",
-      );
-    }
-    if (!proxy.modelId?.trim()) {
-      throw new Error(
-        "Proxy endpoint: no model id set. Open Settings → Models.",
-      );
-    }
-    resolvedId = proxy.modelId.trim();
-  }
   return buildLanguageModel(m.provider, keys, resolvedId, {
     openaiCompatibleBaseURL,
     sessionId,
-    proxyBaseURL: m.provider === "proxy" ? proxy?.baseURL : undefined,
   });
 }
 
@@ -438,11 +393,11 @@ export type RunAgentOptions = {
   /** Current auto-approve setting ("off"|"all"), journaled with the turn so
    *  "did the agent run unattended?" is answerable from the event log. */
   autoApprove?: string;
-  /** Owning chat session id — rides every openai-compatible request as
-   *  `x-session-id` (memory-proxy capsule key). Null/absent = one-shot call. */
+  /** Owning chat session id — keys the MemoChain memory capsule per session
+   *  (embedded handler, 2026-11-26) and rides openai-compatible wires as
+   *  `x-session-id` for keyless local endpoints that want it. Null/absent =
+   *  one-shot call (no memory folding). */
   sessionId?: string | null;
-  /** Proxy endpoint config (Settings → Models): base URL + backend model name. */
-  proxy?: { baseURL?: string; modelId?: string } | null;
 };
 
 /**
@@ -745,7 +700,6 @@ export async function runAgentStream(opts: RunAgentOptions) {
     opts.openaiCompatibleBaseURL,
     opts.openaiCompatibleModelId,
     opts.sessionId ?? null,
-    opts.proxy ?? undefined,
   );
   const provider = getModel(modelId).provider;
 
@@ -777,9 +731,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
   const runtimeModelName =
     modelId === "openai-compatible-custom"
       ? opts.openaiCompatibleModelId
-      : modelId === "proxy-custom"
-        ? opts.proxy?.modelId ?? null
-        : null;
+      : null;
   const canSee = modelCanSee(
     modelId,
     runtimeModelName,
@@ -832,12 +784,26 @@ export async function runAgentStream(opts: RunAgentOptions) {
     }
   }
   const contextLimit = getModelContextLimit(getModel(modelId).id);
-  // PROXY-MANAGED MEMORY (MemoChain 2026-11-25): a proxy-routed session sends
-  // the FULL history verbatim — no local elision, no truncation, no tool-output
-  // trimming. The proxy owns prompt capping + memory compression; local
-  // compaction would fight it (the proxy's receipt chain would diverge from
-  // what the model actually saw). Skip the elider entirely.
-  const compact = isProxyManagedModel(modelId)
+  // MEMOCHAIN-MANAGED MEMORY (2026-11-26): a MemoChain-toggled session sends
+  // the FULL history verbatim — no local elision, no truncation, no
+  // tool-output trimming. The embedded memory handler owns prompt capping +
+  // memory compression (hot window + 22,606-byte verifiable capsule); local
+  // compaction would fight it (the capsule's receipt chain would diverge from
+  // what the model actually saw). Skip the elider entirely, and give the
+  // handler its turn to fold the overflowing prefix FIRST.
+  const memoChain = isProxyManagedModel(modelId);
+  const memoSessionId = opts.sessionId ?? null;
+  if (memoChain && memoSessionId) {
+    const folded = await memoChainFoldPrefix(memoSessionId, history);
+    if (folded) {
+      appendSessionEvent(memoSessionId, {
+        kind: "compact",
+        droppedCount: folded.foldedMessages,
+        contextLimit,
+      });
+    }
+  }
+  const compact = memoChain
     ? { messages: history, compacted: false, droppedCount: 0 } as const
     : compactModelMessagesDetailed(history, contextLimit);
   const compactedHistory = compact.messages;
@@ -865,7 +831,19 @@ export async function runAgentStream(opts: RunAgentOptions) {
   const systemWithNotices = xUnconfigured
     ? `${systemContent}\n\n## X (Twitter) — NOT AVAILABLE\nThe social_read tool is disabled because no X developer Bearer token is configured. Do NOT try to read X/Twitter content. For social sentiment around a topic, use web_search or platform_reach (GitHub/Reddit/HN) instead; for X specifically, say the user can configure a token in Settings → Social → X (Twitter).`
     : systemContent;
-  const messages: ModelMessage[] = [{ role: "system", content: systemWithNotices }];
+  // MEMOCHAIN MEMORY BLOCK: for a toggled session, inject the folded rolling
+  // summary + top-K verbatim recalled turns as a [Durable memory] section in
+  // the system prompt — the same shape the standalone proxy injected, so the
+  // model-side behavior is unchanged from the proxy era. Fenced like tool
+  // output (recalled chunks are stored text, i.e. untrusted-at-rest).
+  let memoMemoryBlock: string | null = null;
+  if (memoChain && memoSessionId) {
+    memoMemoryBlock = await memoChainMemoryBlock(memoSessionId, history, opts.fenceState ?? undefined);
+  }
+  const systemFinal = memoMemoryBlock
+    ? `${systemWithNotices}\n\n${memoMemoryBlock}`
+    : systemWithNotices;
+  const messages: ModelMessage[] = [{ role: "system", content: systemFinal }];
   messages.push(...compactedHistory);
 
   const finalMessages = applyCacheBreakpoints(messages, provider);
@@ -1107,7 +1085,9 @@ export async function runAgentStream(opts: RunAgentOptions) {
     },
     // Inject a pending loop nudge into the immediate next request only.
     // Returning undefined leaves the step untouched (the common case).
-    prepareStep: ({ messages: stepMessages }) => {
+    // MEMOCHAIN: prepareStep is async-capable (returns a Promise), so the
+    // mid-run fold below can await the handler without breaking the SDK.
+    prepareStep: async ({ messages: stepMessages }) => {
       // ── MID-RUN CONTEXT RE-ELISION (2026-10-31) ────────────────────────
       // The pre-run compaction above elides ONCE at send time, but a long
       // multi-step run (heavy bash output, big reads) re-attaches fresh
@@ -1120,9 +1100,10 @@ export async function runAgentStream(opts: RunAgentOptions) {
       // transcript keeps the full text (the turn's "compact" journal entry
       // already records the pre-run elision; this logs its own event).
       let messages = stepMessages;
-      // PROXY-MANAGED MEMORY: same gate as the pre-run elision above —
-      // a proxy-routed session never re-elides mid-run either.
-      const stepCompact = isProxyManagedModel(modelId)
+      // MEMOCHAIN-MANAGED MEMORY: same gate as the pre-run elision above —
+      // a MemoChain-toggled session never re-elides mid-run; the handler
+      // folds the overflowing prefix itself (see memoChainFoldPrefix).
+      const stepCompact = memoChain
         ? { messages, compacted: false, droppedCount: 0 } as const
         : compactModelMessagesDetailed(messages, contextLimit);
       if (stepCompact.compacted) {
@@ -1133,6 +1114,19 @@ export async function runAgentStream(opts: RunAgentOptions) {
           droppedCount: stepCompact.droppedCount,
           contextLimit,
         });
+      }
+      // Mid-run fold: fresh tool results attached since the pre-run fold can
+      // push THIS step's request over the hot limit. Same decision logic,
+      // same fail-open contract — errors leave the step's messages untouched.
+      if (memoChain && memoSessionId) {
+        const stepFold = await memoChainFoldPrefix(memoSessionId, messages);
+        if (stepFold) {
+          appendSessionEvent(memoSessionId, {
+            kind: "compact",
+            droppedCount: stepFold.foldedMessages,
+            contextLimit,
+          });
+        }
       }
       // USER-MESSAGE IMAGE HANDOFF: vision model on a compat wire — splice
       // its queued screenshot into THIS request as a user message.

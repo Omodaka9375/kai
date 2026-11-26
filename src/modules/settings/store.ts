@@ -51,12 +51,12 @@ export type Preferences = {
   restoreWindowState: boolean;
   openaiCompatibleBaseURL: string;
   openaiCompatibleModelId: string;
-  /** Proxy endpoint (MemoChain-class memory proxy, distinct from the local
-   *  openai-compatible endpoint). Base URL + the backend model name the
-   *  proxy serves (an OpenRouter/Anthropic/OpenAI model id, or whatever the
-   *  proxy names it). No context-size pref: the proxy owns context memory. */
-  proxyBaseURL: string;
-  proxyModelId: string;
+  /** Per-model MemoChain memory toggles (2026-11-26): each listed model id
+   *  routes its chat sessions through the embedded MemoChain memory handler
+   *  (bundled weights, verifiable 22,606-byte capsule) instead of KAI's
+   *  local summarization/compaction machinery. Replaces the removed
+   *  proxy-custom endpoint slot (base URL + backend model id). */
+  memoChainModelIds: string[];
   favoriteModelIds: string[];
   recentModelIds: string[];
   vimMode: boolean;
@@ -184,8 +184,7 @@ const KEY_AUTOSTART = "autostart";
 const KEY_RESTORE_WINDOW = "restoreWindowState";
 const KEY_OPENAI_COMPAT_BASE_URL = "openaiCompatibleBaseURL";
 const KEY_OPENAI_COMPAT_MODEL_ID = "openaiCompatibleModelId";
-const KEY_PROXY_BASE_URL = "proxyBaseURL";
-const KEY_PROXY_MODEL_ID = "proxyModelId";
+const KEY_MEMOCHAIN_MODELS = "memoChainModelIds";
 const KEY_FAVORITE_MODELS = "favoriteModelIds";
 const KEY_RECENT_MODELS = "recentModelIds";
 const KEY_VIM_MODE = "vimMode";
@@ -282,8 +281,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   restoreWindowState: true,
   openaiCompatibleBaseURL: OPENAI_COMPATIBLE_DEFAULT_BASE_URL,
   openaiCompatibleModelId: "",
-  proxyBaseURL: "",
-  proxyModelId: "",
+  memoChainModelIds: [],
   favoriteModelIds: [],
   recentModelIds: [],
   vimMode: false,
@@ -379,12 +377,9 @@ export async function loadPreferences(): Promise<Preferences> {
     openaiCompatibleModelId:
       get<string>(KEY_OPENAI_COMPAT_MODEL_ID) ??
       DEFAULT_PREFERENCES.openaiCompatibleModelId,
-    proxyBaseURL:
-      get<string>(KEY_PROXY_BASE_URL) ??
-      DEFAULT_PREFERENCES.proxyBaseURL,
-    proxyModelId:
-      get<string>(KEY_PROXY_MODEL_ID) ??
-      DEFAULT_PREFERENCES.proxyModelId,
+    memoChainModelIds:
+      get<string[]>(KEY_MEMOCHAIN_MODELS) ??
+      DEFAULT_PREFERENCES.memoChainModelIds,
     favoriteModelIds:
       get<string[]>(KEY_FAVORITE_MODELS) ??
       DEFAULT_PREFERENCES.favoriteModelIds,
@@ -722,12 +717,8 @@ export async function setOpenaiCompatibleModelId(value: string): Promise<void> {
   await writePref(KEY_OPENAI_COMPAT_MODEL_ID, value);
 }
 
-export async function setProxyBaseURL(value: string): Promise<void> {
-  await writePref(KEY_PROXY_BASE_URL, value);
-}
-
-export async function setProxyModelId(value: string): Promise<void> {
-  await writePref(KEY_PROXY_MODEL_ID, value);
+export async function setMemoChainModelIds(value: string[]): Promise<void> {
+  await writePref(KEY_MEMOCHAIN_MODELS, value);
 }
 
 export async function setFavoriteModelIds(value: string[]): Promise<void> {
@@ -957,8 +948,7 @@ export async function onPreferencesChange(
     [KEY_COMPAT_CTX_SIZE]: "openaiCompatibleContextSize",
     [KEY_COMPAT_THINKING]: "openaiCompatibleThinkingMode",
     [KEY_COMPAT_VISION]: "openaiCompatibleVision",
-    [KEY_PROXY_BASE_URL]: "proxyBaseURL",
-    [KEY_PROXY_MODEL_ID]: "proxyModelId",
+    [KEY_MEMOCHAIN_MODELS]: "memoChainModelIds",
     [KEY_UI_THEME]: "uiThemeId",
     projectModelIds: "projectModelIds",
     [KEY_SUBAGENT_MAX_STEPS]: "subagentMaxSteps",
