@@ -432,6 +432,12 @@ export function makeChatSync(
     },
     onCompact: (info: { droppedCount: number; kind?: "elide" | "memo-fold" }) => {
       if (!isActive()) return;
+      // MEMO-FOLD notices stay OUT of the chat (2026-11-26 ask): durable-
+      // memory folds recur on long sessions and the capsule state is already
+      // visible in the context dropdown (Hot window / Folded / Capsule rows),
+      // so the in-chat banner was pure repetition. Only the local elider's
+      // notice renders here.
+      if (info.kind === "memo-fold") return;
       // Show once per session - elision recurs every turn once the history is
       // large enough, and repeating the notice is just noise.
       if (compactionNoticeShown.current) return;

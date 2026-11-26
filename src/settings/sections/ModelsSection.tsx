@@ -28,6 +28,7 @@ import {
   type VisionOverride,
 } from "@/modules/ai/config";
 import { clearKey, getAllKeys, setKey } from "@/modules/ai/lib/keyring";
+import { useOpenRouterModelsStore } from "@/modules/ai/store/openrouterModelsStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   emitKeysChanged,
@@ -751,7 +752,17 @@ function MemoChainModelPicker({
   onToggle: (id: string) => void;
 }) {
   const [query, setQuery] = useState("");
-  const all = useMemo(() => MODELS, []);
+  // SAME catalog as the status-bar model dropdown (2026-11-26 ask): the
+  // OpenRouter-synced merged list, not the static MODELS registry - otherwise
+  // a model visible in the main picker could not be toggled here. The store
+  // seeds from the hardcoded registry and merges fetched/persisted dynamic
+  // models, deduped by id.
+  const orModels = useOpenRouterModelsStore((s) => s.models);
+  const orFetch = useOpenRouterModelsStore((s) => s.fetch);
+  useEffect(() => {
+    void orFetch();
+  }, [orFetch]);
+  const all = orModels;
   const q = query.trim().toLowerCase();
   const filtered = useMemo(() => {
     if (!q) return all;

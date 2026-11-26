@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { foldLimitsFor } from "../lib/memochain";
+import { foldLimitsFor, getHotWindowTokens } from "../lib/memochain";
 import { native, type MemoChainSessionInfo } from "../lib/native";
 import { getModelContextLimit } from "../config";
 
@@ -77,12 +77,19 @@ export function MemoChainContextRows({
   const tampered = info?.tampered ?? false;
   const step = info?.step ?? 0;
   const folded = info?.foldedHashes?.length ?? 0;
+  // HOT WINDOW (2026-11-26 ask): the model-bound trimmed window the LAST
+  // request actually carried (noted by agent.ts after each fold pass), NOT
+  // the full-history estimate - the persisted Chat history grows forever, so
+  // estimating from it made the row read "84k / 80k" permanently after the
+  // first fold. Falls back to the estimate only before the first request on
+  // a toggled model.
+  const usedWindow = getHotWindowTokens(sessionId) ?? used;
   return (
     <>
       <div className="mt-1 flex items-center justify-between text-muted-foreground">
         <span>Hot window</span>
         <span className="font-mono text-foreground">
-          {fmtTokens(used)} / {fmtTokens(hot)}
+          {fmtTokens(usedWindow)} / {fmtTokens(hot)}
         </span>
       </div>
       <Row label="Folded">

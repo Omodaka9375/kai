@@ -84,6 +84,36 @@ export function foldLimitsFor(contextLimit?: number): {
   return { hotLimit, keepMin: Math.min(keepMin, hotLimit) };
 }
 
+/** Per-session MODEL-BOUND hot window (tokens) as of the LAST request — the
+ *  trimmed remainder the request actually carried, noted by agent.ts after
+ *  every memoChainFoldPrefix pass (fold or no-fold: the value is whatever the
+ *  request sent). The persisted Chat history keeps every message forever, so
+ *  estimating from it yields a number that only grows past the hot limit
+ *  ("84k / 80k" forever); the context dropdown reads this instead so the row
+ *  RESETS to the post-fold remainder after each fold. Not reactive state —
+ *  consumers (MemoChainContextRows) re-render on their own poll cadence and
+ *  re-read the map. Cleared entries are never needed: sessions are
+ *  long-lived, values are one number each. */
+const hotWindowTokens = new Map<string, number>();
+
+export function noteHotWindowTokens(sessionId: string, tokens: number): void {
+  hotWindowTokens.set(sessionId, Math.max(0, tokens));
+}
+
+export function getHotWindowTokens(sessionId: string | null): number | null {
+  return sessionId ? hotWindowTokens.get(sessionId) ?? null : null;
+}
+
+/** Estimate the hot window of a message list with the SAME weight text the
+ *  fold decision uses (messageWeightText, ~4 chars per token), so the
+ *  displayed number and the fold budget agree. */
+export function estimateHotWindowTokens(messages: ModelMessage[]): number {
+  return messages.reduce(
+    (acc, m) => acc + estimateTokens(messageWeightText(m)),
+    0,
+  );
+}
+
 /** Per-document clip before embedding (matches Python `max_doc_chars`). */
 export const MEMOCHAIN_MAX_DOC_CHARS = 2000;
 /** Verbatim chunk recall depth (top-K hybrid search results injected). */

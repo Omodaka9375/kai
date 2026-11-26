@@ -33,10 +33,12 @@ import { repairEditToolCallInput } from "../tools/edit";
 import { primeXBearerPresence, xBearerKnownAbsent } from "../tools/social";
 import { compactModelMessagesDetailed } from "./compact";
 import {
+  estimateHotWindowTokens,
   injectRecalledBeforeLastUser,
   memoChainFactSheet,
   memoChainFoldPrefix,
   memoChainMemorySections,
+  noteHotWindowTokens,
 } from "./memochain";
 import {
   modelCanSee,
@@ -825,6 +827,13 @@ export async function runAgentStream(opts: RunAgentOptions) {
         await memoChainFactSheet(memoSessionId, folded.newlyFolded);
       }
     }
+    // Context-dropdown hot window: the trimmed remainder THIS request sends
+    // (full history when nothing folded) — see noteHotWindowTokens in
+    // memochain.ts for why the row must not use the full-history estimate.
+    noteHotWindowTokens(
+      memoSessionId,
+      estimateHotWindowTokens(historyForRun),
+    );
   }
   const compact = memoChain
     ? { messages: historyForRun, compacted: false, droppedCount: 0 } as const
@@ -1164,6 +1173,12 @@ export async function runAgentStream(opts: RunAgentOptions) {
             await memoChainFactSheet(memoSessionId, stepFold.newlyFolded);
           }
         }
+        // Keep the mid-run hot window current too (prepareStep can attach
+        // fresh tool results, then fold them back down).
+        noteHotWindowTokens(
+          memoSessionId,
+          estimateHotWindowTokens(messages),
+        );
       }
       // USER-MESSAGE IMAGE HANDOFF: vision model on a compat wire — splice
       // its queued screenshot into THIS request as a user message.

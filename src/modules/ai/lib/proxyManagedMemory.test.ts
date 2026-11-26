@@ -128,7 +128,10 @@ describe("memoChain sessions disable local context handling (source pins)", () =
     const section = read("settings/sections/ModelsSection.tsx");
     const picker = section.split("function MemoChainModelPicker")[1]?.split("function MemoChainBlock")[0] ?? "";
     expect(picker).not.toContain('m.id !== "openai-compatible-custom"');
-    expect(picker).toContain("const all = useMemo(() => MODELS, []);");
+    // 2026-11-26 parity ask: the picker lists the SAME catalog as the
+    // status-bar model dropdown (OpenRouter-synced merged list), not the
+    // static MODELS registry.
+    expect(picker).toContain('useOpenRouterModelsStore((s) => s.models)');
     // The fold budgets scale to the model's context limit, so a small local
     // window folds at ITS limit, not the 80k cloud default.
     const memo = read("modules/ai/lib/memochain.ts");
