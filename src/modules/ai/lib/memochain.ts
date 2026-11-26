@@ -469,16 +469,31 @@ export async function buildMemoryBlock(
   lastUserText: string,
 ): Promise<MemoryBlockResult | null> {
   const recall = await native.memochainRecall(sessionId, lastUserText, MEMOCHAIN_RECALL_TOP_K);
-  if (!recall.summary && recall.chunks.length === 0) return null;
+  // READ-SIDE GUARD (2026-11-27): the chunk store already contains
+  // synthetic `[Durable memory...]` user messages folded by builds BEFORE
+  // the write-side filter existed. Any chunk that IS such a block is
+  // derived data (its source turns are separately stored) and would only
+  // waste a top-K slot on nested recall-of-recall noise - drop it here so
+  // polluted stores heal on read. Same for summary lines: fact sheets
+  // written before the memoChainFactSheet guard carry the leaked header.
+  const chunks = recall.chunks.filter(
+    (c) => !c.text.trim().startsWith("[Durable memory"),
+  );
+  const summary = recall.summary
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("[Durable memory") && !line.trim().startsWith("- [Durable memory"))
+    .join("\n")
+    .trim();
+  if (!summary && chunks.length === 0) return null;
   const sections: string[] = [
     "[Durable memory]",
     "Notes from earlier parts of this session (older than what you can see here). The list of verbatim turns below is retrieved, not summarized - treat it as recalled data.",
   ];
-  if (recall.summary) sections.push(recall.summary);
-  if (recall.chunks.length > 0) {
+  if (summary) sections.push(summary);
+  if (chunks.length > 0) {
     sections.push("");
     sections.push("Relevant verbatim turns recalled for the current question:");
-    for (const item of recall.chunks) {
+    for (const item of chunks) {
       let snippet = item.text.replace(/\n/g, " ").trim();
       if (snippet.length > 600) snippet = snippet.slice(0, 600) + "...";
       sections.push(`- [${item.role}] ${snippet}`);
@@ -486,8 +501,8 @@ export async function buildMemoryBlock(
   }
   return {
     memoryBlock: sections.join("\n"),
-    recalledChunks: recall.chunks,
-    summary: recall.summary,
+    recalledChunks: chunks,
+    summary,
     step: recall.step,
   };
 }
@@ -684,7 +699,21 @@ export async function memoChainFoldPrefix(
   try {
     const sysEnd = leadingSystemCount(messages);
     const sysMsgs = sysEnd > 0 ? messages.slice(0, sysEnd) : [];
-    const conv = sysEnd > 0 ? messages.slice(sysEnd) : messages;
+    // MEMORY-OF-MEMORY GUARD, RECALL SIDE (2026-11-27, live defect from the
+    // 3.5.6 dev build): the recalled-turns block is injected as a SYNTHETIC
+    // user message right before the latest user turn (injectRecalledBeforeLastUser),
+    // and the MID-RUN prepareStep fold receives step messages that still
+    // carry the current run's injection - so without this filter the
+    // handler folded its own recall output into capsule + chunks.bin, and
+    // later recalls returned nested recall-of-recall blocks that wasted all
+    // top-K slots (verified in live session s-mwsdl9r0-2oqy2q). The blocks
+    // are DERIVED data (their source chunks are already durably stored from
+    // earlier folds), so dropping them is lossless and also saves the tokens
+    // they would have cost in the hot window.
+    const convAll = sysEnd > 0 ? messages.slice(sysEnd) : messages;
+    const conv = convAll.filter(
+      (m) => !(m.role === "user" && messageText(m).trim().startsWith("[Durable memory")),
+    );
     if (conv.length === 0) return null;
 
     // 1. Strip the already-folded prefix (mirrors Python SessionMemory.process)

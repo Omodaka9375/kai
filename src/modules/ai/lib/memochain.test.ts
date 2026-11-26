@@ -432,6 +432,56 @@ describe("memoChainFactSheet (honesty pass: locally-derived summary, 2026-11-26)
     expect(written).toContain("what port is the server on?");
     expect(written).not.toContain("[Durable memory");
   });
+
+  it("never folds its own injected memory blocks into the capsule (mid-run fold, 2026-11-27)", async () => {
+    // WRITE-SIDE GUARD: prepareStep's mid-run fold receives step messages
+    // that still carry the CURRENT run's synthetic recall injection. The
+    // pre-3.5.7 build folded those into capsule + chunks.bin, so later
+    // recalls returned nested recall-of-recall blocks filling every top-K
+    // slot (observed live). memoChainFoldPrefix must drop them BEFORE
+    // hashing - and still fold the real turns around them.
+    const { native } = await import("./native");
+    vi.mocked(native.memochainSessionInfo).mockResolvedValue({
+      exists: false,
+      step: 0,
+      stateDigest: "",
+      accumulator: "",
+      summary: "",
+      foldedHashes: [],
+      weightsDigest: null,
+      tampered: false,
+    });
+    vi.mocked(native.memochainFold).mockClear();
+    vi.mocked(native.memochainFold).mockResolvedValue({
+      step: 1,
+      stateDigest: "d1",
+      weightsDigest: "w1",
+      receiptRows: 1,
+      chunkCount: 1,
+      docsFolded: 1,
+    });
+    const { memoChainFoldPrefix } = await import("./memochain");
+    const syntheticRecall =
+      "[Durable memory - recalled turns]\nRelevant verbatim turns recalled for the current question:\n[user] (score 0.91) use port 8080";
+    // Force a fold: 8k limit -> hot 6.4k / keep 4k, so ~7.5k tokens of history
+    // overflows and decideFold evicts the leading groups.
+    const msgs: ModelMessage[] = [
+      user("old ask one " + "x".repeat(10_000)),
+      user("old ask two " + "y".repeat(10_000)),
+      user("old ask three " + "z".repeat(10_000)),
+      user(syntheticRecall),
+      user("current question"),
+    ];
+    const res = await memoChainFoldPrefix("s-fold-guard", msgs, 8_000);
+    expect(res).not.toBeNull();
+    const entries = vi.mocked(native.memochainFold).mock.calls[0]?.[1] ?? [];
+    for (const e of entries) {
+      expect(e.text).not.toContain("[Durable memory");
+    }
+    // Real turns around the injection still folded.
+    expect(entries.length).toBeGreaterThan(0);
+    expect(entries.some((e) => e.text.includes("old ask one"))).toBe(true);
+  });
 });
 
 describe("regression guards (2026-11-26 audit fixes)", () => {
@@ -558,6 +608,41 @@ describe("regression guards (2026-11-26 audit fixes)", () => {
     expect(injected[2].role).toBe("user");
     expect(String(injected[2].content)).toContain("use port 8080");
     expect(injected[3]).toBe(history[2]);
+  });
+
+  it("filters polluted recall chunks and leaked summary lines (read-side guard, 2026-11-27)", async () => {
+    // Chunk stores written by builds BEFORE the write-side guard contain
+    // synthetic [Durable memory...] user messages. buildMemoryBlock must
+    // drop them on read so a polluted store heals instead of injecting
+    // nested recall-of-recall noise; summary lines leak the same way.
+    const { native } = await import("./native");
+    vi.mocked(native.memochainRecall).mockResolvedValue({
+      summary:
+        "Earlier asks:\n- [Durable memory - recalled turns]\n- rebuild the tarball\nFiles touched:\n- src/app.ts",
+      step: 9,
+      stateDigest: "d9",
+      chunks: [
+        {
+          score: 0.9,
+          step: 4,
+          role: "user",
+          text: "[Durable memory - recalled turns]\nRelevant verbatim turns:\n- [user] old ask",
+        },
+        { score: 0.85, step: 5, role: "user", text: "rebuild the tarball please" },
+      ],
+    });
+    const fenceState = {
+      nonces: { tool: "t1", web: "w1", watch: "wa1", mcp: "m1" },
+    } as unknown as import("./fence").FenceState;
+    const history: ModelMessage[] = [user("what did we build?")];
+    const sections = await memoChainMemorySections("s-read-guard", history, fenceState);
+    expect(sections).not.toBeNull();
+    // The polluted chunk is gone; the real one survives.
+    expect(sections!.recalledChunks).toHaveLength(1);
+    expect(sections!.recalledChunks[0].text).toContain("rebuild the tarball");
+    expect(sections!.summary).not.toContain("[Durable memory");
+    expect(sections!.summary).toContain("rebuild the tarball");
+    expect(sections!.summary).toContain("src/app.ts");
   });
 });
 
