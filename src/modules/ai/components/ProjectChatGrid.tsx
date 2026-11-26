@@ -137,7 +137,7 @@ import { projectIconFillCss } from "@/modules/workspace/projectIcons";
 import { CardTrustStrip } from "./TrustStrip";
 import { useProjectsMenu } from "@/app/projectsMenu";
 import { ACCEPTED_FILES } from "./composer";
-import { GRID_COLS, GRID_ROWS } from "../store/projectChatGrid";
+import { GRID_CHAT_MAX, gridLayoutFor } from "../store/projectChatGrid";
 import {
   type CardAttachment,
   cardImageAttachment,
@@ -474,7 +474,7 @@ export function ProjectChatGrid({ items }: { items: ProjectSwitcherItem[] }) {
       setDragOrder((prev) => {
         const base = prev ?? gridOrder;
         const visible = items
-          .slice(0, GRID_ROWS * GRID_COLS)
+          .slice(0, GRID_CHAT_MAX)
           .map((c) => c.id);
         const eff = [
           ...base.filter((id) => visible.includes(id)),
@@ -496,16 +496,19 @@ export function ProjectChatGrid({ items }: { items: ProjectSwitcherItem[] }) {
     setDragOrder(null);
     setDragId(null);
   }, [dragOrder]);
-  // STABLE DOM ORDER + CSS `order` (2026-11-23 scroll-reset fix):
-  // Reordering React children mutates DOM order via `insertBefore`, which
-  // resets `scrollTop = 0` on every scrollable descendant inside moved cards
-  // (Chromium/WebView2 spec behavior). Keep `cells` in the stable `items`
-  // array order so DOM nodes are NEVER moved on drag, and position each card
-  // visually using CSS Grid `order` derived from `dragOrder ?? gridOrder`.
-  const cells = useMemo(
-    () => items.slice(0, GRID_ROWS * GRID_COLS),
-    [items],
-  );
+  // ADAPTIVE LAYOUT (2026-11-26): the grid shape follows the OPEN-project
+  // count instead of a fixed 2x4 with holes — 1 project gets one full-size
+  // card, 2 get a 50/50 split, 3-8 keep the 2x4 default, 9-24 pack a 3x8.
+  // Both layout and cells derive from the SAME `items` array in one memo so
+  // a project open/close re-renders once with a consistent shape+cell set
+  // (no torn state where the grid widens a frame before the cells land).
+  // `items` is AppShell's rail array (ProjectRailItemsContext) — it already
+  // re-renders on every open/close/reorder, so this stays reactive without
+  // any extra subscription.
+  const { layout, cells } = useMemo(() => {
+    const layout = gridLayoutFor(items.length);
+    return { layout, cells: items.slice(0, GRID_CHAT_MAX) };
+  }, [items]);
   const orderMap = useMemo(() => {
     const order = dragOrder ?? gridOrder;
     const visibleIds = cells.map((c) => c.id);
@@ -665,9 +668,12 @@ export function ProjectChatGrid({ items }: { items: ProjectSwitcherItem[] }) {
       role="region"
       aria-label="Workspaces"
       data-project-chat-grid
-      style={{ gridTemplateColumns: `repeat(${GRID_COLS}, minmax(0, 1fr))` }}
+      style={{
+        gridTemplateColumns: `repeat(${layout.cols}, minmax(0, 1fr))`,
+        gridTemplateRows: `repeat(${layout.rows}, minmax(0, 1fr))`,
+      }}
       className={cn(
-        "absolute z-40 grid grid-rows-2 overflow-hidden gap-2 rounded-2xl border border-border/60 bg-card text-[12px]",
+        "absolute z-40 grid overflow-hidden gap-2 rounded-2xl border border-border/60 bg-card text-[12px]",
         "shadow-[0_24px_48px_-12px_rgba(0,0,0,0.45)] ring-1 ring-black/5 dark:ring-white/5",
         // UNIVERSAL (2026-11-19): ABSOLUTE inside AppShell's post-rail
         // container — spans everything right of the rail, independent of
@@ -704,6 +710,23 @@ export function ProjectChatGrid({ items }: { items: ProjectSwitcherItem[] }) {
           onDragEndCell={handleDragEnd}
         />
       ))}
+      {/* CAP NOTICE (2026-11-26): open projects beyond the 24-cell cap
+          render NO card. The notice names the overflow instead of leaving
+          silent holes, and its close button uses the same projectsMenu path
+          as the rail's X (AppShell's confirmation dialog included) — the
+          grid never refuses a close mid-stream, it just asks. */}
+      {items.length > GRID_CHAT_MAX ? (
+        <div
+          style={{ order: cells.length }}
+          className="flex items-center justify-center gap-2 px-3 text-center text-[11px] text-muted-foreground"
+        >
+          <span>
+            {items.length - GRID_CHAT_MAX} more project
+            {items.length - GRID_CHAT_MAX === 1 ? "" : "s"} without a card —
+            close one to make room for the next.
+          </span>
+        </div>
+      ) : null}
     </motion.div>
   );
 }
