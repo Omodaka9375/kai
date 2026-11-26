@@ -141,10 +141,25 @@ export function approvalContinuationPending(
  * (stricter) gate. One definition, two call sites.
  */
 export function hasPendingApprovals(chat: Chat<UIMessage>): boolean {
+  // APPROVAL-REQUESTED anywhere = genuinely pending (a card awaits a
+  // decision). APPROVAL-RESPONDED is pending only in the LIVE continuation
+  // window - the SDK is about to fire the follow-up request while the last
+  // message still holds the responded part. Once the continuation appends
+  // new messages, the responded part is HISTORY: counting it forever made
+  // any session that ever answered a card read "busy" for the rest of its
+  // life (2026-11-26 group-chat report: a settled, idle agent got "queued
+  // (busy)" on every later delivery because its OLD approval-responded
+  // parts never left the history; the same staleness pinned LRU eviction,
+  // /compact, and injectMessage). approvalContinuationPending (the banner
+  // suppressor) keeps its broader semantics - it guards a UI flash on the
+  // LIVE tail, not a busy decision.
   for (const m of chat.messages) {
     if (m.role !== "assistant") continue;
+    const isLast = m === chat.messages[chat.messages.length - 1];
     for (const p of m.parts as unknown[]) {
-      if (approvalContinuationPending([p])) return true;
+      const st = (p as { state?: string }).state ?? "";
+      if (st === "approval-requested") return true;
+      if (isLast && st === "approval-responded") return true;
     }
   }
   return false;

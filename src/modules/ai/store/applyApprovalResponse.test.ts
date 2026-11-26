@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Chat } from "@ai-sdk/react";
 import type { UIMessage } from "ai";
 import { lastAssistantMessageIsCompleteWithApprovalResponses } from "ai";
-import { applyApprovalResponseToChat, clearSessionStopped, markSessionStopped, settleInterruptedToolMessages, wasSessionStopped, USER_INTERRUPTED_ERROR_TEXT, DEFAULT_DENY_REASON } from "./approvalResponses";
+import { applyApprovalResponseToChat, clearSessionStopped, markSessionStopped, settleInterruptedToolMessages, wasSessionStopped, hasPendingApprovals, USER_INTERRUPTED_ERROR_TEXT, DEFAULT_DENY_REASON } from "./approvalResponses";
 
 /**
  * The stranded-approval contract (2026-11-09 report: reminder wake parked on
@@ -164,6 +164,43 @@ describe("applyApprovalResponseToChat", () => {
     expect(direct.addToolApprovalResponse).toHaveBeenCalledWith(
       expect.objectContaining({ approved: false, reason: "custom reason" }),
     );
+  });
+});
+
+describe("hasPendingApprovals (busy-decision semantics)", () => {
+  // 2026-11-26 group-chat report: a settled, idle agent got "queued (busy)"
+  // on every later delivery because its OLD approval-responded parts never
+  // left the history. Responded parts are only pending in the LIVE
+  // continuation window (last message); requested parts anywhere count.
+  const assistantResponded = {
+    id: "a-responded",
+    role: "assistant",
+    parts: [approvalPart(true)],
+  } as UIMessage;
+  const laterUser = {
+    id: "u-later",
+    role: "user",
+    parts: [{ type: "text", text: "next turn" }],
+  } as UIMessage;
+
+  it("an approval-requested card anywhere counts as pending", () => {
+    expect(hasPendingApprovals(fakeChat([assistantWithCard]))).toBe(true);
+    // Stranded on an earlier message still counts - a card awaits a click.
+    expect(hasPendingApprovals(fakeChat([assistantWithCard, rideAlongUser]))).toBe(true);
+  });
+
+  it("approval-responded on the LAST message counts (live continuation window)", () => {
+    expect(hasPendingApprovals(fakeChat([assistantResponded]))).toBe(true);
+  });
+
+  it("approval-responded buried in HISTORY is not pending - the session is idle", () => {
+    expect(hasPendingApprovals(fakeChat([assistantResponded, laterUser]))).toBe(false);
+  });
+
+  it("a chat with no approval parts is not pending", () => {
+    expect(
+      hasPendingApprovals(fakeChat([laterUser])),
+    ).toBe(false);
   });
 });
 
