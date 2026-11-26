@@ -15,9 +15,7 @@
 # content and silently destroys your edits (it cost a full extraction session
 # once), and on EOL-only diffs it is a no-op anyway until the file is deleted.
 # The test suite's eolHygiene gate fails if the tree ever regresses.
-
 * text=auto eol=lf
-
 # Binaries — never normalize, never diff-merge.
 *.png  binary
 *.jpg  binary
@@ -56,7 +54,7 @@
 *.node binary
 *.pdf  binary
 *.jar  binary
-
 # cmd.exe misparses LF-only batch files — these stay CRLF.
 *.bat  text eol=crlf
 *.cmd  text eol=crlf
+scripts/cactus/publish/kai-reflex-v1-12L.cact filter=lfs diff=lfs merge=lfs -text

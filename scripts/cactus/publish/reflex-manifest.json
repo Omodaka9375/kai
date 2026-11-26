@@ -1,0 +1,38 @@
+{
+  "version": "2026.11.23-r5",
+  "model": "kai-reflex-v1",
+  "depth": 12,
+  "weights_url": "https://github.com/Omodaka9375/kai/releases/latest/download/kai-reflex-v1-12L.cact",
+  "weights_sha256": "1366ba974fcc9f39ef49791be0ee6c30f187df95d1055dbab51293f300e97db9",
+  "weights_bytes": 22549012,
+  "tools_url": "https://github.com/Omodaka9375/kai/releases/latest/download/narrow_tools.json",
+  "tools_sha256": "b1bd3104ad0ec990c1e689679bff3945a3a0b47456eba6054c7aab65ba04a2e8",
+  "tools_bytes": 12016,
+  "engines": {
+    "windows-x86_64": {
+      "url": "https://huggingface.co/Cactus-Compute/cactus/resolve/4e822c9036be2eb0e47ef556df32a818bb1572ef/releases/4.1.0/windows-x86_64/cactus.exe",
+      "sha256": "3b913456f1abd8de91aad6058ed1467eb418af7d2806f82c3d0bd8d26677ca6f",
+      "bytes": 1622016
+    },
+    "windows-arm64": {
+      "url": "https://huggingface.co/Cactus-Compute/cactus/resolve/4e822c9036be2eb0e47ef556df32a818bb1572ef/releases/4.1.0/windows-arm64/cactus.exe",
+      "sha256": "06c001b2d0608cc79297db0d417f5eb83236f59105bf18e1befe7aef81ae8b84",
+      "bytes": 1399296
+    },
+    "macos-arm64": {
+      "url": "https://huggingface.co/Cactus-Compute/cactus/resolve/4e822c9036be2eb0e47ef556df32a818bb1572ef/releases/4.1.0/macos-arm64/cactus",
+      "sha256": "86c7bad785977c79d935a47604e14df0ef9640297b1b1280d93757a15a87f3f5",
+      "bytes": 1156280
+    },
+    "linux-x86_64": {
+      "url": "https://huggingface.co/Cactus-Compute/cactus/resolve/4e822c9036be2eb0e47ef556df32a818bb1572ef/releases/4.1.0/linux-x86_64/cactus",
+      "sha256": "d3fabf298fed9da8db319c90fbce62c898930699d87c0468b20262860b337098",
+      "bytes": 1604704
+    },
+    "linux-arm64": {
+      "url": "https://huggingface.co/Cactus-Compute/cactus/resolve/4e822c9036be2eb0e47ef556df32a818bb1572ef/releases/4.1.0/linux-arm64/cactus",
+      "sha256": "088137b428c1be5cacb022a78a56f82815e5d60767002874afcc2ca7cf446074",
+      "bytes": 1486560
+    }
+  }
+}
