@@ -129,8 +129,151 @@ export function messageText(msg: ModelMessage): string {
   return "";
 }
 
-/** Atomic eviction units: an assistant message carrying tool_calls groups with
- *  the tool result messages that answer it (matches Python `eviction_groups`).
+/** SIZE ESTIMATE text (2026-11-26 fold-never-fires fix): messageText counts
+ *  ONLY text blocks, so a tool-heavy agentic session (assistant tool-call
+ *  blocks + tool-role result blocks - the bulk of any real KAI session) is
+ *  INVISIBLE to decideFold's hot-window estimator: a 200+ message history
+ *  with 100+ tool exchanges estimated at ~39k tokens while the real request
+ *  carries several times that, and the fold never fired. This variant adds
+ *  the real wire shapes (SDK v6 ModelMessage): `tool-call` block input JSON,
+ *  `tool-result` block output text, approval blocks, and reasoning text.
+ *  Used ONLY for budget decisions (decideFold) - hashing and the capsule
+ *  text stay on messageText so the byte-compatible parity with the
+ *  standalone Python tooling is untouched. */
+export function messageWeightText(msg: ModelMessage): string {
+  const extra: string[] = [];
+  const c = msg.content;
+  const pushBlock = (b: unknown) => {
+    if (typeof b === "string") {
+      extra.push(b);
+      return;
+    }
+    if (!b || typeof b !== "object") return;
+    const block = b as Record<string, unknown>;
+    switch (block.type) {
+      case "tool-call": {
+        // The input rides the wire as argument tokens.
+        if (block.input != null) {
+          extra.push(
+            typeof block.input === "string"
+              ? block.input
+              : JSON.stringify(block.input),
+          );
+        }
+        break;
+      }
+      case "tool-result": {
+        // output: string | content blocks | object.
+        const out = block.output;
+        if (typeof out === "string") {
+          extra.push(out);
+        } else if (Array.isArray(out)) {
+          for (const ob of out) {
+            if (typeof ob === "string") extra.push(ob);
+            else if (
+              ob &&
+              typeof ob === "object" &&
+              typeof (ob as { text?: unknown }).text === "string"
+            ) {
+              extra.push((ob as { text: string }).text);
+            }
+          }
+        } else if (out != null) {
+          extra.push(JSON.stringify(out));
+        }
+        break;
+      }
+      case "tool-approval-request":
+      case "tool-approval-response": {
+        extra.push(JSON.stringify(block));
+        break;
+      }
+      case "reasoning": {
+        // Thinking-mode models bill reasoning as real request tokens.
+        if (typeof block.text === "string") extra.push(block.text);
+        break;
+      }
+      default:
+        break;
+    }
+  };
+  // Assistant tool-call blocks inside array content.
+  if (Array.isArray(c)) {
+    for (const block of c) pushBlock(block);
+  } else if (typeof c === "string") {
+    extra.push(c);
+  }
+  // Native OpenAI wire form (assistant.tool_calls) - kept for messages that
+  // still carry it (subagent paths / provider passthrough).
+  const calls = (msg as { tool_calls?: unknown }).tool_calls;
+  if (Array.isArray(calls)) {
+    for (const tc of calls) {
+      const fn = (tc as { function?: { arguments?: unknown } }).function;
+      if (fn && typeof fn.arguments === "string") extra.push(fn.arguments);
+    }
+  }
+  // Tool-role message content: string or blocks (handled above when array).
+  if (msg.role === "tool" && typeof c === "string") extra.push(c);
+  const base = messageText(msg);
+  return extra.length === 0 ? base : `${base}\n${extra.join("\n")}`;
+}
+
+/** Collect the tool-call ids one assistant message emits - SDK v6 content
+ *  blocks (`tool-call`), the native OpenAI wire field (`tool_calls`), or
+ *  both. Empty when the message calls no tools. */
+function assistantToolCallIds(msg: ModelMessage): Set<string> {
+  const ids = new Set<string>();
+  const c = msg.content;
+  if (Array.isArray(c)) {
+    for (const block of c) {
+      if (
+        block &&
+        typeof block === "object" &&
+        (block as { type?: unknown }).type === "tool-call" &&
+        typeof (block as { toolCallId?: unknown }).toolCallId === "string"
+      ) {
+        ids.add((block as { toolCallId: string }).toolCallId);
+      }
+    }
+  }
+  const calls = (msg as { tool_calls?: unknown }).tool_calls;
+  if (Array.isArray(calls)) {
+    for (const tc of calls) {
+      const id = tc?.id;
+      if (typeof id === "string") ids.add(id);
+    }
+  }
+  return ids;
+}
+
+/** True when a tool-role message answers one of the given call ids - via the
+ *  native `tool_call_id` field or any `tool-result` content block. */
+function toolMessageAnswers(msg: ModelMessage, ids: Set<string>): boolean {
+  const native = (msg as { tool_call_id?: unknown }).tool_call_id;
+  if (typeof native === "string" && ids.has(native)) return true;
+  const c = msg.content;
+  if (Array.isArray(c)) {
+    for (const block of c) {
+      if (
+        block &&
+        typeof block === "object" &&
+        typeof (block as { toolCallId?: unknown }).toolCallId === "string" &&
+        ids.has((block as { toolCallId: string }).toolCallId)
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/** Atomic eviction units: an assistant message carrying tool calls groups with
+ *  the tool result messages that answer them (matches Python
+ *  `eviction_groups`). Handles BOTH wire shapes: the native OpenAI
+ *  `tool_calls` field AND SDK v6 `tool-call` content blocks (the form KAI's
+ *  converted history actually uses - the 2026-11-26 fold-never-fires fix:
+ *  the original only knew the native field, so runtime grouping fused
+ *  NOTHING and a fold boundary could split a call from its result).
  *  Group boundaries are what keep tool calls and their results from being
  *  split across the fold boundary. */
 export function evictionGroups(messages: ModelMessage[]): Array<[number, number]> {
@@ -139,11 +282,10 @@ export function evictionGroups(messages: ModelMessage[]): Array<[number, number]
   const n = messages.length;
   while (i < n) {
     const m = messages[i];
-    if (m.role === "assistant" && Array.isArray((m as { tool_calls?: unknown }).tool_calls)) {
-      const calls = (m as unknown as { tool_calls: Array<{ id?: string }> }).tool_calls;
-      const ids = new Set(calls.map((tc) => tc?.id).filter(Boolean));
+    const ids = m.role === "assistant" ? assistantToolCallIds(m) : new Set<string>();
+    if (ids.size > 0) {
       let j = i + 1;
-      while (j < n && messages[j].role === "tool" && ids.has((messages[j] as { tool_call_id?: string }).tool_call_id ?? "")) {
+      while (j < n && messages[j].role === "tool" && toolMessageAnswers(messages[j], ids)) {
         j += 1;
       }
       groups.push([i, j]);
@@ -259,7 +401,13 @@ export function decideFold(
   keepMin = MEMOCHAIN_KEEP_MIN,
 ): FoldDecision {
   const groups = evictionGroups(messages);
-  const total = messages.reduce((acc, m) => acc + estimateTokens(messageText(m)), 0);
+  // messageWeightText (not messageText): the hot window must reflect what
+  // the REQUEST actually carries - tool-call args and tool results included
+  // - or a tool-heavy session undercounts forever and never folds.
+  const total = messages.reduce(
+    (acc, m) => acc + estimateTokens(messageWeightText(m)),
+    0,
+  );
   const keepFloor = Math.min(keepMin, hotLimit);
   if (total <= hotLimit || groups.length <= 1) {
     return { foldStart: 0, foldEnd: 0, hotTokens: total, overflow: false };
@@ -272,7 +420,7 @@ export function decideFold(
     if (lastUserIdx >= 0 && end > lastUserIdx) break;
     const groupTokens = messages
       .slice(start, end)
-      .reduce((acc, m) => acc + estimateTokens(messageText(m)), 0);
+      .reduce((acc, m) => acc + estimateTokens(messageWeightText(m)), 0);
     if (remaining - groupTokens < keepFloor) break;
     remaining -= groupTokens;
     evictEnd = end;

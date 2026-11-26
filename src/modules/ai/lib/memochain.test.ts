@@ -27,6 +27,7 @@ import {
   foldLimitsFor,
   messageHash,
   messageText,
+  messageWeightText,
 } from "./memochain";
 import type { ModelMessage } from "ai";
 
@@ -103,6 +104,36 @@ describe("evictionGroups", () => {
     const groups = evictionGroups([user("a"), user("b")]);
     expect(groups).toEqual([[0, 1], [1, 2]]);
   });
+
+  it("fuses SDK v6 tool-call content blocks with their tool-result blocks (2026-11-26 fix)", () => {
+    // The wire shape KAI's converted history actually uses: assistant
+    // content holds tool-call blocks, tool-role content holds tool-result
+    // blocks. The original grouping only knew the native tool_calls field,
+    // so runtime grouping fused NOTHING and a fold boundary could split a
+    // call from its result.
+    const msgs = [
+      user("q"),
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "calling" },
+          { type: "tool-call", toolCallId: "c1", toolName: "grep", input: { pattern: "x" } },
+          { type: "tool-call", toolCallId: "c2", toolName: "read_file", input: { path: "y" } },
+        ],
+      },
+      {
+        role: "tool",
+        content: [
+          { type: "tool-result", toolCallId: "c2", toolName: "read_file", output: "file body" },
+          { type: "tool-result", toolCallId: "c1", toolName: "grep", output: ["hit1"] },
+        ],
+      } as unknown as ModelMessage,
+      { role: "assistant", content: "done" },
+    ] as unknown as ModelMessage[];
+    const groups = evictionGroups(msgs);
+    // user | (assistant + its tool result fused, ids matched in any order) | assistant
+    expect(groups).toEqual([[0, 1], [1, 3], [3, 4]]);
+  });
 });
 
 describe("decideFold", () => {
@@ -138,6 +169,74 @@ describe("decideFold", () => {
 
   it("empty history is a no-op", () => {
     expect(decideFold([]).overflow).toBe(false);
+  });
+});
+
+describe("messageWeightText (tool i/o counts toward the hot window, 2026-11-26 fix)", () => {
+  it("counts SDK v6 tool-call input and tool-result output blocks", () => {
+    const assistant = {
+      role: "assistant",
+      content: [
+        { type: "text", text: "looking" },
+        { type: "tool-call", toolCallId: "c1", toolName: "read_file", input: { path: "src/lib.rs", offset: 0, limit: 2000 } },
+      ],
+    } as unknown as ModelMessage;
+    // messageText (hash/capsule parity) sees ONLY the text block; the weight
+    // variant must see the tool input too - otherwise tool-heavy sessions
+    // undercount forever and never fold.
+    expect(messageText(assistant)).toBe("looking");
+    expect(messageWeightText(assistant)).toContain("looking");
+    expect(messageWeightText(assistant)).toContain("src/lib.rs");
+
+    const tool = {
+      role: "tool",
+      content: [
+        { type: "tool-result", toolCallId: "c1", toolName: "read_file", output: "fn main() {}" },
+      ],
+    } as unknown as ModelMessage;
+    expect(messageText(tool)).toBe("");
+    expect(messageWeightText(tool)).toContain("fn main() {}");
+  });
+
+  it("counts reasoning and approval blocks (real request tokens)", () => {
+    const m = {
+      role: "assistant",
+      content: [
+        { type: "reasoning", text: "thinking it through" },
+        { type: "tool-approval-request", approvalId: "a1", toolCallId: "c1" },
+      ],
+    } as unknown as ModelMessage;
+    expect(messageWeightText(m)).toContain("thinking it through");
+    expect(messageWeightText(m)).toContain("a1");
+  });
+
+  it("a tool-heavy session over the hot limit now folds (regression)", () => {
+    // 200 user/tool exchanges whose TEXT is tiny but whose tool i/o is big -
+    // the exact shape of the s-mwsdl9r0 session that never folded.
+    const msgs: ModelMessage[] = [];
+    for (let i = 0; i < 200; i++) {
+      msgs.push({
+        role: "assistant",
+        content: [
+          { type: "tool-call", toolCallId: `c${i}`, toolName: "bash_run", input: { command: `echo ${i}`, arg: "y".repeat(1200) } },
+        ],
+      } as unknown as ModelMessage);
+      msgs.push({
+        role: "tool",
+        content: [
+          { type: "tool-result", toolCallId: `c${i}`, toolName: "bash_run", output: "z".repeat(1200) },
+        ],
+      } as unknown as ModelMessage);
+    }
+    // With the OLD text-only estimator this estimated ~0 tokens. The
+    // weighted estimate must cross the default hot limit and fold.
+    const d = decideFold(msgs, MEMOCHAIN_HOT_LIMIT, MEMOCHAIN_KEEP_MIN);
+    expect(d.overflow).toBe(true);
+    expect(d.foldEnd).toBeGreaterThan(0);
+    // The fold boundary lands ON a group boundary (never splits a call
+    // from its result).
+    const groups = evictionGroups(msgs);
+    expect(groups.some(([, e]) => e === d.foldEnd)).toBe(true);
   });
 });
 
