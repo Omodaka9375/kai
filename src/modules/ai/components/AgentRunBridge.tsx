@@ -336,6 +336,13 @@ function Bridge({
   useEffect(() => {
     autoApprovedRef.current = new Set();
   }, [sessionId]);
+  // Bounded backoff self-retry for a deferred auto-approve whose respond()
+  // returned false. Declared as a ref (assigned below the auto-approve
+  // effect, after every value it closes over exists); the effect's fire
+  // path invokes it through the ref. See the assignment for rationale.
+  const retryAutoApproveRef = useRef<
+    (id: string, toolName: string, attempt: number) => void
+  >(() => {});
 
   // Commit-signing "ask for approval" must outrank autoApprove: "all". A signed
   // commit is a stronger, user-owned assertion than a routine file edit, so a
@@ -1027,6 +1034,21 @@ function Bridge({
             // at schedule time grew autoApprovedIds with ids whose cards were
             // reaped before the timer ran (part gone = decision can't land).
             markAutoApproved(id);
+          } else {
+            // BOUNDED SELF-RETRY (2026-11-26 "stuck at Run shell command
+            // approving…" report): the old contract - "the next effect pass
+            // retries a failed id" - is FALSE for a parked session. respond()
+            // fails only when the part was already gone OR the decision was
+            // latched; on a PARKED run (status ready, no messages changes)
+            // NO further effect pass ever fires, so a transiently-missed
+            // apply left the card pinned forever with the flat buttonless
+            // "approving…" row and the run neither running nor resumable.
+            // Retry a few times with backoff; the part becomes findable
+            // once the throttled messages flush lands (the same flush the
+            // bridge's own effect re-run depends on). The retry re-runs the
+            // fire-time gates (mode re-read, latch), so a mid-retry Deny or
+            // mode flip still wins. Denials stay monotonic via the latch.
+            retryAutoApproveRef.current(id, toolName, 1);
           }
         }, 0);
       }
@@ -1034,6 +1056,37 @@ function Bridge({
     // alwaysAllowedAuthorityTools is live above: schedule-time grant checks;
     // fire-time grant checks re-read the store (toggles/revocations mid-step).
   }, [messages, autoApprove, respond, markAutoApproved, signingApprovalRequired, alwaysAllowedAuthorityTools]);
+
+  // BOUNDED SELF-RETRY ASSIGNMENT (2026-11-26 "stuck at Run shell command
+  // approving…" report): the deferred auto-approve above relied on "the next
+  // effect pass retries a failed id" - FALSE for a PARKED session (status
+  // ready, no messages changes fire, nothing re-runs the effect), so a single
+  // failed respond() pinned the card forever with the flat buttonless
+  // "approving…" row: run not running, clicks impossible. The retry below
+  // re-runs the SAME fire-time gates (mode re-read, grant re-read, latch via
+  // respond) with tiny backoff, so a mid-retry Deny or mode flip still wins
+  // and denials stay monotonic. After the retries exhaust, the card's own
+  // prediction-grace escalation (AiToolApproval) restores the interactive
+  // card - the user is never stuck.
+  retryAutoApproveRef.current = (id, toolName, attempt) => {
+    if (autoApprovedRef.current.has(id)) return;
+    const delay = 100 * attempt; // 100ms, 200ms, 400ms, 800ms
+    setTimeout(() => {
+      const stillGranted = isAlwaysAllowedAuthorityTool(
+        toolName,
+        effectiveAuthorityGrants(grantsProjectId),
+      );
+      if (effectiveSessionAutoApprove(sessionId) !== "all" && !stillGranted) {
+        return;
+      }
+      if (respond(id, true)) {
+        autoApprovedRef.current.add(id);
+        markAutoApproved(id);
+        return;
+      }
+      if (attempt < 4) retryAutoApproveRef.current(id, toolName, attempt + 1);
+    }, delay);
+  };
 
   // ---- AI diff tab management ----------------------------------------------
   // We track which approvalIds have already opened a tab so re-renders don't

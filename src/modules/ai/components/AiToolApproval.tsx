@@ -13,7 +13,7 @@ import ToolsIcon from "@hugeicons/core-free-icons/ToolsIcon";
 import UserWarning01Icon from "@hugeicons/core-free-icons/UserWarning01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ToolUIPart } from "ai";
-import { memo, useCallback, useMemo, useState, useSyncExternalStore } from "react";
+import { memo, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useChatStore } from "../store/chatStore";
 import {
   abortSession,
@@ -78,6 +78,12 @@ const TOOL_ICON: Record<string, typeof FilePlusIcon> = {
   save_memory: AiBrain03Icon,
 };
 
+/** How long a PREDICTED auto-approval may show the buttonless "approving…"
+ *  row before the card escalates to the full interactive card. The bridge
+ *  normally resolves within a macrotask; 3s covers slow continuations while
+ *  keeping the anti-blink flat row for the common case. */
+const PREDICTION_GRACE_MS = 3000;
+
 function AiToolApprovalImpl({ part, toolName, onRespond, queue, proxy, sessionId }: Props) {
   const meta = TOOL_ICON[toolName];
   const label = presentationFor(toolName).approvalLabel ?? toolName;
@@ -121,7 +127,7 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue, proxy, sessionId
       standingAuthorityGrantProjects: s.standingAuthorityGrantProjects,
     }),
   );
-  const willBeAutoApproved =
+  const predictedAutoApproval =
     !proxy &&
     predictAutoApproval({
       autoApprove: sessionAutoApprove,
@@ -143,6 +149,27 @@ function AiToolApprovalImpl({ part, toolName, onRespond, queue, proxy, sessionId
       },
       projectIdForSession(ownerSessionId),
     );
+  // PREDICTION ESCALATION (2026-11-26 "stuck at Run shell command
+  // approving…" report): the flat buttonless "approving…" row is rendered
+  // on a PREDICTION that the bridge will resolve the card within a
+  // macrotask. When that never happens (a single failed respond() has NO
+  // guaranteed retry - a parked session produces no further messages
+  // changes, so the bridge's effect never re-runs), the card was a
+  // PERMANENT dead end: amber pulsing dot, no buttons, run not running,
+  // clicking impossible. After this grace window the prediction is
+  // withdrawn and the full interactive card renders, so the user can
+  // always act. markAutoApproved (wasAutoApproved) lands via the
+  // autoApprovedIds subscription and cancels the timer through the
+  // re-render; a Deny or a mode flip makes the prediction false anyway.
+  const [predictionStale, setPredictionStale] = useState(false);
+  const approvalId = part.approval.id;
+  useEffect(() => {
+    if (!predictedAutoApproval || wasAutoApproved || hasGrant) return;
+    setPredictionStale(false);
+    const t = setTimeout(() => setPredictionStale(true), PREDICTION_GRACE_MS);
+    return () => clearTimeout(t);
+  }, [approvalId, predictedAutoApproval, wasAutoApproved, hasGrant]);
+  const willBeAutoApproved = predictedAutoApproval && !predictionStale;
   const isAuthorityTool = STANDING_AUTHORITY_TOOLS.has(toolName);
 
   const isShell = toolName === "bash_run" || toolName === "bash_background";

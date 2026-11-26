@@ -2968,6 +2968,16 @@ export function respondToApprovalStandalone(
   reason?: string,
 ): void {
   const state = useChatStore.getState();
+  // VISIBILITY (2026-11-26 "clicking approve doesn't work" report): a Deny
+  // latched earlier (reaper pass, scheduled auto-approve race, an earlier
+  // click on a card the UI still shows) makes every later Approve on the
+  // same id a silent no-op INSIDE the responders. The user sees a dead
+  // button. Surface the drop here so the mismatch is diagnosable instead
+  // of looking like broken UI. (The latch itself stays - denials must be
+  // monotonic.)
+  if (approved && isApprovalDenied(approvalId)) {
+    console.warn("[kai] approve dropped - this call was already denied earlier:", approvalId);
+  }
   // AUDIT: record the human decision — the one thing the agent's own
   // transcript can't prove. Fire-and-forget; never blocks the response.
   const auditSummary = describeApproval(approvalId, approved, state);
