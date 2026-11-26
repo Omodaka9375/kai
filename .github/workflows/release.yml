@@ -365,3 +365,66 @@ jobs:
             });
             core.info('latest.json re-uploaded with notes.');
 
+
+  # ── 4. Upload Local Reflex runtime assets (weights + tools + manifest) ──
+  #
+  # The app downloads kai-reflex-v1-12L.cact + narrow_tools.json +
+  # reflex-manifest.json from the release's latest/download URL on first
+  # setup. Until 2026-11-26 the release workflow only shipped installers,
+  # so Local Reflex 404'd. The weights are NOT committed to the repo
+  # (gitignored, ~22 MB), so this job regenerates the manifest from the
+  # local files when present and uploads whatever is there; a missing
+  # .cact is a loud warning, not a hard failure (Local Reflex is optional).
+  reflex-assets:
+    needs: [create-release, publish-tauri]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Stage reflex assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p scripts/cactus/publish
+          # narrow_tools.json is committed; copy it into the publish dir.
+          cp scripts/cactus/narrow_tools.json scripts/cactus/publish/narrow_tools.json
+          # Weights are gitignored (models/ and publish/ both excluded). If
+          # they are not present in the checkout, the weights cannot be
+          # regenerated and must be uploaded by the maintainer locally.
+          if [ -f scripts/cactus/models/kai-reflex-v1-12L.cact ]; then
+            cp scripts/cactus/models/kai-reflex-v1-12L.cact scripts/cactus/publish/kai-reflex-v1-12L.cact
+          else
+            echo "::warning::kai-reflex-v1-12L.cact not present in checkout - weights will NOT be uploaded. Local Reflex setup will 404 on this tag. Upload scripts/cactus/publish/kai-reflex-v1-12L.cact (and the matching reflex-manifest.json) locally with: gh release upload <tag> scripts/cactus/publish/* --clobber"
+          fi
+          # Regenerate the manifest from the staged files (keeps the release
+          # manifest version in sync with the local cactus branch).
+          python3 scripts/cactus/publish_artifacts.py --version "2026.11.23-r5" --depth 12 || echo "::warning::publish_artifacts.py failed - uploading narrow_tools.json as-is without manifest"
+
+      - name: Upload reflex assets to draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_ID: ${{ needs.create-release.outputs.release-id }}
+        run: |
+          set -euo pipefail
+          assets=()
+          for f in scripts/cactus/publish/kai-reflex-v1-12L.cact \
+                   scripts/cactus/publish/narrow_tools.json \
+                   scripts/cactus/publish/reflex-manifest.json; do
+            if [ -f "$f" ]; then assets+=("$f"); fi
+          done
+          if [ ${#assets[@]} -eq 0 ]; then
+            echo "::warning::No reflex assets staged - skipping upload"
+            exit 0
+          fi
+          echo "Uploading: ${assets[*]}"
+          # gh release upload targets the draft release by tag; the create-release
+          # job pins the release to the draft created above.
+          gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber --repo "${{ github.repository }}"
