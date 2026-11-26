@@ -705,6 +705,20 @@ export function registerExternalModelLookup(fn: (id: string) => ModelInfo | unde
   externalModelLookup = fn;
 }
 
+/** True when the id resolves to a REAL catalog entry (hardcoded registry or
+ *  a dynamic OpenRouter model), false when getModel would fall back to the
+ *  synthetic "Unknown" entry. Surfaces that list raw persisted ids
+ *  (favorites, recents) use this to skip ids that outlived the registry -
+ *  e.g. the removed MemoChain proxy endpoint slot (3.5.4) still favorited
+ *  on disk: getModel() would happily synthesize an entry and the Workspaces
+ *  card model pill would offer a dead model to click. */
+export function isKnownModelId(id: string): boolean {
+  return (
+    (MODELS as readonly ModelInfo[]).some((x) => x.id === id) ||
+    externalModelLookup?.(id) !== undefined
+  );
+}
+
 /** Ids already warned about in this process (see getModel). */
 const warnedUnknownModels = new Set<string>();
 
