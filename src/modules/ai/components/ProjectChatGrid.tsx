@@ -26,6 +26,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
 import { MemoChainBadge } from "./MemoChainBadge";
+import { MemoChainContextRows } from "./MemoChainContextStats";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -1156,6 +1157,13 @@ const CardContextRing = memo(function CardContextRing({
               )}
             </span>
           </div>
+          {proxyManaged ? (
+            <MemoChainContextRows
+              sessionId={sessionId}
+              modelId={modelId}
+              used={used}
+            />
+          ) : null}
         </ContextContentBody>
         <ContextContentFooter>
           <span className="text-[10px] italic text-muted-foreground">

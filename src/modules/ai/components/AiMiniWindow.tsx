@@ -45,6 +45,7 @@ import {
 } from "react";
 import { SandboxBadge } from "./SandboxBadge";
 import { MemoChainBadge } from "./MemoChainBadge";
+import { MemoChainContextRows } from "./MemoChainContextStats";
 import { ShadowStrip, ShadowSessionMenuItem } from "./ShadowStrip";
 import { TrustStrip } from "./TrustStrip";
 import { TelegramMonitorMenuItem } from "./TelegramMonitorMenuItem";
@@ -513,6 +514,7 @@ function formatTokens(n: number): string {
 
 function ContextIndicator({ messages }: { messages: UIMessage[] }) {
   const modelId = useChatStore((s) => s.selectedModelId);
+  const sessionId = useChatStore((s) => s.activeSessionId);
   const tokens = useChatStore((s) => s.agentMeta.tokens);
   const lastInput = useChatStore((s) => s.agentMeta.lastInputTokens);
   const lastCached = useChatStore((s) => s.agentMeta.lastCachedTokens);
@@ -653,6 +655,13 @@ function ContextIndicator({ messages }: { messages: UIMessage[] }) {
               {formatTokens(Math.min(SYSTEM_OVERHEAD_TOKENS, getModelContextLimit(modelId)))}
             </span>
           </div>
+          {proxyManaged ? (
+            <MemoChainContextRows
+              sessionId={sessionId}
+              modelId={modelId}
+              used={used}
+            />
+          ) : null}
         </ContextContentBody>
         <ContextContentFooter>
           <span className="text-[10px] italic text-muted-foreground">
