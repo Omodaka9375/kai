@@ -33,8 +33,12 @@ describe("project icon customization (2026-11-11)", () => {
     expect(total).toBeGreaterThanOrEqual(40);
   });
 
-  it("color presets stay in the muted rail family and resolve", () => {
-    expect(PROJECT_ICON_COLORS).toHaveLength(8);
+  it("color presets stay unique, valid, and resolve both icon and tint colors", () => {
+    expect(PROJECT_ICON_COLORS).toHaveLength(19);
+    // Every preset produces a unique CSS color and tint fill.
+    const cssSet = new Set(PROJECT_ICON_COLORS.map((c) => projectIconCss(c.key, "p1")));
+    expect(cssSet.size).toBe(PROJECT_ICON_COLORS.length);
+    // Original presets keep exact compatibility.
     expect(projectIconCss("emerald", "p1")).toBe("hsl(152 45% 52%)");
     // Unknown keys and "auto" fall back to the deterministic hash hue.
     expect(projectIconCss("chartreuse", "p1")).toBe(autoProjectIconColor("p1"));

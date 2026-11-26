@@ -24,37 +24,74 @@ import type { IconSvgElement } from "@hugeicons/react";
 
 export type ProjectIconColorKey =
   | "auto"
+  | "crimson"
   | "red"
+  | "coral"
   | "orange"
   | "amber"
+  | "gold"
+  | "lime"
+  | "green"
   | "emerald"
+  | "teal"
   | "cyan"
+  | "sky"
   | "blue"
+  | "indigo"
   | "violet"
-  | "pink";
+  | "magenta"
+  | "pink"
+  | "bronze"
+  | "slate";
 
-/** Same muted family as the rail's original hash hue (45% 52%): enough to
- * tell tiles apart without fighting the theme. */
-const COLOR_HUES: Record<Exclude<ProjectIconColorKey, "auto">, number> = {
-  red: 0,
-  orange: 24,
-  amber: 45,
-  emerald: 152,
-  cyan: 189,
-  blue: 217,
-  violet: 262,
-  pink: 330,
+type ColorSpec = { h: number; s: number; l: number };
+
+/** Harmonious palette for project icons and header/card tints. The original 8
+ *  presets stay at 45% / 52% for exact compatibility; newer accents vary
+ *  saturation/lightness slightly so adjacent hues and neutrals (gold, coral,
+ *  crimson, bronze, slate) read as clearly distinct on both themes. */
+const COLOR_SPECS: Record<Exclude<ProjectIconColorKey, "auto">, ColorSpec> = {
+  crimson: { h: 350, s: 54, l: 48 },
+  red: { h: 0, s: 45, l: 52 },
+  coral: { h: 12, s: 58, l: 56 },
+  orange: { h: 24, s: 45, l: 52 },
+  amber: { h: 45, s: 45, l: 52 },
+  gold: { h: 54, s: 54, l: 48 },
+  lime: { h: 84, s: 44, l: 48 },
+  green: { h: 124, s: 42, l: 46 },
+  emerald: { h: 152, s: 45, l: 52 },
+  teal: { h: 172, s: 48, l: 45 },
+  cyan: { h: 189, s: 45, l: 52 },
+  sky: { h: 202, s: 58, l: 54 },
+  blue: { h: 217, s: 45, l: 52 },
+  indigo: { h: 239, s: 50, l: 58 },
+  violet: { h: 262, s: 45, l: 52 },
+  magenta: { h: 292, s: 48, l: 54 },
+  pink: { h: 330, s: 45, l: 52 },
+  bronze: { h: 30, s: 28, l: 48 },
+  slate: { h: 215, s: 16, l: 54 },
 };
 
 export const PROJECT_ICON_COLORS: Array<{ key: ProjectIconColorKey; label: string }> = [
+  { key: "crimson", label: "Crimson" },
   { key: "red", label: "Red" },
+  { key: "coral", label: "Coral" },
   { key: "orange", label: "Orange" },
   { key: "amber", label: "Amber" },
+  { key: "gold", label: "Gold" },
+  { key: "lime", label: "Lime" },
+  { key: "green", label: "Green" },
   { key: "emerald", label: "Emerald" },
+  { key: "teal", label: "Teal" },
   { key: "cyan", label: "Cyan" },
+  { key: "sky", label: "Sky" },
   { key: "blue", label: "Blue" },
+  { key: "indigo", label: "Indigo" },
   { key: "violet", label: "Violet" },
+  { key: "magenta", label: "Magenta" },
   { key: "pink", label: "Pink" },
+  { key: "bronze", label: "Bronze" },
+  { key: "slate", label: "Slate" },
 ];
 
 /** Deterministic per-project hue: hash -> h, shared by the glyph color and
@@ -67,18 +104,23 @@ function autoProjectIconHue(projectId: string): number {
   return h % 360;
 }
 
+function resolveColorSpec(color: string | undefined, projectId: string): ColorSpec {
+  if (color && color !== "auto" && color in COLOR_SPECS) {
+    return COLOR_SPECS[color as Exclude<ProjectIconColorKey, "auto">];
+  }
+  return { h: autoProjectIconHue(projectId), s: 45, l: 52 };
+}
+
 /** Deterministic per-project hue: hash -> hsl(h, 45%, 52%). Same scheme the
  * rail used since day one, kept as the "auto" fallback. */
 export function autoProjectIconColor(projectId: string): string {
   return `hsl(${autoProjectIconHue(projectId)} 45% 52%)`;
 }
 
-/** Resolve a tile's icon color: preset hue, or the project's auto hash. */
+/** Resolve a tile's icon color: preset color, or the project's auto hash. */
 export function projectIconCss(color: string | undefined, projectId: string): string {
-  if (color && color !== "auto" && color in COLOR_HUES) {
-    return `hsl(${COLOR_HUES[color as Exclude<ProjectIconColorKey, "auto">]} 45% 52%)`;
-  }
-  return autoProjectIconColor(projectId);
+  const { h, s, l } = resolveColorSpec(color, projectId);
+  return `hsl(${h} ${s}% ${l}%)`;
 }
 
 /** BADGE FILL (2026-11-14): the tile glyph now sits on a filled rounded
@@ -90,11 +132,8 @@ export function projectIconFillCss(
   projectId: string,
   active = false,
 ): string {
-  const h =
-    color && color !== "auto" && color in COLOR_HUES
-      ? COLOR_HUES[color as Exclude<ProjectIconColorKey, "auto">]
-      : autoProjectIconHue(projectId);
-  return `hsl(${h} 45% 52% / ${active ? 0.26 : 0.16})`;
+  const { h, s, l } = resolveColorSpec(color, projectId);
+  return `hsl(${h} ${s}% ${l}% / ${active ? 0.26 : 0.16})`;
 }
 
 // ---------------------------------------------------------------------------

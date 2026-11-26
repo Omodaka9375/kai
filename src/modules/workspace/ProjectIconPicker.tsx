@@ -94,6 +94,15 @@ export function ProjectIconPicker({
     pendingColor && pendingColor !== "auto" ? pendingColor : undefined,
     project.id,
   );
+  const previewTint = projectIconFillCss(
+    pendingColor && pendingColor !== "auto" ? pendingColor : undefined,
+    project.id,
+    true,
+  );
+  const activeColorLabel =
+    pendingColor === "auto" || !pendingColor
+      ? "Auto color"
+      : (PROJECT_ICON_COLORS.find((c) => c.key === pendingColor)?.label ?? pendingColor);
 
   const applyColor = (color: string) => {
     setPendingColor(color);
@@ -112,12 +121,15 @@ export function ProjectIconPicker({
           </DialogDescription>
         </DialogHeader>
 
-        {/* Live preview: the tile is 17px, so the choice needs a bigger
-            surface to be judgeable. */}
-        <div className="flex items-center gap-3 rounded-lg border border-border/60 bg-accent/40 px-3 py-2">
+        {/* Live preview: shows both the icon badge and the active header/card
+            tint so the chosen color can be judged across both surfaces. */}
+        <div
+          className="flex items-center gap-3 rounded-lg border border-border/60 px-3 py-2"
+          style={{ background: previewFill }}
+        >
           <span
             className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border/70"
-            style={{ background: previewFill, color: previewColor }}
+            style={{ background: previewTint, color: previewColor }}
           >
             <HugeiconsIcon
               icon={previewIcon ?? Folder01Icon}
@@ -130,21 +142,20 @@ export function ProjectIconPicker({
             <div className="text-muted-foreground">
               {project.icon ? iconDisplayName(project.icon) : "Folder (default)"}
               {" · "}
-              {pendingColor === "auto" ? "auto color" : pendingColor}
+              {activeColorLabel}
             </div>
           </div>
         </div>
 
-        {/* Color row: Auto + the 8 preset hues, all in the muted 45%/52%
-            family the rail already uses. */}
-        <div className="flex items-center gap-1.5">
+        {/* Color grid: Auto + 19 distinct presets across 2 balanced rows of 10. */}
+        <div className="grid grid-cols-10 justify-items-center gap-1.5">
           <button
             type="button"
             aria-label="Automatic color"
             title="Automatic color"
             onClick={() => applyColor("auto")}
             className={cn(
-              "flex size-6 items-center justify-center rounded-full border text-[9px] font-medium",
+              "flex size-6 items-center justify-center rounded-full border text-[9px] font-medium transition-transform hover:scale-110",
               (pendingColor ?? "auto") === "auto"
                 ? "border-foreground/70 ring-2 ring-primary/40"
                 : "border-border/70",
