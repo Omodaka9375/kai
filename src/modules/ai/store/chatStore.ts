@@ -196,6 +196,14 @@ function friendlyErrorText(msg: string): string | null {
       "running and the URL is reachable."
     );
   }
+  if (/error decoding response body|connection closed before message completed/i.test(msg)) {
+    return (
+      "The provider connection dropped mid-stream (transport error). The " +
+      "conversation history is intact; press Retry - a fresh connection " +
+      "usually succeeds. If it repeats, the provider or an intermediate " +
+      "proxy is unstable; try switching models."
+    );
+  }
   if (/enginecore/i.test(msg)) {
     return (
       msg +

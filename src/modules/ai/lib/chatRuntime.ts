@@ -27,7 +27,11 @@ import type { StackInfo } from "../lib/stackDetector";
 import { detectStack } from "../lib/stackDetector";
 import { createContextAwareTransport, getSessionFenceState } from "../lib/transport";
 import { fence } from "../lib/fence";
-import { isContextOverflowError, isStallError } from "../lib/dsmlMiddleware";
+import {
+  isContextOverflowError,
+  isStallError,
+  isTransientTransportError,
+} from "../lib/dsmlMiddleware";
 import { appendSessionEvent } from "../lib/sessionEvents";
 import { loadShadow, withShadowRedirect } from "../lib/shadow";
 import { FileTracker } from "../lib/fileTracker";
@@ -624,7 +628,14 @@ export function makeChatSync(
         // the error card below - an already-minimal history cannot shrink
         // further and an infinite retry loop would just burn requests.
       }
-      if (isStallError(e) && isActive()) {
+      // TRANSIENT TRANSPORT DROPS (2026-11-26): reqwest's "error decoding
+      // response body" and its siblings are the same recovery class as a
+      // stall - a fresh connection over the same history usually succeeds.
+      // Shares the stall retry budget (never an unbounded retry loop).
+      if (
+        (isStallError(e) || isTransientTransportError(e)) &&
+        isActive()
+      ) {
         const MAX_STALL_RETRIES = 2;
         if (stallRetriesRef.current < MAX_STALL_RETRIES) {
           const outcome = deps.compactSession?.(sessionId) ?? deps.compactActiveSession();

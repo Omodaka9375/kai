@@ -128,6 +128,34 @@ export function isStallError(err: unknown): boolean {
   return msg.includes(STALL_SIGNATURE);
 }
 
+/** TRANSIENT TRANSPORT DROPS (2026-11-26 group-chat report: "Something went
+ *  wrong. error decoding response body"). The Rust proxy streams provider
+ *  bytes over reqwest; a mid-stream hiccup (engine reset the connection,
+ *  proxy closed early, chunked decode failed) surfaces as reqwest's
+ *  "error decoding response body" / "error reading a body from connection"
+ *  / hyper's "connection reset" / "connection closed before message
+ *  completed". These are the same failure class as a stall - the request
+ *  itself is healthy and a fresh connection over the same history usually
+ *  succeeds - so chatRuntime routes them into the SAME bounded
+ *  compact-or-retry recovery instead of the manual error card. */
+const TRANSPORT_DROP_MARKERS = [
+  "error decoding response body",
+  "error reading a body from connection",
+  "connection reset",
+  "connection closed before message completed",
+];
+
+export function isTransientTransportError(err: unknown): boolean {
+  const msg =
+    err instanceof Error
+      ? err.message
+      : typeof err === "string"
+        ? err
+        : String((err as { message?: unknown })?.message ?? "");
+  const lower = msg.toLowerCase();
+  return TRANSPORT_DROP_MARKERS.some((m) => lower.includes(m));
+}
+
 /** True when an error is a CONTEXT-OVERFLOW rejection: the provider refused
  *  the request because the prompt exceeds the model's window. These deserve
  *  the same automatic compact-and-retry recovery stalls get - without it a
