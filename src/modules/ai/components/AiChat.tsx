@@ -44,8 +44,9 @@ import type {
   UIMessage,
   UIMessagePart,
 } from "ai";
-import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Fragment } from "react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import type { StickToBottomContext } from "use-stick-to-bottom";
 import { AiToolApproval } from "./AiToolApproval";
 import { MediaMessage, isMediaOutput, isGeneratingMedia } from "./MediaMessage";
@@ -58,6 +59,37 @@ import {
   stripUserContextBlocks,
   type ContextChip,
 } from "../lib/chatText";
+
+/** Render an error display string with any http(s) URL rendered as a clickable
+ *  link (opens in the system browser via the opener plugin). Long URL text
+ *  otherwise stretches the message bubble; we wrap the link and break it. */
+function renderErrorWithLinks(text: string): ReactNode {
+  const parts = text.split(/(https?:\/\/[^\s]+)/g);
+  return parts.map((part, i) => {
+    if (/^https?:\/\//.test(part)) {
+      let host = part;
+      try {
+        host = new URL(part).host;
+      } catch {
+        // keep raw
+      }
+      return (
+        <a
+          key={i}
+          href={part}
+          onClick={(e) => {
+            e.preventDefault();
+            void openUrl(part).catch(() => {});
+          }}
+          className="underline opacity-90 hover:opacity-100"
+        >
+          {host}
+        </a>
+      );
+    }
+    return <Fragment key={i}>{part}</Fragment>;
+  });
+}
 
 function ForkButton({ messageIndex }: { messageIndex: number }) {
   const forkSession = useChatStore((s) => s.forkSession);
@@ -579,10 +611,10 @@ export function AiChatView({
           <ContinueRow onContinue={onContinue} />
         )}
         {error && (
-          <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          <div className="max-w-full overflow-hidden rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
             <div className="font-medium">Something went wrong.</div>
-            <div className="mt-0.5 whitespace-pre-wrap leading-relaxed opacity-90">
-              {errorDisplay}
+            <div className="mt-0.5 whitespace-pre-wrap break-words leading-relaxed opacity-90">
+              {renderErrorWithLinks(errorDisplay)}
             </div>
             <div className="mt-1.5 flex items-center gap-3">
               <button

@@ -4,6 +4,32 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [3.5.5]
+
+- MemoChain: the fold now counts tool call inputs, tool result outputs, approval blocks, reasoning and string content, so tool-heavy sessions actually reach the hot limit (previously they silently never folded).
+- MemoChain: fold trims the model-bound window (folded prefixs never ride the request again) and the store dedupes re-folds, so an interleaved pre-run/mid-run fold cannot double-count the capsule.
+- MemoChain: meta race closed with a per-session write lock; meta.folded_hashes and meta.step reconcile across concurrent folds.
+- MemoChain: `memochain_session_info` lazily reads the bundled weights file instead of re-hashing the 3.6 MB blob on every 5s UI poll.
+- MemoChain: the mid-run fold keeps system-role messages intact (never folded or dropped).
+- MemoChain: fold status/integrity shown in the context dropdown (hot window, steps, folded count) for durable-memory sessions; badge replaces the context ring.
+- MemoChain: fold notice says "folded, not elided"; a locally-derived fact sheet replaces the never-implemented LLM rolling summary; truthful copy everywhere.
+- MemoChain: context budgets scale with the model context limit (min 1k/500 floors), and the 1M-context cap keeps MemoChain folding on big models.
+- MemoChain: browser-safe WebCrypto hashing (node:crypto can't ship in the browser bundle).
+- Group chat: the main AI input bar doubles as the group input while a group owns the rail - the panel composer is removed and the input-bar gap is fixed.
+- Group chat: the coordinator authors its own transcript lines instead of the recipient.
+- Group chat: coordinator gains stop_participants and close_group tools (approval-gated).
+- Group chat: deliveries render as a collapsed group pill in project chat, not watch fires or raw bubbles.
+- Approvals: pending approvals count only responded parts on the live tail (stale history no longer pins sessions busy).
+- Recovery: transient transport drops (error decoding response body) get stall-class auto-retry and a friendly error card.
+- Workspaces: grid adapts to open-project count (1x1, 1x2, 2x4, 3x8) with a 24-cell cap and a safe overflow notice.
+- Workspaces: hands-free voice transcripts auto-submit in Allow mode like the main composer.
+- Workspaces: project icon palette expanded (19 presets).
+- AI: `effectiveAuthorityGrants` returns a stable empty array (React #185 fix) for untrusted projects.
+- UI: polish AI input bars (stop square on the right of the box, allow pill left, multi-line inputs collapse/expand correctly), Workspaces cards (same pattern), context popover (slimmed, quicker read), and compact ModelPicker.
+- UI: macOS header traffic-light padding so the traffic lights clear the sidebar toggle; overlay title bar explicitly enabled.
+
+---
+
 ## [3.5.4]
 
 - MemoChain durable memory is now EMBEDDED (2026-11-26): the Proxy endpoint model slot (3.5.3) is REMOVED and replaced by a per-model "Durable memory (MemoChain)" toggle in Settings -> Models. No external proxy process, no base URL/model id configuration - the memory fold runs in-process against weights bundled with the app (3.6 MB distilled student model, SHA-256-verified on load).
