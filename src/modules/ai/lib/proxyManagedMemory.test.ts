@@ -88,8 +88,9 @@ describe("memoChain sessions disable local context handling (source pins)", () =
     // prepareStep re-elision carries the same gate + mid-run fold.
     const prepareStep = src.split("MEMOCHAIN-MANAGED MEMORY: same gate")[1]?.split("// USER-MESSAGE IMAGE HANDOFF")[0] ?? "";
     expect(prepareStep).toContain("memoChain");
-    // The memory block rides the system prompt.
-    expect(src).toContain("memoChainMemoryBlock");
+    // The memory sections ride the system prompt (stable summary) + pre-last-user recall.
+    expect(src).toContain("memoChainMemorySections");
+    expect(src).toContain("injectRecalledBeforeLastUser");
   });
 
   it("transport.ts maybeSummarize stands down for memoChain sessions", () => {

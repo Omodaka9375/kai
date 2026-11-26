@@ -1,6 +1,7 @@
 import AiBrain01Icon from "@hugeicons/core-free-icons/AiBrain01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { cn } from "@/lib/utils";
+import { usePreferencesStore } from "@/modules/settings/preferences";
 import { isProxyManagedModel } from "../config";
 
 /**
@@ -24,6 +25,8 @@ export function MemoChainBadge({
    *  pill) to match their adjacent model labels. */
   size?: number;
 }) {
+  // Subscribe so toggling a model in Settings updates mounted badges live.
+  usePreferencesStore((s) => s.memoChainModelIds);
   if (!isProxyManagedModel(modelId)) return null;
   return (
     <span

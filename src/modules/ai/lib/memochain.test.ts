@@ -23,7 +23,10 @@ import {
   MEMOCHAIN_MAX_DOC_CHARS,
   MEMOCHAIN_RECALL_TOP_K,
   decideFold,
+  foldMessages,
+  injectRecalledBeforeLastUser,
   memoChainFoldPrefix,
+  memoChainMemorySections,
   estimateTokens,
   evictionGroups,
   foldLimitsFor,
@@ -279,6 +282,17 @@ describe("foldLimitsFor (custom-endpoint context scaling, 2026-11-26)", () => {
     expect(l.keepMin).toBeLessThanOrEqual(l.hotLimit);
   });
 
+  it("caps 1M-context cloud models at 80k/40k so MemoChain still folds", () => {
+    expect(foldLimitsFor(1_000_000)).toEqual({
+      hotLimit: MEMOCHAIN_HOT_LIMIT,
+      keepMin: MEMOCHAIN_KEEP_MIN,
+    });
+    expect(foldLimitsFor(200_000)).toEqual({
+      hotLimit: MEMOCHAIN_HOT_LIMIT,
+      keepMin: MEMOCHAIN_KEEP_MIN,
+    });
+  });
+
   it("decideFold fires under a scaled hot limit (small-window fold works)", () => {
     // 30k-token history against an 8k window: with the DEFAULT 80k limit this
     // never folds; with foldLimitsFor it must evict down to the keep floor.
@@ -364,5 +378,154 @@ describe("memoChainFactSheet (honesty pass: locally-derived summary, 2026-11-26)
     const { memoChainFactSheet } = await import("./memochain");
     await memoChainFactSheet("s-sheet2", []);
     expect(native.memochainSetSummary).not.toHaveBeenCalled();
+  });
+
+  it("keeps the NEWEST 2000 chars when merged summary exceeds the cap", async () => {
+    const { native } = await import("./native");
+    vi.mocked(native.memochainSetSummary).mockClear();
+    vi.mocked(native.memochainSessionInfo).mockResolvedValue({
+      exists: true,
+      step: 5,
+      stateDigest: "d",
+      accumulator: "a",
+      summary: "OLD_SENTINEL_" + "a".repeat(1990),
+      foldedHashes: [],
+      weightsDigest: null,
+      tampered: false,
+    });
+    vi.mocked(native.memochainSetSummary).mockResolvedValue(true);
+    const { memoChainFactSheet } = await import("./memochain");
+    await memoChainFactSheet("s-sheet-cap", [user("BRAND_NEW_ASK_MARKER")]);
+    const written = vi.mocked(native.memochainSetSummary).mock.calls[0]?.[1] ?? "";
+    expect(written.length).toBeLessThanOrEqual(2000);
+    expect(written).toContain("BRAND_NEW_ASK_MARKER");
+    expect(written).not.toContain("OLD_SENTINEL_");
+  });
+});
+
+describe("regression guards (2026-11-26 audit fixes)", () => {
+  it("preserves leading system messages during mid-run prepareStep fold", async () => {
+    const { native } = await import("./native");
+    vi.mocked(native.memochainSessionInfo).mockResolvedValue({
+      exists: false,
+      step: 0,
+      stateDigest: "",
+      accumulator: "",
+      summary: "",
+      foldedHashes: [],
+      weightsDigest: null,
+      tampered: false,
+    });
+    vi.mocked(native.memochainFold).mockClear();
+    vi.mocked(native.memochainFold).mockResolvedValue({
+      step: 5,
+      stateDigest: "s5",
+      weightsDigest: "w",
+      receiptRows: 5,
+      chunkCount: 5,
+      docsFolded: 5,
+    });
+    const sysMsg: ModelMessage = { role: "system", content: "SYSTEM_PROMPT_MUST_SURVIVE" };
+    const conv = Array.from(
+      { length: 200 },
+      (_, i) => user(`turn ${i} ${"x".repeat(200)}`),
+    );
+    const stepMessages: ModelMessage[] = [sysMsg, ...conv];
+    const res = await memoChainFoldPrefix("s-prep", stepMessages, 8_000);
+    expect(res).not.toBeNull();
+    // System message stays verbatim at index 0 and is NEVER sent to memochainFold.
+    expect(res!.trimmedMessages[0]).toBe(sysMsg);
+    const foldedEntries = vi.mocked(native.memochainFold).mock.calls[0]?.[1] ?? [];
+    expect(foldedEntries.some((e) => e.role === "system")).toBe(false);
+    expect(foldedEntries.some((e) => e.text.includes("SYSTEM_PROMPT_MUST_SURVIVE"))).toBe(false);
+  });
+
+  it("strips already-folded prefix on subsequent turns without re-folding or repeating notices", async () => {
+    const { native } = await import("./native");
+    const msgs = Array.from({ length: 10 }, (_, i) => user(`turn ${i} ${"x".repeat(40)}`));
+    const alreadyHashes = await Promise.all(msgs.slice(0, 4).map((m) => messageHash(m)));
+    vi.mocked(native.memochainSessionInfo).mockResolvedValue({
+      exists: true,
+      step: 4,
+      stateDigest: "d4",
+      accumulator: "a4",
+      summary: "earlier",
+      foldedHashes: alreadyHashes,
+      weightsDigest: null,
+      tampered: false,
+    });
+    vi.mocked(native.memochainFold).mockClear();
+    // Total hot tail is well under limit, so NO new fold should run — only strip.
+    const res = await memoChainFoldPrefix("s-strip", msgs, 128_000);
+    expect(res).not.toBeNull();
+    expect(res!.alreadyFolded).toBe(4);
+    expect(res!.foldedMessages).toBe(0);
+    expect(res!.newlyFolded).toEqual([]);
+    expect(res!.trimmedMessages).toEqual(msgs.slice(4));
+    expect(native.memochainFold).not.toHaveBeenCalled();
+  });
+
+  it("foldMessages indexes tool-only messages via messageWeightText so hashes and outputs are retained", async () => {
+    const { native } = await import("./native");
+    vi.mocked(native.memochainFold).mockClear();
+    vi.mocked(native.memochainFold).mockResolvedValue({
+      step: 2,
+      stateDigest: "d2",
+      weightsDigest: "w",
+      receiptRows: 2,
+      chunkCount: 2,
+      docsFolded: 2,
+    });
+    const msgs: ModelMessage[] = [
+      {
+        role: "assistant",
+        content: [
+          { type: "tool-call", toolCallId: "c1", toolName: "read_file", input: { path: "src/app.ts" } },
+        ],
+      } as unknown as ModelMessage,
+      {
+        role: "tool",
+        content: [
+          { type: "tool-result", toolCallId: "c1", toolName: "read_file", output: "export const PORT = 8080;" },
+        ],
+      } as unknown as ModelMessage,
+    ];
+    await foldMessages("s-tool", msgs);
+    const entries = vi.mocked(native.memochainFold).mock.calls[0]?.[1] ?? [];
+    expect(entries).toHaveLength(2);
+    expect(entries[0].text).toContain("src/app.ts");
+    expect(entries[1].text).toContain("PORT = 8080");
+    expect(entries[0].msgHash).toBe(await messageHash(msgs[0]));
+    expect(entries[1].msgHash).toBe(await messageHash(msgs[1]));
+  });
+
+  it("splits stable summary from per-turn recalled chunks and injects recall before the last user turn", async () => {
+    const { native } = await import("./native");
+    vi.mocked(native.memochainRecall).mockResolvedValue({
+      summary: "Earlier asks:\n- build server",
+      step: 3,
+      stateDigest: "d3",
+      chunks: [{ score: 0.91, step: 1, role: "user", text: "use port 8080" }],
+    });
+    const fenceState = {
+      nonces: { tool: "t1", web: "w1", watch: "wa1", mcp: "m1" },
+    } as unknown as import("./fence").FenceState;
+    const history: ModelMessage[] = [
+      user("first ask"),
+      { role: "assistant", content: "first reply" } as ModelMessage,
+      user("which port?"),
+    ];
+    const sections = await memoChainMemorySections("s-split", history, fenceState);
+    expect(sections).not.toBeNull();
+    expect(sections!.summaryBlock).toContain("build server");
+    expect(sections!.summaryBlock).not.toContain("use port 8080");
+    expect(sections!.recalledBlock).toContain("use port 8080");
+    expect(sections!.recalledBlock).toContain("[start tool_t1]");
+
+    const injected = injectRecalledBeforeLastUser(history, sections!.recalledBlock);
+    expect(injected).toHaveLength(4);
+    expect(injected[2].role).toBe("user");
+    expect(String(injected[2].content)).toContain("use port 8080");
+    expect(injected[3]).toBe(history[2]);
   });
 });

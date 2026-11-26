@@ -987,6 +987,7 @@ const CardContextRing = memo(function CardContextRing({
   );
   usePreferencesStore((s) => s.projectModelIds);
   usePreferencesStore((s) => s.defaultModelId);
+  usePreferencesStore((s) => s.memoChainModelIds);
 
   const modelId = getProjectEffectiveModelId(projectId, sessionId);
   const meta = getSessionAgentMeta(sessionId);

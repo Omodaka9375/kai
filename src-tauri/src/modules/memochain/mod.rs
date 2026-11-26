@@ -29,10 +29,26 @@ use core::{
     Capsule, ChainHead, ReceiptRow, StudentWriter, EXPECTED_WEIGHTS_SHA256, STATE_PARAMS,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 use tauri::Manager;
+
+/// Per-session mutex table so concurrent IPC calls (memochain_fold vs
+/// memochain_set_summary / memochain_delete) on the same session serialize
+/// their read-modify-write on meta.json + capsule.bin instead of clobbering
+/// step/state_digest and tripping tamper detection.
+fn session_lock(session_id: &str) -> Arc<Mutex<()>> {
+    static LOCKS: OnceLock<Mutex<HashMap<String, Arc<Mutex<()>>>>> = OnceLock::new();
+    let key = sanitize_session_id(session_id);
+    let map = LOCKS.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut guard = map.lock().unwrap_or_else(|e| e.into_inner());
+    guard
+        .entry(key)
+        .or_insert_with(|| Arc::new(Mutex::new(())))
+        .clone()
+}
 
 /// Per-message clipping before embedding (matches Python `max_doc_chars`).
 const MAX_DOC_CHARS: usize = 2000;
@@ -318,6 +334,8 @@ pub fn memochain_fold(
     session_id: String,
     entries: Vec<FoldEntry>,
 ) -> Result<MemoChainFoldResult, String> {
+    let lock = session_lock(&session_id);
+    let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
     let w = load_weights(&app)?;
     let writer = StudentWriter::from_bytes(&w.bytes)?;
     let dir = session_dir(&app, &session_id)?;
@@ -491,6 +509,8 @@ pub fn memochain_set_summary(
     session_id: String,
     summary: String,
 ) -> Result<bool, String> {
+    let lock = session_lock(&session_id);
+    let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
     let dir = session_dir(&app, &session_id)?;
     let mut meta = read_meta(&dir).ok_or("session has no meta (fold first)")?;
     meta.summary = summary;
@@ -553,12 +573,7 @@ pub struct MemoChainVerifyResult {
     pub capsule_bytes: usize,
 }
 
-#[tauri::command]
-pub fn memochain_verify(
-    app: tauri::AppHandle,
-    session_id: String,
-) -> Result<MemoChainVerifyResult, String> {
-    let dir = session_dir(&app, &session_id)?;
+fn verify_session_dir(dir: &Path) -> MemoChainVerifyResult {
     let mut res = MemoChainVerifyResult {
         ok: false,
         error: None,
@@ -575,67 +590,100 @@ pub fn memochain_verify(
         Ok(r) => r,
         Err(_) => {
             res.error = Some("missing capsule".into());
-            return Ok(res);
+            return res;
         }
     };
     res.capsule_bytes = cap_raw.len();
-    let Some(meta) = read_meta(&dir) else {
+    let Some(meta) = read_meta(dir) else {
         res.error = Some("missing meta".into());
-        return Ok(res);
+        return res;
     };
     let cap = match Capsule::from_bytes(&cap_raw) {
         Ok(c) => c,
         Err(e) => {
             res.error = Some(e);
-            return Ok(res);
+            return res;
         }
     };
     res.step = cap.step;
     res.state_matches_meta = core::state_digest(&cap.state) == meta.state_digest;
-    res.head_matches_meta = cap.head == meta.accumulator;
+    res.head_matches_meta = cap.head == meta.accumulator && cap.step == meta.step;
 
     // Replay the binding chain from receipts.jsonl (Python verify semantics).
+    // A capsule at step > 0 MUST have matching sequential receipts; missing or
+    // truncated receipts.jsonl must fail verification instead of passing.
     let mut acc = "0".repeat(64);
-    if let Ok(body) = fs::read_to_string(dir.join("receipts.jsonl")) {
-        for line in body.lines() {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            let row: serde_json::Value = match serde_json::from_str(line) {
-                Ok(v) => v,
-                Err(e) => {
+    let mut expected_step: u64 = 1;
+    match fs::read_to_string(dir.join("receipts.jsonl")) {
+        Ok(body) => {
+            for line in body.lines() {
+                let line = line.trim();
+                if line.is_empty() {
+                    continue;
+                }
+                let row: serde_json::Value = match serde_json::from_str(line) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        res.receipt_chain_ok = false;
+                        res.error = Some(format!("bad receipt row: {e}"));
+                        break;
+                    }
+                };
+                res.receipt_rows += 1;
+                let step = row["step"].as_u64().unwrap_or(0);
+                if step != expected_step {
                     res.receipt_chain_ok = false;
-                    res.error = Some(format!("bad receipt row: {e}"));
+                    res.error = Some(format!(
+                        "receipt step out of order: expected {expected_step}, got {step}"
+                    ));
                     break;
                 }
-            };
-            res.receipt_rows += 1;
-            let step = row["step"].as_u64().unwrap_or(0);
-            let doc_hash = row["doc_hash"].as_str().unwrap_or("");
-            let state_digest = row["state_digest"].as_str().unwrap_or("");
-            let binding_expected = row["binding"].as_str().unwrap_or("");
-            let accumulator_expected = row["accumulator"].as_str().unwrap_or("");
-            let binding = core::sha256_hex(
-                format!("{step}|{acc}|{doc_hash}|{state_digest}").as_bytes(),
-            );
-            acc = core::sha256_hex(format!("{acc}{binding}").as_bytes());
-            if binding != binding_expected || acc != accumulator_expected {
-                res.receipt_chain_ok = false;
-                break;
+                expected_step += 1;
+                let doc_hash = row["doc_hash"].as_str().unwrap_or("");
+                let state_digest = row["state_digest"].as_str().unwrap_or("");
+                let binding_expected = row["binding"].as_str().unwrap_or("");
+                let accumulator_expected = row["accumulator"].as_str().unwrap_or("");
+                let binding = core::sha256_hex(
+                    format!("{step}|{acc}|{doc_hash}|{state_digest}").as_bytes(),
+                );
+                acc = core::sha256_hex(format!("{acc}{binding}").as_bytes());
+                if binding != binding_expected || acc != accumulator_expected {
+                    res.receipt_chain_ok = false;
+                    break;
+                }
             }
         }
+        Err(_) if cap.step > 0 => {
+            res.receipt_chain_ok = false;
+            res.error = Some("missing receipts.jsonl".into());
+        }
+        Err(_) => {}
     }
-    res.receipt_head_matches = res.receipt_rows == 0 || acc == cap.head;
+    res.receipt_head_matches = if cap.step == 0 {
+        res.receipt_rows == 0
+    } else {
+        res.receipt_rows as u64 == cap.step && acc == cap.head
+    };
     res.ok = res.state_matches_meta
         && res.head_matches_meta
         && res.receipt_chain_ok
         && res.receipt_head_matches;
-    Ok(res)
+    res
+}
+
+#[tauri::command]
+pub fn memochain_verify(
+    app: tauri::AppHandle,
+    session_id: String,
+) -> Result<MemoChainVerifyResult, String> {
+    let dir = session_dir(&app, &session_id)?;
+    Ok(verify_session_dir(&dir))
 }
 
 #[tauri::command]
 pub fn memochain_delete(app: tauri::AppHandle, session_id: String) -> Result<bool, String> {
+    let lock = session_lock(&session_id);
+    let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
     let dir = session_dir(&app, &session_id)?;
     if dir.exists() {
         fs::remove_dir_all(&dir).map_err(|e| format!("remove session failed: {e}"))?;
@@ -784,5 +832,77 @@ mod tests {
             }
         }
         assert!(!ok);
+    }
+
+    #[test]
+    fn verify_rejects_missing_or_empty_receipts_and_step_mismatch() {
+        let w_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("resources/memochain/weights.bin");
+        let raw = fs::read(&w_path).unwrap();
+        let writer = StudentWriter::from_bytes(&raw).unwrap();
+
+        let dir = std::env::temp_dir().join(format!(
+            "kai-memochain-verify-test-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let embed = core::hash_embed("verify receipt presence");
+        let q14 = core::embed_to_q14(&embed);
+        let (state, r1, h1) = writer.fold_doc_with_receipt(&core::zero_state(), &q14, None);
+        let cap = Capsule {
+            state,
+            step: h1.step,
+            head: h1.accumulator.clone(),
+        };
+        fs::write(dir.join("capsule.bin"), cap.to_bytes().unwrap()).unwrap();
+        let meta = Meta {
+            session_id: "s-verify".into(),
+            step: h1.step,
+            state_digest: h1.state_digest.clone(),
+            accumulator: h1.accumulator.clone(),
+            folded_hashes: vec!["h1".into()],
+            summary: String::new(),
+            weights_digest: writer.weights_digest(),
+            updated_at: now_iso(),
+        };
+        write_meta(&dir, &meta).unwrap();
+
+        // 1. Missing receipts.jsonl MUST fail when step > 0.
+        let missing = verify_session_dir(&dir);
+        assert!(!missing.ok);
+        assert!(!missing.receipt_chain_ok);
+        assert!(!missing.receipt_head_matches);
+
+        // 2. Empty receipts.jsonl MUST also fail when step > 0.
+        fs::write(dir.join("receipts.jsonl"), "").unwrap();
+        let empty = verify_session_dir(&dir);
+        assert!(!empty.ok);
+        assert!(!empty.receipt_head_matches);
+
+        // 3. Valid receipts.jsonl passes.
+        let valid_row = serde_json::to_string(&ReceiptJson {
+            step: r1.step,
+            doc_hash: r1.doc_hash.clone(),
+            state_digest: r1.state_digest.clone(),
+            binding: r1.binding.clone(),
+            accumulator: r1.accumulator.clone(),
+        })
+        .unwrap();
+        fs::write(dir.join("receipts.jsonl"), format!("{valid_row}\n")).unwrap();
+        let ok = verify_session_dir(&dir);
+        assert!(ok.ok, "expected valid session to pass: {:?}", ok);
+        assert_eq!(ok.receipt_rows, 1);
+
+        // 4. Meta step mismatch fails even when digest/head match.
+        let mut bad_meta = meta;
+        bad_meta.step = 99;
+        write_meta(&dir, &bad_meta).unwrap();
+        let mismatch = verify_session_dir(&dir);
+        assert!(!mismatch.ok);
+        assert!(!mismatch.head_matches_meta);
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

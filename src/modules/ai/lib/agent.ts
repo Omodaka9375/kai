@@ -32,7 +32,12 @@ import { buildTools, type ToolContext } from "../tools/tools";
 import { repairEditToolCallInput } from "../tools/edit";
 import { primeXBearerPresence, xBearerKnownAbsent } from "../tools/social";
 import { compactModelMessagesDetailed } from "./compact";
-import { memoChainFactSheet, memoChainFoldPrefix, memoChainMemoryBlock } from "./memochain";
+import {
+  injectRecalledBeforeLastUser,
+  memoChainFactSheet,
+  memoChainFoldPrefix,
+  memoChainMemorySections,
+} from "./memochain";
 import {
   modelCanSee,
   swapImagePartsToText,
@@ -805,22 +810,20 @@ export async function runAgentStream(opts: RunAgentOptions) {
     const folded = await memoChainFoldPrefix(memoSessionId, history, contextLimit);
     if (folded) {
       historyForRun = folded.trimmedMessages;
-      appendSessionEvent(memoSessionId, {
-        kind: "compact",
-        droppedCount: folded.foldedMessages,
-        contextLimit,
-      });
-      // MEMO-FOLD NOTICE (2026-11-26 honesty pass): the fold moves the
-      // prefix into the durable-memory capsule - it is NOT the local
-      // elider. Surface it with its own kind so the UI never tells the
-      // user these messages were "elided to save tokens" (they are
-      // retrievable verbatim via the chunk store).
-      opts.onCompact?.({ droppedCount: folded.foldedMessages, kind: "memo-fold" });
-      // FACT SHEET (honesty pass): locally-derived digest of the folded
-      // prefix (user asks, touched files, tools) - the honest replacement
-      // for the never-implemented proxy-era LLM "rolling summary".
-      // Fire-and-forget; fail-open inside.
-      void memoChainFactSheet(memoSessionId, history.slice(0, history.length - folded.trimmedMessages.length));
+      if (folded.foldedMessages > 0) {
+        appendSessionEvent(memoSessionId, {
+          kind: "compact",
+          droppedCount: folded.foldedMessages,
+          contextLimit,
+        });
+        // MEMO-FOLD NOTICE (2026-11-26 honesty pass): only notify when NEW
+        // messages were folded into the capsule (stripping already-folded
+        // turns on later turns is silent).
+        opts.onCompact?.({ droppedCount: folded.foldedMessages, kind: "memo-fold" });
+        // FACT SHEET: await BEFORE reading memoChainMemorySections below so
+        // the fold turn sees its own fact sheet and never races meta.json.
+        await memoChainFactSheet(memoSessionId, folded.newlyFolded);
+      }
     }
   }
   const compact = memoChain
@@ -851,20 +854,27 @@ export async function runAgentStream(opts: RunAgentOptions) {
   const systemWithNotices = xUnconfigured
     ? `${systemContent}\n\n## X (Twitter) — NOT AVAILABLE\nThe social_read tool is disabled because no X developer Bearer token is configured. Do NOT try to read X/Twitter content. For social sentiment around a topic, use web_search or platform_reach (GitHub/Reddit/HN) instead; for X specifically, say the user can configure a token in Settings → Social → X (Twitter).`
     : systemContent;
-  // MEMOCHAIN MEMORY BLOCK: for a toggled session, inject the folded rolling
-  // summary + top-K verbatim recalled turns as a [Durable memory] section in
-  // the system prompt — the same shape the standalone proxy injected, so the
-  // model-side behavior is unchanged from the proxy era. Fenced like tool
-  // output (recalled chunks are stored text, i.e. untrusted-at-rest).
+  // MEMOCHAIN MEMORY BLOCK: keep the stable fact sheet in the system prompt
+  // (only changes on fold -> preserves prompt cache) and inject per-turn
+  // top-K recalled verbatim chunks right before the latest user message so
+  // changing query hits never invalidate the cached system prompt prefix.
+  // Recalled chunks are fenced like tool output (untrusted-at-rest data).
   let memoMemoryBlock: string | null = null;
+  let memoRecalledBlock: string | null = null;
   if (memoChain && memoSessionId) {
-    memoMemoryBlock = await memoChainMemoryBlock(memoSessionId, history, opts.fenceState ?? undefined);
+    const sections = await memoChainMemorySections(
+      memoSessionId,
+      history,
+      opts.fenceState ?? undefined,
+    );
+    memoMemoryBlock = sections?.summaryBlock ?? null;
+    memoRecalledBlock = sections?.recalledBlock ?? null;
   }
   const systemFinal = memoMemoryBlock
     ? `${systemWithNotices}\n\n${memoMemoryBlock}`
     : systemWithNotices;
   const messages: ModelMessage[] = [{ role: "system", content: systemFinal }];
-  messages.push(...compactedHistory);
+  messages.push(...injectRecalledBeforeLastUser(compactedHistory, memoRecalledBlock));
 
   const finalMessages = applyCacheBreakpoints(messages, provider);
 
@@ -1144,14 +1154,15 @@ export async function runAgentStream(opts: RunAgentOptions) {
         const stepFold = await memoChainFoldPrefix(memoSessionId, messages, contextLimit);
         if (stepFold) {
           messages = stepFold.trimmedMessages;
-          appendSessionEvent(memoSessionId, {
-            kind: "compact",
-            droppedCount: stepFold.foldedMessages,
-            contextLimit,
-          });
-          opts.onCompact?.({ droppedCount: stepFold.foldedMessages, kind: "memo-fold" });
-          const stepFoldedCount = stepMessages.length - stepFold.trimmedMessages.length;
-          void memoChainFactSheet(memoSessionId, stepMessages.slice(0, stepFoldedCount));
+          if (stepFold.foldedMessages > 0) {
+            appendSessionEvent(memoSessionId, {
+              kind: "compact",
+              droppedCount: stepFold.foldedMessages,
+              contextLimit,
+            });
+            opts.onCompact?.({ droppedCount: stepFold.foldedMessages, kind: "memo-fold" });
+            await memoChainFactSheet(memoSessionId, stepFold.newlyFolded);
+          }
         }
       }
       // USER-MESSAGE IMAGE HANDOFF: vision model on a compat wire — splice

@@ -43,6 +43,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import { usePreferencesStore } from "@/modules/settings/preferences";
 import { SandboxBadge } from "./SandboxBadge";
 import { MemoChainBadge } from "./MemoChainBadge";
 import { MemoChainContextRows } from "./MemoChainContextStats";
@@ -523,6 +524,8 @@ function ContextIndicator({ messages }: { messages: UIMessage[] }) {
   // embedded handler owns context memory (hot window + compact memory +
   // receipt chain), KAI's own summarization/compaction is off, and the
   // ring is informational only.
+  // Subscribe so toggling a model in Settings swaps the indicator live.
+  usePreferencesStore((s) => s.memoChainModelIds);
   const proxyManaged = isProxyManagedModel(modelId);
   // estimateTokens is WeakMap-cached per historical message, and this effect
   // only recomputes immediately when the message COUNT changes (new turn /
