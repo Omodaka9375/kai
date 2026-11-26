@@ -14,22 +14,17 @@ import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon";
 import LeftToRightBlockQuoteIcon from "@hugeicons/core-free-icons/LeftToRightBlockQuoteIcon";
 import Logout03Icon from "@hugeicons/core-free-icons/Logout03Icon";
 import Link01Icon from "@hugeicons/core-free-icons/Link01Icon";
-import Mic01Icon from "@hugeicons/core-free-icons/Mic01Icon";
 import MinusSignIcon from "@hugeicons/core-free-icons/MinusSignIcon";
 import PencilEdit01Icon from "@hugeicons/core-free-icons/PencilEdit01Icon";
-import SentIcon from "@hugeicons/core-free-icons/SentIcon";
 import StopIcon from "@hugeicons/core-free-icons/StopIcon";
-import UserWarning01Icon from "@hugeicons/core-free-icons/UserWarning01Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { MessageResponse } from "@/components/ai-elements/message";
-import { Spinner } from "@/components/ui/spinner";
 import {
   Conversation,
   ConversationContent,
   ConversationScrollButton,
 } from "@/components/ai-elements/conversation";
 import type { StickToBottomContext } from "use-stick-to-bottom";
-import { useWhisperRecording } from "../hooks/useWhisperRecording";
 import { getProjectAgentStatus } from "../store/projectStatus";
 import { useAgentsStore } from "../store/agentsStore";
 import { BUILTIN_AGENTS } from "../lib/agents";
@@ -60,7 +55,6 @@ import {
   renameGroupChat,
   resumeGroupChat,
   setGroupAutoApprove,
-  sendGroupMessage,
   stopGroupParticipant,
   stopGroupParticipants,
   subscribeGroupChats,
@@ -73,10 +67,10 @@ import { CoordinatorMenu } from "./CoordinatorMenu";
 import { mirrorOpenGroupId } from "./ProjectChatGrid";
 import { InvitePicker, ParticipantsMenu, participantDisplayName } from "./GroupChatInvitePicker";
 import {
-  buildQuoteBlock,
   quoteExcerpt,
   splitQuoteBlock,
 } from "../lib/chatText";
+export { resolveGroupMentionTarget } from "../lib/groupMention";
 import { unfence } from "../lib/fence";
 import { useChatFontSize, installChatZoomShortcuts } from "../lib/chatFont";
 
@@ -414,7 +408,11 @@ export function GroupChatPanel({
             <Transcript group={active} />
             <GroupApprovals group={active} />
             <ActivityStrip group={active} />
-            <Composer group={active} />
+            {active.endedAt !== null ? (
+              <div className="shrink-0 border-t border-border/60 px-3 py-2 text-center text-[11px] text-muted-foreground">
+                Group ended - participants continue independently. Resume to re-open.
+              </div>
+            ) : null}
           </motion.div>
         ) : null}
       </AnimatePresence>
@@ -1161,442 +1159,11 @@ function TypingDots() {
   );
 }
 
-/**
- * Resolve the @-mention send target from message text (exported for tests).
- * RULE: default = ALL. A mention routes to an agent from ANYWHERE in the
- * message — beginning or mid-sentence. Every @token in the whole text is a
- * candidate; the LAST token that MATCHES a participant wins; stray
- * non-matching @tokens (paths, emails) never strip a real mention.
- */
-export function resolveGroupMentionTarget(
-  text: string,
-  participants: GroupParticipant[],
-): string | undefined {
-  const tokens = [...text.matchAll(/@([^\s]+)/g)];
-  if (tokens.length === 0) return undefined; // default: all
-  const matchParticipant = (raw: string) => {
-    const token = raw.toLowerCase();
-    return participants.find(
-      (p) =>
-        p.name.toLowerCase() === token ||
-        p.name
-          .toLowerCase()
-          .replace(/\s+/g, "")
-          .startsWith(token.replace(/\s+/g, "")) ||
-        p.name.toLowerCase().includes(token),
-    );
-  };
-  let hit: GroupParticipant | undefined;
-  for (const token of tokens) {
-    hit = matchParticipant(token[1]) ?? hit;
-  }
-  return hit ? hit.projectId : undefined; // default: all
-}
-
-function Composer({ group }: { group: GroupChat }) {
-  const [text, setText] = useState("");
-  const [sending, setSending] = useState(false);
-  // SHOULD 8: transient send-failure line (draft preserved on failure).
-  const [sendError, setSendError] = useState<string | null>(null);
-  // Reply-quote from the group transcript (right-click → Quote). The quote
-  // rides the sent text as a <quote author="..."> block so every participant
-  // agent sees WHO is being quoted from the earlier conversation.
-  const [pendingQuote, setPendingQuote] = useState<{
-    author: string;
-    text: string;
-  } | null>(null);
-  // ── @-MENTION TARGETING (replaces the "All" dropdown) ───────────────────
-  // Typing "@" at the caret opens a picker over the group's participants
-  // (plus "All" to clear targeting). Picking inserts "@Name " into the text.
-  // On send, the LAST @-mention in the text targets that participant (same
-  // single-target semantics the dropdown had); no mentions = everyone. The
-  // mention itself stays in the text so the targeted agent sees it addressed.
-  const [mention, setMention] = useState<{
-    open: boolean;
-    start: number;
-    query: string;
-  }>({
-    open: false,
-    start: 0,
-    query: "",
-  });
-  const textRef = useRef<HTMLTextAreaElement | null>(null);
-  const mentionCandidates = useMemo(() => {
-    const q = mention.query.toLowerCase();
-    const list = group.participants.filter((p) =>
-      !q ? true : p.name.toLowerCase().includes(q),
-    );
-    return list;
-  }, [group.participants, mention.query]);
-  const mentionIndexRef = useRef(0);
-  const [mentionIndex, setMentionIndex] = useState(0);
-  const mentionList =
-    mentionCandidates.length > 0 || mention.query
-      ? [{ id: "all" as const, name: "All" }, ...mentionCandidates]
-      : [];
-  // Pick a candidate: replace the "@query" token at mention.start with
-  // "@Name " ("All" inserts nothing — clearing targeting is the point).
-  // PURE UPDATER (2026-11-02 audit NIT): setText/queueMicrotask used to run
-  // INSIDE the setMention updater — React may call updaters twice (StrictMode
-  // double-invoke), so side effects belong outside. Compute from the CURRENT
-  // mention state, mutate text, then close the picker.
-  const pickMention = useCallback(
-    (name: string) => {
-      const m = mention;
-      if (!m.open) return;
-      const before = text.slice(0, m.start);
-      const insertion = name === "All" ? "" : `@${name} `;
-      const next =
-        before + insertion + text.slice(m.start + 1 + m.query.length);
-      setText(next);
-      setMention({ open: false, start: 0, query: "" });
-      // Restore the caret after the inserted mention.
-      queueMicrotask(() => {
-        const el = textRef.current;
-        if (el) {
-          el.focus();
-          const at = (before + insertion).length;
-          el.setSelectionRange(at, at);
-        }
-      });
-    },
-    [mention, text],
-  );
-  // Detect an open @-token at the caret on every edit.
-  const onTextChange = useCallback((value: string, caret: number) => {
-    const beforeCaret = value.slice(0, caret);
-    const m = /(^|\s)@([^\s]*)$/.exec(beforeCaret);
-    if (m) {
-      setMention((prev) => ({
-        ...prev,
-        open: true,
-        // start points AT the typed "@" (not at the first char after it):
-        // pickMention's insertion carries its own "@" (`@${name} `), so
-        // the replaced token range must swallow the typed one. Pointing
-        // past the "@" left it in place and the insert prepended a second
-        // one — a doubled "@@" in the composer.
-        start: caret - m[2].length - 1,
-        query: m[2],
-      }));
-      setMentionIndex(0);
-    } else {
-      setMention((prev) =>
-        prev.open ? { ...prev, open: false, query: "" } : prev,
-      );
-    }
-    setText(value);
-  }, []);
-  // Last @-mention in the text wins as the send target (null = all).
-  // @-TARGETING RULE (2026-10-31): default = ALL. A mention routes to an
-  // agent when it appears ANYWHERE in the message — at the beginning
-  // ("@alpha did the tests pass?") or mid-sentence ("hey, can @alpha check
-  // the build?"). Every @token in the WHOLE message is a candidate; the LAST
-  // token that MATCHES a participant wins. Non-matching tokens (a stray @
-  // in a path, an email, a typo) never override a real mention elsewhere
-  // in the sentence — the old last-token-only rule let "check test@2" strip
-  // a beginning "@alpha" target. See resolveGroupMentionTarget (exported).
-  const mentionedTarget = useMemo(
-    () => resolveGroupMentionTarget(text, group.participants),
-    [text, group.participants],
-  );
-  // The group panel is app-level; quote dispatches arrive via the same
-  // window-event seam the panel's other cross-surface entries use. Scope by
-  // groupId so quoting in one group doesn't seed another group's composer.
-  useEffect(() => {
-    const onQuote = (e: Event) => {
-      const detail = (
-        e as CustomEvent<{ groupId: string; author: string; text: string }>
-      ).detail;
-      if (detail?.groupId !== group.id || !detail.text) return;
-      setPendingQuote({ author: detail.author, text: detail.text });
-    };
-    window.addEventListener("Kai:group-quote", onQuote);
-    return () => window.removeEventListener("Kai:group-quote", onQuote);
-  }, [group.id]);
-  const send = useCallback(async () => {
-    const trimmed = text.trim();
-    if ((!trimmed && !pendingQuote) || group.endedAt !== null || sending)
-      return;
-    setSending(true);
-    try {
-      const quoteBlock = pendingQuote
-        ? buildQuoteBlock(pendingQuote.author, pendingQuote.text)
-        : null;
-      const composed = [quoteBlock, trimmed].filter(Boolean).join("\n\n");
-      try {
-        await sendGroupMessage(group.id, composed, mentionedTarget);
-      } catch (e) {
-        // SHOULD 8: a delivery rejection (bridge throw, persist failure) was
-        // an unhandled promise from every Enter keydown. Keep the draft
-        // (text preserved) and surface the failure.
-        console.error("[Kai-groups] send failed:", e);
-        setSendError(
-          e instanceof Error ? `Send failed: ${e.message}` : "Send failed",
-        );
-        return;
-      }
-      setText("");
-      setPendingQuote(null);
-      setMention({ open: false, start: 0, query: "" });
-      setSendError(null);
-    } finally {
-      setSending(false);
-    }
-  }, [text, group, sending, pendingQuote, mentionedTarget]);
-
-  // VOICE INPUT (2026-11-02, STT only): the same mic the main AI input bar
-  // has — record, transcribe, land the text in THIS composer's draft. No
-  // TTS wiring here. Deliberately NOT bound to the global
-  // Kai:ai-voice-toggle (Cmd/Ctrl+M) event: the main AiInputBar (still
-  // mounted while the group owns the slot) also listens for it, and one
-  // shortcut press must never start TWO recordings into two fields — the
-  // group mic is click-only. The hook reads the shared STT prefs/keys
-  // (Settings → Voice), so it routes exactly like the main chat's mic.
-  const voice = useWhisperRecording({
-    onResult: (transcript: string) => {
-      setText((t) => (t ? `${t} ${transcript}` : transcript));
-      requestAnimationFrame(() => textRef.current?.focus());
-    },
-  });
-
-  if (group.endedAt !== null) {
-    return (
-      <div className="shrink-0 border-t border-border/60 px-3 py-2 text-center text-[11px] text-muted-foreground">
-        Group ended — participants continue independently. Resume to re-open.
-      </div>
-    );
-  }
-  // PADDING PARITY (2026-11-14 ask): the main bar is a min-h-[42px]
-  // vertically-centered strip whose padding lives on an inner rounded-lg
-  // px-1 py-1 container. Quote/error rows flip it to py-2, like the main
-  // bar's chips rule.
-  const hasRows = pendingQuote !== null || sendError !== null;
-  return (
-    <div
-      className={cn(
-        // Same footprint as the AI input bar (AiInputBar): borderless strip,
-        // no boxed input — the textarea is a transparent flex-1 element
-        // flanked by the target picker and send button, so it fills the
-        // panel edge-to-edge instead of a small centered box. No width cap
-        // when expanded — the AI input bar has none either; the strip spans
-        // the whole panel like the main chat.
-        "flex shrink-0 flex-col justify-center border-t border-border/60 bg-card/40 px-3",
-        hasRows ? "py-2" : "min-h-[42px] py-0",
-      )}
-    >
-      <div className="flex flex-col gap-1.5 rounded-lg px-1 py-1">
-      {pendingQuote && (
-        <div className="flex items-center gap-1.5 rounded-lg border-l-2 border-primary/70 bg-muted/50 px-2 py-1">
-          <HugeiconsIcon
-            icon={LeftToRightBlockQuoteIcon}
-            size={12}
-            strokeWidth={1.75}
-            className="shrink-0 text-primary/80"
-          />
-          <div className="min-w-0 flex-1">
-            <span className="text-[10px] font-semibold text-primary/90">
-              {pendingQuote.author}
-            </span>
-            <span className="ml-1.5 text-[10.5px] text-muted-foreground line-clamp-1">
-              {quoteExcerpt(pendingQuote.text)}
-            </span>
-          </div>
-          <button
-            type="button"
-            aria-label="Remove quote"
-            title="Remove quote"
-            onClick={() => setPendingQuote(null)}
-            className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          >
-            <HugeiconsIcon icon={Cancel01Icon} size={11} strokeWidth={2} />
-          </button>
-        </div>
-      )}
-      {sendError ? (
-        <div className="flex items-center gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-[10.5px] text-destructive">
-          <span className="min-w-0 flex-1 truncate">{sendError}</span>
-          <button
-            type="button"
-            aria-label="Dismiss"
-            onClick={() => setSendError(null)}
-            className="shrink-0 rounded p-0.5 hover:text-foreground"
-          >
-            <HugeiconsIcon icon={Cancel01Icon} size={9} strokeWidth={2} />
-          </button>
-        </div>
-      ) : null}
-      <div className="relative flex items-center gap-2">
-        {mention.open && mentionList.length > 0 ? (
-          // @-mention picker: an absolutely-positioned dropdown INSIDE the
-          // composer strip (bottom-full = above the textarea), NOT a Radix
-          // Popover. The 2026-10-31 cut used <Popover open> with NO
-          // trigger/anchor — Radix PopoverContent has no anchor element, so
-          // the portal rendered unpositioned and the picker was INVISIBLE
-          // ("no dropdown in group chat input"). A plain absolute div anchored
-          // in the relative strip is simpler and always visible; the picker's
-          // buttons use onMouseDown preventDefault so focus never leaves the
-          // textarea (no blur-close race).
-          <div
-            role="listbox"
-            aria-label="Mention picker"
-            className={cn(
-              "absolute bottom-full left-0 z-50 mb-1 w-52 overflow-hidden rounded-lg border border-border/70 bg-popover p-1 text-xs shadow-lg",
-            )}
-          >
-            {mentionList.map((c, i) => (
-              <button
-                key={"projectId" in c ? c.projectId : c.id}
-                type="button"
-                role="option"
-                aria-selected={i === mentionIndex}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  pickMention(c.name);
-                }}
-                onMouseEnter={() => {
-                  mentionIndexRef.current = i;
-                  setMentionIndex(i);
-                }}
-                className={cn(
-                  "flex w-full items-center justify-between rounded px-2 py-1.5 text-left hover:bg-accent",
-                  i === mentionIndex && "bg-accent",
-                )}
-              >
-                <span className="truncate">
-                  {"projectId" in c ? `@${c.name}` : "All — send to everyone"}
-                </span>
-                {"projectId" in c ? (
-                  <ParticipantDot participant={c} groupId={group.id} />
-                ) : null}
-              </button>
-            ))}
-          </div>
-        ) : null}
-        <textarea
-          ref={textRef}
-          value={text}
-          onChange={(e) =>
-            onTextChange(
-              e.target.value,
-              e.target.selectionStart ?? e.target.value.length,
-            )
-          }
-          onKeyDown={(e) => {
-            if (mention.open && mentionList.length > 0) {
-              if (e.key === "ArrowDown") {
-                e.preventDefault();
-                const next = (mentionIndex + 1) % mentionList.length;
-                mentionIndexRef.current = next;
-                setMentionIndex(next);
-                return;
-              }
-              if (e.key === "ArrowUp") {
-                e.preventDefault();
-                const prev =
-                  (mentionIndex - 1 + mentionList.length) % mentionList.length;
-                mentionIndexRef.current = prev;
-                setMentionIndex(prev);
-                return;
-              }
-              if (e.key === "Enter" || e.key === "Tab") {
-                e.preventDefault();
-                pickMention(mentionList[mentionIndex]?.name ?? "All");
-                return;
-              }
-              if (e.key === "Escape") {
-                e.preventDefault();
-                setMention((m) => ({ ...m, open: false }));
-                return;
-              }
-            }
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              void send();
-            }
-          }}
-          placeholder="Coordinate your project agents… use @ to address one"
-          rows={1}
-          wrap="soft"
-          className={cn(
-            // AiInputBar's textarea contract: transparent, borderless,
-            // flex-1 — reads as one continuous strip with the picker and
-            // send button, not a boxed input. NO min-h/py of its own: the
-            // root strip (min-h-[42px] + justify-center) plus the inner
-            // py-1 container do the vertical centering, exactly like the
-            // main bar — the old min-h-8 + py-1.5 kept dead space INSIDE
-            // the textarea box. Grows with content up to a practical cap
-            // (max-h-24) so a long draft never eats the panel.
-            // Grows with content up to a practical cap (max-h-[124px] =
-            // 5 lines of 12.5px x 1.625 leading) so a long draft never
-            // eats the panel but Shift+Enter multi-line drafts stay visible.
-            "flex-1 resize-none rounded-lg bg-transparent text-[12.5px] leading-relaxed outline-none",
-            "overflow-x-hidden whitespace-pre-wrap break-words [overflow-wrap:anywhere]",
-            // NO focus ring (2026-11-18 ask): the blinking cursor is enough
-            // focus indication — the ring read as a boxed input while the
-            // strip contract above says borderless/continuous.
-            "placeholder:text-muted-foreground/60",
-            "max-h-[124px] overflow-y-auto",
-          )}
-        />
-        {voice.supported ? (
-          <button
-            type="button"
-            title={
-              voice.recording
-                ? "Stop & transcribe"
-                : voice.transcribing
-                  ? "Transcribing."
-                  : voice.error
-                    ? voice.error
-                    : "Voice input"
-            }
-            onClick={() => {
-              if (voice.recording) {
-                voice.stop();
-              } else {
-                if (voice.error) voice.clearError();
-                void voice.start();
-              }
-            }}
-            disabled={voice.transcribing}
-            className={cn(
-              "shrink-0 size-6 flex items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50",
-              voice.recording &&
-                "bg-destructive/15 text-destructive hover:bg-destructive/20 hover:text-destructive animate-pulse",
-              voice.error && "text-amber-600 dark:text-amber-400",
-            )}
-          >
-            {voice.recording ? (
-              <span className="size-1.5 rounded-full bg-destructive" />
-            ) : voice.transcribing ? (
-              <Spinner className="size-3" />
-            ) : voice.error ? (
-              <HugeiconsIcon
-                icon={UserWarning01Icon}
-                size={14}
-                strokeWidth={1.75}
-              />
-            ) : (
-              <HugeiconsIcon icon={Mic01Icon} size={14} strokeWidth={1.75} />
-            )}
-          </button>
-        ) : null}
-        <Button
-          type="button"
-          size="icon"
-          variant="ghost"
-          className="size-8 shrink-0 rounded-lg"
-          aria-label="Send to group"
-          disabled={!text.trim() || sending}
-          onClick={() => void send()}
-        >
-          <HugeiconsIcon icon={SentIcon} size={15} strokeWidth={1.75} />
-        </Button>
-      </div>
-      </div>
-    </div>
-  );
-}
+// 2026-11-26 group-input unification: the panel no longer renders its own
+// Composer strip - while a group owns the right-gutter slot, the main
+// AiInputBar at the bottom routes submits, @-mentions, quotes, and voice
+// directly to this group. resolveGroupMentionTarget lives in ../lib/groupMention
+// and is re-exported above for existing consumers/tests.
 
 function GroupListTray({
   groups,

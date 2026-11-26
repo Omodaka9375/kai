@@ -28,6 +28,10 @@ const panel = read("../components/GroupChatPanelView.tsx");
 const picker = read("../components/GroupChatInvitePicker.tsx");
 const mini = read("../components/AiMiniWindow.tsx");
 const lib = read("./groupApprovals.ts");
+// 2026-11-26 group-input unification: the main bar + composer provider
+// carry the group input seams the panel used to own.
+const bar = read("../components/AiInputBar.tsx");
+const composerSrc = read("../components/composer.tsx");
 
 describe("persona approval ids route by the SDK approvalId", () => {
   it("registrations are keyed by the SDK approvalId, not the toolCallId", () => {
@@ -87,40 +91,47 @@ describe("panel ✕ is minimize; the pill ✕ ends and deletes", () => {
   });
 });
 
-describe("composer mirrors the AI input bar", () => {
-  it("borderless transparent textarea (no boxed Input element)", () => {
-    expect(panel).toMatch(
-      /flex-1 resize-none rounded-lg bg-transparent/,
-    );
-    // The boxed <Input from ui/input is gone from the COMPOSER. Scoped to
-    // the composer slice (2026-11-01): the InvitePicker persona filter is a
-    // legitimate consumer of the Input primitive — but the composer's chat
-    // input must stay a borderless transparent textarea.
-    const start = panel.indexOf("function Composer");
-    const end = panel.indexOf("function GroupListTray");
-    expect(start).toBeGreaterThan(-1);
-    expect(end).toBeGreaterThan(start);
-    const composer = panel.slice(start, end);
-    expect(composer).not.toContain("<Input");
+describe("group input is the MAIN AI input bar (2026-11-26 unification)", () => {
+  it("the panel has NO composer of its own - the main bar routes group sends", () => {
+    expect(panel).not.toContain("function Composer");
+    expect(panel).not.toContain("<Composer");
+    // The composer context exposes group mode; the submit path routes to
+    // sendGroupMessage with mention targeting.
+    expect(composerSrc).toContain("groupMode: boolean;");
+    expect(composerSrc).toContain("await sendGroupMessage(activeGroup.id, composed, target);");
+    expect(composerSrc).toContain("GROUP SUBMIT ROUTE");
+    // A separate group draft: switching AI<->group never leaks drafts.
+    expect(composerSrc).toContain('const [groupDraft, setGroupDraft] = useState("");');
   });
 
-  it("expanded spans the full panel width like the main AI chat (no centered column)", () => {
-    // Span the whole composer section (function boundary regexes stop at the
-    // first nested brace - anchor to the NEXT function instead).
-    const start = panel.indexOf("function Composer");
-    const end = panel.indexOf("function GroupListTray");
-    const composer = panel.slice(start, end);
-    // 2026-10-31: the centered max-w-3xl column was removed - the expanded
-    // panel mirrors the main AI chat layout (full-width strip, user bubbles
-    // ml-auto max-w-[85%], replies full-width), so neither the composer nor
-    // the transcript may reintroduce a width cap.
-    expect(composer).not.toContain("max-w-3xl");
+  it("single-agent affordances hide in group mode", () => {
+    expect(bar).toContain("{!c.groupMode && (");
+    // The attach button, chips row, and auto-approve toggle are the
+    // single-session affordances; group mode swaps the toggle for a send
+    // button.
+    expect(bar).toMatch(/\{c\.groupMode \? \(\s*<Button[\s\S]{0,200}aria-label="Send to group"/);
+    expect(bar).toContain("<AutoApproveToggle />");
+  });
+
+  it("the input bar never collapses while a group is open", () => {
+    // openGroupToStack now forces panelOpen: the bottom bar IS the group
+    // input, so it must be visible whenever the group owns the slot.
+    const chatStore = read("../store/chatStore.ts");
+    expect(chatStore).toMatch(/openGroupToStack: \(\) =>\s*\n\s*set\(\(s\) => \(\{\s*\n\s*panelOpen: true,/);
+  });
+
+  it("group quotes seed the main input bar (scoped to the open group)", () => {
+    // App dispatches Kai:group-quote; the composer listens for BOTH quote
+    // events and scopes group quotes by groupId.
+    expect(composerSrc).toContain('window.addEventListener("Kai:group-quote", onQuote);');
+    expect(composerSrc).toContain("if (detail.groupId && detail.groupId !== getOpenGroupUiId()) return;");
+  });
+
+  it("the panel still spans full width when expanded (no centered column)", () => {
     expect(
       panel.indexOf("max-w-3xl", panel.indexOf("function Transcript")),
     ).toBe(-1);
-    // User bubbles get the main chat's right-aligned treatment.
     expect(panel).toContain('m.from === "user" && "ml-auto max-w-[85%]"');
-    expect(composer).not.toContain("border-x");
   });
 
   it("agent reply bubbles sit on the panel gray — never a bg-background slab (2026-11-01)", () => {
@@ -362,7 +373,7 @@ describe("2026-11-02 audit SHOULDs 4-11: scroll, memo, rejections, preamble, non
     expect(panel).toMatch(/const runGroupAction = useCallback/);
     expect(panel).toMatch(/runGroupAction\("Ending the group"/);
     expect(panel).toMatch(/runGroupAction\("Stopping participants"/);
-    expect(panel).toMatch(/setSendError\(/);
+    expect(composerSrc).toMatch(/setGroupSendError\(/);
     expect(panel).not.toMatch(/void endGroupChat\(active\.id\)/);
     expect(panel).toMatch(
       /\.catch\(\(e: unknown\) =>[\s\S]{0,80}console\.error\("\[Kai-groups\] /,
@@ -443,23 +454,18 @@ describe("2026-11-02 audit NITs: pill badge, rename cap, pure updater, proxy pre
     expect(panel).toMatch(/<input\s+autoFocus\s+value=\{nameDraft\}\s+maxLength=\{120\}/);
   });
 
-  it("pickMention is a pure updater (side effects outside setMention)", () => {
-    // setText/queueMicrotask must not run inside the updater — React may
-    // double-invoke updaters (StrictMode); idempotent today, fatal tomorrow.
-    const fn = panel.slice(
-      panel.indexOf("const pickMention = useCallback("),
-      panel.indexOf("const onTextChange = useCallback("),
+  it("pickMention inserts without an updater race (main-bar group picker)", () => {
+    // 2026-11-26: the panel composer is gone - pickMention now lives in the
+    // MAIN input bar's group mode. It must stay a plain close-and-insert:
+    // c.setValue(next) with the computed string (no functional updater),
+    // then the caret restore in queueMicrotask.
+    const fn = bar.slice(
+      bar.indexOf("const pickMention = (name: string) => {"),
+      bar.indexOf("const hasChips ="),
     );
-    // The single setMention call must be a plain close — no updater fn at
-    // all (the pure-updater fix removed it), and setText/queueMicrotask sit
-    // outside any setMention argument.
-    const setMentionIdx = fn.indexOf("setMention(");
-    const updaterEnd = fn.indexOf(");", setMentionIdx);
-    const updaterCall = fn.slice(setMentionIdx, updaterEnd);
-    expect(updaterCall).not.toContain("=>");
-    expect(updaterCall).not.toContain("setText");
-    expect(updaterCall).not.toContain("queueMicrotask");
-    expect(fn).toMatch(/setMention\(\{ open: false, start: 0, query: "" \}\);/);
+    expect(fn).toContain("c.setValue(next);");
+    expect(fn).toContain("queueMicrotask(() => {");
+    expect(fn).not.toContain("setMention(");
   });
 
   it("proxy approval cards preview file edits inline (no diff tab exists for headless runs)", () => {
@@ -541,52 +547,33 @@ describe("the pill survives a project round-trip (2026-11-01)", () => {
   });
 });
 
-describe("group composer has the main chat's STT mic (2026-11-02)", () => {
+describe("group voice input rides the MAIN bar's mic (2026-11-26 unification)", () => {
   // "I need access to Voice input in group chat like in the main ai input
-  //  chat. I don't need TTS just my STT." The composer reuses the SAME
-  // useWhisperRecording hook (shared Settings → Voice routing: browser /
-  // OpenAI / AssemblyAI / local whisper.cpp) and mirrors AiInputBar's mic
-  // button states. STT only — no TTS wiring.
-  const composer = (() => {
-    const start = panel.indexOf("function Composer");
-    const end = panel.indexOf("function GroupListTray");
-    expect(start).toBeGreaterThan(-1);
-    expect(end).toBeGreaterThan(start);
-    return panel.slice(start, end);
-  })();
-
-  it("uses the same recording hook with a draft-appending onResult", () => {
-    expect(panel).toMatch(
-      /import \{ useWhisperRecording \} from "\.\.\/hooks\/useWhisperRecording";/,
-    );
-    expect(composer).toContain("const voice = useWhisperRecording({");
-    expect(composer).toMatch(
-      /setText\(\(t\) => \(t \? `\$\{t\} \$\{transcript\}` : transcript\)\);/,
+  //  chat. I don't need TTS just my STT." With the panel composer gone, the
+  // main AiInputBar's mic IS the group mic - one hook, one button, one
+  // shortcut; no duplicate listener can ever start two recordings.
+  it("the composer provider lands transcripts in the group draft", () => {
+    expect(composerSrc).toMatch(
+      /if \(groupMode\) \{\s*\n\s*setGroupDraft\(\(t\) => \(t \? `\$\{t\} \$\{transcript\}` : transcript\)\);/,
     );
   });
 
-  it("the mic button mirrors AiInputBar's states", () => {
-    // The title is a ternary (recording/transcribing/error/default), same
-    // shape as AiInputBar's mic.
-    expect(composer).toContain("? \"Stop & transcribe\"");
-    expect(composer).toMatch(/voice\.recording &&\s*\n\s*"bg-destructive\/15/);
-    expect(composer).toContain("<Spinner className=\"size-3\" />");
-    expect(composer).toContain("icon={UserWarning01Icon}");
-    expect(composer).toContain("icon={Mic01Icon}");
-    expect(composer).toContain("voice.transcribing}");
-    expect(composer).toContain("voice.supported ? (");
-  });
-
-  it("is click-only — the global Ctrl+M shortcut is NOT wired here", () => {
-    // The main AiInputBar (still mounted while the group owns the slot)
-    // already owns Kai:ai-voice-toggle; a second listener would start two
-    // recordings on one shortcut press. The group mic must stay click-only:
-    // no event LISTENER for the toggle (prose may still name the event).
-    expect(composer).not.toMatch(
+  it("the panel has no second mic listener (one shortcut, one recording)", () => {
+    expect(panel).not.toMatch(
       /addEventListener\("Kai:ai-voice-toggle"/,
     );
-    // The comment documenting WHY it is click-only (prose wraps; pin the
-    // tail phrase on its own line).
-    expect(composer).toContain("group mic is click-only");
+    expect(panel).not.toContain("useWhisperRecording");
+  });
+
+  it("hands-free auto-submit follows the group's own Allow toggle", () => {
+    expect(composerSrc).toContain(
+      "autoSubmit: groupMode",
+    );
+    expect(composerSrc).toContain(
+      "activeGroup?.autoApprove === true",
+    );
+    expect(composerSrc).toContain(
+      'autoApprove !== "off",',
+    );
   });
 });

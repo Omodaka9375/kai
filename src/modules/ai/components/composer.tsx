@@ -5,8 +5,10 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 
 /** Loose part type for steering-message payloads (text + image file parts). */
@@ -41,6 +43,15 @@ import {
   useChatStore,
 } from "../store/chatStore";
 import { skillsForProject, useSkillsStore } from "../store/skillsStore";
+import {
+  getGroup,
+  getGroupStoreVersion,
+  sendGroupMessage,
+  subscribeGroupChats,
+  type GroupParticipant,
+} from "../store/groupChatStore";
+import { getOpenGroupUiId, subscribeOpenGroupUi } from "../lib/openGroupUi";
+import { resolveGroupMentionTarget } from "../lib/groupMention";
 import {
   getSessionPreferences,
   hydrateSessionPreferences,
@@ -100,6 +111,20 @@ type ComposerCtx = {
   addCommand: (c: SlashCommandMeta) => void;
   removeCommand: (name: string) => void;
   isBusy: boolean;
+  /** GROUP MODE (2026-11-26 group-input unification): true while a group
+   *  owns the right-gutter slot - the main bar submits to the GROUP, the
+   *  single-agent affordances (attach, slash/skill pickers, auto-approve)
+   *  hide, and the placeholder switches to group addressing. */
+  groupMode: boolean;
+  /** Group participants in group mode (mention targeting); null outside. */
+  groupParticipants: GroupParticipant[] | null;
+  /** Group id while in group mode (ParticipantDot status lookup); null outside. */
+  groupId: string | null;
+  /** True when the open group has ended (input bar disables send and shows ended hint). */
+  groupEnded: boolean;
+  /** Transient group send error (draft preserved on failure). */
+  groupSendError: string | null;
+  clearGroupSendError: () => void;
   /** Alt+Enter / background start leaves the current surface untouched. */
   submit: (options?: { text?: string; background?: boolean }) => void;
   stop: () => void;
@@ -139,7 +164,63 @@ export function AiComposerProvider({ children }: ProviderProps) {
     status === "streaming" ||
     status === "awaiting-approval";
 
-  const [value, setValue] = useState(() => sessionId ? getSessionPreferences(sessionId).draft ?? "" : "");
+  // GROUP MODE (2026-11-26 group-input unification): while a group owns the
+  // right-gutter slot, the MAIN input bar becomes the group composer - its
+  // submit routes through sendGroupMessage (with @-mention targeting),
+  // single-agent affordances hide, and group quotes seed this bar.
+  const stackSurface = useChatStore((s) => s.stackRail.surface);
+  const openGroupUiId = useSyncExternalStore(
+    subscribeOpenGroupUi,
+    getOpenGroupUiId,
+    getOpenGroupUiId,
+  );
+  const groupStoreVersion = useSyncExternalStore(
+    subscribeGroupChats,
+    getGroupStoreVersion,
+    getGroupStoreVersion,
+  );
+  const activeGroup = useMemo(
+    () =>
+      stackSurface === "group" && openGroupUiId
+        ? getGroup(openGroupUiId)
+        : null,
+    [stackSurface, openGroupUiId, groupStoreVersion],
+  );
+  const groupMode = activeGroup !== null;
+  const groupEnded = activeGroup !== null && activeGroup.endedAt !== null;
+  const groupId = activeGroup?.id ?? null;
+  const groupParticipants = activeGroup?.participants ?? null;
+  const [groupSending, setGroupSending] = useState(false);
+  const [groupSendError, setGroupSendError] = useState<string | null>(null);
+  const clearGroupSendError = useCallback(() => setGroupSendError(null), []);
+
+  // Separate draft text for group mode so switching between AI chat and group
+  // chat never overwrites or leaks the user's unsent AI session draft.
+  const [groupDraft, setGroupDraft] = useState("");
+  const prevGroupIdRef = useRef<string | null>(groupId);
+  useEffect(() => {
+    if (prevGroupIdRef.current !== groupId) {
+      prevGroupIdRef.current = groupId;
+      setGroupDraft("");
+      setGroupSendError(null);
+      setPendingQuote(null);
+    }
+  }, [groupId]);
+
+  const [sessionValue, setSessionValue] = useState(() =>
+    sessionId ? getSessionPreferences(sessionId).draft ?? "" : "",
+  );
+  const value = groupMode ? groupDraft : sessionValue;
+  const setValue: React.Dispatch<React.SetStateAction<string>> = useCallback(
+    (next) => {
+      if (groupMode) {
+        setGroupDraft(next);
+      } else {
+        setSessionValue(next);
+      }
+    },
+    [groupMode],
+  );
   const draftSessionRef = useRef(sessionId);
   useEffect(() => {
     void hydrateSessionPreferences();
@@ -150,7 +231,9 @@ export function AiComposerProvider({ children }: ProviderProps) {
   useEffect(() => {
     if (draftSessionRef.current !== sessionId) {
       draftSessionRef.current = sessionId;
-      setValue(sessionId ? getSessionPreferences(sessionId).draft ?? "" : "");
+      setSessionValue(
+        sessionId ? getSessionPreferences(sessionId).draft ?? "" : "",
+      );
       // Only the text draft is session-scoped today. Do not let pending
       // attachments from chat A become a message in chat B on the next send.
       setFiles([]);
@@ -162,12 +245,12 @@ export function AiComposerProvider({ children }: ProviderProps) {
       // draft with its initial empty value before the store has loaded.
       void hydrateSessionPreferences().then(() => {
         if (draftSessionRef.current === sessionId) {
-          setSessionPreferences(sessionId, { draft: value || undefined });
+          setSessionPreferences(sessionId, { draft: sessionValue || undefined });
         }
       });
     }, 150);
     return () => clearTimeout(timer);
-  }, [sessionId, value]);
+  }, [sessionId, sessionValue]);
   const [files, setFiles] = useState<FileAttachment[]>([]);
   const [pickedSnippets, setPickedSnippets] = useState<Skill[]>([]);
   const [pickedCommands, setPickedCommands] = useState<SlashCommandMeta[]>([]);
@@ -219,7 +302,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
       const text = consumePrefill();
       if (text) setValue((v) => (v ? `${text}${v}` : text));
     }
-  }, [focusSignal, pendingPrefill, consumePrefill]);
+  }, [focusSignal, pendingPrefill, consumePrefill, setValue]);
 
   // Listen for explorer's "Attach to Agent" event.
   useEffect(() => {
@@ -255,14 +338,24 @@ export function AiComposerProvider({ children }: ProviderProps) {
 
   // Quote-from-transcript (right-click Quote on a chat message). Replaces
   // any pending quote - one quote per message, like every chat app.
+  // GROUP QUOTES (2026-11-26): the group panel no longer mounts its own
+  // composer; group quotes seed THIS input bar (scoped to the open group id).
   useEffect(() => {
     const onQuote = (e: Event) => {
-      const detail = (e as CustomEvent<{ author: string; text: string }>).detail;
+      const detail = (
+        e as CustomEvent<{ groupId?: string; author: string; text: string }>
+      ).detail;
       if (!detail?.text) return;
+      if (detail.groupId && detail.groupId !== getOpenGroupUiId()) return;
       setPendingQuote({ author: detail.author, text: detail.text });
+      textareaRef.current?.focus();
     };
     window.addEventListener("Kai:ai-quote", onQuote);
-    return () => window.removeEventListener("Kai:ai-quote", onQuote);
+    window.addEventListener("Kai:group-quote", onQuote);
+    return () => {
+      window.removeEventListener("Kai:ai-quote", onQuote);
+      window.removeEventListener("Kai:group-quote", onQuote);
+    };
   }, []);
 
   useEffect(() => {
@@ -304,6 +397,11 @@ export function AiComposerProvider({ children }: ProviderProps) {
   const voiceCaptureSidRef = useRef<string | null>(null);
   const voice = useWhisperRecording({
     onResult: (transcript: string) => {
+      if (groupMode) {
+        setGroupDraft((t) => (t ? `${t} ${transcript}` : transcript));
+        requestAnimationFrame(() => textareaRef.current?.focus());
+        return;
+      }
       const routing = routeVoiceTranscript(
         voiceCaptureSidRef.current,
         sessionId,
@@ -318,11 +416,19 @@ export function AiComposerProvider({ children }: ProviderProps) {
         );
         return;
       }
-      setValue((v) => (v ? `${v} ${transcript}` : transcript));
+      setSessionValue((v) => (v ? `${v} ${transcript}` : transcript));
       requestAnimationFrame(() => textareaRef.current?.focus());
     },
-    autoSubmit: autoApprove !== "off",
+    // In group mode, auto-submit only when the group's own Allow toggle is on.
+    autoSubmit: groupMode
+      ? activeGroup?.autoApprove === true
+      : autoApprove !== "off",
     onAutoSubmit: (transcript: string) => {
+      if (groupMode) {
+        const pre = groupDraft.trim();
+        void submit({ text: pre ? `${pre} ${transcript}` : transcript });
+        return;
+      }
       // Routed-away captures never auto-submit: sending the user's words to
       // the WRONG project's agent (from a session they switched away from)
       // is worse than a one-click resend from the saved draft.
@@ -331,11 +437,11 @@ export function AiComposerProvider({ children }: ProviderProps) {
         sessionId,
       );
       if (routing.route === "draft") return;
-      // Merge with pre-typed text: `value` in this closure is fresh as of
+      // Merge with pre-typed text: `sessionValue` in this closure is fresh as of
       // the last render (the hook keeps the callback current via ref), so
       // it holds whatever the user typed BEFORE capture started — the
       // transcript itself has not flushed into state yet.
-      const pre = value.trim();
+      const pre = sessionValue.trim();
       void submit({ text: pre ? `${pre} ${transcript}` : transcript });
     },
   });
@@ -464,6 +570,46 @@ export function AiComposerProvider({ children }: ProviderProps) {
     // transcript arrives via callback before the field's setState flushes,
     // so reading `value` there would miss it.
     const trimmed = (options?.text ?? value).trim();
+
+    // GROUP SUBMIT ROUTE (2026-11-26): while a group owns the right-gutter
+    // slot, the main input bar sends straight to that group (with @-mention
+    // targeting and reply-quote support). Draft is preserved on send error.
+    if (activeGroup) {
+      if (
+        (!trimmed && !pendingQuote) ||
+        activeGroup.endedAt !== null ||
+        groupSending
+      ) {
+        return;
+      }
+      setGroupSending(true);
+      try {
+        const quoteBlock = pendingQuote
+          ? buildQuoteBlock(pendingQuote.author, pendingQuote.text)
+          : null;
+        const composed = [quoteBlock, trimmed].filter(Boolean).join("\n\n");
+        const target = resolveGroupMentionTarget(
+          trimmed,
+          activeGroup.participants,
+        );
+        try {
+          await sendGroupMessage(activeGroup.id, composed, target);
+        } catch (e) {
+          console.error("[Kai-groups] send failed:", e);
+          setGroupSendError(
+            e instanceof Error ? `Send failed: ${e.message}` : "Send failed",
+          );
+          return;
+        }
+        setGroupDraft("");
+        setPendingQuote(null);
+        setGroupSendError(null);
+      } finally {
+        setGroupSending(false);
+      }
+      return;
+    }
+
     if (
       !trimmed &&
       files.length === 0 &&
@@ -486,7 +632,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
     if (commandSource.startsWith("/") || commandSource.startsWith("#")) {
       const outcome = await tryRunSlashCommand(commandSource);
       if (outcome.kind === "handled") {
-        setValue("");
+        setSessionValue("");
         setFiles([]);
         setPickedSnippets([]);
         setPickedCommands([]);
@@ -623,13 +769,10 @@ export function AiComposerProvider({ children }: ProviderProps) {
     // AND image file parts) as a steering signal — the bridge stops the
     // current run and sends it as-is once idle. Anything sent here must
     // match the normal path exactly: attachments included.
-    // AND image file parts) as a steering signal — the bridge stops the
-    // current run and sends it as-is once idle. Anything sent here must
-    // match the normal path exactly: attachments included.
     if (isBusy) {
       const pending = sessionId ? getSessionSteeringMessage(sessionId) : null;
       if (sessionId) setSessionSteeringMessage(sessionId, (pending ?? []).concat(parts as LoosePart[]));
-      setValue("");
+      setSessionValue("");
       setFiles([]);
       setPickedSnippets([]);
       setPickedCommands([]);
@@ -654,7 +797,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
     });
     if (!options?.background && !store.mini.open) store.openMini();
     if (options?.background) showNotice("Agent started in background");
-    setValue("");
+    setSessionValue("");
     setFiles([]);
     setPickedSnippets([]);
     setPickedCommands([]);
@@ -666,13 +809,14 @@ export function AiComposerProvider({ children }: ProviderProps) {
     stopSession(sessionId);
   };
 
-  const canSend =
-    value.trim().length > 0 ||
-    (!isBusy &&
-      (files.length > 0 ||
-        pickedSnippets.length > 0 ||
-        pickedCommands.length > 0 ||
-        pendingQuote !== null));
+  const canSend = groupMode
+    ? !groupEnded && !groupSending && (value.trim().length > 0 || pendingQuote !== null)
+    : value.trim().length > 0 ||
+      (!isBusy &&
+        (files.length > 0 ||
+          pickedSnippets.length > 0 ||
+          pickedCommands.length > 0 ||
+          pendingQuote !== null));
 
   const ctx: ComposerCtx = {
     textareaRef,
@@ -692,6 +836,12 @@ export function AiComposerProvider({ children }: ProviderProps) {
     addCommand,
     removeCommand,
     isBusy,
+    groupMode,
+    groupParticipants,
+    groupId,
+    groupEnded,
+    groupSendError,
+    clearGroupSendError,
     submit,
     stop,
     voice,

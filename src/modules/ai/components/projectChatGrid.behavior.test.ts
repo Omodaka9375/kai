@@ -129,8 +129,10 @@ describe("Workspaces grid behavior (source pins)", () => {
   // text-chip <file> blocks) feeds the same fan-out.
   expect(grid).toContain("sendGroupMessage(group.id, body)");
     expect(grid).toContain("GroupCardBody");
-    // The panel mirrors its component-local openGroupId into the grid.
-    expect(grid).toContain("export function mirrorOpenGroupId");
+    // The panel mirrors its component-local openGroupId into the shared
+    // lib (openGroupUi.ts, 2026-11-26); the grid re-exports it for its own
+    // importers.
+    expect(grid).toContain("mirrorOpenGroupId,");
     const panel = readFileSync(
       new URL("./GroupChatPanelView.tsx", import.meta.url),
       "utf8",

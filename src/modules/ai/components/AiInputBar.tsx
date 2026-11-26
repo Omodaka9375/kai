@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { Popover, PopoverAnchor } from "@/components/ui/popover";
+import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import Add01Icon from "@hugeicons/core-free-icons/Add01Icon";
@@ -8,6 +8,7 @@ import ClipboardIcon from "@hugeicons/core-free-icons/ClipboardIcon";
 import NextIcon from "@hugeicons/core-free-icons/NextIcon";
 import PauseIcon from "@hugeicons/core-free-icons/PauseIcon";
 import PlayCircleIcon from "@hugeicons/core-free-icons/PlayCircleIcon";
+import SentIcon from "@hugeicons/core-free-icons/SentIcon";
 import Timer01Icon from "@hugeicons/core-free-icons/Timer01Icon";
 import CodeIcon from "@hugeicons/core-free-icons/CodeIcon";
 import Copy01Icon from "@hugeicons/core-free-icons/Copy01Icon";
@@ -64,6 +65,7 @@ import {
 import { AutoApproveToggle } from "./AutoApproveToggle";
 import { FilePickerContent } from "./FilePicker";
 import { SnippetPickerContent, type PickerItem } from "./SnippetPicker";
+import { ParticipantDot } from "./GroupChatPanelView";
 
 export function AiInputBar() {
   const c = useComposer();
@@ -96,7 +98,10 @@ export function AiInputBar() {
     setTtsRate(next);
     ttsSetRate(next);
   };
-  const workspaceFiles = useWorkspaceFiles(workspaceRoot, fileTrigger !== null);
+  const workspaceFiles = useWorkspaceFiles(
+    workspaceRoot,
+    !c.groupMode && fileTrigger !== null,
+  );
 
   const [fileQuery, setFileQuery] = useState("");
   useEffect(() => {
@@ -121,11 +126,13 @@ export function AiInputBar() {
       return;
     }
     const caret = el.selectionStart ?? 0;
-    setTrigger(detectSnippetTrigger(c.value, caret));
+    // Group mode has no slash/skill pickers; `@` targets group participants
+    // instead of workspace files.
+    setTrigger(c.groupMode ? null : detectSnippetTrigger(c.value, caret));
     setFileTrigger(detectFileTrigger(c.value, caret));
   };
 
-  useEffect(updateTrigger, [c.value, c.textareaRef]);
+  useEffect(updateTrigger, [c.value, c.textareaRef, c.groupMode]);
 
   const filteredItems = useMemo<PickerItem[]>(() => {
     if (!trigger) return [];
@@ -154,7 +161,7 @@ export function AiInputBar() {
 
   const FILE_PICKER_CAP = 30;
   const filteredFiles = useMemo<string[]>(() => {
-    if (!fileTrigger) return [];
+    if (!fileTrigger || c.groupMode) return [];
     const q = fileQuery.toLowerCase();
     if (!q) return workspaceFiles.files.slice(0, FILE_PICKER_CAP);
     const out: string[] = [];
@@ -165,15 +172,48 @@ export function AiInputBar() {
       }
     }
     return out;
-  }, [fileTrigger, fileQuery, workspaceFiles.files]);
+  }, [fileTrigger, c.groupMode, fileQuery, workspaceFiles.files]);
+
+  // GROUP @-MENTION PICKER (2026-11-26 group-input unification): while a
+  // group owns the slot, typing `@` opens the participant picker (plus "All"
+  // to clear targeting), using the same fileTrigger caret detection.
+  const mentionList = useMemo(() => {
+    if (!c.groupMode || !fileTrigger || !c.groupParticipants) return [];
+    const q = fileTrigger.query.toLowerCase();
+    const hits = c.groupParticipants.filter((p) =>
+      !q ? true : p.name.toLowerCase().includes(q),
+    );
+    return hits.length > 0 || q
+      ? [{ id: "all" as const, name: "All" }, ...hits]
+      : [];
+  }, [c.groupMode, fileTrigger, c.groupParticipants]);
 
   const fileTriggerOpen = fileTrigger !== null;
   const snippetTriggerOpen = trigger !== null;
   useEffect(() => {
     setActiveIndex(0);
-  }, [snippetTriggerOpen, fileTriggerOpen, fileQuery]);
+  }, [snippetTriggerOpen, fileTriggerOpen, fileQuery, fileTrigger?.query]);
 
-  const pickerOpen = trigger !== null || fileTrigger !== null;
+  const pickerOpen = c.groupMode
+    ? fileTrigger !== null && mentionList.length > 0
+    : trigger !== null || fileTrigger !== null;
+
+  const pickMention = (name: string) => {
+    if (!fileTrigger) return;
+    const before = c.value.slice(0, fileTrigger.start);
+    const insertion = name === "All" ? "" : `@${name} `;
+    const next = before + insertion + c.value.slice(fileTrigger.end);
+    c.setValue(next);
+    setFileTrigger(null);
+    setActiveIndex(0);
+    queueMicrotask(() => {
+      const el = c.textareaRef.current;
+      if (!el) return;
+      el.focus();
+      const at = (before + insertion).length;
+      el.setSelectionRange(at, at);
+    });
+  };
 
   const onPickItem = (item: PickerItem) => {
     if (!trigger) return;
@@ -216,6 +256,11 @@ export function AiInputBar() {
   };
 
   const pickActive = () => {
+    if (c.groupMode) {
+      const item = mentionList[activeIndex];
+      if (item) pickMention(item.name);
+      return;
+    }
     if (fileTrigger) {
       const file = filteredFiles[activeIndex];
       if (file) void onPickFile(file);
@@ -226,9 +271,12 @@ export function AiInputBar() {
   };
 
   const hasChips =
-    c.files.length > 0 ||
-    c.pickedSnippets.length > 0 ||
-    c.pickedCommands.length > 0;
+    !c.groupMode &&
+    (c.files.length > 0 ||
+      c.pickedSnippets.length > 0 ||
+      c.pickedCommands.length > 0);
+  const hasTopRows =
+    hasChips || c.pendingQuote !== null || (c.groupMode && c.groupSendError !== null);
   // Warn when an image is attached but the selected model can't see it —
   // the agent will send extracted text instead of the picture itself.
   const selectedModelId = useChatStore((s) => s.selectedModelId);
@@ -250,7 +298,7 @@ export function AiInputBar() {
     <div
       className={cn(
         "shrink-0 border-t border-border/60 bg-card/40 px-3 flex flex-col justify-center",
-        hasChips ? "py-2 min-h-[42px]" : "min-h-[42px] py-0",
+        hasTopRows ? "py-2 min-h-[42px]" : "min-h-[42px] py-0",
       )}
     >
       <div
@@ -259,20 +307,36 @@ export function AiInputBar() {
           "transition-colors focus-within:border-border",
         )}
       >
-        <ChipsRow
-          files={c.files}
-          onRemoveFile={c.removeFile}
-          snippets={c.pickedSnippets}
-          onRemoveSnippet={(name) => {
-            const snip = c.pickedSnippets.find((s) => s.name === name);
-            c.removeSnippet(name);
-            if (!snip) return;
-            const re = new RegExp(`(^|\\s)#${snip.handle}\\b ?`);
-            c.setValue((v) => v.replace(re, (_m, lead: string) => lead));
-          }}
-          commands={c.pickedCommands}
-          onRemoveCommand={(name) => c.removeCommand(name)}
-        />
+        {!c.groupMode && (
+          <ChipsRow
+            files={c.files}
+            onRemoveFile={c.removeFile}
+            snippets={c.pickedSnippets}
+            onRemoveSnippet={(name) => {
+              const snip = c.pickedSnippets.find((s) => s.name === name);
+              c.removeSnippet(name);
+              if (!snip) return;
+              const re = new RegExp(`(^|\\s)#${snip.handle}\\b ?`);
+              c.setValue((v) => v.replace(re, (_m, lead: string) => lead));
+            }}
+            commands={c.pickedCommands}
+            onRemoveCommand={(name) => c.removeCommand(name)}
+          />
+        )}
+
+        {c.groupMode && c.groupSendError ? (
+          <div className="flex items-center gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-[10.5px] text-destructive">
+            <span className="min-w-0 flex-1 truncate">{c.groupSendError}</span>
+            <button
+              type="button"
+              aria-label="Dismiss"
+              onClick={c.clearGroupSendError}
+              className="shrink-0 rounded p-0.5 hover:text-foreground"
+            >
+              <HugeiconsIcon icon={Cancel01Icon} size={9} strokeWidth={2} />
+            </button>
+          </div>
+        ) : null}
 
         {c.pendingQuote && (
           <div className="flex items-center gap-1.5 rounded-lg border-l-2 border-primary/70 bg-muted/50 px-2 py-1">
@@ -302,7 +366,7 @@ export function AiInputBar() {
           </div>
         )}
 
-        {imageBlindModel && (
+        {!c.groupMode && imageBlindModel && (
           <div className="flex items-center gap-1.5 px-1 text-[10.5px] text-amber-600 dark:text-amber-400">
             <HugeiconsIcon
               icon={UserWarning01Icon}
@@ -471,15 +535,17 @@ export function AiInputBar() {
                 </button>
               ) : null}
 
-              <button
-                type="button"
-                title="Attach file or image"
-                disabled={c.isBusy}
-                onClick={() => fileInputRef.current?.click()}
-                className="shrink-0 size-6 flex items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50"
-              >
-                <HugeiconsIcon icon={Add01Icon} size={14} strokeWidth={2} />
-              </button>
+              {!c.groupMode && (
+                <button
+                  type="button"
+                  title="Attach file or image"
+                  disabled={c.isBusy}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="shrink-0 size-6 flex items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50"
+                >
+                  <HugeiconsIcon icon={Add01Icon} size={14} strokeWidth={2} />
+                </button>
+              )}
 
               <textarea
                 ref={c.textareaRef}
@@ -493,6 +559,7 @@ export function AiInputBar() {
                   setCtxMenu({ x: e.clientX, y: e.clientY });
                 }}
                 onPaste={(e) => {
+                  if (c.groupMode) return;
                   const items = e.clipboardData?.items;
                   if (!items) return;
                   const pastedFiles: File[] = [];
@@ -518,17 +585,25 @@ export function AiInputBar() {
                 }}
                 onKeyDown={(e) => {
                   if (pickerOpen) {
-                    const items = fileTrigger ? filteredFiles : filteredItems;
+                    const items = c.groupMode
+                      ? mentionList
+                      : fileTrigger
+                        ? filteredFiles
+                        : filteredItems;
                     if (e.key === "ArrowDown") {
                       e.preventDefault();
                       setActiveIndex((i) =>
-                        Math.min(i + 1, Math.max(0, items.length - 1)),
+                        items.length === 0 ? 0 : (i + 1) % items.length,
                       );
                       return;
                     }
                     if (e.key === "ArrowUp") {
                       e.preventDefault();
-                      setActiveIndex((i) => Math.max(0, i - 1));
+                      setActiveIndex((i) =>
+                        items.length === 0
+                          ? 0
+                          : (i - 1 + items.length) % items.length,
+                      );
                       return;
                     }
                     if (e.key === "Tab" || e.key === "Enter") {
@@ -540,7 +615,9 @@ export function AiInputBar() {
                     }
                     if (e.key === "Escape") {
                       e.preventDefault();
-                      if (fileTrigger) {
+                      if (c.groupMode) {
+                        setFileTrigger(null);
+                      } else if (fileTrigger) {
                         const before = c.value.slice(0, fileTrigger.start);
                         const after = c.value.slice(fileTrigger.end);
                         c.setValue(`${before}${after}`);
@@ -557,27 +634,89 @@ export function AiInputBar() {
                   }
                 }}
                 placeholder={
-                  c.voiceBusy
-                    ? c.voice.recording
-                      ? "Listening…"
-                      : "Transcribing…"
-                    : c.isBusy
-                      ? "Redirect agent…"
-                      : "Ask anything / for commands, # for skills, @ for files"
+                  c.groupMode
+                    ? c.groupEnded
+                      ? "Group ended - resume from the header to keep chatting"
+                      : c.voiceBusy
+                        ? c.voice.recording
+                          ? "Listening…"
+                          : "Transcribing…"
+                        : "Coordinate your project agents… use @ to address one"
+                    : c.voiceBusy
+                      ? c.voice.recording
+                        ? "Listening…"
+                        : "Transcribing…"
+                      : c.isBusy
+                        ? "Redirect agent…"
+                        : "Ask anything / for commands, # for skills, @ for files"
                 }
                 rows={1}
-                disabled={false}
+                disabled={c.groupMode && c.groupEnded}
                 wrap="soft"
                 className={cn(
                   "flex-1 resize-none bg-transparent text-[13px] leading-relaxed outline-none overflow-x-hidden",
                   "whitespace-pre-wrap break-words [overflow-wrap:anywhere]",
                   "placeholder:text-muted-foreground/60",
+                  c.groupMode && c.groupEnded && "opacity-60",
                 )}
               />
-              <AutoApproveToggle />
+              {c.groupMode ? (
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  className="size-7 shrink-0 rounded-lg"
+                  aria-label="Send to group"
+                  disabled={!c.canSend}
+                  onClick={() => c.submit()}
+                >
+                  <HugeiconsIcon icon={SentIcon} size={14} strokeWidth={1.75} />
+                </Button>
+              ) : (
+                <AutoApproveToggle />
+              )}
             </div>
           </PopoverAnchor>
-          {fileTrigger ? (
+          {c.groupMode ? (
+            <PopoverContent
+              side="top"
+              align="start"
+              sideOffset={6}
+              onOpenAutoFocus={(e) => e.preventDefault()}
+              onCloseAutoFocus={(e) => e.preventDefault()}
+              onMouseDown={(e) => e.preventDefault()}
+              role="listbox"
+              aria-label="Mention picker"
+              className="w-56 overflow-hidden rounded-lg border border-border/70 bg-popover p-1 text-xs shadow-lg"
+            >
+              {mentionList.map((item, i) => (
+                <button
+                  key={"projectId" in item ? item.projectId : item.id}
+                  type="button"
+                  role="option"
+                  aria-selected={i === activeIndex}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    pickMention(item.name);
+                  }}
+                  onMouseEnter={() => setActiveIndex(i)}
+                  className={cn(
+                    "flex w-full items-center justify-between rounded px-2 py-1.5 text-left hover:bg-accent",
+                    i === activeIndex && "bg-accent",
+                  )}
+                >
+                  <span className="truncate">
+                    {"projectId" in item
+                      ? `@${item.name}`
+                      : "All - send to everyone"}
+                  </span>
+                  {"projectId" in item && c.groupId ? (
+                    <ParticipantDot participant={item} groupId={c.groupId} />
+                  ) : null}
+                </button>
+              ))}
+            </PopoverContent>
+          ) : fileTrigger ? (
             <FilePickerContent
               files={filteredFiles}
               activeIndex={activeIndex}

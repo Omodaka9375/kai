@@ -1565,6 +1565,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
     })),
   openGroupToStack: () =>
     set((s) => ({
+      panelOpen: true,
       stackRail: { surface: "group" },
       groupPanelExpanded:
         s.stackRail.surface === "group"

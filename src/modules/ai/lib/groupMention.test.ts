@@ -17,8 +17,15 @@ import { describe, expect, it } from "vitest";
 
 const read = (rel: string) => readFileSync(new URL(rel, import.meta.url), "utf8");
 const panel = read("../components/GroupChatPanelView.tsx");
+// 2026-11-26 group-input unification: the panel no longer renders its own
+// composer - the MAIN AiInputBar is the group input while a group owns the
+// right-gutter slot, so the mention picker + send routing live there and in
+// the shared composer provider.
+const bar = read("../components/AiInputBar.tsx");
+const composerSrc = read("../components/composer.tsx");
+const lib = read("./groupMention.ts");
 
-import { resolveGroupMentionTarget } from "../components/GroupChatPanelView";
+import { resolveGroupMentionTarget } from "../lib/groupMention";
 
 const PARTS = [
   { projectId: "p-alpha", name: "alpha", sessionId: "s-a", root: "/a", joinedAt: 0 },
@@ -53,78 +60,67 @@ describe("resolveGroupMentionTarget — default all, anywhere-in-message matchin
   });
 });
 
-describe("composer @-mention targeting (replaces the All dropdown)", () => {
-  it("the dropdown trigger is gone; @-mention drives targeting", () => {
-    // The old Popover trigger button (title="Send to…") is gone.
+describe("group input @-mention targeting (2026-11-26: the MAIN input bar is the group input)", () => {
+  it("the panel composer is gone; the main bar drives group targeting", () => {
+    expect(panel).not.toContain("function Composer");
+    expect(panel).not.toContain("<Composer");
+    // The old Popover trigger button (title="Send to…") stays gone.
     expect(panel).not.toContain('title="Send to…"');
-    // No setTarget dropdown state remains.
     expect(panel).not.toMatch(/setTarget\(/);
-    // Mention state + picker + insertion drive the composer.
-    expect(panel).toContain("setMention(");
-    expect(panel).toContain("pickMention(");
-    expect(panel).toContain("onTextChange(");
+    // The main bar's group-mode mention picker owns insertion.
+    expect(bar).toContain("pickMention(");
+    expect(bar).toContain("mentionList");
   });
 
   it("the last MATCHING mention in the text is the send target (resolver)", () => {
-    // The resolver is exported + used by the composer's send path.
-    expect(panel).toContain("export function resolveGroupMentionTarget(");
-    expect(panel).toContain("resolveGroupMentionTarget(text, group.participants)");
-    expect(panel).toContain(
-      "await sendGroupMessage(group.id, composed, mentionedTarget);",
+    // The resolver lives in the shared lib; the composer's group submit
+    // route resolves the target from the trimmed text.
+    expect(lib).toContain("export function resolveGroupMentionTarget(");
+    expect(composerSrc).toContain("resolveGroupMentionTarget(");
+    expect(composerSrc).toContain(
+      "await sendGroupMessage(activeGroup.id, composed, target);",
     );
   });
 
   it("keyboard: arrows navigate, Enter/Tab pick, Escape closes", () => {
-    expect(panel).toMatch(/"ArrowDown"[\s\S]{0,420}"ArrowUp"/);
-    expect(panel).toContain('e.key === "Enter" || e.key === "Tab"');
-    expect(panel).toMatch(/"Escape"[\s\S]{0,120}setMention/);
+    expect(bar).toMatch(/"ArrowDown"[\s\S]{0,420}"ArrowUp"/);
+    expect(bar).toContain('e.key === "Tab" || e.key === "Enter"');
+    expect(bar).toMatch(/"Escape"[\s\S]{0,200}setFileTrigger\(null\)/);
   });
 
-  it("the picker is a real positioned dropdown (not an anchorless Radix Popover)", () => {
-    // 2026-11-01 fix: the picker rendered as <Popover open> with NO
-    // PopoverTrigger/PopoverAnchor — Radix PopoverContent without an anchor
-    // renders unpositioned in the portal, so the dropdown was INVISIBLE
-    // ("@ mention doesn't work visually, there is no dropdown"). The picker
-    // must be a plain absolutely-positioned div inside the composer strip.
-    const picker = panel.slice(
-      panel.indexOf("role=\"listbox\"") - 40,
-      panel.indexOf("role=\"listbox\"") + 700,
-    );
-    expect(picker).toMatch(/absolute bottom-full/);
-    expect(picker).toMatch(/role="listbox"/);
-    // The anchorless form must not return: <Popover open={true}> with no
-    // trigger wrapping PopoverContent.
-    expect(panel).not.toContain("<Popover open={true}>");
+  it("the picker is a positioned dropdown inside the anchored Popover", () => {
+    // The main bar's Popover wraps the strip in a PopoverAnchor, so the
+    // mention picker rides the SAME anchored portal - never the anchorless
+    // <Popover open> form that rendered unpositioned (2026-11-01 bug).
+    expect(bar).toContain('role="listbox"');
+    expect(bar).toContain('aria-label="Mention picker"');
+    expect(bar).not.toContain("<Popover open={true}>");
   });
 
   it("the picker offers All (clear targeting) plus participants", () => {
-    expect(panel).toContain("All — send to everyone");
-    expect(panel).toMatch(/ParticipantDot participant=\{/);
+    expect(bar).toContain("All - send to everyone");
+    expect(bar).toMatch(/ParticipantDot participant=\{item\} groupId=\{c\.groupId\}/);
   });
 
-  it("vertical centering lives on the strip + inner container, like the main bar (2026-11-14)", () => {
-    // The old min-h-8 + py-1.5 put the padding INSIDE the textarea box;
-    // now the composer mirrors AiInputBar exactly: the root strip is
-    // min-h-[42px] with justify-center, and the inner rounded-lg px-1
-    // py-1 container owns the breathing room - no dead space inside the
-    // textarea itself.
-    expect(panel).toMatch(/min-h-\[42px\] py-0/);
-    expect(panel).toMatch(/rounded-lg px-1 py-1/);
-    expect(panel).not.toMatch(
-      /bg-transparent px-1 py-1\.5 text-\[12\.5px\]/,
-    );
+  it("group mode hides the single-agent file picker behind @", () => {
+    // `@` in group mode targets participants, NOT workspace files - the
+    // file list must stay empty and the picker only shows mentions.
+    expect(bar).toContain("if (!fileTrigger || c.groupMode) return [];");
   });
 });
 
 describe("picking a mention yields exactly ONE @ (no doubled @@)", () => {
   it("the replaced token range starts AT the typed @ (2026-11-01)", () => {
-    // User report: "When I type @ in group chat and pick an agent I get
-    // double @@". pickMention's insertion carries its own "@" (`@${name} `),
-    // so the replaced token range must swallow the typed @ too — the
-    // pre-fix start (the first char AFTER the @) left it in place and the
-    // insert prepended a second one: "@@alpha ".
-    expect(panel).toMatch(/start:\s*caret\s*-\s*m\[2\]\.length\s*-\s*1,/);
-    // The @-EXCLUSIVE start form must not return.
-    expect(panel).not.toMatch(/start:\s*caret\s*-\s*m\[2\]\.length,/);
+    // detectFileTrigger's FileTrigger.start points AT the typed "@"
+    // (inputTriggers.ts), and pickMention's insertion carries its own
+    // "@" (`@${name} `), so the replaced range swallows the typed one -
+    // the pre-fix start (the first char AFTER the @) left it in place and
+    // the insert prepended a second one: "@@alpha ".
+    expect(bar).toContain(
+      'const insertion = name === "All" ? "" : `@${name} `;',
+    );
+    expect(bar).toContain(
+      "const next = before + insertion + c.value.slice(fileTrigger.end);",
+    );
   });
 });

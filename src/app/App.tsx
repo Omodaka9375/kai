@@ -1004,12 +1004,18 @@ export const ProjectWorkspace = memo(function ProjectWorkspace() {
   const quoteFromTranscript = useCallback(
     (text: string, author: string, groupId?: string) => {
       if (groupId) {
+        if (!hasComposer) {
+          void openSettingsWindow("models");
+          return;
+        }
         window.dispatchEvent(
           new CustomEvent<{ groupId: string; author: string; text: string }>(
             "Kai:group-quote",
             { detail: { groupId, author, text } },
           ),
         );
+        openPanel();
+        focusInput(null);
         return;
       }
       if (!hasComposer) {

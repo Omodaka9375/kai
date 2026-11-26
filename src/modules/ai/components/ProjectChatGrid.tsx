@@ -408,23 +408,18 @@ function groupOfCell(projectId: string): GroupChat | null {
   const s = useChatStore.getState();
   if (s.stackRail.surface !== "group") return null;
   const g = liveGroupForProject(projectId);
-  return g && g.id === openGroupUiId ? g : null;
+  return g && g.id === getOpenGroupUiId() ? g : null;
 }
 
-/** Open-group UI id: the panel's openGroupId is component-local, so the
- *  panel mirrors it here on change (mirrorOpenGroupId below). Module-level
- *  (not React state) so groupOfCell can read it synchronously. */
-let openGroupUiId: string | null = null;
-export function mirrorOpenGroupId(id: string | null): void {
-  if (openGroupUiId === id) return;
-  openGroupUiId = id;
-  for (const l of openGroupUiListeners) l();
-}
-const openGroupUiListeners = new Set<() => void>();
-function subscribeOpenGroupUi(listener: () => void): () => void {
-  openGroupUiListeners.add(listener);
-  return () => openGroupUiListeners.delete(listener);
-}
+/** Open-group UI id: moved to the shared lib (openGroupUi.ts) so the
+ *  MAIN input bar can read which group owns the slot without importing the
+ *  panel component. The local re-export keeps existing imports working. */
+export {
+  mirrorOpenGroupId,
+  getOpenGroupUiId,
+  subscribeOpenGroupUi,
+} from "../lib/openGroupUi";
+import { getOpenGroupUiId, subscribeOpenGroupUi } from "../lib/openGroupUi";
 
 function mergeTranscriptIntoDraft(
   existing: string | null | undefined,
@@ -727,7 +722,7 @@ const GridCell = memo(function GridCell(props: GridCellProps) {
   // stack rail, the card shows the GROUP, not the project AI chat. Capture
   // the snapshots so `useMemo` recomputes whenever group state or stack
   // surface changes.
-  const openGroup = useSyncExternalStore(subscribeOpenGroupUi, () => openGroupUiId);
+  const openGroup = useSyncExternalStore(subscribeOpenGroupUi, getOpenGroupUiId);
   const groupVer = useSyncExternalStore(subscribeGroupChats, getGroupStoreVersion);
   const stackSurface = useChatStore((s) => s.stackRail.surface);
   const group = useMemo(

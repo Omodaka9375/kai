@@ -13,7 +13,9 @@ describe("composer attachment isolation", () => {
       composer.indexOf("if (draftSessionRef.current !== sessionId)"),
       composer.indexOf("if (!sessionId) return;", composer.indexOf("if (draftSessionRef.current !== sessionId)")),
     );
-    expect(branch).toContain("setValue(");
+    // setSessionValue (the session draft setter; group mode rides a separate
+    // groupDraft state, 2026-11-26) resets the field on the session flip.
+    expect(branch).toContain("setSessionValue(");
     expect(branch).toContain("setFiles([]);");
   });
 
