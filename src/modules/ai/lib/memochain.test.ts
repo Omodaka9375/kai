@@ -22,6 +22,7 @@ import {
   MEMOCHAIN_MAX_DOC_CHARS,
   MEMOCHAIN_RECALL_TOP_K,
   decideFold,
+  memoChainFoldPrefix,
   estimateTokens,
   evictionGroups,
   foldLimitsFor,
@@ -287,5 +288,36 @@ describe("foldLimitsFor (custom-endpoint context scaling, 2026-11-26)", () => {
     expect(d.overflow).toBe(true);
     expect(d.foldEnd).toBeGreaterThan(0);
     expect(d.hotTokens).toBeGreaterThanOrEqual(Math.min(keepMin, hotLimit) - 200);
+  });
+});
+
+describe("memoChainFoldPrefix hot-window trim (2026-11-26 specialist review)", () => {
+  it("returns the folded prefix REMOVED - the caller must send trimmedMessages, not its original", async () => {
+    const { native } = await import("./native");
+    vi.mocked(native.memochainFold).mockResolvedValue({
+      step: 1,
+      stateDigest: "abc",
+      weightsDigest: "w",
+      receiptRows: 2,
+      chunkCount: 2,
+      docsFolded: 2,
+    });
+    // ~103 tokens/message x 1000: crosses the default hot limit.
+    const msgs = Array.from(
+      { length: 1000 },
+      (_, i) => user(`msg ${i} ${"x".repeat(400)}`),
+    );
+    const result = await memoChainFoldPrefix("s-test", msgs);
+    expect(result).not.toBeNull();
+    // THE FIX: the folded messages leave the model-bound window.
+    expect(result!.trimmedMessages.length).toBe(msgs.length - result!.foldedMessages);
+    // And the trim is a real suffix of the original (not copies/mutations).
+    expect(result!.trimmedMessages[0]).toBe(msgs[result!.foldedMessages]);
+    expect(result!.trimmedMessages.length).toBeGreaterThan(0);
+  });
+
+  it("no fold under the limit returns null (no trim, full history)", async () => {
+    const result = await memoChainFoldPrefix("s-test2", [user("hi"), user("there")]);
+    expect(result).toBeNull();
   });
 });

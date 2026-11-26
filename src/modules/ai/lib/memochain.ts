@@ -143,16 +143,17 @@ export function messageText(msg: ModelMessage): string {
 export function messageWeightText(msg: ModelMessage): string {
   const extra: string[] = [];
   const c = msg.content;
+  // Base (messageText) already covers text blocks, string content, and
+  // reasoning text (reasoning blocks carry a `text` field) - do NOT add
+  // those again. Only the tool i/o with no text representation rides
+  // `extra` (specialist review fix: the first version double-counted
+  // string content and reasoning).
   const pushBlock = (b: unknown) => {
-    if (typeof b === "string") {
-      extra.push(b);
-      return;
-    }
     if (!b || typeof b !== "object") return;
     const block = b as Record<string, unknown>;
     switch (block.type) {
       case "tool-call": {
-        // The input rides the wire as argument tokens.
+        // The input rides the wire as argument tokens (string or object).
         if (block.input != null) {
           extra.push(
             typeof block.input === "string"
@@ -188,20 +189,14 @@ export function messageWeightText(msg: ModelMessage): string {
         extra.push(JSON.stringify(block));
         break;
       }
-      case "reasoning": {
-        // Thinking-mode models bill reasoning as real request tokens.
-        if (typeof block.text === "string") extra.push(block.text);
-        break;
-      }
       default:
         break;
     }
   };
-  // Assistant tool-call blocks inside array content.
+  // Assistant content blocks: tool-call inputs + approval JSON (text and
+  // reasoning blocks are covered by the base join below).
   if (Array.isArray(c)) {
     for (const block of c) pushBlock(block);
-  } else if (typeof c === "string") {
-    extra.push(c);
   }
   // Native OpenAI wire form (assistant.tool_calls) - kept for messages that
   // still carry it (subagent paths / provider passthrough).
@@ -212,8 +207,6 @@ export function messageWeightText(msg: ModelMessage): string {
       if (fn && typeof fn.arguments === "string") extra.push(fn.arguments);
     }
   }
-  // Tool-role message content: string or blocks (handled above when array).
-  if (msg.role === "tool" && typeof c === "string") extra.push(c);
   const base = messageText(msg);
   return extra.length === 0 ? base : `${base}\n${extra.join("\n")}`;
 }
@@ -442,6 +435,14 @@ export type FoldPrefixResult = {
   foldedMessages: number;
   step: number;
   stateDigest: string;
+  /** Model-bound hot window AFTER the fold: the folded prefix REMOVED.
+   *  The fold is not bookkeeping - the caller MUST send this array (not its
+   *  original) or the model still receives the overflowing history the
+   *  capsule just absorbed (2026-11-26 specialist review: the folded
+   *  messages were never trimmed, so every turn re-sent them AND re-folded
+   *  them next turn). Always non-empty (decideFold never folds the final
+   *  group or the last user message). */
+  trimmedMessages: ModelMessage[];
 };
 
 /** Build the full system-prompt memory section for a MemoChain-toggled
@@ -516,6 +517,12 @@ export async function memoChainFoldPrefix(
       foldedMessages: stats.foldedMessages,
       step: stats.step,
       stateDigest: stats.stateDigest,
+      // HOT-WINDOW TRIM (2026-11-26 specialist review): the folded prefix
+      // leaves the model-bound request - the capsule owns it now. Without
+      // this the fold was pure bookkeeping: the model still received the
+      // overflowing history and the next turn re-folded the same messages
+      // (duplicate receipts every turn).
+      trimmedMessages: messages.slice(decision.foldEnd),
     };
   } catch {
     // Fail-open: the run proceeds with the full (untrimmed) history.

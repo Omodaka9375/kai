@@ -257,7 +257,12 @@ pub fn memochain_session_info(
     session_id: String,
 ) -> Result<MemoChainSessionInfo, String> {
     let dir = session_dir(&app, &session_id)?;
-    let weights = load_weights(&app);
+    // WEIGHTS LAZY (2026-11-26 specialist review): this command runs on the
+    // UI poll path (the context dropdown hits it every 5s) - it must not
+    // load the 3.6MB weights file per call. Only report the digest when
+    // the weights are ALREADY loaded; a null digest is honest (engine not
+    // spun up yet - memochain_status remains the authoritative probe).
+    let weights_digest = WEIGHTS.get().map(|w| w.digest.clone());
     let Some(meta) = read_meta(&dir) else {
         return Ok(MemoChainSessionInfo {
             exists: false,
@@ -266,7 +271,7 @@ pub fn memochain_session_info(
             accumulator: String::new(),
             summary: String::new(),
             folded_hashes: Vec::new(),
-            weights_digest: weights.ok().map(|w| w.digest.clone()),
+            weights_digest,
             tampered: false,
         });
     };
@@ -283,7 +288,7 @@ pub fn memochain_session_info(
         accumulator: meta.accumulator,
         summary: meta.summary,
         folded_hashes: meta.folded_hashes,
-        weights_digest: weights.ok().map(|w| w.digest.clone()),
+        weights_digest,
         tampered,
     })
 }
@@ -327,19 +332,65 @@ pub fn memochain_fold(
     };
 
     // Docs: non-empty clipped texts (matches Python `_fold_messages`).
+    // DEDUPE (2026-11-26 specialist review): a message hash already in
+    // meta.folded_hashes has ALREADY been folded into the capsule - its
+    // receipt is in the chain. Folding it again appends a duplicate receipt
+    // and double-counts the doc in the student state. The TS side trims the
+    // folded prefix from the request now, but any interleaving (mid-run fold
+    // racing the next pre-run fold, a failed run replaying) must not be able
+    // to re-fold; the store itself refuses.
     let mut docs: Vec<(String, String, String)> = Vec::new(); // (hash, role, clipped text)
+    let existing_meta = read_meta(&dir);
+    let already_folded: std::collections::HashSet<&String> = existing_meta
+        .as_ref()
+        .map(|m| m.folded_hashes.iter().collect())
+        .unwrap_or_default();
+    let mut skipped_dupes: usize = 0;
+    let mut entries_folded: Vec<String> = Vec::new();
     for e in &entries {
+        if already_folded.contains(&e.msg_hash) {
+            skipped_dupes += 1;
+            continue;
+        }
         let t = e.text.trim();
         if !t.is_empty() {
             let clipped: String = t.chars().take(MAX_DOC_CHARS).collect();
             docs.push((e.msg_hash.clone(), e.role.clone(), clipped));
         }
+        // Recorded even when the text was empty (matches the original
+        // meta.folded_hashes semantics: every entry's hash lands in meta).
+        entries_folded.push(e.msg_hash.clone());
     }
-    let texts: Vec<String> = if docs.is_empty() {
-        vec!["(empty tool exchange)".to_string()]
-    } else {
-        docs.iter().map(|(_, _, t)| t.clone()).collect()
-    };
+    if docs.is_empty() && skipped_dupes == 0 {
+        // Fresh fold with no text at all: keep the sentinel so the capsule
+        // still advances a step (matches Python `_fold_messages`).
+        docs.push((
+            "(empty tool exchange)".to_string(),
+            "user".to_string(),
+            "(empty tool exchange)".to_string(),
+        ));
+        entries_folded.push("(empty tool exchange)".to_string());
+    }
+    let texts: Vec<String> = docs.iter().map(|(_, _, t)| t.clone()).collect();
+
+    // ALL-DUPES FAST PATH (2026-11-26 specialist review): every entry was
+    // already folded - the capsule, receipts and meta are unchanged. Return
+    // the current state WITHOUT touching disk (a no-op fold used to append
+    // nothing to receipts but still rewrote capsule+meta with an identical
+    // step - harmless but wasteful on every turn's re-fold race).
+    if texts.is_empty() {
+        let chunk_count = chunks::load_chunks(&dir.join("chunks.bin"))
+            .map(|c| c.len())
+            .unwrap_or(0);
+        return Ok(MemoChainFoldResult {
+            step: head.step,
+            state_digest: head.state_digest.clone(),
+            weights_digest: w.digest.clone(),
+            receipt_rows: 0,
+            chunk_count,
+            docs_folded: 0,
+        });
+    }
 
     let receipts_path = dir.join("receipts.jsonl");
     let mut appended: usize = 0;
@@ -394,8 +445,8 @@ pub fn memochain_fold(
     }
     let chunk_count = chunks::load_chunks(&dir.join("chunks.bin"))?.len();
 
-    // meta: folded_hashes gains ALL folded message hashes (empty-text ones too).
-    let mut meta = read_meta(&dir).unwrap_or(Meta {
+    // meta: folded_hashes gains the NEW hashes only (deduped above).
+    let mut meta = existing_meta.unwrap_or(Meta {
         session_id: sanitize_session_id(&session_id),
         step: 0,
         state_digest: String::new(),
@@ -405,8 +456,8 @@ pub fn memochain_fold(
         weights_digest: w.digest.clone(),
         updated_at: String::new(),
     });
-    for e in &entries {
-        meta.folded_hashes.push(e.msg_hash.clone());
+    for h in &entries_folded {
+        meta.folded_hashes.push(h.clone());
     }
     meta.step = head.step;
     meta.state_digest = head.state_digest.clone();

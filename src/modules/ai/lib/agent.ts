@@ -793,12 +793,18 @@ export async function runAgentStream(opts: RunAgentOptions) {
   // handler its turn to fold the overflowing prefix FIRST.
   const memoChain = isProxyManagedModel(modelId);
   const memoSessionId = opts.sessionId ?? null;
+  // MODEL-BOUND HOT WINDOW: starts as the full history; a successful fold
+  // REPLACES it with the trimmed remainder (the capsule owns the folded
+  // prefix now). The persisted Chat history is untouched - the trim is
+  // per-request only, same contract as local compaction.
+  let historyForRun = history;
   if (memoChain && memoSessionId) {
     // contextLimit carries the custom-endpoint context-size override, so a
     // toggled local model with a small window folds at ITS limit, not the
     // 80k cloud default (foldLimitsFor).
     const folded = await memoChainFoldPrefix(memoSessionId, history, contextLimit);
     if (folded) {
+      historyForRun = folded.trimmedMessages;
       appendSessionEvent(memoSessionId, {
         kind: "compact",
         droppedCount: folded.foldedMessages,
@@ -807,7 +813,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
     }
   }
   const compact = memoChain
-    ? { messages: history, compacted: false, droppedCount: 0 } as const
+    ? { messages: historyForRun, compacted: false, droppedCount: 0 } as const
     : compactModelMessagesDetailed(history, contextLimit);
   const compactedHistory = compact.messages;
   if (compact.compacted) {
@@ -1119,11 +1125,14 @@ export async function runAgentStream(opts: RunAgentOptions) {
         });
       }
       // Mid-run fold: fresh tool results attached since the pre-run fold can
-      // push THIS step's request over the hot limit. Same decision logic,
-      // same fail-open contract — errors leave the step's messages untouched.
+      // push THIS step's request over the hot limit. The fold TRIMS the
+      // step's model-bound window (same hot-window contract as the pre-run
+      // fold; the Chat history keeps everything). Same fail-open contract -
+      // errors leave the step's messages untouched.
       if (memoChain && memoSessionId) {
         const stepFold = await memoChainFoldPrefix(memoSessionId, messages, contextLimit);
         if (stepFold) {
+          messages = stepFold.trimmedMessages;
           appendSessionEvent(memoSessionId, {
             kind: "compact",
             droppedCount: stepFold.foldedMessages,
