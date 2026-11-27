@@ -4,6 +4,20 @@ All notable changes to the KAI terminal emulator project are documented in this 
 
 ---
 
+## [3.6.0]
+
+- MemoChain: cache-aware passthrough (mina parity) - folded prefixes replay from the capsule without re-sending them, and the context dropdown gains a Saved row showing what durable memory kept.
+- MemoChain: the fact sheet and recall skip the agent's own injected [Durable memory] blocks, so memory-of-memory loops cannot feed the capsule its own output (mid-run guard covers both paths).
+- Workspaces: card header close X, rail-parity right-click menu on card headers, and the context usage ring now sits inside the model pill.
+- Workspaces: the card session picker lists New session first, not last.
+- AI window: expanded header pickers (agent persona, session) match their dropdown panel width - fixed widths instead of unbounded flex growth, and the dropdowns no longer blow out to max-content inside the portal.
+- AI window: session rows no longer shift on hover - the pin/edit/delete/merge icons float over the right edge with an opaque backdrop, and a hovered pinned row shows one pin instead of two.
+- Chat: the floating day pill only appears once you scroll into past days (hidden while in today's messages) and tracks scroll live on the conversation scroller.
+- Chat: scrolling near the top of a long transcript auto-loads older messages with scroll-position restore, instead of requiring the Show earlier messages button.
+- CI: release ships the committed 12L reflex weights via LFS and uploads the Local Reflex assets (weights/tools/manifest).
+
+---
+
 ## [3.5.6]
 
 - Approvals: stuck "approving…" cards fixed — a predicted auto-approval that the bridge fails to resolve now escalates to the full interactive card after a 3s grace window, and the bridge retries a failed auto-approve respond up to 4 times with backoff (latch-safe), so Allow-mode cards can no longer dead-end while the model sits parked.
