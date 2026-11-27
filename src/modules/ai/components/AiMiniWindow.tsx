@@ -460,7 +460,7 @@ function Header({
       )}
       style={tint ? { background: tint } : undefined}
     >
-      <div className="flex min-w-0 items-center gap-1.5">
+      <div className={cn("flex min-w-0 items-center gap-1.5", expanded && "min-w-0 flex-1")}>
         {/* Expand toggle LEFTMOST (2026-11-14 ask) - minimize stays at the
             far right. Same arrangement as the group panel's header. */}
         <Button
@@ -474,14 +474,14 @@ function Header({
         >
           <HugeiconsIcon icon={expanded ? ArrowShrink01Icon : ArrowExpand01Icon} size={11} strokeWidth={1.75} />
         </Button>
-        <AgentSwitcher isMiniWindow />
+        <AgentSwitcher isMiniWindow expanded={expanded} />
         {messages !== undefined ? (
           <ContextIndicator messages={messages} />
         ) : null}
         <SandboxBadge />
       </div>
-      <div className="flex shrink-0 items-center gap-1">
-        <SessionPicker />
+      <div className={cn("flex items-center gap-1", expanded && "min-w-0 flex-1 justify-end")}>
+        <SessionPicker expanded={expanded} />
         {/* Minimize ( _ ) at the FAR RIGHT - same trailing position as the
             group panel's header (2026-11-14 ask).
             Minimize collapses the window to the AI pill in the bottom
@@ -644,7 +644,7 @@ function ContextIndicator({ messages }: { messages: UIMessage[] }) {
   );
 }
 
-function SessionPicker() {
+function SessionPicker({ expanded }: { expanded?: boolean }) {
   const sessions = useChatStore((s) => s.sessions);
   const activeId = useChatStore((s) => s.activeSessionId);
   const switchSession = useChatStore((s) => s.switchSession);
@@ -695,7 +695,8 @@ function SessionPicker() {
         <button
           type="button"
           className={cn(
-            "kai-tint-chip flex min-w-0 max-w-32 items-center gap-1 rounded-md px-1.5 py-1",
+            "kai-tint-chip flex min-w-0 items-center gap-1 rounded-md px-1.5 py-1",
+            expanded ? "w-64 shrink-0" : "max-w-32",
             "text-[11px] text-muted-foreground transition-colors",
             "hover:text-foreground",
           )}
@@ -714,7 +715,9 @@ function SessionPicker() {
           menu must grow LEFTWARD into the window - the old align="start"
           anchored its left edge at the trigger and clipped against the
           window's right side. Wider caps: long titles + timestamps need
-          more room than 288px. */}
+          more room than 288px. NO w-full override: the ui content sizes
+          itself to the trigger width already; w-full in the portal resolves
+          to max-content and breaks the match (2026-11-27). */}
       <DropdownMenuContent align="end" className="max-h-[60vh] min-w-64 max-w-80 overflow-y-auto">
         <DropdownMenuItem
           onSelect={() => {
@@ -882,21 +885,26 @@ function SessionRow({
         <span
           className={cn(
             "min-w-0 flex-1 truncate",
-            // Idle: full row width — the action icons take NO layout space.
-            // Hover/focus-within: reserve room on the right for them so the
-            // title never runs under the floated icon cluster.
-            "transition-[padding] duration-150",
-            // 4 hover icons when the merge control is present, 3 otherwise.
-            otherSessions.length > 0
-              ? "group-hover:pr-20 group-focus-within:pr-20"
-              : "group-hover:pr-14 group-focus-within:pr-14",
+            // Full row width ALWAYS: the hover action icons float OVER the
+            // row's right edge with their own opaque backdrop instead of
+            // reserving layout space. The old group-hover:pr-14/pr-20
+            // padding reserve shifted the title text (and its second-line
+            // timestamp) on every hover enter/leave - the whole row
+            // "popped" (2026-11-27 report).
+            "truncate",
           )}
         >
           {session.title || "New chat"}
           {session.pinned ? (
             <span
               title="Pinned - stacks at the top of the list"
-              className="ml-1 inline-flex items-center align-middle text-primary"
+              className={cn(
+                "ml-1 inline-flex items-center align-middle text-primary",
+                // Hide while the action cluster is visible: the hover pin
+                // button already shows pin state (primary-colored), so a
+                // hovered pinned row showed TWO pins (2026-11-27 report).
+                "transition-opacity group-hover:opacity-0 group-focus-within:opacity-0",
+              )}
             >
               <HugeiconsIcon icon={Pin02Icon} size={10} strokeWidth={1.75} />
             </span>
@@ -917,10 +925,13 @@ function SessionRow({
       {editing ? null : (
         <div
           className={cn(
-            // Floated above the row's right edge — takes NO layout space, so
-            // the title spans the full row width when idle; it yields (via
-            // the title's group-hover padding) once the icons fade in.
-            "absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center gap-1",
+            // Floated OVER the row's right edge - takes NO layout space, so
+            // the title spans the full row width at all times. Opaque
+            // backdrop (row bg + blur) so title text under the fading-in
+            // icons is masked, not run through (replaces the old
+            // padding-reserve that shifted the title on hover).
+            "absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center gap-0.5",
+            "rounded-md bg-card/95 px-0.5 shadow-sm backdrop-blur-[2px]",
             "pointer-events-none opacity-0 transition-opacity",
             "group-hover:pointer-events-auto group-hover:opacity-100",
             "group-focus-within:pointer-events-auto group-focus-within:opacity-100",

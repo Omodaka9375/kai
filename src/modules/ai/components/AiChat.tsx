@@ -315,7 +315,68 @@ export function AiChatView({
   useEffect(() => {
     setVisibleLimit(compact ? TRANSCRIPT_WINDOW_COMPACT : TRANSCRIPT_WINDOW_FULL);
   }, [sessionId, compact]);
+  // Floating day pill: tracks which day's first message is near the top of
+  // the scroller so the user can see where they are in a long conversation.
+  // The pill is only shown for PAST days - when the top message is from
+  // today there is nothing to orient by (2026-11-27 ask).
+  const [topTs, setTopTs] = useState<number | null>(null);
+  const [atBottom, setAtBottom] = useState(true);
+  const topTsRaf = useRef<number>(0);
+  // windowStart mirror + auto-load bookkeeping: when the user scrolls near
+  // the top and older messages are windowed out, load one more step in-place
+  // instead of forcing the "Show earlier messages" button.
+  const windowStartRef = useRef(0);
+  const pendingScrollRestore = useRef<{ height: number; top: number } | null>(null);
+  const lastAutoLoad = useRef(0);
+  const updateTopTs = useCallback(() => {
+    const scroller = scrollCtx.current?.scrollRef?.current as HTMLElement | null;
+    if (!scroller) return;
+    // INFINITE SCROLL UP: near the top with hidden history -> grow the
+    // window. Record scroll geometry first so the post-render effect can
+    // restore the viewport over the newly PREPENDED messages (otherwise
+    // prepended content pushes the view down and the read position jumps).
+    if (
+      scroller.scrollTop <= 120 &&
+      windowStartRef.current > 0 &&
+      Date.now() - lastAutoLoad.current > 500
+    ) {
+      lastAutoLoad.current = Date.now();
+      if (!pendingScrollRestore.current) {
+        pendingScrollRestore.current = { height: scroller.scrollHeight, top: scroller.scrollTop };
+      }
+      setVisibleLimit((prev) => prev + TRANSCRIPT_WINDOW_STEP);
+      return;
+    }
+    const rootRect = scroller.getBoundingClientRect();
+    const nodes = scroller.querySelectorAll("[data-ts]");
+    for (const n of nodes) {
+      const r = (n as HTMLElement).getBoundingClientRect();
+      if (r.bottom >= rootRect.top + 24) {
+        const ts = Number((n as HTMLElement).dataset.ts);
+        if (ts) setTopTs(ts);
+        break;
+      }
+    }
+    const dist = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+    setAtBottom(dist <= 70);
+  }, []);
+  useEffect(() => {
+    // Restore scroll over prepended window history, then re-measure the pill.
+    const scroller = scrollCtx.current?.scrollRef?.current as HTMLElement | null;
+    const pending = pendingScrollRestore.current;
+    if (scroller && pending) {
+      scroller.scrollTop = pending.top + (scroller.scrollHeight - pending.height);
+      pendingScrollRestore.current = null;
+    }
+    topTsRaf.current = window.requestAnimationFrame(updateTopTs);
+    return () => cancelAnimationFrame(topTsRaf.current);
+  }, [messages, visibleLimit, updateTopTs]);
+  const scheduleTopTs = useCallback(() => {
+    cancelAnimationFrame(topTsRaf.current);
+    topTsRaf.current = window.requestAnimationFrame(updateTopTs);
+  }, [updateTopTs]);
   const windowStart = Math.max(0, messages.length - visibleLimit);
+  windowStartRef.current = windowStart;
   const visibleMessages =
     windowStart > 0 ? messages.slice(windowStart) : messages;
   // SYMMETRIC CHAT ZOOM (2026-11-18): zoom the TRANSCRIPT by one ratio so
@@ -492,7 +553,7 @@ export function AiChatView({
   }, [messages, status]);
 
   return (
-    <Conversation contextRef={scrollCtx}>
+    <Conversation contextRef={scrollCtx} onScroll={scheduleTopTs}>
         <ConversationContent
           // min-w-0: flex column children default to min-width:auto, so a
           // single wide block (table, fence, unbroken token) would inflate
@@ -547,6 +608,7 @@ export function AiChatView({
                 // context-menu builder recovers who said the selected text
                 // from this attribute (App.tsx contextmenu handler).
                 data-msg-author={m.role === "user" ? "You" : (m.metadata as { agentName?: string } | undefined)?.agentName ?? "Kai"}
+                data-ts={ts}
               >
               <RenderedMessage
                 message={m}
@@ -638,6 +700,16 @@ export function AiChatView({
           </div>
         )}
       </ConversationContent>
+      {topTs != null && !atBottom &&
+        new Date(topTs).toDateString() !== new Date().toDateString() && (
+        <div className="pointer-events-none absolute left-1/2 top-2 z-10 -translate-x-1/2 rounded-full border border-border/40 bg-background/80 px-2.5 py-0.5 text-[10px] font-medium text-muted-foreground shadow-sm backdrop-blur-sm select-none">
+          {new Date(topTs).toLocaleDateString(undefined, {
+            month: "short",
+            day: "numeric",
+            year: new Date(topTs).getFullYear() === new Date().getFullYear() ? undefined : "numeric",
+          })}
+        </div>
+      )}
       <ConversationScrollButton />
     </Conversation>
   );

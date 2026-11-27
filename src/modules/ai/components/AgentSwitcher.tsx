@@ -33,7 +33,7 @@ const ICONS: Record<AgentIconId, typeof CodeIcon> = {
   spark: SparklesIcon,
 };
 
-export function AgentSwitcher({ isMiniWindow }: { isMiniWindow?: boolean }) {
+export function AgentSwitcher({ isMiniWindow, expanded }: { isMiniWindow?: boolean; expanded?: boolean }) {
   // Subscribe to customAgents + activeId so the trigger updates live.
   const customAgents = useAgentsStore((s) => s.customAgents);
   const projectActiveId = useAgentsStore((s) => s.activeId);
@@ -66,20 +66,22 @@ export function AgentSwitcher({ isMiniWindow }: { isMiniWindow?: boolean }) {
           size="xs"
           variant="outline"
           className={cn(
-            !isMiniWindow
-              ? "flex h-6 items-center gap-1 rounded-md border border-border/60 bg-card px-1.5 text-[10.5px] text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-foreground"
-              : "text-xs mr-1",
+            expanded
+              ? "flex h-6 w-60 items-center gap-1 rounded-md border border-border/60 bg-card px-1.5 text-[10.5px] text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-foreground"
+              : !isMiniWindow
+                ? "flex h-6 items-center gap-1 rounded-md border border-border/60 bg-card px-1.5 text-[10.5px] text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-foreground"
+                : "text-xs mr-1",
           )}
           title={noneSelected ? "No agent persona" : `Agent: ${active?.name ?? ""}`}
         >
           {noneSelected ? (
-            <span className="max-w-[7rem] truncate text-muted-foreground/70">
+            <span className={cn("truncate text-muted-foreground/70", expanded ? "w-full" : "max-w-[7rem]")}>
               No persona
             </span>
           ) : (
             <>
               <HugeiconsIcon icon={ActiveIcon} size={11} strokeWidth={1.75} />
-              <span className="max-w-[7rem] truncate">{active?.name}</span>
+              <span className={cn("truncate", expanded ? "w-full" : "max-w-[7rem]")}>{active?.name}</span>
             </>
           )}
           <HugeiconsIcon
@@ -92,7 +94,11 @@ export function AgentSwitcher({ isMiniWindow }: { isMiniWindow?: boolean }) {
       </DropdownMenuTrigger>
       {/* max-h-80 caps the list — with 7 built-ins + customs the menu used
           to stretch to the bottom of the window. Compact rows (py-1,
-          11px/9.5px text) fit ~9 items in the cap; overflow scrolls. */}
+          11px/9.5px text) fit ~9 items in the cap; overflow scrolls.
+          NO width override: the ui content already sizes itself to the
+          trigger width (w-(--radix-dropdown-menu-trigger-width)); adding
+          w-full/min-w-0 here made the portal resolve to max-content and the
+          panel blew out far wider than the header pill (2026-11-27). */}
       <DropdownMenuContent align="start" className="max-h-80 min-w-60">
         <DropdownMenuItem
           onSelect={() => setActiveId("__none__")}

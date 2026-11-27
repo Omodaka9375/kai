@@ -24,7 +24,7 @@ describe("AI mini window minimize-to-pill (source pins)", () => {
     // LEFT edge (leading cluster), minimize stays in the trailing cluster
     // at the far right - same arrangement as the group panel's header.
     const expIdx = mini.indexOf('aria-label={expandLabel}');
-    const agentIdx = mini.indexOf('<AgentSwitcher isMiniWindow />');
+    const agentIdx = mini.indexOf("<AgentSwitcher isMiniWindow");
     const minIdx = mini.indexOf('aria-label="Minimize to pill"');
     expect(expIdx).toBeGreaterThan(-1);
     expect(agentIdx).toBeGreaterThan(-1);
