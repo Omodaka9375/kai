@@ -68,6 +68,7 @@ Kai is a fast, cross-platform terminal built on **Tauri 2 + Rust** and **React 1
 - Paste screenshots straight into chat with `Ctrl+V`; attach PDF/DOCX via the + button (text extracted, works on every model)
 - `/compact` — reset the context in place in the same chat when a session runs long; no new chat needed
 - Automatic context recovery — long runs re-elide tool output mid-run and self-compact past the model's window, so the run continues instead of dying on a provider error
+- **Durable memory** — folds overflowing history into a verifiable 22 KB integer capsule with a SHA-256 receipt chain, keeping long sessions fast and cheap. See [docs/memochain-advantages.md](docs/memochain-advantages.md) for the full breakdown
 - **Long-term reminders** — `reminder_create` persists restart-safe reminders from minutes to months ("remind me to pay bills by Monday"), delivered as an OS notification, an in-session agent wake, and a Telegram ping
 - Screen access — `look_at_screen` shows your displays to the agent (multi-monitor aware, every capture needs your approval)
 - Universal file extraction — zip, audio, image, and video read locally as text
